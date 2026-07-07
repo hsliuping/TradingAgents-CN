@@ -548,6 +548,11 @@ class AgentWorkshopService:
 
         existing_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": spec_id})
         existing_spec = AgentSpec(**existing_doc) if existing_doc else None
+        # 🔑 关键追踪日志：spec_id 解析结果
+        logger.info(
+            "[CreateDraft][Resolve] agent_id=%r → resolved spec_id=%r session_id=%r existing=%s",
+            clean_agent_id, spec_id, session_id, existing_doc is not None,
+        )
 
         # 🔥 防止 LLM 名称漂移：如果已有 spec 且名称非占位值，对比 LLM 传入的名称
         if existing_spec and existing_spec.name and existing_spec.name.strip():
@@ -669,8 +674,26 @@ class AgentWorkshopService:
             builder_contracts=builder_contracts,
         )
 
-        await self._save_spec(spec, session_id=session.session_id)
-        await self._save_session(session)
+        # 🔑 关键追踪日志：写库前打印最终 spec_id 和 name
+        logger.info(
+            "[CreateDraft][SaveDB] 即将写入数据库: spec.spec_id=%r spec.name=%r session_id=%r",
+            spec.spec_id, spec.name, session.session_id,
+        )
+        try:
+            await self._save_spec(spec, session_id=session.session_id)
+            await self._save_session(session)
+            # 🔑 验证写入：立即回查
+            verify_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": spec.spec_id}, {"spec_id": 1, "name": 1})
+            logger.info(
+                "[CreateDraft][SaveDB] ✅ 写入完成并回查: spec_id=%r found=%s verify_name=%r",
+                spec.spec_id, verify_doc is not None, (verify_doc or {}).get("name", ""),
+            )
+        except Exception as save_exc:
+            logger.error(
+                "[CreateDraft][SaveDB] ❌ 写入数据库失败! spec_id=%r error=%s",
+                spec.spec_id, save_exc, exc_info=True,
+            )
+            raise
 
         return {
             "session_id": session.session_id,
@@ -3578,13 +3601,34 @@ class AgentWorkshopService:
             issue_summary,
             recommendation_summary,
             feedback,
+            evaluation=latest_evaluation,
         )
-        turn_result = await self._analyze_requirement_turn(
-            [iterate_description],
-            user_id=spec.owner_user_id,
-            fallback_spec_id=spec.spec_id,
-            existing_spec=spec,
-        )
+        try:
+            turn_result = await self._analyze_requirement_turn(
+                [iterate_description],
+                user_id=spec.owner_user_id,
+                fallback_spec_id=spec.spec_id,
+                existing_spec=spec,
+            )
+        except Exception as turn_exc:
+            logger.warning(
+                "[AgentWorkshop][iterate_version] _analyze_requirement_turn 失败，使用安全回退继续迭代: %s",
+                turn_exc,
+            )
+            fallback_data = self._build_requirement_clarification_fallback_data(
+                spec,
+                iterate_description,
+                str(turn_exc),
+            )
+            fallback_spec = self._merge_llm_spec_data(fallback_data, spec, fallback_spec_id=spec.spec_id)
+            turn_result = {
+                "spec": fallback_spec,
+                "pending_questions": [],
+                "completeness_score": 0.82,
+                "ai_message": fallback_data.get("response_message", "已基于上一轮评估创建下一版草稿，请补充升级需求。"),
+                "feasibility_status": "feasible",
+                "refusal_reason": "",
+            }
 
         iterated_spec = turn_result["spec"]
         session_id = str(uuid.uuid4())
@@ -3631,9 +3675,9 @@ class AgentWorkshopService:
             reminder = self._build_iteration_reminder(latest_evaluation, feedback)
             new_session.messages.append(AgentWorkshopMessage(role="assistant", content=reminder))
             new_session.pending_questions = self._dedupe([
-                *recommendation_summary[:3],
+                *recommendation_summary[:10],
                 *new_session.pending_questions,
-            ])[:4]
+            ])[:10]
             new_session.updated_at = now_tz()
             await self._save_session(new_session)
 
@@ -4395,11 +4439,14 @@ class AgentWorkshopService:
         if existing_version_spec_id:
             return existing_version_spec_id
 
+        # 🔑 兼容旧数据：检查 agent_ 前缀版本
         candidate_spec_id = self._build_nanobot_spec_id(normalized)
         existing_candidate_doc = await self._db[SPEC_COLLECTION].find_one({"spec_id": candidate_spec_id})
         if existing_candidate_doc:
             return str(existing_candidate_doc.get("spec_id") or candidate_spec_id)
-        return candidate_spec_id
+
+        # 🔑 新建时使用原始值（不加 agent_ 前缀），保持和 state.spec_id 一致
+        return normalized
 
     def _build_nanobot_spec_id(self, agent_id: str) -> str:
         normalized = self._normalize_nanobot_identifier(agent_id).lower()
@@ -6630,7 +6677,8 @@ class AgentWorkshopService:
             "5. 如果只是信息不够，请判定 need-clarification，但不要进入开放式追问；你应先给出推荐方案，再把最多 2 个真正影响后续实现的待确认项写入 pending_questions，供后续确认使用。",
             "6. 只有当需求已经足够清楚且可以进入下一步时，才判定 feasible。",
             "7. response_message 必须是直接给用户看的口语化中文，不要写“字段”“schema”“规格化”等系统术语；语气要像专家在给方案，不要像客服在收集需求。",
-            "8. 输出必须是纯 JSON，不要 markdown，不要额外解释。",
+            "8. 输出必须是纯 JSON，不要 markdown，不要额外解释。必须直接输出完整 JSON 对象，第一字符必须是 {，最后一字符必须是 }；不要输出思考过程、字段解释、草稿说明或代码块。",
+            "8.1 completeness_score、feasibility_status、response_message、pending_questions 是硬性必填字段，即使你认为需求已清楚也必须给出；completeness_score 必须是 0 到 1 之间的小数。",
             "9. 对股票分析类 Agent，要把现有项目的行情/财务/行业基础能力视为默认可复用前提，不要把用户当成要从零造数据底座。",
             "10. 如果用户已经明确说要基于现有项目能力做 Agent，就不要再把‘数据从哪来’这类基础设施问题当成待确认重点，除非需求里真的引入新的外部数据依赖。",
             "11. response_message 里优先写你的理解、默认方案和仍待确认的关键分歧，保持简洁，不要展开成长篇方案文档。",
@@ -6723,7 +6771,7 @@ class AgentWorkshopService:
             response = await client.achat([
                 Message(role="system", content=system_prompt),
                 Message(role="user", content=prompt),
-            ], response_format={"type": "json_object"})
+            ], response_format={"type": "json_object"}, temperature=0.1, max_tokens=6000)
         except Exception as exc:
             logger.error(
                 "[AgentWorkshop][requirement_clarification] spec_id=%s spec_name=%s user_id=%s request_failed elapsed_seconds=%.3f llm_runtime=%s prompt_metrics=%s error=%s",
@@ -6739,10 +6787,18 @@ class AgentWorkshopService:
             raise
         request_elapsed = round(perf_counter() - request_started_at, 3)
         raw_content = (response.content or "").strip()
+        finish_reason = str(getattr(response, "finish_reason", "") or "").strip().lower()
+        if finish_reason == "length":
+            logger.warning(
+                "[AgentWorkshop][requirement_clarification] spec_id=%s spec_name=%s LLM 输出被截断 finish_reason=length content_len=%s，将避免把局部 JSON 当完整结果",
+                base_spec.spec_id,
+                base_spec.name,
+                len(raw_content),
+            )
 
         # DeepSeek 等推理模型可能把 CoT 输出到 content 而非 reasoning_content，
         # 同时 JSON 在 CoT 末尾，content 太长被截断。尝试从 reasoning_content 读取。
-        if not raw_content or not raw_content.endswith("}"):
+        if finish_reason != "length" and (not raw_content or not raw_content.endswith("}")):
             reasoning = (getattr(response, "reasoning_content", None) or "").strip()
             if reasoning:
                 logger.info(
@@ -6752,8 +6808,9 @@ class AgentWorkshopService:
                 )
                 raw_content = reasoning
 
-        # 如果 content 包含大量 CoT（Chain-of-Thought）前缀，尝试从末尾提取 JSON
-        if raw_content and not raw_content.startswith("{") and "{" in raw_content:
+        # 如果 content 包含大量 CoT（Chain-of-Thought）前缀，尝试从末尾提取 JSON。
+        # 但如果模型明确因 length 截断，不做 last-{ 提取，避免把数组里的局部对象误判为完整需求 JSON。
+        if finish_reason != "length" and raw_content and not raw_content.startswith("{") and "{" in raw_content:
             last_brace = raw_content.rfind("{")
             if last_brace >= 0:
                 candidate = raw_content[last_brace:]
@@ -6817,7 +6874,28 @@ class AgentWorkshopService:
                     )
 
             if not parsed_ok or not isinstance(data, dict):
-                raise ValueError("requirement clarification LLM 返回的不是 JSON object")
+                logger.warning(
+                    "[AgentWorkshop][requirement_clarification] spec_id=%s spec_name=%s LLM 未返回可解析 JSON，使用安全回退草案",
+                    base_spec.spec_id,
+                    base_spec.name,
+                )
+                data = self._build_requirement_clarification_fallback_data(
+                    base_spec,
+                    conversation,
+                    "LLM 未返回可解析 JSON",
+                )
+            elif not self._is_requirement_clarification_payload(data):
+                logger.warning(
+                    "[AgentWorkshop][requirement_clarification] spec_id=%s spec_name=%s JSON 结构不完整 keys=%s，使用安全回退草案",
+                    base_spec.spec_id,
+                    base_spec.name,
+                    list(data.keys())[:20],
+                )
+                data = self._build_requirement_clarification_fallback_data(
+                    base_spec,
+                    conversation,
+                    "LLM JSON 结构不完整",
+                )
 
             try:
                 feasibility_status = self._require_feasibility_status(data, "requirement_clarification")
@@ -6831,9 +6909,20 @@ class AgentWorkshopService:
                     base_spec.name,
                     raw_fs,
                 )
-            completeness_score = self._require_score_field(data, "completeness_score", "requirement_clarification")
-            pending_questions = self._require_list_field(data, "pending_questions", "requirement_clarification")[:2]
-            refusal_reason = self._require_string_field(data, "refusal_reason", "requirement_clarification", allow_empty=True)
+            try:
+                completeness_score = self._require_score_field(data, "completeness_score", "requirement_clarification")
+            except ValueError as score_exc:
+                fallback_score = 0.82 if feasibility_status == "feasible" else 0.65
+                logger.warning(
+                    "[AgentWorkshop][requirement_clarification] spec_id=%s spec_name=%s completeness_score 缺失/无效，回退为 %.2f: %s",
+                    base_spec.spec_id,
+                    base_spec.name,
+                    fallback_score,
+                    score_exc,
+                )
+                completeness_score = fallback_score
+            pending_questions = self._require_list_field(data, "pending_questions", "requirement_clarification", allow_missing=True)[:2]
+            refusal_reason = self._require_string_field(data, "refusal_reason", "requirement_clarification", allow_empty=True) if "refusal_reason" in data else ""
             spec = self._merge_llm_spec_data(data, base_spec, fallback_spec_id=fallback_spec_id)
             response_message = self._require_string_field(data, "response_message", "requirement_clarification")
             spec, pending_questions, completeness_score = self._post_process_requirement_clarification(
@@ -7179,7 +7268,8 @@ class AgentWorkshopService:
 
     def _merge_llm_spec_data(self, data: Dict[str, Any], fallback_spec: AgentSpec, fallback_spec_id: Optional[str] = None) -> AgentSpec:
         llm_name = self._require_string_field(data, "name", "requirement_clarification")
-        domain = self._require_domain_field(data, "domain", "requirement_clarification")
+        raw_domain = str(data.get("domain") or "").strip()
+        domain = raw_domain or fallback_spec.domain or "general"
 
         # 🔥 保护 spec 名称不被 LLM 意外覆盖
         # 场景1：已存在的 spec 名称不是占位值 → 强制保留
@@ -7242,6 +7332,75 @@ class AgentWorkshopService:
         if content.endswith("```"):
             content = content[:-3]
         return content.strip()
+
+    def _is_requirement_clarification_payload(self, data: Any) -> bool:
+        if not isinstance(data, dict):
+            return False
+        required_keys = {
+            "feasibility_status",
+            "response_message",
+            "pending_questions",
+            "completeness_score",
+            "name",
+            "domain",
+            "target_users",
+            "primary_goal",
+            "responsibilities",
+            "non_goals",
+            "inputs",
+            "outputs",
+            "success_criteria",
+            "constraints",
+            "preferred_methods",
+            "capability_requirements",
+            "sample_symbols",
+        }
+        return required_keys.issubset(data.keys())
+
+    def _build_requirement_clarification_fallback_data(
+        self,
+        base_spec: AgentSpec,
+        conversation: str,
+        reason: str,
+    ) -> Dict[str, Any]:
+        """LLM 输出被截断或结构不完整时，保留现有规格并给出可继续迭代的安全草案。"""
+        short_reason = str(reason or "LLM 输出结构不完整").strip()
+        response_message = (
+            f"这轮迭代的结构化分析返回不完整（{short_reason}），我先保留当前 Agent 规格，"
+            "并把本轮反馈作为下一版修订方向继续推进。请确认是否按这些评估建议进入下一版草稿。"
+        )
+        return {
+            "feasibility_status": "feasible",
+            "response_message": response_message,
+            "refusal_reason": "",
+            "pending_questions": [],
+            "completeness_score": 0.82,
+            "name": base_spec.name or "待确认 Agent",
+            "domain": base_spec.domain or "stock_analysis",
+            "target_users": list(base_spec.target_users or []),
+            "primary_goal": base_spec.primary_goal or conversation[:160] or base_spec.name,
+            "responsibilities": list(base_spec.responsibilities or [base_spec.primary_goal or base_spec.name]),
+            "non_goals": list(base_spec.non_goals or []),
+            "inputs": [
+                item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+                for item in (base_spec.inputs or ["user_request", "symbol"])
+            ],
+            "outputs": [
+                item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+                for item in (base_spec.outputs or ["analysis_report"])
+            ],
+            "success_criteria": self._dedupe([
+                *list(base_spec.success_criteria or []),
+                "覆盖上一轮评估提出的关键假设、失效条件、方法论说明和修订建议。",
+            ]),
+            "constraints": list(base_spec.constraints or []),
+            "preferred_methods": list(base_spec.preferred_methods or []),
+            "capability_requirements": [
+                item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+                for item in (base_spec.capability_requirements or [])
+            ],
+            "sample_symbols": list(base_spec.sample_symbols or []),
+        }
 
     def _extract_outermost_json(self, content: str) -> Optional[Dict[str, Any]]:
         """从混合了 CoT 文本和 JSON 的内容中提取最外层 JSON object。
@@ -9164,7 +9323,7 @@ class AgentWorkshopService:
         }
         recommendations = self._dedupe([
             "优先补充每个 benchmark case 的实际运行输出，再做一次基准评估。",
-            "针对得分最低的样本补强 Prompt 对方法选择和关键假设披露的硬约束。",
+            "针对得分最低的样本补强 Prompt 对风险提示和失效条件的约束。",
             "把 benchmark 中失败的 case 转成后续版本回归样本。",
             *( [f"额外反馈：{user_feedback.strip()}"] if user_feedback.strip() else [] ),
         ])
@@ -9340,11 +9499,11 @@ class AgentWorkshopService:
         publish_blockers.extend([str(item).strip() for item in (evidence_bundle.invalid_reasons or []) if str(item).strip()])
 
         content_score = round((
-            rule_scores.get("runtime_goal_alignment", 0.0)
-            + rule_scores.get("runtime_output_coverage", 0.0)
-            + rule_scores.get("runtime_explainability", 0.0)
-            + rule_scores.get("runtime_constraint_control", 0.0)
-        ) / 4, 2)
+            rule_scores.get("runtime_goal_alignment", 0.0) * 1.0
+            + rule_scores.get("runtime_output_coverage", 0.0) * 1.0
+            + rule_scores.get("runtime_explainability", 0.0) * 0.5
+            + rule_scores.get("runtime_constraint_control", 0.0) * 1.0
+        ) / 3.5, 2)
 
         if confirmed_issue_groups.get("numeric_traceability"):
             traceability_score = 0.35
@@ -10432,7 +10591,7 @@ class AgentWorkshopService:
     async def _llm_review_explainability(
         self, spec: AgentVersion, output_text: str,
     ) -> Dict[str, Any]:
-        """LLM 审核：可解释性（假设、风险、方法依据、失效条件）。"""
+        """LLM 审核：可解释性（假设、风险、失效条件）。"""
         methods = getattr(spec, "preferred_methods", []) or []
         spec_info = {
             "name": getattr(spec, "name", ""),
@@ -10449,10 +10608,16 @@ class AgentWorkshopService:
 
 ## 任务
 检查报告中是否包含以下关键解释要素：
-1. 关键假设（分析前提、估值假设值等）
-2. 方法依据（为什么用这个方法、数据来源）
-3. 风险因素（主要不确定性来源）
-4. 失效条件（什么情况下结论不成立）
+1. 关键假设（分析前提、估值假设值等）——注意：行业通用规则（如 DSO>180天=高风险、Z-Score>3=安全区等）属于常识性阈值，不需要逐一解释来源和原理，仅当使用了非标准或自定义阈值时才需要说明依据
+2. 风险因素（主要不确定性来源）
+3. 失效条件（什么情况下结论不成立）
+
+评分标准：
+- 报告包含关键假设（非标准阈值有说明）、风险因素和失效条件 → 0.8-1.0
+- 报告包含风险因素和失效条件，但缺少非标准假设说明 → 0.6-0.8
+- 报告只呈现工具结果，没有任何风险或失效条件的说明 → 0.3-0.5
+- 不要因为行业通用阈值没有解释来源而扣分，这是内部投研报告，不是评审论文
+- "方法依据"（为什么用这个方法）对内部工具来说是既定的，不需要在每份报告中重复解释
 
 逐项标注 present/absent，附原文片段作为证据。
 
@@ -10460,7 +10625,7 @@ class AgentWorkshopService:
 {{
   "score": 0.0-1.0,
   "reason": "一句话总结可解释性",
-  "evidence": [{{"check": "假设|方法|风险|失效", "status": "present|absent", "excerpt": "原文片段"}}],
+  "evidence": [{{"check": "假设|风险|失效", "status": "present|absent", "excerpt": "原文片段"}}],
   "blockers": ["阻断性问题的中文描述"],
   "warnings": ["提示性问题的中文描述"],
   "recommendations": ["改进建议"]
@@ -10738,7 +10903,7 @@ class AgentWorkshopService:
             "请覆盖以下维度：",
             "1. runtime_goal_alignment: 输出是否真正回应用户目标。",
             "2. runtime_output_quality: 输出质量是否完整、专业、可用，而不是只看字段命中。",
-            "3. runtime_reasoning_quality: 分析过程是否合理，假设、推导、结论之间是否自洽。",
+            "3. runtime_reasoning_quality: 分析结论是否合理自洽。注意：行业通用规则和标准阈值（如 DSO>180天=高风险、Z-Score>3=安全区）属于常识，不需要在报告中解释来源和原理；仅当使用了非标准阈值或自定义假设时才需说明依据。内部投研报告重在结论的可操作性，不需要像学术论文那样逐步论证。",
             "4. runtime_tool_usage: 工具选择与工具调用过程是否合理；如果没有真实工具轨迹，要明确说明证据不足，而不是假装看到了。",
             "5. runtime_prompt_quality: system/user prompt 设计是否清晰、约束是否充分、是否容易把模型引向正确任务。",
             "6. runtime_constraint_control: 是否存在越界、幻觉、与 non_goals/constraints 冲突的问题。",
@@ -11374,7 +11539,7 @@ class AgentWorkshopService:
         if scores.get("output_completeness", 0) < 0.75:
             issues.append("输出 Schema 还不完整，当前版本没有覆盖所有核心输出字段。")
         if scores.get("explainability", 0) < 0.75:
-            issues.append("Prompt 草案对假设披露、推理透明度和失效条件约束还不够强。")
+            issues.append("Prompt 草案对风险提示和失效条件的约束还不够强，建议补充关键风险披露要求。")
         if spec.domain == "stock_analysis" and not version.required_capabilities:
             issues.append("估值相关可调用能力缺口尚未真正补齐，当前版本仍偏配置草案。")
         if user_feedback.strip():
@@ -11417,21 +11582,77 @@ class AgentWorkshopService:
         issues: List[str],
         recommendations: List[str],
         feedback: str,
+        evaluation: Optional[AgentEvaluationReport] = None,
     ) -> str:
-        issue_block = "；".join(issues[:4]) if issues else "暂无明确问题"
-        recommendation_block = "；".join(recommendations[:4]) if recommendations else "暂无明确建议"
+        # 🔑 构建当前 Agent 的详细画像，让 LLM 有足够信息做专业迭代分析
+        responsibilities = "；".join(spec.responsibilities[:5]) if spec.responsibilities else "未定义"
+        inputs_desc = "、".join(
+            (str(i.get("name", "")) if isinstance(i, dict) else str(i))
+            for i in (spec.inputs or [])
+        )[:200] or "未定义"
+        outputs_desc = "、".join(
+            (str(o.get("name", "")) if isinstance(o, dict) else str(o))
+            for o in (spec.outputs or [])
+        )[:200] or "未定义"
+        success_criteria = "；".join(spec.success_criteria[:5]) if spec.success_criteria else "未定义"
+        non_goals = "；".join(spec.non_goals[:3]) if spec.non_goals else "无"
+
+        # 评估分数
+        scores_block = "暂无评估分数"
+        if evaluation and evaluation.scores:
+            score_lines = []
+            for dim, score in evaluation.scores.items():
+                if isinstance(score, (int, float)):
+                    score_lines.append(f"  - {dim}: {score:.2f}")
+            if score_lines:
+                scores_block = "\n".join(score_lines)
+
+        # 评估决策
+        decision = evaluation.decision if evaluation else "暂无"
+        overall_score = evaluation.scores.get("overall", 0) if evaluation and evaluation.scores else 0
+
+        issue_block = "\n".join(f"  - {item}" for item in issues[:10]) if issues else "  - 暂无明确问题"
+        recommendation_block = "\n".join(f"  - {item}" for item in recommendations[:10]) if recommendations else "  - 暂无明确建议"
         feedback_text = feedback.strip() or "无额外人工反馈"
+
         return (
-            f"我们正在迭代 {spec.name} 的版本 {version.version_id}。"
-            f"上一轮评估识别的问题包括：{issue_block}。"
-            f"建议方向包括：{recommendation_block}。"
-            f"人工补充反馈：{feedback_text}。"
-            f"请基于这些信息继续优化这个 Agent 的角色边界、Prompt、工具与输出设计。"
+            f"## 迭代背景\n"
+            f"我们正在迭代 Agent「{spec.name}」的版本 {version.version_id}（状态: {version.status}）。\n\n"
+
+            f"## 当前 Agent 画像\n"
+            f"- 核心职责: {responsibilities}\n"
+            f"- 主要目标: {spec.primary_goal or '未定义'}\n"
+            f"- 输入: {inputs_desc}\n"
+            f"- 输出: {outputs_desc}\n"
+            f"- 成功标准: {success_criteria}\n"
+            f"- 非目标边界: {non_goals}\n\n"
+
+            f"## 上一轮评估结果\n"
+            f"- 评估决策: {decision}\n"
+            f"- 综合得分: {overall_score:.2f}\n"
+            f"- 各维度得分:\n{scores_block}\n\n"
+
+            f"## 识别的问题\n"
+            f"{issue_block}\n\n"
+
+            f"## 优化建议\n"
+            f"{recommendation_block}\n\n"
+
+            f"## 人工补充反馈\n"
+            f"{feedback_text}\n\n"
+
+            f"## 迭代要求\n"
+            f"请基于以上信息，对这个 Agent 进行有针对性的优化。\n"
+            f"1. 首先指出当前 Agent 存在的具体问题（结合评估结果和测试表现）\n"
+            f"2. 说明本次迭代要优化哪些方面，以及为什么这些优化是必要的\n"
+            f"3. 描述优化后预期达到的效果\n"
+            f"4. 更新 Agent 的职责定义、输入输出规格、成功标准等，使其更精准\n"
+            f"注意：这是对已有 Agent 的迭代优化，不是重新设计。保留有效的部分，改进不足的部分。"
         )
 
     def _build_iteration_reminder(self, evaluation: AgentEvaluationReport, feedback: str) -> str:
-        issue_block = "\n".join(f"- {item}" for item in evaluation.issues[:5]) or "- 暂无"
-        recommendation_block = "\n".join(f"- {item}" for item in evaluation.recommendations[:5]) or "- 暂无"
+        issue_block = "\n".join(f"- {item}" for item in evaluation.issues[:10]) or "- 暂无"
+        recommendation_block = "\n".join(f"- {item}" for item in evaluation.recommendations[:10]) or "- 暂无"
         extra_feedback = feedback.strip() or "无"
         return (
             "上一轮评估摘要：\n"
