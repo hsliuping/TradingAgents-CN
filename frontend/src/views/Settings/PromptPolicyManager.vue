@@ -120,10 +120,14 @@
         :disabled="!!editingPolicy?.id"
       >
         <el-form-item v-if="!editingPolicy?.id" label="Agent 类型" required>
-          <el-input v-model="editForm.agent_type" placeholder="如 analysts_v2" />
+          <el-select v-model="editForm.agent_type" placeholder="选择 Agent 类型" style="width: 100%">
+            <el-option v-for="type in agentTypes" :key="type" :label="labelAgentType(type)" :value="type" />
+          </el-select>
         </el-form-item>
         <el-form-item v-if="!editingPolicy?.id" label="Agent 名称" required>
-          <el-input v-model="editForm.agent_name" placeholder="如 market_analyst_v2" />
+          <el-select v-model="editForm.agent_name" placeholder="选择 Agent 名称" style="width: 100%" :disabled="!editForm.agent_type">
+            <el-option v-for="name in agentNames" :key="name.value" :label="name.label" :value="name.value" />
+          </el-select>
         </el-form-item>
         <el-form-item v-if="!editingPolicy?.id" label="场景" required>
           <el-select v-model="editForm.scope" placeholder="选择场景" style="width: 100%">
@@ -205,8 +209,15 @@ const editForm = ref({
 })
 
 const agentTypes = computed(() => {
-  const types = new Set(policies.value.map((p) => p.agent_type))
+  const types = new Set(agents.value.map((a) => a.agent_type))
   return filterV2AgentTypes(Array.from(types)).sort()
+})
+
+const agentNames = computed(() => {
+  if (!editForm.value.agent_type) return []
+  return agents.value
+    .filter((a) => a.agent_type === editForm.value.agent_type)
+    .map((a) => ({ value: a.agent_name, label: labelAgentName(a.agent_name) }))
 })
 
 const groupedPolicies = computed(() => {
