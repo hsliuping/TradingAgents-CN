@@ -37,6 +37,7 @@ _KNOWN_KEYS = frozenset({
     "message_history",
     # ── 澄清标记（跨请求保持） ──
     "clarification_needed",
+    "skill_creation_requested",
     # ── 工具进度 ──
     "test_progress",
 })

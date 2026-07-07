@@ -35,6 +35,7 @@ class AgentBuilderState(TypedDict, total=False):
     awaiting_user: bool
     pending_question: str
     clarification_needed: bool  # 意图无法识别时，让 wait 节点输出澄清提示而非重复上轮内容
+    skill_creation_requested: bool  # 用户要求补齐缺失 skill 时设置，让 wait 节点输出 skill 创建提示
 
     # ── LLM 意图分类（由 classify_intent 节点写入） ──
     user_intent: str  # confirmed / revise / select_option / explore_more / cancel / new_agent / retry
@@ -108,6 +109,7 @@ def new_agent_builder_state(
         awaiting_user=False,
         pending_question="",
         clarification_needed=False,
+        skill_creation_requested=False,
         spec_id="",
         spec_name="",
         requirement_summary="",

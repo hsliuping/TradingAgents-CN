@@ -1970,7 +1970,7 @@ def _looks_unspecified(value: str) -> bool:
 def _generate_short_agent_name_llm(user_request: str, target_responsibility: str = "") -> dict:
     """用 LLM 同步生成简短 Agent 中文名和英文 slug（在同步工具函数中调用）。
 
-    LLM 失败时回退到 _generate_short_agent_name_fallback 规则匹配。
+    LLM 失败时用简单拼音/哈希兜底（不再用关键词映射表）。
     返回 {"name": "中文名", "slug": "english_slug"}
     """
     text = f"{target_responsibility or ''} {user_request or ''}".strip()
@@ -1989,7 +1989,8 @@ def _generate_short_agent_name_llm(user_request: str, target_responsibility: str
             sort=[("version", -1)],
         )
         if not config_doc or "llm_configs" not in config_doc:
-            return _generate_short_agent_name_fallback(user_request, target_responsibility)
+            logger.warning("[AgentName][LLM] 无活跃 LLM 配置，使用拼音兜底")
+            return _generate_simple_slug_fallback(user_request, target_responsibility)
 
         # 复用 intelligent_assistant_service 的模型选择逻辑（同步部分）
         from app.services.intelligent_assistant_service import _resolve_models, _selection_model_name, _selection_config_id, resolve_llm_config_from_config_doc
@@ -1998,7 +1999,8 @@ def _generate_short_agent_name_llm(user_request: str, target_responsibility: str
         target_model = _selection_model_name(target_selection)
         target_config_id = _selection_config_id(target_selection)
         if not target_model:
-            return _generate_short_agent_name_fallback(user_request, target_responsibility)
+            logger.warning("[AgentName][LLM] 无法解析模型名称，使用拼音兜底 (reasoning=%s deep=%s)", reasoning_selection, deep_selection)
+            return _generate_simple_slug_fallback(user_request, target_responsibility)
 
         config = resolve_llm_config_from_config_doc(
             config_doc,
@@ -2007,7 +2009,8 @@ def _generate_short_agent_name_llm(user_request: str, target_responsibility: str
             purpose="agent_naming",
         )
         if not config:
-            return _generate_short_agent_name_fallback(user_request, target_responsibility)
+            logger.warning("[AgentName][LLM] 无法构建 LLM 配置 (model=%s config_id=%s)，使用拼音兜底", target_model, target_config_id)
+            return _generate_simple_slug_fallback(user_request, target_responsibility)
 
         client = UnifiedLLMClient.from_config(config)
 
@@ -2048,20 +2051,28 @@ def _generate_short_agent_name_llm(user_request: str, target_responsibility: str
         response = client.chat(messages, temperature=0.3, max_tokens=150)
         raw_content = str(response.content or "").strip()
 
+        logger.info("[AgentName][LLM] 原始响应: %s", raw_content[:300])
+
         # 尝试解析 JSON
         import json as _json
         try:
             # 清理可能的 markdown 代码块标记
-            cleaned = raw_content.strip("`")
-            if cleaned.lower().startswith("json"):
-                cleaned = cleaned[4:].strip()
-            # 只取第一行（如果有多行）
-            cleaned = cleaned.split("\n")[0].strip()
+            cleaned = raw_content.strip()
+            if cleaned.startswith("```"):
+                # 去掉 ```json 或 ``` 标记
+                cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+                cleaned = re.sub(r"\s*```$", "", cleaned)
+            # 尝试从文本中提取 JSON 对象（兼容跨行和带前后文的情况）
+            json_match = re.search(r'\{[^{}]*"name"[^{}]*"slug"[^{}]*\}', cleaned, re.DOTALL)
+            if json_match:
+                cleaned = json_match.group(0)
             result = _json.loads(cleaned)
             name = str(result.get("name", "")).strip()
             slug = str(result.get("slug", "")).strip().lower()
-        except Exception:
+            logger.info("[AgentName][LLM] 解析成功: name=%s slug=%s", name, slug)
+        except Exception as parse_exc:
             # JSON 解析失败，尝试从文本中提取
+            logger.warning("[AgentName][LLM] JSON 解析失败: %s, raw=%s", parse_exc, raw_content[:200])
             name = raw_content.strip().strip("\"'""''「」【】 ").split("\n")[0].strip()
             name = name.rstrip("。.；;")
             slug = ""
@@ -2072,129 +2083,54 @@ def _generate_short_agent_name_llm(user_request: str, target_responsibility: str
         # 验证 slug 格式
         import re as _re
         if not slug or not _re.match(r"^[a-z][a-z0-9_]{2,39}$", slug):
-            # slug 不合规，从中文名生成兜底
-            slug = _fallback_slug_from_name(name, user_request, target_responsibility)
+            # slug 不合规，用简单拼音兜底
+            logger.warning("[AgentName][LLM] slug 不合规: slug=%r，使用拼音兜底", slug)
+            slug = _generate_simple_slug_fallback(name or user_request, target_responsibility)["slug"]
 
         if name and len(name) <= 20:
-            logger.info("[AgentName][LLM] request=%s -> name=%s slug=%s", user_request[:40], name, slug)
+            logger.info("[AgentName][LLM] 最终结果: request=%s -> name=%s slug=%s", user_request[:40], name, slug)
             return {"name": name, "slug": slug}
 
-        logger.warning("[AgentName][LLM] 生成的名字不合规: %s (len=%d)，回退规则", name, len(name))
-        return _generate_short_agent_name_fallback(user_request, target_responsibility)
+        logger.warning("[AgentName][LLM] 名字不合规: name=%r (len=%d)，使用拼音兜底", name, len(name or ""))
+        return _generate_simple_slug_fallback(user_request, target_responsibility)
     except Exception as exc:
-        logger.warning("[AgentName][LLM] LLM 生成名字失败，回退规则: %s", exc, exc_info=True)
-        return _generate_short_agent_name_fallback(user_request, target_responsibility)
+        logger.error("[AgentName][LLM] LLM 命名异常: %s", exc, exc_info=True)
+        return _generate_simple_slug_fallback(user_request, target_responsibility)
 
 
 def _fallback_slug_from_name(name: str, user_request: str = "", target_responsibility: str = "") -> str:
-    """从中文名称/需求中生成英文 slug 的兜底函数（关键词映射）。"""
-    text = f"{name or ''} {target_responsibility or ''} {user_request or ''}".strip().lower()
-
-    # 英文关键词映射：按优先级匹配，取最具体的
-    slug_mappings = [
-        (["财报排雷", "财务造假", "财务舞弊", "financial risk", "fraud"], "financial_risk_screener"),
-        (["多维度估值", "综合估值", "估值分析", "valuation"], "valuation_analyst"),
-        (["股息率", "分红", "派息", "股利", "dividend"], "dividend_yield_analyst"),
-        (["dcf", "现金流折现", "自由现金流"], "dcf_valuation_analyst"),
-        (["ddm", "股利贴现"], "ddm_valuation_analyst"),
-        (["财报分析", "财务分析", "基本面分析", "fundamental"], "fundamentals_analyst"),
-        (["技术分析", "技术面", "k线", "技术指标", "technical"], "technical_analyst"),
-        (["行业分析", "板块分析", "行业对比", "sector", "industry"], "sector_analyst"),
-        (["选股", "筛选", "股票筛选", "stock screening", "stock picking"], "stock_screener"),
-        (["仓位", "组合", "投资组合", "portfolio"], "portfolio_manager"),
-        (["风险", "风控", "风险评估", "risk"], "risk_assessment"),
-        (["研报", "研究报告", "报告生成", "research report"], "research_report_gen"),
-        (["宏观", "经济周期", "货币政策", "macro", "economy"], "macro_analyst"),
-        (["情绪", "舆情", "市场情绪", "sentiment"], "sentiment_analyst"),
-        (["资金流", "资金面", "主力", "money flow"], "money_flow_analyst"),
-        (["回测", "策略回测", "量化回测", "backtest"], "backtest_engine"),
-        (["事件", "公告", "事件驱动", "event"], "event_driven_analyst"),
-        (["质押", "股权质押", "pledge"], "pledge_risk_analyst"),
-        (["可比公司", "同业对比", "同行对比", "comparable", "peer"], "peer_valuation_analyst"),
-        (["现金流", "cash flow", "cashflow"], "cashflow_analyst"),
-        (["商誉", "goodwill"], "goodwill_risk_analyst"),
-        (["应收", "应收账款", "receivable"], "receivables_analyst"),
-        (["流动性", "liquidity"], "liquidity_analyst"),
-        (["偿债", "solvency", "debt"], "solvency_analyst"),
-    ]
-
-    for keywords, slug in slug_mappings:
-        for kw in keywords:
-            if kw.lower() in text:
-                return slug
-
-    # 兜底：用简单的哈希 + 通用后缀
+    """简单兜底：从文本生成哈希 slug（命名由 LLM 负责，此处仅为最终兜底）。"""
+    text = f"{name or ''} {target_responsibility or ''} {user_request or ''}".strip()
+    if not text:
+        return "analysis_assistant"
     import hashlib
     digest = hashlib.md5(text.encode("utf-8")).hexdigest()[:6]
+    # 尝试从英文名提取前缀（如果有英文的话）
+    import re as _re
+    english_parts = _re.findall(r'[a-zA-Z]{2,}', text)
+    if english_parts:
+        prefix = english_parts[0].lower()[:15]
+        return f"{prefix}_assistant_{digest}"
     return f"analysis_assistant_{digest}"
 
 
-def _generate_short_agent_name_fallback(user_request: str, target_responsibility: str = "") -> dict:
-    """规则兜底：从需求/职责中提取核心业务关键词，生成中文名和英文 slug。
+def _generate_simple_slug_fallback(user_request: str, target_responsibility: str = "") -> dict:
+    """LLM 命名失败时的简单兜底（不再用关键词映射）。
+
     返回 {"name": "中文名", "slug": "english_slug"}
     """
     text = f"{target_responsibility or ''} {user_request or ''}".strip()
     if not text:
         return {"name": "智能分析助手", "slug": "intelligent_analysis_assistant"}
 
-    # 业务领域关键词映射：按优先级匹配，取最具体的
-    # 每项 (关键词列表, 生成的名字模板)
-    domain_mappings = [
-        (["财报排雷", "财务造假", "财务舞弊"], "财报排雷助手"),
-        (["多维度估值", "综合估值", "估值分析"], "多维度估值分析助手"),
-        (["股息率", "分红", "派息", "股利"], "股息率分析助手"),
-        (["DCF", "现金流折现", "自由现金流"], "DCF估值助手"),
-        (["DDM", "股利贴现"], "DDM估值助手"),
-        (["估值"], "估值分析助手"),
-        (["财报分析", "财务分析", "基本面分析"], "基本面分析助手"),
-        (["技术分析", "技术面", "K线", "技术指标"], "技术分析助手"),
-        (["行业分析", "板块分析", "行业对比"], "行业分析助手"),
-        (["选股", "筛选", "股票筛选"], "智能选股助手"),
-        (["仓位", "组合", "投资组合"], "组合管理助手"),
-        (["风险", "风控", "风险评估"], "风险评估助手"),
-        (["研报", "研究报告", "报告生成"], "研报生成助手"),
-        (["宏观", "经济周期", "货币政策"], "宏观分析助手"),
-        (["情绪", "舆情", "市场情绪"], "舆情分析助手"),
-        (["资金流", "资金面", "主力"], "资金面分析助手"),
-        (["回测", "策略回测", "量化回测"], "策略回测助手"),
-        (["事件", "公告", "事件驱动"], "事件驱动分析助手"),
-        (["质押", "股权质押"], "质押风险分析助手"),
-        (["可比公司", "同业对比", "同行对比"], "可比公司估值助手"),
-    ]
+    # 从需求中提取前 10 字作为简短名称
+    short_name = text[:10].rstrip("，。、的了是") + "助手"
+    slug = _fallback_slug_from_name(short_name, user_request, target_responsibility)
+    return {"name": short_name, "slug": slug}
 
-    text_lower = text.lower()
-    matched_name = None
-    for keywords, name in domain_mappings:
-        for kw in keywords:
-            if kw.lower() in text_lower:
-                matched_name = name
-                break
-        if matched_name:
-            break
 
-    if matched_name:
-        slug = _fallback_slug_from_name(matched_name, user_request, target_responsibility)
-        return {"name": matched_name, "slug": slug}
-
-    # 兜底：从职责描述中提取前 8 个字 + "助手"
-    # 去掉常见的冗余前缀
-    cleaned = re.sub(r"^(帮我|请|我想要|我需要|创建|生成|做一个|建一个|新建)\s*", "", text)
-    # 去掉"对A股..."这类前缀
-    cleaned = re.sub(r"^(对|为|给)\s*[A-Za-z\u4e00-\u9fa5]{0,6}(上市公司|股票|A股)?\s*(执行|进行|做|实现)?\s*", "", cleaned)
-    # 取第一个逗号/句号前的部分
-    for sep in ["，", "。", ",", ".", "、", "；", ";", "\n"]:
-        if sep in cleaned:
-            cleaned = cleaned.split(sep)[0]
-            break
-    cleaned = cleaned.strip()
-    if len(cleaned) > 10:
-        cleaned = cleaned[:10]
-    if not cleaned:
-        return {"name": "智能分析助手", "slug": "intelligent_analysis_assistant"}
-
-    name = f"{cleaned}助手"
-    slug = _fallback_slug_from_name(name, user_request, target_responsibility)
-    return {"name": name, "slug": slug}
+# 保留旧名作为别名，兼容 agent_builder_nodes.py 的引用
+_generate_short_agent_name_fallback = _generate_simple_slug_fallback
 
 
 def _contains_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
@@ -2990,6 +2926,7 @@ async def _inspect_agent_overwrite_risk(db: Any, agent_id: str, status: str = "a
     returns="返回 JSON 字符串，包含已知信息、缺失决策、推荐追问问题，以及是否可以直接进入确认阶段。",
     example="prepare_agent_requirement_intake(user_request='帮我做一个估值分析 agent')",
     related_tools=["prepare_agent_generation_confirmation", "generate_confirmed_candidate_agent"],
+    data_source_handling="local_only",
 )
 def prepare_agent_requirement_intake(
     user_request: Annotated[str, "用户原始请求，例如 帮我做一个估值分析 agent"],
@@ -3198,6 +3135,7 @@ def prepare_agent_requirement_intake(
     returns="返回 JSON 字符串，包含确认稿、覆盖风险和建议用户确认项。",
     example="prepare_agent_generation_confirmation(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', target_responsibility='输出A股估值结论', tool_ids='get_value_factor_bundle_tool')",
     related_tools=["generate_confirmed_candidate_agent", "create_or_update_runtime_agent_config"],
+    data_source_handling="local_only",
 )
 async def prepare_agent_generation_confirmation(
     agent_id: Annotated[str, "候选 Agent ID"],
@@ -3439,6 +3377,7 @@ async def prepare_agent_generation_confirmation(
     ),
     example="propose_agent_build_plans(gap_report_json='{\"blocking_gaps\":[],\"non_blocking_gaps\":[]}')",
     related_tools=["search_project_capabilities", "analyze_agent_workshop_gaps", "generate_confirmed_candidate_agent"],
+    data_source_handling="local_only",
 )
 async def propose_agent_build_plans(
     gap_report_json: Annotated[str, "JSON 字符串，包含 blocking_gaps、non_blocking_gaps、suggested_tools 等"],
@@ -3651,6 +3590,7 @@ async def propose_agent_build_plans(
     ),
     example="search_project_capabilities(query='A股估值 行业对比 因子', top_k=8)",
     related_tools=["inspect_agent_blueprints", "get_agent_blueprint_details"],
+    data_source_handling="local_only",
 )
 async def search_project_capabilities(
     query: Annotated[str, "能力检索需求，如 A股估值、行业对比、组合复盘、报告生成"],
@@ -3700,6 +3640,7 @@ async def search_project_capabilities(
     ),
     example="inspect_runtime_agent_configs(keyword='估值', limit=5)",
     related_tools=["inspect_agent_workshop_assets", "inspect_agent_blueprints", "search_project_capabilities"],
+    data_source_handling="local_only",
 )
 async def inspect_runtime_agent_configs(
     keyword: Annotated[str, "按 agent_id、名称、描述、metadata 模糊筛选，可留空"] = "",
@@ -3794,6 +3735,7 @@ async def inspect_runtime_agent_configs(
     ),
     example="inspect_agent_blueprints(keyword='估值', category='analyst', limit=5)",
     related_tools=["get_agent_blueprint_details", "search_project_capabilities"],
+    data_source_handling="local_only",
 )
 def inspect_agent_blueprints(
     keyword: Annotated[str, "按名称、描述、标签、工具名模糊过滤，可留空"] = "",
@@ -3856,6 +3798,7 @@ def inspect_agent_blueprints(
     returns="返回 JSON 字符串，包含单个 Agent 的完整元数据详情。",
     example="get_agent_blueprint_details(agent_id='valuation_analyst_v2')",
     related_tools=["inspect_agent_blueprints", "search_project_capabilities"],
+    data_source_handling="local_only",
 )
 def get_agent_blueprint_details(
     agent_id: Annotated[str, "已注册 Agent ID，如 valuation_analyst_v2"]
@@ -3902,6 +3845,7 @@ def get_agent_blueprint_details(
     ),
     example="inspect_agent_workshop_assets(workshop_session_id='session_001')",
     related_tools=["inspect_runtime_agent_configs", "inspect_agent_blueprints", "search_project_capabilities"],
+    data_source_handling="local_only",
 )
 async def inspect_agent_workshop_assets(
     keyword: Annotated[str, "按 spec 名称、目标、version agent_metadata 模糊筛选，可留空"] = "",
@@ -4141,6 +4085,7 @@ async def inspect_agent_workshop_assets(
     returns="返回 JSON 字符串，包含模板摘要列表。",
     example="inspect_prompt_templates(agent_type='universal', keyword='估值', status='active', limit=10)",
     related_tools=["get_prompt_template_detail", "inspect_agent_workshop_assets", "create_or_update_universal_agent_prompt_template"],
+    data_source_handling="local_only",
 )
 async def inspect_prompt_templates(
     agent_type: Annotated[str, "按 agent_type 精确筛选，可留空"] = "",
@@ -4214,6 +4159,7 @@ async def inspect_prompt_templates(
     returns="返回 JSON 字符串，包含模板详情和完整 content 字段。",
     example="get_prompt_template_detail(template_id='69cfdf8db1828a17f6b00cfb')",
     related_tools=["inspect_prompt_templates", "create_or_update_universal_agent_prompt_template"],
+    data_source_handling="local_only",
 )
 async def get_prompt_template_detail(
     template_id: Annotated[str, "prompt_templates 集合中的 _id 字符串"],
@@ -4258,6 +4204,7 @@ async def get_prompt_template_detail(
     returns="返回 JSON 字符串，包含当前生效模板内容、来源、template_id、version 以及解析参数。",
     example="get_effective_prompt_template(agent_type='universal', agent_name='valuation_candidate_v1', workflow_id='wf_001', node_id='node_002', is_debug_mode=true, debug_template_id='69cfdf8db1828a17f6b00cfb')",
     related_tools=["inspect_prompt_templates", "get_prompt_template_detail", "create_or_update_universal_agent_prompt_template"],
+    data_source_handling="local_only",
 )
 async def get_effective_prompt_template(
     agent_type: Annotated[str, "Agent 类型，如 universal、analysts、researchers"],
@@ -4300,6 +4247,7 @@ async def get_effective_prompt_template(
     returns="返回 JSON 字符串，包含线程上下文、自动推断得到的 resolution_input 和实际生效模板内容。",
     example="get_current_thread_effective_prompt_template()",
     related_tools=["get_effective_prompt_template", "inspect_prompt_templates", "get_prompt_template_detail"],
+    data_source_handling="local_only",
 )
 async def get_current_thread_effective_prompt_template(
     preference_id: Annotated[str, "偏好 ID，默认 neutral"] = "neutral",
@@ -4385,6 +4333,7 @@ async def get_current_thread_effective_prompt_template(
     returns="返回 JSON 字符串，包含写入后的 agent_configs 摘要。",
     example="create_or_update_runtime_agent_config(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', description='输出估值结论')",
     related_tools=["create_or_update_universal_agent_prompt_template", "bind_agent_tools_and_validate_candidate"],
+    data_source_handling="local_only",
 )
 async def create_or_update_runtime_agent_config(
     agent_id: Annotated[str, "运行时 Agent ID，例如 valuation_candidate_v1"],
@@ -4488,6 +4437,7 @@ async def create_or_update_runtime_agent_config(
     returns="返回 JSON 字符串，包含写入后的 spec_id、session_id 和概览信息。",
     example="create_or_update_agent_workshop_draft(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', target_responsibility='输出A股估值结论')",
     related_tools=["generate_confirmed_candidate_agent", "inspect_agent_workshop_assets", "create_or_update_runtime_agent_config"],
+    data_source_handling="local_only",
 )
 async def create_or_update_agent_workshop_draft(
     agent_id: Annotated[str, "候选 Agent ID，例如 valuation_candidate_v1"],
@@ -4520,6 +4470,12 @@ async def create_or_update_agent_workshop_draft(
 
         # 🔥 防止 LLM 意图漂移：对比 agent_id 与当前线程上下文的 spec_id
         thread_context_spec_id = _get_current_thread_context_spec_id()
+        # 🔑 关键追踪日志：IntentGuard 检查
+        logger.info(
+            "[WorkshopDraft][IntentGuard] thread_context.spec_id=%r tool_arg.agent_id=%r equivalent=%s",
+            thread_context_spec_id, clean_agent_id,
+            _agent_id_equivalent(thread_context_spec_id, clean_agent_id) if thread_context_spec_id else "N/A(empty_ctx)",
+        )
         if thread_context_spec_id and thread_context_spec_id != clean_agent_id:
             if _agent_id_equivalent(thread_context_spec_id, clean_agent_id):
                 logger.info(
@@ -4576,6 +4532,11 @@ async def create_or_update_agent_workshop_draft(
                         "version_id": resolved_version_id or None,
                     },
                 )
+        # 🔑 关键追踪日志：create_nanobot_draft 写库前
+        logger.info(
+            "[WorkshopDraft][WriteDB] 即将调用 create_nanobot_draft agent_id=%r agent_name=%r",
+            clean_agent_id, clean_agent_name,
+        )
         result = await AgentWorkshopService(db=db).create_nanobot_draft(
             agent_id=clean_agent_id,
             agent_name=clean_agent_name,
@@ -4604,6 +4565,19 @@ async def create_or_update_agent_workshop_draft(
             owner_user_id=user_id,
             source_thread_id=current_thread_id,
         )
+        # 🔑 关键追踪日志：create_nanobot_draft 写库后
+        result_status = result.get("status", "") if isinstance(result, dict) else "non_dict"
+        result_spec_id = result.get("spec_id", "") if isinstance(result, dict) else ""
+        result_session_id = result.get("session_id", "") if isinstance(result, dict) else ""
+        logger.info(
+            "[WorkshopDraft][WriteDB] create_nanobot_draft 结果 status=%s spec_id=%r session_id=%r",
+            result_status, result_spec_id, result_session_id,
+        )
+        if result_status != "ok":
+            logger.warning(
+                "[WorkshopDraft][WriteDB] ❌ create_nanobot_draft 失败！full_result=%s",
+                json.dumps(result, ensure_ascii=False, default=str)[:500] if isinstance(result, dict) else str(result)[:500],
+            )
         # 🔥 自动更新意图上下文
         # V2 流程：需求确认后才创建 session，此时可能处于 capability_check 阶段，
         # 不应把 stage 改回 draft_preparing。
@@ -4650,6 +4624,7 @@ async def create_or_update_agent_workshop_draft(
     returns="返回 JSON 字符串，包含 session_id、spec_id 与 gap_report 摘要。",
     example="analyze_agent_workshop_gaps(session_id='session_123') 或 analyze_agent_workshop_gaps(agent_id='risk_signal_agent', agent_name='财报风险信号助手', target_responsibility='识别财报风险信号', tool_ids='tool_a,tool_b')",
     related_tools=["create_or_update_agent_workshop_draft", "search_project_capabilities", "generate_agent_workshop_tooling_plan", "build_agent_workshop_version"],
+    data_source_handling="local_only",
 )
 async def analyze_agent_workshop_gaps(
     session_id: Annotated[str, "Agent 工坊会话 ID；如果为空，则需要提供 agent_id 等参数自动创建"] = "",
@@ -4773,6 +4748,7 @@ async def analyze_agent_workshop_gaps(
     returns="返回 JSON 字符串，包含 session_id、spec_id 与 tooling_plan。",
     example="generate_agent_workshop_tooling_plan(session_id='session_123')",
     related_tools=["analyze_agent_workshop_gaps", "build_agent_workshop_version"],
+    data_source_handling="local_only",
 )
 async def generate_agent_workshop_tooling_plan(
     session_id: Annotated[str, "Agent 工坊会话 ID"],
@@ -4820,6 +4796,7 @@ async def generate_agent_workshop_tooling_plan(
     returns="返回 JSON 字符串，包含 session_id、spec_id 和 version。",
     example="build_agent_workshop_version(session_id='session_123')",
     related_tools=["analyze_agent_workshop_gaps", "generate_agent_workshop_tooling_plan"],
+    data_source_handling="local_only",
 )
 async def build_agent_workshop_version(
     session_id: Annotated[str, "Agent 工坊会话 ID"],
@@ -4925,6 +4902,7 @@ async def build_agent_workshop_version(
     returns="返回 JSON 字符串，包含 version_id、spec_id、report、raw_result 和运行元数据，但不会自动生成 evaluation 记录。",
     example="debug_agent_workshop_version(version_id='spec_x_v1', stock_symbol='600519')",
     related_tools=["run_agent_workshop_real_data_test", "publish_agent_workshop_version"],
+    data_source_handling="local_only",
 )
 async def debug_agent_workshop_version(
     version_id: Annotated[str, "Agent 工坊版本 ID"],
@@ -5052,6 +5030,7 @@ async def debug_agent_workshop_version(
     returns="返回 JSON 字符串，包含 debug_result、evaluation、latest_decision 和是否已完成正式落库。",
     example="run_agent_workshop_real_data_test(version_id='spec_x_v1', stock_symbol='600519')",
     related_tools=["debug_agent_workshop_version", "publish_agent_workshop_version"],
+    data_source_handling="local_only",
 )
 async def run_agent_workshop_real_data_test(
     version_id: Annotated[str, "Agent 工坊版本 ID"],
@@ -5061,6 +5040,7 @@ async def run_agent_workshop_real_data_test(
     user_goal: Annotated[str, "本次测试目标，可为空"] = "",
     user_feedback: Annotated[str, "本次测试补充反馈，可为空"] = "",
     prompt_overrides_json: Annotated[str, "Prompt 覆盖 JSON 对象，可为空"] = "",
+    skip_evaluation: Annotated[bool, "仅运行测试不评估，评估由后续单独执行"] = False,
 ) -> str:
     """Execute the official real-data test loop and persist its evaluation."""
     stage_events: list[dict[str, str]] = []
@@ -5152,6 +5132,37 @@ async def run_agent_workshop_real_data_test(
             "output_payload": raw_result,
             "tool_trace": debug_prompt.get("tool_trace") or raw_result.get("tool_trace") or [],
         })
+
+        # 🔑 skip_evaluation=True：仅运行测试，不做评估，评估由 node_real_data_test 后续单独执行
+        if skip_evaluation:
+            stage_events.append(_build_tool_stage_event(
+                "run_agent_workshop_real_data_test.skip_evaluation",
+                "ok",
+                "测试完成，跳过评估阶段（由后续单独执行）",
+            ))
+            return _json_response({
+                "status": "ok",
+                "test_chain_status": "test_only",
+                "version_id": clean_version_id,
+                "spec_id": debug_result.get("spec_id"),
+                "debug_result": debug_result,
+                "runtime_result": runtime_result_payload,
+                "user_feedback": str(user_feedback or "").strip(),
+                "_tool_events": [
+                    *stage_events,
+                    _build_tool_stage_event(
+                        "run_agent_workshop_real_data_test",
+                        "ok",
+                        "真数据测试完成（跳过评估）",
+                    ),
+                ],
+                "summary": {
+                    "symbol": debug_result.get("symbol"),
+                    "analysis_date": debug_result.get("analysis_date"),
+                    "report_length": debug_result.get("report_length"),
+                },
+                "message": "真数据测试已完成，测试报告已生成。评估将在下一步单独执行。",
+            })
 
         evaluation_result = await service.evaluate_version(
             clean_version_id,
@@ -5265,6 +5276,7 @@ async def run_agent_workshop_real_data_test(
     returns="返回 JSON 字符串，包含发布后的版本状态与 spec_id。",
     example="publish_agent_workshop_version(version_id='spec_x_v1')",
     related_tools=["run_agent_workshop_real_data_test", "debug_agent_workshop_version"],
+    data_source_handling="local_only",
 )
 async def publish_agent_workshop_version(
     version_id: Annotated[str, "Agent 工坊版本 ID"],
@@ -5348,6 +5360,7 @@ async def publish_agent_workshop_version(
     returns="返回 JSON 字符串，包含 version_id、evaluation 和最新 decision 摘要。",
     example="evaluate_agent_workshop_version(version_id='spec_x_v1', evaluation_type='production-review', runtime_result_json='{\"output_text\":\"...\"}')",
     related_tools=["debug_agent_workshop_version", "run_agent_workshop_real_data_test", "iterate_agent_workshop_version"],
+    data_source_handling="local_only",
 )
 async def evaluate_agent_workshop_version(
     version_id: Annotated[str, "Agent 工坊版本 ID"],
@@ -5474,6 +5487,7 @@ async def evaluate_agent_workshop_version(
     returns="返回 JSON 字符串，包含 source_version_id、session_id、spec_id 和 ai_message。",
     example="iterate_agent_workshop_version(version_id='spec_x_v1', feedback='补充解释评分波动来源')",
     related_tools=["evaluate_agent_workshop_version", "build_agent_workshop_version", "publish_agent_workshop_version"],
+    data_source_handling="local_only",
 )
 async def iterate_agent_workshop_version(
     version_id: Annotated[str, "Agent 工坊版本 ID"],
@@ -5561,6 +5575,7 @@ async def iterate_agent_workshop_version(
     returns="返回 JSON 字符串，包含写入后的 prompt_templates 摘要。",
     example="create_or_update_universal_agent_prompt_template(agent_id='valuation_candidate_v1', template_name='估值候选模板', system_prompt='你是一名估值分析师')",
     related_tools=["create_or_update_runtime_agent_config", "bind_agent_tools_and_validate_candidate"],
+    data_source_handling="local_only",
 )
 async def create_or_update_universal_agent_prompt_template(
     agent_id: Annotated[str, "对应 UniversalAgent 的 agent_id"],
@@ -5691,6 +5706,7 @@ async def create_or_update_universal_agent_prompt_template(
     returns="返回 JSON 字符串，包含绑定后的工具列表、提示词模板存在性和干运行校验结果；结果仅代表运行时候选可实例化，不代表 Workshop 版本已生成或已通过正式验收。",
     example="bind_agent_tools_and_validate_candidate(agent_id='valuation_candidate_v1', tool_ids='get_value_factor_bundle_tool,get_peer_comparison')",
     related_tools=["create_or_update_runtime_agent_config", "create_or_update_universal_agent_prompt_template"],
+    data_source_handling="local_only",
 )
 async def bind_agent_tools_and_validate_candidate(
     agent_id: Annotated[str, "候选 Agent ID"],
@@ -5817,6 +5833,7 @@ async def bind_agent_tools_and_validate_candidate(
     returns="返回 JSON 字符串，包含三步写入结果、最终干运行校验结果、可选的自动 version 生成结果，以及与 Agent Workshop 正式验收边界相关的治理提示。",
     example="generate_confirmed_candidate_agent(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', target_responsibility='输出A股估值结论', tool_ids='get_value_factor_bundle_tool', system_prompt='你是一名估值分析师', selected_plan_id='complete', acknowledged_gaps='[\"financial_ratio_calculator\"]', gap_report_json='{...}')",
     related_tools=["propose_agent_build_plans", "bind_agent_tools_and_validate_candidate", "resolve_agent_workshop_blocking_gaps"],
+    data_source_handling="local_only",
 )
 async def generate_confirmed_candidate_agent(
     agent_id: Annotated[str, "候选 Agent ID"],
@@ -5933,6 +5950,12 @@ async def generate_confirmed_candidate_agent(
             workshop_constraints = constraints
             if clean_selected_plan_id == "quick" and _quick_plan_constraint_text(parsed_acknowledged_gaps) not in workshop_constraints:
                 workshop_constraints = f"{workshop_constraints}\n{_quick_plan_constraint_text(parsed_acknowledged_gaps)}"
+            # 🔑 关键追踪日志：写库前打印 agent_id 和 agent_name
+            logger.info(
+                "[GenAgent][WriteDraft] 即将调用 create_or_update_agent_workshop_draft "
+                "agent_id=%r agent_name=%r responsibility=%r",
+                clean_agent_id, clean_agent_name, clean_responsibility[:80],
+            )
             workshop_result = _parse_json_tool_result(await create_or_update_agent_workshop_draft.ainvoke({
                 "agent_id": clean_agent_id,
                 "agent_name": clean_agent_name,
@@ -5946,7 +5969,19 @@ async def generate_confirmed_candidate_agent(
                 "preferred_methods": "quick_plan" if clean_selected_plan_id == "quick" else "",
                 "constraints": workshop_constraints,
             }))
+            # 🔑 关键追踪日志：写库结果
+            logger.info(
+                "[GenAgent][WriteDraft] 结果 status=%s spec_id=%r session_id=%r message=%s",
+                workshop_result.get("status", ""),
+                workshop_result.get("spec_id", ""),
+                workshop_result.get("session_id", ""),
+                str(workshop_result.get("message", ""))[:200],
+            )
             if workshop_result.get("status") != "ok":
+                logger.warning(
+                    "[GenAgent][WriteDraft] ❌ workshop_draft 失败！agent 不会写入数据库。full_result=%s",
+                    json.dumps(workshop_result, ensure_ascii=False)[:500],
+                )
                 return _json_response({"status": "error", "stage": "workshop_draft", "result": workshop_result})
 
         config_result = _parse_json_tool_result(await create_or_update_runtime_agent_config.ainvoke({
@@ -6254,6 +6289,7 @@ async def generate_confirmed_candidate_agent(
         "build_agent_workshop_version",
         "search_project_capabilities",
     ],
+    data_source_handling="local_only",
 )
 async def resolve_agent_workshop_blocking_gaps(
     session_id: Annotated[str, "Agent 工坊会话 ID"],
@@ -6784,6 +6820,7 @@ async def resolve_agent_workshop_blocking_gaps(
         "cancel_agent_workshop_gap_resolution",
         "retry_agent_workshop_gap_resolution_item",
     ],
+    data_source_handling="local_only",
 )
 async def start_agent_workshop_gap_resolution(
     session_id: Annotated[str, "Agent 工坊会话 ID"],
@@ -6959,6 +6996,7 @@ async def start_agent_workshop_gap_resolution(
         "cancel_agent_workshop_gap_resolution",
         "retry_agent_workshop_gap_resolution_item",
     ],
+    data_source_handling="local_only",
 )
 async def inspect_agent_workshop_gap_resolution(
     job_id: Annotated[str, "gap resolution job_id"],
@@ -7029,6 +7067,7 @@ async def inspect_agent_workshop_gap_resolution(
         "inspect_agent_workshop_gap_resolution",
         "retry_agent_workshop_gap_resolution_item",
     ],
+    data_source_handling="local_only",
 )
 async def cancel_agent_workshop_gap_resolution(
     job_id: Annotated[str, "gap resolution job_id"],
@@ -7124,6 +7163,7 @@ async def cancel_agent_workshop_gap_resolution(
         "inspect_agent_workshop_gap_resolution",
         "cancel_agent_workshop_gap_resolution",
     ],
+    data_source_handling="local_only",
 )
 async def retry_agent_workshop_gap_resolution_item(
     job_id: Annotated[str, "gap resolution job_id"],

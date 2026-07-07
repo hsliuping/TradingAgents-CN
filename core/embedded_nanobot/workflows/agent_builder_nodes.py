@@ -390,10 +390,183 @@ async def _invoke_stream(callback: Optional[Callable], text: str):
             pass
 
 
+async def _clarify_with_llm(
+    state: AgentBuilderState,
+    llm_client: Any,
+    event_callback: Optional[Callable] = None,
+    on_stream: Optional[Callable] = None,
+) -> str:
+    """意图不明确时，以「财经产品专家 + Agent 构建助手」人设通过 LLM 自然对话引导用户。
+
+    不是静态模板提示，而是结合对话历史、当前 Agent 状态、用户消息，
+    让 LLM 从产品专家角度分析用户可能的需求，提问或建议下一步。
+
+    Returns:
+        LLM 生成的引导回复文本
+    """
+    user_msg = state.get("user_message", "") or ""
+    spec_name = state.get("spec_name", "") or "未命名"
+    current_node = state.get("current_node", "")
+    published = state.get("official_acceptance_decision") == "published"
+    test_status = state.get("test_result", {}).get("status", "")
+    version_id = state.get("version_id", "")
+    build_status = state.get("build_status", "")
+
+    # 构建当前状态摘要
+    state_summary_parts = []
+    state_summary_parts.append(f"当前节点: {current_node}")
+    if spec_name and spec_name != "未命名":
+        state_summary_parts.append(f"当前 Agent: {spec_name}")
+    if version_id:
+        state_summary_parts.append(f"版本: {version_id}")
+    if build_status:
+        state_summary_parts.append(f"构建状态: {build_status}")
+    if test_status:
+        state_summary_parts.append(f"测试状态: {test_status}")
+    if published:
+        state_summary_parts.append("发布状态: 已发布")
+    state_summary = " | ".join(state_summary_parts)
+
+    # 收集最近对话历史
+    history = state.get("message_history", []) or []
+    recent_history = ""
+    if history:
+        recent_entries = history[-6:]  # 最近 3 轮
+        lines = []
+        for entry in recent_entries:
+            role = entry.get("role", "")
+            content = str(entry.get("content", ""))[:200]
+            if role == "user":
+                lines.append(f"用户: {content}")
+            elif role == "agent":
+                lines.append(f"助手: {content}")
+        recent_history = "\n".join(lines)
+
+    system_prompt = f"""你是 TradingAgentsCN 平台的 Agent 构建助手，同时也是一位资深的财经产品专家。
+
+你的职责是帮助用户：
+1. 创建新的交易/分析 Agent（如财报排雷助手、估值分析助手、护城河分析助手等）
+2. 修改/升级已有 Agent 的设计和能力
+3. 测试和发布 Agent
+4. 回答关于 Agent 能力和平台功能的问题
+
+当前状态：{state_summary}
+
+最近对话：
+{recent_history}
+
+用户最新消息：「{user_msg}」
+
+你的任务：
+1. 从财经产品专家的角度分析用户消息，判断用户可能想要什么
+2. 如果能确定意图（如创建新 Agent、修改现有 Agent、测试、发布等），用自然语言确认并引导
+3. 如果意图不明确，通过提问引导用户说清楚需求——可以聊几轮，逐步收敛
+4. 如果用户描述了一个新 Agent 的需求（即使只是初步想法），积极引导细化：目标用户、核心功能、输入输出、数据源等
+5. 回复要自然、专业、简洁，像产品经理和用户聊需求一样
+
+重要规则：
+- 不要输出工具调用 XML 或 JSON
+- 不要重复上一轮的回复内容
+- 不要只列选项让用户选，要结合用户消息做有针对性的引导
+- 如果用户说想创建新 Agent，直接开始聊需求（如"好的，你想创建一个什么样的护城河分析 Agent？能具体说说你希望它帮你分析哪些方面吗？"）
+- 如果用户想修改现有 Agent，问清楚想改什么
+- 中文回复"""
+
+    try:
+        messages = [{"role": "system", "content": system_prompt}]
+        response = await llm_client.achat(
+            _convert_messages(messages),
+            temperature=0.4,
+            auto_execute_tools=False,
+        )
+        reply = getattr(response, "content", "") or ""
+        if not reply.strip():
+            reply = _static_clarify_fallback(state)
+    except Exception as e:
+        logger.warning("[ClarifyWithLLM] LLM 调用失败，使用静态兜底: %s", e)
+        reply = _static_clarify_fallback(state)
+
+    # 🔑 在 LLM 回复末尾追加可选项，让用户知道有哪些操作可用
+    options = _build_contextual_options(state)
+    if options and options not in reply:
+        reply = reply.rstrip() + "\n\n" + options
+
+    return reply.strip()
+
+
+def _build_contextual_options(state: AgentBuilderState) -> str:
+    """根据当前状态生成可选项列表（放在 LLM 回复末尾）。"""
+    published = state.get("official_acceptance_decision") == "published"
+    current_node = state.get("current_node", "")
+    has_version = bool(state.get("version_id"))
+
+    lines = ["---", "你可以："]
+
+    if current_node == "error_recovery":
+        lines.append("- 回复「重试」重新执行上一步")
+        lines.append("- 回复「跳过」跳过当前步骤")
+        lines.append("- 回复「修改」回到需求调整")
+        lines.append("- 直接描述你想创建的新 Agent")
+        lines.append("- 回复「取消」结束流程")
+    elif published:
+        lines.append("- 回复「重测 [股票名]」用其他标的重新测试（如「重测 科大讯飞」）")
+        if has_version:
+            lines.append("- 回复「升级需求」或「修改需求」创建新版本")
+        lines.append("- 回复「重新做缺口分析」刷新能力缺口分析")
+        lines.append("- 回复「重新生成解决方案」基于当前 gap 重新生成候选方案")
+        lines.append("- 直接描述你想创建的新 Agent（如「我想创建一个护城河分析Agent」）")
+        lines.append("- 回复「取消」结束当前会话")
+    else:
+        lines.append("- 回复「发布」确认发布此版本")
+        lines.append("- 回复「重测 [股票名]」重新跑一轮测试（如「重测 贵州茅台」）")
+        if has_version:
+            lines.append("- 回复「升级需求」或「修改需求」回到需求调整")
+        lines.append("- 回复「重新做缺口分析」刷新能力缺口分析")
+        lines.append("- 回复「重新生成解决方案」基于当前 gap 重新生成候选方案")
+        lines.append("- 直接描述你想创建的新 Agent（如「我想创建一个护城河分析Agent」）")
+        lines.append("- 回复「取消」结束流程")
+
+    return "\n".join(lines)
+
+
+def _static_clarify_fallback(state: AgentBuilderState) -> str:
+    """LLM 不可用时的静态兜底澄清提示。"""
+    user_msg = state.get("user_message", "") or ""
+    spec_name = state.get("spec_name", "") or "当前"
+    published = state.get("official_acceptance_decision") == "published"
+    msg_hint = f"（你说的是「{user_msg[:60]}」）" if user_msg else ""
+
+    if published:
+        return (
+            f"抱歉，我没太理解你的意思{msg_hint}。\n\n"
+            f"「{spec_name}」已发布。你可以：\n"
+            "- 直接描述你想创建的新 Agent（如「我想创建一个护城河分析Agent」）\n"
+            "- 回复「升级需求」修改当前 Agent\n"
+            "- 回复「重测 [股票名]」重新测试\n"
+            "- 回复「取消」结束"
+        )
+    return (
+        f"抱歉，我没太理解你的意思{msg_hint}。\n\n"
+        f"「{spec_name}」当前在测试/评估阶段。你可以：\n"
+        "- 回复「发布」上线当前版本\n"
+        "- 直接描述你想创建的新 Agent\n"
+        "- 回复「升级需求」修改当前 Agent\n"
+        "- 回复「重测 [股票名]」重新测试\n"
+        "- 回复「取消」结束"
+    )
+
+
 def _build_force_call_params(tool_name: str, state: AgentBuilderState) -> dict:
     """为强制调用的工具构造最小参数。"""
     user_msg = state.get("user_message", "")
     spec_id = state.get("spec_id", "")
+    # 🔑 如果 spec_id 为空（node_requirement_intake 中不再过早设置 spec_id，
+    # 避免前端从 thread_context 拿到 spec_id 后立即 GET spec 导致 404），
+    # 优先用 LLM 生成的 slug（存在 proposed_plan 中），直到 generate_confirmed_candidate_agent
+    # 工具成功写库后才在 node_generate_candidate_agent 中设置 state.spec_id。
+    if not spec_id:
+        proposed_plan = state.get("proposed_plan", {}) or {}
+        spec_id = str(proposed_plan.get("proposed_agent_slug") or "").strip()
 
     if tool_name == "prepare_agent_requirement_intake":
         return {"user_request": user_msg}
@@ -409,8 +582,10 @@ def _build_force_call_params(tool_name: str, state: AgentBuilderState) -> dict:
             tool_ids = preferred_tools
         else:
             tool_ids = ""
-        # 优先使用 state 中的 spec_id（英文 slug），没有则从名称生成
+        # 优先使用 state 中的 spec_id（英文 slug），没有则从 proposed_plan 取 LLM 生成的 slug
         agent_id = state.get("spec_id", "")
+        if not agent_id:
+            agent_id = str(proposed_plan.get("proposed_agent_slug") or "").strip()
         if not agent_id:
             from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import _fallback_slug_from_name
             agent_id = _fallback_slug_from_name(spec_name, state.get("original_user_request", ""), responsibility)
@@ -428,6 +603,9 @@ def _build_force_call_params(tool_name: str, state: AgentBuilderState) -> dict:
         spec_name = state.get("spec_name", "") or "候选 Agent"
         responsibility = state.get("requirement_summary", "") or spec_name
         agent_id = state.get("spec_id", "")
+        if not agent_id:
+            proposed_plan = state.get("proposed_plan", {}) or {}
+            agent_id = str(proposed_plan.get("proposed_agent_slug") or "").strip()
         if not agent_id:
             from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import _fallback_slug_from_name
             agent_id = _fallback_slug_from_name(spec_name, state.get("original_user_request", ""), responsibility)
@@ -503,10 +681,12 @@ def _build_force_call_params(tool_name: str, state: AgentBuilderState) -> dict:
             tool_ids = "search_project_capabilities"
             logger.warning("[GenAgent][ForceParams] 无可用工具，兜底使用 search_project_capabilities")
 
-        # 生成 agent_id：优先使用 state 中的 spec_id（由 prepare_agent_requirement_intake /
-        # prepare_agent_generation_confirmation 设置），避免意图漂移检测报错。
-        # 只有 spec_id 为空时才用 slug 兜底。
+        # 生成 agent_id：优先使用 state 中的 spec_id（由 generate_confirmed_candidate_agent 写库后设置），
+        # 其次用 LLM 生成的 slug（存在 proposed_plan 中），最后兜底用关键词映射。
         agent_id = spec_id
+        if not agent_id:
+            proposed_plan = state.get("proposed_plan", {}) or {}
+            agent_id = str(proposed_plan.get("proposed_agent_slug") or "").strip()
         if not agent_id:
             from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import _fallback_slug_from_name
             agent_id = _fallback_slug_from_name(spec_name, original_request, responsibility)
@@ -564,13 +744,21 @@ def _build_force_call_params(tool_name: str, state: AgentBuilderState) -> dict:
             "version_id": version_id,
             "stock_symbol": test_symbol,
             "market_type": "A股",
+            "skip_evaluation": True,
         }
     if tool_name == "publish_agent_workshop_version":
         # 需要 version_id
         return {"version_id": _sanitize_version_id(state.get("version_id", ""))}
     if tool_name == "evaluate_agent_workshop_version":
-        # 需要 version_id
-        return {"version_id": _sanitize_version_id(state.get("version_id", ""))}
+        # 需要 version_id；如果有测试阶段的 runtime_result，一并传入
+        params = {"version_id": _sanitize_version_id(state.get("version_id", ""))}
+        runtime_result_json = str(state.get("_test_runtime_result_json", "") or "").strip()
+        if runtime_result_json:
+            params["runtime_result_json"] = runtime_result_json
+        user_feedback = str(state.get("_test_user_feedback", "") or "").strip()
+        if user_feedback:
+            params["user_feedback"] = user_feedback
+        return params
     if tool_name == "iterate_agent_workshop_version":
         return {
             "version_id": _sanitize_version_id(state.get("version_id", "")),
@@ -744,12 +932,24 @@ async def node_classify_user_intent(
         if result.get("test_symbol"):
             state["test_symbol"] = str(result["test_symbol"]).strip()
 
+        # 🔑 如果用户确认测试（confirmed）但没给股票代码，默认用贵州茅台(600519)
+        if state.get("user_intent") in ("confirmed",) and not state.get("test_symbol") and current_node in ("wait_test_request", "generate_candidate_agent"):
+            state["test_symbol"] = "600519"
+            logger.info("[ClassifyIntent] 用户确认测试但未指定标的，默认使用 600519")
+
         if state.get("user_intent") == "retry":
             state["test_result"] = {}
             state["official_acceptance_decision"] = ""
             state["final_response"] = ""
             state["tool_events"] = []
             state["clarification_needed"] = False
+
+        # 🔑 create_skill 意图：设置标记，让后续 wait 节点输出 skill 创建提示
+        # 注意：条件边函数对 state 的修改不会持久化，必须在节点函数中设置
+        if state.get("user_intent") == "create_skill":
+            state["skill_creation_requested"] = True
+            state["clarification_needed"] = False
+            logger.info("[ClassifyIntent] create_skill 意图: 设置 skill_creation_requested=True")
 
         # ── 股票名 → 代码解析 ──
         # 如果 test_symbol 不是 6 位数字代码（是股票名如"科大讯飞"），尝试解析成代码。
@@ -819,8 +1019,16 @@ async def node_classify_user_intent(
     if state.get("intent_confidence", 0.0) >= 0.7:
         state["clarification_needed"] = _will_stay_on_wait_node(state)
     else:
-        # 低置信度：不预判，由 route_after_classify 统一处理
-        state["clarification_needed"] = False
+        # 🔑 低置信度：意图不可靠，路由函数会设 clarification_needed=True 但不持久化，
+        # 必须在节点内预设，否则 wait 节点看不到 clarification_needed=True，
+        # 只会把选项追加到上一轮的 final_response 后面（表现为"重复上一轮回复"）。
+        # 只有当前在 wait 节点时才需要澄清（action 节点不检查此字段）。
+        _is_wait_node = current_node in (
+            "wait_evaluation", "wait_test_request", "wait_intake_confirmation",
+            "wait_requirement_confirmation", "wait_plan_selection",
+            "evaluate_or_publish", "error_recovery",
+        )
+        state["clarification_needed"] = _is_wait_node
 
     # ── 错误恢复阶段的特殊处理 ──
     # 如果用户意图是 actionable（confirmed/retry/select_option），
@@ -834,6 +1042,43 @@ async def node_classify_user_intent(
                 "[ClassifyIntent] error_recovery retry: 清除旧错误, "
                 "remaining=%d", len(state.get("errors", [])),
             )
+
+    # 🔑 new_agent 意图：提示用户手动前往 Agent 工坊创建新 Agent
+    # 不再尝试自动新建会话，因为复杂度过高且容易出状态混乱
+    if intent == "new_agent":
+        spec_name = state.get("spec_name", "") or "当前 Agent"
+        state["final_response"] = (
+            f"你当前在「{spec_name}」的会话中，无法在这里直接创建新 Agent。\n\n"
+            f"请在左侧 Agent 工坊点击 **新建 Agent** 按钮，将你的需求填入即可开始创建：\n"
+            f"> {msg[:120]}\n\n"
+            f"创建后可以继续在这里对「{spec_name}」进行迭代优化。"
+        )
+        logger.info(
+            "[ClassifyIntent] new_agent 意图: 提示用户手动创建 (old_spec_name=%s)",
+            spec_name,
+        )
+
+    # 🔑 如果 version_id 为空但 spec_id 存在，从数据库补全 version_id
+    # 避免路由到 generate_candidate_agent 而不是 iterate_agent_version
+    _vid = _sanitize_version_id(state.get("version_id", ""))
+    if not _vid and state.get("spec_id"):
+        try:
+            from app.core.database import get_mongo_db
+            _db = get_mongo_db()
+            _latest_ver = await _db["agent_workshop_versions"].find_one(
+                {"spec_id": state["spec_id"]},
+                sort=[("created_at", -1)],
+            )
+            if _latest_ver:
+                _resolved_vid = str(_latest_ver.get("version_id") or "").strip()
+                if _resolved_vid:
+                    state["version_id"] = _resolved_vid
+                    logger.info(
+                        "[ClassifyIntent][ResolvedVersionId] spec_id=%s → version_id=%s (从数据库补全)",
+                        state.get("spec_id"), _resolved_vid,
+                    )
+        except Exception as _vid_err:
+            logger.warning("[ClassifyIntent][ResolvedVersionId] 失败: %s", _vid_err)
 
     return state
 
@@ -1174,14 +1419,21 @@ Agent「{spec_name}」的方案已生成，等待用户选择。
 ## 意图类别
 - select_option：用户选了某个方案（如"B""方案B""第二个""选A"）→ 输出 selected_index 或 selected_id
 - confirmed：用户说"确认""推荐""按默认"→ 使用推荐方案
+- create_skill：用户要补齐/创建缺失的工具或 skill（如"补齐工具""创建skill""把缺的工具做出来"）→ 优先选择包含新skill开发的方案
 - revise：用户想修改需求，回到需求阶段
 - rerun_gap：重新执行当前 Agent 的能力缺口分析/工具能力盘点
 - explore_more：用户问问题但没有选择
 - cancel：取消
 
+## 关键区分
+- "补齐工具""创建skill""开发缺失工具" → create_skill
+- 如果有方案包含「补齐」「开发新工具」「创建skill」等内容，create_skill 应输出 selected_id 指向该方案
+- 不确定时宁可给低置信度
+
 ## 输出格式（严格 JSON）
 {{"intent": "select_option", "confidence": 0.95, "reason": "用户说了'B'", "selected_index": 2}}
 或 {{"intent": "confirmed", "confidence": 0.9, "reason": "用户说按推荐的来"}}
+或 {{"intent": "create_skill", "confidence": 0.9, "reason": "用户要补齐缺失的工具", "selected_id": "plan_with_skill"}}
 或 {{"intent": "rerun_gap", "confidence": 0.95, "reason": "用户要求重新做能力缺口分析"}}
 
 只输出 JSON。"""
@@ -1196,7 +1448,8 @@ def _build_test_eval_prompt(state: AgentBuilderState) -> str:
     msg = state.get("user_message", "") or ""
     spec_name = state.get("spec_name", "") or "未命名"
     published = "已发布" if state.get("official_acceptance_decision") == "published" else "未发布"
-    test_status = state.get("test_result", {}).get("status", "未测试")
+    test_result = state.get("test_result") or {}
+    test_status = test_result.get("status", "未测试") if isinstance(test_result, dict) else "未测试"
     recent_history = _format_recent_history(state, rounds=3)
     shared_context = _build_intent_shared_context(state, "test_eval")
 
@@ -1241,15 +1494,18 @@ def _build_test_eval_prompt(state: AgentBuilderState) -> str:
     node_context = {
         "wait_test_request": (
             f"Agent「{spec_name}」已就绪，等待用户给出测试标的。{last_hint}\n"
-            f"用户可能：直接给代码（如 600519）；确认 Agent 建议的代码；给股票名但没代码；问问题；取消。"
+            f"用户可能：直接给代码（如 600519）；确认 Agent 建议的代码；说「测试」「开始测试」「试跑」等（此时默认用贵州茅台 600519）；"
+            f"说「补齐工具」「创建skill」「开发缺失工具」等（表示想先创建缺失的 skill）；取消。"
         ),
         "wait_evaluation": (
             f"Agent「{spec_name}」测试已完成（状态={test_status}），发布状态={published}。\n"
-            f"用户可能：发布上线；换股票重测；升级/修改 Agent 设计；重新做能力缺口分析；重新生成候选解决方案；新建其他 Agent；咨询问题；取消。"
+            f"用户可能：发布上线；换股票重测；升级/修改 Agent 设计；补齐缺失的 skill/工具；"
+            f"重新做能力缺口分析；重新生成候选解决方案；新建其他 Agent；咨询问题；取消。"
         ),
         "evaluate_or_publish": (
             f"Agent「{spec_name}」正在评估阶段，测试状态={test_status}。\n"
-            f"用户可能：发布/继续评估；重新测试；升级/修改需求；重新做能力缺口分析；重新生成候选解决方案；新建其他 Agent；咨询问题；取消。"
+            f"用户可能：发布/继续评估；重新测试；升级/修改需求；补齐缺失的 skill/工具；"
+            f"重新做能力缺口分析；重新生成候选解决方案；新建其他 Agent；咨询问题；取消。"
         ),
     }.get(current_node, f"Agent「{spec_name}」，节点={current_node}")
 
@@ -1264,9 +1520,10 @@ def _build_test_eval_prompt(state: AgentBuilderState) -> str:
 {recent_history}
 
 ## 意图类别
-- confirmed：用户确认推进（发布/开始测试等）
+- confirmed：用户确认推进（发布/开始测试等），包括「测试」「开始测试」「试跑」「跑一下」等测试请求
 - retry：换数据重测，Agent 设计不变（如"换科大讯飞再测""用茅台跑一下""重测"）
 - revise：修改 Agent 设计（如"加一个现金流维度""改输出格式"）
+- create_skill：用户要补齐/创建缺失的工具或 skill（如"补齐工具""创建skill""开发那个缺失的工具""把缺的工具做出来"）
 - new_agent：用户描述的 Agent 与「{spec_name}」完全不同，想创建新 Agent
 - rerun_gap：重新执行当前 Agent 的能力缺口分析/工具能力盘点（如"重新做一下gap分析吧""刷新能力缺口"）
 - regenerate_plan：基于当前 gap_report 重新生成候选解决方案/构建方案（如"重新生成解决方案""刷新候选方案"）
@@ -1274,6 +1531,8 @@ def _build_test_eval_prompt(state: AgentBuilderState) -> str:
 - cancel：取消/结束
 
 ## 关键区分
+- "测试""开始测试""试跑" → confirmed（测试意图，默认用 600519）
+- "补齐工具""创建skill""开发缺失工具" → create_skill（用户要创建缺失的 skill/工具）
 - "换一只股票测" → retry（只换测试数据，不改 Agent）
 - "再加一个维度的分析" → revise（改 Agent 设计）
 - "新建一个舆情分析Agent" → new_agent（全新 Agent，和当前无关）
@@ -1282,16 +1541,19 @@ def _build_test_eval_prompt(state: AgentBuilderState) -> str:
 - "重新生成解决方案" → regenerate_plan（不重跑 gap，只基于当前 gap_report 重新生成候选方案）
 
 ## 输出格式（严格 JSON）
-{{"intent": "confirmed|retry|revise|rerun_gap|regenerate_plan|new_agent|explore_more|cancel", "confidence": 0.85, "reason": "简短推理"}}
+{{"intent": "confirmed|retry|revise|create_skill|rerun_gap|regenerate_plan|new_agent|explore_more|cancel", "confidence": 0.85, "reason": "简短推理"}}
 
 **重要**：
 - 如果用户消息含有股票代码（如 600519），或确认了 Agent 上一轮建议的代码，额外输出：
   {{"intent": "confirmed", "confidence": 0.95, "reason": "用户给了代码/确认建议代码", "test_symbol": "600519"}}
+- 如果用户说「测试」「开始测试」「试跑」但没给代码，仍判定 confirmed，并输出 test_symbol="600519"：
+  {{"intent": "confirmed", "confidence": 0.9, "reason": "用户要求开始测试", "test_symbol": "600519"}}
 - 如果用户要求换股票重测（retry 意图），且消息中含股票代码（如 002230），**必须**输出 test_symbol 字段：
   {{"intent": "retry", "confidence": 0.95, "reason": "用户要求换股重测", "test_symbol": "002230"}}
 - 如果用户给了股票名但没代码（如"科大讯飞""茅台"），输出 test_symbol=股票名，由后续逻辑解析：
   {{"intent": "retry", "confidence": 0.9, "reason": "用户要求换股重测", "test_symbol": "科大讯飞"}}
 - 用户在 wait_evaluation 说"发布""上线"→ confirmed
+- 用户说"补齐工具""创建skill""开发那个缺失的"→ create_skill
 - 不确定时宁可给低置信度
 
 只输出 JSON。"""
@@ -1378,6 +1640,10 @@ def _will_stay_on_wait_node(state: AgentBuilderState) -> bool:
         return False  # rerun_gap → gap_analysis
     if intent == "regenerate_plan":
         return False  # regenerate_plan → plan_generation
+    if intent == "new_agent":
+        return False  # new_agent → requirement_intake，新建 Agent
+    if intent == "create_skill":
+        return False  # create_skill 由 wait 节点特殊处理（输出 skill 创建提示），不算"无法推进"
 
     if current_node in ("wait_intake_confirmation", "wait_requirement_confirmation"):
         # confirmed/select_option/revise 都能推进，只有 explore_more 停留
@@ -1449,6 +1715,46 @@ def _fallback_classify_intent(msg: str, current_node: str) -> str:
     return "explore_more"
 
 
+async def _ensure_slug_uniqueness(db: Any, slug: str) -> str:
+    """检查 slug 唯一性，避免和已有的 spec_id 冲突。
+
+    同时检查原始 slug 和 `agent_` 前缀版本（兼容 _resolve_nanobot_spec_id 的回退逻辑），
+    避免出现 state.spec_id 与数据库实际 spec_id 不一致的情况。
+
+    若冲突，自动追加 _2 / _3 / ... 后缀。
+    """
+    clean_slug = str(slug or "").strip()
+    if not clean_slug:
+        return clean_slug
+    candidates_to_check = [clean_slug]
+    if not clean_slug.startswith("agent_"):
+        candidates_to_check.append(f"agent_{clean_slug}")
+
+    async def _exists(candidate: str) -> bool:
+        try:
+            existing = await db["agent_specs"].find_one({"spec_id": candidate}, {"spec_id": 1})
+            return existing is not None
+        except Exception:
+            return False
+
+    # 检查原始 slug 和 agent_ 前缀版本是否冲突
+    if not (await _exists(clean_slug)) and not (await _exists(f"agent_{clean_slug}")):
+        return clean_slug
+
+    counter = 2
+    while True:
+        new_slug = f"{clean_slug}_{counter}"
+        if not (await _exists(new_slug)) and not (await _exists(f"agent_{new_slug}")):
+            logger.info(
+                "[AgentBuilder][SlugUniqueness] slug '%s' 已存在（或 agent_ 前缀版本冲突），改为 '%s'",
+                clean_slug, new_slug,
+            )
+            return new_slug
+        counter += 1
+        if counter > 100:  # 防御性兜底
+            return new_slug
+
+
 async def node_requirement_intake(
     state: AgentBuilderState,
     tool_registry: Any,
@@ -1505,6 +1811,12 @@ async def node_requirement_intake(
         # 而不是把整句职责描述（如"对A股上市公司执行多维度估值分析，输出结构化报告"）当名字
         proposed_name = str(proposed_plan.get("proposed_agent_name") or "").strip()
         proposed_slug = str(proposed_plan.get("proposed_agent_slug") or "").strip()
+        # 🔑 关键追踪日志：LLM 生成的中文名和英文 slug
+        logger.info(
+            "[Intake][NameGen] LLM 生成: proposed_name=%r proposed_slug=%r responsibility=%r "
+            "can_proceed=%s critical_questions=%d",
+            proposed_name, proposed_slug, responsibility[:80], can_proceed, len(critical_questions),
+        )
         if responsibility and responsibility != "（待确认）":
             state["requirement_summary"] = responsibility
             # spec_name 优先用简短名，没有时用职责描述的前 15 字
@@ -1514,18 +1826,38 @@ async def node_requirement_intake(
             state["spec_name"] = proposed_name or state.get("original_user_request", "")[:15]
             state["requirement_summary"] = state.get("original_user_request", "")
 
-        # 保存 spec_id（英文 slug），优先用 LLM 生成的 proposed_agent_slug
+        # 🔑 关键：不在此处设置 state.spec_id！
+        # 原因：state.spec_id 会通过 thread_context 传给前端，前端 applyThreadContext 会立即
+        # 用它 GET /api/agent-workshop/specs/{spec_id}，但此时 spec 还没创建（要到
+        # node_generate_candidate_agent 调用 generate_confirmed_candidate_agent 工具才写库），
+        # 导致 404。因此这里只把 slug 存到 proposed_plan，_build_force_call_params 会从
+        # proposed_plan.proposed_agent_slug 提取作为 agent_id 传给工具。
+        # state.spec_id 在 node_generate_candidate_agent 中工具成功写库后才设置。
         if proposed_slug:
-            state["spec_id"] = proposed_slug
-        elif not state.get("spec_id"):
+            # 🔑 检查 slug 唯一性（同时检查 agent_ 前缀版本，避免和 _resolve_nanobot_spec_id 冲突）
+            try:
+                from app.core.database import get_mongo_db
+                db = get_mongo_db()
+                proposed_slug = await _ensure_slug_uniqueness(db, proposed_slug)
+            except Exception as e:
+                logger.warning("[AgentBuilder][SlugUniqueness] 检查失败，使用原始 slug: %s", e)
+            proposed_plan["proposed_agent_slug"] = proposed_slug
+        elif not (proposed_plan.get("proposed_agent_slug") or "").strip():
             # 兜底：从 spec_name 生成简单 slug
-            import re
             from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import _fallback_slug_from_name
-            state["spec_id"] = _fallback_slug_from_name(
+            fallback_slug = _fallback_slug_from_name(
                 state.get("spec_name", ""),
                 state.get("original_user_request", ""),
                 responsibility
             )
+            # 兜底 slug 也要检查唯一性（含 agent_ 前缀版本）
+            try:
+                from app.core.database import get_mongo_db
+                db = get_mongo_db()
+                fallback_slug = await _ensure_slug_uniqueness(db, fallback_slug)
+            except Exception:
+                pass
+            proposed_plan["proposed_agent_slug"] = fallback_slug
 
         # pending_question 来自 critical_questions
         if critical_questions and not can_proceed:
@@ -1536,8 +1868,18 @@ async def node_requirement_intake(
         # stage
         state["stage"] = "draft_preparing" if can_proceed else "exploring"
 
-        # 保存 proposed_plan 供后续节点使用
+        # 保存 proposed_plan 供后续节点使用（含最终确定的 proposed_agent_slug）
         state["proposed_plan"] = proposed_plan
+
+        # 🔑 关键追踪日志：proposed slug（注意 spec_id 此刻应为空，直到工具写库后才设置）
+        logger.info(
+            "[Intake][Final] state.spec_id=%r proposed_slug=%r state.spec_name=%r stage=%s "
+            "(spec_id 将在 generate_confirmed_candidate_agent 写库后设置)",
+            state.get("spec_id", ""),
+            proposed_plan.get("proposed_agent_slug", ""),
+            state.get("spec_name", ""),
+            state.get("stage", ""),
+        )
 
     await _emit_event(event_callback, "step", "需求探索完成")
     return state
@@ -1630,16 +1972,14 @@ async def node_requirement_confirmation(
     if conf_result:
         state["confirmation_brief"] = conf_result.get("confirmation_brief", {})
         state["pending_question"] = conf_result.get("pending_question", "")
-        # spec_id 可能在顶层、confirmation_brief.agent_id 或 confirmation_brief.proposed_agent_id
+        # 🔑 不在此处设置 state.spec_id！
+        # 确认稿中的 agent_id / proposed_agent_id 是提议的 slug，不是已入库的 spec_id。
+        # 如果设置 state.spec_id，会通过 thread_context 传给前端，
+        # 前端 applyThreadContext 会立即 GET /api/agent-workshop/specs/{spec_id}，
+        # 但此时 spec 还没创建（要到 generate_confirmed_candidate_agent 才写库），导致 404。
+        # spec_id 只在 node_generate_candidate_agent 中工具成功写库后才设置。
+        # 但 spec_name 可以更新，因为前端只用来显示名称，不会触发 GET 请求。
         conf_brief = conf_result.get("confirmation_brief", {}) or {}
-        spec_id = (
-            conf_result.get("spec_id")
-            or conf_brief.get("agent_id")
-            or conf_brief.get("proposed_agent_id")
-            or state.get("spec_id", "")
-        )
-        if spec_id:
-            state["spec_id"] = spec_id
         spec_name = (
             conf_result.get("spec_name")
             or conf_brief.get("agent_name")
@@ -1698,7 +2038,7 @@ async def node_gap_analysis(
     调用 analyze_agent_workshop_gaps 做真实 gap 分析。
     """
     await _emit_event(event_callback, "step", "缺口分析")
-    await _emit_event(event_callback, "progress", "正在分析能力缺口")
+    await _emit_event(event_callback, "progress", "正在扫描平台现有能力...")
 
     system_prompt = f"""你是 TradingAgentsCN 平台的财经产品专家。
 
@@ -1715,13 +2055,33 @@ Agent 信息：
 
 你必须调用 analyze_agent_workshop_gaps 工具。"""
 
-    final_text, tool_events, tool_results = await _run_node_llm(
-        state, system_prompt, tool_registry, llm_client,
-        required_tool_name="analyze_agent_workshop_gaps",
-        include_inspect_tools=False,
-        event_callback=event_callback,
-        on_stream=on_stream,
-    )
+    # 🔑 定期进度发射器
+    async def _periodic_gap_progress():
+        elapsed = 0
+        while True:
+            await asyncio.sleep(8)
+            elapsed += 8
+            if elapsed <= 16:
+                phase = "正在扫描平台现有工具和能力"
+            else:
+                phase = "正在分析能力缺口和补齐建议"
+            await _emit_event(event_callback, "progress", f"{phase}（已运行 {elapsed} 秒）...")
+
+    gap_progress_task = asyncio.create_task(_periodic_gap_progress())
+    try:
+        final_text, tool_events, tool_results = await _run_node_llm(
+            state, system_prompt, tool_registry, llm_client,
+            required_tool_name="analyze_agent_workshop_gaps",
+            include_inspect_tools=False,
+            event_callback=event_callback,
+            on_stream=on_stream,
+        )
+    finally:
+        gap_progress_task.cancel()
+        try:
+            await gap_progress_task
+        except asyncio.CancelledError:
+            pass
 
     state["final_response"] = final_text
     state["tool_events"] = tool_events
@@ -1770,6 +2130,35 @@ Agent 信息：
         )
 
     await _emit_event(event_callback, "step", "缺口分析完成")
+
+    # 🔑 构建结构化 gap 报告展示
+    if state.get("gap_report"):
+        gap = state["gap_report"]
+        existing_tools = gap.get("existing_tools", []) or []
+        blocking_gaps = gap.get("blocking_gaps", []) or []
+        suggested_tools = gap.get("suggested_tools", []) or []
+
+        gap_display = f"\n\n---\n\n## 缺口分析报告\n\n"
+        gap_display += f"**现有工具：** {len(existing_tools)} 个\n"
+        if existing_tools:
+            tool_names = [t.get("name", t.get("tool_id", str(t))) if isinstance(t, dict) else str(t) for t in existing_tools[:8]]
+            gap_display += f"  {', '.join(tool_names)}\n"
+
+        gap_display += f"\n**阻断性缺口：** {len(blocking_gaps)} 个\n"
+        if blocking_gaps:
+            for bg in blocking_gaps[:5]:
+                gap_display += f"  - {bg if isinstance(bg, str) else bg.get('description', str(bg))}\n"
+
+        gap_display += f"\n**建议补齐工具：** {len(suggested_tools)} 个\n"
+        if suggested_tools:
+            for st in suggested_tools[:5]:
+                gap_display += f"  - {st if isinstance(st, str) else st.get('name', str(st))}\n"
+
+        gap_display += f"\n{'✅ 无阻断性缺口，可以直接生成方案' if not blocking_gaps else '⚠️ 存在阻断性缺口，将在方案中处理'}\n"
+
+        state["final_response"] = (state.get("final_response") or "") + gap_display
+        await _stream_chunked(gap_display, on_stream)
+
     return state
 
 
@@ -1786,7 +2175,7 @@ async def node_plan_generation(
     这是唯一能生成方案的地方，LLM 不能口头生成方案。
     """
     await _emit_event(event_callback, "step", "方案生成")
-    await _emit_event(event_callback, "progress", "正在生成候选方案")
+    await _emit_event(event_callback, "progress", "正在生成候选方案...")
 
     system_prompt = f"""你是 TradingAgentsCN 平台的财经产品专家。
 
@@ -1798,18 +2187,62 @@ Agent 信息：
 
 你的任务：
 1. 调用 propose_agent_build_plans 工具生成结构化候选方案
-2. 用业务语言向用户展示方案选项
+2. 工具返回后，向用户**完整展示所有候选方案**，格式如下：
+
+   **候选方案**
+
+   方案A：[方案名称]（推荐）
+   - 特点：...
+   - 优势：...
+   - 适用场景：...
+
+   方案B：[方案名称]
+   - 特点：...
+   - 优势：...
+
+   方案C：[方案名称]
+   - 特点：...
+   - 优势：...
+
+   请选择一个方案（回复方案字母如「A」「B」「C」，或回复「推荐」按推荐方案推进）。
+
 3. 用户选择方案后，系统会调用 generate_confirmed_candidate_agent
+
+重要规则：
+- 你必须展示所有方案让用户选，不能替用户做决定
+- 不能说"我们选择了推荐方案"或"我按推荐方案推进"这种话
+- 要让用户明确选择
+- 中文回复
 
 你必须调用 propose_agent_build_plans 工具。不能口头生成方案。"""
 
-    final_text, tool_events, tool_results = await _run_node_llm(
-        state, system_prompt, tool_registry, llm_client,
-        required_tool_name="propose_agent_build_plans",
-        include_inspect_tools=False,
-        event_callback=event_callback,
-        on_stream=on_stream,
-    )
+    # 🔑 定期进度发射器
+    async def _periodic_plan_progress():
+        elapsed = 0
+        while True:
+            await asyncio.sleep(8)
+            elapsed += 8
+            if elapsed <= 16:
+                phase = "正在基于 gap 分析结果设计候选方案"
+            else:
+                phase = "正在评估方案优先级和推荐排序"
+            await _emit_event(event_callback, "progress", f"{phase}（已运行 {elapsed} 秒）...")
+
+    plan_progress_task = asyncio.create_task(_periodic_plan_progress())
+    try:
+        final_text, tool_events, tool_results = await _run_node_llm(
+            state, system_prompt, tool_registry, llm_client,
+            required_tool_name="propose_agent_build_plans",
+            include_inspect_tools=False,
+            event_callback=event_callback,
+            on_stream=on_stream,
+        )
+    finally:
+        plan_progress_task.cancel()
+        try:
+            await plan_progress_task
+        except asyncio.CancelledError:
+            pass
 
     state["final_response"] = final_text
     state["tool_events"] = tool_events
@@ -1871,6 +2304,32 @@ async def node_wait_plan_selection(
     if state.get("pending_question"):
         await _emit_event(event_callback, "progress", f"待选择：{state['pending_question']}")
 
+    # 🔑 确保方案列表展示给用户：如果 final_response 里没有方案选项，追加一份
+    options = state.get("pending_options", []) or []
+    if options:
+        current_response = str(state.get("final_response", "") or "")
+        # 检查 final_response 是否已经包含方案选项（至少包含两个方案标识）
+        has_options = (
+            "方案A" in current_response or "方案 A" in current_response
+            or "方案1" in current_response or "方案 1" in current_response
+            or "推荐" in current_response
+        )
+        if not has_options:
+            lines = ["", "---", "**请选择一个方案：**", ""]
+            for opt in options:
+                idx = opt.get("index", "")
+                label = opt.get("name", opt.get("id", ""))
+                desc = opt.get("description", opt.get("summary", ""))
+                rec = "（推荐）" if opt.get("recommended") else ""
+                lines.append(f"方案{idx}：{label}{rec}")
+                if desc:
+                    lines.append(f"  {str(desc)[:120]}")
+                lines.append("")
+            lines.append("请回复方案字母（如「A」「B」），或回复「推荐」按推荐方案推进。")
+            options_block = "\n".join(lines)
+            state["final_response"] = current_response + options_block
+            await _invoke_stream(on_stream, options_block)
+
     return state
 
 
@@ -1887,6 +2346,8 @@ async def node_generate_candidate_agent(
     """
     await _emit_event(event_callback, "step", "生成 Agent")
     await _emit_event(event_callback, "progress", "正在写入配置和 Prompt")
+    # 🔑 清除旧错误，避免 error_recovery 叠加显示不相关的历史错误
+    state["errors"] = []
 
     # 条件函数对 state 的修改不会持久化到节点，这里重新解析 selected_plan_id
     if not state.get("selected_plan_id"):
@@ -1956,6 +2417,43 @@ Agent 信息：
             workshop_session_id = workshop_draft.get("session_id", "")
         state["workshop_session_id"] = workshop_session_id
 
+        # 🔑 从工具结果中同步 spec_id（_resolve_nanobot_spec_id 可能返回和 state 中不同的值）
+        # generate_confirmed_candidate_agent 工具返回结构有两种情况：
+        # 1. 成功：{"status": "ok", "spec_id": "...", "session_id": "...", ...}
+        # 2. 失败/被 phase_guard 阻塞：{"status": "error", "stage": "workshop_version",
+        #     "result": {"status": "blocked", "spec_id": "...", "current_version_id": "...", ...}}
+        # 因此 spec_id 可能出现在顶层、gen_result["result"] 或嵌套的 governance 中。
+        actual_spec_id = (
+            gen_result.get("spec_id")
+            or gen_result.get("agent_id")
+            or ""
+        )
+        if not actual_spec_id:
+            # 🔑 关键：从 result 嵌套层提取（phase_guard 阻塞时 spec_id 在这里）
+            nested_result = gen_result.get("result", {})
+            if isinstance(nested_result, dict):
+                actual_spec_id = (
+                    nested_result.get("spec_id")
+                    or nested_result.get("agent_id")
+                    or ""
+                )
+        if not actual_spec_id:
+            # 从嵌套的 steps.workshop_draft 中提取
+            steps = gen_result.get("steps", {}) or {}
+            workshop_draft = steps.get("workshop_draft", {}) or {}
+            actual_spec_id = workshop_draft.get("spec_id") or workshop_draft.get("agent_id") or ""
+        if not actual_spec_id:
+            governance = gen_result.get("governance_boundary", {}) or {}
+            workshop_governance = governance.get("workshop_governance", {}) or {}
+            actual_spec_id = workshop_governance.get("spec_id") or ""
+        if actual_spec_id and actual_spec_id != state.get("spec_id", ""):
+            old_spec_id = state.get("spec_id", "")
+            logger.info(
+                "[GenerateAgent][SpecIdSync] state.spec_id '%s' → actual '%s' (从工具结果同步)",
+                old_spec_id, actual_spec_id,
+            )
+            state["spec_id"] = actual_spec_id
+
         # version_id 也在多个位置
         version_id = gen_result.get("version_id", "")
         if not version_id:
@@ -1979,22 +2477,67 @@ Agent 信息：
         if gen_result.get("status") == "ok":
             state["build_status"] = "built" if version_id else "ready"
         else:
-            state["build_status"] = "failed"
-            err_msg = gen_result.get("message", "")
-            err_stage = gen_result.get("stage", "")
-            err_result = gen_result.get("result", {})
-            # 同时保留字符串和 dict 形式，便于 node_error_recovery 处理
-            error_entry = {
-                "node": "generate_candidate_agent",
-                "error": err_msg or f"stage={err_stage} result={err_result}" or "生成失败",
-                "stage": err_stage,
-                "message": err_msg,
-            }
-            state["errors"] = state.get("errors", []) + [error_entry]
+            # 🔑 检查是否是 phase_guard 的 version_already_in_progress 阻塞
+            # 这种情况不是真正的错误——版本已存在，直接复用继续测试即可
+            nested_result = gen_result.get("result", {}) if isinstance(gen_result.get("result"), dict) else {}
+            blocked_code = (
+                gen_result.get("blocked_code")
+                or nested_result.get("blocked_code")
+                or ""
+            )
+            is_version_in_progress = blocked_code == "version_already_in_progress"
+
+            if is_version_in_progress:
+                # 版本已存在，提取已有版本信息，直接进入测试阶段
+                existing_version_id = (
+                    gen_result.get("current_version_id")
+                    or nested_result.get("current_version_id")
+                    or ""
+                )
+                existing_session_id = (
+                    gen_result.get("session_id")
+                    or nested_result.get("session_id")
+                    or workshop_session_id
+                    or ""
+                )
+                existing_spec_id = (
+                    gen_result.get("spec_id")
+                    or nested_result.get("spec_id")
+                    or state.get("spec_id")
+                    or ""
+                )
+                if existing_version_id:
+                    state["version_id"] = _sanitize_version_id(existing_version_id)
+                if existing_session_id:
+                    state["workshop_session_id"] = existing_session_id
+                if existing_spec_id:
+                    state["spec_id"] = existing_spec_id
+                state["build_status"] = "built"
+                logger.info(
+                    "[GenerateAgent][PhaseGuardBypass] version_already_in_progress → "
+                    "复用已有版本 version_id=%s session_id=%s spec_id=%s，直接进入测试",
+                    state.get("version_id"),
+                    state.get("workshop_session_id"),
+                    state.get("spec_id"),
+                )
+                # 不添加错误，让路由正常进入 wait_test_request
+            else:
+                state["build_status"] = "failed"
+                err_msg = gen_result.get("message", "")
+                err_stage = gen_result.get("stage", "")
+                err_result = gen_result.get("result", {})
+                # 同时保留字符串和 dict 形式，便于 node_error_recovery 处理
+                error_entry = {
+                    "node": "generate_candidate_agent",
+                    "error": err_msg or f"stage={err_stage} result={err_result}" or "生成失败",
+                    "stage": err_stage,
+                    "message": err_msg,
+                }
+                state["errors"] = state.get("errors", []) + [error_entry]
 
         logger.info(
             "[GenerateAgent][Result] status=%s session_id=%s version_id=%s build_status=%s "
-            "stage=%s message=%s result_keys=%s",
+            "stage=%s message=%s result_keys=%s state.spec_id=%s",
             gen_result.get("status", ""),
             workshop_session_id,
             version_id,
@@ -2002,6 +2545,7 @@ Agent 信息：
             gen_result.get("stage", ""),
             gen_result.get("message", "")[:200],
             list(gen_result.get("result", {}).keys()) if isinstance(gen_result.get("result"), dict) else "N/A",
+            state.get("spec_id", ""),
         )
 
     await _emit_event(event_callback, "step", "Agent 生成完成")
@@ -2116,6 +2660,40 @@ async def node_wait_test_request(
 
     # 若上一轮意图无法识别（如给了股票名而非代码），输出澄清提示，
     # 而不是把上一次的生成结果重复展示一遍。
+    if state.get("skill_creation_requested"):
+        spec_name = state.get("spec_name", "") or "候选 Agent"
+        gap_report = state.get("gap_report", {}) or {}
+        blocking_gaps = gap_report.get("blocking_gaps", []) or []
+        gap_desc = ""
+        if blocking_gaps:
+            gap_items = []
+            for g in blocking_gaps[:3]:
+                if isinstance(g, dict):
+                    gap_items.append(f"- **{g.get('name', g.get('capability', '未知'))}**：{g.get('description', g.get('gap_description', ''))}")
+                else:
+                    gap_items.append(f"- {g}")
+            gap_desc = "\n".join(gap_items)
+
+        skill_msg = (
+            f"理解了，你想补齐缺失的工具/skill。\n\n"
+        )
+        if gap_desc:
+            skill_msg += f"当前识别到的能力缺口：\n{gap_desc}\n\n"
+        skill_msg += (
+            f"> **注意**：Skill/工具的创建需要开发人员编写代码实现，"
+            f"无法在当前 Agent 构建流程中自动完成。\n\n"
+            f"你有两个选择：\n"
+            f"1. **先用降级模式测试**：回复「测试」或股票代码（如 `600519`），"
+            f"Agent 会以现有工具进行测试，缺失的能力会在报告中标注\n"
+            f"2. **记录需求后续开发**：回复「记录需求」，我会将缺失 skill 的需求保存下来\n\n"
+            f"建议先测试当前版本，确认降级模式的输出质量。"
+        )
+        state["final_response"] = skill_msg
+        state["skill_creation_requested"] = False
+        await _invoke_stream(on_stream, skill_msg)
+        await _emit_event(event_callback, "progress", "Skill 创建需求提示")
+        return state
+
     if state.get("clarification_needed"):
         spec_name = state.get("spec_name", "") or "候选 Agent"
         clarify = (
@@ -2149,14 +2727,73 @@ async def node_iterate_agent_version(
     state["current_node"] = "iterate_agent_version"
     state["awaiting_user"] = False
     state["stage"] = "iterating"
+    # 🔑 清除旧错误，避免 error_recovery 叠加显示不相关的历史错误
+    state["errors"] = []
 
-    system_prompt = """你是 TradingAgentsCN 平台的 Agent 工坊版本迭代助手。
+    # 🔑 如果 version_id 为空，尝试从数据库按 spec_id 查最新版本补上
+    # 场景：用户从工坊管理页面打开已有 agent 的新对话，或从 error_recovery 重试
+    version_id = _sanitize_version_id(state.get("version_id", ""))
+    if not version_id:
+        spec_id = state.get("spec_id", "")
+        if spec_id:
+            try:
+                from app.core.database import get_mongo_db
+                db = get_mongo_db()
+                latest_version_doc = await db["agent_workshop_versions"].find_one(
+                    {"spec_id": spec_id},
+                    sort=[("created_at", -1)],
+                )
+                if latest_version_doc:
+                    version_id = str(latest_version_doc.get("version_id") or "").strip()
+                    if version_id:
+                        state["version_id"] = version_id
+                        logger.info(
+                            "[IterateAgent][ResolvedVersionId] spec_id=%s → version_id=%s (从数据库补全)",
+                            spec_id, version_id,
+                        )
+            except Exception as resolve_exc:
+                logger.warning("[IterateAgent][ResolvedVersionId] 失败: %s", resolve_exc)
+
+        if not version_id:
+            state["final_response"] = (
+                "当前没有可迭代的版本。请先创建并测试一个 Agent 版本，再进行迭代优化。\n"
+                "你可以回复「取消」结束当前流程，或描述新的需求重新创建 Agent。"
+            )
+            state["current_node"] = "error_recovery"
+            state["stage"] = "error_recovery"
+            state["awaiting_user"] = True
+            state["errors"] = [{"node": "iterate_agent_version", "error": "version_id 为空，无法迭代"}]
+            return state
+
+    system_prompt = """你是 TradingAgentsCN 平台的 Agent 工坊版本迭代助手，同时也是资深财经产品专家。
 
 当前阶段：用户要求升级/修改已测试或已发布的 Agent。
 
 你的任务：
 1. 调用 iterate_agent_workshop_version，基于当前 version_id 创建下一轮迭代草稿版本
-2. 向用户说明已从当前版本创建了下一版草稿，并引导用户补充升级需求
+2. 工具返回后，向用户输出一份**专业的迭代分析报告**，格式如下：
+
+   **迭代分析报告**
+
+   一、当前 Agent 存在的问题
+   （结合评估结果和测试表现，指出具体问题，不要笼统描述）
+
+   二、本次优化的方向
+   （说明要优化哪些方面，为什么这些优化是必要的）
+
+   三、优化后预期效果
+   （描述优化后 Agent 在哪些方面会有提升）
+
+   四、需要用户确认的关键决策
+   （如果有需要用户进一步明确的点，列出来让用户确认）
+
+3. 最后引导用户补充或确认升级需求
+
+重要规则：
+- 这是迭代优化，不是重新设计。要基于已有 Agent 的评估结果来分析问题
+- 回复要专业、具体，引用评估分数和具体问题，不要泛泛而谈
+- 不要说"我为你准备了一个优化方案草稿"这种话，要说"基于上一轮评估，我发现以下问题..."
+- 中文回复
 
 你必须调用 iterate_agent_workshop_version 工具。"""
 
@@ -2211,6 +2848,7 @@ async def node_iterate_agent_version(
 
 async def node_wait_evaluation(
     state: AgentBuilderState,
+    llm_client: Any = None,
     event_callback: Optional[Callable] = None,
     on_stream: Optional[Callable] = None,
 ) -> AgentBuilderState:
@@ -2223,36 +2861,44 @@ async def node_wait_evaluation(
     state["stage"] = "evaluating"
     published = state.get("official_acceptance_decision") == "published"
 
+    if state.get("skill_creation_requested"):
+        gap_report = state.get("gap_report", {}) or {}
+        blocking_gaps = gap_report.get("blocking_gaps", []) or []
+        gap_desc = ""
+        if blocking_gaps:
+            gap_items = []
+            for g in blocking_gaps[:3]:
+                if isinstance(g, dict):
+                    gap_items.append(f"- **{g.get('name', g.get('capability', '未知'))}**：{g.get('description', g.get('gap_description', ''))}")
+                else:
+                    gap_items.append(f"- {g}")
+            gap_desc = "\n".join(gap_items)
+
+        skill_msg = "理解了，你想补齐缺失的工具/skill。\n\n"
+        if gap_desc:
+            skill_msg += f"当前识别到的能力缺口：\n{gap_desc}\n\n"
+        skill_msg += (
+            "> **注意**：Skill/工具的创建需要开发人员编写代码实现，"
+            "无法在当前 Agent 构建流程中自动完成。\n\n"
+            "你有两个选择：\n"
+            "1. **先发布当前版本**：当前 Agent 的降级模式测试结果已产出，先发布上线，等 skill 开发完成后再迭代升级\n"
+            "2. **记录需求后续开发**：回复「记录需求」，我会将缺失 skill 的需求保存下来\n\n"
+            "建议先发布当前版本，后续通过迭代升级补齐能力。"
+        )
+        state["final_response"] = skill_msg
+        state["skill_creation_requested"] = False
+        await _invoke_stream(on_stream, skill_msg)
+        return state
+
     if state.get("clarification_needed"):
-        if published:
-            clarify = (
-                "抱歉，我不太确定你的意思。\n\n"
-                "此版本已发布上线，你可以：\n"
-                "- 回复「重测 [股票名]」用其他标的重新测试（如「重测 科大讯飞」）\n"
-                "- 回复「升级需求」或「修改需求」创建新版本\n"
-                "- 回复「重新做缺口分析」刷新能力缺口分析\n"
-                "- 回复「重新生成解决方案」基于当前 gap 重新生成候选方案\n"
-                "- 回复「新建 Agent」切换到新 Agent 创建\n"
-                "- 回复「取消」结束当前会话\n\n"
-                "请说得更具体一点。"
-            )
+        # 🔑 用 LLM 人设对话引导，而非静态模板
+        if llm_client:
+            clarify = await _clarify_with_llm(state, llm_client, event_callback, on_stream)
         else:
-            test_status = state.get("test_result", {}).get("status", "unknown")
-            clarify = (
-                f"抱歉，我不太确定你的意思。当前测试已完成（状态={test_status}）。\n\n"
-                "你可以：\n"
-                "- 回复「发布」确认发布此版本\n"
-                "- 回复「重测 [股票名]」重新跑一轮测试（如「重测 贵州茅台」）\n"
-                "- 回复「升级需求」或「修改需求」回到需求调整\n"
-                "- 回复「重新做缺口分析」刷新能力缺口分析\n"
-                "- 回复「重新生成解决方案」基于当前 gap 重新生成候选方案\n"
-                "- 回复「新建 Agent」切换到新 Agent 创建\n"
-                "- 回复「取消」结束流程\n\n"
-                "请说得更具体一点。"
-            )
+            clarify = _static_clarify_fallback(state)
         state["final_response"] = clarify
         state["clarification_needed"] = False
-        await _invoke_stream(on_stream, clarify)
+        await _stream_chunked(clarify, on_stream)
         return state
 
     if published:
@@ -2291,69 +2937,217 @@ async def node_real_data_test(
     event_callback: Optional[Callable] = None,
     on_stream: Optional[Callable] = None,
 ) -> AgentBuilderState:
-    """真数据测试节点。"""
-    await _emit_event(event_callback, "step", "真数据测试")
-    await _emit_event(event_callback, "progress", f"正在用 {state.get('test_symbol', '未知')} 测试")
+    """真数据测试节点（两阶段：测试 → 展示报告 → 评估 → 展示评估结果）。"""
+    test_symbol = state.get("test_symbol", "未知")
+    spec_name = state.get("spec_name", "未命名")
 
-    system_prompt = f"""你是 TradingAgentsCN 平台的财经产品专家。
+    # ═══════════════════════════════════════════════════════
+    # 阶段 1：真数据测试（仅运行 Agent，不做评估）
+    # ═══════════════════════════════════════════════════════
+    await _emit_event(event_callback, "step", "真数据测试")
+    await _emit_event(event_callback, "progress", f"正在用 {test_symbol} 运行 Agent 分析...")
+
+    test_system_prompt = f"""你是 TradingAgentsCN 平台的财经产品专家。
 
 当前阶段：真数据测试。用户已提供测试标的。
 
 Agent 信息：
-- 名称：{state.get('spec_name', '未命名')}
-- 测试标的：{state.get('test_symbol', '未指定')}
+- 名称：{spec_name}
+- 测试标的：{test_symbol}
 
 你的任务：
-1. 调用 run_agent_workshop_real_data_test 进行真数据测试
-2. 解读测试结果
+1. 调用 run_agent_workshop_real_data_test 进行真数据测试（skip_evaluation 已自动设置为 True）
+2. 简要说明测试已完成，报告即将展示
 
 你必须调用 run_agent_workshop_real_data_test 工具。"""
 
-    final_text, tool_events, tool_results = await _run_node_llm(
-        state, system_prompt, tool_registry, llm_client,
-        required_tool_name="run_agent_workshop_real_data_test",
-        include_inspect_tools=False,
-        event_callback=event_callback,
-        on_stream=on_stream,
-    )
+    async def _periodic_progress_test():
+        elapsed = 0
+        while True:
+            await asyncio.sleep(8)
+            elapsed += 8
+            if elapsed <= 24:
+                phase = "正在加载 Agent 配置并运行分析工具"
+            else:
+                phase = "Agent 分析中，正在生成报告"
+            await _emit_event(event_callback, "progress", f"{phase}（已运行 {elapsed} 秒）...")
 
-    state["final_response"] = final_text
-    state["tool_events"] = tool_events
+    progress_task = asyncio.create_task(_periodic_progress_test())
+    try:
+        test_text, test_tool_events, test_tool_results = await _run_node_llm(
+            state, test_system_prompt, tool_registry, llm_client,
+            required_tool_name="run_agent_workshop_real_data_test",
+            include_inspect_tools=False,
+            event_callback=event_callback,
+            on_stream=on_stream,
+        )
+    finally:
+        progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
+
+    state["tool_events"] = test_tool_events
     state["current_node"] = "real_data_test"
     state["stage"] = "testing"
 
+    # 提取测试结果
     test_result = _extract_json_from_result(
-        tool_results.get("run_agent_workshop_real_data_test", "{}")
+        test_tool_results.get("run_agent_workshop_real_data_test", "{}")
     )
-    if test_result:
-        state["test_result"] = test_result
-        # 如果测试失败，记录错误便于 error_recovery 展示
-        if test_result.get("status") == "error":
-            err_msg = (
-                test_result.get("message")
-                or test_result.get("error")
-                or "真数据测试失败"
-            )
-            failed_stage = test_result.get("failed_stage", "unknown")
-            state["errors"] = state.get("errors", []) + [{
-                "node": "real_data_test",
-                "error": str(err_msg)[:300],
-                "stage": "testing",
-                "failed_stage": failed_stage,
-            }]
-            logger.warning(
-                "[RealDataTest][Failed] stage=%s msg=%s | full_result_keys=%s",
-                failed_stage,
-                str(err_msg)[:500],
-                list(test_result.keys()) if isinstance(test_result, dict) else "N/A",
-            )
-            # 打印完整的 tool_events 用于诊断
-            tool_events_from_result = test_result.get("_tool_events") or test_result.get("tool_events") or []
-            if tool_events_from_result:
-                logger.info(
-                    "[RealDataTest][ToolEvents] %s",
-                    json.dumps(tool_events_from_result, ensure_ascii=False)[:1000],
-                )
+
+    if not test_result or test_result.get("status") == "error":
+        # 测试失败
+        err_msg = (
+            test_result.get("message") if test_result else ""
+            or "真数据测试失败"
+        )
+        state["test_result"] = test_result or {}
+        state["errors"] = state.get("errors", []) + [{
+            "node": "real_data_test",
+            "error": str(err_msg)[:300],
+            "stage": "testing",
+        }]
+        state["final_response"] = f"❌ 真数据测试失败：{err_msg}"
+        return state
+
+    state["test_result"] = test_result
+
+    # 🔑 提取测试报告并展示给用户
+    debug_result = test_result.get("debug_result", {}) if isinstance(test_result, dict) else {}
+    test_report = str(debug_result.get("report") or test_result.get("message") or "").strip()
+    report_length = debug_result.get("report_length") or len(test_report)
+
+    # 构建测试报告展示
+    report_display = f"## 真数据测试结果\n\n"
+    report_display += f"**标的：** {test_symbol}\n"
+    report_display += f"**Agent：** {spec_name}\n"
+    report_display += f"**报告长度：** {report_length} 字符\n\n"
+    report_display += "---\n\n"
+    if test_report:
+        # 截取前 3000 字符展示，避免过长
+        if len(test_report) > 3000:
+            report_display += test_report[:3000] + "\n\n...（报告已截断，完整内容已保存）"
+        else:
+            report_display += test_report
+    else:
+        report_display += "测试已完成，但未生成报告文本。"
+
+    state["final_response"] = report_display
+    await _stream_chunked(report_display, on_stream)
+    await _emit_event(event_callback, "progress", "测试报告已展示，开始评估...")
+
+    # ═══════════════════════════════════════════════════════
+    # 阶段 2：评估测试结果
+    # ═══════════════════════════════════════════════════════
+    await _emit_event(event_callback, "step", "评估测试结果")
+    await _emit_event(event_callback, "progress", "正在评估报告质量和合规性...")
+
+    # 保存 runtime_result 供 evaluate_agent_workshop_version 工具使用
+    runtime_result = test_result.get("runtime_result", {})
+    if runtime_result:
+        state["_test_runtime_result_json"] = json.dumps(runtime_result, ensure_ascii=False, default=str)
+    user_feedback = test_result.get("user_feedback", "")
+    if user_feedback:
+        state["_test_user_feedback"] = user_feedback
+
+    eval_system_prompt = f"""你是 TradingAgentsCN 平台的财经产品专家。
+
+当前阶段：评估测试结果。Agent「{spec_name}」用 {test_symbol} 完成了真数据测试，现在需要评估报告质量。
+
+你的任务：
+1. 调用 evaluate_agent_workshop_version 评估测试结果
+2. 用业务语言解读评估结论（决策、得分、主要问题、建议）
+
+你必须调用 evaluate_agent_workshop_version 工具。"""
+
+    async def _periodic_progress_eval():
+        elapsed = 0
+        while True:
+            await asyncio.sleep(8)
+            elapsed += 8
+            if elapsed <= 24:
+                phase = "正在运行评估工作流和合规检查"
+            else:
+                phase = "正在生成评估报告和修订建议"
+            await _emit_event(event_callback, "progress", f"{phase}（已运行 {elapsed} 秒）...")
+
+    eval_progress_task = asyncio.create_task(_periodic_progress_eval())
+    try:
+        eval_text, eval_tool_events, eval_tool_results = await _run_node_llm(
+            state, eval_system_prompt, tool_registry, llm_client,
+            required_tool_name="evaluate_agent_workshop_version",
+            include_inspect_tools=False,
+            event_callback=event_callback,
+            on_stream=on_stream,
+        )
+    finally:
+        eval_progress_task.cancel()
+        try:
+            await eval_progress_task
+        except asyncio.CancelledError:
+            pass
+
+    # 合并 tool_events
+    state["tool_events"] = list(state.get("tool_events", [])) + list(eval_tool_events)
+
+    # 提取评估结果
+    eval_result = _extract_json_from_result(
+        eval_tool_results.get("evaluate_agent_workshop_version", "{}")
+    )
+
+    # 构建评估结果展示
+    eval_display = f"\n\n---\n\n## 评估结果\n\n"
+    if eval_result and eval_result.get("status") == "ok":
+        evaluation = eval_result.get("evaluation", {}) if isinstance(eval_result, dict) else {}
+        decision = evaluation.get("decision", "unknown") if isinstance(evaluation, dict) else "unknown"
+        scores = evaluation.get("scores", {}) if isinstance(evaluation, dict) else {}
+        overall_score = scores.get("overall", "N/A") if isinstance(scores, dict) else "N/A"
+        issues = evaluation.get("issues", []) if isinstance(evaluation, dict) else []
+        recommendations = evaluation.get("recommendations", []) if isinstance(evaluation, dict) else []
+
+        decision_label = {"pass": "✅ 通过", "revise": "⚠️ 需修订", "reject": "❌ 不通过"}.get(decision, decision)
+        eval_display += f"**评估结论：** {decision_label}\n"
+        eval_display += f"**综合得分：** {overall_score}\n\n"
+
+        if issues:
+            eval_display += "**主要问题：**\n"
+            for issue in issues[:5]:
+                eval_display += f"- {issue}\n"
+            eval_display += "\n"
+
+        if recommendations:
+            eval_display += "**优化建议：**\n"
+            for rec in recommendations[:5]:
+                eval_display += f"- {rec}\n"
+            eval_display += "\n"
+
+        # 更新 state 中的评估信息
+        state["test_result"] = {**state.get("test_result", {}), "evaluation": evaluation}
+        state["official_acceptance_decision"] = decision
+    else:
+        eval_display += eval_text or "评估完成，详情请查看上方解读。"
+
+    # 追加 LLM 的解读
+    if eval_text and eval_text.strip():
+        eval_display += f"\n\n---\n\n{eval_text}"
+
+    # 合并最终响应
+    state["final_response"] = report_display + eval_display
+    await _emit_event(event_callback, "progress", "测试和评估均已完成")
+
+    # 清理临时 state
+    state.pop("_test_runtime_result_json", None)
+    state.pop("_test_user_feedback", None)
+
+    logger.info(
+        "[RealDataTest][Done] symbol=%s report_len=%s eval_status=%s decision=%s",
+        test_symbol,
+        report_length,
+        eval_result.get("status") if eval_result else "N/A",
+        eval_result.get("evaluation", {}).get("decision", "N/A") if eval_result and isinstance(eval_result.get("evaluation"), dict) else "N/A",
+    )
 
     return state
 
@@ -2370,27 +3164,15 @@ async def node_evaluate_or_publish(
     state["stage"] = "evaluating"
     state["awaiting_user"] = True  # 备选，一定保留以确保与用户互动，子状态在后续更新
 
-    # 若上一轮意图无法识别（如用户说"重跑测试"但被误判为未知指令），
-    # 输出澄清提示，而不是重新调用 LLM 尝试发布。
+    # 若上一轮意图无法识别，用 LLM 人设对话引导，而非静态模板
     if state.get("clarification_needed"):
-        decision = state.get("official_acceptance_decision", "")
-        test_status = state.get("test_result", {}).get("status", "unknown")
-        clarify = (
-            f"抱歉，我没太理解你的意思。当前版本处于评估阶段（测试状态={test_status}，"
-            f"评估结论={decision}）。\n\n"
-            "你可以：\n"
-            "- 回复「发布」或「继续评估」继续当前评估/发布流程\n"
-            "- 回复「重跑测试」或「重新测试」重新跑一轮真数据测试\n"
-            "- 回复「升级需求」或「修改需求」回到需求调整阶段\n"
-            "- 回复「重新做缺口分析」刷新能力缺口分析\n"
-            "- 回复「重新生成解决方案」基于当前 gap 重新生成候选方案\n"
-            "- 回复「新建 Agent」切换到新 Agent 创建\n"
-            "- 回复「取消」结束当前流程\n\n"
-            "请说得更具体一点。"
-        )
+        if llm_client:
+            clarify = await _clarify_with_llm(state, llm_client, event_callback, on_stream)
+        else:
+            clarify = _static_clarify_fallback(state)
         state["final_response"] = clarify
         state["clarification_needed"] = False
-        await _invoke_stream(on_stream, clarify)
+        await _stream_chunked(clarify, on_stream)
         return state
 
     await _emit_event(event_callback, "step", "评估与发布")
@@ -2453,6 +3235,7 @@ Agent 信息：
 
 async def node_error_recovery(
     state: AgentBuilderState,
+    llm_client: Any = None,
     event_callback: Optional[Callable] = None,
     on_stream: Optional[Callable] = None,
 ) -> AgentBuilderState:

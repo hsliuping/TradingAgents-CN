@@ -211,14 +211,14 @@ def route_start(state: "AgentBuilderState") -> str:
 
 
 def route_after_classify(state: "AgentBuilderState") -> str:
-    """LLM 意图分类后的路由（v2：置信度门槛 + new_agent 支持）。
+    """LLM 意图分类后的路由。
 
     读取 state["user_intent"]、state["intent_confidence"]、state["current_node"]，
     决定下一步去哪个节点。
 
     规则：
       1. confidence < 0.7 → 回到当前 wait 节点，触发 clarification_needed
-      2. intent = "new_agent" → end（引导用户去新建）
+      2. intent = "new_agent" → 留在当前 wait 节点（提示用户手动创建）
       3. 其他按意图 + 节点组合路由
     """
     current_node = state.get("current_node", "")
@@ -240,15 +240,9 @@ def route_after_classify(state: "AgentBuilderState") -> str:
         _log_route("route_after_classify", state, result)
         return result
 
-    # ── new_agent：用户想创建全新 Agent ──
+    # ── new_agent：提示用户手动创建，留在当前 wait 节点 ──
     if intent == "new_agent":
-        spec_name = state.get("spec_name", "") or "当前 Agent"
-        state["final_response"] = (
-            f"当前是「{spec_name}」的会话。创建新的 Agent 需要回到工坊主页面，"
-            f"点击「新建 Agent」开始。\n\n"
-            f"你的需求我已记下，需要我帮你整理成新 Agent 的需求草案吗？"
-        )
-        result = "end"
+        result = current_node if current_node.startswith("wait_") or current_node in ("evaluate_or_publish", "error_recovery") else "wait_evaluation"
         _log_route("route_after_classify", state, result)
         return result
 
@@ -310,7 +304,8 @@ def route_after_classify(state: "AgentBuilderState") -> str:
 
     # ── wait_plan_selection：方案选择阶段 ──
     elif current_node == "wait_plan_selection":
-        if intent == "select_option":
+        if intent == "select_option" or intent == "create_skill":
+            # create_skill：用户要补齐缺失skill，优先选择包含新skill开发的方案
             # 优先用 LLM 解析的 selected_index / selected_id
             selected_id = _resolve_selected_from_llm(state)
             if selected_id:
@@ -324,6 +319,20 @@ def route_after_classify(state: "AgentBuilderState") -> str:
                 if selected_id:
                     state["selected_plan_id"] = selected_id
                     result = "generate_candidate_agent"
+                elif intent == "create_skill":
+                    # 🔑 create_skill 兜底：找包含"补齐"/"开发"/"skill"关键词的方案
+                    selected_id = _find_skill_creation_plan(state.get("pending_options", []))
+                    if selected_id:
+                        state["selected_plan_id"] = selected_id
+                        result = "generate_candidate_agent"
+                    else:
+                        # 没有包含skill开发的方案，用推荐方案
+                        state["selected_plan_id"] = state.get("recommended_plan_id", "")
+                        if not state["selected_plan_id"] and state.get("pending_options"):
+                            state["selected_plan_id"] = state["pending_options"][0].get("id", "")
+                        result = "generate_candidate_agent" if state.get("selected_plan_id") else "wait_plan_selection"
+                        if not state.get("selected_plan_id"):
+                            state["clarification_needed"] = True
                 else:
                     result = "wait_plan_selection"
                     state["clarification_needed"] = True
@@ -345,12 +354,12 @@ def route_after_classify(state: "AgentBuilderState") -> str:
 
     # ── wait_test_request：等待测试标的 ──
     elif current_node == "wait_test_request":
-        # LLM 已在 classify_intent 中处理了所有股票代码提取：
-        # - 用户直接输入代码 → LLM 输出 test_symbol
-        # - 用户确认 Agent 建议的代码 → LLM 从上下文推断 test_symbol
-        # - 用户给股票名"贵州茅台" → LLM 无法提取 → explore_more → clarification
         if state.get("test_symbol"):
             result = "real_data_test"
+        elif intent == "create_skill":
+            # 用户要创建缺失的 skill，停在当前节点，由 node 输出提示
+            result = "wait_test_request"
+            state["skill_creation_requested"] = True
         elif intent == "cancel":
             result = "end"
         else:
@@ -365,6 +374,10 @@ def route_after_classify(state: "AgentBuilderState") -> str:
         elif intent in ("confirmed", "select_option"):
             # 用户确认发布 → 进入发布流程
             result = "evaluate_or_publish"
+        elif intent == "create_skill":
+            # 用户要创建缺失的 skill
+            result = "wait_evaluation"
+            state["skill_creation_requested"] = True
         elif intent in ("revise",):
             result = "iterate_agent_version" if state.get("version_id") else "requirement_intake"
         elif intent == "retry":
@@ -434,6 +447,23 @@ def _resolve_selected_from_llm(state: "AgentBuilderState") -> str:
         for opt in pending:
             if str(opt.get("id") or "") == str(sel_id):
                 return str(opt.get("id") or "").strip()
+    return ""
+
+
+def _find_skill_creation_plan(options: list) -> str:
+    """从方案列表中找到包含 skill/工具开发的方案 ID。"""
+    skill_keywords = ["补齐", "开发", "skill", "创建.*工具", "新增.*工具", "量化评分"]
+    for opt in options:
+        name = str(opt.get("name", opt.get("id", ""))).lower()
+        desc = str(opt.get("description", opt.get("summary", ""))).lower()
+        text = f"{name} {desc}"
+        for kw in skill_keywords:
+            if re.search(kw, text, re.IGNORECASE):
+                return str(opt.get("id") or "").strip()
+    # 没找到，返回推荐方案
+    for opt in options:
+        if opt.get("recommended"):
+            return str(opt.get("id") or "").strip()
     return ""
 
 
