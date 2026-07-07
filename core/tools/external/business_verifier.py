@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import json
+import logging
+from typing import Any, Callable, Dict, List, Optional
+
+from core.llm import Message, UnifiedLLMClient
 
 from .skill_spec import (
     BusinessRuleFailure,
@@ -17,6 +21,11 @@ from .financial_schema_context import (
     infer_financial_schema_profile,
     resolve_financial_schema_context,
 )
+
+logger = logging.getLogger(__name__)
+
+# 业务验收 LLM 判断超时时间（秒）
+BUSINESS_LLM_TIMEOUT_SECONDS = 120
 
 
 class BusinessVerifier:
@@ -34,8 +43,33 @@ class BusinessVerifier:
 class DefaultBusinessVerifier(BusinessVerifier):
     """默认业务验收器。
 
-    当前仅提供统一返回结构，后续可按分类扩展细粒度规则。
+    结合规则检查 + LLM 判断：
+    - 规则检查：字段存在性、状态码、全零检测（零成本，快速拦截明显错误）
+    - LLM 判断：数据矛盾、业务合理性（准确判断，避免误判导致重试成本）
     """
+
+    def __init__(
+        self,
+        llm_client: Optional[UnifiedLLMClient] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ):
+        self._llm_client = llm_client
+        self._provider = provider
+        self._model = model
+
+    def _get_client(self) -> Optional[UnifiedLLMClient]:
+        if self._llm_client is not None:
+            return self._llm_client
+        if self._provider:
+            try:
+                kwargs: Dict[str, Any] = {}
+                if self._model:
+                    kwargs["model"] = self._model
+                self._llm_client = UnifiedLLMClient.from_provider(self._provider, **kwargs)
+            except Exception as exc:
+                logger.warning(f"业务验收 LLM 客户端初始化失败: {exc}")
+        return self._llm_client
 
     def verify(
         self,
@@ -73,8 +107,25 @@ class DefaultBusinessVerifier(BusinessVerifier):
         result.details["output_type"] = type(output).__name__ if output is not None else None
         result.details["executed_checks"] = []
 
+        # 🔬 日志：输出所有验收规则，便于追踪字段名变化
+        check_summary = []
+        for c in generated_checks:
+            check_summary.append(f"  {c.check_type}:{c.name} field={c.field or '-'} blocking={c.blocking}")
+        logger.info(
+            "🔬 [BusinessVerifier] 验收规则汇总(%d条) | tool_id=%s:\n%s",
+            len(generated_checks),
+            spec.tool_id,
+            "\n".join(check_summary),
+        )
+
         for check in generated_checks:
             self._apply_check(result, output, check)
+
+        # 数值合理性检查：检测明显错误的输出
+        self._apply_plausibility_checks(result, output, spec)
+
+        # LLM 业务验收：用 LLM 判断数据矛盾和业务合理性（准确判断，不靠关键词/正则）
+        self._apply_llm_business_check(result, output, sandbox_result, spec, fact_report)
 
         if result.failures:
             result.passed = False
@@ -124,10 +175,31 @@ class DefaultBusinessVerifier(BusinessVerifier):
         raw_checks = list(spec.validation_checks or [])
         if fact_report and fact_report.validation_checks:
             existing_names = {check.name for check in raw_checks if check.name}
+            # 🔧 spec 是权威来源，其 required_field 检查优先于 fact_report（侦察结果可能有字段名幻觉）
+            spec_has_required_fields = any(
+                c.check_type == "required_field" for c in raw_checks
+            )
             for check in fact_report.validation_checks:
                 if check.name and check.name in existing_names:
                     continue
+                # 🔧 如果 spec 已有 required_field 检查，跳过 fact_report 中所有 required_field，
+                #    避免 LLM 侦察输出的字段名与 spec 冲突导致验收规则左右互搏
+                if spec_has_required_fields and check.check_type == "required_field":
+                    logger.info(
+                        "🔬 [_resolve_generated_checks] 跳过 fact_report required_field: name=%s field=%s (spec 已有 required_field，以 spec 为准)",
+                        check.name,
+                        check.field,
+                    )
+                    continue
                 raw_checks.append(check)
+
+        logger.info(
+            "🔬 [_resolve_generated_checks] spec_checks=%d fact_report_checks=%d total_raw=%d | tool_id=%s",
+            len(spec.validation_checks or []),
+            len(fact_report.validation_checks if fact_report else []),
+            len(raw_checks),
+            spec.tool_id,
+        )
 
         for raw in raw_checks:
             normalized_type = DefaultBusinessVerifier._normalize_check_type(raw.check_type, raw.rule_level)
@@ -547,6 +619,255 @@ class DefaultBusinessVerifier(BusinessVerifier):
             return target[0] if target else None
         return target
 
+    @staticmethod
+    def _apply_plausibility_checks(
+        result: BusinessVerificationResult,
+        output: Any,
+        spec: SkillSpec,
+    ) -> None:
+        """数值合理性检查：检测明显错误的结果（如全零数据）"""
+        if not isinstance(output, dict):
+            return
+
+        def _collect_numeric_values(obj: Any, path: str = "") -> Dict[str, float]:
+            """递归收集所有数值字段及其路径"""
+            values: Dict[str, float] = {}
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    full_path = f"{path}.{k}" if path else k
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        values[full_path] = float(v)
+                    elif isinstance(v, dict):
+                        values.update(_collect_numeric_values(v, full_path))
+                    elif isinstance(v, list) and v:
+                        # 列表中每个元素都检查
+                        for i, item in enumerate(v):
+                            if isinstance(item, dict):
+                                values.update(_collect_numeric_values(item, f"{full_path}[{i}]"))
+            return values
+
+        numeric_fields = _collect_numeric_values(output)
+        if not numeric_fields:
+            return  # 没有数值字段，跳过
+
+        # 检查：超过 3 个关键数值字段全部为 0
+        zero_fields = [k for k, v in numeric_fields.items() if v == 0.0]
+        total_fields = len(numeric_fields)
+
+        if total_fields >= 3 and len(zero_fields) >= total_fields * 0.7:
+            # 超过 70% 的数值字段为 0，很可能是计算逻辑错误
+            sample = list(zero_fields)[:5]
+            msg = (
+                f"数值合理性失败：{len(zero_fields)}/{total_fields} 个数值字段为 0 "
+                f"（如 {', '.join(sample)}），可能是计算逻辑错误而非真实数据"
+            )
+            result.failures.append(
+                BusinessRuleFailure(
+                    rule_id="all_zero_values",
+                    message=msg,
+                    severity="error",
+                )
+            )
+            result.details["zero_value_fields"] = len(zero_fields)
+            result.details["total_numeric_fields"] = total_fields
+            return
+
+        # 检查：嵌套字段全零（如 trend/series 列表中每项数值都为 0）
+        list_zero_count = 0
+        for k, v in numeric_fields.items():
+            if "[0]" in k or "[1]" in k or "[2]" in k:
+                if v == 0.0:
+                    list_zero_count += 1
+
+        if list_zero_count >= 3 and total_fields >= 5:
+            msg = (
+                f"数值合理性失败：列表内数据全部为 0（共 {list_zero_count} 个零值），"
+                "趋势/序列类数据不可能全为 0，数据获取或计算逻辑有误"
+            )
+            result.failures.append(
+                BusinessRuleFailure(
+                    rule_id="trend_list_all_zeros",
+                    message=msg,
+                    severity="error",
+                )
+            )
+            result.details["trend_zero_count"] = list_zero_count
+
+    def _apply_llm_business_check(
+        self,
+        result: BusinessVerificationResult,
+        output: Any,
+        sandbox_result: SandboxResult,
+        spec: SkillSpec,
+        fact_report: Optional[ImplementationFactReport],
+    ) -> None:
+        """LLM 业务验收 — 简单内联 prompt 模式，所有证据一次性传入"""
+        client = self._get_client()
+        if client is None:
+            logger.warning("业务验收 LLM 客户端不可用，跳过 LLM 业务验收")
+            return
+
+        logger.info(f"🤖 [BusinessVerifier] LLM 业务验收启动 | tool_id={spec.tool_id}")
+
+        test_symbol = spec.test_input.get("symbol", "") or spec.test_input.get("code", "")
+        test_name = spec.test_input.get("name", "") or spec.test_input.get("display_name", "")
+
+        # 准备输出摘要
+        try:
+            output_str = json.dumps(output, ensure_ascii=False, indent=2, default=str)[:4000]
+        except Exception:
+            output_str = str(output)[:4000]
+
+        # 构建 helper 清单
+        helpers_block = "（无 helper）"
+        if fact_report and fact_report.available_helpers:
+            lines = []
+            for h in fact_report.available_helpers:
+                ds_tag = getattr(h, 'data_source_handling', 'self_contained') or 'self_contained'
+                sig = getattr(h, 'signature', '') or '(无签名)'
+                lines.append(f"  {h.name}: {sig} [{ds_tag}]")
+            if lines:
+                helpers_block = "\n".join(lines)
+
+        # 构建日志摘要（取最后 60 行）
+        log_block = "（无日志）"
+        if sandbox_result.stdout:
+            log_lines = sandbox_result.stdout.strip().split("\n")
+            log_block = "\n".join(log_lines[-60:])
+
+        # 构建内联 user message
+        user_msg = (
+            f"测试标的: {test_symbol} {test_name}\n"
+            f"Skill 功能: {spec.description}\n\n"
+            f"【沙箱执行结果】\n"
+            f"  success: {sandbox_result.success}\n"
+            f"  error: {sandbox_result.error or '无'}\n"
+            f"  输出摘要: {output_str}\n\n"
+            f"【沙箱日志（最后 60 行）】\n{log_block}\n\n"
+            f"【已确认可用的 helper 函数】\n{helpers_block}\n\n"
+            f"判断要点：\n"
+            f"1. 日志中的数据是否与输出矛盾？(helper 有数据但输出为空 → has_contradiction=true)\n"
+            f"2. 输出是否业务合理？(蓝筹股无质押数据 → is_business_valid=true)\n"
+            f"3. success=True 说明代码已成功执行，函数必然存在。\n"
+            f"4. 🚨 跨 helper 一致性检查：如果 Skill 调用了多个 helper，\n"
+            f"   检查它们的返回是否互相矛盾。例如：\n"
+            f"   - 一个 helper 说'无质押'（status=no_pledge），另一个返回了质押股东列表 → has_contradiction=true, severity=critical\n"
+            f"   - 一个 helper 返回空趋势序列，另一个返回非空数据 → has_contradiction=true\n"
+            f"   - 两个 helper 对同一指标给出不同数值 → has_contradiction=true\n\n"
+            f"输出格式，只输出以下，不要其他内容：\n"
+            f"<verdict>\n"
+            f'{{"has_contradiction": true/false, "is_business_valid": true/false, '
+            f'"severity": "none/minor/major/critical", "issue": "一句话", "suggestion": "修复建议"}}\n'
+            f"</verdict>"
+        )
+
+        try:
+            import queue
+            import threading
+
+            result_queue: "queue.Queue[tuple[str, Any]]" = queue.Queue(maxsize=1)
+
+            def _worker() -> None:
+                try:
+                    messages = [
+                        Message(role="system", content="你是金融数据审计专家。判断 Skill 工具的执行结果是否存在数据矛盾或业务不合理。严格按格式输出 <verdict> JSON。"),
+                        Message(role="user", content=user_msg),
+                    ]
+                    response = client.chat(messages, temperature=0.0, max_tokens=2048)
+                    result_queue.put(("ok", response.content or ""))
+                except Exception as exc:
+                    result_queue.put(("error", exc))
+
+            worker = threading.Thread(
+                target=_worker, name=f"biz-verify-{spec.tool_id}", daemon=True
+            )
+            worker.start()
+            worker.join(BUSINESS_LLM_TIMEOUT_SECONDS)
+
+            if worker.is_alive():
+                logger.warning(
+                    f"业务验收 LLM 判断超时（{BUSINESS_LLM_TIMEOUT_SECONDS}s），跳过 | tool_id={spec.tool_id}"
+                )
+                return
+
+            status, payload = result_queue.get_nowait()
+            if status == "error":
+                raise payload
+            raw = str(payload)
+
+            if not raw:
+                logger.warning("业务验收 LLM 返回空内容，跳过")
+                return
+
+            logger.info(f"📥 [BusinessVerifier] LLM 输出: {raw[:500]}")
+
+            # 解析 JSON：优先从 <verdict> 标签中提取
+            import re
+            verdict_match = re.search(r"<verdict>\s*(.*?)\s*</verdict>", raw, re.DOTALL)
+            if verdict_match:
+                json_str = verdict_match.group(1).strip()
+            else:
+                json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", raw, re.DOTALL)
+                json_str = json_match.group() if json_match else ""
+
+            if not json_str:
+                logger.warning(f"业务验收 LLM 输出无法解析为 JSON: {raw[:300]}")
+                return
+
+            try:
+                verdict = json.loads(json_str)
+            except json.JSONDecodeError as je:
+                logger.warning(f"业务验收 LLM JSON 解析失败: {je} | json_str={json_str[:200]}")
+                return
+
+            has_contradiction = bool(verdict.get("has_contradiction", False))
+            is_business_valid = bool(verdict.get("is_business_valid", True))
+            severity = str(verdict.get("severity", "none")).lower()
+            issue = str(verdict.get("issue", "")).strip()
+            suggestion = str(verdict.get("suggestion", "")).strip()
+
+            result.details["llm_business_check"] = {
+                "has_contradiction": has_contradiction,
+                "is_business_valid": is_business_valid,
+                "severity": severity,
+                "issue": issue,
+                "suggestion": suggestion,
+            }
+
+            # 数据矛盾 → 直接判为失败（阻断）
+            if has_contradiction:
+                msg = f"数据矛盾（LLM 判断）: {issue}"
+                if suggestion and suggestion != "无":
+                    msg += f" | 修复建议: {suggestion}"
+                result.failures.append(
+                    BusinessRuleFailure(
+                        rule_id="llm_data_contradiction",
+                        message=msg,
+                        severity="error",
+                    )
+                )
+                logger.warning(f"🚨 [BusinessVerifier] LLM 检测到数据矛盾: {issue}")
+            elif not is_business_valid and severity in ("major", "critical"):
+                msg = f"业务不合理（LLM 判断）: {issue}"
+                if suggestion and suggestion != "无":
+                    msg += f" | 修复建议: {suggestion}"
+                result.failures.append(
+                    BusinessRuleFailure(
+                        rule_id="llm_business_invalid",
+                        message=msg,
+                        severity="error",
+                    )
+                )
+                logger.warning(f"🚨 [BusinessVerifier] LLM 判断业务不合理: {issue}")
+            elif severity == "minor":
+                result.warnings.append(f"LLM 业务验收建议: {issue}")
+                logger.info(f"ℹ️ [BusinessVerifier] LLM 发现小问题: {issue}")
+            else:
+                logger.info(f"✅ [BusinessVerifier] LLM 业务验收通过: {issue}")
+
+        except Exception as exc:
+            logger.warning(f"业务验收 LLM 判断异常: {exc}", exc_info=True)
+
 
 class ValuationBusinessVerifier(DefaultBusinessVerifier):
     """保留估值类验收器类型名，当前不再内置硬编码规则。"""
@@ -566,8 +887,22 @@ class ValuationBusinessVerifier(DefaultBusinessVerifier):
 class BusinessVerifierRegistry:
     """按 Skill 类型选择业务验收器。"""
 
+    def __init__(
+        self,
+        llm_client: Optional[UnifiedLLMClient] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ):
+        self._llm_client = llm_client
+        self._provider = provider
+        self._model = model
+
     def resolve(self, spec: SkillSpec) -> BusinessVerifier:
-        return DefaultBusinessVerifier()
+        return DefaultBusinessVerifier(
+            llm_client=self._llm_client,
+            provider=self._provider,
+            model=self._model,
+        )
 
     def list_rule_families(self) -> List[str]:
         return ["default"]

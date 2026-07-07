@@ -14,15 +14,15 @@ import json
 import logging
 import queue
 import threading
-from typing import Any, Optional
+from typing import Any, Callable, Dict, Optional
 
 from core.llm import UnifiedLLMClient, Message
 
-from .skill_spec import EvalScore, SandboxResult, SkillSpec
+from .skill_spec import EvalScore, ImplementationFactReport, SandboxResult, SkillSpec
 
 logger = logging.getLogger(__name__)
 
-JUDGE_LLM_TIMEOUT_SECONDS = 25
+JUDGE_LLM_TIMEOUT_SECONDS = 120
 JUDGE_LLM_MAX_TOKENS = 1200
 
 
@@ -66,6 +66,7 @@ class OutputEvaluator:
         sandbox_result: SandboxResult,
         spec: SkillSpec,
         code: str,
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> EvalScore:
         """
         评估沙箱执行结果
@@ -74,6 +75,7 @@ class OutputEvaluator:
             sandbox_result: 沙箱执行结果
             spec: Skill 规格书
             code: 生成的代码
+            fact_report: 侦察层事实报告（包含已命中的 available_helpers，用于防止 LLM 误判函数不存在）
 
         Returns:
             EvalScore: 评估打分
@@ -89,7 +91,7 @@ class OutputEvaluator:
 
         # ===== 第 2 层: Judge LLM 深度评分 =====
         if not self._skip_judge:
-            self._judge_llm_eval(sandbox_result, spec, code, score)
+            self._judge_llm_eval(sandbox_result, spec, code, score, fact_report)
 
         return score
 
@@ -145,7 +147,7 @@ class OutputEvaluator:
 
         return True
 
-    # ==================== 第 2 层: Judge LLM ====================
+    # ==================== 第 2 层: Judge LLM (Simple Inline Prompt) ====================
 
     def _judge_llm_eval(
         self,
@@ -153,94 +155,122 @@ class OutputEvaluator:
         spec: SkillSpec,
         code: str,
         score: EvalScore,
+        fact_report: Optional[ImplementationFactReport] = None,
     ) -> None:
-        """Judge LLM 深度评分"""
+        """Judge LLM 深度评分 — 简单内联 prompt，所有证据一次性传入"""
+        import json as _json
+
+        test_symbol = spec.test_input.get("symbol", "") or spec.test_input.get("code", "")
+        test_name = spec.test_input.get("name", "") or spec.test_input.get("display_name", "")
         output_preview = self._format_output_preview(result.output)
 
-        prompt = (
-            "你是一个代码质量评审专家。请对以下工具函数的执行结果进行评分。\n\n"
-            f"【Skill 规格】\n"
-            f"- 名称: {spec.display_name}\n"
-            f"- 描述: {spec.description}\n"
-            f"- 期望输出类型: {spec.expected_output.type}\n"
-            f"- 期望字段: {', '.join(spec.expected_output.fields) or '无'}\n\n"
-            f"【执行结果】\n{output_preview}\n\n"
-            f"【生成的代码】\n```python\n{code[:8000]}\n```\n\n"
-            "【评分说明】\n"
-            "- 若返回 {\"status\": \"success\", \"data\": [], \"message\": \"未找到xxx数据\"}，说明真实调用了数据源但无数据，应给 authenticity≥7、completeness≥6，不要因数据为空而打低分。\n"
-            "- 若返回了 mock/模拟/假数据，authenticity 应打低分。\n"
-            "- 代码能执行且格式正确，executability、format_quality 应≥7。\n\n"
-            "请用 JSON 格式输出 5 个维度的评分（0-10），不要输出其他内容：\n"
-            '{"executability": <分>, "authenticity": <分>, '
-            '"completeness": <分>, "relevance": <分>, "format_quality": <分>}'
+        # 构建 helper 清单
+        helpers_block = "（无 helper）"
+        if fact_report and fact_report.available_helpers:
+            lines = []
+            for h in fact_report.available_helpers:
+                ds_tag = getattr(h, 'data_source_handling', 'self_contained') or 'self_contained'
+                sig = getattr(h, 'signature', '') or '(无签名)'
+                lines.append(f"  {h.name}: {sig} [{ds_tag}]")
+            if lines:
+                helpers_block = "\n".join(lines)
+
+        # 构建日志摘要（取最后 60 行，约 4000 字符）
+        log_block = "（无日志）"
+        if result.stdout:
+            log_lines = result.stdout.strip().split("\n")
+            log_block = "\n".join(log_lines[-60:])
+
+        # 构建内联 user message
+        user_msg = (
+            f"测试标的: {test_symbol} {test_name}\n"
+            f"Skill 名称: {spec.display_name}\n\n"
+            f"【沙箱执行结果】\n"
+            f"  success: {result.success}\n"
+            f"  error: {result.error or '无'}\n"
+            f"  输出 JSON: {output_preview}\n\n"
+            f"【沙箱日志（最后 60 行）】\n{log_block}\n\n"
+            f"【已确认可用的 helper 函数】\n{helpers_block}\n\n"
+            f"评分标准（1-10 分）:\n"
+            f"  executability: 正常执行≥7，有异常≤3\n"
+            f"  authenticity: 真实数据≥8，数据矛盾≤3，no_data 合理 5-6\n"
+            f"  completeness: 字段完整≥8，核心字段为空≤4\n"
+            f"  relevance: 精准匹配≥8，答非所问≤3\n"
+            f"  format_quality: 格式规范≥7，命名混乱≤4\n\n"
+            f"规则：执行成功=所有函数必然存在，严禁根据训练知识判断函数'不存在'\n\n"
+            f"输出格式，只输出以下，不要其他内容：\n"
+            f"<verdict>\n"
+            f'{{"executability": <分>, "authenticity": <分>, "completeness": <分>, '
+            f'"relevance": <分>, "format_quality": <分>, "expert_comment": "<一句话>"}}\n'
+            f"</verdict>"
         )
 
         try:
             import re
-            logger.info(
-                f"\n{'─'*50}\n"
-                f"📤 [OutputEvaluator] Judge LLM 输入 ({len(prompt)} 字符)\n"
-                f"{'─'*50}\n"
-                f"{prompt[:3000]}\n"
-                f"{'...(截断)' if len(prompt) > 3000 else ''}\n"
-                f"{'─'*50}"
-            )
-            raw = self._call_judge_llm(prompt, spec.tool_id)
-            if raw is None:
-                logger.warning(
-                    "Judge LLM 评分超时（%ss），跳过深度评分并保留基础检查分数 | tool_id=%s",
-                    JUDGE_LLM_TIMEOUT_SECONDS,
-                    spec.tool_id,
-                )
-                return
-            logger.info(
-                f"\n{'─'*50}\n"
-                f"📥 [OutputEvaluator] Judge LLM 输出 ({len(raw)} 字符)\n"
-                f"{'─'*50}\n"
-                f"{raw}\n"
-                f"{'─'*50}"
-            )
 
-            json_match = re.search(r"\{[^}]+\}", raw, re.DOTALL)
-            if json_match:
-                scores = json.loads(json_match.group())
+            logger.info(f"\n{'─'*50}\n📤 [OutputEvaluator] Judge LLM 启动 ({len(user_msg)} 字符)\n{'─'*50}")
+            raw = self._call_judge_llm_simple(user_msg, spec.tool_id)
+            if raw is None:
+                logger.warning("Judge LLM 超时，保留基础检查分数 | tool_id=%s", spec.tool_id)
+                return
+
+            logger.info(f"\n{'─'*50}\n📥 [OutputEvaluator] Judge LLM 输出\n{'─'*50}\n{raw}\n{'─'*50}")
+
+            # 从 <verdict> 标签提取 JSON
+            verdict_match = re.search(r"<verdict>\s*(.*?)\s*</verdict>", raw, re.DOTALL)
+            if verdict_match:
+                json_str = verdict_match.group(1).strip()
+            else:
+                fallback = re.search(r"\{[^{}]*\}", raw)
+                json_str = fallback.group() if fallback else ""
+
+            if json_str:
+                scores = _json.loads(json_str)
                 score.executability = float(scores.get("executability", score.executability))
                 score.authenticity = float(scores.get("authenticity", score.authenticity))
                 score.completeness = float(scores.get("completeness", score.completeness))
                 score.relevance = float(scores.get("relevance", score.relevance))
                 score.format_quality = float(scores.get("format_quality", score.format_quality))
-                logger.info(f"🎯 Judge LLM 评分: {score.total}")
+
+                # 硬规则：执行成功必须≥7
+                if result.success and score.executability < 7.0:
+                    logger.warning(f"LLM 误判: success=True 但 executability={score.executability}<7，强制提升")
+                    score.executability = 7.0
+
+                comment = str(scores.get("expert_comment", "")).strip()
+                if comment:
+                    logger.info(f"🎯 Judge LLM 评分: {score.total} | {comment}")
+                else:
+                    logger.info(f"🎯 Judge LLM 评分: {score.total}")
             else:
-                logger.warning(f"⚠️ Judge LLM 输出中未找到 JSON: {raw[:1000]}")
+                logger.warning(f"⚠️ Judge LLM 输出中未找到 JSON: {raw[:500]}")
         except Exception as e:
             logger.warning(f"Judge LLM 评分失败，保留基础检查分数: {e}")
 
-    def _call_judge_llm(self, prompt: str, tool_id: str) -> Optional[str]:
+    def _call_judge_llm_simple(self, user_msg: str, tool_id: str) -> Optional[str]:
+        """简单 LLM 调用（无工具，单次请求 + 超时保护）"""
         result_queue: "queue.Queue[tuple[str, Any]]" = queue.Queue(maxsize=1)
 
         def _worker() -> None:
             try:
                 client = self._get_client()
-                messages = [Message(role="user", content=prompt)]
-                response = client.chat(messages, temperature=0.0, max_tokens=JUDGE_LLM_MAX_TOKENS)
+                messages = [
+                    Message(role="system", content="你是金融数据评估专家，评估 Skill 工具的输出质量。严格按格式输出 <verdict> JSON。"),
+                    Message(role="user", content=user_msg),
+                ]
+                response = client.chat(messages, temperature=0.0, max_tokens=2048)
                 result_queue.put(("ok", response.content or ""))
             except Exception as exc:
                 result_queue.put(("error", exc))
 
         worker = threading.Thread(
-            target=_worker,
-            name=f"skill-judge-{tool_id}",
-            daemon=True,
+            target=_worker, name=f"skill-judge-{tool_id}", daemon=True
         )
         worker.start()
         worker.join(JUDGE_LLM_TIMEOUT_SECONDS)
 
         if worker.is_alive():
             return None
-
-        if result_queue.empty():
-            raise RuntimeError("Judge LLM 未返回结果")
-
         status, payload = result_queue.get_nowait()
         if status == "error":
             raise payload

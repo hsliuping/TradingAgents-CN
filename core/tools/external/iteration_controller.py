@@ -12,11 +12,12 @@
 迭代决策：
   PASS  — 评分 >= 8.0 且边缘测试通过
   RETRY — 评分不足、沙箱失败或边缘测试失败，且未超轮次上限
-  FAIL  — 超过 8 轮仍未通过，并附带每轮失败原因
+  FAIL  — 超过 10 轮仍未通过，并附带每轮失败原因
 """
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -48,10 +49,11 @@ from .static_validator import StaticValidator
 
 logger = logging.getLogger(__name__)
 
-MAX_ITERATIONS = 8
-PASS_THRESHOLD = 8.0
+MAX_ITERATIONS = 10
+PASS_THRESHOLD = 8.5
 # 连续相同失败检测阈值：连续 N 轮业务验收失败项完全一致则判定为不可恢复
-_STALE_FAILURE_THRESHOLD = 5
+# 由 5 调整为 3：更早触发熔断，避免在不可恢复的失败上浪费迭代预算
+_STALE_FAILURE_THRESHOLD = 3
 
 # 快照落盘根目录（与 SkillGenerationService 保持一致）
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -105,7 +107,7 @@ class IterationController:
     迭代控制器
 
     编排 CodeGenerator → StaticValidator → SandboxRunner → OutputEvaluator
-    的完整管线，在每轮失败时插入 LLM 反思步骤，最多 5 轮自动重试。
+    的完整管线，在每轮失败时插入 LLM 反思步骤，最多 10 轮自动重试。
     """
 
     def __init__(
@@ -128,7 +130,11 @@ class IterationController:
             model=model,
             skip_judge=skip_judge,
         )
-        self._business_verifiers = BusinessVerifierRegistry()
+        self._business_verifiers = BusinessVerifierRegistry(
+            llm_client=llm_client,
+            provider=provider,
+            model=model,
+        )
         self._reconnaissance = reconnaissance_controller or DefaultReconnaissanceController()
         self._llm_client = llm_client
         self._provider = provider
@@ -343,7 +349,9 @@ class IterationController:
                     stdout=sandbox.stdout,
                     stderr=sandbox.stderr,
                     output=sandbox.output,
-                )
+                    fact_report=fact_report,
+                sandbox_success=getattr(sandbox, "success", False),
+            )
                 iteration.reflection = reflection
                 logger.info(
                     f"🔍 [第{round_num}轮] 反思结果:\n"
@@ -396,28 +404,7 @@ class IterationController:
             )
             _report("sandbox_execution", f"沙箱执行成功 ({sandbox.execution_time}s)", round_num, 0.6)
 
-            # ===== 阶段 4: 输出评估 =====
-            _report("output_evaluation", "正在质量评估...", round_num, 0.65)
-            eval_score = self._evaluator.evaluate(sandbox, spec, generated.code)
-            iteration.eval_score = eval_score
-            self._persist_stage_artifact(
-                tool_id=spec.tool_id,
-                run_id=run_id,
-                round_num=round_num,
-                stage="output_evaluation",
-                payload={
-                    "eval_score": iteration.eval_score.model_dump(),
-                },
-                code=generated.code,
-            )
-            logger.info(
-                f"📊 [第{round_num}轮] 评估得分:\n"
-                f"   总分: {eval_score.total}/10 (阈值: {PASS_THRESHOLD})\n"
-                f"   可执行性: {eval_score.executability} | 真实性: {eval_score.authenticity}\n"
-                f"   完整性: {eval_score.completeness} | 相关性: {eval_score.relevance}\n"
-                f"   格式质量: {eval_score.format_quality}"
-            )
-
+            # ===== 阶段 4: 业务验收（结构检查，零 LLM 成本） =====
             business_verification = self._business_verifiers.resolve(spec).verify(
                 sandbox,
                 spec,
@@ -445,38 +432,150 @@ class IterationController:
                 f"   失败项: {len(business_verification.failures)}"
             )
 
-            if self._is_systemic_business_verifier_failure(business_verification):
-                system_reflection = ReflectionResult(
-                    root_cause="系统级业务验收规则配置错误，当前失败并非代码实现缺陷。",
-                    fix_plan=[
-                        "清洗或降级不可执行的抽象 validation_checks（如 business/custom）。",
-                        "仅保留 status_success、required_field、required_non_empty_payload 等可执行规则。",
-                        "修复系统规则后再重新发起生成。",
-                    ],
-                    should_retry=False,
-                    confidence=0.99,
+            if not business_verification.passed:
+                # 业务验收不通过，收集错误反馈
+                _report("output_evaluation", "业务验收未通过，正在分析...", round_num, 0.58)
+                failure_messages = []
+                failure_messages.extend(self._build_business_errors(business_verification))
+                extra_context_parts = [self._build_business_reflection_context(business_verification)]
+
+                # 【新增】财经专家判断：如果沙箱输出包含 no_data，判断是否业务合理 + 推荐换股
+                expert_advice = self._check_no_data_and_advise(
+                    spec, sandbox.output, fact_report
                 )
-                iteration.reflection = system_reflection
-                iteration.decision = "FAIL"
-                iteration.feedback = self._build_rich_feedback(
-                    stage="质量评估/业务验收",
-                    errors=self._build_business_errors(business_verification),
+                if expert_advice:
+                    extra_context_parts.append(expert_advice)
+
+                reflection = self._reflect_on_failure(
+                    spec=spec,
+                    code=generated.code,
+                    stage="业务验收",
+                    error="\n".join(failure_messages),
+                    stdout=sandbox.stdout,
+                    stderr=sandbox.stderr,
+                    output=sandbox.output,
+                    fact_report=fact_report,
+                    sandbox_success=getattr(sandbox, "success", False),
+                    extra_context="\n\n".join(part for part in extra_context_parts if part),
+                )
+                iteration.reflection = reflection
+                feedback = self._build_rich_feedback(
+                    stage="业务验收",
+                    errors=failure_messages,
                     code=generated.code,
                     spec=spec,
                     stdout=sandbox.stdout,
                     stderr=sandbox.stderr,
                     output=sandbox.output,
-                    reflection=system_reflection,
+                    reflection=reflection,
                 )
+                # 把专家建议追加到 feedback
+                if expert_advice:
+                    feedback = f"{feedback}\n\n{expert_advice}"
+                iteration.decision = "RETRY"
+                iteration.feedback = feedback
                 iterations.append(iteration)
                 self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
-                _report("output_evaluation", "检测到系统级验收规则错误，终止重试", round_num, 0.8)
-                logger.warning(
-                    f"🛑 [第{round_num}轮] 检测到系统级业务验收错误，停止继续让模型修代码"
-                )
-                break
+                _report("output_evaluation", "业务验收失败，反思后重试中...", round_num, 0.7)
+                continue
 
-            if eval_score.total >= PASS_THRESHOLD and business_verification.passed:
+            # ===== 阶段 5: 黑盒验证 — 标准函数参考对比 =====
+            _report("reference_comparison", "正在对比标准函数输出...", round_num, 0.65)
+            ref_comparison_failures = self._compare_with_reference_helpers(
+                sandbox, spec, fact_report
+            )
+            if ref_comparison_failures:
+                logger.warning(
+                    f"⚠️ [第{round_num}轮] 🔴 黑盒验证失败: 输出值不符合标准函数参考\n"
+                    + "\n".join(f"   ❌ {f}" for f in ref_comparison_failures[:5])
+                )
+                _report("reflection", "黑盒验证失败（值不正确），跳过白盒代码审查，正在分析...", round_num, 0.68)
+                reflection = self._reflect_on_failure(
+                    spec=spec,
+                    code=generated.code,
+                    stage="黑盒验证（标准函数参考对比）",
+                    error="\n".join(ref_comparison_failures),
+                    stdout=sandbox.stdout,
+                    stderr="",
+                    output=sandbox.output,
+                    fact_report=fact_report,
+                sandbox_success=getattr(sandbox, "success", False),
+            )
+                iteration.reflection = reflection
+                feedback = self._build_rich_feedback(
+                    stage="黑盒验证（标准函数参考对比）",
+                    errors=ref_comparison_failures,
+                    code=generated.code,
+                    spec=spec,
+                    stdout=sandbox.stdout,
+                    output=sandbox.output,
+                    reflection=reflection,
+                )
+                iteration.decision = "RETRY"
+                iteration.feedback = feedback
+                iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                _report("reference_comparison", "黑盒验证失败，反思后重试中...", round_num, 0.72)
+                continue
+
+            _report("reference_comparison", "黑盒验证通过，输出值与标准函数一致", round_num, 0.7)
+
+            # ===== 阶段 6: 白盒评估 — Judge LLM 代码审查 =====
+            _report("output_evaluation", "正在白盒代码质量评估...", round_num, 0.75)
+            eval_score = self._evaluator.evaluate(sandbox, spec, generated.code, fact_report=fact_report)
+            iteration.eval_score = eval_score
+            self._persist_stage_artifact(
+                tool_id=spec.tool_id,
+                run_id=run_id,
+                round_num=round_num,
+                stage="output_evaluation",
+                payload={
+                    "eval_score": iteration.eval_score.model_dump(),
+                },
+                code=generated.code,
+            )
+            logger.info(
+                f"📊 [第{round_num}轮] 评估得分:\n"
+                f"   总分: {eval_score.total}/10 (阈值: {PASS_THRESHOLD})\n"
+                f"   可执行性: {eval_score.executability} | 真实性: {eval_score.authenticity}\n"
+                f"   完整性: {eval_score.completeness} | 相关性: {eval_score.relevance}\n"
+                f"   格式质量: {eval_score.format_quality}"
+            )
+
+            if eval_score.total < PASS_THRESHOLD:
+                _report("reflection", f"白盒评审未通过 ({eval_score.total}/10)，正在分析...", round_num, 0.78)
+                failure_messages = []
+                failure_messages.extend(self._build_eval_errors(eval_score))
+                extra_context = []
+                extra_context.append(self._build_eval_reflection_context(eval_score))
+                reflection = self._reflect_on_failure(
+                    spec=spec,
+                    code=generated.code,
+                    stage="白盒代码评审",
+                    error="\n".join(failure_messages),
+                    stdout=sandbox.stdout,
+                    stderr="",
+                    output=sandbox.output,
+                    fact_report=fact_report,
+                sandbox_success=getattr(sandbox, "success", False),
+            )
+                iteration.reflection = reflection
+                feedback = self._build_rich_feedback(
+                    stage="白盒代码评审",
+                    errors=failure_messages,
+                    code=generated.code,
+                    spec=spec,
+                    stdout=sandbox.stdout,
+                    output=sandbox.output,
+                    reflection=reflection,
+                )
+                iteration.decision = "RETRY"
+                iteration.feedback = feedback
+                iterations.append(iteration)
+                self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
+                _report("output_evaluation", "白盒评审未通过，反思后重试中...", round_num, 0.82)
+                continue
+
                 # ===== 阶段 5: 边缘测试验证 =====
                 _report("edge_testing", "正在执行边缘测试验证...", round_num, 0.8)
                 edge_failures = self._run_edge_tests(generated.code, spec)
@@ -495,6 +594,8 @@ class IterationController:
                         stdout=sandbox.stdout,
                         stderr="",
                         output=sandbox.output,
+                        fact_report=fact_report,
+                        sandbox_success=getattr(sandbox, "success", False),
                     )
                     iteration.reflection = reflection
 
@@ -567,6 +668,8 @@ class IterationController:
                     stdout=sandbox.stdout,
                     stderr=sandbox.stderr,
                     output=sandbox.output,
+                    fact_report=fact_report,
+                    sandbox_success=getattr(sandbox, "success", False),
                     extra_context="\n\n".join(part for part in extra_context_parts if part),
                 )
                 iteration.reflection = reflection
@@ -695,6 +798,80 @@ class IterationController:
         except Exception as exc:
             logger.warning("⚠️ 侦察报告落盘失败: %s", exc)
             return None
+
+    @staticmethod
+    def _dump_agentic_prompt_to_logfile(
+        spec: SkillSpec,
+        system_prompt: str,
+        user_prompt: str,
+        fact_report: Optional[ImplementationFactReport],
+    ) -> None:
+        """将 agentic 模式的完整 system/user prompt 写入日志文件，方便排查 LLM 未调用推荐 helper 的问题。
+
+        日志文件位置：logs/codegen_prompts/agentic_<tool_id>_<timestamp>.log
+        """
+        try:
+            from datetime import datetime
+            log_dir = Path("logs/codegen_prompts")
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_tool_id = re.sub(r"[^\w\-]", "_", spec.tool_id or "unknown")
+
+            # 构建 helper 摘要
+            helper_summary = "（无 fact_report）"
+            if fact_report:
+                if fact_report.available_helpers:
+                    helper_lines = []
+                    for h in fact_report.available_helpers:
+                        helper_lines.append(
+                            f"  - {h.module}.{h.name} | signature={h.signature or ''} | "
+                            f"data_source_handling={h.data_source_handling or ''} | reason={h.reason or ''}"
+                        )
+                    helper_summary = f"共 {len(fact_report.available_helpers)} 个:\n" + "\n".join(helper_lines)
+                else:
+                    helper_summary = "available_helpers 为空"
+
+            content = (
+                f"{'=' * 80}\n"
+                f"# Agentic SkillGeneration Prompt Dump\n"
+                f"{'=' * 80}\n"
+                f"# tool_id: {spec.tool_id}\n"
+                f"# timestamp: {timestamp}\n"
+                f"# spec.display_name: {spec.display_name}\n"
+                f"# spec.description: {spec.description[:200] if spec.description else ''}\n"
+                f"# system_prompt 长度: {len(system_prompt)} 字符\n"
+                f"# user_prompt 长度: {len(user_prompt)} 字符\n"
+                f"\n"
+                f"{'─' * 80}\n"
+                f"## 侦察层推荐的 available_helpers\n"
+                f"{'─' * 80}\n"
+                f"{helper_summary}\n"
+                f"\n"
+                f"{'─' * 80}\n"
+                f"## Agentic System Prompt（完整）\n"
+                f"{'─' * 80}\n"
+                f"{system_prompt}\n"
+                f"\n"
+                f"{'─' * 80}\n"
+                f"## Agentic User Prompt（完整）\n"
+                f"{'─' * 80}\n"
+                f"{user_prompt}\n"
+            )
+
+            hist_path = log_dir / f"agentic_{safe_tool_id}_{timestamp}.log"
+            hist_path.write_text(content, encoding="utf-8")
+
+            latest_path = log_dir / f"agentic_{safe_tool_id}_latest.log"
+            latest_path.write_text(content, encoding="utf-8")
+
+            logger.info(
+                f"[AgenticSkill] Prompt dump 已写入: {latest_path} "
+                f"(system={len(system_prompt)}字符, user={len(user_prompt)}字符, "
+                f"helpers={len(fact_report.available_helpers) if fact_report else 0}个)"
+            )
+        except Exception as exc:
+            logger.warning(f"[AgenticSkill] 写入 prompt dump 日志失败: {exc}", exc_info=True)
 
     @staticmethod
     def _persist_round_snapshot(
@@ -883,6 +1060,18 @@ class IterationController:
         feedback = initial_feedback
         previous_code = initial_code
         verified_facts: List[str] = []
+        # 从侦察报告中继承已验证事实，避免 Agentic LLM 重复探索
+        if fact_report:
+            for h in (fact_report.available_helpers or [])[:10]:
+                sig = (h.signature or "").strip()
+                if sig:
+                    verified_facts.append(f"{h.name} 签名已验证: {sig[:80]}")
+                else:
+                    verified_facts.append(f"{h.name} 已验证可用（模块: {h.module}）")
+            for f in (fact_report.schema_facts or [])[:8]:
+                desc = f.description or f.fact or ""
+                if desc:
+                    verified_facts.append(desc[:120])
         self._agentic_trace = []
         logger.info(
             "🤖 [AgenticSkill] start tool_id=%s max_steps=%s initial_feedback_chars=%s initial_code_chars=%s fact_report=%s",
@@ -910,17 +1099,18 @@ class IterationController:
         elif fact_report is not None:
             self._persist_fact_report(spec.tool_id, run_id, fact_report)
 
+        agentic_state = {
+            "feedback": feedback,
+            "previous_code": previous_code,
+            "verified_facts": verified_facts,
+            "progress_callback": _report,
+        }
         tools = self._build_agentic_tools(
             spec=spec,
             run_id=run_id,
             iterations=iterations,
             fact_report=fact_report,
-            state={
-                "feedback": feedback,
-                "previous_code": previous_code,
-                "verified_facts": verified_facts,
-                "progress_callback": _report,
-            },
+            state=agentic_state,
         )
         tool_defs = [ToolCallNormalizer.normalize_tool_definition(func) for func in tools.values()]
         client = self._get_client()
@@ -934,24 +1124,37 @@ class IterationController:
             len(known_context.get("known_verified_facts") or []),
             sorted(tools.keys()),
         )
+        agentic_system_prompt = self._build_agentic_system_prompt()
+        agentic_user_prompt = self._build_agentic_task_prompt(spec, initial_feedback, fact_report, known_context)
+
+        # 将完整的 agentic prompt 写入日志文件，方便排查 LLM 未调用推荐 helper 的问题
+        self._dump_agentic_prompt_to_logfile(spec, agentic_system_prompt, agentic_user_prompt, fact_report)
+
         messages: List[Message] = [
-            Message(role="system", content=self._build_agentic_system_prompt()),
-            Message(role="user", content=self._build_agentic_task_prompt(spec, initial_feedback, fact_report, known_context)),
+            Message(role="system", content=agentic_system_prompt),
+            Message(role="user", content=agentic_user_prompt),
         ]
 
         final_result: Optional[PipelineToolResult] = None
         failure_result: Optional[PipelineToolResult] = None
         stale_failure_counts: Dict[str, int] = {}
+        # 探索节奏跟踪：避免 LLM 浪费步数在重复探索上
+        consecutive_explore_steps = 0
+        total_explore_steps = 0
+        _MAX_CONSECUTIVE_EXPLORE = 2
+        _MAX_TOTAL_EXPLORE = 4
 
         for step in range(1, self._max_iterations + 1):
             _report("agentic_loop", f"Agentic Skill 生成循环第 {step}/{self._max_iterations} 步", step, min(0.05 + step * 0.08, 0.9))
             logger.info(
-                "🤖 [AgenticSkill] step=%s/%s tool_id=%s messages=%s verified_facts=%s",
+                "🤖 [AgenticSkill] step=%s/%s tool_id=%s messages=%s verified_facts=%s consecutive_explore=%s total_explore=%s",
                 step,
                 self._max_iterations,
                 spec.tool_id,
                 len(messages),
                 len(verified_facts),
+                consecutive_explore_steps,
+                total_explore_steps,
             )
             try:
                 response = client.chat(
@@ -972,10 +1175,13 @@ class IterationController:
 
             if response.has_tool_calls:
                 tool_names = [str(call.name or "") for call in response.tool_calls]
+                # 判断本步是否调用了 pipeline_tool
+                step_called_pipeline = any(name == "pipeline_tool" for name in tool_names)
                 logger.info(
-                    "🤖 [AgenticSkill] step=%s tool_calls=%s tool_id=%s",
+                    "🤖 [AgenticSkill] step=%s tool_calls=%s pipeline=%s tool_id=%s",
                     step,
                     tool_names,
+                    step_called_pipeline,
                     spec.tool_id,
                 )
                 messages.append(response.to_message())
@@ -1051,6 +1257,25 @@ class IterationController:
                     break
                 if failure_result and (failure_result.status == "blocked" or not failure_result.should_retry):
                     break
+                # 探索节奏统计：若本步未调用 pipeline_tool，记为探索步
+                if not step_called_pipeline:
+                    consecutive_explore_steps += 1
+                    total_explore_steps += 1
+                    if consecutive_explore_steps >= _MAX_CONSECUTIVE_EXPLORE or total_explore_steps >= _MAX_TOTAL_EXPLORE:
+                        # 注入强制提醒，推动 LLM 下一步直接调用 pipeline_tool
+                        reminder = (
+                            f"⚠️ 你已连续探索 {consecutive_explore_steps} 步（累计 {total_explore_steps} 步），"
+                            f"超过探索预算。下一步必须直接调用 pipeline_tool 生成代码，"
+                            f"不要再调用 run_readonly_query / probe_interface / run_diagnostic_script / describe_runtime_helper 等探索工具。"
+                        )
+                        messages.append(Message(role="user", content=reminder))
+                        logger.warning(
+                            "🤖 [AgenticSkill] explore_budget_exceeded tool_id=%s step=%s consecutive=%s total=%s",
+                            spec.tool_id, step, consecutive_explore_steps, total_explore_steps,
+                        )
+                else:
+                    # 调用过 pipeline_tool，重置连续计数
+                    consecutive_explore_steps = 0
                 continue
 
             content = (response.content or "").strip()
@@ -1065,6 +1290,26 @@ class IterationController:
                 if failure_result and failure_result.status == "pass":
                     final_result = failure_result
             break
+
+        # 兜底：如果 LLM 用尽所有步骤仍未通过（无论是否调用过 pipeline_tool），强制再执行一轮
+        if not final_result:
+            last_round = iterations[-1] if iterations else None
+            last_feedback = last_round.feedback if last_round else ""
+            logger.warning(
+                "🤖 [AgenticSkill] LLM 用尽 %s 步仍未通过，强制再执行一轮 pipeline_tool tool_id=%s last_feedback=%s",
+                self._max_iterations,
+                spec.tool_id,
+                (last_feedback[:80] + "...") if last_feedback else "(none)",
+            )
+            # 把最后一轮的失败反馈写入 agentic_state，让 pipeline_tool 定向修复
+            if last_feedback:
+                agentic_state["feedback"] = last_feedback
+            tools["pipeline_tool"]()
+            failure_result = self._last_agentic_pipeline_result
+            if failure_result and failure_result.iteration:
+                iterations.append(failure_result.iteration)
+            if failure_result and failure_result.status == "pass":
+                final_result = failure_result
 
         total_time = round(time.time() - start_time, 2)
         if final_result:
@@ -1197,6 +1442,7 @@ class IterationController:
             describe_runtime_helper,
             inspect_collection_schema,
             inspect_symbol_sample,
+            list_analysis_tools,
             list_available_collections,
             list_external_data_sources,
             list_runtime_functions,
@@ -1205,8 +1451,10 @@ class IterationController:
         )
 
         def run_diagnostic_script(script: str) -> str:
-            """在构建期沙箱中执行诊断脚本，可临时 import hermes_tools 调用只读工具。
-            仅用于确认真实字段、接口返回形状和数据覆盖率；最终 Skill 代码不得依赖 hermes_tools。"""
+            """在构建期沙箱中执行诊断脚本，用于确认真实字段、接口返回形状和数据覆盖率。
+            脚本内可直接 import core.skill_runtime.data_access / core.skill_runtime.project_access 验证返回形状；
+            也可调用 hermes_tools.run_readonly_query / hermes_tools.probe_interface 等侦察函数（仅诊断用）。
+            最终 Skill 代码不得依赖 hermes_tools，只能使用 core.skill_runtime.* 公开 API。"""
             logger.info(
                 "🤖 [AgenticSkill] diagnostic_script tool_id=%s script_chars=%s",
                 spec.tool_id,
@@ -1257,6 +1505,7 @@ class IterationController:
             "check_field_coverage": check_field_coverage,
             "describe_runtime_helper": describe_runtime_helper,
             "list_runtime_functions": list_runtime_functions,
+            "list_analysis_tools": list_analysis_tools,
             "list_available_collections": list_available_collections,
             "list_external_data_sources": list_external_data_sources,
         }
@@ -1267,18 +1516,37 @@ class IterationController:
 目标：生成一个可注册的 Python Skill，并通过平台硬性质控。
 
 你可以调用工具：
-- run_readonly_query：查询真实样本文档，确认字段和覆盖率。
-- probe_interface：真实调用已登记 helper，确认返回形状。
-- run_diagnostic_script：执行构建期诊断脚本，可临时 import hermes_tools 调用只读工具；只用于诊断，不得写入最终 Skill。
-- inspect_collection_schema / inspect_symbol_sample / check_field_coverage / describe_runtime_helper / list_runtime_functions：结构探测。
-- pipeline_tool：执行一轮受治理的候选代码生成与质控。
+- pipeline_tool：执行一轮受治理的候选代码生成与质控（代码生成→静态校验→沙箱执行→评分）。这是核心工具，必须调用。
+- run_readonly_query：查询真实样本文档，确认字段和覆盖率（仅在 pipeline_tool 失败后需要核实字段时使用）。
+- probe_interface：真实调用已登记 helper，确认返回形状（仅在 pipeline_tool 失败后需要确认接口形状时使用）。
+- run_diagnostic_script：执行构建期诊断脚本，脚本内可直接 import core.skill_runtime.* 或 core.tools.implementations.* 来验证返回形状。
+- list_analysis_tools：列出所有可复用的分析类工具（fundamentals/market/technical/portfolio/risk 等 180+ 个）及其完整导入路径。生成的 Skill 代码可直接 from <module_path> import <function_name> 调用这些工具。
+- inspect_collection_schema / inspect_symbol_sample / check_field_coverage / describe_runtime_helper / list_runtime_functions：结构探测工具。
 
-规则：
-1. 遇到数据字段、helper 返回结构、外部接口可用性不确定时，先查询/探针，不要盲目反复生成。
-2. pipeline_tool 是单轮工具；失败后你应根据 failure_summary 决定查数据、探接口，或再次调用 pipeline_tool。
-3. 最终 Skill 代码不得依赖 hermes_tools、RPC stub 或构建期诊断工具，只能使用 core.skill_runtime.* 正式 API。
-4. 不要跳过 pipeline_tool；只有 pipeline_tool pass 才算成功。
-5. 如果确认数据源无法提供目标能力，应停止重试并说明阻塞原因。"""
+关键规则（按优先级）：
+1. 侦察报告（fact_report）已经为你准备好了，包含可用 helper、推荐策略和验证检查。请直接调用 pipeline_tool 生成代码，不要重复侦察。
+2. pipeline_tool 是核心工具。第一轮请直接调用 pipeline_tool，不要先做任何探索。
+3. 只有当 pipeline_tool 返回 failure_summary 且失败原因明确是"字段名错误""接口返回形状不匹配""数据源不可用"时，才使用 run_readonly_query / probe_interface / run_diagnostic_script 等工具针对性核实，然后再次调用 pipeline_tool。
+4. 最终 Skill 代码允许导入以下模块：
+   - core.skill_runtime.data_access / core.skill_runtime.project_access / core.skill_runtime.standard_financial_apis（标准数据访问）
+   - core.tools.implementations.fundamentals / market / technical / portfolio / risk / news / social / trade_review / legacy_bridge（180+ 个分析工具，与 agent 工坊共享）
+   禁止依赖 hermes_tools、RPC stub、构建期诊断工具、agent_builder/assistant_ops/skill_builder 等流程类工具。
+5. 必须复用已有工具：如果 fact_report.available_helpers 中已有完成目标能力的工具，必须直接 import 调用，禁止自行实现等价的数据获取逻辑。
+6. **数据源标签使用规则**（根据 available_helpers 中每个 helper 的 data_source_handling 标签决策）：
+   - `self_contained`：helper 已自包含数据源调用，直接调用即可，不要再额外调用外部数据源补数据
+   - `local_only`：helper 只查本地 MongoDB，若返回为空或数据不足，需在 skill 中补充外部数据源调用（如 tushare/akshare/finnhub）或 core.skill_runtime.external_sources
+   - `partial`：helper 仅覆盖部分需求，需结合其它 helper 或补充数据源/计算逻辑一起使用
+7. 不要跳过 pipeline_tool；只有 pipeline_tool pass 才算成功。
+8. 如果确认数据源无法提供目标能力，应停止重试并说明阻塞原因。
+9. 最多 10 步。每步要么调用 pipeline_tool，要么做针对性核实，不要无目的探索。
+10. **探索节奏约束**：连续探索步数（非 pipeline_tool 调用）不得超过 2 步；累计探索步数不得超过 4 步。每 3 步内至少调用 1 次 pipeline_tool。若 fact_report 已给出 helper 签名，直接调用 pipeline_tool，不要先 probe_interface 验证。
+11. 🛡️ 通用错误预防（生成的代码必须遵循，避免边缘测试失败）：
+   - 股票代码预检：函数开头用 get_stock_basic_info(symbol) 验证，不存在时立即返回 {"status": "error", "error_code": "symbol_not_found", "message": ..., "symbol": symbol}，不要继续后续查询。
+   - 数据为空时优雅返回：关键数据查询结果为空时返回结构化错误响应，不要让后续计算崩溃。
+   - 除零保护：所有比率计算用安全除法（denominator 为 0 或接近 0 时返回 None）。
+   - 异常兜底：主函数体用 try-except 包裹，捕获异常后返回结构化错误响应，不要抛出未捕获异常。
+   - 返回值一致性：无论成功失败，返回 dict 必须包含 status 字段（"success"/"error"）和 symbol 字段。
+   - 边缘测试会传入不存在的股票代码，代码必须在 5 秒内返回错误响应，不能超时。"""
 
     @staticmethod
     def _extract_known_context_from_spec(spec: SkillSpec) -> Dict[str, List[str]]:
@@ -1297,9 +1565,40 @@ class IterationController:
         fact_report: Optional[ImplementationFactReport],
         known_context: Optional[Dict[str, List[str]]] = None,
     ) -> str:
-        fact_summary = ""
+        # 只提取关键摘要，避免注入完整 fact_report JSON（过大且不聚焦）
+        recon_digest = ""
         if fact_report:
-            fact_summary = json.dumps(fact_report.model_dump(mode="json"), ensure_ascii=False, default=str)[:8000]
+            parts = []
+            # 1. 推荐策略（1 行）
+            if fact_report.recommended_strategy:
+                parts.append(f"【推荐策略】\n{fact_report.recommended_strategy}")
+            # 2. 已验证的可用 helper（名称 + 模块 + 签名 + 数据源标签，每项 1-2 行）
+            if fact_report.available_helpers:
+                helper_lines = []
+                for h in fact_report.available_helpers[:15]:  # 最多 15 个
+                    sig = (h.signature or "")[:120]  # 签名截断
+                    ds = h.data_source_handling or "self_contained"
+                    helper_lines.append(f"- {h.name} | {h.module} | {sig} | 数据源:{ds}")
+                parts.append(
+                    "【已验证可用 helper（无需重复探索）】\n"
+                    + "  数据源标签: self_contained=自包含(直接调用); local_only=仅本地MongoDB(可能需补充外部数据源); partial=部分覆盖\n"
+                    + "\n".join(helper_lines)
+                )
+            # 3. 已验证事实（每项 1 行，最多 12 条）
+            if fact_report.schema_facts:
+                fact_lines = []
+                for f in fact_report.schema_facts[:12]:
+                    desc = f.description or f.fact or ""
+                    if desc:
+                        fact_lines.append(f"- {desc[:150]}")
+                if fact_lines:
+                    parts.append("【已验证字段事实】\n" + "\n".join(fact_lines))
+            # 4. 禁止路径（每项 1 行，最多 5 条）
+            if fact_report.blocked_paths:
+                blocked_lines = [f"- {p.path}: {p.reason}" for p in fact_report.blocked_paths[:5]]
+                parts.append("【禁止路径】\n" + "\n".join(blocked_lines))
+            recon_digest = "\n\n".join(parts) if parts else "(无)"
+
         known_context = known_context or {}
         known_failures = "\n".join(f"- {item}" for item in list(known_context.get("known_failure_summaries") or [])[:5])
         known_facts = "\n".join(f"- {item}" for item in list(known_context.get("known_verified_facts") or [])[:12])
@@ -1317,10 +1616,13 @@ class IterationController:
 【同一次 GapJob 已验证环境事实】
 {known_facts or '(无)'}
 
-【已有侦察事实】
-{fact_summary or '(无)'}
+【侦察阶段已验证结果（无需重复探索）】
+{recon_digest}
 
-请先判断是否需要查询真实数据或探测接口；若信息足够，调用 pipeline_tool 生成并验证候选 Skill。"""
+⚠️ 重要：以上 helper 签名和字段事实已在侦察阶段验证过，不要重复调用 describe_runtime_helper / probe_interface / run_diagnostic_script 探索它们。
+请直接调用 pipeline_tool 生成并验证候选 Skill。
+仅当 pipeline_tool 失败且失败原因涉及"未探索过"的字段名/接口形状/数据源可用性时，才用探索工具针对性核实（最多 2 步），然后立即再次调用 pipeline_tool。"""
+
 
     def _run_pipeline_tool_once(
         self,
@@ -1451,7 +1753,9 @@ class IterationController:
                     stdout=sandbox.stdout,
                     stderr=sandbox.stderr,
                     output=sandbox.output,
-                )
+                    fact_report=fact_report,
+                sandbox_success=getattr(sandbox, "success", False),
+            )
                 iteration.reflection = reflection
                 iteration.decision = "FAIL" if not reflection.should_retry else "RETRY"
                 iteration.feedback = self._build_rich_feedback(
@@ -1471,7 +1775,7 @@ class IterationController:
                 )
 
             _report("output_evaluation", "正在质量评估...", 0.65)
-            eval_score = self._evaluator.evaluate(sandbox, spec, generated.code)
+            eval_score = self._evaluator.evaluate(sandbox, spec, generated.code, fact_report=fact_report)
             iteration.eval_score = eval_score
             business_verification = self._business_verifiers.resolve(spec).verify(sandbox, spec, fact_report)
             iteration.business_verification = business_verification
@@ -1512,6 +1816,8 @@ class IterationController:
                         stdout=sandbox.stdout,
                         stderr="",
                         output=sandbox.output,
+                        fact_report=fact_report,
+                        sandbox_success=getattr(sandbox, "success", False),
                     )
                     iteration.reflection = reflection
                     iteration.decision = "RETRY"
@@ -1562,7 +1868,9 @@ class IterationController:
                 stdout=sandbox.stdout,
                 stderr=sandbox.stderr,
                 output=sandbox.output,
-                extra_context="\n\n".join(part for part in extra_context_parts if part),
+                fact_report=fact_report,
+                    sandbox_success=getattr(sandbox, "success", False),
+                    extra_context="\n\n".join(part for part in extra_context_parts if part),
             )
             iteration.reflection = reflection
             iteration.decision = "FAIL" if not reflection.should_retry else "RETRY"
@@ -1634,82 +1942,157 @@ class IterationController:
         stderr: str = "",
         output: Any = None,
         extra_context: str = "",
+        fact_report: Optional[ImplementationFactReport] = None,
+        sandbox_success: bool = False,
     ) -> ReflectionResult:
-        """
-        LLM 反思 — 在每轮失败后分析根因并制定修复计划。
+        """LLM 反思 — agentic 模式，LLM 按需获取证据分析根因并制定修复计划"""
 
-        借鉴 OpenClaw 的 Agent Loop：让 LLM 看到完整的执行上下文后
-        做出判断，而非机械地转发错误消息。
-        """
-        output_preview = ""
-        if output is not None:
+        # ── 构建工具函数（闭包）──
+        def get_error_info() -> str:
+            """获取失败信息（阶段、错误消息、stderr）"""
+            import json as _json
+            info = {
+                "stage": stage,
+                "error": error[:2000],
+                "stderr": (stderr or "")[:2000],
+                "extra_context": extra_context[:1000] if extra_context else "",
+            }
+            return _json.dumps(info, ensure_ascii=False)
+
+        def get_sandbox_logs(lines: int = 30) -> str:
+            """获取沙箱运行日志的最后 N 行"""
+            if not stdout:
+                return "（无日志）"
+            log_lines = stdout.strip().split("\n")
             try:
-                output_preview = json.dumps(output, ensure_ascii=False, indent=2, default=str)[:10000]
+                lines = int(lines)
+            except (TypeError, ValueError):
+                lines = 30
+            return "\n".join(log_lines[-lines:])
+
+        def get_output() -> str:
+            """获取 Skill 输出结果"""
+            if output is None:
+                return "（无输出）"
+            try:
+                return json.dumps(output, ensure_ascii=False, indent=2, default=str)[:4000]
             except Exception:
-                output_preview = str(output)[:10000]
+                return str(output)[:4000]
 
-        code_context = self._format_code_for_prompt(code)
-        extra_context_block = f"\n【补充上下文】\n{extra_context}\n" if extra_context else ""
+        def get_code_section(start_line: int = 1, end_line: int = 50) -> str:
+            """获取代码的指定行范围"""
+            code_lines = code.split("\n")
+            try:
+                start_line = int(start_line)
+                end_line = int(end_line)
+            except (TypeError, ValueError):
+                pass
+            return "\n".join(code_lines[start_line - 1 : end_line])
 
-        prompt = f"""你是一位资深 Python 开发者。一个自动生成的工具函数在「{stage}」阶段失败了。
-请分析根因并给出精准的修复计划。
+        def get_helper_signatures() -> str:
+            """获取已确认可用的 helper 函数签名"""
+            if not fact_report or not fact_report.available_helpers:
+                return "（无 helper）"
+            lines = []
+            for h in fact_report.available_helpers:
+                ds = h.data_source_handling or "self_contained"
+                sig = h.signature or "(无签名)"
+                lines.append(f"{h.name}: {sig} [数据源:{ds}]")
+            return "\n".join(lines)
 
-【Skill 目标】
-- tool_id: {spec.tool_id}
-- 功能: {spec.description}
-- 数据源: {spec.data_source or '未指定'}
+        tools = {
+            "get_error_info": get_error_info,
+            "get_sandbox_logs": get_sandbox_logs,
+            "get_output": get_output,
+            "get_code_section": get_code_section,
+            "get_helper_signatures": get_helper_signatures,
+        }
 
-【平台可用数据函数 — 如果失效可能与用错函数有关，请检查】
-{LOCAL_DATA_API_DOC}
+        # ── 引导式 system prompt（告诉 LLM 诊断流程，而不是随机探索）──
+        system_prompt = (
+            f"你是资深 Python 开发者。按以下流程逐步诊断 Skill 工具问题：\n\n"
+            f"Skill 功能：{spec.description}\n"
+            f"失败阶段：{stage}\n"
+            f"沙箱执行状态：success={sandbox_success}\n\n"
+            f"诊断流程（严格按顺序，每步只调用一个工具）：\n"
+            f"  第1步: get_error_info → 了解失败类型（异常/数据矛盾/评分低）\n"
+            f"  第2步: get_sandbox_logs(lines=40) + get_output → 看日志和输出\n"
+            f"  第3步（可选）: get_code_section → 仅在前两步不足以定位根因时使用\n"
+            f"  第4步: 立即输出 verdict\n\n"
+            f"关键规则：\n"
+            f"1. sandbox_success=true → 函数必然存在，根因是字段映射/业务逻辑\n"
+            f"2. 代码调用 helper ≠ 需要换函数\n"
+            f"3. 工具总调用次数 ≤4 次，超过后必须输出 verdict\n\n"
+            f"<verdict>\n"
+            f'{{"root_cause": "具体根因（哪行代码/哪个字段）", "fix_plan": ["步骤1", "步骤2"], '
+            f'"should_retry": true/false, "confidence": 0.0-1.0}}\n'
+            f"</verdict>"
+        )
 
-{PROJECT_DATA_ACCESS_DOC}
-
-【生成的代码】
-```python
-{code_context}
-```
-
-{extra_context_block}
-
-【失败信息】
-{error}
-
-【标准输出 stdout】
-{(stdout or '(空)')[:8000]}
-
-【标准错误 stderr】
-{(stderr or '(空)')[:8000]}
-
-【函数返回值】
-{output_preview or '(空)'}
-
-【修复优先级原则 — 严格遵守】
-1. 优先修复「数据获取/业务逻辑」问题（如数据源调用参数错误、字段解析遗漏、返回结构不完整）
-2. 其次修复「异常处理/边界情况」（如缺少 fallback、空值未处理）
-3. 最后才考虑「返回状态码/格式」调整
-⚠️ 禁止在 fix_plan 中仅调整 status 字段值（如从 success 改 error 或反之），这会导致振荡。
-   如果上一轮的反思已经建议过调整 status，本轮必须从数据获取层面寻找根因。
-
-【should_retry 判定准则】
-- should_retry: true — 失败原因是代码 Bug、参数错误、格式不对等可通过修改代码解决的问题
-- should_retry: false — 失败原因是外部数据源确实不提供所需数据（如该股票在 Tushare 中无增长率数据），
-  或所需数据在当前数据源中根本不存在。此时继续迭代无法改善结果，应提前终止。
-
-请用 JSON 格式回复，不要输出其他内容：
-{{"root_cause": "一句话说明根因", "fix_plan": ["修复步骤1", "修复步骤2", ...], "should_retry": true/false, "confidence": 0.0-1.0}}
-"""
         try:
             client = self._get_client()
             logger.info(
                 f"\n{'─'*50}\n"
-                f"📤 [Reflection] LLM 输入 ({len(prompt)} 字符)\n"
-                f"{'─'*50}\n"
-                f"{prompt[:3000]}\n"
-                f"{'...(截断)' if len(prompt) > 3000 else ''}\n"
+                f"📤 [Reflection] Agentic LLM 启动 | tool_id={spec.tool_id}\n"
                 f"{'─'*50}"
             )
-            response = client.chat([Message(role="user", content=prompt)])
-            raw = (response.content or "").strip()
+
+            # 用线程超时包装 LLM 调用
+            import threading
+            REFLECTION_LLM_TIMEOUT = 120
+            response_holder: Dict[str, Any] = {"raw": None, "error": None}
+
+            def _call_reflection_llm() -> None:
+                try:
+                    from core.llm.tool_normalizer import ToolCallNormalizer
+
+                    client.inject_tools(tools)
+                    tool_defs = [
+                        ToolCallNormalizer.normalize_tool_definition(func, name=name)
+                        for name, func in tools.items()
+                    ]
+                    messages = [
+                        Message(role="system", content=system_prompt),
+                        Message(
+                            role="user",
+                            content="请按上述诊断流程逐步分析。先调用 get_error_info 开始。",
+                        ),
+                    ]
+                    resp = client.chat(
+                        messages,
+                        tools=tool_defs,
+                        auto_execute_tools=True,
+                        max_tool_rounds=5,
+                        temperature=0.2,
+                        max_tokens=8192,
+                    )
+                    response_holder["raw"] = (resp.content or "").strip()
+                except Exception as exc:
+                    response_holder["error"] = str(exc)
+
+            thread = threading.Thread(target=_call_reflection_llm, daemon=True)
+            thread.start()
+            thread.join(timeout=REFLECTION_LLM_TIMEOUT)
+
+            if thread.is_alive():
+                logger.warning(
+                    f"⚠️ [Reflection] LLM 调用超时（{REFLECTION_LLM_TIMEOUT}s），跳过反思 | tool_id={spec.tool_id}"
+                )
+                return ReflectionResult(
+                    root_cause=f"反思 LLM 调用超时（{REFLECTION_LLM_TIMEOUT}s）",
+                    fix_plan=[],
+                    should_retry=False,
+                )
+
+            if response_holder["error"]:
+                logger.warning(f"⚠️ [Reflection] LLM 调用失败: {response_holder['error']}")
+                return ReflectionResult(
+                    root_cause=f"反思 LLM 调用失败: {response_holder['error']}",
+                    fix_plan=[],
+                    should_retry=False,
+                )
+
+            raw = response_holder["raw"] or ""
             logger.info(
                 f"\n{'─'*50}\n"
                 f"📥 [Reflection] LLM 输出 ({len(raw)} 字符)\n"
@@ -1719,9 +2102,16 @@ class IterationController:
             )
 
             import re
-            json_match = re.search(r"\{[^}]+\}", raw, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
+            # 优先从 <verdict> 标签中提取 JSON
+            verdict_match = re.search(r"<verdict>\s*(.*?)\s*</verdict>", raw, re.DOTALL)
+            if verdict_match:
+                json_str = verdict_match.group(1).strip()
+            else:
+                fallback_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", raw, re.DOTALL)
+                json_str = fallback_match.group() if fallback_match else ""
+
+            if json_str:
+                data = json.loads(json_str)
                 return ReflectionResult(
                     root_cause=data.get("root_cause", "未知"),
                     fix_plan=data.get("fix_plan", []),
@@ -1738,6 +2128,293 @@ class IterationController:
             confidence=0.3,
         )
 
+    # ==================== 财经专家判断 ====================
+
+    def _check_no_data_and_advise(
+        self,
+        spec: SkillSpec,
+        sandbox_output: Any,
+        fact_report: Optional[ImplementationFactReport] = None,
+    ) -> str:
+        """检查沙箱输出是否包含 no_data，如果是则调用财经专家判断合理性 + 推荐换股。
+
+        返回专家建议文本（用于注入 feedback 和 extra_context），无 no_data 则返回空字符串。
+        """
+        if not sandbox_output or not isinstance(sandbox_output, dict):
+            return ""
+
+        # 检测沙箱输出中是否有 no_data / 无数据 信号
+        output_status = str(sandbox_output.get("status", "")).lower()
+        has_no_data_signal = (
+            output_status in ("no_data", "no_news", "no_pledge", "error")
+            or "无数据" in str(sandbox_output.get("message", ""))
+            or "无可用" in str(sandbox_output.get("message", ""))
+            or "不可用" in str(sandbox_output.get("message", ""))
+        )
+        if not has_no_data_signal:
+            return ""
+
+        # 检查是否所有数值字段都为 null（另一种 no_data 信号）
+        if output_status == "success":
+            profile = sandbox_output.get("profile", {})
+            if isinstance(profile, dict):
+                null_fields = sum(
+                    1 for v in profile.values() if v is None or v == ""
+                )
+                total_fields = len(profile)
+                if total_fields >= 3 and null_fields >= total_fields * 0.7:
+                    has_no_data_signal = True
+
+        if not has_no_data_signal:
+            return ""
+
+        # 提取测试股票信息
+        test_symbol = (
+            spec.test_input.get("symbol")
+            or spec.test_input.get("code")
+            or str(sandbox_output.get("symbol", ""))
+            or ""
+        )
+        if not test_symbol:
+            return ""
+
+        # 如果 fact_report 已经有专家判断（侦察层做的），直接复用
+        if fact_report and fact_report.notes:
+            expert_notes = [
+                n for n in fact_report.notes
+                if "专家判断" in n or "推荐测试股票" in n or "建议换股" in n
+            ]
+            if expert_notes:
+                return "【财经专家判断（来自侦察层）】\n" + "\n".join(expert_notes)
+
+        # 调用财经专家判断
+        try:
+            from .financial_expert_advisor import get_financial_expert_advisor
+
+            advisor = get_financial_expert_advisor(
+                llm_client=self._get_client_safe() if hasattr(self, "_get_client_safe") else self._get_client(),
+                provider=self._provider,
+                model=self._model,
+            )
+
+            # 获取股票基础信息
+            stock_name = ""
+            industry = ""
+            try:
+                from core.skill_runtime.data_access import get_stock_basic_info
+
+                basic = get_stock_basic_info(test_symbol) or {}
+                stock_name = basic.get("name", "")
+                industry = basic.get("industry", "")
+            except Exception:
+                pass
+
+            # 推断数据类型
+            data_type = "所需数据"
+            helper_name = ""
+            if fact_report and fact_report.available_helpers:
+                helper_name = fact_report.available_helpers[0].name
+                name_lower = helper_name.lower()
+                if "pledge" in name_lower:
+                    data_type = "质押数据"
+                elif "financial" in name_lower or "annual" in name_lower:
+                    data_type = "财务数据"
+                elif "news" in name_lower or "announcement" in name_lower:
+                    data_type = "新闻/公告数据"
+                elif "valuation" in name_lower:
+                    data_type = "估值数据"
+
+            # helper 的 warnings（从 sandbox_output 提取）
+            helper_warnings = []
+            if isinstance(sandbox_output.get("data_source_note"), str):
+                helper_warnings.append(sandbox_output.get("data_source_note"))
+            if sandbox_output.get("note"):
+                helper_warnings.append(str(sandbox_output.get("note")))
+
+            judgment = advisor.judge_no_data_rationality(
+                stock_symbol=test_symbol,
+                stock_name=stock_name,
+                industry=industry,
+                skill_purpose=spec.display_name or spec.description or "",
+                data_type=data_type,
+                helper_name=helper_name,
+                helper_warnings=helper_warnings,
+                skill_category=getattr(spec, "category", ""),
+            )
+
+            logger.info(
+                f"🧠 [财经专家] no_data 判断: is_rational={judgment.is_rational}, "
+                f"confidence={judgment.confidence:.2f}, stock={test_symbol}"
+            )
+            return judgment.to_feedback_text()
+
+        except Exception as e:
+            logger.warning(f"⚠️ 财经专家判断失败: {e}")
+            return ""
+
+    def _get_client_safe(self):
+        """安全获取 LLM 客户端，失败返回 None"""
+        try:
+            return self._get_client()
+        except Exception:
+            return None
+
+    # ==================== 标准函数参考对比 ====================
+
+    def _compare_with_reference_helpers(
+        self,
+        sandbox_result: SandboxResult,
+        spec: SkillSpec,
+        fact_report: Optional[ImplementationFactReport] = None,
+    ) -> List[str]:
+        """
+        当侦察层推荐了可复用的标准 helper 时，运行这些 helper 并与 Skill 输出对比。
+
+        如果 Skill 输出与标准 helper 输出差异过大（如关键数值字段不一致），
+        说明 Skill 代码没有正确复用/实现功能，应返回 RETRY。
+        """
+        failures: List[str] = []
+        if not fact_report or not fact_report.available_helpers:
+            return failures
+
+        # 获取测试股票代码
+        test_symbol = spec.test_input.get("symbol") or spec.test_input.get("code") or ""
+        if not test_symbol:
+            return failures
+
+        for helper in fact_report.available_helpers[:3]:  # 最多比较 3 个 helpers
+            try:
+                # 动态导入并执行标准函数
+                reference_result = self._run_reference_helper(
+                    helper.module or "", helper.name or "", test_symbol, spec.test_input
+                )
+                if reference_result is None:
+                    continue
+
+                skill_output = sandbox_result.output
+
+                # 提取关键数值字段进行对比
+                diffs = self._compare_outputs(helper.name or "", reference_result, skill_output)
+                if diffs:
+                    failures.extend(diffs)
+                    logger.info(
+                        f"🔍 [参考对比] {helper.name}: 发现 {len(diffs)} 个差异"
+                    )
+                else:
+                    logger.info(f"✅ [参考对比] {helper.name}: 输出一致，通过")
+            except Exception as exc:
+                logger.warning(f"⚠️ [参考对比] {helper.name}: 执行失败 {exc}")
+
+        return failures
+
+    @staticmethod
+    def _run_reference_helper(
+        module: str,
+        function_name: str,
+        symbol: str,
+        test_input: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """动态导入并执行标准 helper 函数"""
+        try:
+            # module 已经是完整路径（如 core.skill_runtime.standard_financial_apis）
+            # 直接使用，不要重复拼接
+            func = None
+            candidate_modules = [module]
+            # 如果 module 不是以 core. 开头，补充候选路径
+            if not module.startswith("core."):
+                candidate_modules.append(f"core.skill_runtime.{module}")
+                candidate_modules.append(f"core.tools.implementations.fundamentals.{module}")
+
+            for full_module in candidate_modules:
+                try:
+                    mod = __import__(full_module, fromlist=[function_name])
+                    func = getattr(mod, function_name, None)
+                    if func is not None and callable(func):
+                        break
+                except ImportError:
+                    continue
+
+            if func is None or not callable(func):
+                logger.warning(f"⚠️ [参考对比] 函数 {function_name} 在 {module} 中未找到")
+                return None
+
+            # 调用标准函数
+            result = func(symbol=symbol)
+            if isinstance(result, str):
+                import json
+                result = json.loads(result)
+            return result if isinstance(result, dict) else {"value": result}
+        except Exception as e:
+            logger.warning(f"⚠️ [参考对比] 执行 {function_name} 失败: {e}")
+            return None
+
+    @staticmethod
+    def _compare_outputs(
+        helper_name: str,
+        reference: Dict[str, Any],
+        skill_output: Any,
+    ) -> List[str]:
+        """比较两个输出的关键差异"""
+        diffs: List[str] = []
+
+        # 递归提取数值字段
+        def _extract_numeric(obj: Any, prefix: str = "") -> Dict[str, float]:
+            values: Dict[str, float] = {}
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    full = f"{prefix}.{k}" if prefix else k
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        values[full] = float(v)
+                    elif isinstance(v, dict):
+                        values.update(_extract_numeric(v, full))
+            return values
+
+        ref_values = _extract_numeric(reference)
+        skill_values = _extract_numeric(skill_output) if isinstance(skill_output, dict) else {}
+
+        if not ref_values:
+            return diffs
+
+        # 找到共同的字段进行比较
+        common_fields = set(ref_values.keys()) & set(skill_values.keys())
+        if not common_fields:
+            diffs.append(
+                f"[{helper_name}] 标准函数返回 {len(ref_values)} 个数值字段，"
+                f"但 Skill 输出中找不到任何匹配字段，可能是字段命名不一致"
+            )
+            return diffs
+
+        for field in sorted(common_fields):
+            ref_val = ref_values[field]
+            skill_val = skill_values[field]
+
+            # 两个都是 0：全部通过（可能是真正的 0 值）
+            if ref_val == 0.0 and skill_val == 0.0:
+                continue
+
+            # Reference 有值但 Skill 为 0：严重问题
+            if ref_val != 0.0 and skill_val == 0.0:
+                diffs.append(
+                    f"[{helper_name}] 字段 {field}: 标准函数={ref_val}, Skill=0 "
+                    f"(数据获取或计算逻辑有误，不应为 0)"
+                )
+                continue
+
+            # Reference 为 0 但 Skill 有值：可能正常（Skill 提供了额外数据）
+            if ref_val == 0.0 and skill_val != 0.0:
+                continue
+
+            # 两者都有值，比较差异比例
+            if ref_val != 0.0:
+                ratio = abs(skill_val - ref_val) / abs(ref_val)
+                if ratio > 0.5:  # 差异超过 50%
+                    diffs.append(
+                        f"[{helper_name}] 字段 {field}: 标准函数={ref_val:.4f}, "
+                        f"Skill={skill_val:.4f} (差异 {ratio:.0%})"
+                    )
+
+        return diffs
+
     # ==================== 边缘测试 ====================
 
     def _run_edge_tests(self, code: str, spec: SkillSpec) -> List[str]:
@@ -1745,15 +2422,28 @@ class IterationController:
         在主测试通过后，运行额外的边缘测试场景：
         1. 空/无效参数测试 — 函数不应崩溃
         2. LLM 生成的测试用例 — 检查是否有 mock 数据
+
+        边缘测试使用更短的超时（10s），强制执行“无效输入 5 秒内返回错误响应”的规则。
         """
         failures: List[str] = []
+
+        # 边缘测试使用独立的短超时 runner，强制代码对无效输入快速失败
+        edge_runner = self._get_edge_test_runner()
 
         edge_inputs = self._generate_edge_inputs(spec)
         for label, test_input in edge_inputs:
             try:
-                result = self._runner.run(code, spec, test_input=test_input)
+                result = edge_runner.run(code, spec, test_input=test_input)
                 if not result.success:
-                    failures.append(f"边缘测试「{label}」执行崩溃: {result.error or '未知'}")
+                    # 沙箱执行崩溃或超时都算失败
+                    err_msg = result.error or "未知"
+                    if "超时" in err_msg or "timeout" in err_msg.lower():
+                        failures.append(
+                            f"边缘测试「{label}」超时：代码未在 10s 内对无效输入返回响应，"
+                            f"必须在函数开头做股票代码预检并快速返回错误。详情: {err_msg}"
+                        )
+                    else:
+                        failures.append(f"边缘测试「{label}」执行崩溃: {err_msg}")
                 elif result.output is not None:
                     output_str = json.dumps(result.output, ensure_ascii=False, default=str)
                     if self._looks_like_mock_data(output_str):
@@ -1762,6 +2452,13 @@ class IterationController:
                 failures.append(f"边缘测试「{label}」异常: {e}")
 
         return failures
+
+    def _get_edge_test_runner(self):
+        """获取边缘测试专用 runner（短超时）。"""
+        # 懒加载并缓存，避免每次边缘测试都创建新实例
+        if getattr(self, "_edge_runner", None) is None:
+            self._edge_runner = SandboxRunner(timeout=10)
+        return self._edge_runner
 
     @staticmethod
     def _generate_edge_inputs(spec: SkillSpec) -> List[tuple]:
@@ -2010,6 +2707,11 @@ class IterationController:
             )
             parts.append(f"\n## 标准输出 (stdout 摘要)\n{stdout_excerpt}")
 
+            # 提取 helper 返回结构信息（关键：告诉代码生成器 helper 实际返回哪些字段）
+            helper_return_keys = IterationController._extract_helper_return_keys(stdout)
+            if helper_return_keys:
+                parts.append(f"\n## Helper 实际返回字段（🚨 代码必须匹配这些字段名）\n{helper_return_keys}")
+
         if stderr:
             stderr_excerpt = IterationController._summarize_text(
                 stderr,
@@ -2086,3 +2788,33 @@ class IterationController:
             parts.append(f"输出格式质量不足 ({score.format_quality}/10)")
         feedback_lines = "\n".join(f"  - {p}" for p in parts)
         return f"【评分不足 ({score.total}/10)】\n{feedback_lines}\n请针对以上维度改进代码。"
+
+    @staticmethod
+    def _extract_helper_return_keys(stdout: str) -> str:
+        """从沙箱 stdout 提取 helper 函数的返回结构（字段名），帮助代码生成器正确映射"""
+        import re
+        # 匹配 "📊 xxx 返回结构: ['field1', 'field2', ...]" 或 "returned keys: ['field1', ...]"
+        pattern = re.compile(r"(?:返回结构|returned keys|返回键).*?\[([^\]]+)\]", re.IGNORECASE)
+        matches = pattern.findall(stdout)
+        if not matches:
+            # 也尝试匹配纯 "keys: ['...']" 格式
+            pattern2 = re.compile(r"(?:keys|字段)[：:]\s*\[([^\]]+)\]", re.IGNORECASE)
+            matches = pattern2.findall(stdout)
+
+        if not matches:
+            return ""
+
+        lines = []
+        seen_keys = set()
+        for m in matches:
+            keys_str = m.strip()
+            # 解析 key 列表
+            keys = [k.strip().strip("'\"") for k in keys_str.split(",") if k.strip().strip("'\"")]
+            key_sig = ", ".join(keys[:12])  # 最多 12 个字段
+            if key_sig and key_sig not in seen_keys:
+                seen_keys.add(key_sig)
+                lines.append(f"  [{key_sig}]")
+
+        if not lines:
+            return ""
+        return "\n".join(lines[:5])  # 最多 5 个 helper 的返回结构
