@@ -6,10 +6,14 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from datetime import datetime, timedelta
 import re
 from statistics import mean, median, pstdev
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from .data_access import (
     _get_db,
@@ -24,6 +28,7 @@ from .data_access import (
 )
 from .project_access import get_external_historical_data, get_external_valuation_data
 from .sync_wrappers import normalize_tabular_result, run_async_in_sync
+from .catalog import SUPPORTED_EXTERNAL_SOURCES, list_configured_external_sources
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -223,6 +228,9 @@ def _series_stats(values: List[Optional[float]]) -> Dict[str, Any]:
         "coefficient_of_variation": _safe_div(std, abs(avg)) if avg else None,
     }
 
+    logger.info(f"📊 get_pledge_risk_profile 返回结构: {list(result.keys())}")
+    return result
+
 
 def _cagr(latest: Optional[float], earliest: Optional[float], periods: int) -> Optional[float]:
     if latest is None or earliest is None or earliest <= 0 or latest <= 0 or periods <= 0:
@@ -357,7 +365,31 @@ def _normalize_price_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_security_master(symbol: str) -> Dict[str, Any]:
-    """返回统一证券主数据，支持股票代码或股票名称。"""
+    """返回统一证券主数据，支持股票代码或股票名称。
+
+    Args:
+        symbol: A 股股票代码（6 位数字）或股票名称；为空时返回 no_data
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            query: 原始输入查询字符串
+            symbol: 标准化后的 6 位股票代码（解析失败时为 None）
+            ts_code: tushare 格式代码（如 "600519.SH"）
+            name: 证券名称
+            exchange: 交易所代码（如 "SH" / "SZ"）
+            industry: 所属行业
+            area: 地区
+            list_date: 上市日期（ISO 格式字符串）
+            listing_status: 上市状态
+            is_st: 是否 ST 股票
+            market_cap: 总市值
+            float_market_cap: 流通市值
+            data_source: 数据来源名称
+            coverage: 覆盖信息 — has_basic_info(是否有基础信息), has_market_quote(是否有行情),
+                     resolved_by_name(是否通过名称解析)
+            warnings: 警告信息列表
+    """
     original_query = str(symbol or "").strip()
     normalized_symbol, resolved_basic = _resolve_security_query_to_symbol(original_query)
     basic = resolved_basic or (get_stock_basic_info(normalized_symbol) if normalized_symbol else {}) or {}
@@ -401,7 +433,29 @@ def get_adjusted_price_series(
     period: str = "daily",
     limit: int = 1000,
 ) -> Dict[str, Any]:
-    """返回标准化价格序列。当前优先使用本地日线，若本地已复权则透传复权价。"""
+    """返回标准化价格序列。当前优先使用本地日线，若本地已复权则透传复权价。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        start_date: 起始日期（YYYY-MM-DD），为 None 时默认近 3 年
+        end_date: 截止日期（YYYY-MM-DD），为 None 时默认今天
+        period: 周期: "daily"（默认）| "weekly" | "monthly"
+        limit: 最大样本数（默认 1000，会被截断到 [1, 3000]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            period: 实际使用的周期
+            adjustment: 复权标识: "as_stored"（按本地存储透传）
+            data_source: 数据来源: "local" 或外部数据源名称
+            window: 时间窗口 — start(起始日期), end(截止日期)
+            records: 价格序列 [{"trade_date": ..., "open": ..., "high": ..., "low": ...,
+                     "close": ..., "volume": ..., "amount": ..., "turnover_rate": ...,
+                     "pct_chg": ..., "data_source": ...}, ...]
+            coverage: 覆盖信息 — sample_count(样本数)
+            warnings: 警告信息列表
+    """
     normalized_symbol = _normalize_symbol(symbol)
     end = end_date or _today()
     start = start_date or _days_ago(365 * 3)
@@ -477,7 +531,29 @@ def get_return_series(
     period: str = "daily",
     limit: int = 1000,
 ) -> Dict[str, Any]:
-    """基于价格序列返回收益率序列。"""
+    """基于价格序列返回收益率序列。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        start_date: 起始日期（YYYY-MM-DD），为 None 时默认近 3 年
+        end_date: 截止日期（YYYY-MM-DD），为 None 时默认今天
+        period: 周期: "daily"（默认）| "weekly" | "monthly"
+        limit: 最大样本数（默认 1000，会被截断到 [1, 3000]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"（继承价格序列状态）
+            symbol: 标准化后的 6 位股票代码
+            period: 实际使用的周期
+            window: 时间窗口 — start(起始日期), end(截止日期)
+            records: 收益率序列 [{"trade_date": ..., "close": ..., "return": ...,
+                     "return_pct": ...}, ...]
+            summary: 收益率统计 — count(样本数), mean(均值), median(中位数),
+                     min(最小值), max(最大值), stddev(标准差),
+                     coefficient_of_variation(变异系数)
+            coverage: 覆盖信息 — price_sample_count(价格样本数), return_sample_count(收益率样本数)
+            warnings: 警告信息列表
+    """
     price = get_adjusted_price_series(symbol, start_date=start_date, end_date=end_date, period=period, limit=limit)
     records = price.get("records") or []
     returns: List[Dict[str, Any]] = []
@@ -513,7 +589,36 @@ def get_technical_indicator_series(
     indicators: Optional[List[str]] = None,
     limit: int = 300,
 ) -> Dict[str, Any]:
-    """基于标准价格序列计算结构化技术指标历史序列。"""
+    """基于标准价格序列计算结构化技术指标历史序列。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        start_date: 起始日期（YYYY-MM-DD），为 None 时默认近 3 年
+        end_date: 截止日期（YYYY-MM-DD），为 None 时默认今天
+        indicators: 指标列表，支持 "ma" / "macd" / "rsi" / "kdj" / "boll" / "atr" /
+                    "obv" / "support_resistance"；为 None 时返回全部
+        limit: 最大样本数（默认 300，会被截断到 [80, 1000]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            window: 时间窗口 — start(起始日期), end(截止日期)
+            data_source: 数据来源名称
+            indicators: 实际计算的指标列表（排序后）
+            records: 技术指标序列 [{"trade_date": ..., "close": ..., "ma5": ..., "ma10": ...,
+                     "ma20": ..., "ma60": ..., "dif": ..., "dea": ..., "macd_hist": ...,
+                     "rsi14": ..., "kdj_k": ..., "kdj_d": ..., "kdj_j": ...,
+                     "boll_mid": ..., "boll_upper": ..., "boll_lower": ...,
+                     "atr14": ..., "obv": ..., "support_20": ..., "resistance_20": ...}, ...]
+                     （字段按请求的 indicators 动态出现）
+            latest: 最新一日指标快照（同 records 元素结构）
+            summary: 汇总信息 — sample_count(样本数), latest_close(最新收盘价),
+                     latest_ma20(最新 MA20), latest_atr14(最新 ATR14),
+                     latest_boll_position(布林带位置 0-1),
+                     latest_support_20(最新 20 日支撑), latest_resistance_20(最新 20 日阻力)
+            warnings: 警告信息列表
+    """
     requested = {_normalize_metric_key(item) for item in (indicators or ["ma", "macd", "rsi", "kdj", "boll", "atr", "obv", "support_resistance"])}
     price = get_adjusted_price_series(symbol, start_date=start_date, end_date=end_date, limit=max(80, min(int(limit or 300), 1000)))
     rows = price.get("records") or []
@@ -658,7 +763,26 @@ def get_volatility_metrics(
     period: str = "daily",
     limit: int = 1000,
 ) -> Dict[str, Any]:
-    """返回收益率波动率指标。"""
+    """返回收益率波动率指标。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        start_date: 起始日期（YYYY-MM-DD），为 None 时默认近 3 年
+        end_date: 截止日期（YYYY-MM-DD），为 None 时默认今天
+        period: 周期: "daily"（默认，年化因子 252）| "weekly"（52）| "monthly"（12）
+        limit: 最大样本数（默认 1000，会被截断到 [1, 3000]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "insufficient_data"
+            symbol: 标准化后的 6 位股票代码
+            period: 实际使用的周期
+            window: 时间窗口 — start(起始日期), end(截止日期)
+            metrics: 波动率指标 — volatility(日波动率), volatility_pct(日波动率%),
+                     annualized_volatility(年化波动率),
+                     annualized_volatility_pct(年化波动率%), sample_count(样本数)
+            warnings: 警告信息列表（有效样本少于 20 时附加提示）
+    """
     returns = get_return_series(symbol, start_date=start_date, end_date=end_date, period=period, limit=limit)
     values = [item.get("return") for item in returns.get("records", []) if item.get("return") is not None]
     valid = [float(value) for value in values]
@@ -688,7 +812,28 @@ def get_drawdown_metrics(
     period: str = "daily",
     limit: int = 1000,
 ) -> Dict[str, Any]:
-    """返回最大回撤和回撤序列。"""
+    """返回最大回撤和回撤序列。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        start_date: 起始日期（YYYY-MM-DD），为 None 时默认近 3 年
+        end_date: 截止日期（YYYY-MM-DD），为 None 时默认今天
+        period: 周期: "daily"（默认）| "weekly" | "monthly"
+        limit: 最大样本数（默认 1000，会被截断到 [1, 3000]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "insufficient_data"
+            symbol: 标准化后的 6 位股票代码
+            period: 实际使用的周期
+            window: 时间窗口 — start(起始日期), end(截止日期)
+            metrics: 回撤指标 — max_drawdown(最大回撤), max_drawdown_pct(最大回撤%),
+                     max_drawdown_start(回撤起点日期), max_drawdown_end(回撤终点日期),
+                     sample_count(样本数)
+            drawdown_series: 回撤序列 [{"trade_date": ..., "close": ..., "peak": ...,
+                              "drawdown": ..., "drawdown_pct": ...}, ...]
+            warnings: 警告信息列表
+    """
     price = get_adjusted_price_series(symbol, start_date=start_date, end_date=end_date, period=period, limit=limit)
     peak: Optional[float] = None
     peak_date: Optional[str] = None
@@ -732,7 +877,29 @@ def get_historical_financial_annual_series(
     years: int = 10,
     source: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """返回单只 A 股最近 N 年完整年报财务序列。"""
+    """返回单只 A 股最近 N 年完整年报财务序列。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        years: 请求的年报年数（默认 10，会被截断到 [1, 15]）
+        source: 指定数据源（"tushare" / "akshare"），为 None 时自动选择
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            requested_years: 实际请求的年报年数
+            records: 年报财务序列 [{"year": ..., "report_period": ..., "ann_date": ...,
+                     "revenue": ..., "net_profit": ..., "roe": ..., "roa": ..., "roic": ...,
+                     "gross_margin": ..., "netprofit_margin": ..., "operating_margin": ...,
+                     "expense_ratio": ..., "asset_turnover": ..., "equity_multiplier": ...,
+                     "operating_cashflow": ..., "free_cashflow": ..., "total_assets": ...,
+                     "total_liab": ..., "total_equity": ..., "debt_to_assets": ...,
+                     "data_source": ...}, ...]（按年份倒序）
+            coverage: 覆盖信息 — requested_years(请求年数), available_years(实际年数),
+                     missing_years(缺失年份列表)
+            warnings: 警告信息列表
+    """
     normalized_symbol = _normalize_symbol(symbol)
     requested_years = max(1, min(int(years or 10), 15))
     fetch_limit = max(requested_years * 4 + 8, 40)
@@ -807,7 +974,28 @@ def get_historical_financial_annual_series(
 
 
 def get_profitability_stability_metrics(symbol: str, years: int = 10, source: Optional[str] = None) -> Dict[str, Any]:
-    """基于年报序列计算盈利稳定性指标。"""
+    """基于年报序列计算盈利稳定性指标。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        years: 请求的年报年数（默认 10，会被截断到 [1, 15]）
+        source: 指定数据源（"tushare" / "akshare"），为 None 时自动选择
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"（继承年报序列状态）
+            symbol: 标准化后的 6 位股票代码
+            years_used: 实际使用的年报年数
+            coverage: 覆盖信息（结构同 get_historical_financial_annual_series）
+            metrics: 稳定性统计 — revenue(营收统计), net_profit(净利润统计),
+                     roe(ROE 统计), gross_margin(毛利率统计),
+                     revenue_growth_yoy(营收同比增速统计), net_profit_growth_yoy(净利润同比增速统计)
+                     （每个统计含 count/mean/median/min/max/stddev/coefficient_of_variation）
+            trend_series: 趋势序列 — revenue(营收列表), net_profit(净利润列表),
+                     roe(ROE 列表), gross_margin(毛利率列表),
+                     revenue_growth_yoy(营收同比增速列表), net_profit_growth_yoy(净利润同比增速列表)
+            warnings: 警告信息列表（年报样本少于 5 年时附加提示）
+    """
     series = get_historical_financial_annual_series(symbol, years=years, source=source)
     records = series.get("records") or []
     revenue_values = [item.get("revenue") for item in records]
@@ -852,7 +1040,27 @@ def get_profitability_stability_metrics(symbol: str, years: int = 10, source: Op
 
 
 def get_cashflow_quality_trend(symbol: str, years: int = 10, source: Optional[str] = None) -> Dict[str, Any]:
-    """基于年报序列计算现金流质量趋势。"""
+    """基于年报序列计算现金流质量趋势。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        years: 请求的年报年数（默认 10，会被截断到 [1, 15]）
+        source: 指定数据源（"tushare" / "akshare"），为 None 时自动选择
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"（继承年报序列状态）
+            symbol: 标准化后的 6 位股票代码
+            years_used: 实际使用的年报年数
+            coverage: 覆盖信息（结构同 get_historical_financial_annual_series）
+            trend: 现金流趋势 [{"year": ..., "report_period": ..., "net_profit": ...,
+                  "operating_cashflow": ..., "free_cashflow": ...,
+                  "ocf_to_net_profit": ..., "fcf_to_net_profit": ...,
+                  "ocf_margin": ..., "fcf_margin": ...}, ...]
+            summary: 汇总统计 — ocf_to_net_profit, fcf_to_net_profit, ocf_margin, fcf_margin
+                  （每个统计含 count/mean/median/min/max/stddev/coefficient_of_variation）
+            warnings: 警告信息列表
+    """
     series = get_historical_financial_annual_series(symbol, years=years, source=source)
     records = series.get("records") or []
     trend: List[Dict[str, Any]] = []
@@ -895,7 +1103,26 @@ def get_historical_valuation_percentile(
     lookback_years: int = 5,
     as_of_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """返回结构化历史估值分位。"""
+    """返回结构化历史估值分位。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        metrics: 估值指标列表，支持 "pe" / "pe_ttm" / "pb" / "pb_mrq" /
+                  "ps" / "ps_ttm" / "pcf" / "pcf_ttm"；为 None 时默认 ["pe_ttm", "pb", "ps_ttm"]
+        lookback_years: 回溯年数（默认 5，会被截断到 [1, 15]）
+        as_of_date: 截止日期（YYYY-MM-DD），为 None 时默认今天
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "partial_or_no_data"
+            symbol: 标准化后的 6 位股票代码
+            window: 时间窗口 — start(起始日期), end(截止日期), lookback_years(回溯年数)
+            data_source: 数据来源名称
+            metrics: 各指标分位结果 {metric_name: {status, field, current_value,
+                     current_date, median, average, min, max, percentile, sample_count}}
+                     （status 可能值: "success" | "insufficient_samples" | "no_data" | "unsupported_metric"）
+            warnings: 警告信息列表
+    """
     normalized_symbol = _normalize_symbol(symbol)
     requested_metrics = [str(item).strip().lower() for item in (metrics or ["pe_ttm", "pb", "ps_ttm"]) if str(item).strip()]
     metric_alias = {
@@ -970,7 +1197,26 @@ def get_historical_valuation_percentile(
 
 
 def get_current_valuation_snapshot(symbol: str) -> Dict[str, Any]:
-    """返回当前估值快照。"""
+    """返回当前估值快照。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            name: 证券名称
+            industry: 所属行业
+            trade_date: 行情日期
+            current_price: 当前价格
+            metrics: 估值指标 — pe, pe_ttm, pb, pb_mrq, ps, ps_ttm, peg,
+                     dividend_yield(股息率), total_mv(总市值)
+            metric_sources: 指标来源标记 — dividend_yield(股息率数据来源说明)
+            raw_metrics: 原始指标 — basic_info_dividend_yield(basic_info 原始股息率)
+            data_source: 数据来源名称
+            warnings: 警告信息列表
+    """
     normalized_symbol = _normalize_symbol(symbol)
     basic = get_stock_basic_info(normalized_symbol) or {}
     quote = get_market_quotes(normalized_symbol) or {}
@@ -1021,7 +1267,27 @@ def get_current_valuation_snapshot(symbol: str) -> Dict[str, Any]:
 
 
 def get_debt_solvency_trend(symbol: str, years: int = 10, source: Optional[str] = None) -> Dict[str, Any]:
-    """返回偿债能力长期趋势。"""
+    """返回偿债能力长期趋势。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        years: 请求的年报年数（默认 10，会被截断到 [1, 15]）
+        source: 指定数据源（"tushare" / "akshare"），为 None 时自动选择
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"（继承年报序列状态）
+            symbol: 标准化后的 6 位股票代码
+            years_used: 实际使用的年报年数
+            coverage: 覆盖信息（结构同 get_historical_financial_annual_series）
+            trend: 偿债能力趋势 [{"year": ..., "report_period": ..., "total_assets": ...,
+                  "total_liab": ..., "total_equity": ..., "debt_to_assets": ...,
+                  "current_ratio": ..., "quick_ratio": ..., "cash_ratio": ...,
+                  "debt_to_equity": ..., "ocf_to_total_liab": ...}, ...]
+            summary: 汇总统计 — debt_to_assets, debt_to_equity, ocf_to_total_liab
+                  （每个统计含 count/mean/median/min/max/stddev/coefficient_of_variation）
+            warnings: 警告信息列表
+    """
     series = get_historical_financial_annual_series(symbol, years=years, source=source)
     trend: List[Dict[str, Any]] = []
     raw_records = get_stock_financial_periods(_normalize_symbol(symbol), source=source, limit=max(int(years or 10) * 4 + 8, 40))
@@ -1061,7 +1327,25 @@ def get_debt_solvency_trend(symbol: str, years: int = 10, source: Optional[str] 
 
 
 def get_margin_stability_metrics(symbol: str, years: int = 10, source: Optional[str] = None) -> Dict[str, Any]:
-    """返回利润率稳定性指标。"""
+    """返回利润率稳定性指标。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        years: 请求的年报年数（默认 10，会被截断到 [1, 15]）
+        source: 指定数据源（"tushare" / "akshare"），为 None 时自动选择
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"（继承年报序列状态）
+            symbol: 标准化后的 6 位股票代码
+            years_used: 实际使用的年报年数
+            coverage: 覆盖信息（结构同 get_historical_financial_annual_series）
+            trend: 利润率趋势 [{"year": ..., "report_period": ..., "gross_margin": ...,
+                  "netprofit_margin": ..., "operating_margin": ..., "expense_ratio": ...}, ...]
+            metrics: 利润率稳定性统计 — gross_margin, netprofit_margin, operating_margin, expense_ratio
+                  （每个统计含 count/mean/median/min/max/stddev/coefficient_of_variation）
+            warnings: 警告信息列表（年报样本少于 5 年时附加提示）
+    """
     series = get_historical_financial_annual_series(symbol, years=years, source=source)
     records = series.get("records") or []
     metrics = {
@@ -1096,7 +1380,26 @@ def get_margin_stability_metrics(symbol: str, years: int = 10, source: Optional[
 
 
 def get_capital_efficiency_trend(symbol: str, years: int = 10, source: Optional[str] = None) -> Dict[str, Any]:
-    """返回资本效率长期趋势。"""
+    """返回资本效率长期趋势。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        years: 请求的年报年数（默认 10，会被截断到 [1, 15]）
+        source: 指定数据源（"tushare" / "akshare"），为 None 时自动选择
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"（继承年报序列状态）
+            symbol: 标准化后的 6 位股票代码
+            years_used: 实际使用的年报年数
+            coverage: 覆盖信息（结构同 get_historical_financial_annual_series）
+            trend: 资本效率趋势 [{"year": ..., "report_period": ..., "roe": ...,
+                  "roa": ..., "roic": ..., "asset_turnover": ..., "equity_multiplier": ...,
+                  "total_assets": ..., "total_equity": ...}, ...]
+            summary: 汇总统计 — roe, roa, roic, asset_turnover, equity_multiplier
+                  （每个统计含 count/mean/median/min/max/stddev/coefficient_of_variation）
+            warnings: 警告信息列表
+    """
     series = get_historical_financial_annual_series(symbol, years=years, source=source)
     records = series.get("records") or []
     trend: List[Dict[str, Any]] = []
@@ -1139,7 +1442,33 @@ def get_capital_efficiency_trend(symbol: str, years: int = 10, source: Optional[
 
 
 def get_growth_quality_metrics(symbol: str, years: int = 10, source: Optional[str] = None) -> Dict[str, Any]:
-    """返回成长质量指标。"""
+    """返回成长质量指标。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        years: 请求的年报年数（默认 10，会被截断到 [1, 15]）
+        source: 指定数据源（"tushare" / "akshare"），为 None 时自动选择
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"（继承年报序列状态）
+            symbol: 标准化后的 6 位股票代码
+            years_used: 实际使用的年报年数
+            coverage: 覆盖信息（结构同 get_historical_financial_annual_series）
+            cagr: 复合增长率 — revenue(营收 CAGR), net_profit(净利润 CAGR),
+                  operating_cashflow(经营现金流 CAGR), free_cashflow(自由现金流 CAGR)
+            annual_growth: 年度同比增速 [{"year": ..., "report_period": ...,
+                  "revenue_growth": ..., "net_profit_growth": ...,
+                  "operating_cashflow_growth": ..., "free_cashflow_growth": ...}, ...]（按年份升序）
+            growth_stability: 增速稳定性统计 — revenue_growth, net_profit_growth,
+                  operating_cashflow_growth, free_cashflow_growth
+                  （每个统计含 count/mean/median/min/max/stddev/coefficient_of_variation）
+            quality_flags: 质量标记 — revenue_positive_year_ratio(营收正增长年份占比),
+                  profit_positive_year_ratio(净利润正增长年份占比),
+                  fcf_positive_year_ratio(自由现金流正增长年份占比),
+                  profit_growth_above_revenue_ratio(利润增速高于营收增速年份占比)
+            warnings: 警告信息列表
+    """
     series = get_historical_financial_annual_series(symbol, years=years, source=source)
     records = series.get("records") or []
     chronological = list(reversed(records))
@@ -1200,7 +1529,33 @@ def get_single_stock_risk_profile(
     period: str = "daily",
     limit: int = 1000,
 ) -> Dict[str, Any]:
-    """返回单只股票价格风险画像。"""
+    """返回单只股票价格风险画像。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        start_date: 起始日期（YYYY-MM-DD），为 None 时默认近 3 年
+        end_date: 截止日期（YYYY-MM-DD），为 None 时默认今天
+        period: 周期: "daily"（默认）| "weekly" | "monthly"
+        limit: 最大样本数（默认 1000，会被截断到 [1, 3000]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "insufficient_data"（样本数 >= 20 才为 success）
+            symbol: 标准化后的 6 位股票代码
+            period: 实际使用的周期
+            window: 时间窗口 — start(起始日期), end(截止日期)
+            metrics: 风险指标 — sample_count(样本数), average_return(平均收益率),
+                     median_return(收益率中位数), best_return(最佳收益率),
+                     best_return_pct(最佳收益率%), worst_return(最差收益率),
+                     worst_return_pct(最差收益率%), positive_day_ratio(上涨日占比),
+                     negative_day_ratio(下跌日占比), downside_volatility(下行波动率),
+                     downside_volatility_pct(下行波动率%), annualized_volatility(年化波动率),
+                     max_drawdown(最大回撤), max_drawdown_start(回撤起点),
+                     max_drawdown_end(回撤终点)
+            components: 子组件状态 — return_series_status(收益率序列状态),
+                     volatility_status(波动率状态), drawdown_status(回撤状态)
+            warnings: 警告信息列表（合并子组件警告）
+    """
     returns = get_return_series(symbol, start_date=start_date, end_date=end_date, period=period, limit=limit)
     volatility = get_volatility_metrics(symbol, start_date=start_date, end_date=end_date, period=period, limit=limit)
     drawdown = get_drawdown_metrics(symbol, start_date=start_date, end_date=end_date, period=period, limit=limit)
@@ -1243,7 +1598,23 @@ def get_single_stock_risk_profile(
 
 
 def get_peer_group(symbol: str, limit: int = 50) -> Dict[str, Any]:
-    """返回标准化同行样本组。"""
+    """返回标准化同行样本组。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        limit: 最大同行样本数（默认 50，会被截断到 [1, 300]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            industry: 所属行业（无法识别时为 None）
+            peers: 同行样本列表 [{"symbol": ..., "name": ..., "industry": ...,
+                  "total_mv": ..., "pe_ttm": ..., "pb": ..., "roe": ...,
+                  "data_source": ...}, ...]
+            coverage: 覆盖信息 — peer_count(同行数), limit(请求上限)
+            warnings: 警告信息列表
+    """
     master = get_security_master(symbol)
     industry = master.get("industry")
     warnings: List[str] = []
@@ -1281,7 +1652,39 @@ def get_industry_market_performance(
     lookback_days: int = 20,
     peer_limit: int = 100,
 ) -> Dict[str, Any]:
-    """返回结构化行业市场表现。"""
+    """返回结构化行业市场表现。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        start_date: 起始日期（YYYY-MM-DD），为 None 时默认 lookback_days*2 天前
+        end_date: 截止日期（YYYY-MM-DD），为 None 时默认今天
+        lookback_days: 回溯天数（默认 20）
+        peer_limit: 最大同行样本数（默认 100，会被截断到 [1, 200]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            industry: 所属行业
+            window: 时间窗口 — start(起始日期), end(截止日期), lookback_days(回溯天数)
+            summary: 汇总信息 — peer_count(同行数), industry_return(行业平均收益),
+                     industry_return_pct(行业平均收益%), industry_return_median(行业中位收益),
+                     target_return(目标股票收益), target_return_pct(目标股票收益%),
+                     target_return_percentile(目标股票收益分位 0-100),
+                     rising_ratio(上涨股票占比), latest_total_amount(最新成交额合计),
+                     matched_moneyflow_count(匹配资金流记录数)
+            top_gainers: 涨幅前 10 [{"symbol": ..., "name": ..., "first_date": ...,
+                       "latest_date": ..., "first_close": ..., "latest_close": ...,
+                       "period_return": ..., "period_return_pct": ...,
+                       "latest_pct_chg": ..., "amount": ...}, ...]
+            top_losers: 跌幅前 10（结构同 top_gainers）
+            moneyflow: 行业资金流 [{"trade_date": ..., "industry": ..., "pct_change": ...,
+                     "net_amount": ..., "net_buy_amount": ..., "net_sell_amount": ...,
+                     "company_num": ...}, ...]（最多 20 条）
+            coverage: 覆盖信息 — peer_price_sample_count(价格样本数), peer_limit(上限),
+                     moneyflow_sample_count(资金流记录数)
+            warnings: 警告信息列表
+    """
     master = get_security_master(symbol)
     industry = master.get("industry")
     normalized_symbol = master.get("symbol") or _normalize_symbol(symbol)
@@ -1367,7 +1770,30 @@ def get_industry_market_performance(
 
 
 def get_peer_relative_growth(symbol: str, metrics: Optional[List[str]] = None, years: int = 5, peer_limit: int = 50) -> Dict[str, Any]:
-    """返回同业成长指标相对分位。"""
+    """返回同业成长指标相对分位。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        metrics: 成长指标列表，支持 "revenue" / "revenue_cagr" / "net_profit" /
+                  "net_profit_cagr" / "operating_cashflow" / "operating_cashflow_cagr" /
+                  "free_cashflow" / "free_cashflow_cagr"；为 None 时默认全部 4 个 CAGR
+        years: 请求的年报年数（默认 5）
+        peer_limit: 最大同行样本数（默认 50，会被截断到 [1, 100]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "partial_or_no_data"
+            symbol: 标准化后的 6 位股票代码
+            industry: 所属行业
+            years: 实际使用的年报年数
+            metrics: 各指标相对分位 {metric_name: {current_value, current_value_pct,
+                     peer_count, peer_average, peer_median, peer_percentile}}
+            samples: 样本列表 [{"symbol": ..., "is_target": ..., "revenue_cagr": ...,
+                  "net_profit_cagr": ..., "operating_cashflow_cagr": ...,
+                  "free_cashflow_cagr": ..., "years_used": ..., "status": ...}, ...]
+            coverage: 覆盖信息 — sample_count(样本数), peer_limit(上限)
+            warnings: 警告信息列表
+    """
     requested = [_normalize_metric_key(item) for item in (metrics or ["revenue_cagr", "net_profit_cagr", "operating_cashflow_cagr", "free_cashflow_cagr"]) if str(item).strip()]
     metric_alias = {
         "revenue": "revenue_cagr",
@@ -1430,7 +1856,23 @@ def get_peer_relative_growth(symbol: str, metrics: Optional[List[str]] = None, y
 
 
 def get_peer_relative_valuation(symbol: str, metrics: Optional[List[str]] = None, peer_limit: int = 200) -> Dict[str, Any]:
-    """返回同业相对估值分位和行业统计。"""
+    """返回同业相对估值分位和行业统计。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        metrics: 估值指标列表，支持 "pe" / "pe_ttm" / "pb" / "pb_mrq" / "ps" / "ps_ttm"；
+                  为 None 时默认 ["pe", "pb", "ps"]
+        peer_limit: 最大同行样本数（默认 200）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            industry: 所属行业（无法识别时为 None）
+            metrics: 各估值指标相对分位 {metric_name: {current_value, industry_average,
+                     industry_median, industry_min, industry_max, peer_count, peer_percentile}}
+            warnings: 警告信息列表
+    """
     requested = [str(item).lower() for item in (metrics or ["pe", "pb", "ps"]) if str(item).strip()]
     master = get_security_master(symbol)
     snapshot = get_current_valuation_snapshot(symbol)
@@ -1467,7 +1909,23 @@ def get_peer_relative_valuation(symbol: str, metrics: Optional[List[str]] = None
 
 
 def get_peer_relative_quality(symbol: str, metrics: Optional[List[str]] = None, peer_limit: int = 200) -> Dict[str, Any]:
-    """返回同业质量指标相对位置。"""
+    """返回同业质量指标相对位置。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        metrics: 质量指标列表，支持 "pe" / "pe_ttm" / "pb" / "roe"；
+                  为 None 时默认 ["roe", "pb", "pe_ttm"]
+        peer_limit: 最大同行样本数（默认 200）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "partial_or_no_data"
+            symbol: 标准化后的 6 位股票代码
+            industry: 所属行业
+            metrics: 各质量指标相对分位 {metric_name: {current_value, peer_count,
+                     peer_average, peer_median, peer_percentile}}
+            warnings: 警告信息列表
+    """
     requested = [str(item).lower() for item in (metrics or ["roe", "pb", "pe_ttm"]) if str(item).strip()]
     peer_group = get_peer_group(symbol, limit=peer_limit)
     master = get_security_master(symbol)
@@ -1500,7 +1958,24 @@ def get_peer_relative_quality(symbol: str, metrics: Optional[List[str]] = None, 
 
 
 def get_industry_fundamental_summary(symbol: str, peer_limit: int = 100) -> Dict[str, Any]:
-    """返回目标股票所在行业的基本面样本统计。"""
+    """返回目标股票所在行业的基本面样本统计。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        peer_limit: 最大同行样本数（默认 100）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            industry: 所属行业
+            coverage: 覆盖信息 — peer_count(同行数), peer_limit(上限)
+            metrics: 行业基本面统计 — total_mv(总市值), pe_ttm(市盈率),
+                     pb(市净率), roe(净资产收益率)
+                     （每个统计含 count/mean/median/min/max/stddev/coefficient_of_variation）
+            top_market_cap_peers: 市值前 10 同行（结构同 get_peer_group 的 peers 元素）
+            warnings: 警告信息列表（同行样本少于 5 个时附加提示）
+    """
     peer_group = get_peer_group(symbol, limit=peer_limit)
     peers = peer_group.get("peers") or []
     requested_fields = ["total_mv", "pe_ttm", "pb", "roe"]
@@ -1592,7 +2067,26 @@ def get_capital_flow_series(symbol: str, start_date: Optional[str] = None, end_d
 
 
 def get_chip_distribution_context(symbol: str, trade_date: Optional[str] = None) -> Dict[str, Any]:
-    """返回结构化筹码分布上下文。"""
+    """返回结构化筹码分布上下文。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        trade_date: 交易日期（YYYY-MM-DD），为 None 时默认今天
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data" | "error"
+            symbol: 标准化后的 6 位股票代码
+            trade_date: 实际使用的交易日期
+            message: 错误信息（仅 status="error" 时存在）
+            data_source: 数据来源名称
+            metrics: 筹码指标 — profit_ratio(获利比例 0-1), avg_cost(平均成本),
+                     cost_90_low(90% 成本下沿), cost_90_high(90% 成本上沿),
+                     cost_90_width(90% 成本宽度), concentration_90(90% 集中度),
+                     cost_70_low(70% 成本下沿), cost_70_high(70% 成本上沿),
+                     cost_70_width(70% 成本宽度), concentration_70(70% 集中度)
+            warnings: 警告信息列表
+    """
     normalized_symbol = _normalize_symbol(symbol)
     target_date = trade_date or _today()
     try:
@@ -1644,7 +2138,31 @@ def get_chip_distribution_context(symbol: str, trade_date: Optional[str] = None)
 
 
 def get_company_event_timeline(symbol: str, lookback_days: int = 365, event_types: Optional[List[str]] = None, limit: int = 100) -> Dict[str, Any]:
-    """返回正式公告/监管事件第一版结构化时间线。"""
+    """返回正式公告/监管事件第一版结构化时间线。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        lookback_days: 回溯天数（默认 365）
+        event_types: 事件类型过滤列表，支持 "financial_report" / "dividend_plan" /
+                  "shareholder_reduction" / "shareholder_increase" / "pledge" /
+                  "litigation" / "regulatory_inquiry" / "regulatory_penalty" /
+                  "major_restructuring" / "performance_forecast" / "management_change"；
+                  为 None 时返回全部
+        limit: 最大事件数（默认 100，会被截断到 [1, 300]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            window: 时间窗口 — start(起始日期), end(截止日期), lookback_days(回溯天数)
+            data_source: 数据源集合名称（无数据时为 None）
+            events: 事件列表 [{"event_date": ..., "publish_date": ..., "event_types": [...],
+                  "title": ..., "summary": ..., "source": ..., "url": ...,
+                  "severity": ...}, ...]（severity 1-3，3 为最严重）
+            summary: 汇总信息 — event_count(事件总数), type_counts(各类型计数 dict),
+                  high_severity_count(高严重度事件数)
+            warnings: 警告信息列表
+    """
     normalized_symbol = _normalize_symbol(symbol)
     end = _today()
     start = _days_ago(lookback_days)
@@ -1731,7 +2249,28 @@ def get_company_event_timeline(symbol: str, lookback_days: int = 365, event_type
 
 
 def get_business_segment_trend(symbol: str, years: int = 5, segment_type: str = "product") -> Dict[str, Any]:
-    """返回主营结构趋势第一版。"""
+    """返回主营结构趋势第一版。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        years: 请求的年数（默认 5，会被截断到 [1, 10]）
+        segment_type: 分部类型: "product"（产品，默认）| "region"（地区）| "all"（全部）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            segment_type: 实际使用的分部类型
+            periods: 各期分部汇总 [{"report_period": ..., "segment_count": ...,
+                  "total_segment_revenue": ..., "top_segments": [{"report_period": ...,
+                  "year": ..., "segment_name": ..., "segment_type": ..., "revenue": ...,
+                  "cost": ..., "gross_profit": ..., "gross_margin": ...,
+                  "revenue_share": ..., "revenue_share_pct": ..., "source": ...}, ...],
+                  "concentration": {"top1_share": ..., "top3_share": ..., "hhi": ...}}]
+                  （按报告期倒序，最多 10 期）
+            coverage: 覆盖信息 — period_count(期数), raw_segment_count(原始分部记录数)
+            warnings: 警告信息列表
+    """
     normalized_symbol = _normalize_symbol(symbol)
     records = get_stock_financial_periods(normalized_symbol, source=None, limit=max(int(years or 5) * 6, 40))
     segments: List[Dict[str, Any]] = []
@@ -1803,7 +2342,32 @@ def get_business_segment_trend(symbol: str, years: int = 5, segment_type: str = 
 
 
 def get_shareholder_return_metrics(symbol: str, years: int = 5) -> Dict[str, Any]:
-    """返回股东回报指标第一版。"""
+    """返回股东回报指标第一版。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        years: 请求的年数（默认 5）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            data_source: 数据来源名称（"tushare" 或本地集合名）
+            current_price: 用于计算股息率的当前价格
+            records: 分红记录 [{"end_date": ..., "ann_date": ..., "ex_date": ...,
+                  "cash_div_tax": ..., "cash_div": ..., "div_proc": ...}, ...]
+            annual: 年度聚合 [{"year": ..., "cash_dividend_per_share": ...,
+                  "dividend_yield": ...}, ...]（按年份倒序）
+            metrics: 股东回报指标 — latest_cash_dividend_per_share(最新每股分红),
+                     latest_dividend_yield(最新股息率), latest_dividend_yield_pct(最新股息率%),
+                     average_cash_dividend_per_share(平均每股分红),
+                     dividend_positive_years(有分红年数),
+                     dividend_continuity_ratio(分红连续性占比),
+                     fcf_positive_ratio(自由现金流为正占比)
+            coverage: 覆盖信息 — dividend_record_count(分红记录数),
+                     annual_count(年度数), financial_years(财务年数)
+            warnings: 警告信息列表
+    """
     normalized_symbol = _normalize_symbol(symbol)
     rows, source = _read_local_collection_rows(
         ["stock_dividend", "stock_dividends", "dividend_data"],
@@ -1890,7 +2454,30 @@ def get_shareholder_return_metrics(symbol: str, years: int = 5) -> Dict[str, Any
 
 
 def get_portfolio_risk_profile(positions: List[Dict[str, Any]], start_date: Optional[str] = None, end_date: Optional[str] = None, limit: int = 300) -> Dict[str, Any]:
-    """返回持仓组合风险画像。"""
+    """返回持仓组合风险画像。
+
+    Args:
+        positions: 持仓列表，每个元素含 symbol/code、market_value 或 quantity+price；
+                   如 [{"symbol": "600519", "market_value": 100000}, ...]
+        start_date: 起始日期（YYYY-MM-DD），为 None 时默认 1 年前
+        end_date: 截止日期（YYYY-MM-DD），为 None 时默认今天
+        limit: 单只股票最大样本数（默认 300）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "insufficient_data" | "no_data"
+            window: 时间窗口 — start(起始日期), end(截止日期)
+            positions: 持仓列表（按权重倒序）[{"symbol": ..., "name": ...,
+                  "market_value": ..., "weight": ..., "industry": ...}, ...]
+            metrics: 组合风险指标 — total_market_value(总市值), sample_count(样本数),
+                     annualized_volatility(年化波动率), max_drawdown(最大回撤),
+                     var_95(95% VaR), cvar_95(95% CVaR), top1_weight(最大持仓权重),
+                     top3_weight(前 3 持仓权重合计), concentration_hhi(赫芬达尔指数)
+            exposure: 行业暴露 — industry_weights(行业权重 dict)
+            return_series: 组合收益率序列 [{"trade_date": ..., "return": ...}, ...]
+            coverage: 覆盖信息 — position_count(持仓数), sample_counts(各股票样本数 dict)
+            warnings: 警告信息列表（样本少于 20 时附加提示）
+    """
     normalized_positions = []
     for item in positions or []:
         symbol = _normalize_symbol(item.get("symbol") or item.get("code"))
@@ -1964,7 +2551,27 @@ def get_portfolio_risk_profile(positions: List[Dict[str, Any]], start_date: Opti
 
 
 def get_risk_event_flags(symbol: str, lookback_days: int = 180, limit: int = 50) -> Dict[str, Any]:
-    """基于近期新闻标题/摘要提取风险事件 flags。"""
+    """基于近期新闻标题/摘要提取风险事件 flags。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        lookback_days: 回溯天数（默认 180）
+        limit: 最大新闻条数（默认 50，会被截断到 [1, 200]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_news"
+            symbol: 标准化后的 6 位股票代码
+            window: 时间窗口 — start(起始日期), end(截止日期), lookback_days(回溯天数)
+            news_count: 新闻总数
+            hit_flags: 命中的风险事件类型列表（如 ["litigation", "pledge", ...]）
+            flags: 各类风险事件详情 {flag_name: {"hit": bool, "count": int,
+                  "examples": [{"title": ..., "publish_time": ..., "url": ...}, ...]}}
+                  （flag_name 可能值: regulatory_penalty / litigation /
+                  shareholder_reduction / pledge / performance_warning /
+                  major_restructuring / management_change）
+            warnings: 警告信息列表（无新闻时附加提示）
+    """
     normalized_symbol = _normalize_symbol(symbol)
     end = _today()
     start = _days_ago(lookback_days)
@@ -2004,7 +2611,24 @@ def get_risk_event_flags(symbol: str, lookback_days: int = 180, limit: int = 50)
 
 
 def get_company_announcements(symbol: str, lookback_days: int = 365, limit: int = 50) -> Dict[str, Any]:
-    """返回公司公告/公告类新闻的结构化列表。"""
+    """返回公司公告/公告类新闻的结构化列表。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        lookback_days: 回溯天数（默认 365）
+        limit: 最大公告条数（默认 50，会被截断到 [1, 200]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            window: 时间窗口 — start(起始日期), end(截止日期), lookback_days(回溯天数)
+            announcements: 公告列表 [{"title": ..., "publish_time": ..., "category": ...,
+                  "summary": ..., "url": ..., "source": ...}, ...]（最多 limit 条）
+            coverage: 覆盖信息 — source_news_count(原始新闻数),
+                     announcement_count(识别为公告的数量)
+            warnings: 警告信息列表
+    """
     normalized_symbol = _normalize_symbol(symbol)
     end = _today()
     start = _days_ago(lookback_days)
@@ -2030,4 +2654,665 @@ def get_company_announcements(symbol: str, lookback_days: int = 365, limit: int 
         "coverage": {"source_news_count": len(news), "announcement_count": len(announcements[:limit])},
         "warnings": [] if announcements else ["未在近期新闻中识别到公告类记录；如需正式公告，应接入公告专用数据源。"],
     }
+
+
+def get_pledge_risk_profile(symbol: str, source: Optional[str] = None) -> Dict[str, Any]:
+    """股权质押风险画像：获取质押比例、未解押规模、前几大股东质押情况、风险等级。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        source: 指定数据源（"tushare" / "akshare"），为 None 时自动选择
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success" | "no_pledge" | "no_data" | "error"
+            symbol: 标准化后的 6 位股票代码
+            data_source: 实际使用的数据源名称，无数据时为 None
+            metrics: 聚合指标 — total_pledge_ratio(总质押比例%), outstanding_pledge_amount_wan(未解押万股),
+                     total_share_wan(总股本万股), pledger_count(股东数), total_pledge_events(事件数),
+                     recent_pledge_events_30d(近30天事件数)
+            top_pledgers: 前几大未解押股东列表 [{"holder_name": ..., "shares_wan": ..., "ratio_pct": ...}, ...]
+            recent_pledges: 近期质押事件列表（最多 20 条）
+            risk_level: 风险等级: "high" | "medium_high" | "medium" | "low" | "none"
+            warnings: 警告信息列表
+            data_source_status: 各数据源调用状态
+    """
+    normalized_symbol = _normalize_symbol(symbol)
+    ts_code = _to_ts_code(normalized_symbol)
+    rows = []
+    data_source = None
+
+    def _resolve_sources(preferred_source: Optional[str], market_category: str) -> List[str]:
+        if preferred_source:
+            return [preferred_source]
+        configured = list_configured_external_sources(market_category=market_category)
+        if configured:
+            return configured
+        return list(SUPPORTED_EXTERNAL_SOURCES.get(market_category, ()))
+
+    # 记录每个数据源的具体状态，用于区分"无质押"(业务正确) vs "数据源错误"
+    source_call_status: Dict[str, str] = {}  # source_id -> "success_empty" | "success_with_data" | "error"
+    source_call_errors: Dict[str, str] = {}
+
+    resolved_sources = _resolve_sources(source, "a_shares")
+    logger.info(f"🔬 [get_pledge_risk_profile] _resolve_sources 返回: {resolved_sources} (source={source!r}, symbol={normalized_symbol}) | PID={os.getpid()}")
+    for source_id in resolved_sources:
+        try:
+            if source_id == "tushare":
+                logger.info(f"🔬 [get_pledge_risk_profile] 尝试 tushare | PID={os.getpid()}")
+                from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+                from .sync_wrappers import run_async_in_sync
+
+                provider = get_tushare_provider()
+                df = run_async_in_sync(provider.get_pledge_detail(ts_code=ts_code))
+                if df is not None and not df.empty:
+                    rows = df.to_dict("records")
+                    data_source = "tushare"
+                    source_call_status[source_id] = "success_with_data"
+                    logger.info(f"🔬 [get_pledge_risk_profile] tushare ✅ 返回 {len(rows)} 行 | PID={os.getpid()}")
+                    break
+                else:
+                    # Tushare 调用成功但返回空 DataFrame —— 该股票可能真的无质押
+                    source_call_status[source_id] = "success_empty"
+                    logger.info(f"🔬 [get_pledge_risk_profile] tushare ⚠️ 返回空 (success_empty) | PID={os.getpid()}")
+            elif source_id == "akshare":
+                logger.info(f"🔬 [get_pledge_risk_profile] 尝试 akshare | PID={os.getpid()}")
+                from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
+                from .sync_wrappers import run_async_in_sync
+
+                provider = get_akshare_provider()
+                df = run_async_in_sync(provider.get_pledge_detail(symbol=normalized_symbol))
+                if df is not None and not df.empty:
+                    rows = df.to_dict("records")
+                    data_source = "akshare"
+                    source_call_status[source_id] = "success_with_data"
+                    break
+                else:
+                    source_call_status[source_id] = "success_empty"
+        except Exception as exc:
+            logger.error("🔬 [get_pledge_risk_profile] 数据源 %s 调用异常: %s | PID=%s", source_id, exc, os.getpid())
+            source_call_status[source_id] = "error"
+            source_call_errors[source_id] = str(exc)
+
+    # 最终汇总日志（无论什么级别都打出来，方便排查）
+    logger.info(
+        f"🔬 [get_pledge_risk_profile] 最终结果: status={source_call_status}, "
+        f"rows={len(rows)} | PID={os.getpid()}"
+    )
+
+    if not rows:
+        # 区分两种 no_data 情况：
+        # 1. 数据源调用成功但返回空 → 该股票可能真的无质押（业务正确）
+        # 2. 数据源调用全部异常 → 数据源错误（需要修复）
+        has_success_empty = any(s == "success_empty" for s in source_call_status.values())
+        has_error = any(s == "error" for s in source_call_status.values())
+        tried_sources = list(source_call_status.keys())
+
+        if has_success_empty and not has_error:
+            # 数据源正常，但该股票无质押记录（业务正确）
+            return {
+                "status": "no_pledge",
+                "symbol": normalized_symbol,
+                "data_source": None,
+                "metrics": {},
+                "top_pledgers": [],
+                "recent_pledges": [],
+                "risk_level": "none",
+                "warnings": [
+                    f"该股票无股权质押记录（数据源 {tried_sources} 调用成功但返回 0 行）。"
+                    "可能是银行股/蓝筹股等本就无质押的股票，属业务正确情况。"
+                ],
+                "data_source_status": source_call_status,
+            }
+        elif has_success_empty and has_error:
+            # 部分数据源成功但空，部分异常
+            error_details = "; ".join(f"{k}: {v}" for k, v in source_call_errors.items())
+            return {
+                "status": "no_data",
+                "symbol": normalized_symbol,
+                "data_source": None,
+                "metrics": {},
+                "top_pledgers": [],
+                "recent_pledges": [],
+                "risk_level": "unknown",
+                "warnings": [
+                    f"部分数据源调用异常（{error_details}），"
+                    f"成功调用的数据源返回空（该股票可能无质押，也可能数据源权限不足）。"
+                ],
+                "data_source_status": source_call_status,
+            }
+        else:
+            # 所有数据源都异常
+            error_details = "; ".join(f"{k}: {v}" for k, v in source_call_errors.items())
+            return {
+                "status": "error",
+                "symbol": normalized_symbol,
+                "data_source": None,
+                "metrics": {},
+                "top_pledgers": [],
+                "recent_pledges": [],
+                "risk_level": "unknown",
+                "warnings": [
+                    f"所有数据源调用失败: {error_details}。"
+                    "请检查 Tushare pledge_detail 权限或 akshare 质押接口可用性。"
+                ],
+                "data_source_status": source_call_status,
+            }
+
+    # 🔍 调试日志：打印前 3 条原始数据的字段和值
+    logger.info(f"🔍 [质押调试] 数据源: {data_source}, 数据条数: {len(rows)}")
+    if rows:
+        logger.info(f"🔍 [质押调试] 可用字段: {list(rows[0].keys())}")
+        for i, row in enumerate(rows[:3]):
+            is_release_val = row.get("is_release")
+            pledge_amt = row.get("pledge_amount")
+            p_total_ratio = row.get("p_total_ratio")
+            logger.info(f"🔍 [质押调试] 记录#{i+1}: is_release={is_release_val!r}, pledge_amount={pledge_amt!r}, p_total_ratio={p_total_ratio!r}")
+
+    total_pledge_ratio = 0.0
+    outstanding_amount = 0.0
+    pledger_map: Dict[str, Dict[str, Any]] = {}
+    recent_events = []
+
+    for idx, row in enumerate(rows):
+        pledge_amt = _pick_number(row, "pledge_amount", "质押股份数量", "质押数量") or 0.0
+        ratio = _pick_number(row, "p_total_ratio", "占总股本比例", "占总股本比例(%)") or 0.0
+        holder = str(row.get("holder_name") or row.get("股东名称") or row.get("holder") or "未知")
+        is_released = str(row.get("is_release") or row.get("是否解押") or "").strip() in {"1", "是", "已解押", "True", "true"}
+        ann_date = str(row.get("ann_date") or row.get("公告日期") or "")
+
+        # 🔍 只打印前 5 条的调试日志
+        if idx < 5:
+            logger.info(
+                f"🔍 [质押调试] 记录#{idx+1}: is_released={is_released}, "
+                f"pledge_amt={pledge_amt}, ratio={ratio}, holder={holder[:10]}"
+            )
+
+        if not is_released:
+            outstanding_amount += pledge_amt
+            total_pledge_ratio += ratio
+
+
+        if holder not in pledger_map:
+            pledger_map[holder] = {
+                "holder_name": holder,
+                "total_pledged": 0.0,
+                "outstanding": 0.0,
+                "holding_amount": _pick_number(row, "holding_amount", "持股总数", "持股数量") or 0.0,
+                "holding_ratio": _pick_number(row, "h_total_ratio", "持股占总股本比例") or 0.0,
+                "pledge_count": 0,
+                "release_count": 0,
+            }
+        pledger_map[holder]["total_pledged"] += pledge_amt
+        pledger_map[holder]["pledge_count"] += 1
+        if not is_released:
+            pledger_map[holder]["outstanding"] += pledge_amt
+        else:
+            pledger_map[holder]["release_count"] += 1
+
+        if ann_date:
+            recent_events.append({
+                "ann_date": _normalize_date(ann_date),
+                "holder_name": holder,
+                "pledge_amount": pledge_amt,
+                "is_release": is_released,
+                "start_date": _normalize_date(row.get("start_date") or row.get("质押开始日期") or ""),
+                "end_date": _normalize_date(row.get("end_date") or row.get("质押结束日期") or ""),
+                "pledgor": row.get("pledgor") or row.get("质押方") or "",
+            })
+
+    top_pledgers = sorted(
+        pledger_map.values(),
+        key=lambda x: x["outstanding"],
+        reverse=True
+    )[:10]
+
+    recent_events.sort(key=lambda x: x["ann_date"] or "", reverse=True)
+    recent_pledges = recent_events[:20]
+
+    if total_pledge_ratio >= 50:
+        risk_level = "high"
+    elif total_pledge_ratio >= 30:
+        risk_level = "medium_high"
+    elif total_pledge_ratio >= 15:
+        risk_level = "medium"
+    elif total_pledge_ratio > 0:
+        risk_level = "low"
+    else:
+        risk_level = "none"
+
+    basic = get_stock_basic_info(normalized_symbol) or {}
+    total_share = _pick_number(basic, "total_share", "总股本")
+
+    # 🔍 调试日志：打印最终聚合结果
+    logger.info(
+        f"\n{'='*80}\n"
+        f"🔍 [质押调试] get_pledge_risk_profile 最终聚合结果\n"
+        f"   股票代码: {normalized_symbol}\n"
+        f"   未解押总股数: {outstanding_amount:.2f} 万股\n"
+        f"   总质押比例: {total_pledge_ratio:.2f}%\n"
+        f"   未解押股东数: {len(pledger_map)}\n"
+        f"   前10大未解押股东: {[p['holder_name'][:10] for p in top_pledgers[:5]]}...\n"
+        f"   风险等级: {risk_level}\n"
+        f"{'='*80}"
+    )
+
+    # 🔑 关键：输出返回结构的字段名，供代码生成的反馈使用
+    result = {
+        "status": "success",
+        "symbol": normalized_symbol,
+        "data_source": data_source,
+        "metrics": {
+            "total_pledge_ratio": round(total_pledge_ratio, 2),
+            "outstanding_pledge_amount_wan": round(outstanding_amount, 2),
+            "total_share_wan": total_share,
+            "pledger_count": len(pledger_map),
+            "total_pledge_events": len(rows),
+            "recent_pledge_events_30d": sum(
+                1 for e in recent_events
+                if e["ann_date"] and _days_between(e["ann_date"], _today()) <= 30
+            ),
+        },
+        "top_pledgers": top_pledgers,
+        "recent_pledges": recent_pledges,
+        "risk_level": risk_level,
+        "warnings": [],
+    }
+
+    logger.info(f"📊 get_pledge_risk_profile 返回结构: {list(result.keys())}")
+    return result
+
+
+def get_pledge_historical_series(
+    symbol: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    years: Optional[int] = None,
+    period: str = "year",
+    source: Optional[str] = None,
+) -> Dict[str, Any]:
+    """股权质押历史序列：返回指定时间段内的质押比例、质押股数等趋势数据。
+
+    基于质押明细的开始/结束日期，按指定周期统计每个周期末的未解押余额，
+    用于评估质押风险的变动方向（好转/恶化）。
+
+    Args:
+        symbol: A 股股票代码
+        start_date: 开始日期，YYYY-MM-DD 格式。与 years 二选一。
+        end_date: 结束日期，YYYY-MM-DD 格式。默认今天。
+        years: 最近 N 年，便捷参数，与 start_date 二选一。默认 3 年。
+        period: 统计周期，支持 'year'（年）、'quarter'（季）、'month'（月）。默认 'year'。
+        source: 数据源，默认自动选择。
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: "success" | "no_data" | "error"
+            symbol: 标准化后的 6 位股票代码
+            data_source: 实际使用的数据源名称
+            period: 统计周期 "year" | "quarter" | "month"
+            start_date: 开始日期 "YYYY-MM-DD"
+            end_date: 结束日期 "YYYY-MM-DD"
+            period_count: 周期总数
+            series: 历史趋势数组 [{"period": "2024", "period_label": "2024年", "as_of_date": "2024-12-31",
+                     "outstanding_pledge_amount_wan": 未解押万股, "pledge_ratio": 质押比例%,
+                     "active_pledge_count": 活跃笔数, "total_share_wan": 总股本万股}, ...]
+            trend_assessment: 趋势评估 {"direction": "stable"|"improving"|"deteriorating"|"fluctuating"|"insufficient_data",
+                             "change_pct": 变化百分比 or None, "summary": "文字描述"}
+            warnings: 警告信息列表
+    """
+    normalized_symbol = _normalize_symbol(symbol)
+    ts_code = _to_ts_code(normalized_symbol)
+    rows = []
+    data_source = None
+
+    def _resolve_sources(preferred_source: Optional[str], market_category: str) -> List[str]:
+        if preferred_source:
+            return [preferred_source]
+        configured = list_configured_external_sources(market_category=market_category)
+        if configured:
+            return configured
+        return list(SUPPORTED_EXTERNAL_SOURCES.get(market_category, ()))
+
+    # 记录每个数据源的具体状态（与 get_pledge_risk_profile 保持一致）
+    source_call_status: Dict[str, str] = {}
+    source_call_errors: Dict[str, str] = {}
+
+    resolved_sources = _resolve_sources(source, "a_shares")
+    logger.info(f"🔬 [get_pledge_historical_series] _resolve_sources 返回: {resolved_sources} (source={source!r}, symbol={normalized_symbol}) | PID={os.getpid()}")
+    for source_id in resolved_sources:
+        try:
+            if source_id == "tushare":
+                logger.info(f"🔬 [get_pledge_historical_series] 尝试 tushare | PID={os.getpid()}")
+                from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+                from .sync_wrappers import run_async_in_sync
+
+                provider = get_tushare_provider()
+                df = run_async_in_sync(provider.get_pledge_detail(ts_code=ts_code))
+                if df is not None and not df.empty:
+                    rows = df.to_dict("records")
+                    data_source = "tushare"
+                    source_call_status[source_id] = "success_with_data"
+                    logger.info(f"🔬 [get_pledge_historical_series] tushare ✅ 返回 {len(rows)} 行 | PID={os.getpid()}")
+                    break
+                else:
+                    source_call_status[source_id] = "success_empty"
+                    logger.info(f"🔬 [get_pledge_historical_series] tushare ⚠️ 返回空 (success_empty) | PID={os.getpid()}")
+            elif source_id == "akshare":
+                logger.info(f"🔬 [get_pledge_historical_series] 尝试 akshare | PID={os.getpid()}")
+                from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
+                from .sync_wrappers import run_async_in_sync
+
+                provider = get_akshare_provider()
+                df = run_async_in_sync(provider.get_pledge_detail(symbol=normalized_symbol))
+                if df is not None and not df.empty:
+                    rows = df.to_dict("records")
+                    data_source = "akshare"
+                    source_call_status[source_id] = "success_with_data"
+                    break
+                else:
+                    source_call_status[source_id] = "success_empty"
+        except Exception as exc:
+            logger.error("🔬 [get_pledge_historical_series] 数据源 %s 调用异常: %s | PID=%s", source_id, exc, os.getpid())
+            source_call_status[source_id] = "error"
+            source_call_errors[source_id] = str(exc)
+
+    # 最终汇总日志（无论什么级别都打出来，方便排查）
+    logger.info(
+        f"🔬 [get_pledge_historical_series] 最终结果: status={source_call_status}, "
+        f"rows={len(rows)} | PID={os.getpid()}"
+    )
+
+    if not rows:
+        # 区分两种 no_data 情况（与 get_pledge_risk_profile 保持一致）
+        has_success_empty = any(s == "success_empty" for s in source_call_status.values())
+        has_error = any(s == "error" for s in source_call_status.values())
+        tried_sources = list(source_call_status.keys())
+
+        if has_success_empty and not has_error:
+            return {
+                "status": "no_pledge",
+                "symbol": normalized_symbol,
+                "data_source": None,
+                "series": [],
+                "warnings": [
+                    f"该股票无股权质押记录（数据源 {tried_sources} 调用成功但返回 0 行）。"
+                    "可能是银行股/蓝筹股等本就无质押的股票，属业务正确情况。"
+                ],
+                "data_source_status": source_call_status,
+            }
+        elif has_success_empty and has_error:
+            error_details = "; ".join(f"{k}: {v}" for k, v in source_call_errors.items())
+            return {
+                "status": "no_data",
+                "symbol": normalized_symbol,
+                "data_source": None,
+                "series": [],
+                "warnings": [
+                    f"部分数据源调用异常（{error_details}），"
+                    f"成功调用的数据源返回空（该股票可能无质押，也可能数据源权限不足）。"
+                ],
+                "data_source_status": source_call_status,
+            }
+        else:
+            error_details = "; ".join(f"{k}: {v}" for k, v in source_call_errors.items())
+            return {
+                "status": "error",
+                "symbol": normalized_symbol,
+                "data_source": None,
+                "series": [],
+                "warnings": [
+                    f"所有数据源调用失败: {error_details}。"
+                    "请检查 Tushare pledge_detail 权限或 akshare 质押接口可用性。"
+                ],
+                "data_source_status": source_call_status,
+            }
+
+    from datetime import datetime, date
+
+    def _parse_date(date_val: Any) -> Optional[datetime]:
+        if not date_val:
+            return None
+        # 先统一格式化为带横杠的日期字符串
+        normalized = _normalize_date(date_val)
+        try:
+            return datetime.strptime(normalized, "%Y-%m-%d")
+        except Exception:
+            return None
+
+    today = datetime.now()
+
+    if end_date:
+        end_dt = _parse_date(end_date) or today
+    else:
+        end_dt = today
+
+    if start_date:
+        start_dt = _parse_date(start_date)
+        if start_dt is None:
+            start_dt = datetime(end_dt.year - 3, 1, 1)
+    elif years is not None:
+        n = max(1, min(int(years), 10))
+        start_dt = datetime(end_dt.year - n + 1, 1, 1)
+    else:
+        start_dt = datetime(end_dt.year - 2, 1, 1)
+
+    period = period.lower()
+    if period not in ("year", "quarter", "month", "y", "q", "m"):
+        period = "year"
+    period_map = {"y": "year", "q": "quarter", "m": "month"}
+    period = period_map.get(period, period)
+
+    pledge_events = []
+    for row in rows:
+        pledge_amt = _pick_number(row, "pledge_amount", "质押股份数量", "质押数量") or 0.0
+        ratio = _pick_number(row, "p_total_ratio", "占总股本比例", "占总股本比例(%)") or 0.0
+        s_date = _parse_date(row.get("start_date") or row.get("质押开始日期") or row.get("ann_date"))
+        e_date = _parse_date(row.get("end_date") or row.get("质押结束日期"))
+        is_released = str(row.get("is_release") or row.get("是否解押") or "").strip() in {"1", "是", "已解押", "True", "true"}
+
+        if is_released and e_date is None:
+            e_date = _parse_date(row.get("ann_date"))
+
+        pledge_events.append({
+            "amount": pledge_amt,
+            "ratio": ratio,
+            "start_date": s_date,
+            "end_date": e_date if is_released else None,
+            "holder": str(row.get("holder_name") or row.get("股东名称") or "未知"),
+        })
+
+    def _period_key(dt: datetime, ptype: str) -> str:
+        if ptype == "year":
+            return str(dt.year)
+        elif ptype == "quarter":
+            q = (dt.month - 1) // 3 + 1
+            return f"{dt.year}Q{q}"
+        else:
+            return f"{dt.year}-{dt.month:02d}"
+
+    def _period_end(dt: datetime, ptype: str) -> datetime:
+        if ptype == "year":
+            return datetime(dt.year, 12, 31)
+        elif ptype == "quarter":
+            q = (dt.month - 1) // 3 + 1
+            if q == 1:
+                return datetime(dt.year, 3, 31)
+            elif q == 2:
+                return datetime(dt.year, 6, 30)
+            elif q == 3:
+                return datetime(dt.year, 9, 30)
+            else:
+                return datetime(dt.year, 12, 31)
+        else:
+            if dt.month == 12:
+                return datetime(dt.year, 12, 31)
+            else:
+                import calendar
+                last_day = calendar.monthrange(dt.year, dt.month)[1]
+                return datetime(dt.year, dt.month, last_day)
+
+    period_ends = []
+    cursor = start_dt
+    while cursor <= end_dt:
+        pe = _period_end(cursor, period)
+        if pe > end_dt:
+            pe = end_dt
+        if pe >= start_dt:
+            key = _period_key(pe, period)
+            if not period_ends or period_ends[-1]["key"] != key:
+                period_ends.append({"key": key, "date": pe, "label": key})
+        if period == "year":
+            cursor = datetime(cursor.year + 1, 1, 1)
+        elif period == "quarter":
+            if cursor.month >= 10:
+                cursor = datetime(cursor.year + 1, 1, 1)
+            else:
+                cursor = datetime(cursor.year, cursor.month + 3, 1)
+        else:
+            if cursor.month >= 12:
+                cursor = datetime(cursor.year + 1, 1, 1)
+            else:
+                cursor = datetime(cursor.year, cursor.month + 1, 1)
+
+    basic = get_stock_basic_info(normalized_symbol) or {}
+    total_share = _pick_number(basic, "total_share", "总股本")
+
+    series: List[Dict[str, Any]] = []
+    for p in period_ends:
+        as_of = p["date"]
+        period_amount = 0.0
+        period_ratio = 0.0
+        event_count = 0
+
+        for event in pledge_events:
+            if event["start_date"] is None:
+                continue
+            if event["start_date"] > as_of:
+                continue
+            if event["end_date"] is not None and event["end_date"] <= as_of:
+                continue
+            period_amount += event["amount"]
+            period_ratio += event["ratio"]
+            event_count += 1
+
+        calc_ratio = None
+        if total_share and total_share > 0 and period_amount > 0:
+            calc_ratio = round((period_amount / total_share) * 100, 2)
+
+        item = {
+            "period": p["key"],
+            "period_label": p["label"],
+            "as_of_date": as_of.strftime("%Y-%m-%d"),
+            "outstanding_pledge_amount_wan": round(period_amount, 2),
+            "pledge_ratio": round(period_ratio, 2) if period_ratio > 0 else (calc_ratio if calc_ratio is not None else 0.0),
+            "active_pledge_count": event_count,
+            "total_share_wan": total_share,
+        }
+        if period == "year":
+            item["year"] = int(p["key"])
+        series.append(item)
+
+    series.sort(key=lambda x: x["as_of_date"], reverse=True)
+
+    # 🔍 调试日志：打印每个周期的统计结果
+    logger.info(f"\n{'='*80}")
+    logger.info(f"🔍 [质押趋势调试] 各周期统计结果:")
+    for item in series:
+        logger.info(
+            f"   {item.get('period')}: "
+            f"未解押={item['outstanding_pledge_amount_wan']:.2f}万股, "
+            f"比例={item['pledge_ratio']:.2f}%, "
+            f"活跃笔数={item['active_pledge_count']}"
+        )
+
+    valid_periods = [s for s in series if s.get("outstanding_pledge_amount_wan", 0) > 0]
+
+    warnings: List[str] = []
+    if len(valid_periods) < len(period_ends):
+        warnings.append(f"部分周期无有效质押数据，共 {len(period_ends)} 个周期，有效 {len(valid_periods)} 个")
+    if len(rows) < 20 and data_source == "akshare":
+        warnings.append("AKShare 数据源可能仅返回近期数据，历史周期可能不完整；建议使用 Tushare 获取完整历史")
+
+    trend_result = _assess_pledge_trend(series, period)
+
+    result = {
+        "status": "success",
+        "symbol": normalized_symbol,
+        "data_source": data_source,
+        "period": period,
+        "start_date": start_dt.strftime("%Y-%m-%d"),
+        "end_date": end_dt.strftime("%Y-%m-%d"),
+        "period_count": len(period_ends),
+        "series": series,
+        "trend_assessment": trend_result,
+        "warnings": warnings,
+    }
+
+    logger.info(f"📊 get_pledge_historical_series 返回结构: {list(result.keys())}")
+    return result
+
+
+def _assess_pledge_trend(series: List[Dict[str, Any]], period: str = "year") -> Dict[str, Any]:
+    """根据历史序列评估质押趋势方向。"""
+    if len(series) < 2:
+        return {"direction": "insufficient_data", "change_pct": None, "summary": "数据不足，无法判断趋势"}
+
+    valid = [s for s in series if s.get("pledge_ratio", 0) > 0]
+    if len(valid) < 2:
+        return {"direction": "insufficient_data", "change_pct": None, "summary": "有效数据不足，无法判断趋势"}
+
+    latest = valid[0]
+    oldest = valid[-1]
+
+    latest_ratio = latest.get("pledge_ratio", 0)
+    oldest_ratio = oldest.get("pledge_ratio", 0)
+
+    latest_label = latest.get("period_label") or latest.get("year") or ""
+    oldest_label = oldest.get("period_label") or oldest.get("year") or ""
+
+    if oldest_ratio == 0:
+        change_pct = None
+    else:
+        change_pct = round(((latest_ratio - oldest_ratio) / oldest_ratio) * 100, 1)
+
+    diff = latest_ratio - oldest_ratio
+    if abs(diff) < 1.0:
+        direction = "stable"
+        summary = f"质押比例基本稳定，{oldest_label} {oldest_ratio}% → {latest_label} {latest_ratio}%"
+    elif diff > 0:
+        direction = "worsening"
+        summary = f"质押比例上升（风险恶化），{oldest_label} {oldest_ratio}% → {latest_label} {latest_ratio}%，上升 {round(diff, 2)} 个百分点"
+    else:
+        direction = "improving"
+        summary = f"质押比例下降（风险好转），{oldest_label} {oldest_ratio}% → {latest_label} {latest_ratio}%，下降 {round(abs(diff), 2)} 个百分点"
+
+    return {
+        "direction": direction,
+        "change_pct": change_pct,
+        "summary": summary,
+        "latest_period": latest.get("period") or latest.get("year"),
+        "latest_ratio": latest_ratio,
+        "oldest_period": oldest.get("period") or oldest.get("year"),
+        "oldest_ratio": oldest_ratio,
+        "period": period,
+    }
+
+
+def _to_ts_code(symbol: str) -> str:
+    if "." in symbol:
+        return symbol
+    if symbol.startswith("6"):
+        return f"{symbol}.SH"
+    return f"{symbol}.SZ"
+
+
+def _days_between(date_str: str, today_str: str) -> int:
+    try:
+        from datetime import datetime
+        # 统一格式化为带横杠的日期字符串
+        d1 = datetime.strptime(_normalize_date(date_str), "%Y-%m-%d")
+        d2 = datetime.strptime(_normalize_date(today_str), "%Y-%m-%d")
+        return abs((d2 - d1).days)
+    except Exception:
+        return 999
 
