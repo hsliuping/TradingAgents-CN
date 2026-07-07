@@ -2489,6 +2489,69 @@ class AKShareProvider(BaseStockDataProvider):
         """
         return self._event_loop_closed
 
+    async def get_pledge_detail(
+        self,
+        symbol: str = None,
+        date: str = None,
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取股权质押明细数据
+
+        Args:
+            symbol: 股票代码（6位数字，如 600519）
+            date: 查询日期 (YYYYMMDD)，用于质押比例统计
+
+        Returns:
+            DataFrame 包含质押明细数据
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            import akshare as ak
+
+            if symbol:
+                normalized = self._normalize_security_code(symbol)
+                market_prefix = "sh" if normalized.startswith('6') else "sz"
+                ak_symbol = f"{market_prefix}{normalized}"
+
+                try:
+                    df = await asyncio.to_thread(
+                        ak.stock_gpzy_detail_em,
+                        symbol=ak_symbol
+                    )
+                except AttributeError:
+                    try:
+                        df = await asyncio.to_thread(
+                            ak.stock_pledge_detail,
+                            symbol=normalized
+                        )
+                    except Exception:
+                        df = None
+
+                if df is not None and not df.empty:
+                    self.logger.info(f"✅ 获取股权质押明细: {len(df)} 条 | symbol={symbol}")
+                    return df
+                return None
+            else:
+                if date:
+                    date_clean = date.replace('-', '')
+                    try:
+                        df = await asyncio.to_thread(
+                            ak.stock_gpzy_pledge_ratio_em,
+                            date=date_clean
+                        )
+                        if df is not None and not df.empty:
+                            self.logger.info(f"✅ 获取全市场质押比例: {len(df)} 条 | date={date_clean}")
+                            return df
+                    except Exception:
+                        pass
+                return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取股权质押明细失败: {e}")
+            return None
+
 
 # 全局提供器实例
 _akshare_provider = None

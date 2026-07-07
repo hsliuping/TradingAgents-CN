@@ -125,8 +125,9 @@ class TushareProvider(BaseStockDataProvider):
             for source, token in token_candidates:
                 try:
                     self.logger.info(f"🔄 初始化 Tushare API Client (Token来源: {source})")
-                    ts.set_token(token)
-                    api = ts.pro_api()
+                    # 直接传入 token 给 pro_api，不调用 set_token 避免写 tk.csv 文件
+                    # ts.set_token(token) 会把 token 缓存到 ~/tk.csv，在沙箱等受限环境会 Permission denied
+                    api = ts.pro_api(token)
 
                     if validate:
                         test_data = api.stock_basic(list_status='L', limit=1)
@@ -2710,6 +2711,67 @@ class TushareProvider(BaseStockDataProvider):
 
         except Exception as e:
             self.logger.error(f"❌ 获取每日市场统计失败: {e}")
+            return None
+
+    async def get_pledge_detail(
+        self,
+        ts_code: str = None,
+        ann_date: str = None,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取股权质押明细
+
+        Args:
+            ts_code: 股票代码（TS格式，如 600519.SH）
+            ann_date: 公告日期 (YYYYMMDD)
+            start_date: 公告开始日期 (YYYYMMDD)
+            end_date: 公告结束日期 (YYYYMMDD)
+
+        Returns:
+            DataFrame 包含:
+            - ts_code: TS股票代码
+            - ann_date: 公告日期
+            - holder_name: 股东名称
+            - pledge_amount: 质押数量（万股）
+            - start_date: 质押开始日期
+            - end_date: 质押结束日期
+            - is_release: 是否已解押
+            - release_date: 解押日期
+            - pledgor: 质押方
+            - holding_amount: 持股总数（万股）
+            - pledged_amount: 质押总数（万股）
+            - p_total_ratio: 本次质押占总股本比例
+            - h_total_ratio: 持股总数占总股本比例
+            - is_buyback: 是否回购（0否 1是）
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if ts_code:
+                params['ts_code'] = ts_code
+            if ann_date:
+                params['ann_date'] = ann_date.replace('-', '')
+            if start_date:
+                params['start_date'] = start_date.replace('-', '')
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
+
+            df = await asyncio.to_thread(
+                self.api.pledge_detail,
+                **params
+            )
+
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取股权质押明细: {len(df)} 条 | ts_code={ts_code or 'all'}")
+                return df
+            return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取股权质押明细失败: {e}")
             return None
 
 
