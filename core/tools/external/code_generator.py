@@ -51,7 +51,7 @@ CODING_PATTERNS = """\
 4. 错误处理：所有外部调用用 try/except 包裹，出错时返回 {"status": "error", "message": "..."}
 5. 日志规范：使用 logger = logging.getLogger(__name__)，关键步骤用 emoji 日志
 6. 导入规范：只使用标准库和常见第三方库（requests, pandas, akshare 等）；只允许从 core.skill_runtime.data_access 或 core.skill_runtime.project_access 导入项目运行时能力；严禁直接导入 tradingagents.dataflows.interface、tradingagents.dataflows.providers 及其任何子模块；禁止臆造其他未文档化项目接口
-7. 函数体 < 100 行，超过说明做的事太多
+7. 函数体 < 100 行，超过说明做的事太多。**严格控制代码长度**：含辅助函数在内不超过 250 行，避免代码被 LLM 输出截断导致语法错误。辅助函数（如 _normalize_a_share_symbol、_safe_divide）应精简到 5-10 行，不要写大段注释。
 8. 股票代码参数：本系统传递的股票代码为 6 位纯数字（如 600519、000001），不带 .SH/.SZ 后缀。生成的函数参数必须接收此格式；若数据源 API 需要其他格式（如 600519.SH），需在函数内部自行转换，不要要求调用方传入带后缀的格式。
 9. 禁止模拟数据：严禁使用 mock、模拟、假数据、占位数据。必须真实调用数据源（API、akshare、tushare、本地数据库等）获取数据。若无数据则返回 {"status": "success", "data": [], "message": "未找到xxx数据"}，绝不可返回伪造数据。
 10. 禁止占位代码：严禁写「这里需要实际的 API 调用」「由于无法直接调用」「需要配置 API 密钥」等注释后不实现。必须写出可执行的完整 API 调用（requests.get/post 等）。若某 API 需付费 Token，改用 akshare、tushare 等免费替代方案实现，不得用占位逻辑替代。
@@ -132,12 +132,17 @@ class CodeGenerator:
         system_prompt = self._build_system_prompt(spec)
         user_prompt = self._build_user_prompt(spec, feedback, previous_code, fact_report)
 
+        # 将完整 prompt 写入日志文件，方便排查 LLM 未调用推荐 helper 的问题
+        self._dump_prompt_to_logfile(spec, system_prompt, user_prompt, fact_report)
+
         messages = [
             Message(role="system", content=system_prompt),
             Message(role="user", content=user_prompt),
         ]
 
         # 调用 LLM — 代码生成需要较大的输出空间，显式设置 max_tokens
+        # 注意：8192 tokens 对于含中文注释的复杂金融分析函数可能不够（约 4000 行代码），
+        # 曾出现代码被截断导致语法错误的情况。提升到 12288 以确保完整输出。
         logger.info(
             f"\n{'─'*50}\n"
             f"📤 [CodeGenerator] LLM 输入 (tool_id={spec.tool_id})\n"
@@ -148,7 +153,7 @@ class CodeGenerator:
             f"{'...(截断)' if len(user_prompt) > 3000 else ''}\n"
             f"{'─'*50}"
         )
-        response = client.chat(messages, max_tokens=8192)
+        response = client.chat(messages, max_tokens=12288)
         raw = response.content or ""
         logger.info(
             f"\n{'─'*50}\n"
@@ -180,6 +185,9 @@ class CodeGenerator:
         system_prompt = self._build_system_prompt(spec)
         user_prompt = self._build_user_prompt(spec, feedback, previous_code, fact_report)
 
+        # 将完整 prompt 写入日志文件，方便排查 LLM 未调用推荐 helper 的问题
+        self._dump_prompt_to_logfile(spec, system_prompt, user_prompt, fact_report)
+
         messages = [
             Message(role="system", content=system_prompt),
             Message(role="user", content=user_prompt),
@@ -195,7 +203,7 @@ class CodeGenerator:
             f"{'...(截断)' if len(user_prompt) > 3000 else ''}\n"
             f"{'─'*50}"
         )
-        response = await client.achat(messages, max_tokens=8192)
+        response = await client.achat(messages, max_tokens=12288)
         raw = response.content or ""
         logger.info(
             f"\n{'─'*50}\n"
@@ -211,6 +219,85 @@ class CodeGenerator:
         result.generation_model = response.model or self._provider
 
         return result
+
+    # ==================== Prompt 日志转储 ====================
+
+    def _dump_prompt_to_logfile(
+        self,
+        spec: SkillSpec,
+        system_prompt: str,
+        user_prompt: str,
+        fact_report: Optional[ImplementationFactReport],
+    ) -> None:
+        """将完整的 system_prompt 和 user_prompt 写入日志文件，方便排查 LLM 未调用推荐 helper 的问题。
+
+        日志文件位置：logs/codegen_prompts/<tool_id>_<timestamp>.log
+        每次生成都覆盖同一个 tool_id 的最新日志，并保留历史版本（带时间戳）。
+        """
+        try:
+            from datetime import datetime
+            log_dir = Path("logs/codegen_prompts")
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_tool_id = re.sub(r"[^\w\-]", "_", spec.tool_id or "unknown")
+
+            # 构建 helper 摘要（让排查时一眼看到推荐了哪些 helper）
+            helper_summary = "（无 fact_report）"
+            if fact_report:
+                if fact_report.available_helpers:
+                    helper_lines = []
+                    for h in fact_report.available_helpers:
+                        helper_lines.append(
+                            f"  - {h.module}.{h.name} | signature={h.signature or ''} | "
+                            f"data_source_handling={h.data_source_handling or ''} | reason={h.reason or ''}"
+                        )
+                    helper_summary = f"共 {len(fact_report.available_helpers)} 个:\n" + "\n".join(helper_lines)
+                else:
+                    helper_summary = "available_helpers 为空"
+
+            content = (
+                f"{'=' * 80}\n"
+                f"# CodeGenerator Prompt Dump\n"
+                f"{'=' * 80}\n"
+                f"# tool_id: {spec.tool_id}\n"
+                f"# timestamp: {timestamp}\n"
+                f"# spec.display_name: {spec.display_name}\n"
+                f"# spec.description: {spec.description[:200] if spec.description else ''}\n"
+                f"# system_prompt 长度: {len(system_prompt)} 字符\n"
+                f"# user_prompt 长度: {len(user_prompt)} 字符\n"
+                f"\n"
+                f"{'─' * 80}\n"
+                f"## 侦察层推荐的 available_helpers\n"
+                f"{'─' * 80}\n"
+                f"{helper_summary}\n"
+                f"\n"
+                f"{'─' * 80}\n"
+                f"## System Prompt（完整）\n"
+                f"{'─' * 80}\n"
+                f"{system_prompt}\n"
+                f"\n"
+                f"{'─' * 80}\n"
+                f"## User Prompt（完整）\n"
+                f"{'─' * 80}\n"
+                f"{user_prompt}\n"
+            )
+
+            # 写入带时间戳的历史版本
+            hist_path = log_dir / f"{safe_tool_id}_{timestamp}.log"
+            hist_path.write_text(content, encoding="utf-8")
+
+            # 覆盖最新版本（方便排查最新一次）
+            latest_path = log_dir / f"{safe_tool_id}_latest.log"
+            latest_path.write_text(content, encoding="utf-8")
+
+            logger.info(
+                f"[CodeGenerator] Prompt dump 已写入: {latest_path} "
+                f"(system={len(system_prompt)}字符, user={len(user_prompt)}字符, "
+                f"helpers={len(fact_report.available_helpers) if fact_report else 0}个)"
+            )
+        except Exception as exc:
+            logger.warning(f"[CodeGenerator] 写入 prompt dump 日志失败: {exc}", exc_info=True)
 
     # ==================== Prompt 构建 ====================
 
@@ -243,8 +330,7 @@ class CodeGenerator:
 【参考模板 — 同类内置工具的代码风格（仅参考逻辑，不要照搬装饰器和导入）】
 ```python
 {chr(10).join(lines)}
-```
-"""
+```"""
         return f"""你是一个专业的 Python 工具函数生成器。你的任务是根据用户的需求规格书（SkillSpec），生成一个完整的、可直接运行的纯 Python 函数。
 
 {LOCAL_DATA_API_DOC}
@@ -261,13 +347,38 @@ class CodeGenerator:
 
 ⚠️ 关键要求：
 - 不要使用 @tool、@register_tool 等任何装饰器
-- 生成的 Skill 若要访问项目能力，只能导入 core.skill_runtime.data_access 和 core.skill_runtime.project_access 这两个公开接口
+- 生成的 Skill 若要访问项目能力，允许导入以下模块：
+  - core.skill_runtime.data_access / core.skill_runtime.project_access / core.skill_runtime.standard_financial_apis（标准数据访问和金融分析封装）
+  - core.tools.implementations.fundamentals / market / technical / portfolio / risk / news / social / trade_review / legacy_bridge（180+ 个分析工具，与 agent 工坊共享）
 - 不要直接导入 core.skill_runtime.catalog、core.skill_runtime.external_sources、core.skill_runtime.sync_wrappers 等内部实现模块
 - 不要直接导入 tradingagents.dataflows.interface、tradingagents.dataflows.providers 或其任意子模块
-- 除上述公开接口外，不要 from core.xxx import 其他模块
+- 不要导入 core.tools.implementations.agent_builder / assistant_ops / skill_builder（这些是流程类工具，skill 代码不应调用）
 - 不要 from langchain_core.xxx import 任何模块
 - 生成的代码必须是独立可运行的纯 Python 函数
+- **🚫 禁止脚本入口与调试代码（必须遵守）**：Skill 是被外部调用的纯函数，不是脚本。代码末尾**严禁**出现 `if __name__ == "__main__":` 块、`print(xxx(...))` 形式的本地调试调用、或任何"演示用法"代码。测试调用由 TESTS 区块的 JSON 声明、沙箱统一执行（`func(**test_args)`），LLM 不需要在代码里"演示"如何调用。函数行为完全由参数决定，必填参数要有合理默认值或前置校验。
+- 必须复用已有工具：如果 fact_report.available_helpers 中已有完成目标能力的工具，必须直接 from <module_path> import <function_name> 调用，禁止自行实现等价的数据获取逻辑
+- **🚨 Helper 透传铁律（最高优先级）**：helper 返回的数据已经过聚合、计算和格式化。你的代码只需 ①调用helper → ②.get()取字段 → ③组装输出。**严禁自己实现**分组聚合/趋势计算/字段映射推导/风险等级计算。**严禁猜测字段名**，严格按 helper 的 Returns 说明来写。
+- **⚠️ 防御性编程（status 检查）**：helper 返回的 status 字段可能有多种取值（"success" | "no_data" | "no_pledge" | "error" 等）。当 status 不是 "success" 时，数据字段（metrics/top_pledgers/records/series 等）可能为空字典 {{}}、空列表 [] 或不存在，必须做防御性处理：①先检查 status 再访问数据字段；②对列表用 for item in (list or []) 而非直接索引 [0]；③用 .get("field", {{}}) 或 .get("field", []) 设置默认值。
+- 优先复用 standard_financial_apis 中的高级封装（如 get_historical_financial_annual_series、get_profitability_stability_metrics、get_cashflow_quality_trend、get_historical_valuation_percentile 等），避免手动重复计算 ROIC、CAGR、变异系数等指标
 - 如果任务命中了常用分析因子白名单，优先复用 catalog 中已有 factor_id、bundle helper 和固定公式，不要自造新的底层因子字段
+- **数据源标签使用规则**（根据 available_helpers 中每个 helper 的 data_source_handling 标签决策）：
+  - `self_contained`：helper 已自包含数据源调用（内部已封装 MongoDB/外部 API），直接调用即可，**不要**再额外调用外部数据源补数据
+  - `local_only`：helper 只查本地 MongoDB，若返回为空或数据不足，需在 skill 中补充外部数据源调用（如 tushare/akshare/finnhub）或项目外部数据接口（core.skill_runtime.external_sources）
+  - `partial`：helper 仅覆盖部分需求，需结合其它 helper 或补充数据源/计算逻辑一起使用
+
+🛡️ 通用错误预防（必须遵循，避免边缘测试失败）：
+1. **股票代码有效性预检**：函数开头必须验证股票代码是否存在于基础数据中。使用 get_stock_basic_info(symbol) 获取基本信息，如果返回为空或报错，立即返回结构化错误响应（不要继续执行后续查询，避免 API 调用超时）。示例：
+   ```python
+   basic_info = get_stock_basic_info(symbol)
+   if not basic_info:
+       return {{"status": "error", "error_code": "symbol_not_found", "message": f"股票代码 {{symbol}} 不存在于基础数据中", "symbol": symbol}}
+   ```
+2. **数据为空时优雅返回**：所有数据查询结果必须检查是否为空。如果关键数据为空，返回结构化错误响应（不要让后续计算因 None/空列表而崩溃）。
+3. **除零保护**：所有比率计算必须使用安全除法。示例：`ratio = numerator / denominator if denominator else None` 或 `ratio = round(numerator / denominator, 4) if abs(denominator) > 1e-9 else None`。
+4. **时间序列数据不足时降级**：如果历史数据不足 N 年，不要崩溃，改为用现有数据计算并标注 `data_sufficient: false`。
+5. **API 调用超时保护**：不要在循环中反复调用外部 API；如果必须调用，设置合理的超时（如 5 秒）和 try-except 降级。
+6. **异常兜底**：主函数体用 try-except 包裹，捕获异常后返回结构化错误响应（包含 error_code、message、symbol），不要抛出未捕获异常。
+7. **返回值一致性**：无论成功还是失败，返回的 dict 必须包含 `status` 字段（"success"/"error"）和 `symbol` 字段，保证调用方能统一处理。
 
 {CODING_PATTERNS}
 {template_section}
@@ -380,12 +491,64 @@ class CodeGenerator:
         # ── 区块 2: 可用 Helper 函数 ──
         if fact_report.available_helpers:
             helper_lines: list[str] = []
-            for h in fact_report.available_helpers[:8]:
+            # data_source_handling 标签说明（让 LLM 理解每个 helper 的数据源处理方式）
+            ds_label_map = {
+                "self_contained": "自包含(已封装数据源,直接调用)",
+                "local_only": "仅本地MongoDB(可能需补充外部数据源)",
+                "partial": "部分覆盖(可能需补充其它数据源或计算)",
+            }
+            # 限制 helper 数量避免 prompt 膨胀，但保留足够数量确保关键 helper 不被截断
+            # 之前 [:8] 导致部分关键 helper（如质押函数）被截断，LLM 转而自行实现导致失败
+            helpers_to_show = fact_report.available_helpers[:20]
+            logger.info(
+                f"[CodeGenerator] available_helpers 总数={len(fact_report.available_helpers)}, "
+                f"展示前 {len(helpers_to_show)} 个: "
+                f"{[h.name for h in helpers_to_show]}"
+            )
+            for h in helpers_to_show:
                 line = f"  from {h.module} import {h.name}"
+                if h.signature:
+                    line += f"  # 签名: {h.signature}"
+                if h.description:
+                    logger.info(
+                        f"[CodeGenerator] helper={h.name} desc_len={len(h.description)} "
+                        f"has_returns={'Returns:' in h.description}"
+                    )
+                    desc = h.description
+                    if len(desc) > 400:
+                        # 优先展示 Returns 部分
+                        returns_idx = desc.find("Returns:")
+                        if returns_idx > 0:
+                            desc_excerpt = desc[returns_idx:returns_idx + 350]
+                            line += f"\n    📋 返回结构:\n      {desc_excerpt}"
+                        else:
+                            # 截断末尾
+                            line += f"\n    📋 {desc[-350:]}"
+                    else:
+                        line += f"\n    📋 {desc}"
+                # 显式展示 data_source_handling 标签，让 LLM 判断是否需要补充数据源
+                ds_label = ds_label_map.get(h.data_source_handling, h.data_source_handling)
+                line += f"  # 数据源: {ds_label}"
                 if h.reason:
                     line += f"  # {h.reason}"
                 helper_lines.append(line)
-            sections.append("▸ 可用 Helper（优先使用这些函数获取数据）\n" + "\n".join(helper_lines))
+            sections.append(
+                "▸ 可用 Helper（必须优先复用这些函数获取数据，禁止自行实现等价逻辑）\n"
+                + "  数据源标签说明: self_contained=自包含(直接调用); local_only=仅本地MongoDB(可能需补充外部数据源); partial=部分覆盖\n"
+                + "\n".join(helper_lines)
+            )
+            # 🚨 关键提醒：helper 已聚合好数据，直接透传
+            sections.append(
+                "▸ 🚨 Helper 使用铁律（不遵守将导致迭代失败）\n"
+                "  - helper 返回的数据已经过聚合、计算和格式化，直接使用其返回值即可\n"
+                "  - 禁止自己实现分组聚合、趋势计算、字段映射等逻辑（helper 已做好）\n"
+                "  - 直接用 .get() 从 helper 返回值中取字段，不要猜测或推导字段名\n"
+                "  - 如果 helper 的描述中有 Returns 说明，严格按照其中的字段名和类型来写代码\n"
+                "  - ⚠️ 防御性编程：先检查 helper 返回的 status 字段。status 不是 'success' 时，\n"
+                "    数据字段（metrics/top_pledgers/records/series 等）可能为空字典/空列表。\n"
+                "    对列表用 for item in (list or []) 遍历，不要直接索引 [0]。\n"
+                "    用 .get('field', {}) 或 .get('field', []) 设置默认值"
+            )
 
         # ── 区块 3: 数据库集合字段（来自 sample_fields）──
         if fact_report.sample_fields:
