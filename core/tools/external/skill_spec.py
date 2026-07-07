@@ -86,6 +86,10 @@ class SkillSpec(BaseModel):
     test_input: Dict[str, Any] = Field(default_factory=dict)  # 测试输入
     test_expected: Dict[str, Any] = Field(default_factory=dict)  # 测试期望
     metadata: Dict[str, Any] = Field(default_factory=dict)       # 生成期附加上下文，不属于最终输出契约
+    # 🔧 版本管理字段（迭代模式下写入）
+    parent_skill_id: str = ""              # 根 Skill 的 tool_id（首次创建为空，迭代产生的新版本指向原 Skill）
+    version: int = 1                       # 版本号（首次创建为 1，迭代递增）
+    version_note: str = ""                 # 本次迭代说明（来自用户反馈摘要）
 
 
 class TestCase(BaseModel):
@@ -119,6 +123,11 @@ class ImplementationHelper(BaseModel):
     signature: str = ""
     description: str = ""
     reason: str = ""
+    # 数据源处理方式标签：
+    #   "self_contained" - helper 自包含，内部已封装数据源调用（直接调 Tushare/AKShare 或本地优先+外部兜底），LLM 直接调用即可
+    #   "local_only"     - helper 只查本地 MongoDB，若本地无数据 LLM 可能需要自己调外部数据源补充
+    #   "partial"        - helper 覆盖部分需求，LLM 可能需要补充其它数据源或计算
+    data_source_handling: str = "self_contained"
 
 
 class ImplementationFact(BaseModel):
@@ -322,6 +331,8 @@ class SkillCreationSession(BaseModel):
     clarity_level: Optional[ClarityLevel] = None
     boundary_check: Optional[BoundaryCheck] = None
     handoff_context: Optional[SkillHandoffContext] = None
+    # 迭代模式：记录正在迭代的 Skill 的 tool_id
+    iterate_skill_id: Optional[str] = None
     # 规格
     spec: Optional[SkillSpec] = None
     spec_confirmed: bool = False

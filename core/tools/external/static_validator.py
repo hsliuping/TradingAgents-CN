@@ -56,10 +56,25 @@ PLACEHOLDER_PATTERNS: Set[str] = {
     "模拟API响应",
 }
 
-# 允许的 core 子模块（生成的 Skill 可从此处获取本地数据）
+# 允许的 core 子模块（生成的 Skill 可从此处获取本地数据）— 精确匹配
 ALLOWED_CORE_IMPORTS: Set[str] = {
     "core.skill_runtime.data_access",
     "core.skill_runtime.project_access",
+    "core.skill_runtime.standard_financial_apis",
+}
+
+# 允许的 core 子模块前缀 — 前缀匹配（用于开放分析类工具子目录）
+# 这些是 core.tools.implementations 下的分析类工具，与 agent 工坊共享
+ALLOWED_CORE_PREFIXES: Set[str] = {
+    "core.tools.implementations.fundamentals",
+    "core.tools.implementations.market",
+    "core.tools.implementations.technical",
+    "core.tools.implementations.portfolio",
+    "core.tools.implementations.risk",
+    "core.tools.implementations.news",
+    "core.tools.implementations.social",
+    "core.tools.implementations.trade_review",
+    "core.tools.implementations.legacy_bridge",
 }
 
 # 禁止直接导入的项目内部实现模块。
@@ -70,6 +85,10 @@ BLOCKED_IMPORT_PREFIXES: Set[str] = {
     "hermes_tools",
     "sandbox_tools",
     "skill_build_tools",
+    # agent_builder / assistant_ops / skill_builder 是流程类工具，skill 代码不应调用
+    "core.tools.implementations.agent_builder",
+    "core.tools.implementations.assistant_ops",
+    "core.tools.implementations.skill_builder",
 }
 
 # 依赖白名单：允许导入的第三方库
@@ -209,9 +228,16 @@ class StaticValidator:
 
             if full_mod in ALLOWED_CORE_IMPORTS:
                 continue
+            # 前缀匹配：允许 ALLOWED_CORE_PREFIXES 下的子模块
+            allowed_prefix = next(
+                (prefix for prefix in ALLOWED_CORE_PREFIXES if full_mod == prefix or full_mod.startswith(prefix + ".")),
+                None,
+            )
+            if allowed_prefix:
+                continue
             top_level = full_mod.split(".")[0]
             if top_level == "core":
-                result.errors.append(f"禁止导入: {full_mod}（仅允许 {', '.join(ALLOWED_CORE_IMPORTS)}）")
+                result.errors.append(f"禁止导入: {full_mod}（仅允许 core.skill_runtime.* 和 core.tools.implementations 分析类子目录）")
                 continue
 
         for mod in set(imported_modules):
