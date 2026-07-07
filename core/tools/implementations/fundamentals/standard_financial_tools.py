@@ -31,6 +31,8 @@ from core.skill_runtime.standard_financial_apis import (
     get_peer_relative_growth,
     get_peer_relative_quality,
     get_peer_relative_valuation,
+    get_pledge_historical_series,
+    get_pledge_risk_profile,
     get_portfolio_risk_profile,
     get_profitability_stability_metrics,
     get_return_series,
@@ -89,7 +91,20 @@ def get_company_event_timeline_tool(
     event_types: Annotated[str, "逗号分隔事件类型，可为空"] = "",
     limit: Annotated[int, "最多返回事件数，默认100"] = 100,
 ) -> str:
-    """获取公司公告/监管事件时间线。"""
+    """获取公司公告/监管事件时间线。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数，默认365
+        event_types: 逗号分隔事件类型，可为空
+        limit: 最多返回事件数，默认100
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_company_event_timeline`` 的 Returns ——
+            status, symbol, window, data_source, events, summary(event_count/type_counts/high_severity_count),
+            warnings
+    """
     try:
         return _json_response(get_company_event_timeline(symbol, lookback_days=lookback_days, event_types=_parse_metrics(event_types), limit=limit))
     except Exception as exc:
@@ -115,7 +130,18 @@ def get_business_segment_trend_tool(
     years: Annotated[int, "年数，默认5"] = 5,
     segment_type: Annotated[str, "分部类型，如 product/region/all"] = "product",
 ) -> str:
-    """获取主营结构趋势。"""
+    """获取主营结构趋势。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        years: 年数，默认5
+        segment_type: 分部类型，如 product/region/all
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_business_segment_trend`` 的 Returns ——
+            status, symbol, segment_type, periods, coverage(period_count/raw_segment_count), warnings
+    """
     try:
         return _json_response(get_business_segment_trend(symbol, years=years, segment_type=segment_type))
     except Exception as exc:
@@ -140,7 +166,17 @@ def get_shareholder_return_metrics_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     years: Annotated[int, "年数，默认5"] = 5,
 ) -> str:
-    """获取股东回报指标。"""
+    """获取股东回报指标。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        years: 年数，默认5
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_shareholder_return_metrics`` 的 Returns ——
+            status, symbol, data_source, current_price, records, annual, metrics, coverage, warnings
+    """
     try:
         return _json_response(get_shareholder_return_metrics(symbol, years=years))
     except Exception as exc:
@@ -171,7 +207,19 @@ def get_portfolio_risk_profile_tool(
     end_date: Annotated[Optional[str], "结束日期 YYYY-MM-DD，默认今天"] = None,
     limit: Annotated[int, "最多价格样本，默认300"] = 300,
 ) -> str:
-    """获取组合风险画像。"""
+    """获取组合风险画像。
+
+    Args:
+        positions_json: 持仓 JSON 数组，元素包含 symbol/code 与 market_value 或 quantity*price
+        start_date: 开始日期 YYYY-MM-DD，默认近一年
+        end_date: 结束日期 YYYY-MM-DD，默认今天
+        limit: 最多价格样本，默认300
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_portfolio_risk_profile`` 的 Returns ——
+            status, window, positions, metrics, exposure, return_series, coverage, warnings
+    """
     try:
         return _json_response(get_portfolio_risk_profile(_parse_positions(positions_json), start_date=start_date, end_date=end_date, limit=limit))
     except Exception as exc:
@@ -207,7 +255,20 @@ def get_technical_indicator_series_tool(
     indicators: Annotated[str, "逗号分隔指标，如 ma,macd,rsi,kdj,boll,atr,obv,support_resistance"] = "ma,macd,rsi,kdj,boll,atr,obv,support_resistance",
     limit: Annotated[int, "最多返回条数，默认300"] = 300,
 ) -> str:
-    """获取技术指标历史序列。"""
+    """获取技术指标历史序列。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        start_date: 开始日期 YYYY-MM-DD，默认近一年
+        end_date: 结束日期 YYYY-MM-DD，默认今天
+        indicators: 逗号分隔指标，如 ma,macd,rsi,kdj,boll,atr,obv,support_resistance
+        limit: 最多返回条数，默认300
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_technical_indicator_series`` 的 Returns ——
+            status, symbol, window, data_source, indicators, records, latest, summary, warnings
+    """
     try:
         return _json_response(get_technical_indicator_series(symbol, start_date=start_date, end_date=end_date, indicators=_parse_metrics(indicators), limit=limit))
     except Exception as exc:
@@ -235,7 +296,21 @@ def get_industry_market_performance_tool(
     lookback_days: Annotated[int, "回看天数，默认20"] = 20,
     peer_limit: Annotated[int, "同行样本上限，默认100"] = 100,
 ) -> str:
-    """获取行业市场表现。"""
+    """获取行业市场表现。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        start_date: 开始日期 YYYY-MM-DD，可为空
+        end_date: 结束日期 YYYY-MM-DD，默认今天
+        lookback_days: 回看天数，默认20
+        peer_limit: 同行样本上限，默认100
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_industry_market_performance`` 的 Returns ——
+            status, symbol, industry, window, summary, top_gainers, top_losers, moneyflow,
+            coverage, warnings
+    """
     try:
         return _json_response(get_industry_market_performance(symbol, start_date=start_date, end_date=end_date, lookback_days=lookback_days, peer_limit=peer_limit))
     except Exception as exc:
@@ -262,7 +337,19 @@ def get_peer_relative_growth_tool(
     years: Annotated[int, "年报年数，默认5，最大15"] = 5,
     peer_limit: Annotated[int, "同行样本上限，默认50"] = 50,
 ) -> str:
-    """获取同业成长分位。"""
+    """获取同业成长分位。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        metrics: 逗号分隔指标，如 revenue_cagr,net_profit_cagr,operating_cashflow_cagr,free_cashflow_cagr
+        years: 年报年数，默认5，最大15
+        peer_limit: 同行样本上限，默认50
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_peer_relative_growth`` 的 Returns ——
+            status, symbol, industry, years, metrics, samples, coverage, warnings
+    """
     try:
         return _json_response(get_peer_relative_growth(symbol, metrics=_parse_metrics(metrics), years=years, peer_limit=peer_limit))
     except Exception as exc:
@@ -296,7 +383,18 @@ def get_historical_financial_annual_series_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     years: Annotated[int, "年报年数，默认 10，最大 15"] = 10,
 ) -> str:
-    """获取结构化历史年报财务序列。"""
+    """获取结构化历史年报财务序列。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        years: 年报年数，默认 10，最大 15
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_historical_financial_annual_series`` 的 Returns ——
+            status, symbol, requested_years, records, coverage(requested_years/available_years/missing_years),
+            warnings
+    """
     try:
         return _json_response(get_historical_financial_annual_series(symbol, years=years))
     except Exception as exc:
@@ -326,7 +424,17 @@ def get_profitability_stability_metrics_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     years: Annotated[int, "年报年数，默认 10，最大 15"] = 10,
 ) -> str:
-    """获取结构化盈利稳定性指标。"""
+    """获取结构化盈利稳定性指标。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        years: 年报年数，默认 10，最大 15
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_profitability_stability_metrics`` 的 Returns ——
+            status, symbol, years_used, coverage, metrics, trend_series, warnings
+    """
     try:
         return _json_response(get_profitability_stability_metrics(symbol, years=years))
     except Exception as exc:
@@ -360,7 +468,17 @@ def get_cashflow_quality_trend_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     years: Annotated[int, "年报年数，默认 10，最大 15"] = 10,
 ) -> str:
-    """获取结构化现金流质量趋势。"""
+    """获取结构化现金流质量趋势。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        years: 年报年数，默认 10，最大 15
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_cashflow_quality_trend`` 的 Returns ——
+            status, symbol, years_used, coverage, trend, summary, warnings
+    """
     try:
         return _json_response(get_cashflow_quality_trend(symbol, years=years))
     except Exception as exc:
@@ -392,7 +510,19 @@ def get_historical_valuation_percentile_tool(
     lookback_years: Annotated[int, "回看年数，默认 5，最大 15"] = 5,
     as_of_date: Annotated[Optional[str], "分析日期 YYYY-MM-DD，默认今天"] = None,
 ) -> str:
-    """获取结构化历史估值分位。"""
+    """获取结构化历史估值分位。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        metrics: 逗号分隔指标，如 pe_ttm,pb,ps_ttm,pcf_ttm
+        lookback_years: 回看年数，默认 5，最大 15
+        as_of_date: 分析日期 YYYY-MM-DD，默认今天
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_historical_valuation_percentile`` 的 Returns ——
+            status, symbol, window, data_source, metrics, warnings
+    """
     try:
         return _json_response(
             get_historical_valuation_percentile(
@@ -421,7 +551,17 @@ def get_historical_valuation_percentile_tool(
     example="get_security_master_tool(symbol='600519') 或 get_security_master_tool(symbol='科大讯飞')",
 )
 def get_security_master_tool(symbol: Annotated[str, "A 股股票代码或股票名称，如 600519、科大讯飞、贵州茅台"]) -> str:
-    """获取证券主数据。"""
+    """获取证券主数据。
+
+    Args:
+        symbol: A 股股票代码或股票名称，如 600519、科大讯飞、贵州茅台
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_security_master`` 的 Returns ——
+            status, query, symbol, ts_code, name, exchange, industry, area, list_date,
+            listing_status, is_st, market_cap, float_market_cap, data_source, coverage, warnings
+    """
     try:
         return _json_response(get_security_master(symbol))
     except Exception as exc:
@@ -448,7 +588,19 @@ def get_adjusted_price_series_tool(
     end_date: Annotated[Optional[str], "结束日期 YYYY-MM-DD，默认今天"] = None,
     limit: Annotated[int, "最多返回条数，默认1000"] = 1000,
 ) -> str:
-    """获取标准价格序列。"""
+    """获取标准价格序列。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        start_date: 开始日期 YYYY-MM-DD，默认近3年
+        end_date: 结束日期 YYYY-MM-DD，默认今天
+        limit: 最多返回条数，默认1000
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_adjusted_price_series`` 的 Returns ——
+            status, symbol, period, adjustment, data_source, window, records, coverage, warnings
+    """
     try:
         return _json_response(get_adjusted_price_series(symbol, start_date=start_date, end_date=end_date, limit=limit))
     except Exception as exc:
@@ -475,7 +627,19 @@ def get_return_series_tool(
     end_date: Annotated[Optional[str], "结束日期 YYYY-MM-DD，默认今天"] = None,
     limit: Annotated[int, "最多返回条数，默认1000"] = 1000,
 ) -> str:
-    """获取收益率序列。"""
+    """获取收益率序列。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        start_date: 开始日期 YYYY-MM-DD，默认近3年
+        end_date: 结束日期 YYYY-MM-DD，默认今天
+        limit: 最多返回条数，默认1000
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_return_series`` 的 Returns ——
+            status, symbol, period, window, records, summary, coverage, warnings
+    """
     try:
         return _json_response(get_return_series(symbol, start_date=start_date, end_date=end_date, limit=limit))
     except Exception as exc:
@@ -502,7 +666,19 @@ def get_volatility_metrics_tool(
     end_date: Annotated[Optional[str], "结束日期 YYYY-MM-DD，默认今天"] = None,
     limit: Annotated[int, "最多返回条数，默认1000"] = 1000,
 ) -> str:
-    """获取波动率指标。"""
+    """获取波动率指标。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        start_date: 开始日期 YYYY-MM-DD，默认近3年
+        end_date: 结束日期 YYYY-MM-DD，默认今天
+        limit: 最多返回条数，默认1000
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_volatility_metrics`` 的 Returns ——
+            status, symbol, period, window, metrics, warnings
+    """
     try:
         return _json_response(get_volatility_metrics(symbol, start_date=start_date, end_date=end_date, limit=limit))
     except Exception as exc:
@@ -529,7 +705,19 @@ def get_drawdown_metrics_tool(
     end_date: Annotated[Optional[str], "结束日期 YYYY-MM-DD，默认今天"] = None,
     limit: Annotated[int, "最多返回条数，默认1000"] = 1000,
 ) -> str:
-    """获取回撤指标。"""
+    """获取回撤指标。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        start_date: 开始日期 YYYY-MM-DD，默认近3年
+        end_date: 结束日期 YYYY-MM-DD，默认今天
+        limit: 最多返回条数，默认1000
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_drawdown_metrics`` 的 Returns ——
+            status, symbol, period, window, metrics, drawdown_series, warnings
+    """
     try:
         return _json_response(get_drawdown_metrics(symbol, start_date=start_date, end_date=end_date, limit=limit))
     except Exception as exc:
@@ -555,7 +743,17 @@ def get_drawdown_metrics_tool(
     example="get_current_valuation_snapshot_tool(symbol='600519')",
 )
 def get_current_valuation_snapshot_tool(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """获取当前估值快照。"""
+    """获取当前估值快照。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_current_valuation_snapshot`` 的 Returns ——
+            status, symbol, name, industry, trade_date, current_price, metrics, metric_sources,
+            raw_metrics, data_source, warnings
+    """
     try:
         return _json_response(get_current_valuation_snapshot(symbol))
     except Exception as exc:
@@ -580,7 +778,17 @@ def get_debt_solvency_trend_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     years: Annotated[int, "年报年数，默认10，最大15"] = 10,
 ) -> str:
-    """获取偿债能力长期趋势。"""
+    """获取偿债能力长期趋势。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        years: 年报年数，默认10，最大15
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_debt_solvency_trend`` 的 Returns ——
+            status, symbol, years_used, coverage, trend, summary, warnings
+    """
     try:
         return _json_response(get_debt_solvency_trend(symbol, years=years))
     except Exception as exc:
@@ -605,7 +813,17 @@ def get_peer_group_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     limit: Annotated[int, "同行数量上限，默认50"] = 50,
 ) -> str:
-    """获取标准同行组。"""
+    """获取标准同行组。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        limit: 同行数量上限，默认50
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_peer_group`` 的 Returns ——
+            status, symbol, industry, peers, coverage(peer_count/limit), warnings
+    """
     try:
         return _json_response(get_peer_group(symbol, limit=limit))
     except Exception as exc:
@@ -635,7 +853,18 @@ def get_peer_relative_valuation_tool(
     metrics: Annotated[str, "逗号分隔指标，如 pe,pb,ps"] = "pe,pb,ps",
     peer_limit: Annotated[int, "同行样本上限，默认200"] = 200,
 ) -> str:
-    """获取同业相对估值。"""
+    """获取同业相对估值。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        metrics: 逗号分隔指标，如 pe,pb,ps
+        peer_limit: 同行样本上限，默认200
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_peer_relative_valuation`` 的 Returns ——
+            status, symbol, industry, metrics, warnings
+    """
     try:
         return _json_response(get_peer_relative_valuation(symbol, metrics=_parse_metrics(metrics), peer_limit=peer_limit))
     except Exception as exc:
@@ -665,7 +894,18 @@ def get_peer_relative_quality_tool(
     metrics: Annotated[str, "逗号分隔指标，如 roe,pb,pe_ttm"] = "roe,pb,pe_ttm",
     peer_limit: Annotated[int, "同行样本上限，默认200"] = 200,
 ) -> str:
-    """获取同业相对质量。"""
+    """获取同业相对质量。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        metrics: 逗号分隔指标，如 roe,pb,pe_ttm
+        peer_limit: 同行样本上限，默认200
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_peer_relative_quality`` 的 Returns ——
+            status, symbol, industry, metrics, warnings
+    """
     try:
         return _json_response(get_peer_relative_quality(symbol, metrics=_parse_metrics(metrics), peer_limit=peer_limit))
     except Exception as exc:
@@ -695,7 +935,18 @@ def get_company_announcements_tool(
     lookback_days: Annotated[int, "回看天数，默认365"] = 365,
     limit: Annotated[int, "返回条数上限，默认50"] = 50,
 ) -> str:
-    """获取公司公告代理记录。"""
+    """获取公司公告代理记录。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数，默认365
+        limit: 返回条数上限，默认50
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_company_announcements`` 的 Returns ——
+            status, symbol, window, announcements, coverage, warnings
+    """
     try:
         return _json_response(get_company_announcements(symbol, lookback_days=lookback_days, limit=limit))
     except Exception as exc:
@@ -728,7 +979,18 @@ def get_risk_event_flags_tool(
     lookback_days: Annotated[int, "回看天数，默认180"] = 180,
     limit: Annotated[int, "新闻条数上限，默认50"] = 50,
 ) -> str:
-    """获取风险事件标记。"""
+    """获取风险事件标记。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数，默认180
+        limit: 新闻条数上限，默认50
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_risk_event_flags`` 的 Returns ——
+            status, symbol, window, news_count, hit_flags, flags, warnings
+    """
     try:
         return _json_response(get_risk_event_flags(symbol, lookback_days=lookback_days, limit=limit))
     except Exception as exc:
@@ -753,7 +1015,17 @@ def get_margin_stability_metrics_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     years: Annotated[int, "年报年数，默认10，最大15"] = 10,
 ) -> str:
-    """获取利润率稳定性指标。"""
+    """获取利润率稳定性指标。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        years: 年报年数，默认10，最大15
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_margin_stability_metrics`` 的 Returns ——
+            status, symbol, years_used, coverage, trend, metrics, warnings
+    """
     try:
         return _json_response(get_margin_stability_metrics(symbol, years=years))
     except Exception as exc:
@@ -778,7 +1050,17 @@ def get_capital_efficiency_trend_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     years: Annotated[int, "年报年数，默认10，最大15"] = 10,
 ) -> str:
-    """获取资本效率趋势。"""
+    """获取资本效率趋势。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        years: 年报年数，默认10，最大15
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_capital_efficiency_trend`` 的 Returns ——
+            status, symbol, years_used, coverage, trend, summary, warnings
+    """
     try:
         return _json_response(get_capital_efficiency_trend(symbol, years=years))
     except Exception as exc:
@@ -803,7 +1085,18 @@ def get_growth_quality_metrics_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     years: Annotated[int, "年报年数，默认10，最大15"] = 10,
 ) -> str:
-    """获取成长质量指标。"""
+    """获取成长质量指标。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        years: 年报年数，默认10，最大15
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_growth_quality_metrics`` 的 Returns ——
+            status, symbol, years_used, coverage, cagr, annual_growth, growth_stability,
+            quality_flags, warnings
+    """
     try:
         return _json_response(get_growth_quality_metrics(symbol, years=years))
     except Exception as exc:
@@ -830,7 +1123,19 @@ def get_single_stock_risk_profile_tool(
     end_date: Annotated[Optional[str], "结束日期 YYYY-MM-DD，默认今天"] = None,
     limit: Annotated[int, "最多返回条数，默认1000"] = 1000,
 ) -> str:
-    """获取个股风险画像。"""
+    """获取个股风险画像。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        start_date: 开始日期 YYYY-MM-DD，默认近3年
+        end_date: 结束日期 YYYY-MM-DD，默认今天
+        limit: 最多返回条数，默认1000
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_single_stock_risk_profile`` 的 Returns ——
+            status, symbol, period, window, metrics, components, warnings
+    """
     try:
         return _json_response(get_single_stock_risk_profile(symbol, start_date=start_date, end_date=end_date, limit=limit))
     except Exception as exc:
@@ -855,7 +1160,17 @@ def get_industry_fundamental_summary_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     peer_limit: Annotated[int, "同行样本上限，默认100"] = 100,
 ) -> str:
-    """获取行业基本面摘要。"""
+    """获取行业基本面摘要。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        peer_limit: 同行样本上限，默认100
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_industry_fundamental_summary`` 的 Returns ——
+            status, symbol, industry, coverage, metrics, top_market_cap_peers, warnings
+    """
     try:
         return _json_response(get_industry_fundamental_summary(symbol, peer_limit=peer_limit))
     except Exception as exc:
@@ -886,7 +1201,19 @@ def get_capital_flow_series_tool(
     end_date: Annotated[Optional[str], "结束日期 YYYY-MM-DD，默认今天"] = None,
     limit: Annotated[int, "最多返回条数，默认120"] = 120,
 ) -> str:
-    """获取个股资金流序列。"""
+    """获取个股资金流序列。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        start_date: 开始日期 YYYY-MM-DD，默认近180天
+        end_date: 结束日期 YYYY-MM-DD，默认今天
+        limit: 最多返回条数，默认120
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_capital_flow_series`` 的 Returns ——
+            status, symbol, window, data_source, records, summary, coverage, warnings
+    """
     try:
         return _json_response(get_capital_flow_series(symbol, start_date=start_date, end_date=end_date, limit=limit))
     except Exception as exc:
@@ -911,9 +1238,116 @@ def get_chip_distribution_context_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     trade_date: Annotated[Optional[str], "交易日期 YYYY-MM-DD，默认今天"] = None,
 ) -> str:
-    """获取筹码分布上下文。"""
+    """获取筹码分布上下文。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        trade_date: 交易日期 YYYY-MM-DD，默认今天
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_chip_distribution_context`` 的 Returns ——
+            status, symbol, trade_date, message, data_source, metrics, warnings
+    """
     try:
         return _json_response(get_chip_distribution_context(symbol, trade_date=trade_date))
     except Exception as exc:
         logger.error("筹码分布上下文获取失败: %s", exc, exc_info=True)
         return _json_response({"status": "error", "message": f"筹码分布上下文获取失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="get_pledge_risk_profile_tool",
+    name="股权质押风险画像",
+    description=(
+        "返回股权质押风险画像：总质押比例、未解押规模、前几大质押股东、最近质押事件、风险等级。"
+        "数据来源优先使用项目内置 Tushare/akshare 数据源，无需用户指定数据源。"
+    ),
+    category="fundamentals",
+    is_online=True,
+    auto_register=True,
+    timeout_tier="medium",
+    when_to_use="当需要分析股权质押比例、大股东质押情况、质押爆仓风险、平仓线压力时使用。",
+    when_not_to_use="不适合非质押类的股东分析（请使用 get_shareholder_return_metrics_tool）；不适合一般风险画像（请使用 get_single_stock_risk_profile_tool）。",
+    capability_tags=["pledge", "shareholder", "risk"],
+    tool_role_hint="specialized",
+    returns="返回 JSON 字符串，包含 status、metrics（total_pledge_ratio/outstanding_amount 等）、top_pledgers、recent_pledges、risk_level、warnings。",
+    example="get_pledge_risk_profile_tool(symbol='600519')",
+    related_tools=["get_risk_event_flags_tool", "get_shareholder_return_metrics_tool", "get_single_stock_risk_profile_tool"],
+)
+def get_pledge_risk_profile_tool(
+    symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
+    source: Annotated[Optional[str], "数据源，默认自动选择"] = None,
+) -> str:
+    """获取股权质押风险画像。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        source: 数据源，默认自动选择
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_pledge_risk_profile`` 的 Returns ——
+            status, symbol, data_source, metrics(total_pledge_ratio/outstanding_pledge_amount_wan 等),
+            top_pledgers, recent_pledges, risk_level, warnings, data_source_status
+    """
+    try:
+        return _json_response(get_pledge_risk_profile(symbol, source=source))
+    except Exception as exc:
+        logger.error("股权质押风险画像获取失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"股权质押风险画像获取失败: {exc}"})
+
+
+@register_tool(
+    tool_id="get_pledge_historical_series_tool",
+    name="股权质押历史趋势",
+    description=(
+        "返回单只 A 股指定时间段内的股权质押趋势数据，支持按年/季/月统计，"
+        "包括每个周期末的质押比例、未解押股数、活跃质押笔数，以及自动评估的趋势方向（好转/恶化/稳定）。"
+        "数据来源优先使用项目内置 Tushare/akshare 数据源，无需用户指定数据源。"
+    ),
+    category="fundamentals",
+    is_online=True,
+    auto_register=True,
+    timeout_tier="medium",
+    when_to_use="当需要分析股权质押比例的历史变化趋势、判断质押风险是好转还是恶化、按时间周期对比质押数据时使用。支持自定义起止日期和统计粒度。",
+    when_not_to_use="不适合查询当前质押快照（请使用 get_pledge_risk_profile_tool）；不适合非质押类的股东分析。",
+    capability_tags=["pledge", "shareholder", "risk", "trend", "historical"],
+    tool_role_hint="specialized",
+    returns="返回 JSON 字符串，包含 status、period（统计周期）、start_date、end_date、series（周期数组，含 period/pledge_ratio/outstanding_pledge_amount_wan 等）、trend_assessment（趋势方向评估）、warnings。",
+    example="get_pledge_historical_series_tool(symbol='600519', start_date='2021-01-01', end_date='2024-12-31', period='year')",
+    related_tools=["get_pledge_risk_profile_tool", "get_single_stock_risk_profile_tool", "get_risk_event_flags_tool"],
+)
+def get_pledge_historical_series_tool(
+    symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
+    start_date: Annotated[Optional[str], "开始日期，YYYY-MM-DD 格式，与 years 二选一"] = None,
+    end_date: Annotated[Optional[str], "结束日期，YYYY-MM-DD 格式，默认今天"] = None,
+    years: Annotated[Optional[int], "最近 N 年，便捷参数，与 start_date 二选一，默认 3 年"] = None,
+    period: Annotated[Optional[str], "统计周期：year/quarter/month，默认 year"] = "year",
+    source: Annotated[Optional[str], "数据源，默认自动选择"] = None,
+) -> str:
+    """获取股权质押历史趋势。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        start_date: 开始日期，YYYY-MM-DD 格式，与 years 二选一
+        end_date: 结束日期，YYYY-MM-DD 格式，默认今天
+        years: 最近 N 年，便捷参数，与 start_date 二选一，默认 3 年
+        period: 统计周期：year/quarter/month，默认 year
+        source: 数据源，默认自动选择
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_pledge_historical_series`` 的 Returns ——
+            status, symbol, data_source, period, start_date, end_date, period_count, series,
+            trend_assessment(direction/change_pct/summary), warnings
+    """
+    try:
+        return _json_response(get_pledge_historical_series(
+            symbol, start_date=start_date, end_date=end_date,
+            years=years, period=period, source=source
+        ))
+    except Exception as exc:
+        logger.error("股权质押历史趋势获取失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"股权质押历史趋势获取失败: {exc}"})

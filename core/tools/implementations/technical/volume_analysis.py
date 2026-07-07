@@ -73,7 +73,30 @@ def get_vwap(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     lookback_days: Annotated[int, "回看天数用于 VWAP 计算，默认 60"] = 60,
 ) -> str:
-    """计算 VWAP（成交量加权平均价格）。"""
+    """计算 VWAP（成交量加权平均价格）及多周期 VWAP 趋势，评估当前价格相对于 VWAP 的偏离程度。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于 VWAP 计算，默认 60
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_close: 最新收盘价
+            date: 最新交易日
+            latest_vwap: 最新 VWAP 值
+            deviation_pct: 当前价相对 VWAP 的偏离百分比
+            position: 价格相对 VWAP 的位置，取值 "above_vwap" | "below_vwap" | "at_vwap"
+            vwap_trend: 多周期 VWAP 趋势，子字段 —
+                vwap_5d: 5 日 VWAP
+                vwap_20d: 20 日 VWAP
+            interpretation: 解读文本
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 
@@ -185,7 +208,35 @@ def get_obv_analysis(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     lookback_days: Annotated[int, "回看天数用于 OBV 计算，默认 120"] = 120,
 ) -> str:
-    """计算 OBV（On-Balance Volume）并检测背离信号。"""
+    """计算 OBV（On-Balance Volume，能量潮指标）并检测 OBV 趋势以及与价格的背离信号。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于 OBV 计算，默认 120
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            latest_obv: 最新 OBV 值
+            obv_trend: OBV 趋势，取值 "up" | "down" | "neutral"
+            divergence_signal: 背离信号，取值 "bearish" | "bullish" | "none"
+            obv_data: 最近 5 期 OBV 数据列表，每个元素结构 —
+                date: 交易日期
+                close: 收盘价
+                obv: OBV 值
+            interpretation: 解读信息，子字段 —
+                obv_up: OBV 上升说明
+                obv_down: OBV 下降说明
+                bearish_divergence: 看跌背离说明
+                bullish_divergence: 看涨背离说明
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 
@@ -332,7 +383,32 @@ def get_turnover_analysis(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     lookback_days: Annotated[int, "回看天数用于换手率分析，默认 120"] = 120,
 ) -> str:
-    """分析股票换手率。"""
+    """分析股票换手率，计算历史平均换手率，检测异常放量/缩量信号，评估交易活跃度变化趋势。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于换手率分析，默认 120
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            has_shares_info: 是否获取到总股本信息（False 时换手率字段为 None，使用成交额近似估算）
+            avg_turnover: 平均换手率（百分比），无总股本时为 None
+            current_turnover: 当前换手率（百分比），无总股本时为 None
+            abnormal_days_count: 异常放量天数
+            abnormal_days: 异常放量日列表（最近 5 条），每个元素结构 —
+                date: 交易日期
+                volume: 成交量
+                volume_ratio: 量比
+            turnover_trend: 换手率趋势，取值 "increasing" | "decreasing" | "stable"
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes, get_stock_basic_info
 
@@ -464,7 +540,36 @@ def get_pivot_points(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     lookback_days: Annotated[int, "回看天数用于枢轴点计算，默认 30"] = 30,
 ) -> str:
-    """计算经典枢轴点和斐波那契枢轴点。"""
+    """计算经典枢轴点和斐波那契枢轴点，为日内交易提供支撑/阻力位参考。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于枢轴点计算，默认 30
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            reference_bar: 参考K线（前一根），子字段 —
+                date: 参考K线日期
+                high: 最高价
+                low: 最低价
+                close: 收盘价
+            classic: 经典枢轴点，每个水平的值为 {price, distance_pct}，key 包括 —
+                pp: 枢轴点
+                r1, r2, r3: 阻力位 1/2/3
+                s1, s2, s3: 支撑位 1/2/3
+            fibonacci: 斐波那契枢轴点，子字段 —
+                pp: 枢轴点
+                resistances: 阻力位字典，key 为 "r_{level}"（level 取值 0.0、0.236、0.382、0.5、0.618、0.786、1.0），值为 {price, distance_pct}
+                supports: 支撑位字典，key 为 "s_{level}"（level 同上），值为 {price, distance_pct}
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 
@@ -601,7 +706,40 @@ def get_volume_profile(
     lookback_days: Annotated[int, "回看天数用于成交量分布计算，默认 60"] = 60,
     price_bins: Annotated[int, "价格区间分箱数量，默认 20"] = 20,
 ) -> str:
-    """计算成交量分布（Volume Profile）。"""
+    """计算成交量分布（Volume Profile），识别 POC（控制点）、价值区域，评估当前价格在价值区域中的位置。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于成交量分布计算，默认 60
+        price_bins: 价格区间分箱数量，默认 20
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            poc_price: POC（控制点）价格
+            poc_volume: POC 成交量
+            poc_volume_pct: POC 成交量占比（百分比）
+            value_area_high: 价值区域上沿
+            value_area_low: 价值区域下沿
+            value_area_width: 价值区域宽度
+            current_position_relative_to_va: 当前价相对价值区域的位置，取值 "above_va" | "below_va" | "within_va"
+            distribution_profile: 分布概况列表（最多 20 个分箱），每个元素结构 —
+                price_level: 价格水平（分箱中心）
+                price_low: 分箱下沿
+                price_high: 分箱上沿
+                volume: 成交量
+                volume_pct: 成交量占比（百分比）
+                is_poc: 是否为 POC
+                in_value_area: 是否在价值区域内
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+                price_bins: 实际分箱数
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 
@@ -788,7 +926,39 @@ def get_fibonacci_extension(
     lookback_days: Annotated[int, "回看天数用于波动区间识别，默认 120"] = 120,
     extension_levels: Annotated[str, "扩展水平，逗号分隔，默认 1.272,1.382,1.618,2.0,2.618"] = "1.272,1.382,1.618,2.0,2.618",
 ) -> str:
-    """计算斐波那契扩展目标位。"""
+    """计算斐波那契扩展目标位，基于最近的价格波动（高点到低点或低点到高点）计算潜在价格目标。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于波动区间识别，默认 120
+        extension_levels: 扩展水平，逗号分隔，默认 "1.272,1.382,1.618,2.0,2.618"
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            trend: 当前趋势方向，取值 "up" | "down"
+            swing_analysis: 波动分析，子字段 —
+                swing_type: 波动类型，取值 "上升波动" | "下降波动"
+                start_price: 波动起点价
+                end_price: 波动终点价
+                swing_range: 波动幅度
+            extension_prices: 扩展位列表，每个元素结构 —
+                level: 扩展比例（如 1.272、1.382、1.618、2.0、2.618）
+                price: 扩展位价格
+                distance_pct: 距离当前价的百分比
+            current_proximity: 最近的扩展位信息，子字段 —
+                closest_level: 最近扩展比例
+                closest_price: 最近扩展位价格
+                distance_pct: 距离当前价的百分比
+                role: 价格角色，取值 "resistance" | "support"
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 

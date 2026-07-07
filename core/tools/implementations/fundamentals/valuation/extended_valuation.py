@@ -91,7 +91,69 @@ def get_dcf_three_stage_valuation(
     transition_end_rate: Annotated[float, "过渡期结束时的增长率（即永续前增速），默认 5%"] = 0.05,
     base_fcf: Annotated[Optional[float], "基期自由现金流覆盖值，默认 None 使用最新年报数据"] = None,
 ) -> str:
-    """DCF 三阶段估值模型：高增长 → 过渡（线性递减） → 永续"""
+    """DCF 三阶段估值模型：高增长 → 过渡（线性递减） → 永续
+
+    Args:
+        symbol: A 股股票代码，如 600519
+        growth_rate: 预测期年化增长率（小数形式），默认 None 由历史营收数据自动估算并夹钳到 [0.03, 0.25]
+        wacc: 折现率（小数形式），默认 None 自动计算并夹钳到 [0.05, 0.20]
+        terminal_growth_rate: 永续增长率，默认 2.5（>1 时视为百分比，自动除以 100）
+        high_growth_years: 高增长期年数，默认 5，自动夹钳到 [1, 15]
+        transition_years: 过渡期年数，默认 3，自动夹钳到 [1, 10]
+        high_growth_rate: 高增长期增长率（小数形式），默认 None 时使用 growth_rate
+        transition_end_rate: 过渡期结束时的增长率（即永续前增速），默认 0.05
+        base_fcf: 基期自由现金流覆盖值，默认 None 使用最新年报数据；若 ≤0 依次回退到 operating_cashflow、net_profit×0.7
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+            symbol: 股票代码
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            method: "三阶段DCF"
+            stages: 三阶段参数 dict —
+                high_growth_years: 高增长期年数
+                transition_years: 过渡期年数
+                perpetual_growth_rate: 永续增长率（小数）
+            parameters: 估值参数 dict —
+                high_growth_rate: 高增长期增长率（小数）
+                transition_end_rate: 过渡期结束增长率（小数）
+                terminal_growth_rate: 永续增长率（小数）
+                wacc: 折现率（小数）
+            base_year: 基期信息 dict —
+                year: 基期年份
+                free_cashflow: 基期自由现金流
+            valuation: 估值结果 dict —
+                pv_stage1_high_growth: 高增长期现值合计
+                pv_stage2_transition: 过渡期现值合计
+                pv_terminal: 永续期现值
+                enterprise_value: 企业价值
+                equity_value: 股权价值
+                per_share_value: 每股内在价值
+                current_price: 当前股价
+                upside_pct: 相对当前价格的上行空间百分比
+                net_debt_adjustment: 净债务调整额
+            scenarios: 情景分析 dict —
+                base: 基准情景 dict — per_share_value, upside_pct
+                bull: 乐观情景 dict — per_share_value, upside_pct
+                bear: 悲观情景 dict — per_share_value, upside_pct
+            sensitivity: 敏感性分析 dict —
+                wacc_range: WACC 取值列表（3 个值）
+                growth_range: 高增长率取值列表（3 个值）
+                matrix: 每股价值矩阵 [[值, 值, 值], ...]
+            data_quality: 数据质量 dict —
+                years_available: 可用年报期数
+                base_fcf_source: FCF 来源："parameter_override" | "free_cashflow" | "operating_cashflow" | "net_profit_estimated"
+                growth_source: 增长率来源："parameter_override" | "revenue_historical_mean"
+                wacc_source: WACC 来源："parameter_override" | "auto_computed"
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         from core.skill_runtime.standard_financial_apis import get_historical_financial_annual_series
 
@@ -343,7 +405,44 @@ def get_ddm_valuation(
     growth_rate: Annotated[float, "股利永续增长率，默认 5%"] = 0.05,
     required_return: Annotated[float, "必要回报率（折现率），默认 8%"] = 0.08,
 ) -> str:
-    """股利贴现模型（Gordon Growth Model）"""
+    """股利贴现模型（Gordon Growth Model）
+
+    Args:
+        symbol: A 股股票代码，如 600519
+        growth_rate: 股利永续增长率（小数形式），默认 0.05；若 ≥ required_return，自动调整为 required_return + 0.03
+        required_return: 必要回报率/折现率（小数形式），默认 0.08
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        无分红数据情形返回 dict，字段：
+            status: "no_dividend_data"
+            symbol: 股票代码
+            message: 描述信息
+
+        错误/异常情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            method: "gordon_growth_model"
+            parameters: 参数 dict —
+                current_dividend_per_share: 当前每股股利
+                expected_dividend_d1: 预期下一期股利 D1
+                growth_rate: 永续增长率（小数）
+                required_return: 必要回报率（小数）
+            valuation: 估值结果 dict —
+                intrinsic_value: 内在价值
+                current_price: 当前股价
+                upside_pct: 相对当前价格的上行空间百分比
+            dividend_history: 历年分红记录列表（最多 5 条）
+            data_quality: 数据质量 dict —
+                dividend_records_count: 分红记录条数
+                dividend_positive_years: 正分红年数
+                latest_dividend_yield: 最新股息率
+                warnings: 警告信息列表
+    """
     try:
         from core.skill_runtime.data_access import get_latest_stock_price
         from core.skill_runtime.standard_financial_apis import get_shareholder_return_metrics
@@ -433,7 +532,47 @@ def get_residual_income_valuation(
     terminal_growth: Annotated[float, "终值增长率，默认 3%"] = 0.03,
     cost_of_equity: Annotated[Optional[float], "股权成本，默认 None 自动估算"] = None,
 ) -> str:
-    """剩余收益估值模型：RI_t = (ROE_t - r_e) × BV_{t-1}"""
+    """剩余收益估值模型：RI_t = (ROE_t - r_e) × BV_{t-1}
+
+    Args:
+        symbol: A 股股票代码，如 600519
+        growth_years: 预测期年数，默认 5，自动夹钳到 [3, 15]
+        terminal_growth: 终值增长率（小数形式），默认 0.03
+        cost_of_equity: 股权成本（小数形式），默认 None 时使用 0.035 + 1.0 × 0.06 自动估算
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+            symbol: 股票代码
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            method: "residual_income_model"
+            parameters: 参数 dict —
+                book_value_per_share: 每股净资产
+                roe: 最新 ROE（小数）
+                cost_of_equity: 股权成本（小数）
+                forecast_years: 预测期年数
+                terminal_growth: 终值增长率（小数）
+            valuation: 估值结果 dict —
+                current_book_value_per_share: 当前每股净资产
+                cumulative_pv_ri: 预测期剩余收益现值合计
+                pv_terminal_ri: 终值剩余收益现值
+                intrinsic_value: 内在价值
+                current_price: 当前股价
+                upside_pct: 相对当前价格的上行空间百分比
+            residual_income_stream: 各期剩余收益流列表 [{"year": ..., "roe": ..., "book_value_per_share": ..., "residual_income_per_share": ..., "pv_residual_income": ...}, ...]
+            data_quality: 数据质量 dict —
+                years_available: 可用年报期数
+                roe_source: ROE 来源："latest_roe" | "estimated"
+                cost_of_equity_source: 股权成本来源："parameter_override" | "auto_estimated"
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         from core.skill_runtime.data_access import get_latest_stock_price, get_stock_basic_info, get_stock_financial_periods
         from core.skill_runtime.standard_financial_apis import get_historical_financial_annual_series
@@ -579,7 +718,37 @@ def get_eva_valuation(
     symbol: Annotated[str, "A 股股票代码，如 600519"],
     tax_rate: Annotated[float, "企业所得税率，默认 25%"] = 0.25,
 ) -> str:
-    """EVA 估值：EVA = NOPAT - WACC × Invested_Capital"""
+    """EVA 估值：EVA = NOPAT - WACC × Invested_Capital
+
+    Args:
+        symbol: A 股股票代码，如 600519
+        tax_rate: 企业所得税率（小数形式），默认 0.25，自动夹钳到 [0, 0.5]
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+            symbol: 股票代码
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            method: "economic_value_added"
+            current_eva: 最新期 EVA 指标 dict —
+                nopat: 税后净营业利润
+                wacc: 加权平均资本成本（小数）
+                invested_capital: 投入资本
+                eva_value: EVA 值
+                eva_spread: EVA 利差（EVA / 投入资本）
+            trend: 多期 EVA 趋势列表 [{"year": ..., "nopat": ..., "wacc": ..., "invested_capital": ..., "eva": ..., "eva_spread": ...}, ...]
+            current_price: 当前股价
+            data_quality: 数据质量 dict —
+                years_available: 可用年报期数
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         from core.skill_runtime.data_access import get_stock_financial_periods, get_latest_stock_price, get_stock_basic_info
         from core.skill_runtime.standard_financial_apis import get_historical_financial_annual_series
@@ -696,7 +865,42 @@ def get_fcff_fcfe_calculation(
     symbol: Annotated[str, "A 股股票代码，如 600519"],
     tax_rate: Annotated[float, "企业所得税率，默认 25%"] = 0.25,
 ) -> str:
-    """计算 FCFF = NOPAT + D&A - CapEx - ΔWC 和 FCFE = FCFF - Interest×(1-t) + NetBorrowing"""
+    """计算 FCFF = NOPAT + D&A - CapEx - ΔWC 和 FCFE = FCFF - Interest×(1-t) + NetBorrowing
+
+    Args:
+        symbol: A 股股票代码，如 600519
+        tax_rate: 企业所得税率（小数形式），默认 0.25，自动夹钳到 [0, 0.5]
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+            symbol: 股票代码
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            method: "FCFF/FCFE计算"
+            latest: 最新一期数据 dict —
+                fcff: 公司自由现金流
+                fcfe: 股权自由现金流
+                components: FCFF/FCFE 组成 dict —
+                    nopat: 税后净营业利润
+                    depreciation_amortization: 折旧摊销估算
+                    capex: 资本支出
+                    delta_working_capital: 营运资本变动
+                    interest_expense: 利息费用
+                    net_borrowing: 净新增借款
+            trend: 多期趋势列表 [{"year": ..., "nopat": ..., "depreciation_amortization": ..., "capex": ..., "delta_working_capital": ..., "fcff": ..., "interest_expense": ..., "net_borrowing": ..., "fcfe": ...}, ...]
+            data_quality: 数据质量 dict —
+                years_available: 可用年报期数
+                da_source: 折旧摊销来源（"estimated_percent_of_revenue"）
+                capex_source: 资本支出来源（"delta_fixed_assets_plus_da"）
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         from core.skill_runtime.data_access import get_stock_financial_periods
         from core.skill_runtime.standard_financial_apis import get_historical_financial_annual_series
@@ -712,12 +916,26 @@ def get_fcff_fcfe_calculation(
 
         tax = max(0, min(0.5, tax_rate))
         raw_periods = get_stock_financial_periods(symbol, limit=max(len(records) + 2, 10))
+
+        # 🔑 按年份分组时，同一年优先取年报（12-31 结束），避免季报累计值被当作年报
+        from core.tools.implementations.risk.extended_risk_models import (
+            _detect_period_type, _PERIOD_LABELS,
+        )
         period_by_year = {}
         for p in raw_periods:
             yr = p.get("report_period") or p.get("report_date") or ""
             y = str(yr)[:4] if yr else ""
             if y.isdigit():
-                period_by_year.setdefault(int(y), []).append(p)
+                year_int = int(y)
+                p_type = _detect_period_type(p)
+                # 同一年份已有数据时，优先保留口径更大的
+                if year_int not in period_by_year:
+                    period_by_year[year_int] = p
+                else:
+                    priority = {"annual": 4, "q3": 3, "h1": 2, "q1": 1, "unknown": 0}
+                    existing_type = _detect_period_type(period_by_year[year_int])
+                    if priority.get(p_type, 0) > priority.get(existing_type, 0):
+                        period_by_year[year_int] = p
 
         warnings: list = []
         trend = []
@@ -846,7 +1064,35 @@ def get_fcff_fcfe_calculation(
 def get_peg_valuation(
     symbol: Annotated[str, "A 股股票代码，如 600519"],
 ) -> str:
-    """PEG = PE / Earnings_Growth_Rate"""
+    """PEG = PE / Earnings_Growth_Rate
+
+    Args:
+        symbol: A 股股票代码，如 600519
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+            symbol: 股票代码
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            method: "peg_valuation"
+            parameters: 参数 dict —
+                pe_ttm: 滚动市盈率
+                growth_rate_3y_cagr: 3 年净利润 CAGR（小数），无法计算时为 None
+                peg_ratio: PEG 比率，无法计算时为 None
+            valuation: 估值结论 dict —
+                assessment: 评估结论："低估" | "合理" | "高估" | "无法评估（增长率不足或为负）"
+                current_price: 当前股价
+            data_quality: 数据质量 dict —
+                years_of_profit_data: 正利润数据期数
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         from core.skill_runtime.data_access import get_stock_basic_info, get_latest_stock_price
         from core.skill_runtime.standard_financial_apis import get_historical_financial_annual_series
@@ -945,7 +1191,38 @@ def get_peg_valuation(
 def get_graham_valuation(
     symbol: Annotated[str, "A 股股票代码，如 600519"],
 ) -> str:
-    """Graham Number = √(22.5 × EPS × BVPS)"""
+    """Graham Number = √(22.5 × EPS × BVPS)
+
+    Args:
+        symbol: A 股股票代码，如 600519
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+            symbol: 股票代码
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            method: "格雷厄姆估值"
+            parameters: 参数 dict —
+                eps: 每股收益
+                bvps: 每股净资产
+                graham_number: 格雷厄姆数
+            valuation: 估值结果 dict —
+                graham_number: 格雷厄姆数
+                current_price: 当前股价
+                upside_pct: 相对当前价格的上行空间百分比
+                safety_margin: 安全边际百分比
+                safety_margin_level: 安全边际等级："高安全边际" | "中等安全边际" | "低安全边际" | "无安全边际"
+            data_quality: 数据质量 dict —
+                shares_source: 股本来源："basic_info" | "estimated"
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         from core.skill_runtime.data_access import get_latest_stock_price, get_stock_basic_info, get_stock_financial_periods
         from core.skill_runtime.standard_financial_apis import get_historical_financial_annual_series
@@ -1057,7 +1334,40 @@ def get_capm_cost_of_equity(
     risk_free_rate: Annotated[float, "无风险利率（10 年期国债收益率），默认 2.5%"] = 0.025,
     equity_risk_premium: Annotated[float, "股权风险溢价，默认 6%"] = 0.06,
 ) -> str:
-    """CAPM = Rf + β × ERP"""
+    """CAPM = Rf + β × ERP
+
+    Args:
+        symbol: A 股股票代码，如 600519
+        risk_free_rate: 无风险利率（小数形式，如 0.025 表示 2.5%），默认 0.025
+        equity_risk_premium: 股权风险溢价（小数形式），默认 0.06
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            method: "capm"
+            parameters: 参数 dict —
+                risk_free_rate: 无风险利率（小数）
+                beta: Beta 系数
+                equity_risk_premium: 股权风险溢价（小数）
+            cost_of_equity: 股权成本（小数）
+            components: 各组成部分 dict —
+                risk_free_rate: dict — value: 无风险利率值, description: 描述
+                beta: dict — value: Beta 值, source: Beta 来源："default" | "price_returns_estimated"
+                equity_risk_premium: dict — value: ERP 值, description: 描述
+            formula: 公式文本 "cost_of_equity = Rf + β × ERP"
+            calculation: 计算过程文本
+            data_quality: 数据质量 dict —
+                beta_source: Beta 来源："default" | "price_returns_estimated"
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
         from core.skill_runtime.standard_financial_apis import get_security_master
@@ -1160,7 +1470,50 @@ def get_capm_cost_of_equity(
 def get_growth_adjusted_valuation(
     symbol: Annotated[str, "A 股股票代码，如 600519"],
 ) -> str:
-    """基于增长质量评分调整 PE"""
+    """基于增长质量评分调整 PE
+
+    Args:
+        symbol: A 股股票代码，如 600519
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+            symbol: 股票代码
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            method: "增长质量调整估值"
+            parameters: 参数 dict —
+                raw_pe_ttm: 原始滚动市盈率
+            growth_quality: 增长质量评分 dict —
+                total_score: 综合评分（0-100）
+                quality_label: 质量标签："优秀" | "良好" | "一般" | "较差" | "差"
+                components: 评分组成 dict —
+                    revenue_consistency: 营收一致性评分
+                    roic_sustainability: ROIC 可持续性评分
+                    cashflow_quality: 现金流质量评分
+                detail: 评分明细 dict —
+                    revenue_growth_std: 营收增长率标准差（数据不足时为 None）
+                    mean_roe: ROE 均值（数据不足时为 None）
+                    mean_ocf_to_net_profit: OCF/净利润 均值（数据不足时为 None）
+            valuation: 估值结果 dict —
+                pe_adjustment_factor: PE 调整因子
+                adjusted_pe: 调整后 PE
+                industry_median_pe: 行业中位数 PE（缺失时为 None）
+                fair_pe: 公允 PE
+                fair_value: 公允价值（EPS 不可计算时为 None）
+                current_price: 当前股价
+            methodology: 方法论文本
+            data_quality: 数据质量 dict —
+                industry: 所属行业
+                years_available: 可用年报期数
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         from core.skill_runtime.data_access import get_stock_basic_info, get_latest_stock_price
         from core.skill_runtime.standard_financial_apis import (

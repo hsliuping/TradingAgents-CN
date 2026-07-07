@@ -232,6 +232,39 @@ def get_economic_cycle_position() -> str:
 
     通过 AKShare 实时获取沪深300指数收益率和国债收益率数据，
     运用简化美林时钟框架判断当前周期所处位置及推荐资产配置。
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "ok" | "error"
+            analysis_date: 分析日期（YYYY-MM-DD）
+            data_source: 数据来源说明
+            cycle_position: dict 周期定位——
+                — quadrant: 美林时钟象限
+                — recommended_asset_class: 推荐资产类别
+                — signal_description: 信号描述
+            gdp_proxy: dict 增长代理指标（沪深300近3个月收益率）——
+                — label: 指标标签
+                — value_pct: 收益率（%）
+                — direction: 方向: "高增长" | "低增长" | "中性"
+                — threshold_note: 阈值说明
+            inflation_proxy: dict 通胀代理指标（10Y国债收益率近3个月变化）——
+                — label: 指标标签
+                — value_change: 收益率变化
+                — direction: 方向: "上升" | "下降" | "平稳"
+                — threshold_note: 阈值说明
+            current_data: dict 当前数据——
+                — csi300_latest_close: 沪深300最新收盘价
+                — csi300_latest_date: 沪深300最新日期
+                — china_10y_yield: 中国10年期收益率
+                — china_10y_3m_ago: 3个月前的中国10年期收益率
+                — us_10y_yield: 美国10年期收益率
+                — cn_us_spread_10y: 中美10年期利差
+            data_quality: dict 数据质量——
+                — has_csi300_data: 是否有沪深300数据
+                — has_yield_history: 是否有收益率历史
+                — yield_history_days: 历史数据天数
+                — note: 说明文本
+            message: 错误信息（仅 status="error" 时存在）
     """
     try:
         # 1. 获取中美收益率数据（含近3个月历史）
@@ -397,6 +430,41 @@ def get_monetary_environment() -> str:
 
     通过 AKShare 获取中美国债收益率数据，分析利率水平、趋势、
     利差和政策立场。
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "ok" | "error"
+            analysis_date: 分析日期（YYYY-MM-DD）
+            data_source: 数据来源说明
+            interest_rate_environment: dict 利率环境——
+                — china_10y_level: 利率水平: "低位" | "中性" | "高位" | "未知"
+                — china_10y_level_detail: 水平详细说明
+                — trend_1m: dict 近1个月趋势——
+                    — change_bps: 变化（基点）
+                    — direction: 方向: "上升" | "下降" | "平稳" | "未知"
+                — trend_3m: dict 近3个月趋势（结构同 trend_1m）
+            china_10y_yield: dict 中国10年期收益率——
+                — current: 当前值
+                — 1m_ago: 1个月前
+                — 3m_ago: 3个月前
+            us_10y_yield: dict 美国10年期收益率——
+                — current: 当前值
+            spread_trend: dict 中美利差趋势——
+                — cn_us_10y_spread: 中美10年期利差
+                — note: 说明文本
+            monetary_stance: dict 货币政策立场——
+                — stance: 立场: "宽松" | "中性" | "紧缩" | "未知"
+                — description: 立场描述
+                — basis: 判断依据
+            available_data_sources: dict 可用数据源——
+                — current_data: 当前数据源
+                — not_included: list[str] 未包含的数据源列表
+            data_quality: dict 数据质量——
+                — has_full_history: 是否有完整历史
+                — has_china_10y: 是否有中国10Y数据
+                — has_us_10y: 是否有美国10Y数据
+                — history_points: 历史数据点数
+            message: 错误信息（仅 status="error" 时存在）
     """
     try:
         rate_data = _fetch_zh_us_rate()
@@ -673,6 +741,42 @@ def get_sector_rotation_signals() -> str:
 
     结合本地行业估值数据和实时宏观周期信号，判断行业轮动阶段
     并给出各行业的相对强度排名。
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "ok" | "error"
+            analysis_date: 分析日期（YYYY-MM-DD）
+            data_source: 数据来源说明
+            current_cycle_position_data: dict 当前周期数据（实时数据不可用时包含 cycle_phase="未知（实时数据不可用）"）——
+                — market_return_3m: 沪深300近3个月收益率
+                — china_10y_yield: 中国10年期收益率
+                — cycle_phase: 周期阶段: "复苏" | "过热" | "滞涨" | "衰退" | "过渡" | "未知" | "未知（实时数据不可用）"
+            rotation_phase: dict 轮动阶段——
+                — phase: 阶段: "成长领涨" | "周期领涨" | "防御轮动" | "价值领涨" | "均衡轮动"
+                — description: 阶段描述
+                — methodology: 方法论说明
+            sector_ranking: list[dict] 行业排名（前30），元素结构——
+                — industry: 行业名
+                — stock_count: 股票数量
+                — pe_median: PE中位数
+                — pb_median: PB中位数
+                — total_mv_billion: 总市值（亿元）
+                — relative_strength: 相对强度
+                — relative_valuation: 相对估值: "价值" | "成长" | "中性"
+            market_valuation_context: dict 市场估值上下文——
+                — market_pe_median: 市场PE中位数
+                — market_pb_median: 市场PB中位数
+                — total_industries: 行业总数
+                — total_stocks_tracked: 跟踪的股票总数
+            top_defensive: list[dict] 推荐防御型板块（结构同 sector_ranking 元素）
+            top_cyclical: list[dict] 推荐周期型板块（结构同 sector_ranking 元素）
+            data_quality: dict 数据质量——
+                — industry_count: 行业数
+                — defensive_found: 找到的防御型板块数
+                — cyclical_found: 找到的周期型板块数
+                — cycle_data_available: 是否有实时周期数据
+                — note: 说明文本
+            message: 错误信息（仅 status="error" 时存在）
     """
     try:
         today = datetime.date.today()

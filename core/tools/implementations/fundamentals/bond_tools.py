@@ -340,6 +340,27 @@ def get_bond_yield_calculation() -> str:
 
     使用 AKShare 的 bond_china_yield() 和 bond_zh_us_rate() 接口，
     返回最新各期限收益率及曲线形态判断。
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "ok" | "error"
+            date: 数据日期（YYYY-MM-DD）
+            data_source: 数据源说明
+            data_note: 数据注释（强调返回即期收益率曲线而非个券YTM）
+            yields_by_tenor: list[dict] 各期限收益率表，元素结构——
+                — tenor: 期限（如 "1年"、"10年"）
+                — china_yield_pct: 中国该期限国债收益率（%）
+            yield_curve_shape_china: 中国收益率曲线形态判断
+            yield_curve_shape_us: 美国收益率曲线形态判断
+            china_us_comparison: dict 中美利差对比（数据不可用时为 {"status": "unavailable"}）——
+                — china_10y: 中国10年期收益率
+                — us_10y: 美国10年期收益率
+                — china_2y: 中国2年期收益率（实际取1年）
+                — us_2y: 美国2年期收益率
+                — cn_us_10y_spread: 中美10年期利差（百分点）
+            commentary_with_key_levels: 市场解读文本（含关键水平）
+            message: 错误信息（仅 status="error" 时存在）
+            suggestion: 建议（仅部分错误场景存在）
     """
     try:
         curve = _fetch_china_yield_curve()
@@ -450,6 +471,27 @@ def get_credit_spread_analysis() -> str:
 
     利用 AKShare 获取多条收益率曲线，计算 AAA 中短期票据、
     AAA 银行普通债与同期限国债之间的信用利差。
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "ok" | "error"
+            date: 数据日期（YYYY-MM-DD）
+            data_source: 数据源说明
+            data_note: 数据注释（信用利差定义与解读说明）
+            curves_available: dict 各曲线可用日期——
+                — treasury: 国债收益率曲线数据日期
+                — aaa_corporate_note: AAA中短期票据曲线日期
+                — aaa_bank_note: AAA银行普通债曲线日期
+            credit_spreads_by_tenor: list[dict] 各期限信用利差表，元素结构——
+                — tenor: 期限
+                — treasury_yield_%: 国债收益率（%）
+                — aaa_corporate_spread_%: AAA企业债信用利差（%）
+                — aaa_bank_spread_%: AAA银行债信用利差（%）
+            key_tenor_spreads: dict 关键期限（1/3/5/7/10年）利差汇总——
+                — <tenor>: 该期限下 aaa_corporate_spread / aaa_bank_spread
+            interpretation: 市场解读文本
+            warning_if_data_stale: 数据时效警告（数据较旧时返回字符串，否则为 None）
+            message: 错误信息（仅 status="error" 时存在）
     """
     try:
         multi = _fetch_china_multi_curve()
@@ -611,6 +653,44 @@ def get_bond_duration_convexity(
     """计算固定利率债券的 Macaulay 久期、修正久期和凸性。
 
     若不提供 yield_to_maturity，将通过 akshare 获取当前10年期国债收益率。
+
+    Args:
+        coupon_rate: 票面利率（小数，如 0.03 表示 3%），默认 0.03
+        years_to_maturity: 剩余期限（年），默认 10.0
+        yield_to_maturity: 到期收益率（小数），为 None 时自动获取当前10年期国债收益率，默认 None
+        frequency: 年付息频率，可选 1（年付）/ 2（半年付）/ 4（季付）/ 12（月付），默认 2
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "ok" | "error"
+            macaulay_duration: dict Macaulay 久期——
+                — years: 久期年数
+                — description: 含义说明
+            modified_duration: dict 修正久期——
+                — value: 修正久期数值
+                — description: 含义说明
+            convexity: dict 凸性——
+                — value: 凸性数值
+                — description: 含义说明
+            price_change_1pct: dict 收益率上升1%时的价格变动估算——
+                — yield_increase_1pct_pct_change: 价格变动百分比
+                — explanation: 解释文本
+                — formula: 使用的公式
+                — linear_estimate_only_mod_duration: 仅久期线性估算的百分比
+                — with_convexity_adjustment: 含凸性调整后的百分比
+            bond_price: dict 债券价格——
+                — current_price: 当前价格
+                — face_value: 面值（100.0）
+            parameters_used: dict 实际使用的参数——
+                — coupon_rate: 票面利率（小数）
+                — coupon_rate_pct: 票面利率（%）
+                — years_to_maturity: 剩余期限
+                — yield_to_maturity: 到期收益率（小数）
+                — yield_to_maturity_pct: 到期收益率（%）
+                — frequency: 付息频率文本说明
+                — payment_periods: 总付息期数
+            methodology: dict 各指标计算方法说明（macaulay_duration/modified_duration/convexity/price_change）
+            message: 错误信息（仅 status="error" 时存在）
     """
     try:
         if yield_to_maturity is None:

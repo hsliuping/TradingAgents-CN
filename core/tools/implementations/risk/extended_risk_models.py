@@ -40,6 +40,58 @@ def _pct_change(current, previous) -> float | None:
 
 
 # ============================================================================
+# 报告期口径检测（避免季报 vs 年报的错误比较）
+# ============================================================================
+
+_PERIOD_LABELS = {"q1": "一季报", "h1": "半年报", "q3": "三季报", "annual": "年报", "unknown": "未知"}
+
+
+def _detect_period_type(fin: dict) -> str:
+    """返回 period_type: annual / q1 / h1 / q3 / unknown"""
+    rp = str(fin.get("report_period") or fin.get("report_date") or fin.get("end_date") or "").strip()
+    if not rp:
+        return "unknown"
+    # 提取月份：支持 "2025-03-31" 和 "20250331" 两种格式
+    digits = "".join(ch for ch in rp[:10] if ch.isdigit())
+    if len(digits) >= 6:
+        month_part = digits[4:6]
+    elif "-" in rp and len(rp) >= 7:
+        month_part = rp[:10].split("-")[1]
+    else:
+        month_part = ""
+    return {"03": "q1", "06": "h1", "09": "q3", "12": "annual"}.get(month_part, "unknown")
+
+
+def _annualize_factor(period_type: str) -> float:
+    """年化因子：年报=1, 一季报=4, 半年报=2, 三季报=4/3"""
+    return {"annual": 1.0, "q1": 4.0, "h1": 2.0, "q3": 4.0 / 3.0}.get(period_type, 1.0)
+
+
+def _find_same_period_prev(fin_data_list: list, cur_period_type: str) -> tuple:
+    """找相同口径的上期数据做同比。返回 (fin_prev, prev_period_type, period_mismatch)"""
+    for candidate in fin_data_list[1:]:
+        if _detect_period_type(candidate) == cur_period_type:
+            return candidate, cur_period_type, False
+    # 退而求其次用最近一期
+    if len(fin_data_list) > 1:
+        fin_prev = fin_data_list[1]
+        prev_type = _detect_period_type(fin_prev)
+        mismatch = (prev_type != cur_period_type and cur_period_type != "unknown")
+        return fin_prev, prev_type, mismatch
+    return None, "unknown", False
+
+
+def _period_caliber_payload(cur_type: str, prev_type: str, mismatch: bool) -> dict:
+    """生成口径信息 payload"""
+    return {
+        "current": cur_type,
+        "previous": prev_type,
+        "period_mismatch": mismatch,
+        "annualized": cur_type != "annual" and cur_type != "unknown",
+    }
+
+
+# ============================================================================
 # Tool 1:  Ohlson O-Score 破产预测
 # ============================================================================
 
@@ -63,10 +115,36 @@ def _pct_change(current, previous) -> float | None:
     related_tools=["get_altman_zscore", "get_piotroski_fscore"],
 )
 def get_ohlson_oscore(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """计算 Ohlson O-Score 破产概率。"""
+    """计算 Ohlson O-Score 破产概率。基于 logit 模型综合公司规模、负债、流动性、盈利等维度预测破产概率。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            o_score: O-Score 评分（越高破产概率越大）
+            probability: 破产概率（0-1，由 O-Score 经 logit 转换得到）
+            risk_level: 风险等级，"high"（>0.5） | "medium"（>0.15） | "low"
+            components: dict，六个分量——
+                — x1_log_assets: log(总资产)
+                — x2_debt_ratio: 总负债 / 总资产
+                — x3_wc_to_assets: 营运资金 / 总资产
+                — x4_cl_to_ca: 流动负债 / 流动资产
+                — x5_liab_exceeds_assets: 资不抵债虚拟变量（1.0 或 0.0）
+                — x6_ni_change: 净利润变化率（口径不一致或数据缺失时为 None）
+            interpretation: dict，解读——
+                — o_score: O-Score
+                — probability: 破产概率
+                — risk_level: 风险等级
+            data_quality: dict，数据质量——
+                — warnings: list[str]，告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
-        # 获取最新两期财务数据（计算净利变化需要）
-        fin_data_list = get_stock_financial_periods(symbol, limit=2)
+        # 获取多期财务数据（计算净利变化需要相同口径）
+        fin_data_list = get_stock_financial_periods(symbol, limit=4)
         if not fin_data_list:
             return json.dumps(
                 {"status": "error", "message": f"未获取到 {symbol} 的财务数据", "symbol": symbol},
@@ -74,7 +152,9 @@ def get_ohlson_oscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
             )
 
         fin_t = fin_data_list[0]
-        fin_t1 = fin_data_list[1] if len(fin_data_list) > 1 else None
+        # 🔑 找相同口径的上期数据（避免季报 vs 年报的错误比较）
+        cur_period_type = _detect_period_type(fin_t)
+        fin_t1, prev_period_type, period_mismatch = _find_same_period_prev(fin_data_list, cur_period_type)
 
         # 提取当期数据
         total_assets = _safe_float(fin_t.get("total_assets"))
@@ -88,6 +168,9 @@ def get_ohlson_oscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
 
         warnings: list[str] = []
         components: dict[str, Optional[float]] = {}
+
+        if period_mismatch:
+            warnings.append(f"口径不一致：当期{_PERIOD_LABELS.get(cur_period_type, cur_period_type)} vs 上期{_PERIOD_LABELS.get(prev_period_type, prev_period_type)}，净利润变化率(X6)已跳过")
 
         # X1 = log(总资产)
         x1 = math.log(total_assets) if total_assets is not None and total_assets > 0 else None
@@ -123,13 +206,14 @@ def get_ohlson_oscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
         components["x5_liab_exceeds_assets"] = x5
 
         # X6 = 净利润变化率： (NI_t - NI_{t-1}) / (|NI_t| + |NI_{t-1}|)
+        # 🔑 口径不一致时跳过（季报 vs 年报的净利比较无意义）
         x6 = None
-        if net_profit_t is not None and net_profit_t1 is not None:
+        if not period_mismatch and net_profit_t is not None and net_profit_t1 is not None:
             denom = abs(net_profit_t) + abs(net_profit_t1)
             if denom != 0:
                 x6 = (net_profit_t - net_profit_t1) / denom
         components["x6_ni_change"] = x6
-        if x6 is None:
+        if x6 is None and not period_mismatch:
             warnings.append("净利润历史数据不足，X6分量无效")
 
         # 计算 O-Score
@@ -221,9 +305,37 @@ def get_ohlson_oscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
     related_tools=["get_inventory_quality", "get_liquidity_stress_test"],
 )
 def get_receivables_quality(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """评估应收账款质量。"""
+    """评估应收账款质量。通过 DSO、应收/营收比、应收/总资产比及同比变化综合评分 0-100 分。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            period_type: 当期报告期类型，"annual" | "interim" | "q1" | "q3" | "unknown"
+            period_caliber: dict，报告期口径信息——
+                — current: 当期类型
+                — previous: 上期类型
+                — period_mismatch: 是否存在口径不一致
+                — annualized: 是否进行了年化处理
+            metrics: dict，应收账款指标——
+                — dso_days: 应收账款周转天数
+                — dso_previous_days: 上期 DSO
+                — dso_change_pct: DSO 同比变化百分比
+                — receivables_to_revenue_pct: 应收/营收比（百分比）
+                — receivables_to_assets_pct: 应收/总资产比（百分比）
+                — receivables_growth_pct: 应收同比增长百分比
+                — revenue_growth_pct: 营收同比增长百分比
+            score: 应收账款质量评分（0-100，越高越好；口径不一致时同比相关指标为 None）
+            flags: list[str]，触发的不良信号描述
+            data_quality: dict，数据质量——
+                — warnings: list[str]，告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
-        fin_data_list = get_stock_financial_periods(symbol, limit=2)
+        fin_data_list = get_stock_financial_periods(symbol, limit=4)
         if not fin_data_list:
             return json.dumps(
                 {"status": "error", "message": f"未获取到 {symbol} 的财务数据", "symbol": symbol},
@@ -231,34 +343,56 @@ def get_receivables_quality(symbol: Annotated[str, "A 股股票代码，如 6005
             )
 
         fin_cur = fin_data_list[0]
-        fin_prev = fin_data_list[1] if len(fin_data_list) > 1 else None
+
+        # 🔑 检测报告期口径，避免季报 vs 年报的错误比较
+        cur_period_type = _detect_period_type(fin_cur)
+        cur_factor = _annualize_factor(cur_period_type)
+        fin_prev, prev_period_type, period_mismatch = _find_same_period_prev(fin_data_list, cur_period_type)
 
         warnings: list[str] = []
         flags: list[str] = []
+
+        if cur_period_type != "annual" and cur_period_type != "unknown":
+            warnings.append(f"当期为{_PERIOD_LABELS.get(cur_period_type, cur_period_type)}数据，营收已年化处理以消除口径差异")
+
+        if period_mismatch:
+            warnings.append(f"口径不一致：当期{_PERIOD_LABELS.get(cur_period_type, cur_period_type)} vs 上期{_PERIOD_LABELS.get(prev_period_type, prev_period_type)}，同比指标已标注口径失真")
 
         # 提取当前期数据
         accounts_receiv = _safe_float(fin_cur.get("accounts_receiv"))
         revenue = _safe_float(fin_cur.get("revenue"))
         total_assets = _safe_float(fin_cur.get("total_assets"))
 
+        # 🔑 年化营收（用于 DSO 和应收/营收比）
+        revenue_annualized = revenue * cur_factor if revenue is not None else None
+
         # 提取上期数据
         ar_prev = _safe_float(fin_prev.get("accounts_receiv")) if fin_prev else None
         rev_prev = _safe_float(fin_prev.get("revenue")) if fin_prev else None
+        prev_factor = _annualize_factor(prev_period_type)
+        rev_prev_annualized = rev_prev * prev_factor if rev_prev is not None else None
 
-        # DSO (Days Sales Outstanding)
-        dso = _safe_div(accounts_receiv, _safe_div(revenue, 365)) if accounts_receiv is not None and revenue is not None else None
-        dso_prev = _safe_div(ar_prev, _safe_div(rev_prev, 365)) if ar_prev is not None and rev_prev is not None else None
+        # DSO (Days Sales Outstanding) — 使用年化营收
+        dso = _safe_div(accounts_receiv, _safe_div(revenue_annualized, 365)) if accounts_receiv is not None and revenue_annualized is not None else None
+        dso_prev = _safe_div(ar_prev, _safe_div(rev_prev_annualized, 365)) if ar_prev is not None and rev_prev_annualized is not None else None
 
-        # 应收/营收比
-        receivables_to_revenue = _safe_div(accounts_receiv, revenue)
+        # 应收/营收比 — 使用年化营收
+        receivables_to_revenue = _safe_div(accounts_receiv, revenue_annualized)
 
-        # 应收/总资产比
+        # 应收/总资产比（不受营收口径影响）
         receivables_to_assets = _safe_div(accounts_receiv, total_assets)
 
-        # 同比变化
-        ar_growth = _pct_change(accounts_receiv, ar_prev)
-        rev_growth = _pct_change(revenue, rev_prev)
-        dso_change = _pct_change(dso, dso_prev) if dso is not None and dso_prev is not None else None
+        # 同比变化（仅在口径一致时才有意义）
+        if period_mismatch:
+            # 口径不一致，不计算同比
+            dso_change = None
+            ar_growth = None
+            rev_growth = None
+            warnings.append("因报告期口径不一致，DSO同比、应收增长、营收增长等同比指标已跳过")
+        else:
+            ar_growth = _pct_change(accounts_receiv, ar_prev)
+            rev_growth = _pct_change(revenue, rev_prev)  # 用原始值比较（同期口径相同）
+            dso_change = _pct_change(dso, dso_prev) if dso is not None and dso_prev is not None else None
 
         # 评分 (0-100)
         score = 50.0  # 基础分
@@ -337,6 +471,13 @@ def get_receivables_quality(symbol: Annotated[str, "A 股股票代码，如 6005
 
         payload = {
             "symbol": symbol,
+            "period_type": cur_period_type,
+            "period_caliber": {
+                "current": cur_period_type,
+                "previous": prev_period_type,
+                "period_mismatch": period_mismatch,
+                "annualized": cur_period_type != "annual" and cur_period_type != "unknown",
+            },
             "metrics": metrics,
             "score": round(score, 1),
             "flags": flags,
@@ -377,9 +518,37 @@ def get_receivables_quality(symbol: Annotated[str, "A 股股票代码，如 6005
     related_tools=["get_receivables_quality", "get_liquidity_stress_test"],
 )
 def get_inventory_quality(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """评估存货质量。"""
+    """评估存货质量。通过存货周转率、DIO、存货/营收比及同比变化综合评分 0-100 分。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            period_type: 当期报告期类型，"annual" | "interim" | "q1" | "q3" | "unknown"
+            period_caliber: dict，报告期口径信息——
+                — current: 当期类型
+                — previous: 上期类型
+                — period_mismatch: 是否存在口径不一致
+                — annualized: 是否进行了年化处理
+            metrics: dict，存货指标——
+                — inventory_turnover: 存货周转率（次/年）
+                — dio_days: 存货周转天数
+                — inventory_to_revenue_pct: 存货/营收比（百分比）
+                — inventory_to_assets_pct: 存货/总资产比（百分比）
+                — inventory_to_current_assets_pct: 存货/流动资产比（百分比）
+                — inventory_growth_pct: 存货同比增长百分比
+                — revenue_growth_pct: 营收同比增长百分比
+            score: 存货质量评分（0-100，越高越好）
+            flags: list[str]，触发的不良信号描述
+            data_quality: dict，数据质量——
+                — warnings: list[str]，告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
-        fin_data_list = get_stock_financial_periods(symbol, limit=2)
+        fin_data_list = get_stock_financial_periods(symbol, limit=4)
         if not fin_data_list:
             return json.dumps(
                 {"status": "error", "message": f"未获取到 {symbol} 的财务数据", "symbol": symbol},
@@ -387,10 +556,19 @@ def get_inventory_quality(symbol: Annotated[str, "A 股股票代码，如 600519
             )
 
         fin_cur = fin_data_list[0]
-        fin_prev = fin_data_list[1] if len(fin_data_list) > 1 else None
+
+        # 🔑 检测报告期口径
+        cur_period_type = _detect_period_type(fin_cur)
+        cur_factor = _annualize_factor(cur_period_type)
+        fin_prev, prev_period_type, period_mismatch = _find_same_period_prev(fin_data_list, cur_period_type)
 
         warnings: list[str] = []
         flags: list[str] = []
+
+        if cur_period_type != "annual" and cur_period_type != "unknown":
+            warnings.append(f"当期为{_PERIOD_LABELS.get(cur_period_type, cur_period_type)}数据，营收和成本已年化处理")
+        if period_mismatch:
+            warnings.append(f"口径不一致：当期{_PERIOD_LABELS.get(cur_period_type, cur_period_type)} vs 上期{_PERIOD_LABELS.get(prev_period_type, prev_period_type)}，同比指标已跳过")
 
         # 提取数据
         inventories = _safe_float(fin_cur.get("inventories"))
@@ -398,34 +576,43 @@ def get_inventory_quality(symbol: Annotated[str, "A 股股票代码，如 600519
         total_assets = _safe_float(fin_cur.get("total_assets"))
         total_cur_assets = _safe_float(fin_cur.get("total_cur_assets"))
 
+        # 🔑 年化营收
+        revenue_annualized = revenue * cur_factor if revenue is not None else None
+
         # 营业成本（使用营收 - 毛利近似）
         gross_margin = _safe_float(fin_cur.get("gross_margin"))
-        cogs = revenue * (1 - gross_margin / 100) if revenue is not None and gross_margin is not None and gross_margin > 1 else None
+        cogs = revenue_annualized * (1 - gross_margin / 100) if revenue_annualized is not None and gross_margin is not None and gross_margin > 1 else None
 
         # 上期数据
         inv_prev = _safe_float(fin_prev.get("inventories")) if fin_prev else None
         rev_prev = _safe_float(fin_prev.get("revenue")) if fin_prev else None
         gm_prev = _safe_float(fin_prev.get("gross_margin")) if fin_prev else None
-        cogs_prev = rev_prev * (1 - gm_prev / 100) if rev_prev is not None and gm_prev is not None and gm_prev > 1 else None
+        prev_factor = _annualize_factor(prev_period_type)
+        rev_prev_annualized = rev_prev * prev_factor if rev_prev is not None else None
+        cogs_prev = rev_prev_annualized * (1 - gm_prev / 100) if rev_prev_annualized is not None and gm_prev is not None and gm_prev > 1 else None
 
-        # 存货周转率
+        # 存货周转率（使用年化成本）
         inventory_turnover = _safe_div(cogs, inventories) if cogs is not None and inventories is not None else None
 
         # DIO (Days Inventory Outstanding)
         dio = _safe_div(365, inventory_turnover) if inventory_turnover is not None and inventory_turnover > 0 else None
 
-        # 存货/营收比
-        inventory_to_revenue = _safe_div(inventories, revenue)
+        # 存货/营收比 — 使用年化营收
+        inventory_to_revenue = _safe_div(inventories, revenue_annualized)
 
-        # 存货/总资产比
+        # 存货/总资产比（不受营收口径影响）
         inventory_to_assets = _safe_div(inventories, total_assets)
 
         # 存货/流动资产比
         inventory_to_ca = _safe_div(inventories, total_cur_assets)
 
-        # 同比变化
-        inv_growth = _pct_change(inventories, inv_prev)
-        rev_growth = _pct_change(revenue, rev_prev)
+        # 同比变化（仅在口径一致时计算）
+        if period_mismatch:
+            inv_growth = None
+            rev_growth = None
+        else:
+            inv_growth = _pct_change(inventories, inv_prev)
+            rev_growth = _pct_change(revenue, rev_prev)
 
         # 评分 (0-100)
         score = 50.0
@@ -500,6 +687,8 @@ def get_inventory_quality(symbol: Annotated[str, "A 股股票代码，如 600519
 
         payload = {
             "symbol": symbol,
+            "period_type": cur_period_type,
+            "period_caliber": _period_caliber_payload(cur_period_type, prev_period_type, period_mismatch),
             "metrics": metrics,
             "score": round(score, 1),
             "flags": flags,
@@ -543,7 +732,38 @@ def get_liquidity_stress_test(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     revenue_decline_pcts: Annotated[str, "营收下滑百分比（逗号分隔），如'0.1,0.2,0.3' 表示10%/20%/30%"] = "0.1,0.2,0.3",
 ) -> str:
-    """执行流动性压力测试。"""
+    """执行流动性压力测试。模拟不同营收下滑情景下的流动性风险。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        revenue_decline_pcts: 营收下滑百分比（逗号分隔），默认 "0.1,0.2,0.3"；
+            每个值会被夹取到 [0, 1]；解析失败时回退为默认值
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            period_type: 当期报告期类型，"annual" | "interim" | "q1" | "q3" | "unknown"
+            period_caliber: dict，报告期口径信息——
+                — current: 当期类型
+                — previous: 上期类型（恒为 "unknown"）
+                — period_mismatch: 是否存在口径不一致（恒为 False）
+                — annualized: 是否进行了年化处理
+            liquidity_metrics: dict，基础流动性指标——
+                — current_ratio: 流动比率
+                — quick_ratio: 速动比率
+                — cash_coverage_days: 现金覆盖天数
+            stress_scenarios: list[dict]，压力情景结果，元素结构——
+                — revenue_decline_pct: 营收下滑比例
+                — stressed_revenue: 受压营收
+                — stressed_oper_profit: 受压营业利润
+                — stressed_net_profit: 受压净利润
+                — stressed_current_ratio: 受压流动比率
+                — stressed_cash_coverage_days: 受压现金覆盖天数
+            data_quality: dict，数据质量——
+                — warnings: list[str]，告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         fin_data_list = get_stock_financial_periods(symbol, limit=1)
         if not fin_data_list:
@@ -554,6 +774,12 @@ def get_liquidity_stress_test(
 
         fin = fin_data_list[0]
         warnings: list[str] = []
+
+        # 🔑 检测报告期口径
+        cur_period_type = _detect_period_type(fin)
+        cur_factor = _annualize_factor(cur_period_type)
+        if cur_period_type != "annual" and cur_period_type != "unknown":
+            warnings.append(f"当期为{_PERIOD_LABELS.get(cur_period_type, cur_period_type)}数据，营收已年化处理")
 
         # 提取数据
         total_cur_assets = _safe_float(fin.get("total_cur_assets"))
@@ -566,6 +792,9 @@ def get_liquidity_stress_test(
         net_profit = _safe_float(fin.get("net_profit"))
         oper_profit = _safe_float(fin.get("oper_profit"))
 
+        # 🔑 年化营收
+        revenue_annualized = revenue * cur_factor if revenue is not None else None
+
         # 流动性指标
         current_ratio = _safe_div(total_cur_assets, total_cur_liab)
 
@@ -577,8 +806,8 @@ def get_liquidity_stress_test(
         )
         quick_ratio = _safe_div(quick_assets, total_cur_liab)
 
-        # 现金覆盖天数
-        daily_opex = _safe_div(revenue * 0.7, 365) if revenue is not None else None  # 假设营业费用约占营收70%
+        # 现金覆盖天数 — 使用年化营收
+        daily_opex = _safe_div(revenue_annualized * 0.7, 365) if revenue_annualized is not None else None  # 假设营业费用约占营收70%
         cash_coverage_days = _safe_div(money_cap, daily_opex) if money_cap is not None and daily_opex is not None and daily_opex > 0 else None
 
         if daily_opex is None:
@@ -605,13 +834,13 @@ def get_liquidity_stress_test(
         # 压力场景分析
         stress_scenarios = []
         for pct in sorted(declines):
-            # 营收下滑后的营收
-            stressed_revenue = revenue * (1 - pct) if revenue is not None else None
+            # 营收下滑后的营收（基于年化营收）
+            stressed_revenue = revenue_annualized * (1 - pct) if revenue_annualized is not None else None
 
             # 假设固定成本占营收50%，变动成本随营收线性变化
             # 模拟成本结构：总成本 = 0.5*原营收(固定) + 0.5*原营收*(1-下滑率) = 原营收*(1 - 0.5*下滑率)
             cost_ratio_after = 1.0 - 0.5 * pct  # 成本占原营收比例
-            stressed_oper_profit = stressed_revenue - (revenue * cost_ratio_after) if stressed_revenue is not None and revenue is not None else None
+            stressed_oper_profit = stressed_revenue - (revenue_annualized * cost_ratio_after) if stressed_revenue is not None and revenue_annualized is not None else None
 
             # 模拟净利（假设税率25%）
             stressed_net_profit = stressed_oper_profit * 0.75 if stressed_oper_profit is not None else None
@@ -624,7 +853,7 @@ def get_liquidity_stress_test(
                 stressed_ca = None
             stressed_cr = _safe_div(stressed_ca, total_cur_liab)
 
-            # 模拟后的现金覆盖天数
+            # 模拟后的现金覆盖天数 — 使用年化营收
             stressed_daily_opex = _safe_div(stressed_revenue * 0.7, 365) if stressed_revenue is not None else None
             stressed_cash_coverage = _safe_div(money_cap, stressed_daily_opex) if money_cap is not None and stressed_daily_opex is not None and stressed_daily_opex > 0 else None
 
@@ -640,6 +869,8 @@ def get_liquidity_stress_test(
 
         payload = {
             "symbol": symbol,
+            "period_type": cur_period_type,
+            "period_caliber": _period_caliber_payload(cur_period_type, "unknown", False),
             "liquidity_metrics": liquidity_metrics,
             "stress_scenarios": stress_scenarios,
             "data_quality": {"warnings": warnings},
@@ -679,9 +910,36 @@ def get_liquidity_stress_test(
     related_tools=["get_liquidity_stress_test", "get_ohlson_oscore"],
 )
 def get_debt_structure_analysis(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """分析债务结构。"""
+    """分析债务结构。通过负债/权益比、负债/资产比、利息覆盖倍数、短期债务占比等指标综合评分 0-100 分。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            period_type: 当期报告期类型，"annual" | "interim" | "q1" | "q3" | "unknown"
+            period_caliber: dict，报告期口径信息——
+                — current: 当期类型
+                — previous: 上期类型
+                — period_mismatch: 是否存在口径不一致
+                — annualized: 是否进行了年化处理
+            ratios: dict，债务结构指标——
+                — debt_to_equity: 负债/权益比
+                — debt_to_equity_previous: 上期负债/权益比
+                — debt_to_equity_change_pct: 负债/权益比同比变化百分比
+                — debt_to_assets_pct: 负债/总资产比（百分比）
+                — interest_coverage: 利息覆盖倍数（无穷大时为字符串 "inf"）
+                — short_term_debt_ratio_pct: 短期债务占比（百分比）
+            score: 债务结构评分（0-100，越高越好）
+            interpretation: 债务结构解读文案
+            data_quality: dict，数据质量——
+                — warnings: list[str]，告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
-        fin_data_list = get_stock_financial_periods(symbol, limit=2)
+        fin_data_list = get_stock_financial_periods(symbol, limit=4)
         if not fin_data_list:
             return json.dumps(
                 {"status": "error", "message": f"未获取到 {symbol} 的财务数据", "symbol": symbol},
@@ -689,9 +947,14 @@ def get_debt_structure_analysis(symbol: Annotated[str, "A 股股票代码，如 
             )
 
         fin_cur = fin_data_list[0]
-        fin_prev = fin_data_list[1] if len(fin_data_list) > 1 else None
+
+        # 🔑 检测报告期口径
+        cur_period_type = _detect_period_type(fin_cur)
+        fin_prev, prev_period_type, period_mismatch = _find_same_period_prev(fin_data_list, cur_period_type)
 
         warnings: list[str] = []
+        if period_mismatch:
+            warnings.append(f"口径不一致：当期{_PERIOD_LABELS.get(cur_period_type, cur_period_type)} vs 上期{_PERIOD_LABELS.get(prev_period_type, prev_period_type)}，D/E 同比已跳过")
 
         # 提取当期数据
         total_liab = _safe_float(fin_cur.get("total_liab"))
@@ -720,9 +983,13 @@ def get_debt_structure_analysis(symbol: Annotated[str, "A 股股票代码，如 
         # 短期债务占比（使用流动负债/总负债作为近似）
         short_term_debt_ratio = _safe_div(total_cur_liab, total_liab)
 
-        # 趋势
-        debt_to_equity_prev = _safe_div(tl_prev, te_prev) if tl_prev is not None and te_prev is not None else None
-        de_change = _pct_change(debt_to_equity, debt_to_equity_prev) if debt_to_equity is not None and debt_to_equity_prev is not None else None
+        # 趋势 — 口径不一致时跳过同比
+        if period_mismatch:
+            de_change = None
+            debt_to_equity_prev = None
+        else:
+            debt_to_equity_prev = _safe_div(tl_prev, te_prev) if tl_prev is not None and te_prev is not None else None
+            de_change = _pct_change(debt_to_equity, debt_to_equity_prev) if debt_to_equity is not None and debt_to_equity_prev is not None else None
 
         # 评分 (0-100)
         score = 50.0
@@ -814,6 +1081,8 @@ def get_debt_structure_analysis(symbol: Annotated[str, "A 股股票代码，如 
 
         payload = {
             "symbol": symbol,
+            "period_type": cur_period_type,
+            "period_caliber": _period_caliber_payload(cur_period_type, prev_period_type, period_mismatch),
             "ratios": ratios,
             "score": round(score, 1),
             "interpretation": interpretation,

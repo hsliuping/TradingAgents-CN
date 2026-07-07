@@ -135,7 +135,37 @@ def get_black_scholes_price(
     volatility: Annotated[float, "波动率（年化）"] = 0.25,
     option_type: Annotated[str, "期权类型：call（看涨）或 put（看跌）"] = "call",
 ) -> str:
-    """计算欧式期权的 Black-Scholes 理论价格。"""
+    """计算欧式期权的 Black-Scholes 理论价格。
+
+    Args:
+        spot_price: 标的资产当前价格
+        strike_price: 行权价
+        time_to_expiry: 到期时间（年），如 0.5 表示半年
+        risk_free_rate: 无风险利率（小数），默认 0.025
+        volatility: 波动率（年化小数），默认 0.25
+        option_type: 期权类型: "call"（看涨）或 "put"（看跌），默认 "call"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "ok" | "error"
+            option_type: 期权类型: "call" | "put"
+            option_price: 期权理论价格
+            d1: BS 公式中的 d1
+            d2: BS 公式中的 d2
+            delta: Delta 值
+            intrinsic_value: 内在价值
+            time_value: 时间价值
+            moneyness: 价内状态: "价内" | "价平或价外"
+            parameters_used: dict 使用的参数——
+                — spot_price: 标的价格
+                — strike_price: 行权价
+                — time_to_expiry_years: 到期时间（年）
+                — risk_free_rate: 无风险利率
+                — volatility: 波动率
+                — option_type: 期权类型
+            methodology: 计算方法说明
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         opt_type = option_type.lower()
         if opt_type not in ("call", "put"):
@@ -250,7 +280,37 @@ def get_implied_volatility(
     risk_free_rate: Annotated[float, "无风险利率"] = 0.025,
     option_type: Annotated[str, "期权类型：call 或 put"] = "call",
 ) -> str:
-    """通过 Newton-Raphson 迭代从市场价反推隐含波动率。"""
+    """通过 Newton-Raphson 迭代从市场价反推隐含波动率。
+
+    Args:
+        spot_price: 标的资产当前价格
+        strike_price: 行权价
+        time_to_expiry: 到期时间（年）
+        option_price: 期权市场价
+        risk_free_rate: 无风险利率（小数），默认 0.025
+        option_type: 期权类型: "call" 或 "put"，默认 "call"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "ok" | "error"
+            implied_volatility: 隐含波动率（小数）
+            implied_volatility_pct: 隐含波动率（%）
+            iterations: 迭代次数
+            convergence_status: 收敛状态: "已收敛" | "未收敛"
+            initial_guess: 初始猜测值（0.3）
+            price_at_iv: IV 对应的 BS 价格（仅 status="ok" 时存在）
+            target_price: 目标期权市场价（仅 status="ok" 时存在）
+            price_error: 价格误差（仅 status="ok" 时存在）
+            parameters_used: dict 使用的参数（仅 status="ok" 时存在）——
+                — spot_price: 标的价格
+                — strike_price: 行权价
+                — time_to_expiry_years: 到期时间（年）
+                — risk_free_rate: 无风险利率
+                — option_price: 期权市场价
+                — option_type: 期权类型
+            methodology: 计算方法说明（仅 status="ok" 时存在）
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         opt_type = option_type.lower()
         if opt_type not in ("call", "put"):
@@ -385,7 +445,45 @@ def get_option_greeks(
     volatility: Annotated[float, "波动率（年化）"] = 0.25,
     option_type: Annotated[str, "期权类型：call 或 put"] = "call",
 ) -> str:
-    """计算欧式期权的 Delta、Gamma、Theta、Vega、Rho。"""
+    """计算欧式期权的 Delta、Gamma、Theta、Vega、Rho。
+
+    Args:
+        spot_price: 标的资产当前价格
+        strike_price: 行权价
+        time_to_expiry: 到期时间（年）
+        risk_free_rate: 无风险利率（小数），默认 0.025
+        volatility: 波动率（年化小数），默认 0.25
+        option_type: 期权类型: "call" 或 "put"，默认 "call"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "ok" | "error"
+            option_type: 期权类型: "call" | "put"
+            spot_price_used: 使用的标的价格
+            delta: dict Delta——
+                — value: Delta 值
+                — description: 含义说明
+                — interpretation: 解释（方向性风险敞口）
+            gamma: dict Gamma——
+                — value: Gamma 值
+                — description: 含义说明
+                — interpretation: 解释（Delta 的敏感度/凸性风险）
+            theta: dict Theta（年化）——
+                — value: Theta 值（年化）
+                — description: 含义说明（含日均 Theta）
+                — interpretation: 解释（时间衰减）
+            vega: dict Vega（每 1% 波动率变动）——
+                — value: Vega 值
+                — description: 含义说明
+                — interpretation: 解释（波动率风险敞口）
+            rho: dict Rho（每 1% 利率变动）——
+                — value: Rho 值
+                — description: 含义说明
+                — interpretation: 解释（利率风险敞口）
+            parameters_used: dict 使用的参数
+            methodology: 计算方法说明
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         opt_type = option_type.lower()
         if opt_type not in ("call", "put"):
@@ -672,7 +770,45 @@ def get_option_strategy_pnl(
     time_to_expiry: Annotated[float, "到期时间（年）"] = 0.25,
     risk_free_rate: Annotated[float, "无风险利率"] = 0.025,
 ) -> str:
-    """计算期权策略在到期日的盈亏分布。"""
+    """计算期权策略在到期日的盈亏分布。
+
+    Args:
+        strategy_type: 策略类型，可选 "covered_call" / "protective_put" / "straddle" /
+            "strangle" / "bull_spread" / "bear_spread" / "iron_condor"，默认 "covered_call"
+        spot_price: 标的当前价格，默认 100.0
+        strike1: 主行权价（第一腿），默认 100.0
+        strike2: 第二行权价（价差策略使用），为 None 时按策略自动推算，默认 None
+        premium1: 第一腿权利金，默认 5.0
+        premium2: 第二腿权利金，为 None 时按策略自动推算，默认 None
+        volatility: 波动率（用于 ATM 期权参考），默认 0.25
+        time_to_expiry: 到期时间（年），默认 0.25
+        risk_free_rate: 无风险利率，默认 0.025
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "ok" | "error"
+            strategy: 策略中文名称
+            strategy_description: 策略描述
+            legs: 各腿组合说明文本
+            max_profit: 最大盈利（数值或 "无穷（理论上限）"）
+            max_loss: 最大亏损（数值或 "无穷（理论下限）"）
+            break_even_points: list[float] 盈亏平衡点列表
+            pnl_table: list[dict] 盈亏明细表（约 21 个点），元素结构——
+                — spot_price_at_expiry: 到期标的价格
+                — pnl: 该价格下的盈亏
+            visualization_note: 可视化说明
+            parameters_used: dict 使用的参数——
+                — strategy_type: 策略类型
+                — spot_price: 标的价格
+                — strike1: 主行权价
+                — strike2: 第二行权价
+                — premium1: 第一腿权利金
+                — premium2: 第二腿权利金
+                — time_to_expiry_years: 到期时间（年）
+                — volatility: 波动率
+            methodology: 计算方法说明
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         strategy = strategy_type.lower()
         if strategy not in _STRATEGIES:

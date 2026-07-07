@@ -116,7 +116,36 @@ def _fetch_akshare_dividend_yield(symbol: str) -> Optional[Dict[str, Any]]:
 def get_dividend_valuation_context(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
 ) -> str:
-    """获取股息率估值增强上下文。"""
+    """获取股息率估值增强上下文。
+
+    Args:
+        symbol: A 股股票代码，如 "600519"、"000001"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "success" | "error"
+            symbol: 标准化后的 6 位股票代码
+            current_price: 当前股价
+            current_yield: 当前股息率（小数）
+            current_yield_pct: 当前股息率（%）
+            avg_5y_yield: 5年平均股息率（小数）
+            avg_5y_yield_pct: 5年平均股息率（%）
+            yield_percentile: 当前股息率历史分位（0-100）
+            payout_ratio: 派息率（小数）
+            payout_ratio_pct: 派息率（%）
+            dividend_growth: 股息3年CAGR（小数）
+            dividend_growth_pct: 股息3年CAGR（%）
+            valuation_signal: 估值信号: "低估" | "中性" | "高估"
+            dividend_history: list[dict] 分红历史（最近5年），元素结构——
+                — year: 年份
+                — cash_dividend_per_share: 每股现金分红
+                — dividend_yield: 股息率（小数）
+                — dividend_yield_pct: 股息率（%）
+            data_quality: 数据质量: "数据充足" | "数据有限" | "数据不足"
+            data_source: 数据来源标识
+            warnings: list[str] 警告列表
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         normalized_symbol = str(symbol).strip().upper()
         for prefix in ("SH", "SZ", "SS", "BJ"):
@@ -251,7 +280,31 @@ def get_dividend_valuation_context(
 def get_industry_valuation_distribution(
     industry: Annotated[str, "行业名称，如 '白酒'、'银行'；为空时分析所有行业"] = "",
 ) -> str:
-    """获取行业估值分布。"""
+    """获取行业估值分布。
+
+    Args:
+        industry: 行业名称（如 "白酒"、"银行"），为空字符串时分析所有行业，默认 ""
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "success" | "no_data" | "error"
+            industries_covered: 覆盖的行业数
+            total_stocks_analyzed: 分析的股票总数
+            distribution_stats: dict 行业估值统计，key 为行业名，value 结构——
+                — pe: dict PE分布（count/mean/median/p25/p75/min/max）
+                — pb: dict PB分布（count/mean/median/p25/p75/min/max）
+                — sample_count: 样本数
+            cheapest_stocks: dict 各行业 PE 最低的 Top 10 股票列表，元素结构——
+                — symbol: 股票代码
+                — name: 股票名称
+                — pe: PE值
+                — pb: PB值
+                — total_mv: 总市值
+            priciest_stocks: dict 各行业 PE 最高的 Top 10 股票列表（结构同上）
+            data_quality: 数据质量: "数据充足" | "数据不足"
+            warnings: list[str] 警告列表
+            message: 错误或提示信息（仅 status 为 "no_data"/"error" 时存在）
+    """
     try:
         # 从 stock_basic_info 获取全量数据
         # 通过 project_access 的聚合或直接查询

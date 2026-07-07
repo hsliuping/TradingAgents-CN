@@ -60,7 +60,39 @@ def _json_response(payload: dict) -> str:
 def get_value_factor_bundle_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"]
 ) -> str:
-    """获取标准化价值因子包。"""
+    """获取标准化价值因子包。
+
+    Args:
+        symbol: A 股股票代码，如 "600519"、"000001"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态（仅在异常时为 "error"）
+            symbol: 标准化后的股票代码
+            name: 股票名称
+            industry: 所属行业
+            current_price: 当前价格
+            report_period: 报告期
+            data_source: 数据来源
+            bundle: 因子包标识，固定为 "value_core"
+            factors: dict 价值因子集合——
+                — pe: 市盈率
+                — pe_ttm: TTM市盈率
+                — pb: 市净率
+                — pb_mrq: MRQ市净率
+                — ps_ttm: TTM市销率
+                — dividend_yield: 股息率
+                — peg: PEG
+                — industry_pe_median: 行业PE中位数
+                — industry_pb_median: 行业PB中位数
+            factor_warnings: dict 因子告警信息
+            industry_samples: dict 行业样本数——
+                — pe_count: PE样本数
+                — pb_count: PB样本数
+            calculation_notes: list[str] 计算说明
+            missing_factors: list[str] 缺失因子列表
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         return _json_response(get_value_factor_bundle(symbol))
     except Exception as exc:
@@ -109,7 +141,49 @@ def get_value_factor_bundle_tool(
 def get_quality_factor_bundle_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"]
 ) -> str:
-    """获取标准化质量因子包。"""
+    """获取标准化质量因子包。
+
+    Args:
+        symbol: A 股股票代码，如 "600519"、"000001"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态（仅在异常时为 "error"）
+            symbol: 标准化后的股票代码
+            name: 股票名称
+            industry: 所属行业
+            current_price: 当前价格
+            report_period: 报告期
+            data_source: 数据来源
+            bundle: 因子包标识，固定为 "quality_core"
+            factors: dict 质量因子集合——
+                — roe: 净资产收益率
+                — roa: 总资产收益率
+                — gross_margin: 毛利率
+                — netprofit_margin: 净利率
+                — debt_to_assets: 资产负债率
+                — assets_to_eqt: 权益乘数
+                — current_ratio: 流动比率
+                — quick_ratio: 速动比率
+                — cash_ratio: 现金比率
+                — roic: 投入资本回报率
+                — cash_conversion: 现金转换率（经营现金流/净利润）
+                — accrual_ratio: 应计利润比率（%）
+                — asset_turnover: 总资产周转率
+                — gross_profit_to_assets: 毛利/总资产（%）
+                — interest_coverage: 利息保障倍数
+                — inventory_turnover: 存货周转率
+                — receivable_turnover: 应收账款周转率
+                — net_cash_position: 净现金状况
+                — piotroski_f_score: Piotroski F-Score
+                — altman_z_score: Altman Z-Score
+                — beneish_m_score: Beneish M-Score
+            factor_diagnostics: dict 因子诊断信息
+            factor_warnings: dict 因子告警信息
+            calculation_notes: list[str] 计算说明
+            missing_factors: list[str] 缺失因子列表
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         return _json_response(get_quality_factor_bundle(symbol))
     except Exception as exc:
@@ -162,7 +236,43 @@ def get_quality_factor_bundle_tool(
 def get_growth_cashflow_factor_bundle_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"]
 ) -> str:
-    """获取标准化成长/现金流因子包。"""
+    """获取标准化成长/现金流因子包。
+
+    Args:
+        symbol: A 股股票代码，如 "600519"、"000001"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态（仅在异常时为 "error"）
+            symbol: 标准化后的股票代码
+            name: 股票名称
+            industry: 所属行业
+            current_price: 当前价格
+            report_period: 报告期
+            data_source: 数据来源
+            bundle: 因子包标识，固定为 "growth_cashflow_core"
+            factors: dict 成长/现金流因子集合——
+                — revenue_yoy: 营收同比增长率
+                — net_profit_yoy: 净利润同比增长率
+                — oper_profit_yoy: 营业利润同比增长率
+                — revenue_cagr_3y: 营收3年CAGR
+                — profit_cagr_3y: 净利润3年CAGR
+                — revenue_ttm: TTM营收
+                — net_profit_ttm: TTM净利润
+                — n_cashflow_act: 经营现金流
+                — fcf: 自由现金流
+                — fcf_yield: 自由现金流收益率（%）
+                — fcf_margin: 自由现金流利润率（%）
+                — ocf_yield: 经营现金流收益率（%）
+                — total_cur_assets: 流动资产
+                — total_cur_liab: 流动负债
+                — net_working_capital: 净营运资本
+                — working_capital_change: 营运资本变化
+            factor_warnings: dict 因子告警信息
+            calculation_notes: list[str] 计算说明
+            missing_factors: list[str] 缺失因子列表
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         return _json_response(get_growth_cashflow_factor_bundle(symbol))
     except Exception as exc:
@@ -206,7 +316,30 @@ def get_growth_cashflow_factor_bundle_tool(
 def get_fundamental_factor_snapshot_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"]
 ) -> str:
-    """获取标准化基本面因子快照。"""
+    """获取标准化基本面因子快照。
+
+    Args:
+        symbol: A 股股票代码，如 "600519"、"000001"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态（仅在异常时为 "error"）
+            symbol: 标准化后的股票代码
+            name: 股票名称
+            industry: 所属行业
+            current_price: 当前价格
+            report_period: 报告期
+            data_source: 数据来源
+            factors: dict 合并后的全部因子（value_core + quality_core + growth_cashflow_core）
+            factor_diagnostics: dict 合并后的因子诊断信息
+            factor_warnings: dict 合并后的因子告警信息
+            missing_factors: list[str] 合并后的缺失因子列表（去重排序）
+            bundles: dict 三个因子包分组——
+                — value_core: dict 价值因子包（结构同 get_value_factor_bundle_tool 返回）
+                — quality_core: dict 质量因子包（结构同 get_quality_factor_bundle_tool 返回）
+                — growth_cashflow_core: dict 成长现金流因子包（结构同 get_growth_cashflow_factor_bundle_tool 返回）
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         snapshot = get_fundamental_factor_snapshot(symbol)
         return _json_response(snapshot)

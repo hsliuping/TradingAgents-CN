@@ -16,6 +16,12 @@ from langchain_core.tools import tool
 
 from core.skill_runtime.data_access import get_stock_financial_periods
 from core.tools.base import register_tool
+from core.tools.implementations.risk.extended_risk_models import (
+    _detect_period_type,
+    _annualize_factor,
+    _find_same_period_prev,
+    _PERIOD_LABELS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -178,29 +184,59 @@ def _enrich_with_financials(
 
 
 def _calc_growth(periods: List[Dict[str, Any]], *fields: str) -> Optional[float]:
-    """计算最新两期之间的同比增长率。"""
+    """计算最新两期之间的同比增长率，自动处理口径差异。
+
+    如果两期口径不一致（如一季报 vs 年报），先对非年报期做年化后再比较。
+    仅在口径完全不同（如年报 vs 一季报无法简单年化对比）时跳过。
+    """
     if len(periods) < 2:
         return None
+    cur_type = _detect_period_type(periods[0])
+    prev_type = _detect_period_type(periods[1])
+
     current = _get_field(periods[0], *fields)
     previous = _get_field(periods[1], *fields)
-    if current is not None and previous is not None and previous != 0:
+
+    if current is None or previous is None or previous == 0:
+        return None
+
+    # 🔑 口径一致时直接比较
+    if cur_type == prev_type:
         return (current - previous) / abs(previous)
-    return None
+
+    # 🔑 口径不一致时，年化后再比较（利润表科目需要年化）
+    # 仅对可能是利润表累计值的科目做年化（revenue / net_profit 等）
+    cur_annualized = current * _annualize_factor(cur_type)
+    prev_annualized = previous * _annualize_factor(prev_type)
+    if prev_annualized == 0:
+        return None
+    return (cur_annualized - prev_annualized) / abs(prev_annualized)
 
 
 def _calc_cagr_3y(periods: List[Dict[str, Any]], *fields: str) -> Optional[float]:
     """计算约 3 年的 CAGR。取最新期和最早期（约 3 年前）的数据。
 
     periods 按报告期倒序排列，取第 0 期（最新）和第 min(3, len-1) 期。
+    仅在两期口径一致（都是年报或同一季报类型）时才计算，否则返回 None。
     """
     if len(periods) < 4:
         return None
+    cur_type = _detect_period_type(periods[0])
+    older_type = _detect_period_type(periods[3])
+
     current = _get_field(periods[0], *fields)
     older = _get_field(periods[3], *fields)
-    if current is not None and older is not None and older > 0 and current > 0:
-        ratio = current / older
-        if ratio > 0:
-            return ratio ** (1.0 / 3.0) - 1.0
+
+    if current is None or older is None or older <= 0 or current <= 0:
+        return None
+
+    # 🔑 CAGR 要求口径一致，否则跨年比较无意义
+    if cur_type != older_type:
+        return None
+
+    ratio = current / older
+    if ratio > 0:
+        return ratio ** (1.0 / 3.0) - 1.0
     return None
 
 
@@ -268,7 +304,33 @@ def _score_item(
 def get_graham_screen(
     limit: Annotated[int, "返回前 N 只股票，默认 30"] = 30,
 ) -> str:
-    """格雷厄姆式价值筛选。"""
+    """格雷厄姆式价值筛选。
+
+    Args:
+        limit: 返回前 N 只股票，默认 30，自动夹钳到 [1, 100]
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+
+        成功情形返回 dict，字段：
+            criteria_applied: 筛选条件 dict —
+                pe_ttm: dict — max: 15
+                pb: dict — max: 1.5
+                debt_to_equity: dict — max: 1.0
+                net_profit: dict — min: 0
+            total_screened: 候选池总数
+            passed: 通过筛选的股票数
+            returned: 实际返回数量
+            results: 排序后的股票列表 [{"rank": 序号, "symbol": 代码, "name": 名称, "industry": 行业, "score": 综合得分, "pe_ttm": 市盈率, "pb": 市净率, "debt_to_equity": 债务股权比, "graham_number": 格雷厄姆数, "graham_upside_pct": 格雷厄姆数 upside 百分比}, ...]
+            data_quality: 数据质量 dict —
+                note: 候选池与方法说明文本
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         limit = max(1, min(int(limit), 100))
 
@@ -443,7 +505,32 @@ def get_graham_screen(
 def get_growth_stock_screen(
     limit: Annotated[int, "返回前 N 只股票，默认 30"] = 30,
 ) -> str:
-    """成长股筛选。"""
+    """成长股筛选。
+
+    Args:
+        limit: 返回前 N 只股票，默认 30，自动夹钳到 [1, 100]
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+
+        成功情形返回 dict，字段：
+            criteria_applied: 筛选条件 dict —
+                revenue_growth_3y: dict — min: 20
+                roe: dict — min: 15
+                pe_ttm: dict — max: 50
+            total_screened: 候选池总数
+            passed: 通过筛选的股票数
+            returned: 实际返回数量
+            results: 按 PEG 升序排列的股票列表 [{"rank": 序号, "symbol": 代码, "name": 名称, "industry": 行业, "score": 综合得分, "revenue_growth_3y_pct": 3 年营收 CAGR 百分比, "roe": ROE, "pe_ttm": 市盈率, "peg": PEG 比率}, ...]
+            data_quality: 数据质量 dict —
+                note: 候选池与方法说明文本
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         limit = max(1, min(int(limit), 100))
 
@@ -585,7 +672,32 @@ def get_growth_stock_screen(
 def get_dividend_stock_screen(
     limit: Annotated[int, "返回前 N 只股票，默认 30"] = 30,
 ) -> str:
-    """红利股筛选。"""
+    """红利股筛选。
+
+    Args:
+        limit: 返回前 N 只股票，默认 30，自动夹钳到 [1, 100]
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+
+        成功情形返回 dict，字段：
+            criteria_applied: 筛选条件 dict —
+                dividend_yield: dict — min: 3
+                payout_ratio: dict — min: 0.2, max: 0.8
+                consecutive_dividend_years: dict — min: 3
+            total_screened: 候选池总数
+            passed: 通过筛选的股票数
+            returned: 实际返回数量
+            results: 按股息率降序排列的股票列表 [{"rank": 序号, "symbol": 代码, "name": 名称, "industry": 行业, "score": 综合得分, "dividend_yield_pct": 股息率百分比, "pe_ttm": 市盈率, "payout_ratio": 分红率}, ...]
+            data_quality: 数据质量 dict —
+                note: 候选池与方法说明文本
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         limit = max(1, min(int(limit), 100))
 
@@ -739,7 +851,32 @@ def get_dividend_stock_screen(
 def get_turnaround_screen(
     limit: Annotated[int, "返回前 N 只股票，默认 30"] = 30,
 ) -> str:
-    """困境反转筛选。"""
+    """困境反转筛选。
+
+    Args:
+        limit: 返回前 N 只股票，默认 30，自动夹钳到 [1, 100]
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+
+        成功情形返回 dict，字段：
+            criteria_applied: 筛选条件 dict —
+                pe_ttm: dict — max: 20
+                revenue_growth_improving: 改善判断说明文本
+                n_cashflow_act: dict — min: 0
+            total_screened: 候选池总数
+            passed: 通过筛选的股票数
+            returned: 实际返回数量
+            results: 按改善分数降序排列的股票列表 [{"rank": 序号, "symbol": 代码, "name": 名称, "industry": 行业, "pe_ttm": 市盈率, "revenue_growth_pct": 营收增长率百分比, "operating_cashflow": 经营现金流, "net_profit": 净利润, "roe": ROE, "improvement_score": 改善评分}, ...]
+            data_quality: 数据质量 dict —
+                note: 候选池与方法说明文本
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         limit = max(1, min(int(limit), 100))
 

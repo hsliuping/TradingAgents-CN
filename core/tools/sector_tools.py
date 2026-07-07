@@ -701,6 +701,102 @@ async def get_peer_comparison(
         return f"❌ 同业对比分析失败: {e}"
 
 
+async def get_industry_top_companies(
+    ticker: str,
+    top_n: int = 5,
+) -> str:
+    """
+    获取同行业 TOP N 公司列表（轻量版，自动取最新交易日）
+
+    Args:
+        ticker: 目标股票代码（如 600519 或 600519.SH）
+        top_n: 返回前 N 家公司，默认 5
+
+    Returns:
+        同行业 TOP N 公司简表（代码、名称、市值、PE、PB）
+    """
+    provider = _get_tushare_provider()
+
+    try:
+        # 1. 获取股票所属行业
+        industry = await provider.get_stock_industry(ticker)
+        if not industry:
+            return f"⚠️ 无法获取股票 {ticker} 的行业信息"
+
+        # 2. 自动取最新交易日（用今天往前找）
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        trade_date_clean = await _get_latest_trade_date(today_str)
+
+        # 3. 获取同行业股票每日基础数据
+        industry_df = await provider.get_sector_stocks_daily_basic(
+            industry=industry,
+            trade_date=trade_date_clean
+        )
+
+        if industry_df is None or industry_df.empty:
+            return f"⚠️ 暂无行业「{industry}」在 {trade_date_clean} 的数据"
+
+        # 4. 按市值排序
+        industry_df = industry_df.sort_values('total_mv', ascending=False)
+        total_count = len(industry_df)
+        top_n_actual = min(top_n, total_count)
+
+        # 5. 找目标股票的排名
+        ts_code = provider._normalize_ts_code(ticker)
+        target_rank = 0
+        target_row = industry_df[industry_df['ts_code'] == ts_code]
+        if not target_row.empty:
+            target_rank = industry_df.index.get_loc(target_row.index[0]) + 1
+
+        trade_date_formatted = f"{trade_date_clean[:4]}-{trade_date_clean[4:6]}-{trade_date_clean[6:8]}"
+
+        # 6. 构建简表
+        lines = [
+            f"🏭 {industry} — 同行业 TOP {top_n_actual} 公司",
+            f"📅 数据日期: {trade_date_formatted} | 行业共 {total_count} 家",
+            "",
+            f"{'排名':>4}  {'代码':<12} {'名称':<8} {'市值(亿)':>10} {'PE':>8} {'PB':>8}",
+            f"{'─'*4}  {'─'*12} {'─'*8} {'─'*10} {'─'*8} {'─'*8}",
+        ]
+
+        for i, row in enumerate(industry_df.head(top_n_actual).itertuples(), 1):
+            name = str(getattr(row, 'name', ''))[:6]  # 中文名截断对齐
+            code = str(getattr(row, 'ts_code', ''))
+            total_mv = getattr(row, 'total_mv', 0) or 0
+            total_mv_yi = total_mv / 10000  # 万元 → 亿元
+            pe = getattr(row, 'pe_ttm', None)
+            pb = getattr(row, 'pb', None)
+            pe_str = f"{pe:.1f}" if pe and pe == pe else "N/A"
+            pb_str = f"{pb:.2f}" if pb and pb == pb else "N/A"
+            marker = "◄" if code == ts_code else " "
+            lines.append(
+                f"{marker}{i:>3}  {code:<12} {name:<8} {total_mv_yi:>10.1f} {pe_str:>8} {pb_str:>8}"
+            )
+
+        # 7. 目标股票如果在 TOP N 之外，追加显示
+        if target_rank > top_n_actual:
+            target = target_row.iloc[0]
+            name = str(target.get('name', ''))[:6]
+            total_mv_yi = (target.get('total_mv', 0) or 0) / 10000
+            pe = target.get('pe_ttm')
+            pb = target.get('pb')
+            pe_str = f"{pe:.1f}" if pe and pe == pe else "N/A"
+            pb_str = f"{pb:.2f}" if pb and pb == pb else "N/A"
+            lines.append(f"{'─'*4}  {'─'*12} {'─'*8} {'─'*10} {'─'*8} {'─'*8}")
+            lines.append(
+                f" {target_rank:>3}  {ts_code:<12} {name:<8} {total_mv_yi:>10.1f} {pe_str:>8} {pb_str:>8} (目标)"
+            )
+
+        lines.append("")
+        lines.append("💡 提示: 使用 get_peer_comparison 可获取更详细的同业对比分析报告。")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.error(f"获取同行业 TOP 公司失败: {e}")
+        return f"❌ 获取同行业 TOP 公司失败: {e}"
+
+
 async def analyze_sector(ticker: str, trade_date: str) -> str:
     """
     综合板块分析（SectorAnalyst 主入口）
@@ -1140,6 +1236,11 @@ def get_sector_rotation_sync(trade_date: str, top_n: int = 10,
 def get_peer_comparison_sync(ticker: str, trade_date: str, top_n: int = 10) -> str:
     """get_peer_comparison 的同步版本"""
     return asyncio.run(get_peer_comparison(ticker, trade_date, top_n))
+
+
+def get_industry_top_companies_sync(ticker: str, top_n: int = 5) -> str:
+    """get_industry_top_companies 的同步版本"""
+    return asyncio.run(get_industry_top_companies(ticker, top_n))
 
 
 def search_sector_sync(keyword: str, sector_type: str = "N") -> str:

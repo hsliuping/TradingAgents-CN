@@ -22,6 +22,11 @@ from core.skill_runtime.standard_financial_apis import (
     get_historical_financial_annual_series,
 )
 from core.tools.base import register_tool
+from core.tools.implementations.risk.extended_risk_models import (
+    _detect_period_type,
+    _annualize_factor,
+    _PERIOD_LABELS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +98,43 @@ def _normalize_symbol(symbol: str) -> str:
 def get_cashflow_quality_deep(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
 ) -> str:
-    """获取现金流质量深度增强数据。"""
+    """获取现金流质量深度增强数据。
+
+    Args:
+        symbol: A 股股票代码，如 "600519"、"000001"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "success" | "no_data" | "error"
+            symbol: 标准化后的股票代码
+            years_analyzed: 已分析的年数
+            current_price: 当前股价
+            total_market_cap: 总市值
+            fcf: 最新一年自由现金流
+            fcf_yield: 自由现金流收益率（小数）
+            fcf_yield_pct: 自由现金流收益率（%）
+            ocf_to_net_profit: dict OCF/净利润比率——
+                — current: 最新值
+                — average: 平均值
+                — min: 最小值
+                — max: 最大值
+            stability_score: 现金流稳定性评分（0-100）
+            quality_score: 现金流质量综合评分（0-100）
+            score_components: dict 评分细分（fcf_positive_ratio / avg_ocf_to_net_profit / stability_score）
+            trend_direction: 趋势方向: "improving" | "stable" | "deteriorating"
+            flags: list[str] 信号标签列表
+            trend_series: list[dict] 趋势序列（最多10年），元素结构——
+                — year: 年份
+                — report_period: 报告期
+                — ocf_to_net_profit: OCF/净利润
+                — fcf_to_net_profit: FCF/净利润
+                — operating_cashflow: 经营现金流
+                — free_cashflow: 自由现金流
+            coverage: dict 数据覆盖度
+            data_quality: 数据质量: "数据充足" | "数据有限" | "数据不足"
+            warnings: list[str] 警告列表
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         normalized_symbol = _normalize_symbol(symbol)
         if not normalized_symbol:
@@ -291,64 +332,133 @@ def get_cashflow_quality_deep(
 def get_earnings_surprise_analysis(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
 ) -> str:
-    """获取业绩预告/盈利惊喜分析。"""
+    """获取业绩预告/盈利惊喜分析。
+
+    Args:
+        symbol: A 股股票代码，如 "600519"、"000001"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态: "success" | "no_data" | "insufficient_data" | "error"
+            symbol: 标准化后的股票代码
+            total_periods_available: 可用期间总数
+            periods_analyzed: 实际分析的期间数
+            recent_quarters_data: list[dict] 最近年度数据（最新在前），元素结构——
+                — period: 报告期
+                — period_type: 期间类型: "annual" | "q3" | "h1" | "q1" | "unknown"
+                — period_label: 期间中文标签
+                — net_profit: 原始净利润
+                — net_profit_annualized: 年化净利润
+                — yoy_growth: 同比增长率
+                — expected_profit: 趋势预期净利润
+                — surprise: 惊喜额（实际-预期）
+                — surprise_pct: 惊喜百分比
+                — surprise_category: 惊喜类别: "大幅正向惊喜" | "温和正向惊喜" | "符合预期" | "温和负向惊喜" | "大幅负向惊喜"
+            recent_surprises_list: list[dict] 显著惊喜列表（|surprise_pct|>20%），元素结构——
+                — period: 报告期
+                — period_label: 期间标签
+                — actual_profit_annualized: 实际年化净利润
+                — actual_profit_raw: 原始净利润
+                — expected_profit: 预期净利润
+                — surprise_pct: 惊喜百分比
+                — category: 类别
+            overall_sentiment: 整体业绩情绪: "整体偏多" | "整体偏空" | "谨慎偏多" | "谨慎偏空" | "多空均衡" | "稳定"
+            trend_description: 趋势描述文本
+            estimated_trend_params: dict 趋势线参数——
+                — slope: 斜率
+                — intercept: 截距
+            data_quality: 数据质量: "数据充足" | "数据有限"
+            methodology_note: 方法论说明
+            warnings: list[str] 警告列表
+            message: 错误或提示信息（仅 status 为 "error"/"no_data"/"insufficient_data" 时存在）
+    """
     try:
         normalized_symbol = _normalize_symbol(symbol)
         if not normalized_symbol:
             return _json_response({"status": "error", "message": "无效股票代码"})
 
-        # 1. 获取财务期间数据（最近 12 期，以确保有 8 个季度）
+        # 1. 获取财务期间数据（最近 16 期，以确保有 8 个季度）
         periods = get_stock_financial_periods(normalized_symbol, limit=16) or []
 
         if not periods:
             return _json_response({"status": "no_data", "message": "未获取到财务期间数据", "symbol": normalized_symbol})
 
-        # 2. 提取季度净利润数据
+        # 2. 提取季度净利润数据，并进行口径处理
+        # 🔑 关键：不同报告期（年报/季报）的净利润为累计值，不可直接做环比
+        # 策略：优先筛选同一口径的数据（如全部取年报），若不足则按口径分组
         quarterly_data: List[Dict[str, Any]] = []
+        caliber_warnings: List[str] = []
         for p in periods:
             period_label = str(p.get("report_period") or p.get("report_date") or "")
             net_profit = _safe_float(p.get("net_profit") or p.get("net_income") or p.get("n_income_attr_p"))
             if net_profit is not None:
+                period_type = _detect_period_type(p)
+                # 🔑 对非年报数据做年化处理，使口径统一为年报口径
+                factor = _annualize_factor(period_type)
+                net_profit_annualized = net_profit * factor
                 quarterly_data.append({
                     "period": period_label,
+                    "period_type": period_type,
+                    "period_label": _PERIOD_LABELS.get(period_type, period_type),
                     "net_profit": net_profit,
+                    "net_profit_annualized": net_profit_annualized,
                 })
+                if period_type != "annual" and period_type != "unknown":
+                    caliber_warnings.append(f"{period_label}为{_PERIOD_LABELS.get(period_type, period_type)}口径，净利润已年化处理")
 
         # 按时间排序（最旧到最新）
         quarterly_data.sort(key=lambda x: str(x.get("period", "")))
 
-        # 取最近 8 个季度
-        recent_quarters = quarterly_data[-8:] if len(quarterly_data) >= 8 else quarterly_data
+        # 🔑 去重：同一年份保留口径最大的那条（优先年报 > 三季报 > 半年报 > 一季报）
+        seen_years: Dict[str, Dict[str, Any]] = {}
+        for q in quarterly_data:
+            yr = str(q["period"])[:4]
+            if yr not in seen_years:
+                seen_years[yr] = q
+            else:
+                # 口径优先级：annual > q3 > h1 > q1
+                priority = {"annual": 4, "q3": 3, "h1": 2, "q1": 1, "unknown": 0}
+                if priority.get(q["period_type"], 0) > priority.get(seen_years[yr]["period_type"], 0):
+                    seen_years[yr] = q
+        yearly_data = sorted(seen_years.values(), key=lambda x: str(x.get("period", "")))
+
+        # 取最近 8 年（年化后按年比较）
+        recent_quarters = yearly_data[-8:] if len(yearly_data) >= 8 else yearly_data
 
         if len(recent_quarters) < 3:
             return _json_response({
                 "status": "insufficient_data",
-                "message": f"仅获取到 {len(recent_quarters)} 个季度的净利润数据，至少需要 3 个季度进行分析",
+                "message": f"仅获取到 {len(recent_quarters)} 个年度的净利润数据，至少需要 3 个年度进行分析",
                 "symbol": normalized_symbol,
                 "recent_quarters_data": recent_quarters,
                 "data_quality": "数据不足",
             })
 
-        # 3. 计算环比增长率和趋势偏离
+        # 3. 计算同比增长率和趋势偏离（使用年化净利润）
         enhanced_quarters: List[Dict[str, Any]] = []
         for i, q in enumerate(recent_quarters):
             entry = {
                 "period": q["period"],
+                "period_type": q.get("period_type", "unknown"),
+                "period_label": q.get("period_label", ""),
                 "net_profit": q["net_profit"],
-                "sequential_growth": None,
+                "net_profit_annualized": q["net_profit_annualized"],
+                "yoy_growth": None,
                 "expected_profit": None,
                 "surprise": None,
                 "surprise_pct": None,
                 "surprise_category": None,
             }
             if i > 0:
-                prev_np = recent_quarters[i - 1]["net_profit"]
-                if prev_np != 0:
-                    entry["sequential_growth"] = round((q["net_profit"] - prev_np) / abs(prev_np), 4)
+                # 🔑 使用年化值做同比，避免口径差异
+                prev_np_ann = recent_quarters[i - 1]["net_profit_annualized"]
+                cur_np_ann = q["net_profit_annualized"]
+                if prev_np_ann != 0:
+                    entry["yoy_growth"] = round((cur_np_ann - prev_np_ann) / abs(prev_np_ann), 4)
             enhanced_quarters.append(entry)
 
-        # 4. 计算趋势线（简单线性回归：最近 8 个季度）
-        np_values = [q["net_profit"] for q in enhanced_quarters]
+        # 4. 计算趋势线（简单线性回归：基于年化净利润）
+        np_values = [q["net_profit_annualized"] for q in enhanced_quarters]
         n = len(np_values)
         x_mean = (n - 1) / 2
         y_mean = mean(np_values)
@@ -357,11 +467,11 @@ def get_earnings_surprise_analysis(
         slope = numerator / denominator if denominator != 0 else 0
         intercept = y_mean - slope * x_mean
 
-        # 计算每个季度的预期值（趋势值）和惊喜
+        # 计算每个年度的预期值（趋势值）和惊喜（使用年化净利润）
         surprises: List[Dict[str, Any]] = []
         for i, entry in enumerate(enhanced_quarters):
             expected = intercept + slope * i
-            actual = entry["net_profit"]
+            actual = entry["net_profit_annualized"]
             if expected != 0:
                 surprise_pct = (actual - expected) / abs(expected)
                 entry["expected_profit"] = round(expected, 2)
@@ -385,7 +495,9 @@ def get_earnings_surprise_analysis(
                 if abs(surprise_pct) > 0.20:
                     surprises.append({
                         "period": entry["period"],
-                        "actual_profit": actual,
+                        "period_label": entry.get("period_label", ""),
+                        "actual_profit_annualized": actual,
+                        "actual_profit_raw": entry["net_profit"],
                         "expected_profit": round(expected, 2),
                         "surprise_pct": round(surprise_pct, 4),
                         "category": category,
@@ -437,13 +549,13 @@ def get_earnings_surprise_analysis(
             },
             "data_quality": "数据充足" if periods_analyzed >= 6 else "数据有限",
             "methodology_note": (
-                "由于系统不含券商盈利预测数据，'expected_profit' 基于最近 8 个季度净利润的简单线性回归趋势线估算。"
-                "'surprise' = actual_profit - expected_profit，大于 ±20% 视为显著意外变化。"
-                "此方法无法区分季节性影响，仅供参考。"
+                "由于系统不含券商盈利预测数据，'expected_profit' 基于最近 8 个年度净利润（年化后）的简单线性回归趋势线估算。"
+                "'surprise' = actual_profit_annualized - expected_profit，大于 ±20% 视为显著意外变化。"
+                "同一年份优先采用年报数据，季报数据已做年化处理以统一口径。"
             ),
             "warnings": (
-                ["数据量有限，趋势线参考价值受限"] if periods_analyzed < 6
-                else ["缺乏官方盈利预测数据，以趋势线作为预期基准"]
+                ["数据量有限，趋势线参考价值受限"] + caliber_warnings if periods_analyzed < 6
+                else ["缺乏官方盈利预测数据，以趋势线作为预期基准"] + caliber_warnings
             ),
         })
     except Exception as exc:

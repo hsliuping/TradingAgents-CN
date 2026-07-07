@@ -226,7 +226,34 @@ def get_correlation_matrix(
     lookback_days: Annotated[int, "回溯天数，默认 252（约 1 个交易日年）"] = 252,
     method: Annotated[str, "相关系数方法：pearson / spearman / kendall，默认 pearson"] = "pearson",
 ) -> str:
-    """计算多只股票的收益率相关性矩阵。"""
+    """计算多只股票的收益率相关性矩阵。
+
+    Args:
+        symbols: 多个股票代码，用逗号分隔（如 "600519,000001,300750"）
+        lookback_days: 回溯天数（自动截断到 20-1000），默认 252
+        method: 相关系数方法: "pearson" / "spearman" / "kendall"，默认 "pearson"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态（仅在异常时为 "error"）
+            symbols: list[str] 实际使用的股票代码列表
+            method: 实际使用的方法
+            bars_used: 对齐后使用的收益率样本数
+            correlation_matrix: list[dict] 相关性矩阵，元素结构——
+                — symbol: 股票代码
+                — values: list[float] 与各股票的相关系数
+            top_correlated_pairs: list[dict] 相关系数绝对值 > 0.7 的股票对（最多20个），元素结构——
+                — stock_a: 股票 A
+                — stock_b: 股票 B
+                — correlation: 相关系数
+                — strength: 强度: "强正相关" | "强负相关"
+            data_quality: dict 数据质量——
+                — requested_symbols: 请求的股票列表
+                — valid_symbols: 有效股票数
+                — returns_per_stock: 每只股票的收益率数
+                — note: 说明
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         lookback_days = max(20, min(int(lookback_days), 1000))
         sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
@@ -393,7 +420,33 @@ def get_cointegration_test(
     symbol_y: Annotated[str, "第二只股票代码，如 000858"],
     lookback_days: Annotated[int, "回溯天数，默认 504（约 2 年）"] = 504,
 ) -> str:
-    """对两只股票进行协整检验。"""
+    """对两只股票进行协整检验。
+
+    Args:
+        symbol_x: 第一只股票代码（如 "600519"）
+        symbol_y: 第二只股票代码（如 "000858"）
+        lookback_days: 回溯天数（自动截断到 60-2000），默认 504
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态（仅在异常时为 "error"）
+            symbol_x: 第一只股票代码
+            symbol_y: 第二只股票代码
+            alpha: OLS 回归截距
+            beta: OLS 回归斜率（对冲比率）
+            hedge_ratio: 对冲比率（= beta）
+            adf_statistic: ADF 检验统计量
+            p_value: ADF 检验 p 值
+            is_cointegrated: 是否协整（p<0.05）
+            half_life_days: 均值回归半衰期（天，无法计算时为 None）
+            current_z_score: 当前价差 Z-Score
+            spread_series: list[dict] 最近10期价差序列，元素结构——
+                — date: 日期
+                — spread: 价差
+            bars_used: 共同交易日数
+            interpretation: 解读文本
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         lookback_days = max(60, min(int(lookback_days), 2000))
 
@@ -543,7 +596,33 @@ def get_rolling_regression(
     lookback_days: Annotated[int, "总回溯天数，默认 504（约 2 年）"] = 504,
     window: Annotated[int, "滚动窗口大小（交易日数），默认 60"] = 60,
 ) -> str:
-    """对个股相对基准指数进行滚动回归。"""
+    """对个股相对基准指数进行滚动回归。
+
+    Args:
+        symbol: 股票代码（如 "600519"）
+        benchmark_symbol: 基准指数代码，默认 "000300"（沪深300）
+        lookback_days: 总回溯天数（自动截断到 100-2000），默认 504
+        window: 滚动窗口大小（交易日数，自动截断到 20 至 lookback_days/2），默认 60
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态（仅在异常时为 "error"）
+            symbol: 股票代码
+            benchmark: 基准指数代码
+            window_days: 滚动窗口大小
+            total_bars: 收益率总数
+            rolling_windows_computed: 计算出的滚动窗口数
+            latest_beta: 最新 Beta 值
+            latest_alpha: 最新 Alpha 值
+            latest_r_squared: 最新 R² 值
+            beta_stability: Beta 稳定性（标准差）
+            beta_stability_interpretation: Beta 稳定性解读: "稳定" | "中等波动" | "高度波动"
+            rolling_series: list[dict] 最近20个滚动回归结果，元素结构——
+                — beta: Beta 值
+                — alpha: Alpha 值
+                — r_squared: R² 值
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         lookback_days = max(100, min(int(lookback_days), 2000))
         window = max(20, min(int(window), lookback_days // 2))
@@ -709,7 +788,26 @@ def get_normality_test(
     symbol: Annotated[str, "A 股股票代码，如 600519"],
     lookback_days: Annotated[int, "回溯天数，默认 252（约 1 年）"] = 252,
 ) -> str:
-    """对股票日收益率进行 Jarque-Bera 正态性检验。"""
+    """对股票日收益率进行 Jarque-Bera 正态性检验。
+
+    Args:
+        symbol: A 股股票代码（如 "600519"）
+        lookback_days: 回溯天数（自动截断到 30-1000），默认 252
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态（仅在异常时为 "error"）
+            symbol: 股票代码
+            jb_statistic: Jarque-Bera 统计量
+            p_value: p 值
+            is_normal: 是否服从正态分布（p>0.05）
+            skewness: 偏度
+            kurtosis: 峰度
+            excess_kurtosis: 超额峰度（kurtosis - 3）
+            samples_used: 样本数
+            interpretation: 解读文本
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         lookback_days = max(30, min(int(lookback_days), 1000))
 
@@ -828,7 +926,30 @@ def get_stationarity_test(
     lookback_days: Annotated[int, "回溯天数，默认 252（约 1 年）"] = 252,
     price_type: Annotated[str, "价格类型：close（收盘价）/ adjusted（后复权），默认 close"] = "close",
 ) -> str:
-    """对股票价格序列进行 ADF 平稳性检验。"""
+    """对股票价格序列进行 ADF 平稳性检验。
+
+    Args:
+        symbol: A 股股票代码（如 "600519"）
+        lookback_days: 回溯天数（自动截断到 30-2000），默认 252
+        price_type: 价格类型: "close"（收盘价）或 "adjusted"（后复权），默认 "close"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态（仅在异常时为 "error"）
+            symbol: 股票代码
+            price_type: 价格类型
+            adf_statistic: ADF 检验统计量
+            p_value: p 值
+            is_stationary: 是否平稳（p<0.05）
+            critical_values: dict 临界值——
+                — "1%": 1% 临界值
+                — "5%": 5% 临界值
+                — "10%": 10% 临界值
+            test_type: 检验类型说明
+            samples_used: 样本数
+            interpretation: 解读文本
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         lookback_days = max(30, min(int(lookback_days), 2000))
 
@@ -946,7 +1067,31 @@ def get_garch_volatility(
     p: Annotated[int, "GARCH 滞后阶数 p，默认 1（在 EWMA 模式下固定为 EWMA）"] = 1,
     q: Annotated[int, "ARCH 滞后阶数 q，默认 1（在 EWMA 模式下固定为 EWMA）"] = 1,
 ) -> str:
-    """使用 EWMA（RiskMetrics 标准）估计条件波动率。"""
+    """使用 EWMA（RiskMetrics 标准）估计条件波动率。
+
+    Args:
+        symbol: A 股股票代码（如 "600519"）
+        lookback_days: 回溯天数（自动截断到 60-2000），默认 504
+        p: GARCH 滞后阶数 p（当前实现固定为 EWMA，参数保留），默认 1
+        q: ARCH 滞后阶数 q（当前实现固定为 EWMA，参数保留），默认 1
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: 状态（仅在异常时为 "error"）
+            symbol: 股票代码
+            model: 模型标识（固定为 "EWMA (RiskMetrics, λ=0.94)"）
+            current_volatility: 当前条件波动率（年化）
+            long_term_historical_volatility: 长期历史波动率（年化）
+            volatility_ratio: 当前/长期 波动率比值
+            volatility_regime: 波动率状态: "高波动（当前 > 长期 × 1.2）" | "低波动（当前 < 长期 × 0.8）" | "正常波动"
+            volatility_series: list[dict] 最近20期波动率序列，元素结构——
+                — date: 日期
+                — daily_volatility: 日波动率
+                — annualized_volatility: 年化波动率
+            method_note: 方法说明
+            bars_used: 使用的收益率样本数
+            message: 错误信息（仅 status="error" 时存在）
+    """
     try:
         lookback_days = max(60, min(int(lookback_days), 2000))
 

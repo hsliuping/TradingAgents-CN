@@ -113,7 +113,37 @@ def get_adx_trend_strength(
     lookback_days: Annotated[int, "回看天数用于计算 ADX，默认 120"] = 120,
     period: Annotated[int, "ADX 计算周期，默认 14"] = 14,
 ) -> str:
-    """计算 ADX（平均趋向指数）及 ±DI 指标。"""
+    """计算 ADX（平均趋向指数）及 ±DI 指标，评估股票当前趋势的强度和方向。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于计算 ADX，默认 120
+        period: ADX 计算周期，默认 14
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            latest_adx: 最新 ADX 值
+            plus_di: 最新 +DI 值
+            minus_di: 最新 -DI 值
+            trend_strength: 趋势强度，取值 "strong" | "moderate" | "weak"
+            trend_direction: 趋势方向，取值 "up" | "down" | "neutral"
+            adx_trend: ADX 变化方向，取值 "rising" | "falling" | "unknown"
+            adx_series: 最近 5 期 ADX 值列表，元素结构 —
+                date: 交易日期
+                adx: ADX 值
+            interpretation: 解读信息，子字段 —
+                adx_meanings: ADX 含义说明文本
+                current_assessment: 当前评估文本
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+                period: ADX 计算周期
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 
@@ -287,7 +317,40 @@ def get_macd_divergence(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     lookback_days: Annotated[int, "回看天数用于背离检测，默认 180"] = 180,
 ) -> str:
-    """检测 MACD 与价格之间的背离信号。"""
+    """检测 MACD 与价格之间的背离信号，识别趋势衰竭和潜在反转点。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于背离检测，默认 180
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            divergences: 背离信号列表，每个元素结构 —
+                type: 背离类型，取值 "bearish"（顶背离） | "bullish"（底背离）
+                label: 中文标签，取值 "顶背离" | "底背离"
+                price_start_date: 起始价格日期
+                price_end_date: 结束价格日期
+                price_start: 起始价格
+                price_end: 结束价格
+                price_change_pct: 价格变化百分比
+                macd_start: 起始 MACD 柱值
+                macd_end: 结束 MACD 柱值
+                strength: 信号强度，取值 "strong" | "moderate" | "weak"
+                confirmation_status: 确认状态，取值 "confirmed" | "pending"
+            summary: 汇总信息，子字段 —
+                total_divergences: 背离总数
+                bullish_count: 看涨背离数量
+                bearish_count: 看跌背离数量
+                strong_signals: 强信号数量
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
         from core.tools.implementations.technical import macd
@@ -454,7 +517,40 @@ def get_rsi_divergence(
     lookback_days: Annotated[int, "回看天数用于背离检测，默认 180"] = 180,
     rsi_period: Annotated[int, "RSI 计算周期，默认 14"] = 14,
 ) -> str:
-    """检测 RSI 与价格之间的背离信号。"""
+    """检测 RSI 与价格之间的背离信号，识别超买/超卖区域的潜在反转点。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于背离检测，默认 180
+        rsi_period: RSI 计算周期，默认 14
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            latest_rsi: 最新 RSI 值
+            rsi_zone: RSI 区域，取值 "超买(>70)" | "超卖(<30)" | "中性"
+            divergences: 背离信号列表，每个元素结构 —
+                type: 背离类型，取值 "bearish"（顶背离） | "bullish"（底背离）
+                label: 中文标签，取值 "RSI顶背离" | "RSI底背离"
+                price_start: 起始价格
+                price_end: 结束价格
+                rsi_start: 起始 RSI 值
+                rsi_end: 结束 RSI 值
+                rsi_zone: RSI 所处区域，取值 "超买区" | "中性区" | "超卖区"
+                strength: 信号强度，取值 "strong" | "moderate" | "weak"
+            summary: 汇总信息，子字段 —
+                total_divergences: 背离总数
+                bullish_count: 看涨背离数量
+                bearish_count: 看跌背离数量
+                strong_signals: 强信号数量
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
         from core.tools.implementations.technical import rsi
@@ -606,7 +702,38 @@ def get_volume_price_divergence(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     lookback_days: Annotated[int, "回看天数用于量价分析，默认 120"] = 120,
 ) -> str:
-    """分析成交量和价格之间的关系，检测量价背离信号。"""
+    """分析成交量和价格之间的关系，检测量价背离信号，识别放量滞涨、缩量上涨等形态。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于量价分析，默认 120
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            current_status: 当前量价状态，取值 "bearish_divergence_detected" | "capitulation_detected" | "healthy_uptrend" | "mixed"
+            divergence_bars_count: 量价背离 K 线数量
+            total_bars_analyzed: 分析的 K 线总数
+            divergence_ratio: 背离 K 线占比
+            trend_alignment: 趋势一致性，取值 "aligned_bullish" | "aligned_bearish" | "bearish_divergence" | "potential_bottom" | "neutral" | "insufficient_data"
+            recent_assessments: 近期量价评估列表（最近 10 根），每个元素结构 —
+                date: 交易日期
+                price_change_pct: 价格变化百分比
+                volume_ratio: 量比
+                status: 单根 K 线状态，取值 "healthy_uptrend" | "bearish_divergence" | "capitulation" | "low_interest" | "neutral"
+            interpretation: 状态解读，子字段 —
+                healthy_uptrend: 价涨量增说明
+                bearish_divergence: 价涨量缩说明
+                capitulation: 价跌量增说明
+                low_interest: 价跌量缩说明
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 

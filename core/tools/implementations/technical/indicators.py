@@ -147,6 +147,17 @@ def boll(close: pd.Series, n: int = 20, k: float = 2.0, min_periods: int = None)
 
 
 def atr(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14) -> pd.Series:
+    """计算 ATR（Average True Range，真实波动幅度均值）指标，衡量价格波动率。
+
+    Args:
+        high: 最高价序列
+        low: 最低价序列
+        close: 收盘价序列
+        n: 计算周期，默认 14
+
+    Returns:
+        pd.Series: ATR 序列（真实波动幅度的 n 日移动平均），前 n-1 个值为 NaN
+    """
     prev_close = close.shift(1)
     tr = pd.concat([
         (high - low).abs(),
@@ -157,6 +168,22 @@ def atr(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 14) -> pd.Se
 
 
 def kdj(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 9, m1: int = 3, m2: int = 3) -> pd.DataFrame:
+    """计算 KDJ 随机指标，用于判断超买超卖和短期买卖信号。
+
+    Args:
+        high: 最高价序列
+        low: 最低价序列
+        close: 收盘价序列
+        n: RSV 计算周期，默认 9
+        m1: K 值平滑系数，默认 3
+        m2: D 值平滑系数，默认 3
+
+    Returns:
+        pd.DataFrame: 包含 KDJ 三条线的 DataFrame，列说明 —
+            kdj_k: K 值（RSV 的 m1 日平滑）
+            kdj_d: D 值（K 值的 m2 日平滑）
+            kdj_j: J 值（3*K - 2*D，灵敏度最高）
+    """
     lowest_low = low.rolling(window=int(n), min_periods=int(n)).min()
     highest_high = high.rolling(window=int(n), min_periods=int(n)).max()
     rsv = (close - lowest_low) / (highest_high - lowest_low) * 100
@@ -186,6 +213,33 @@ def kdj(high: pd.Series, low: pd.Series, close: pd.Series, n: int = 9, m1: int =
 
 
 def compute_indicator(df: pd.DataFrame, spec: IndicatorSpec) -> pd.DataFrame:
+    """根据 IndicatorSpec 在 DataFrame 上计算单个技术指标并追加结果列。
+
+    支持的指标名称：ma、ema、macd、rsi、boll、atr、kdj。
+
+    Args:
+        df: 包含价格数据的 DataFrame（需含所需列，如 close、high、low）
+        spec: IndicatorSpec 对象，name 为指标名，params 为参数字典
+            ma/ema: n 或 period（默认 20）
+            macd: fast/slow/signal（默认 12/26/9）
+            rsi: n 或 period（默认 14）
+            boll: n（默认 20）、k（默认 2.0）
+            atr: n（默认 14）
+            kdj: n（默认 9）、m1（默认 3）、m2（默认 3）
+
+    Returns:
+        pd.DataFrame: 原始 DataFrame 的副本，追加指标结果列，列名规则 —
+            ma{N}: 移动平均线
+            ema{N}: 指数移动平均线
+            dif, dea, macd_hist: MACD 指标
+            rsi{N}: RSI 指标
+            boll_mid, boll_upper, boll_lower: 布林带
+            atr{N}: ATR 指标
+            kdj_k, kdj_d, kdj_j: KDJ 指标
+
+    Raises:
+        ValueError: 指标名不支持或缺少必要列时抛出
+    """
     name = spec.name.lower()
     params = spec.params or {}
     out = df.copy()
@@ -247,6 +301,16 @@ def compute_indicator(df: pd.DataFrame, spec: IndicatorSpec) -> pd.DataFrame:
 
 
 def compute_many(df: pd.DataFrame, specs: List[IndicatorSpec]) -> pd.DataFrame:
+    """批量计算多个技术指标，按 (name, params) 去重后依次合并结果列。
+
+    Args:
+        df: 包含价格数据的 DataFrame（需含所需列，如 close、high、low）
+        specs: IndicatorSpec 列表，每个元素描述一个待计算的指标
+
+    Returns:
+        pd.DataFrame: 原始 DataFrame 的副本，追加所有去重后的指标结果列；
+            若 specs 为空则返回原始 DataFrame 的副本
+    """
     if not specs:
         return df.copy()
     # 粗略去重（按 name+sorted(params)）
@@ -270,6 +334,16 @@ def compute_many(df: pd.DataFrame, specs: List[IndicatorSpec]) -> pd.DataFrame:
 
 
 def last_values(df: pd.DataFrame, columns: List[str]) -> Dict[str, Any]:
+    """提取 DataFrame 中指定列的最后一行（最新）值，缺失或 NaN 时返回 None。
+
+    Args:
+        df: 数据 DataFrame
+        columns: 需要提取的列名列表
+
+    Returns:
+        Dict[str, Any]: 字典，key 为列名，value 为该列最后一行的值；
+            若 df 为空、列不存在或值为 NaN，则对应 value 为 None
+    """
     if df.empty:
         return {c: None for c in columns}
     last = df.iloc[-1]

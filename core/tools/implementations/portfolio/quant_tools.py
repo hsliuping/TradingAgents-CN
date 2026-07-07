@@ -92,7 +92,38 @@ def get_efficient_frontier(
     risk_free_rate: Annotated[float, "无风险利率，默认 0.025（2.5%）"] = 0.025,
     num_portfolios: Annotated[int, "蒙特卡洛模拟的组合数量，默认5000"] = 5000,
 ) -> str:
-    """计算投资组合有效前沿。"""
+    """计算投资组合有效前沿。基于马科维茨均值-方差模型，给出最大夏普组合、最小波动组合及前沿曲线。
+
+    Args:
+        symbols: 股票代码列表，用逗号分隔，如 "600519,000001,300750"（至少 2 只）
+        lookback_days: 回看交易日数，默认 252（约 1 年）
+        risk_free_rate: 无风险利率，默认 0.025（2.5%）
+        num_portfolios: 蒙特卡洛模拟的随机组合数量，默认 5000
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            max_sharpe: dict，最大夏普比率组合——
+                — return: 年化收益
+                — volatility: 年化波动率
+                — sharpe_ratio: 夏普比率
+                — weights: dict[str, float]，各股票权重
+            min_vol: dict，最小波动组合——
+                — return: 年化收益
+                — volatility: 年化波动率
+                — weights: dict[str, float]，各股票权重
+            frontier_points: list[dict]，有效前沿曲线点，元素结构——
+                — return: 目标收益
+                — volatility: 对应最小波动率
+            portfolio_stats: dict，组合统计——
+                — num_assets: 资产数
+                — valid_symbols: list[str]，实际使用的有效股票代码
+                — num_portfolios_simulated: 模拟组合数
+                — overlapping_trading_days: 重叠交易日数
+                — risk_free_rate: 无风险利率
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         symbol_list = [s.strip() for s in str(symbols).split(",") if s.strip()]
@@ -282,7 +313,43 @@ def get_monte_carlo_simulation(
     mu: Annotated[Optional[float], "年化收益率期望，不传则从历史数据估计"] = None,
     sigma: Annotated[Optional[float], "年化波动率，不传则从历史数据估计"] = None,
 ) -> str:
-    """基于几何布朗运动进行蒙特卡洛价格模拟。"""
+    """基于几何布朗运动进行蒙特卡洛价格模拟。预测未来价格分布及风险指标。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        days: 模拟的交易日数，默认 252（约 1 年）
+        simulations: 模拟路径数量，默认 1000（实际会被限制在 10000 以内）
+        mu: 年化收益率期望；为 None 时从历史数据估计
+        sigma: 年化波动率；为 None 时从历史数据估计
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            current_price: 当前价格（模拟起点）
+            parameters: dict，模拟参数——
+                — mu_annual: 年化收益率期望
+                — sigma_annual: 年化波动率
+                — mu_source: "user_provided" | "estimated"
+                — sigma_source: "user_provided" | "estimated"
+                — days: 模拟交易日数
+            simulation_count: 实际模拟路径数
+            stats: dict，最终价格统计——
+                — median: 中位数
+                — mean: 均值
+                — std: 标准差
+                — p5: 5 分位数
+                — p95: 95 分位数
+                — prob_loss: 亏损概率（最终价低于当前价的比例）
+                — min: 最小值
+                — max: 最大值
+            sample_paths: list[dict]，样本路径（最多 100 条），元素结构——
+                — simulation_id: 模拟编号
+                — final_price: 最终价格
+                — path: list[float]，每日价格序列
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         end_date = _today()
@@ -416,7 +483,37 @@ def get_factor_attribution(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     lookback_days: Annotated[int, "回看交易日数，默认252（约1年）"] = 252,
 ) -> str:
-    """对个股进行简化的因子归因分析。"""
+    """对个股进行简化的因子归因分析。基于单因子 CAPM 模型分解 Alpha、Beta、R² 及市场解释度。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看交易日数，默认 252（约 1 年）
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            factor_model: 因子模型名，"single_factor_capm" 或 "single_factor_simplified"
+            alpha: 年化 Alpha（简化模型下为 0.0）
+            beta: Beta 系数（简化模型下为 1.0）
+            r_squared: 决定系数 R²（简化模型下为 None）
+            explained_by_market_pct: 市场因子解释度百分比（简化模型下为 None）
+            stock_specific_pct: 个股特质收益占比百分比（简化模型下为 None）
+            annualized_return: 年化收益
+            annualized_volatility: 年化波动率
+            residual_std: 残差标准差（仅完整 CAPM 模型返回）
+            skewness: 偏度
+            kurtosis: 峰度
+            pe_ttm: 滚动市盈率（基础信息缺失时为 None）
+            pb: 市净率（基础信息缺失时为 None）
+            data_quality: dict，数据质量——
+                — return_data_points: 收益率样本数
+                — overlapping_days: 与基准重叠交易日数（仅完整模型）
+                — has_benchmark: 是否有可用基准
+                — benchmark_symbol: 基准代码（"000300"）
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         sym = str(symbol)

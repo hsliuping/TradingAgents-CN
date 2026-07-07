@@ -152,7 +152,28 @@ def get_sortino_ratio(
     risk_free_rate: Annotated[float, "无风险利率，默认 0.025（2.5%）"] = 0.025,
     target_return: Annotated[float, "目标收益率，默认 0.0"] = 0.0,
 ) -> str:
-    """计算 Sortino 比率。"""
+    """计算 Sortino 比率。仅以负收益偏离（下行偏差）作为风险度量，衡量单位下行风险的超额收益。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看交易日数，默认 252（约 1 年）
+        risk_free_rate: 无风险利率，默认 0.025（2.5%）
+        target_return: 目标收益率（MAR），默认 0.0
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            sortino_ratio: 年化 Sortino 比率（不可计算时为 None）
+            downside_deviation: 年化下行偏差
+            annualized_return: 年化收益率
+            excess_return: 年化超额收益（年化收益 - 无风险利率）
+            risk_free_rate: 实际使用的无风险利率
+            target_return: 实际使用的目标收益率
+            data_points: 有效收益率样本数
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         rf = float(risk_free_rate) if risk_free_rate is not None else 0.025
@@ -233,7 +254,26 @@ def get_treynor_ratio(
     lookback_days: Annotated[int, "回看交易日数，默认252（约1年）"] = 252,
     risk_free_rate: Annotated[float, "无风险利率，默认 0.025（2.5%）"] = 0.025,
 ) -> str:
-    """计算 Treynor 比率。"""
+    """计算 Treynor 比率。以 Beta 衡量系统性风险，衡量单位系统性风险的超额收益。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看交易日数，默认 252（约 1 年）
+        risk_free_rate: 无风险利率，默认 0.025（2.5%）
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            treynor_ratio: Treynor 比率（不可计算时为 None）
+            beta: 相对沪深300 的 Beta 系数（Beta 计算失败时回退为 1.0）
+            annualized_return: 年化收益率
+            excess_return: 年化超额收益
+            risk_free_rate: 实际使用的无风险利率
+            data_points: 有效收益率样本数
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         sym = str(symbol)
@@ -319,7 +359,25 @@ def get_information_ratio(
     benchmark_symbol: Annotated[str, "基准指数代码，默认 000300（沪深300）"] = "000300",
     lookback_days: Annotated[int, "回看交易日数，默认252（约1年）"] = 252,
 ) -> str:
-    """计算信息比率。"""
+    """计算信息比率。衡量组合相对基准的超额收益与跟踪误差之比。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        benchmark_symbol: 基准指数代码，默认 "000300"（沪深300）
+        lookback_days: 回看交易日数，默认 252（约 1 年）
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            benchmark_symbol: 实际使用的基准代码
+            information_ratio: 信息比率
+            tracking_error: 年化跟踪误差
+            excess_return: 年化超额收益
+            data_points: 实际对齐使用的样本数
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         sym = str(symbol)
@@ -405,7 +463,23 @@ def get_calmar_ratio(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     lookback_days: Annotated[int, "回看交易日数，默认252（约1年）"] = 252,
 ) -> str:
-    """计算 Calmar 比率。"""
+    """计算 Calmar 比率。年化收益率与最大回撤（绝对值）之比，衡量回撤调整后收益。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看交易日数，默认 252（约 1 年）
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            calmar_ratio: Calmar 比率（最大回撤为 0 时为 None）
+            annualized_return: 年化收益率
+            max_drawdown: 最大回撤（负数）
+            data_points: 有效收益率样本数
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         sym = str(symbol)
@@ -470,7 +544,27 @@ def get_jensen_alpha(
     lookback_days: Annotated[int, "回看交易日数，默认252（约1年）"] = 252,
     risk_free_rate: Annotated[float, "无风险利率，默认 0.025（2.5%）"] = 0.025,
 ) -> str:
-    """计算 Jensen Alpha。"""
+    """计算 Jensen Alpha。基于 CAPM 模型衡量组合实际收益与预期收益之差。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看交易日数，默认 252（约 1 年）
+        risk_free_rate: 无风险利率，默认 0.025（2.5%）
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            jensen_alpha: Jensen Alpha（实际收益 - CAPM 预期收益）
+            beta: 相对沪深300 的 Beta 系数
+            expected_return: CAPM 预期收益
+            actual_return: 实际年化收益
+            market_return: 基准年化收益
+            risk_free_rate: 实际使用的无风险利率
+            data_points: 实际对齐使用的样本数
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         sym = str(symbol)
@@ -563,7 +657,32 @@ def get_portfolio_stress_test(
     symbols: Annotated[str, "股票代码列表，用逗号分隔，如 '600519,000001,300750'"],
     weights: Annotated[Optional[str], "权重列表，用逗号分隔，如 '0.4,0.3,0.3'，不传则等权"] = None,
 ) -> str:
-    """对投资组合进行压力测试。"""
+    """对投资组合进行压力测试。模拟 2008 金融危机、2015 股灾、2020 疫情、2022 调整等极端情景下的影响。
+
+    Args:
+        symbols: 股票代码列表，用逗号分隔，如 "600519,000001,300750"
+        weights: 权重列表，用逗号分隔，如 "0.4,0.3,0.3"；为 None 时等权；
+            权重数量与 symbols 不一致时回退等权；权重会被归一化
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            current_value: 组合当前总价值（按权重 × 价格聚合）
+            num_assets: 资产数量
+            assets: list[dict]，资产清单，元素结构——
+                — symbol: 股票代码
+                — weight: 归一化后的权重
+                — price: 当前价格（缺失时使用假设价格 100.0）
+            scenarios: list[dict]，情景结果，元素结构——
+                — name: 情景名（"2008 金融危机" / "2015 股灾" / "2020 疫情冲击" / "2022 市场调整"）
+                — description: 情景描述
+                — shock: 情景冲击幅度（如 -0.50）
+                — total_return: 组合总收益率
+                — impact: 影响金额
+                — remaining_value: 剩余价值
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         sym_list, w_list = _parse_symbols_weights(str(symbols), weights)
@@ -664,7 +783,34 @@ def get_scenario_analysis(
     weights: Annotated[Optional[str], "权重列表，用逗号分隔，如 '0.5,0.5'，不传则等权"] = None,
     scenarios: Annotated[str, "情景 JSON 字符串，格式为 [{\"name\": \"情景名\", \"shocks\": {\"600519\": -0.1, \"000001\": 0.05}}]"] = "[]",
 ) -> str:
-    """对投资组合进行自定义情景分析。"""
+    """对投资组合进行自定义情景分析。按用户指定的各资产涨跌幅计算组合整体影响。
+
+    Args:
+        symbols: 股票代码列表，用逗号分隔，如 "600519,000001"
+        weights: 权重列表，用逗号分隔，如 "0.5,0.5"；为 None 时等权；权重会被归一化
+        scenarios: 情景 JSON 字符串，默认 "[]"；
+            格式为 [{"name": "情景名", "shocks": {"600519": -0.1, "000001": 0.05}}]
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            base_value: 组合基础总价值
+            num_assets: 资产数量
+            num_scenarios: 解析得到的情景数
+            scenario_results: list[dict]，情景结果，元素结构——
+                — name: 情景名
+                — total_return: 组合总收益率
+                — post_value: 冲击后组合总价值
+                — impact: 影响金额
+                — asset_details: list[dict]，资产明细，元素结构——
+                    — symbol: 股票代码
+                    — weight: 权重
+                    — shock: 该资产的冲击幅度
+                    — contribution: 对组合收益的贡献
+                    — value_change: 资产价值变化
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         sym_list, w_list = _parse_symbols_weights(str(symbols), weights)
@@ -778,7 +924,32 @@ def get_brinson_attribution(
     symbols: Annotated[str, "投资组合股票代码列表，用逗号分隔，如 '600519,000001,300750'"],
     benchmark_symbols: Annotated[str, "基准指数代码列表，用逗号分隔，默认 '000300,399001,399006'（沪深300、深证成指、创业板指）"] = "000300,399001,399006",
 ) -> str:
-    """对投资组合进行 Brinson 绩效归因。"""
+    """对投资组合进行 Brinson 绩效归因。将超额收益分解为配置效应、选股效应和交互效应。
+
+    Args:
+        symbols: 投资组合股票代码列表，用逗号分隔，如 "600519,000001,300750"
+        benchmark_symbols: 基准指数代码列表，用逗号分隔，默认 "000300,399001,399006"
+            （沪深300、深证成指、创业板指）
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            allocation_effect: 配置效应
+            selection_effect: 选股效应
+            interaction_effect: 交互效应
+            total_excess_return: 总超额收益（组合 - 基准）
+            portfolio_return: 组合年化收益
+            benchmark_return: 基准年化收益
+            portfolio_assets: list[str]，组合股票代码列表
+            benchmark_assets: list[str]，基准指数代码列表
+            industry_breakdown: dict，行业分解——
+                — portfolio: dict[str, dict]，组合各行业——
+                    — <行业名>: {weight: 权重, return: 行业收益}
+                — benchmark: dict[str, dict]，基准各行业——
+                    — <行业名>: {weight: 权重, return: 行业收益}
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         sym_list = [s.strip() for s in str(symbols).split(",") if s.strip()]
@@ -941,7 +1112,30 @@ def get_brinson_attribution(
 def get_sector_attribution(
     symbols: Annotated[str, "股票代码列表，用逗号分隔，如 '600519,000001,300750'"],
 ) -> str:
-    """对投资组合进行行业归因分析。"""
+    """对投资组合进行行业归因分析。按行业分类计算各行业对组合总收益的贡献度。
+
+    Args:
+        symbols: 股票代码列表，用逗号分隔，如 "600519,000001,300750"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            portfolio_return: 组合年化收益
+            num_sectors: 行业数量
+            num_assets: 资产数量
+            sector_contributions: list[dict]，按行业收益降序排列，元素结构——
+                — sector: 行业名
+                — weight: 行业权重
+                — return: 行业加权收益
+                — contribution_pct: 收益贡献百分比
+                — num_assets: 该行业资产数
+                — assets: list[dict]，该行业资产清单——
+                    — symbol: 股票代码
+                    — return: 年化收益
+                    — weight: 权重
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list = []
         sym_list = [s.strip() for s in str(symbols).split(",") if s.strip()]
