@@ -214,15 +214,31 @@ def get_contract_required_fields(schema_context: Optional[Dict[str, Any]]) -> Li
 
     contract = schema_context.get("contract") or {}
     verifier_rule = schema_context.get("verifier_rule") or {}
+    verifier_rule_id = schema_context.get("verifier_rule_id", "?")
+    contract_id = schema_context.get("contract_id", "?")
     required_fields = list((verifier_rule.get("params") or {}).get("required_fields") or [])
     if required_fields:
-        return [field_name for field_name in required_fields if str(field_name).strip()]
+        result = [field_name for field_name in required_fields if str(field_name).strip()]
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "🔬 [get_contract_required_fields] 来源=verifier_rule(%s) required_fields=%s",
+            verifier_rule_id,
+            result,
+        )
+        return result
 
     fields: List[str] = []
     for field_def in contract.get("required_fields") or []:
         field_name = str((field_def or {}).get("field_name") or "").strip()
         if field_name:
             fields.append(field_name)
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "🔬 [get_contract_required_fields] 来源=contract(%s) required_fields=%s (verifier_rule %s 无 required_fields)",
+        contract_id,
+        fields,
+        verifier_rule_id,
+    )
     return fields
 
 
@@ -309,6 +325,14 @@ def build_schema_generated_checks(schema_context: Optional[Dict[str, Any]]) -> L
             field_name = str((field_def or {}).get("field_name") or "").strip()
             if field_name:
                 required_fields.append(field_name)
+
+    logger = logging.getLogger(__name__)
+    logger.info(
+        "🔬 [build_schema_generated_checks] required_fields=%s verifier_rule_id=%s contract_id=%s",
+        required_fields,
+        schema_context.get("verifier_rule_id", "?"),
+        schema_context.get("contract_id", "?"),
+    )
 
     blocking = bool(verifier_rule.get("blocking", True))
     contract_name = str(contract.get("name") or schema_context.get("contract_id") or "schema_contract")

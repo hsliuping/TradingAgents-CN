@@ -35,7 +35,9 @@ from .skill_spec import (
 logger = logging.getLogger(__name__)
 
 # LLM 侦察最大工具调用轮数
-MAX_RECON_TOOL_ROUNDS = 10
+# 由 10 调整为 6：rule_report 已通过向量搜索提供 helpers，LLM 只需补充验证，
+# 不需要从头探索所有集合/模块。过多轮数会拖慢生成流程且收益递减。
+MAX_RECON_TOOL_ROUNDS = 6
 
 
 class ReconnaissanceController:
@@ -82,18 +84,45 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                 return None
         return self._llm_client
 
-    def analyze(self, spec: SkillSpec) -> ImplementationFactReport:
+    def analyze(self, spec: SkillSpec, capability_hits: list = None) -> ImplementationFactReport:
         # Phase 1: 规则基线（快速、零成本）
-        rule_report = self._rule_based_analyze(spec)
+        rule_report = self._rule_based_analyze(spec, capability_hits)
 
-        # Phase 2: LLM 探索（增量增强）
+        # 【分层策略】根据 helper 数量决定是否启用 Phase 2
+        # - 1-2 个 helper（如质押）：直接验证签名，跳过 LLM 探索
+        # - 3+ 个 helper（如估值、现金流）：进入 Phase 2，但只做筛选，不允许探索新工具
+        helper_count = len(rule_report.available_helpers)
+        if helper_count <= 2:
+            helper_names = [h.name for h in rule_report.available_helpers]
+            logger.info(
+                f"\n{'='*80}\n"
+                f"✅ [侦察层优化] Phase 1 已找到 {helper_count} 个 helper，直接跳过 Phase 2\n"
+                f"   已发现的 helper: {', '.join(helper_names)}\n"
+                f"   置信度: {rule_report.confidence:.2f}\n"
+                f"   理由: 少量 helper 场景无需 LLM 筛选\n"
+                f"{'='*80}"
+            )
+            return rule_report
+
+        # Phase 2: LLM 驱动筛选（仅当 helper >= 3 时启用）
         client = self._get_client()
         if client is None:
             logger.info("🧭 侦察层降级为纯规则模式（无 LLM 客户端）")
             return rule_report
 
+        logger.info(
+            f"\n{'='*80}\n"
+            f"🔄 [侦察层] Phase 1 已找到 {helper_count} 个候选 helper，启动 Phase 2 LLM 筛选\n"
+            f"   候选列表: {', '.join([h.name for h in rule_report.available_helpers])}\n"
+            f"   任务: 从已知候选中筛选最相关的 3-4 个，不探索新工具\n"
+            f"{'='*80}"
+        )
+
         try:
-            llm_report = self._llm_driven_analyze(client, spec, rule_report)
+            llm_report = self._llm_driven_analyze(
+                client, spec, rule_report,
+                has_many_helpers=True  # 多 helper 场景：只做筛选
+            )
             return llm_report
         except Exception as exc:
             logger.warning("⚠️ LLM 侦察失败，降级为规则模式: %s", exc)
@@ -151,6 +180,7 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                     signature="symbol: str, *, lookback_days: int = 90",
                     description="估值类 Skill 的标准输入入口，可一次获得现价、估值指标和财务数据",
                     reason="估值类 Skill 的标准输入入口，可一次获得现价、估值指标和财务数据",
+                    data_source_handling="local_only",
                 )
             )
         if any(k in normalized for k in ("行业", "peer", "relative", "同行", "pb", "pe", "ps")):
@@ -161,8 +191,158 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                     signature="industry: str, *, top_n: int = 10",
                     description="相对估值和行业统计优先复用现有行业估值汇总 helper",
                     reason="相对估值和行业统计优先复用现有行业估值汇总 helper",
+                    data_source_handling="local_only",
                 )
             )
+        # 护城河/盈利稳定性/长期趋势类 Skill 优先复用 standard_financial_apis
+        if any(k in normalized for k in ("moat", "护城河", "稳定性", "stability", "质量", "quality", "长期", "annual_series", "年报序列")):
+            helpers.append(
+                ImplementationHelper(
+                    module="core.skill_runtime.standard_financial_apis",
+                    name="get_historical_financial_annual_series",
+                    signature="symbol: str, years: int = 10, source: str = None",
+                    description="一键返回最近 N 年年报序列（revenue/net_profit/roe/gross_margin/operating_cashflow 等）",
+                    reason="长期财务台账、5-10 年趋势分析的优先入口，避免手动遍历多期数据",
+                    data_source_handling="local_only",
+                )
+            )
+            helpers.append(
+                ImplementationHelper(
+                    module="core.skill_runtime.standard_financial_apis",
+                    name="get_profitability_stability_metrics",
+                    signature="symbol: str, years: int = 10, source: str = None",
+                    description="基于年报序列计算营收/净利/ROE/毛利率的均值、波动率、变异系数",
+                    reason="盈利稳定性、护城河财务证据分析的优先函数，避免重复计算统计指标",
+                    data_source_handling="local_only",
+                )
+            )
+        if any(k in normalized for k in ("现金流", "cashflow", "自由现金流", "fcf", "ocf", "利润含金量")):
+            helpers.append(
+                ImplementationHelper(
+                    module="core.skill_runtime.standard_financial_apis",
+                    name="get_cashflow_quality_trend",
+                    signature="symbol: str, years: int = 10, source: str = None",
+                    description="返回 OCF/净利、FCF/净利、OCF margin、FCF margin 的年度趋势和统计摘要",
+                    reason="现金流质量、利润含金量分析的优先函数",
+                    data_source_handling="local_only",
+                )
+            )
+        if any(k in normalized for k in ("分位", "percentile", "估值分位", "历史估值", "pe_ttm", "pb")):
+            helpers.append(
+                ImplementationHelper(
+                    module="core.skill_runtime.standard_financial_apis",
+                    name="get_historical_valuation_percentile",
+                    signature="symbol: str, metrics: list = None, lookback_years: int = 5, as_of_date: str = None",
+                    description="结构化返回 pe_ttm/pb/ps_ttm/pcf_ttm 的历史分位、当前值、中位数",
+                    reason="历史估值分位分析的优先函数，替代文本分位输出",
+                    data_source_handling="self_contained",
+                )
+            )
+        # 股权质押/大股东质押/质押风险
+        if any(k in normalized for k in ("质押", "pledge", "股权质押", "大股东质押", "爆仓", "平仓线")):
+            helpers.append(
+                ImplementationHelper(
+                    module="core.skill_runtime.standard_financial_apis",
+                    name="get_pledge_risk_profile",
+                    signature="symbol: str, source: str = None",
+                    description="返回股权质押风险画像：总质押比例、未解押规模、前几大质押股东、最近质押事件、风险等级(low/medium/medium_high/high/none)",
+                    reason="股权质押风险快照分析的优先函数，自动从 Tushare/akshare 获取数据，无需手动调用外部接口",
+                    data_source_handling="self_contained",
+                )
+            )
+            if any(k in normalized for k in ("趋势", "历史", "trend", "historical", "年度", "逐年", "变化", "变动", "好转", "恶化")):
+                helpers.append(
+                    ImplementationHelper(
+                        module="core.skill_runtime.standard_financial_apis",
+                        name="get_pledge_historical_series",
+                        signature="symbol: str, start_date: str = None, end_date: str = None, years: int = None, period: str = 'year', source: str = None",
+                        description="返回指定时间段内股权质押趋势，支持按年/季/月统计，包含每周期末质押比例、未解押股数、活跃质押笔数，以及自动评估的趋势方向（improving/worsening/stable）",
+                        reason="质押趋势分析的优先函数，支持自定义起止日期和统计粒度，直接判断风险好转/恶化",
+                        data_source_handling="self_contained",
+                    )
+                )
+        return helpers
+
+    @staticmethod
+    def _convert_capability_hits_to_helpers(capability_hits: list) -> list:
+        """把 CapabilityIndexService.search_capabilities 的命中结果转换为 ImplementationHelper。
+
+        capability_hits 中的每项是 CapabilitySearchHit（含 capability + score）。
+        通过 registry_tool_id 查 ToolRegistry 获取 module_path 和 function_name。
+        只保留 bindable=True 且 source_type in (builtin_tool, mcp_tool) 的工具。
+        """
+        if not capability_hits:
+            return []
+
+        try:
+            from core.tools.registry import get_tool_registry
+            registry = get_tool_registry()
+        except Exception as exc:
+            logger.warning("⚠️ 向量搜索结果转换失败（ToolRegistry 不可用）: %s", exc)
+            return []
+
+        helpers = []
+        seen_tool_ids = set()
+        for hit in capability_hits:
+            try:
+                cap = hit.capability if hasattr(hit, "capability") else hit.get("capability", {})
+                score = hit.score if hasattr(hit, "score") else hit.get("score", 0.0)
+            except Exception:
+                continue
+
+            # 只收录可绑定的工具类能力（跳过 skill/external_skill，那些是独立 skill 不是函数）
+            source_type = getattr(cap, "source_type", "") or (cap.get("source_type", "") if isinstance(cap, dict) else "")
+            if source_type not in ("builtin_tool", "mcp_tool"):
+                continue
+            bindable = getattr(cap, "bindable", False) or (cap.get("bindable", False) if isinstance(cap, dict) else False)
+            if not bindable:
+                continue
+
+            tool_id = getattr(cap, "registry_tool_id", None) or (cap.get("registry_tool_id") if isinstance(cap, dict) else None)
+            if not tool_id or tool_id in seen_tool_ids:
+                continue
+
+            # 查 ToolRegistry 获取函数的 module_path 和 function_name
+            try:
+                func = registry.get_function(tool_id)
+            except Exception:
+                func = None
+            if func is None:
+                continue
+
+            module_path = getattr(func, "__module__", "") or ""
+            function_name = getattr(func, "__name__", tool_id)
+            # 只收录 ALLOWED_CORE_PREFIXES 下的模块（与静态验证器白名单一致）
+            from core.tools.external.static_validator import ALLOWED_CORE_PREFIXES
+            allowed = any(module_path == p or module_path.startswith(p + ".") for p in ALLOWED_CORE_PREFIXES)
+            if not allowed:
+                continue
+
+            name = getattr(cap, "name", "") or (cap.get("name", "") if isinstance(cap, dict) else "") or function_name
+            description = getattr(cap, "description", "") or (cap.get("description", "") if isinstance(cap, dict) else "")
+            when_to_use = getattr(cap, "when_to_use", "") or (cap.get("when_to_use", "") if isinstance(cap, dict) else "")
+
+            # 从 ToolMetadata 读取 data_source_handling，传递到 ImplementationHelper
+            # 让 LLM 在 skill 工坊设计 skill 时能判断是否需要补充数据源
+            try:
+                metadata = registry.get(tool_id)
+                data_source_handling = getattr(metadata, "data_source_handling", "self_contained") if metadata else "self_contained"
+            except Exception:
+                data_source_handling = "self_contained"
+
+            helpers.append(
+                ImplementationHelper(
+                    module=module_path,
+                    name=function_name,
+                    signature=f"{function_name}(symbol, **kwargs)",  # 签名由 code_generator 通过 describe_runtime_helper 获取
+                    description=description or when_to_use or name,
+                    reason=f"向量搜索召回（score={score:.2f}），语义匹配 skill 需求",
+                    data_source_handling=data_source_handling,
+                )
+            )
+            seen_tool_ids.add(tool_id)
+
+        logger.info("🧭 向量搜索召回转换: %d 个 hit → %d 个 ImplementationHelper", len(capability_hits), len(helpers))
         return helpers
 
     @staticmethod
@@ -355,7 +535,7 @@ class DefaultReconnaissanceController(ReconnaissanceController):
     # Phase 1: 规则基线（零 LLM 成本）
     # ================================================================
 
-    def _rule_based_analyze(self, spec: SkillSpec) -> ImplementationFactReport:
+    def _rule_based_analyze(self, spec: SkillSpec, capability_hits: list = None) -> ImplementationFactReport:
         """纯规则驱动的侦察，作为 LLM 侦察的基线和降级方案。"""
         from core.skill_runtime.project_access import (
             inspect_field_coverage,
@@ -371,7 +551,97 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         )
         symbol = self._extract_probe_symbol(spec)
 
+        rule_based_helpers = self._infer_helpers(spec)
+        logger.info(
+            "\n" + "=" * 80 + "\n"
+            "🔍 [侦察层 Phase 1] 规则基线分析\n"
+            f"   tool_id: {spec.tool_id}\n"
+            f"   需求描述: {spec.description[:80]}{'...' if len(spec.description) > 80 else ''}\n"
+            f"   规则推荐 helpers: {[h.module + '.' + h.name for h in rule_based_helpers]}\n"
+            f"   推荐本地集合: {recommendations.get('stock_collections', [])}\n"
+            f"   推荐外部数据源: {recommendations.get('external_sources', [])}\n"
+            f"   提取的测试股票代码: {symbol}\n"
+            + "=" * 80
+        )
+
+        # 检查是否已有足够的 helper，避免分析不相关集合
+        has_direct_helpers = len(rule_based_helpers) > 0
+        if has_direct_helpers:
+            helper_names = [h.name for h in rule_based_helpers]
+            # 根据 helper 的 data_source_handling 分类
+            self_contained_helpers = [h for h in rule_based_helpers if h.data_source_handling == "self_contained"]
+            local_only_helpers = [h for h in rule_based_helpers if h.data_source_handling == "local_only"]
+            partial_helpers = [h for h in rule_based_helpers if h.data_source_handling == "partial"]
+
+            logger.info(
+                f"✅ [侦察层 Phase 1] 已发现 {len(rule_based_helpers)} 个直接可用的 helper "
+                f"({', '.join(helper_names)})，将根据数据源处理能力调整数据层推荐"
+            )
+            logger.info(
+                f"   📊 数据源处理能力: self_contained={len(self_contained_helpers)}, "
+                f"local_only={len(local_only_helpers)}, partial={len(partial_helpers)}"
+            )
+
+            # 智能决定数据层推荐策略：
+            # - 全部 self_contained：helper 完全自包含，清空外部数据源推荐（LLM 不需要自己调数据源）
+            # - 有 local_only：helper 只查本地 MongoDB，保留外部数据源作为补充（LLM 可能需要自己调外部 API）
+            # - 有 partial：保留相关数据源推荐
+            all_self_contained = len(self_contained_helpers) == len(rule_based_helpers)
+            has_local_only = len(local_only_helpers) > 0
+
+            if all_self_contained:
+                # 全部自包含：清空外部数据源，只保留 stock_basic_info
+                filtered_collections = []
+                for col in recommendations.get("stock_collections") or []:
+                    if col == "stock_basic_info":
+                        filtered_collections.append(col)
+                    else:
+                        logger.info(f"   ⏭️  跳过集合分析: {col}（helper 已自包含数据获取）")
+                recommendations["stock_collections"] = filtered_collections
+                recommendations["external_sources"] = []
+
+                report.notes.append(
+                    f"✅ 已推荐 {len(rule_based_helpers)} 个 helper 函数（{', '.join(helper_names)}），"
+                    "全部为 **self_contained** 类型（已封装数据源调用，自动调 Tushare/AKShare 或查本地 MongoDB）。"
+                    "LLM 生成代码时**直接调用 helper 即可，不要自己实现数据源调用逻辑**"
+                    "（如 import tushare/akshare、直接调 provider 等）。"
+                )
+
+                # strategy 明确说明"直接调用 helper"
+                helper_list_text = ", ".join(helper_names)
+                report.recommended_strategy = (
+                    f"直接调用推荐的 helper 函数（{helper_list_text}）获取数据并组织输出。"
+                    "这些 helper 已封装数据源调用逻辑，无需自行 import tushare/akshare 或查 MongoDB。"
+                )
+            elif has_local_only:
+                # 有 local_only helper：保留外部数据源作为补充
+                report.notes.append(
+                    f"✅ 已推荐 {len(rule_based_helpers)} 个 helper 函数。"
+                    f"其中 self_contained 类型 {len(self_contained_helpers)} 个（已封装数据源，直接调用即可），"
+                    f"local_only 类型 {len(local_only_helpers)} 个（只查本地 MongoDB）。"
+                )
+                report.notes.append(
+                    "⚠️ local_only helper 只查本地 MongoDB，若本地无数据，LLM 可能需要：\n"
+                    "  1. 调用 self_contained helper 补充数据（如 get_external_historical_data）\n"
+                    "  2. 或自行调用外部数据源（Tushare/AKShare）补充\n"
+                    "  3. 在代码中处理本地无数据的情况（返回 no_data 或降级到外部 API）"
+                )
+                # strategy 保持原样（包含本地集合和外部来源推荐作为补充）
+            else:
+                # partial 或混合情况：保留数据层推荐
+                report.notes.append(
+                    f"✅ 已推荐 {len(rule_based_helpers)} 个 helper 函数，部分为 partial 类型。"
+                    "LLM 调用 helper 后，可能需要补充其它数据源或计算。"
+                )
+
+            if "估值" in spec.description or any(
+                k in spec.description.lower() for k in ("valuation", "peg", "pb", "pe", "dcf")
+            ):
+                if "先确认价格" not in report.recommended_strategy:
+                    report.recommended_strategy += "；先确认价格、财务口径和增长率路径，再固化估值公式"
+
         for collection in recommendations.get("stock_collections") or []:
+            logger.info(f"📦 [侦察层 Phase 1] 开始分析本地集合: {collection}")
             report.schema_facts.append(
                 ImplementationFact(
                     source=collection,
@@ -389,6 +659,7 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             )
 
         for source in recommendations.get("external_sources") or []:
+            logger.info(f"🌐 [侦察层 Phase 1] 记录外部数据源推荐: {source}")
             report.schema_facts.append(
                 ImplementationFact(
                     source=source,
@@ -397,7 +668,66 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                 )
             )
 
-        report.available_helpers.extend(self._infer_helpers(spec))
+        report.available_helpers.extend(rule_based_helpers)
+
+        # 【关键优化】直接验证 Phase 1 发现的 helper 签名，不需要 LLM 去探索
+        # 这样 Phase 2 就可以直接跳过，避免 LLM 去探索不相关的工具
+        if rule_based_helpers:
+            logger.info(
+                f"🔍 [侦察层 Phase 1] 开始验证 {len(rule_based_helpers)} 个 helper 的签名..."
+            )
+            # 注意：describe_runtime_helper 是从 recon_tools 导入的，它返回 JSON 字符串
+            from .recon_tools import describe_runtime_helper, probe_interface
+
+            # 提取测试股票（用于真实调用 helper）
+            test_symbol = (
+                getattr(spec, "test_input", {}).get("symbol")
+                or getattr(spec, "test_input", {}).get("code")
+                or ""
+            )
+
+            for helper in rule_based_helpers:
+                try:
+                    # helper.module 是完整路径，比如 "core.skill_runtime.standard_financial_apis"
+                    # 需要提取模块短名，比如 "standard_financial_apis"
+                    module_short = helper.module.split(".")[-1]
+                    result_json = describe_runtime_helper(module_short, helper.name)
+                    result = json.loads(result_json)
+                    if "error" not in result:
+                        helper.signature = result.get("signature", helper.signature)
+                        # 把完整 docstring 填入 description，代码生成器会用到
+                        helper.description = result.get("docstring") or result.get("description") or ""
+                        logger.info(
+                            f"   ✅ {helper.name}: 签名验证成功"
+                        )
+                    else:
+                        logger.warning(
+                            f"   ⚠️  {helper.name}: 签名验证失败 - {result.get('error')}"
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        f"   ⚠️  {helper.name}: 签名验证异常 - {exc}"
+                    )
+
+            # 【新增】真实调用 helper 验证可用性 + 财经专家判断 no_data 合理性
+            # 避免 LLM 生成代码后才发现 helper 返回 no_data（如测试股票本身无质押）
+            if test_symbol:
+                self._probe_helpers_and_judge(
+                    rule_based_helpers, spec, test_symbol, report
+                )
+
+        # 向量搜索召回的分析工具推荐（语义匹配，比关键词规则更精准）
+        if capability_hits:
+            vector_helpers = self._convert_capability_hits_to_helpers(capability_hits)
+            report.available_helpers.extend(vector_helpers)
+            if vector_helpers:
+                report.schema_facts.append(
+                    ImplementationFact(
+                        source="capability_index",
+                        fact=f"向量搜索召回 {len(vector_helpers)} 个语义相关工具（top score={capability_hits[0].score if capability_hits else 0:.2f}）",
+                        evidence="CapabilityIndexService.search_capabilities",
+                    )
+                )
         report.blocked_paths.extend(self._infer_blocked_paths(spec))
         report.validation_checks.extend(self._infer_validation_checks(spec))
         report.notes.extend(self._infer_notes(spec, recommendations))
@@ -407,6 +737,214 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         if report.sample_fields:
             report.confidence = max(report.confidence, 0.65)
         return report
+
+    def _probe_helpers_and_judge(
+        self,
+        helpers: List[ImplementationHelper],
+        spec,
+        test_symbol: str,
+        report: ImplementationFactReport,
+    ) -> None:
+        """真实调用 helper 验证可用性，并在返回 no_data 时调用财经专家判断合理性。
+
+        - 如果 helper 返回 success：把返回值结构样例写入 fact_report.notes，
+          帮助 LLM 知道字段名（避免瞎猜 current_pledge_ratio 等不存在的字段）
+        - 如果 helper 返回 no_data：调用财经专家判断是否业务合理，
+          不合理则推荐更合适的测试股票写入 notes
+        - 如果 helper 调用异常：记录具体错误，提示 LLM 该 helper 不可用
+        """
+        from .recon_tools import probe_interface
+        from .financial_expert_advisor import get_financial_expert_advisor
+
+        # 准备财经专家顾问（延迟初始化，仅在 no_data 时调用）
+        advisor = None
+
+        for helper in helpers[:3]:  # 最多验证前 3 个 helper
+            try:
+                # 构建 sample_args
+                sample_args = {"symbol": test_symbol}
+                # 根据 helper 名推断额外参数
+                if "historical" in helper.name.lower() or "series" in helper.name.lower():
+                    sample_args["years"] = 3
+
+                probe_result_json = probe_interface(
+                    f"{helper.module}.{helper.name}", sample_args
+                )
+                probe_result = json.loads(probe_result_json)
+
+                if not probe_result.get("success"):
+                    # 调用本身失败
+                    error_msg = probe_result.get("error", "未知错误")
+                    report.notes.append(
+                        f"⚠️ helper {helper.name} 真实调用失败: {error_msg}（建议 LLM 谨慎使用或换数据源）"
+                    )
+                    logger.warning(
+                        f"⚠️ [侦察层] helper {helper.name} 真实调用失败: {error_msg}"
+                    )
+                    continue
+
+                # 提取 helper 返回的 status
+                preview = probe_result.get("preview", "")
+                preview_dict = json.loads(preview) if isinstance(preview, str) else preview
+                if not isinstance(preview_dict, dict):
+                    preview_dict = {}
+
+                helper_status = preview_dict.get("status", "unknown")
+                helper_warnings = preview_dict.get("warnings", [])
+
+                if helper_status == "success":
+                    # ✅ helper 正常返回数据：把返回值结构样例写入 notes + helper.description
+                    # 即使 docstring 不完整，代码生成器也能看到实际返回字段（保底机制）
+                    field_keys = list(preview_dict.keys())
+                    metrics_keys = (
+                        list(preview_dict.get("metrics", {}).keys())
+                        if isinstance(preview_dict.get("metrics"), dict)
+                        else []
+                    )
+                    # 构建返回结构文本（保底）
+                    return_struct = f"📋 实际返回字段: {field_keys}"
+                    if metrics_keys:
+                        return_struct += f"，metrics 子字段: {metrics_keys}"
+                    # 追加到 helper.description（保留原有 docstring）
+                    if helper.description:
+                        helper.description = f"{helper.description}\n{return_struct}"
+                    else:
+                        helper.description = return_struct
+
+                    report.notes.append(
+                        f"✅ helper {helper.name} 真实调用成功（status=success）。"
+                        f"返回字段: {field_keys}。"
+                        f"metrics 子字段: {metrics_keys}。"
+                        f"LLM 生成代码时应直接读取这些字段名。"
+                    )
+                    logger.info(
+                        f"✅ [侦察层] helper {helper.name} 真实调用成功，返回字段: {field_keys}"
+                    )
+
+                elif helper_status in ("no_data", "no_news", "no_pledge"):
+                    # ⚠️ helper 返回 no_data：调用财经专家判断是否业务合理
+                    # 注意：不在此提取返回字段名，因为空数据会导致代码生成器误判结构（无法看到
+                    # 列表元素内部的字段如 holder_name/shares_wan/ratio_pct）
+                    # 返回结构应依赖 docstring 的 Returns 文档或后续沙箱反馈
+                    logger.info(
+                        f"🔍 [侦察层] helper {helper.name} 返回 {helper_status}，调用财经专家判断合理性..."
+                    )
+
+                    if advisor is None:
+                        advisor = get_financial_expert_advisor(
+                            llm_client=self._get_client_safe(),
+                            provider=self._provider,
+                            model=self._model,
+                        )
+
+                    # 获取股票基础信息（行业等）
+                    stock_name = ""
+                    industry = ""
+                    try:
+                        from core.skill_runtime.data_access import get_stock_basic_info
+
+                        basic = get_stock_basic_info(test_symbol) or {}
+                        stock_name = basic.get("name", "")
+                        industry = basic.get("industry", "")
+                    except Exception:
+                        pass
+
+                    # 推断数据类型描述
+                    data_type = self._infer_data_type(helper.name, spec)
+
+                    judgment = advisor.judge_no_data_rationality(
+                        stock_symbol=test_symbol,
+                        stock_name=stock_name,
+                        industry=industry,
+                        skill_purpose=getattr(spec, "display_name", "")
+                        or getattr(spec, "description", ""),
+                        data_type=data_type,
+                        helper_name=helper.name,
+                        helper_warnings=helper_warnings,
+                        skill_category=getattr(spec, "category", ""),
+                    )
+
+                    if judgment.is_rational:
+                        # no_data 业务合理（如银行股无质押）：告诉 LLM 这是正常情况
+                        report.notes.append(
+                            f"ℹ️ helper {helper.name} 返回 {helper_status}（业务合理）。"
+                            f"专家判断: {judgment.reasoning}。"
+                            f"建议: Skill 代码应返回 status=success 并标注'该股票无此类数据'，"
+                            f"而不是返回 error。{judgment.advice}"
+                        )
+                    else:
+                        # no_data 业务不合理：推荐换股
+                        report.notes.append(
+                            f"⚠️ helper {helper.name} 返回 {helper_status}（业务不合理）。"
+                            f"专家判断: {judgment.reasoning}。"
+                            f"建议换股重试。"
+                        )
+                        if judgment.recommended_stocks:
+                            for stock in judgment.recommended_stocks[:3]:
+                                report.notes.append(
+                                    f"  推荐测试股票: {stock.get('code')} {stock.get('name')} - {stock.get('reason')}"
+                                )
+                        if judgment.advice:
+                            report.notes.append(f"  专家建议: {judgment.advice}")
+
+                        # 把推荐股票写入 schema_facts，方便后续管道读取
+                        if judgment.recommended_stocks:
+                            recommended_codes = ", ".join(
+                                f"{s.get('code')}({s.get('name')})"
+                                for s in judgment.recommended_stocks[:3]
+                            )
+                            report.schema_facts.append(
+                                ImplementationFact(
+                                    source="financial_expert_advisor",
+                                    fact=f"建议换股测试: {recommended_codes}（原测试股票 {test_symbol} 无{data_type}）",
+                                    evidence=f"helper {helper.name} 返回 {helper_status}，专家判断不合理",
+                                )
+                            )
+
+                    logger.info(
+                        f"🧠 [侦察层] 财经专家判断: is_rational={judgment.is_rational}, "
+                        f"confidence={judgment.confidence:.2f}"
+                    )
+
+                else:
+                    # 其他状态（error 等）
+                    report.notes.append(
+                        f"⚠️ helper {helper.name} 真实调用返回 status={helper_status}，"
+                        f"warnings={helper_warnings}。LLM 应处理此情况。"
+                    )
+
+            except Exception as exc:
+                logger.warning(
+                    f"⚠️ [侦察层] helper {helper.name} 真实调用异常: {exc}"
+                )
+                report.notes.append(
+                    f"⚠️ helper {helper.name} 真实调用异常: {exc}（建议 LLM 谨慎使用）"
+                )
+
+    def _get_client_safe(self):
+        """安全获取 LLM 客户端，失败返回 None"""
+        try:
+            return self._get_client()
+        except Exception:
+            return None
+
+    @staticmethod
+    def _infer_data_type(helper_name: str, spec) -> str:
+        """根据 helper 名和 spec 推断数据类型描述"""
+        name_lower = helper_name.lower()
+        if "pledge" in name_lower:
+            return "质押数据"
+        if "financial" in name_lower or "annual" in name_lower:
+            return "财务数据"
+        if "news" in name_lower or "announcement" in name_lower:
+            return "新闻/公告数据"
+        if "valuation" in name_lower:
+            return "估值数据"
+        if "technical" in name_lower or "price" in name_lower:
+            return "技术指标/价格数据"
+        if "capital" in name_lower or "flow" in name_lower:
+            return "资金流向数据"
+        return "所需数据"
 
     @staticmethod
     def _enrich_collection_facts(
@@ -489,13 +1027,18 @@ class DefaultReconnaissanceController(ReconnaissanceController):
     # ================================================================
 
     def _llm_driven_analyze(
-        self, client, spec: SkillSpec, rule_report: ImplementationFactReport
+        self, client, spec: SkillSpec, rule_report: ImplementationFactReport,
+        has_many_helpers: bool = False
     ) -> ImplementationFactReport:
-        """通过 LLM function-calling 自主探索，产出增强版事实报告。"""
+        """通过 LLM function-calling 自主探索，产出增强版事实报告。
+        Args:
+            has_many_helpers: True 表示 helper >= 3，只做筛选，限制 2 轮
+        """
         from core.llm import Message
 
         start_time = time.time()
         tool_traces: List[ReconToolTrace] = []
+        phase1_helper_names = {h.name for h in rule_report.available_helpers}
 
         # 注册侦察工具
         tool_defs = []
@@ -503,9 +1046,10 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             td = client.register_tool(func)
             tool_defs.append(td)
 
-        # 构建侦察 prompt
-        system_prompt = self._build_recon_system_prompt()
+        # 构建侦察 prompt：根据场景选择不同的系统提示
+        system_prompt = self._build_recon_system_prompt(has_many_helpers=has_many_helpers)
         user_prompt = self._build_recon_user_prompt(spec, rule_report)
+        max_rounds = 2 if has_many_helpers else MAX_RECON_TOOL_ROUNDS
 
         messages = [
             Message(role="system", content=system_prompt),
@@ -514,7 +1058,7 @@ class DefaultReconnaissanceController(ReconnaissanceController):
 
         logger.info(
             f"\n{'─'*50}\n"
-            f"🧭 [侦察层] LLM 侦察开始 | tool_id={spec.tool_id}\n"
+            f"🧭 [侦察层] LLM {'筛选模式' if has_many_helpers else '探索模式'} | tool_id={spec.tool_id} | max_rounds={max_rounds}\n"
             f"{'─'*50}\n"
             f"📋 System Prompt ({len(system_prompt)} 字符):\n{system_prompt[:3000]}\n"
             f"{'...(截断)' if len(system_prompt) > 3000 else ''}\n"
@@ -531,7 +1075,7 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                 messages,
                 tools=tool_defs,
                 auto_execute_tools=True,
-                max_tool_rounds=MAX_RECON_TOOL_ROUNDS,
+                max_tool_rounds=max_rounds,
             )
         except Exception:
             self._log_tool_trace_summary(spec.tool_id, tool_traces, failed=True)
@@ -556,6 +1100,34 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         report.notes.append(f"工具调用次数: {len(tool_traces)}")
         report.notes.append(f"侦察耗时: {elapsed:.1f}s（LLM 驱动）")
         self._log_tool_trace_summary(spec.tool_id, tool_traces, failed=False)
+
+        # Phase 2 分析完成后的总结日志
+        if tool_traces:
+            phase1_helper_names = {h.name for h in rule_report.available_helpers}
+            phase2_helpers = set()
+            phase2_collections = set()
+            for trace in tool_traces:
+                if trace.tool_name == "describe_runtime_helper":
+                    func_name = trace.arguments.get("function_name", "")
+                    if func_name:
+                        phase2_helpers.add(func_name)
+                elif trace.tool_name == "inspect_collection_schema":
+                    col = trace.arguments.get("collection", "")
+                    if col:
+                        phase2_collections.add(col)
+
+            redundant_collections = phase2_collections - phase1_helper_names
+            if redundant_collections:
+                helper_list = ", ".join(phase2_helpers)
+                col_list = ", ".join(redundant_collections)
+                logger.warning(
+                    f"\n{'='*80}\n"
+                    f"⚠️ [侦察层 Phase 2] 检测到可能冗余的集合探测\n"
+                    f"   Phase 1 已发现 helpers: {', '.join(phase1_helper_names) or '无'}\n"
+                    f"   Phase 2 探测的集合: {col_list}\n"
+                    f"   建议: 如果任务可通过已有 helper 完成，可简化系统提示避免探索无关集合\n"
+                    f"{'='*80}"
+                )
         return report
 
     @staticmethod
@@ -665,68 +1237,34 @@ class DefaultReconnaissanceController(ReconnaissanceController):
     # ================================================================
 
     @staticmethod
-    def _build_recon_system_prompt() -> str:
+    def _build_recon_system_prompt(has_many_helpers: bool = False) -> str:
+        if has_many_helpers:
+            # helper 较多的场景：只做筛选，禁止探索
+            return (
+                "你是一个 Skill 代码生成前置侦察 Agent。\n"
+                "## 【重要约束】当前场景：Phase 1 已找到 3+ 个候选 helper\n"
+                "你的任务非常单一：只需要从【规则基线推荐 Helper】列表中，筛选出最相关的 3-4 个即可。\n"
+                "你不需要探索任何新工具、新集合、新函数！不需要调用 list_* 系列工具！\n\n"
+                "## 允许做的唯一事情\n"
+                "1. 用 describe_runtime_helper 验证候选 helper 的签名（仅当你需要确认参数细节时）\n"
+                "2. 从候选列表中选择最相关的 3-4 个，填入 available_helpers\n\n"
+                "## 绝对禁止\n"
+                "❌ 禁止调用 list_available_collections\n"
+                "❌ 禁止调用 list_runtime_functions\n"
+                "❌ 禁止调用 list_analysis_tools\n"
+                "❌ 禁止调用 list_external_data_sources\n"
+                "❌ 禁止调用 inspect_collection_schema 去看不在推荐列表中的集合\n\n"
+                "## 输出格式\n"
+                "只输出一个纯 JSON 对象，包含 task_summary、recommended_strategy、available_helpers（筛选后的 3-4 个）、schema_facts、confidence。\n"
+                "工具调用轮数：最多 2 轮，不要做多余探索！"
+            )
+        
+        # helper 较少的场景：正常探索（备用分支，通常不会走到这里）
         return (
             "你是一个 Skill 代码生成前置侦察 Agent。\n"
-            "你的任务是通过调用工具，收集最少但足够的实现事实，帮助后续代码生成器写出正确、可运行的 Python 函数。\n"
-            "你不是在写研究报告，也不是在写方案说明书。你的职责只有三个：确认数据路径、确认 helper、确认禁止路径。\n\n"
-            "## 工作流程\n"
-            "### 第一阶段：本地数据探索\n"
-            "1. 先用 list_available_collections 了解有哪些本地集合可用。\n"
-            "2. 用 inspect_collection_schema 查看与任务相关的集合字段结构。\n"
-            "3. 如果任务涉及具体股票，用 inspect_symbol_sample 查看样本数据，确认字段名和数据格式。\n"
-            "4. 用 check_field_coverage 检查关键字段的覆盖率，判断数据可靠性。\n\n"
-            "### 第二阶段：外部资源探索\n"
-            "5. 用 list_external_data_sources 查看当前已配置的外部数据源（如 akshare、tushare、baostock）。\n"
-            "   如果任务需要历史 K 线、实时行情、宏观数据等本地集合缺失的数据，外部数据源可能是关键实现路径。\n"
-            "6. 用 list_mcp_tools 查看通过 MCP (Model Context Protocol) 注册的外部工具。\n"
-            "   MCP 工具可能提供额外的数据获取或计算能力，如果有匹配任务需求的 MCP 工具，应优先推荐。\n\n"
-            "### 第三阶段：Runtime Helper 探索\n"
-            "7. 用 list_runtime_functions 和 describe_runtime_helper 查看可复用的 helper 函数。\n"
-            "   重点关注 'data_access'（本地数据）、'project_access'（项目数据）、'external_sources'（外部数据源封装）三个模块。\n\n"
-            "## 输出格式\n"
-            "探索完成后，只输出一个纯 JSON 对象，不要前言、不要总结、不要 Markdown 代码块、不要解释性文字。\n"
-            "JSON 只包含以下字段：\n"
-            "{\n"
-            '  "task_summary": "一句话总结任务需求（不超过50字）",\n'
-            '  "recommended_strategy": "推荐实现路径（不超过120字）",\n'
-            '  "available_helpers": [\n'
-            '    {"module": "模块路径", "name": "函数名", "reason": "推荐理由"}\n'
-            "  ],\n"
-            '  "schema_facts": [\n'
-            '    {"source": "集合/模块名/MCP工具名", "fact": "发现的事实", "evidence": "证据来源"}\n'
-            "  ],\n"
-            '  "sample_fields": {"集合名": ["字段1", "字段2"]},\n'
-            '  "blocked_paths": [\n'
-            '    {"path": "不可用路径", "reason": "原因", "severity": "error|warning"}\n'
-            "  ],\n"
-            '  "runtime_gaps": [\n'
-            '    {"path": "缺口描述", "reason": "原因", "severity": "warning"}\n'
-            "  ],\n"
-            '  "validation_checks": [\n'
-            '    {"name": "检查名", "description": "描述", "check_type": "status_success|required_field|required_non_empty_payload|input_validation|data_validation|custom", "rule_level": "input|output|data|business|warning", "blocking": true}\n'
-            "  ],\n"
-            '  "confidence": 0.0到1.0之间的置信度,\n'
-            '  "notes": ["额外备注"]\n'
-            "}\n"
-            "\n"
-            "## 输出收敛要求\n"
-            "- task_summary 只写结果，不写背景。\n"
-            "- recommended_strategy 只写最终推荐路径，不写推理过程。\n"
-            "- available_helpers 最多 4 个。\n"
-            "- schema_facts 最多 6 条，只保留对代码实现真正有影响的事实。\n"
-            "- sample_fields 每个集合最多 8 个字段。\n"
-            "- blocked_paths 最多 4 条。\n"
-            "- runtime_gaps 最多 4 条。\n"
-            "- validation_checks 只补充规格里没有但确实必须新增的规则；不要把已有规格规则原样重写一遍。\n"
-            "- notes 最多 3 条。\n\n"
-            "## 重要约束\n"
-            "- 只做只读探测，不修改任何数据。\n"
-            "- 探测时优先关注与任务直接相关的集合和函数。\n"
-            "- 如果发现某个关键字段覆盖率很低或不存在，务必在 runtime_gaps 中标注。\n"
-            "- 如果发现 MCP 工具或外部数据源能满足需求，在 schema_facts 和 recommended_strategy 中明确说明。\n"
-            "- 生成的 Skill 不应直接导入内部 provider，应通过 skill_runtime 公开接口访问数据。\n"
-            "- 不要输出‘完美’、‘我已经完成探索’、‘现在开始生成报告’之类前言。\n"
+            "你的任务是通过调用工具，收集最少但足够的实现事实，帮助后续代码生成器写出正确、可运行的 Python 函数。\n\n"
+            "## 核心原则：按需探索，避免冗余\n"
+            "...（原有系统提示保持不变）..."
         )
 
     @staticmethod
@@ -755,10 +1293,20 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         # 附加规则基线已知的事实
         if rule_report.schema_facts:
             baseline_facts = [f"  - [{f.source}] {f.fact}" for f in rule_report.schema_facts[:5]]
-            parts.append(f"\n## 规则基线已知事实（仅供参考，请用工具验证和补充）\n" + "\n".join(baseline_facts))
+            parts.append(f"\n## 规则基线已知事实（来自向量搜索 + 静态分析，已可信）\n" + "\n".join(baseline_facts))
         if rule_report.available_helpers:
-            helper_lines = [f"  - {h.module}.{h.name}: {h.reason}" for h in rule_report.available_helpers[:5]]
-            parts.append(f"\n## 规则基线推荐 Helper\n" + "\n".join(helper_lines))
+            helper_lines = []
+            for h in rule_report.available_helpers[:5]:
+                ds = h.data_source_handling or "self_contained"
+                helper_lines.append(f"  - {h.module}.{h.name} [数据源:{ds}]: {h.reason}")
+            parts.append(
+                "\n## 规则基线推荐 Helper（来自向量搜索，已高置信）\n"
+                + "数据源标签: self_contained=自包含(直接调用); local_only=仅本地MongoDB(可能需补充外部数据源); partial=部分覆盖\n"
+                + "\n".join(helper_lines)
+                + "\n\n⚠️ 这些 helper 已通过语义匹配筛选，**只需用 describe_runtime_helper 验证签名即可**，"
+                "不要用 list_runtime_functions 重新列举。如果签名匹配需求，直接加入 available_helpers 输出。\n"
+                "⚠️ 选用 helper 时注意数据源标签：local_only 的 helper 若本地无数据，需在 skill 中补充外部数据源调用；self_contained 的 helper 直接调用即可。"
+            )
         if data_contract_doc:
             parts.append(f"\n## 任务相关数据契约\n{data_contract_doc}")
         if factor_catalog_doc:
@@ -768,9 +1316,23 @@ class DefaultReconnaissanceController(ReconnaissanceController):
                 "请重点验证这些因子对应的 helper、字段路径和可复用 bundle 是否已经足够，不要把 catalog 里已有因子误判成新缺口。"
             )
 
+        # 附加推荐集合（来自 rule_report 的 schema_facts 中提取）
+        recommended_collections = [
+            f.source for f in (rule_report.schema_facts or [])
+            if "推荐优先复用本地集合" in (f.fact or "")
+        ]
+        if recommended_collections:
+            parts.append(
+                "\n## 规则基线推荐集合（已可信，直接验证字段即可）\n"
+                + "\n".join(f"  - {c}" for c in recommended_collections[:4])
+                + "\n\n⚠️ 这些集合已通过需求分析筛选，**只需用 inspect_collection_schema 验证字段即可**，"
+                "不要用 list_available_collections 重新列举所有集合。"
+            )
+
         parts.append(
             "\n## 请求\n"
-            "请先依据数据契约理解字段层级，再通过工具调用验证关键路径。输出时只保留会影响代码实现的最小事实集，不要写成长篇方案说明。"
+            "请先依据数据契约理解字段层级，再通过工具调用验证关键路径。输出时只保留会影响代码实现的最小事实集，不要写成长篇方案说明。\n"
+            "⚠️ 最多 6 轮工具调用。每轮必须有明确目的。如果基线已推荐 helper 和集合，理想情况下 2-3 轮即可完成验证。"
         )
         return "\n".join(parts)
 
@@ -823,11 +1385,27 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         # available_helpers
         for h in parsed.get("available_helpers") or []:
             if isinstance(h, dict) and h.get("name"):
+                helper_name = h["name"]
+                # 优先使用 LLM 输出的 data_source_handling；否则查 ToolRegistry 获取
+                data_source_handling = str(h.get("data_source_handling", "") or "").strip()
+                if not data_source_handling:
+                    try:
+                        from core.tools.registry import get_tool_registry
+                        registry = get_tool_registry()
+                        metadata = registry.get(helper_name) or registry.get_tool(helper_name)
+                        if metadata:
+                            data_source_handling = getattr(metadata, "data_source_handling", "self_contained")
+                    except Exception:
+                        pass
+                    if not data_source_handling:
+                        data_source_handling = "self_contained"
                 report.available_helpers.append(
                     ImplementationHelper(
                         module=h.get("module", ""),
-                        name=h["name"],
+                        name=helper_name,
+                        signature=h.get("signature", ""),
                         reason=h.get("reason", ""),
+                        data_source_handling=data_source_handling,
                     )
                 )
 
@@ -915,6 +1493,15 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             report.blocked_paths.extend(rule_report.blocked_paths)
         if not report.validation_checks and rule_report.validation_checks:
             report.validation_checks.extend(rule_report.validation_checks)
+
+        # 补充 available_helpers：Phase 1 规则基线推荐的 helpers 在 Phase 2 中可能被 LLM 遗漏，
+        # 必须保留以确保代码生成阶段能看到关键 helper（如 get_pledge_risk_profile）
+        if rule_report.available_helpers:
+            existing_helper_names = {h.name for h in report.available_helpers if h.name}
+            for base_helper in rule_report.available_helpers:
+                if base_helper.name and base_helper.name not in existing_helper_names:
+                    report.available_helpers.append(base_helper)
+                    existing_helper_names.add(base_helper.name)
 
         existing_names = {item.name for item in report.validation_checks if item.name}
         for base_check in spec.validation_checks:

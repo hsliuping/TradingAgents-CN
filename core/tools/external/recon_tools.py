@@ -89,13 +89,14 @@ def inspect_symbol_sample(collection: str, symbol: str, limit: int = 2) -> str:
 
 def describe_runtime_helper(module: str, function_name: str) -> str:
     """查看 skill_runtime 公开模块中某个函数的签名和文档字符串。
-    参数 module: 模块短名，支持 'data_access'、'project_access'、'external_sources'。
+    参数 module: 模块短名，支持 'data_access'、'project_access'、'external_sources'、'standard_financial_apis'。
     参数 function_name: 函数名，例如 'get_stock_valuation_context'。
     返回 JSON 对象，包含 signature(函数签名)和 docstring(文档)。"""
     MODULE_MAP = {
         "data_access": "core.skill_runtime.data_access",
         "project_access": "core.skill_runtime.project_access",
         "external_sources": "core.skill_runtime.external_sources",
+        "standard_financial_apis": "core.skill_runtime.standard_financial_apis",
     }
     full_module = MODULE_MAP.get(module)
     if not full_module:
@@ -121,12 +122,13 @@ def describe_runtime_helper(module: str, function_name: str) -> str:
 
 def list_runtime_functions(module: str) -> str:
     """列出 skill_runtime 某个模块中所有公开函数的名称和签名。
-    参数 module: 模块短名，支持 'data_access'、'project_access'、'external_sources'。
+    参数 module: 模块短名，支持 'data_access'、'project_access'、'external_sources'、'standard_financial_apis'。
     返回 JSON 数组，每项包含 name(函数名)和 signature(签名)。"""
     MODULE_MAP = {
         "data_access": "core.skill_runtime.data_access",
         "project_access": "core.skill_runtime.project_access",
         "external_sources": "core.skill_runtime.external_sources",
+        "standard_financial_apis": "core.skill_runtime.standard_financial_apis",
     }
     full_module = MODULE_MAP.get(module)
     if not full_module:
@@ -139,8 +141,8 @@ def list_runtime_functions(module: str) -> str:
             if name.startswith("_"):
                 continue
             sig = str(inspect.signature(obj))
-            doc_first_line = (inspect.getdoc(obj) or "").split("\n")[0]
-            funcs.append({"name": name, "signature": f"{name}{sig}", "summary": doc_first_line})
+            full_doc = inspect.getdoc(obj) or ""
+            funcs.append({"name": name, "signature": f"{name}{sig}", "summary": full_doc})
         return json.dumps(funcs, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
@@ -167,6 +169,65 @@ def list_external_data_sources(market_category: str = "a_shares") -> str:
         "configured_sources": configured,
         "hint": "使用 list_runtime_functions('external_sources') 查看可调用的外部数据获取函数",
     }, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# 工具 7b: 列出所有可复用的分析类工具（core.tools.implementations）
+# ---------------------------------------------------------------------------
+
+# 分析类子目录白名单（与 static_validator.ALLOWED_CORE_PREFIXES 保持一致）
+_ANALYSIS_SUBDIRS = [
+    "fundamentals", "market", "technical", "portfolio",
+    "risk", "news", "social", "trade_review", "legacy_bridge",
+]
+
+def list_analysis_tools(category: str = "") -> str:
+    """列出所有可复用的分析类工具及其完整导入路径。
+    参数 category: 可选分类过滤，支持 'fundamentals'、'market'、'technical'、'portfolio'、'risk'、'news'、'social'、'trade_review'、'legacy_bridge'。留空返回全部。
+    返回 JSON 数组，每项包含 tool_id、name、category、module_path（完整导入路径）、function_name（函数名）、summary（一句话说明）。
+    生成的 Skill 代码可通过 from <module_path> import <function_name> 调用这些工具。
+    注意：此工具返回全量列表，适合分类浏览。若需按需求语义匹配最相关的工具，侦察阶段会通过 CapabilityIndexService 向量搜索自动推荐。"""
+    import inspect as _inspect
+
+    target_cats = {category} if category else set(_ANALYSIS_SUBDIRS)
+    if category and category not in _ANALYSIS_SUBDIRS:
+        return json.dumps({"error": f"不支持的分类: {category}", "allowed": _ANALYSIS_SUBDIRS}, ensure_ascii=False)
+
+    try:
+        from core.tools.registry import get_tool_registry
+        registry = get_tool_registry()
+        all_tools = registry.list_all()
+    except Exception as exc:
+        return json.dumps({"error": f"ToolRegistry 加载失败: {exc}"}, ensure_ascii=False)
+
+    results = []
+    for t in all_tools:
+        if t.category not in target_cats:
+            continue
+        # 获取工具的可调用函数，以确定模块路径
+        func = None
+        try:
+            func = registry.get_function(t.id)
+        except Exception:
+            pass
+        module_path = ""
+        function_name = t.id  # 默认用 tool_id 作为函数名
+        summary = ""
+        if func is not None:
+            module_path = getattr(func, "__module__", "") or ""
+            function_name = getattr(func, "__name__", t.id)
+            doc_first = (_inspect.getdoc(func) or "").split("\n")[0]
+            summary = doc_first[:100]
+        results.append({
+            "tool_id": t.id,
+            "name": t.name,
+            "category": t.category,
+            "module_path": module_path,
+            "function_name": function_name,
+            "summary": summary,
+        })
+
+    return json.dumps(results, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +411,7 @@ def _resolve_runtime_helper(source_or_helper: str):
         "data_access": "core.skill_runtime.data_access",
         "project_access": "core.skill_runtime.project_access",
         "external_sources": "core.skill_runtime.external_sources",
+        "standard_financial_apis": "core.skill_runtime.standard_financial_apis",
     }
     allowed_modules = set(module_map.values())
 
@@ -380,9 +442,19 @@ def probe_interface(source_or_helper: str, sample_args: dict = None) -> str:
     global _PROBE_INTERFACE_CALL_COUNT
     _PROBE_INTERFACE_CALL_COUNT += 1
 
-    args = sample_args or {}
+    # 处理 LLM 可能传入 JSON 字符串的情况
+    args = sample_args
+    if args is None:
+        args = {}
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+            logger.debug(f"[probe_interface] sample_args 已从 JSON 字符串解析: {type(args)}")
+        except Exception:
+            pass
     if not isinstance(args, dict):
-        return json.dumps({"success": False, "error": "sample_args must be an object", "metrics": {"call_count": _PROBE_INTERFACE_CALL_COUNT}}, ensure_ascii=False)
+        logger.warning(f"[probe_interface] sample_args 类型错误: {type(args)}，值: {args}")
+        return json.dumps({"success": False, "error": f"sample_args must be an object（当前类型: {type(args).__name__}）", "metrics": {"call_count": _PROBE_INTERFACE_CALL_COUNT}}, ensure_ascii=False)
     if _contains_mongo_operator(args):
         return json.dumps({"success": False, "error": "Mongo-style operators are not allowed in sample_args", "metrics": {"call_count": _PROBE_INTERFACE_CALL_COUNT}}, ensure_ascii=False)
 
@@ -439,6 +511,7 @@ RECON_TOOLS: List[callable] = [
     inspect_symbol_sample,
     describe_runtime_helper,
     list_runtime_functions,
+    list_analysis_tools,
     list_external_data_sources,
     list_mcp_tools,
     run_readonly_query,

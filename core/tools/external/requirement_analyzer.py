@@ -13,7 +13,7 @@ import logging
 import re
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.llm import UnifiedLLMClient, Message
 
@@ -32,6 +32,48 @@ from .financial_schema_context import (
     resolve_financial_schema_context,
 )
 from core.skill_runtime import build_factor_catalog_prompt_context, infer_recommended_factor_packs
+
+# standard_financial_apis 标准函数摘要 — 注入需求分析提示词，让 LLM 知道项目已内置哪些能力
+STANDARD_FINANCIAL_APIS_SUMMARY = (
+    "## 项目内置标准金融数据能力（standard_financial_apis）\n"
+    "项目通过 core.skill_runtime.standard_financial_apis 提供 32 个标准函数，"
+    "覆盖行情、财务、估值、风险、同行、质押等场景。这些函数**自动从项目配置的数据源获取数据**"
+    "（Tushare/akshare/local 等，优先级由数据库 datasource_groupings 集合统一配置），"
+    "**用户不需要、也不应该选择数据源**。\n"
+    "如果用户需求能被以下函数覆盖，应直接告知用户「项目已内置该能力」，不要引导用户选择数据源：\n"
+    "- get_pledge_risk_profile：股权质押风险画像（质押比例、未解押规模、前几大质押股东、风险等级）\n"
+    "- get_pledge_historical_series：股权质押历史趋势（支持自定义起止日期，按年/季/月统计质押比例、未解押股数，自动评估趋势方向）\n"
+    "- get_historical_financial_annual_series：历史年报财务序列（营收/净利/ROE/毛利率/现金流等）\n"
+    "- get_profitability_stability_metrics：盈利稳定性指标（均值/波动率/变异系数）\n"
+    "- get_cashflow_quality_trend：现金流质量趋势（OCF/净利、FCF/净利、margin 趋势）\n"
+    "- get_historical_valuation_percentile：历史估值分位（PE/PB/PS/PCF 分位）\n"
+    "- get_current_valuation_snapshot：当前估值快照\n"
+    "- get_debt_solvency_trend：偿债能力趋势\n"
+    "- get_margin_stability_metrics：利润稳定性指标\n"
+    "- get_capital_efficiency_trend：资本效率趋势\n"
+    "- get_growth_quality_metrics：成长质量指标\n"
+    "- get_single_stock_risk_profile：个股风险画像\n"
+    "- get_shareholder_return_metrics：股东回报指标（分红/股息率）\n"
+    "- get_risk_event_flags：风险事件标记\n"
+    "- get_company_event_timeline：公司公告监管事件时间线\n"
+    "- get_company_announcements：公司公告\n"
+    "- get_business_segment_trend：主营结构趋势\n"
+    "- get_peer_group：同行样本\n"
+    "- get_peer_relative_growth / get_peer_relative_valuation / get_peer_relative_quality：同行相对分析\n"
+    "- get_industry_market_performance：行业市场表现\n"
+    "- get_industry_fundamental_summary：行业基本面汇总\n"
+    "- get_capital_flow_series：资金流序列\n"
+    "- get_chip_distribution_context：筹码分布上下文\n"
+    "- get_security_master：证券主数据\n"
+    "- get_adjusted_price_series：复权价格序列\n"
+    "- get_return_series：收益序列\n"
+    "- get_technical_indicator_series：技术指标历史序列\n"
+    "- get_volatility_metrics：波动率指标\n"
+    "- get_drawdown_metrics：回撤指标\n"
+    "- get_portfolio_risk_profile：组合风险画像\n"
+    "只有当用户需求**不被以上函数覆盖**时，才考虑引导用户使用外部数据源（如 AKShare/Tushare），"
+    "但仍应优先通过 skill_runtime 公开接口访问，不要让用户直接选择数据源。"
+)
 
 from .skill_spec import (
     BoundaryCheck,
@@ -785,6 +827,7 @@ class RequirementAnalyzer:
         *,
         spec: Optional[SkillSpec] = None,
         conversation: str = "",
+        fact_report: Optional["ImplementationFactReport"] = None,
     ) -> Dict[str, Any]:
         if spec is not None:
             category = getattr(spec, "category", "") or self._infer_category_hint(getattr(spec, "description", ""))
@@ -802,29 +845,40 @@ class RequirementAnalyzer:
             expected_fields = []
             parameter_names = []
 
-        local_collections = select_relevant_stock_collections(
-            category=category,
-            description=description,
-            data_source=data_source,
-            constraints=constraints,
-            expected_fields=expected_fields,
-            parameter_names=parameter_names,
-            max_items=3,
-        )
-        external_sources = select_relevant_external_data_sources(
-            category=category,
-            description=description,
-            data_source=data_source,
-            constraints=constraints,
-            expected_fields=expected_fields,
-            parameter_names=parameter_names,
-            max_items=3,
-        )
+        # 当侦察层已找到推荐 helper 时，不再推荐本地集合和外部来源——
+        # helper 函数内部已封装数据访问，直接推荐集合/来源会让用户困惑该以哪个为准。
+        # category_hint / data_source_hint / recommended_factor_packs 等元信息仍然返回。
+        has_recon_helpers = bool(fact_report and getattr(fact_report, "available_helpers", None))
+        if has_recon_helpers:
+            stock_collections: List[str] = []
+            external_sources: List[str] = []
+        else:
+            local_collections = select_relevant_stock_collections(
+                category=category,
+                description=description,
+                data_source=data_source,
+                constraints=constraints,
+                expected_fields=expected_fields,
+                parameter_names=parameter_names,
+                max_items=3,
+            )
+            external_sources_list = select_relevant_external_data_sources(
+                category=category,
+                description=description,
+                data_source=data_source,
+                constraints=constraints,
+                expected_fields=expected_fields,
+                parameter_names=parameter_names,
+                max_items=3,
+            )
+            stock_collections = [item["collection"] for item in local_collections]
+            external_sources = [item["source_id"] for item in external_sources_list]
+
         return {
             "category_hint": category,
             "data_source_hint": data_source,
-            "stock_collections": [item["collection"] for item in local_collections],
-            "external_sources": [item["source_id"] for item in external_sources],
+            "stock_collections": stock_collections,
+            "external_sources": external_sources,
             "recommended_factor_packs": infer_recommended_factor_packs(
                 description,
                 category=category,
@@ -838,6 +892,7 @@ class RequirementAnalyzer:
         self,
         user_id: str = "",
         handoff_context: Optional[SkillHandoffContext] = None,
+        iterate_skill_id: Optional[str] = None,
     ) -> SkillCreationSession:
         """创建新的 Skill 创建会话"""
         return SkillCreationSession(
@@ -845,6 +900,7 @@ class RequirementAnalyzer:
             user_id=user_id,
             status=SessionStatus.GATHERING,
             handoff_context=handoff_context,
+            iterate_skill_id=iterate_skill_id,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
@@ -923,6 +979,7 @@ class RequirementAnalyzer:
         self,
         session: SkillCreationSession,
         user_message: str,
+        skill_context: Optional[str] = None,
     ) -> Tuple[SkillCreationSession, str]:
         """
         处理用户输入，推进对话
@@ -930,22 +987,34 @@ class RequirementAnalyzer:
         Args:
             session: 当前会话
             user_message: 用户消息
+            skill_context: 迭代模式下已有 Skill 的上下文（JSON 字符串）
 
         Returns:
             (更新后的会话, AI 回复消息)
         """
         session.updated_at = datetime.utcnow()
 
+        # 判断是否为迭代模式
+        is_iteration = bool(session.iterate_skill_id)
+
         # 如果是第一轮，先做清晰度评估和边界检测
         if session.current_round == 0:
-            clarity = self._assess_clarity(user_message)
+            try:
+                clarity = self._assess_clarity(user_message)
+            except Exception as exc:
+                logger.error("清晰度评估失败，降级为 MEDIUM: %s", exc)
+                clarity = ClarityLevel.MEDIUM
             session.clarity_level = clarity
 
-            boundary_context = self._build_handoff_context_text(session)
-            boundary = self._check_boundary(
-                user_message,
-                conversation_context=boundary_context or None,
-            )
+            try:
+                boundary_context = self._build_handoff_context_text(session)
+                boundary = self._check_boundary(
+                    user_message,
+                    conversation_context=boundary_context or None,
+                )
+            except Exception as exc:
+                logger.error("边界检测失败，降级为通过: %s", exc)
+                boundary = BoundaryCheck(within_boundary=True, reason="边界检测失败，默认通过")
             session.boundary_check = boundary
 
             # 如果超出边界，返回拆分建议
@@ -966,19 +1035,60 @@ class RequirementAnalyzer:
 
         # 第 2 轮及以后：根据用户最新反馈重新评估边界，复杂度提醒会随之更新
         if session.current_round >= 2:
-            conversation = self._collect_conversation(session, user_message)
-            boundary = self._check_boundary(user_message, conversation_context=conversation)
-            session.boundary_check = boundary
+            try:
+                conversation = self._collect_conversation(session, user_message)
+                boundary = self._check_boundary(user_message, conversation_context=conversation)
+                session.boundary_check = boundary
+            except Exception as exc:
+                logger.error("第%d轮边界检测失败，跳过: %s", session.current_round, exc)
 
         if session.current_round >= max_rounds:
-            # 最后一轮：生成规格确认
-            ai_msg = self._build_spec_confirmation(session, user_message)
+            # 迭代模式：第 1 轮绝不能直接跳到最后轮，至少需要一次迭代引导
+            if is_iteration and session.current_round == 1:
+                if skill_context:
+                    try:
+                        ai_msg = self._build_iteration_round1_response(
+                            session, user_message, skill_context
+                        )
+                    except Exception as exc:
+                        logger.error("迭代模式第1轮需求分析 LLM 调用失败，使用降级回复: %s", exc)
+                        ai_msg = self._build_fallback_round1_response(user_message)
+                else:
+                    ai_msg = self._build_round1_response(session, user_message)
+            else:
+                # 最后一轮：生成规格确认
+                try:
+                    ai_msg = self._build_spec_confirmation(session, user_message)
+                except Exception as exc:
+                    logger.error("最后一轮规格确认 LLM 调用失败，使用降级回复: %s", exc)
+                    ai_msg = self._build_fallback_spec_confirmation(
+                        self._collect_conversation(session, user_message)
+                    )
         elif session.current_round == 1:
-            # 第 1 轮：初步理解 + 功能点拆解
-            ai_msg = self._build_round1_response(session, user_message)
+            # 第 1 轮
+            if is_iteration and skill_context:
+                # 迭代模式：使用迭代专用提示词
+                try:
+                    ai_msg = self._build_iteration_round1_response(
+                        session, user_message, skill_context
+                    )
+                except Exception as exc:
+                    logger.error("迭代模式第1轮需求分析 LLM 调用失败，使用降级回复: %s", exc)
+                    ai_msg = self._build_fallback_round1_response(user_message)
+            else:
+                # 普通模式：初步理解 + 功能点拆解
+                try:
+                    ai_msg = self._build_round1_response(session, user_message)
+                except Exception as exc:
+                    logger.error("第1轮需求分析 LLM 调用失败，使用降级回复: %s", exc)
+                    ai_msg = self._build_fallback_round1_response(user_message)
         else:
             # 第 2 轮：技术细化
-            ai_msg = self._build_round2_response(session, user_message)
+            try:
+                ai_msg = self._build_round2_response(session, user_message)
+            except Exception as exc:
+                logger.error("第2轮需求分析 LLM 调用失败，使用降级回复: %s", exc)
+                ai_msg = self._build_fallback_round2_response(session, user_message)
 
         round_obj = ConversationRound(
             round_number=session.current_round,
@@ -1010,7 +1120,7 @@ class RequirementAnalyzer:
         conversation = self._collect_conversation(session, user_message)
 
         # LLM 生成结构化 SkillSpec
-        spec = self._generate_spec(conversation, fact_report=fact_report)
+        spec = self._generate_spec(conversation, fact_report=fact_report, session=session)
 
         if spec:
             session.spec = spec
@@ -1031,7 +1141,7 @@ class RequirementAnalyzer:
         用于规格确认步骤展示，用户确认后再调用 confirm_spec 执行管线。
         """
         conversation = self._collect_conversation(session, user_message)
-        return self._generate_spec(conversation, fact_report=fact_report)
+        return self._generate_spec(conversation, fact_report=fact_report, session=session)
 
     # ==================== 清晰度评估 ====================
 
@@ -1141,18 +1251,19 @@ class RequirementAnalyzer:
             "用户正在创建的 Skill 将作为 Agent 可调用的可复用功能工具，可用于数据获取、清洗转换、指标计算、规则判断、结构化汇总等明确且可验证的能力。"
             "Skill 不等于只能取数，但应避免把开放式研究、主观投资结论或完整多阶段工作流塞进单个 Skill。\n\n"
             f"{SKILL_SEMANTICS_GUIDANCE}\n\n"
+            f"{STANDARD_FINANCIAL_APIS_SUMMARY}\n\n"
             "## 你的任务\n"
             "1. 复述你的理解\n"
-            "2. 用表格列出功能点（目标市场、数据源、输入参数、返回字段、调用方式）\n"
+            "2. 用表格列出功能点（目标市场、输入参数、返回字段、调用方式）\n"
             "3. **主动建议**：根据用户需求给出专业建议（如更合适的实现方式、常见坑、最佳实践）\n"
-            "4. **数据源引导（重要）**：\n"
-            "   - 先问用户：您是否有偏好的数据源？\n"
-            "   - 若用户说「不确定」「不知道」「没有」「都可以」："
-            "结合你对 A股/中国金融数据生态的了解，根据用户需求类型（财报、新闻、行情、资金流等），"
-            "推荐 2-3 个合适的数据源，简要说明各自特点和适用场景，让用户选择。\n"
-            "   - 优先在系统当前可复用的本地集合/外部来源里做建议，不要泛泛推荐一长串不在系统内的接口。\n"
-            "   - 不要只说「需通过参数传入数据源」而不给建议，这样用户会不知道如何操作。\n\n"
-            "5. 提出其他需要确认的问题\n\n"
+            "4. **实现路径引导（重要）**：\n"
+            "   - **首先检查**：用户需求是否已被上方「项目内置标准金融数据能力」中的函数覆盖？\n"
+            "   - 如果已覆盖：直接告知用户「项目已内置该能力（XXX 函数），无需选择数据源，数据源由项目统一配置」，"
+            "并说明该函数的返回内容和适用场景，不需要再问数据源。\n"
+            "   - 如果未覆盖：简要说明项目暂无直接覆盖的标准函数，可建议通过 skill_runtime 公开接口组合实现，"
+            "或提及可能相关的外部数据源方向，但**不要让用户选择数据源**——数据源由项目统一配置和管理。\n"
+            "   - **绝对不要**问用户「您偏好 AKShare 还是 Tushare」之类的问题，这不是用户应该关心的事。\n\n"
+            "5. 提出其他需要确认的问题（如返回格式、风险判断规则、批量需求等）\n\n"
             f"{handoff_guardrails}\n"
             f"上游交接上下文:\n{handoff_context or '无'}\n\n"
             f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
@@ -1168,6 +1279,41 @@ class RequirementAnalyzer:
             logger.error(f"第1轮需求分析失败: {e}")
             self._raise_analysis_error("第1轮需求分析", e)
 
+    def _build_iteration_round1_response(
+        self,
+        session: SkillCreationSession,
+        user_message: str,
+        skill_context: str,
+    ) -> str:
+        """迭代模式第 1 轮：展示现有 Skill 现状，引导用户描述需要调整的内容"""
+        client = self._get_client()
+        prompt = (
+            "你是 Skill 迭代优化专家。用户正在优化一个已有的 Skill，以下是当前 Skill 的信息：\n\n"
+            f"```json\n{skill_context}\n```\n\n"
+            "## 你的任务\n"
+            "请用**极简**的方式回复，不要生成规格书、不要列功能表格、不要分析数据源：\n\n"
+            "**第一步：一句话介绍当前 Skill**\n"
+            "用大白话告诉用户：这个 Skill 做了什么、输入什么、输出什么。最多 3 行。\n\n"
+            "**第二步：理解用户的改进意图并引导**\n"
+            "用户说：" + user_message + "\n"
+            "请基于用户的描述，判断他的意图属于哪一类（Bug 修复 / 功能增强 / 结果优化 / 其他），"
+            "然后**只问 1-2 个最关键的确认问题**，引导用户说出更具体的改进方向。\n\n"
+            "**约束：**\n"
+            "- 不要生成工具规格确认（tool_id/参数/返回字段/数据源等），那些留给后面的流程处理\n"
+            "- 不要问数据源选择、不要列本地集合、不要提 AKShare/Tushare\n"
+            "- 本次回复的核心目的：让用户确认你的理解，然后说出更多改进细节\n"
+            "- 如果用户的想法跟当前 Skill 实现完全冲突，温和建议重新创建"
+        )
+        try:
+            response = client.chat([Message(role="user", content=prompt)])
+            content = (response.content or "").strip()
+            if content:
+                return content
+            self._raise_analysis_error("迭代模式第1轮需求分析")
+        except Exception as e:
+            logger.error(f"迭代模式第1轮需求分析失败: {e}")
+            self._raise_analysis_error("迭代模式第1轮需求分析", e)
+
     def _build_round2_response(
         self, session: SkillCreationSession, user_message: str
     ) -> str:
@@ -1180,12 +1326,13 @@ class RequirementAnalyzer:
         prompt = (
             "你是 Skill 需求分析专家，所在项目是 **TradingAgents-CN**（A股/港股/美股多智能体股票分析平台）。"
             "正在进行第 2 轮技术细化。\n\n"
+            f"{STANDARD_FINANCIAL_APIS_SUMMARY}\n\n"
             "请根据之前的对话和用户新的反馈：\n"
-            "1. 确认技术方案（数据接口、返回格式）\n"
+            "1. 确认技术方案（返回格式、风险判断规则等）\n"
             "2. **主动建议**：根据用户需求给出技术方案建议（如推荐实现方式、边界情况处理）\n"
-            "3. **若数据源仍未明确**：结合你对 A股/中国金融数据生态的了解，"
-            "根据需求类型给出 2-3 个具体数据源推荐及理由，让用户选择\n"
-            "   - 推荐时优先引用当前系统已整理的本地集合和外部来源，不要脱离系统现状给建议。\n"
+            "3. **实现路径确认**：确认用户需求是否已被项目内置标准函数覆盖。"
+            "如果已覆盖，说明将复用哪个函数；如果未覆盖，说明将通过 skill_runtime 公开接口组合实现。"
+            "**不要问用户选择数据源**——数据源由项目统一配置。\n"
             "4. 给出推荐方案让用户选择（而不是问开放性问题）\n"
             "5. 列出最终的参数和返回字段清单\n\n"
             f"{handoff_guardrails}\n"
@@ -1282,12 +1429,14 @@ class RequirementAnalyzer:
         self,
         conversation: str,
         fact_report: Optional[ImplementationFactReport] = None,
+        session: Optional[SkillCreationSession] = None,
     ) -> Optional[SkillSpec]:
         """通过 LLM 将对话转化为结构化 SkillSpec
 
         Args:
             conversation: 收集的对话内容
             fact_report: 侦察报告（侦察前置模式），包含真实字段可用性
+            session: 当前会话（用于迭代模式识别，传入时会保留原 tool_id 等版本关系）
         """
         client = self._get_client()
         catalog_context = self._build_catalog_context(conversation)
@@ -1297,6 +1446,21 @@ class RequirementAnalyzer:
                 "6. 这次会话带有上游交接上下文，必须保留上游指定能力，不要把它改写成另一个更窄、更偷懒的实现。\n"
                 "7. 若原目标显然是 Agent/Workflow 级目标，当前 SkillSpec 只能定义为其中一个确定性的子能力，并在 description/constraints 中明确这一点。\n"
                 "8. 禁止把“估值分析”“研究分析”“多维判断”这类目标直接偷换成单一 PB/PE 指标计算器，除非用户明确只要这个子功能。\n\n"
+            )
+
+        # 🔧 迭代模式约束：新版本用 _v{N} 后缀，体现版本关系
+        iteration_guardrails = ""
+        is_iteration = bool(session and session.iterate_skill_id)
+        if is_iteration:
+            original_tool_id = session.iterate_skill_id or ""
+            iteration_guardrails = (
+                f"9. **迭代模式约束（必须遵守）**：本次是迭代优化已有 Skill，原 Skill 的 tool_id 是 `{original_tool_id}`。\n"
+                f"   - 生成的 spec.tool_id **必须以 `_v2`、`_v3` 等版本后缀结尾**（首次迭代用 `_v2`，二次迭代用 `_v3`，以此类推）。\n"
+                f"   - **禁止沿用原 tool_id**（会覆盖原 Skill，影响已绑定到 Agent 的旧版本）。\n"
+                f"   - 命名格式：`{{原tool_id}}_v{{新版本号}}`，如 `{original_tool_id}_v2`。\n"
+                f"   - display_name 必须以 ` v{{新版本号}}` 结尾，可附加简短说明，如 `xxx v2`。\n"
+                f"   - 这是对原 Skill 的升级，不是创建全新 Skill；功能要在原 Skill 基础上改进，不要完全推翻重写。\n"
+                f"   - 在 constraints 中追加一条：`本 Skill 是 {original_tool_id} 的迭代优化版本`。\n\n"
             )
 
         # 侦察事实注入：将真实的字段可用性、Helper 函数信息注入 prompt
@@ -1320,6 +1484,7 @@ class RequirementAnalyzer:
             "   而不能也叫 get_stock_news。命名冲突会导致 Skill 执行时进入无限递归。\n"
             "   建议命名格式：get_<数据源>_<功能>（如 get_eastmoney_news、fetch_tushare_financials）。\n\n"
             f"{handoff_guardrails}"
+            f"{iteration_guardrails}"
             f"{SKILL_SEMANTICS_GUIDANCE}\n\n"
             f"当前按需求命中的数据上下文:\n{catalog_context}\n\n"
         )
@@ -1416,12 +1581,29 @@ class RequirementAnalyzer:
         # 可用 Helper 函数
         if report.available_helpers:
             helper_lines = []
+            helper_field_names: set[str] = set()
             for h in report.available_helpers:
                 sig = f"  • {h.name}({h.signature})" if h.signature else f"  • {h.name}"
+                ds = h.data_source_handling or "self_contained"
+                sig += f" [数据源:{ds}]"
                 if h.description:
                     sig += f" — {h.description}"
                 helper_lines.append(sig)
-            parts.append("- 可用 Helper 函数:\n" + "\n".join(helper_lines))
+                # 🔧 从 helper 的 Returns 文档中提取字段名，用于约束 LLM 输出字段命名
+                if h.description:
+                    field_names = RequirementAnalyzer._extract_return_field_names(h.description)
+                    helper_field_names.update(field_names)
+            parts.append(
+                "- 可用 Helper 函数 (数据源: self_contained=自包含; local_only=仅本地MongoDB; partial=部分覆盖):\n"
+                + "\n".join(helper_lines)
+            )
+            # 🔧 注入 helper 实际返回的字段名，防止 LLM 自创字段名
+            if helper_field_names:
+                sorted_fields = sorted(helper_field_names)
+                parts.append(
+                    f"- 🚨 Helper 实际返回的字段名（expected_output.fields 必须优先使用这些字段名，禁止自创）: "
+                    f"{', '.join(sorted_fields[:30])}"
+                )
 
         # 数据库字段实况
         if report.schema_facts:
@@ -1492,3 +1674,52 @@ class RequirementAnalyzer:
             parts.append("- 备注: " + "; ".join(report.notes))
 
         return "\n".join(parts) if parts else ""
+
+    @staticmethod
+    def _extract_return_field_names(description: str) -> list[str]:
+        """从 helper 的 docstring 描述中提取 Returns 区块列出的字段名。
+
+        Helper 的 docstring 通常包含这样的 Returns 段落:
+            Returns:
+                dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+                    status: 状态: "success" | "no_pledge" | ...
+                    symbol: 标准化后的 6 位股票代码
+                    metrics: 聚合指标 — ...
+                    top_pledgers: 前几大未解押股东列表
+                    ...
+
+        本方法解析出 status / symbol / metrics / top_pledgers 等字段名,
+        用于约束 spec 生成阶段不要自创字段名。
+        """
+        if not description:
+            return []
+        text = str(description)
+
+        # 定位 Returns 区块
+        returns_idx = text.find("Returns:")
+        if returns_idx < 0:
+            return []
+        returns_block = text[returns_idx:]
+
+        # 截到下一个段落标记（Args/Examples/Note 等）或文档末尾
+        for marker in ("\nArgs:", "\nExamples:", "\nNote:", "\nRaises:"):
+            marker_idx = returns_block.find(marker)
+            if marker_idx > 0:
+                returns_block = returns_block[:marker_idx]
+                break
+
+        field_names: list[str] = []
+        seen: set[str] = set()
+        # 匹配 "            field_name: 描述" 这种行
+        # 字段名通常由字母/数字/下划线组成，冒号前
+        import re
+        for match in re.finditer(r"^\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:", returns_block, re.MULTILINE):
+            name = match.group(1)
+            # 过滤掉明显的非字段名（如 "dict"、"list"、"str"、"Returns" 等）
+            if name.lower() in {"dict", "list", "str", "int", "float", "bool", "returns", "args", "examples", "note"}:
+                continue
+            if name in seen:
+                continue
+            seen.add(name)
+            field_names.append(name)
+        return field_names
