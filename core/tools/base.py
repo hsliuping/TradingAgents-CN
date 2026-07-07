@@ -81,30 +81,33 @@ def register_tool(
     auto_register: bool = True,
     parameters: Optional[List] = None,
     timeout_tier: str = "",
+    data_source_handling: str = "",
     **kwargs
 ):
     """
     工具注册装饰器
-    
+
     用法1: 装饰函数
         @register_tool(
             tool_id="my_tool",
             name="我的工具",
-            category="custom"
+            category="custom",
+            data_source_handling="self_contained"
         )
         def my_tool_func(param1: str) -> str:
             return f"Result: {param1}"
-    
+
     用法2: 装饰类
         @register_tool(
             tool_id="my_tool",
             name="我的工具",
-            category="custom"
+            category="custom",
+            data_source_handling="local_only"
         )
         class MyTool(BaseTool):
             def execute(self, param1: str) -> str:
                 return f"Result: {param1}"
-    
+
     Args:
         tool_id: 工具唯一ID
         name: 工具显示名称
@@ -112,6 +115,8 @@ def register_tool(
         category: 工具分类
         is_online: 是否需要在线
         auto_register: 是否自动注册到 ToolRegistry
+        data_source_handling: 数据源处理方式标签 (self_contained / local_only / partial)，
+            留空则由 register_function 根据 ToolMetadata 默认值处理
     """
     def decorator(obj):
         # 如果是类
@@ -122,13 +127,16 @@ def register_tool(
             obj.description = description or obj.__doc__ or ""
             obj.category = category
             obj.is_online = is_online
-            
+
             # 自动注册
             if auto_register:
-                _auto_register_class(obj, **kwargs)
-            
+                extra_kwargs = dict(kwargs)
+                if data_source_handling:
+                    extra_kwargs["data_source_handling"] = data_source_handling
+                _auto_register_class(obj, **extra_kwargs)
+
             return obj
-        
+
         # 如果是函数
         else:
             func = obj
@@ -139,12 +147,15 @@ def register_tool(
             func._tool_is_online = is_online
             func._tool_parameters = parameters
             func._tool_timeout_tier = timeout_tier
-            
+
             if auto_register:
-                _auto_register_function(func, parameters=parameters, timeout_tier=timeout_tier, **kwargs)
-            
+                extra_kwargs = dict(kwargs)
+                if data_source_handling:
+                    extra_kwargs["data_source_handling"] = data_source_handling
+                _auto_register_function(func, parameters=parameters, timeout_tier=timeout_tier, **extra_kwargs)
+
             return func
-    
+
     return decorator
 
 

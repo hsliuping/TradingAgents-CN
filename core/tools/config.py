@@ -64,6 +64,11 @@ class ToolMetadata(BaseModel):
     # 数据源信息
     data_source: str = ""             # 数据来源
     is_online: bool = True            # 是否需要在线访问
+    # 数据源处理方式标签（供 Skill 工坊 LLM 判断是否需要补充数据源）：
+    #   "self_contained" - 工具自包含，内部已封装数据源调用（项目数据访问层 / 直接外部 API / 混合多源 / 纯计算 / 旧版桥接），LLM 直接调用即可
+    #   "local_only"     - 工具只查本地 MongoDB，若本地无数据 LLM 可能需要自己调外部数据源补充
+    #   "partial"        - 工具覆盖部分需求，LLM 可能需要补充其它数据源或计算
+    data_source_handling: str = "self_contained"
     
     # 配置
     timeout: int = 30                 # 超时时间（秒）—— 旧字段，保留兼容
@@ -779,6 +784,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         data_source="database",
         is_online=False,
         timeout_tier=ToolTimeoutTier.LIGHT,
+        data_source_handling="local_only",
         icon="📋",
         color="#95a5a6",
         parameters=[
@@ -810,6 +816,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         data_source="database",
         is_online=False,
         timeout_tier=ToolTimeoutTier.LIGHT,
+        data_source_handling="local_only",
         icon="💳",
         color="#95a5a6",
         parameters=[
