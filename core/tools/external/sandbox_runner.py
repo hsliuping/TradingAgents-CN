@@ -178,6 +178,7 @@ class SandboxRunner:
 
             if __name__ == "__main__":
                 try:
+                    import types as _types
                     test_args = json.loads('''{args_json}''')
                     # 查找目标函数
                     func = None
@@ -186,11 +187,40 @@ class SandboxRunner:
                             func = obj
                             break
                     if func is None:
-                        # 回退：找第一个不以 _ 开头的函数
+                        # 回退：找第一个不以 _ 开头的用户定义函数
+                        # 排除类型（如 datetime）、模块、内置函数、typing 类型、import 来的函数等非 Skill 函数
+                        import typing as _typing
+                        _skip_names = {{"json", "sys", "os", "_types", "_typing", "test_args", "func", "name", "obj"}}
                         for name, obj in list(locals().items()):
-                            if callable(obj) and not name.startswith("_") and name != "json" and name != "sys":
-                                func = obj
-                                break
+                            if name.startswith("_") or name in _skip_names:
+                                continue
+                            if not callable(obj):
+                                continue
+                            # 只接受函数（lambda 或 def），排除类/类型
+                            if isinstance(obj, type):
+                                continue
+                            # 排除模块
+                            if isinstance(obj, _types.ModuleType):
+                                continue
+                            # 排除内置函数
+                            if isinstance(obj, _types.BuiltinFunctionType):
+                                continue
+                            # 排除 typing 类型（Optional, Dict, List, Any 等）
+                            # typing._SpecialForm 是 callable 但不是 type，会被误认为函数
+                            if hasattr(obj, "__module__") and getattr(obj, "__module__", "").startswith("typing"):
+                                continue
+                            # 排除 typing._GenericAlias 实例（如 Dict[str, Any]）
+                            if hasattr(_typing, "_GenericAlias") and isinstance(obj, _typing._GenericAlias):
+                                continue
+                            if hasattr(_typing, "_SpecialForm") and isinstance(obj, _typing._SpecialForm):
+                                continue
+                            # 排除从 import 来的函数（非用户定义）
+                            # 用户定义的函数 __module__ 是 "__main__"，import 来的函数 __module__ 是包路径
+                            obj_module = getattr(obj, "__module__", "")
+                            if obj_module and obj_module != "__main__":
+                                continue
+                            func = obj
+                            break
                     if func is None:
                         print(json.dumps({{"__error__": "未找到可执行的函数"}}))
                         sys.exit(1)

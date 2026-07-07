@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
-logger = logging.getLogger("skill_gap_detector")
+logger = logging.getLogger(__name__)
 
 
 class SkillGapDetector:
