@@ -13,6 +13,11 @@ from core.skill_runtime.standard_financial_apis import (
     get_historical_financial_annual_series,
 )
 from core.tools.base import register_tool
+from core.tools.implementations.risk.extended_risk_models import (
+    _detect_period_type,
+    _annualize_factor,
+    _PERIOD_LABELS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +48,21 @@ def _pct_change(current, previous) -> float | None:
 
 
 def _match_financial_period_by_year(fin_periods: list[dict], year: int) -> dict | None:
+    """按年份匹配财务期间数据，优先匹配年报（12-31 结束的报告期）。"""
+    # 第一轮：优先找年报（report_period 以 12-31 结尾）
+    for record in fin_periods:
+        report_period = str(record.get("report_period") or record.get("report_date") or "")
+        clean = report_period.replace("-", "").replace("/", "")
+        if len(clean) >= 8 and clean[:4] == str(year) and clean[4:8] == "1231":
+            return record
+    # 第二轮：检查 report_type 字段
+    for record in fin_periods:
+        report_period = str(record.get("report_period") or record.get("report_date") or "")
+        clean = report_period.replace("-", "").replace("/", "")
+        report_type = str(record.get("report_type") or record.get("statement_type") or "").lower()
+        if len(clean) >= 8 and clean[:4] == str(year) and report_type in ("annual", "yearly", "年报"):
+            return record
+    # 第三轮：退而求其次，找该年份任意报告期（但标注可能非年报）
     for record in fin_periods:
         report_period = str(record.get("report_period") or record.get("report_date") or "")
         clean = report_period.replace("-", "").replace("/", "")
@@ -71,7 +91,39 @@ def _match_financial_period_by_year(fin_periods: list[dict], year: int) -> dict 
     related_tools=["get_earnings_quality_score", "get_beneish_mscore"],
 )
 def get_financial_fraud_signals(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """检测财务造假信号，从七个维度综合评分。"""
+    """检测财务造假信号。从收入确认、利润质量、资产异常、关联交易、现金流、毛利率和费用资本化七个维度综合评分。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "error" 时存在；成功时不包含该字段
+            symbol: 标的股票代码
+            total_score: 总分（满分 100，分数越高越可疑）
+            rating: 风险评级，"正常" | "需关注" | "可疑" | "高度可疑"
+            categories: dict，七个维度评分与信号——
+                — revenue_recognition: dict，收入确认异常（满分 20）——
+                    — score: 得分
+                    — max: 满分 20
+                    — signals: list[str]，信号描述
+                — earnings_quality: dict，利润质量异常（满分 20）——
+                    — score / max / signals
+                — asset_irregularities: dict，资产异常（满分 15）——
+                    — score / max / signals
+                — related_party: dict，关联交易信号（满分 15）——
+                    — score / max / signals
+                — cash_flow: dict，现金流异常（满分 15）——
+                    — score / max / signals
+                — margin_anomalies: dict，毛利率异常（满分 10）——
+                    — score / max / signals
+                — capitalization: dict，费用资本化信号（满分 5）——
+                    — score / max / signals
+            warnings: list[str]，过程中产生的告警信息
+            data_quality: dict，数据质量——
+                — years_available: 可用年报年数
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list[str] = []
 
@@ -105,6 +157,18 @@ def get_financial_fraud_signals(symbol: Annotated[str, "A 股股票代码，如 
         fin_periods = get_stock_financial_periods(symbol, limit=30)
         fin_cur = _match_financial_period_by_year(fin_periods, latest_year) if latest_year else None
         fin_prior = _match_financial_period_by_year(fin_periods, prior_year) if prior_year else None
+
+        # 🔑 检查匹配的期间是否为年报口径
+        def _is_annual_period(fin: dict | None) -> bool:
+            if not fin:
+                return True  # 无数据时不告警
+            rp = str(fin.get("report_period") or fin.get("report_date") or "")
+            return rp[:10].endswith("12-31") or rp.replace("-", "").endswith("1231")
+
+        if fin_cur and not _is_annual_period(fin_cur):
+            warnings.append(f"当期({latest_year})匹配到非年报期间数据，DSO等指标可能存在口径偏差")
+        if fin_prior and not _is_annual_period(fin_prior):
+            warnings.append(f"上期({prior_year})匹配到非年报期间数据，同比比较可能存在口径偏差")
 
         # 获取现金流质量趋势
         cf_trend_data = get_cashflow_quality_trend(symbol, years=5)
@@ -158,8 +222,21 @@ def get_financial_fraud_signals(symbol: Annotated[str, "A 股股票代码，如 
                 d1_signals.append(f"营收与经营现金流增长基本匹配(divergence={divergence*100:.1f}%)")
 
         # 1b: DSO (Days Sales Outstanding) 变化
-        dso_cur = _safe_div(ar_cur, rev_cur / 365) if ar_cur is not None and rev_cur is not None else None
-        dso_prior = _safe_div(ar_prior, rev_prior / 365) if ar_prior is not None and rev_prior is not None else None
+        # 🔑 年化营收：季报营收为累计值，需年化后才能用于 DSO 计算
+        cur_period = _detect_period_type(fin_cur) if fin_cur else "unknown"
+        prev_period = _detect_period_type(fin_prior) if fin_prior else "unknown"
+        cur_factor = _annualize_factor(cur_period)
+        prev_factor = _annualize_factor(prev_period)
+        rev_cur_ann = rev_cur * cur_factor if rev_cur is not None else None
+        rev_prior_ann = rev_prior * prev_factor if rev_prior is not None else None
+
+        if cur_period != "annual" and cur_period != "unknown":
+            warnings.append(f"当期利润表为{_PERIOD_LABELS.get(cur_period, cur_period)}口径，DSO计算已使用年化营收")
+        if prev_period != "annual" and prev_period != "unknown":
+            warnings.append(f"上期利润表为{_PERIOD_LABELS.get(prev_period, prev_period)}口径，DSO计算已使用年化营收")
+
+        dso_cur = _safe_div(ar_cur, _safe_div(rev_cur_ann, 365)) if ar_cur is not None and rev_cur_ann is not None else None
+        dso_prior = _safe_div(ar_prior, _safe_div(rev_prior_ann, 365)) if ar_prior is not None and rev_prior_ann is not None else None
         if dso_cur is not None and dso_prior is not None and dso_prior > 0:
             dso_change = (dso_cur - dso_prior) / dso_prior
             if dso_change > 0.20:

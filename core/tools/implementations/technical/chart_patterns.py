@@ -475,7 +475,33 @@ def get_chart_patterns(
     lookback_days: Annotated[int, "回看天数用于形态识别，默认180"] = 180,
     pattern_types: Annotated[str, "形态类型筛选，逗号分隔：head_shoulders,double_top_bottom,triangle,flag,channel,all"] = "all",
 ) -> str:
-    """识别股票经典技术形态。"""
+    """识别股票经典技术形态，自动识别头肩顶/底、双顶/双底、三角、旗形、通道五大类形态。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于形态识别，默认 180
+        pattern_types: 形态类型筛选，逗号分隔，取值 "head_shoulders" | "double_top_bottom" | "triangle" | "flag" | "channel" | "all"，默认 "all"
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            patterns: 形态列表，每个元素结构因形态而异，公共字段 —
+                pattern: 形态名称，取值如 "head_and_shoulders_top" | "head_and_shoulders_bottom" | "double_top" | "double_bottom" | "symmetrical_triangle" | "ascending_triangle" | "descending_triangle" | "bull_flag" | "bear_flag" | "channel"
+                type: 形态子类型/方向，取值如 "top" | "bottom" | "bullish" | "bearish" | "neutral" | "horizontal" | "uptrend_channel" | "downtrend_channel"
+                confidence: 置信度，取值 "high" | "medium"
+                （附加字段因形态不同而异，如 left_shoulder_price、head_price、right_shoulder_price、neckline、break_down_target、break_up_target、peak1_price、peak2_price、valley_price、trough1_price、trough2_price、bar_distance、peak_trend_slope_pct、trough_trend_slope_pct、bars_to_apex、pole_move_pct、consolidation_days、consolidation_range_pct、channel_height_pct、resistance_slope、support_slope、current_resistance、current_support）
+            note: 可选，未检测到形态时的说明文本
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+                peaks_detected: 检测到的峰值数
+                troughs_detected: 检测到的谷值数
+                patterns_found: 检测到的形态数量
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 

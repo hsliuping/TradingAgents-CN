@@ -393,7 +393,24 @@ def get_market_analysis(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],
     lookback_days: Annotated[int, "回看天数，默认60天"] = 60
 ) -> str:
-    """统一的大盘分析工具，自动按当前数据源路由。"""
+    """统一的大盘分析工具，自动按当前数据源（QMT 或 Tushare）路由，返回整合后的大盘分析报告。
+
+    Args:
+        trade_date: 交易日期，格式 YYYY-MM-DD
+        lookback_days: 回看天数，默认 60
+
+    Returns:
+        str: Markdown 格式的大盘分析报告，由多个分节拼接而成，分节包括 —
+            ## 指数趋势：指数行情与趋势分析
+            ## 市场宽度：涨跌家数、涨跌停分布
+            ## 市场环境：市场综合环境评估
+            ## 市场周期：市场周期阶段识别
+            ## 北向资金：沪深港通北向资金流向
+            ## 两融余额：融资融券余额变化
+            ## 涨跌停统计：涨跌停家数统计
+            ## 指数技术面：MACD/RSI/KDJ 等技术指标
+        QMT 或 Tushare 失败时返回以 "❌" 开头的错误说明字符串
+    """
     source = _resolve_market_analysis_source()
 
     if source == "qmt":

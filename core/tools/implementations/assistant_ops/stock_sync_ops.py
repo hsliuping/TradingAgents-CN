@@ -44,6 +44,7 @@ def _format_sync_section(title: str, payload: dict | None) -> str:
     is_online=True,
     auto_register=True,
     timeout_tier="heavy",
+    data_source_handling="self_contained",
 )
 async def sync_single_stock_data(
     symbol: Annotated[str, "股票代码，支持 6 位数字或带交易所后缀，如 000001、600519.SH"],

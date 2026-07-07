@@ -55,6 +55,7 @@ def _resolve_date_range(date_range: Optional[str]):
     is_online=True,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def search_reports(
     symbol: Annotated[Optional[str], "股票代码筛选，如 600519"] = None,
@@ -121,6 +122,7 @@ async def search_reports(
     is_online=True,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def get_report_detail(
     task_id: Annotated[str, "分析任务ID"],
@@ -223,6 +225,7 @@ _EXCERPT_CHARS = 500      # 每个分析师报告的摘录字数
     is_online=True,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def get_latest_report(
     symbol: Annotated[str, "股票代码，如 600519。若用户未指定可传空字符串，则返回最近一次任意股票的报告"],
@@ -345,6 +348,7 @@ async def get_latest_report(
     is_online=True,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def search_attachable_reports(
     keyword: Annotated[Optional[str], "股票代码、公司名或报告关键词，如 宁德时代 / 比亚迪 / 300750"] = None,
@@ -401,6 +405,7 @@ async def search_attachable_reports(
     is_online=True,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def attach_existing_report_to_current_topic(
     keyword: Annotated[str, "股票代码、公司名或报告关键词，如 宁德时代 / 比亚迪 / 300750"],

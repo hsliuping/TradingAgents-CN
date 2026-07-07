@@ -157,6 +157,7 @@ def run_recent_information_search(query: str) -> str:
     category="assistant_ops",
     is_online=True,
     auto_register=True,
+    data_source_handling="local_only",
 )
 def search_recent_information(
     query: Annotated[str, "搜索关键词，例如：比亚迪 伯克希尔 减持 持股比例，或 宁德时代 最新 公告"],

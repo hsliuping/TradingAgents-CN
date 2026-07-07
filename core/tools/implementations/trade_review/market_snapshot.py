@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
     name="获取市场快照",
     description="获取交易期间的K线数据和市场快照，用于复盘分析",
     category="trade_review",
-    is_online=True
+    is_online=True,
+    data_source_handling="self_contained",
 )
 def get_market_snapshot_for_review(
     code: Annotated[str, "股票代码"],

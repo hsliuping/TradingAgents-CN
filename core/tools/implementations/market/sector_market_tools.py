@@ -182,6 +182,41 @@ def get_peer_comparison(
 
 @tool
 @register_tool(
+    tool_id="get_industry_top_companies",
+    name="同行业TOP公司",
+    description="获取同行业市值排名前N的公司列表，适合快速了解行业竞争格局和同业对比",
+    category="market",
+    is_online=True,
+    auto_register=True
+)
+def get_industry_top_companies(
+    ticker: Annotated[str, "股票代码（如 600519 或 600519.SH）"],
+    top_n: Annotated[int, "返回前N家同行业公司，默认5"] = 5
+) -> str:
+    """
+    获取同行业 TOP N 公司列表（轻量版）
+
+    自动识别股票所属行业，按市值排序返回前N家同行业公司，
+    包含代码、名称、市值、PE、PB 等关键指标。
+    不需要传交易日期，自动取最新交易日数据。
+
+    Args:
+        ticker: 股票代码（如 600519 或 600519.SH）
+        top_n: 返回前N家同行业公司（默认5）
+
+    Returns:
+        str: 同行业 TOP N 公司简表
+    """
+    try:
+        from core.tools.sector_tools import get_industry_top_companies_sync
+        return get_industry_top_companies_sync(ticker, top_n)
+    except Exception as e:
+        logger.error(f"获取同行业TOP公司失败: {e}")
+        return f"❌ 获取同行业TOP公司失败: {e}"
+
+
+@tool
+@register_tool(
     tool_id="analyze_sector",
     name="综合板块分析",
     description="综合分析股票所属板块，包括表现、轮动、同业对比等",
@@ -237,7 +272,21 @@ def get_sector_analysis(
     lookback_days: Annotated[int, "回看天数，默认20天"] = 20,
     top_n: Annotated[int, "返回前N个结果，默认10"] = 10
 ) -> str:
-    """统一的行业分析工具，自动按当前数据源路由。"""
+    """统一的行业分析工具，自动按当前数据源（QMT 或 Tushare）路由，返回整合后的行业分析报告。
+
+    Args:
+        ticker: 股票代码（如 000001 或 000001.SZ）
+        trade_date: 交易日期，格式 YYYY-MM-DD
+        lookback_days: 回看天数，默认 20
+        top_n: 返回前 N 个结果，默认 10
+
+    Returns:
+        str: Markdown 格式的行业分析报告，由多个分节拼接而成，分节包括 —
+            ## 板块表现：板块行情与涨跌表现
+            ## 板块资金流向：板块资金流入流出排名
+            ## 同业对比：同行业个股对比
+        QMT 或 Tushare 失败时返回以 "❌" 开头的错误说明字符串
+    """
     source = _resolve_sector_analysis_source()
 
     if source == "qmt":

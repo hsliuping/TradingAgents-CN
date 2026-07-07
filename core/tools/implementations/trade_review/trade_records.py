@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
     category="trade_review",
     is_online=False,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 def get_trade_records(
     user_id: Annotated[str, "用户ID"],

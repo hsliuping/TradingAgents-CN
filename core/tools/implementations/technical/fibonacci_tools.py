@@ -148,7 +148,43 @@ def get_fibonacci_retracement(
     trend_direction: Annotated[str, "趋势方向：up（上升趋势回调）、down（下降趋势回调）、auto（自动识别）"] = "auto",
     extension_levels: Annotated[bool, "是否计算扩展位（1.272、1.382、1.618、2.0、2.618）"] = False,
 ) -> str:
-    """计算股票的斐波那契回调位和扩展位。"""
+    """计算股票的斐波那契回调位和扩展位，评估每个价格水平的支撑/阻力作用。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数用于计算波动范围，默认 120
+        trend_direction: 趋势方向，取值 "up"（上升趋势回调） | "down"（下降趋势回调） | "auto"（自动识别），默认 "auto"
+        extension_levels: 是否计算扩展位（1.272、1.382、1.618、2.0、2.618），默认 False
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            trend: 实际使用的趋势方向，取值 "up" | "down"
+            swing: 波动区间，子字段 —
+                high: 区间最高价
+                low: 区间最低价
+                range: 区间振幅
+            retracement_levels: 回调位列表，每个元素结构 —
+                level: 斐波那契比例（0.0、0.236、0.382、0.5、0.618、0.786、1.0）
+                price: 对应价格
+                distance_pct: 距离当前价的百分比
+                touched: 是否被触及
+                action: 可选，价格行为，取值 "bounce_above" | "breakout_above" | "breakout_below"（仅 touched 时存在）
+            closest_level: 最近的水平（结构同 retracement_levels 元素，并附加 role 字段） —
+                role: 价格角色，取值 "resistance" | "support" | "current"
+            extension_levels: 可选，扩展位列表（仅 extension_levels=True 时存在），元素结构 —
+                level: 扩展比例（1.272、1.382、1.618、2.0、2.618）
+                price: 对应价格
+                distance_pct: 距离当前价的百分比
+                touched: 是否被触及
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 

@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
     is_online=True,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def list_trade_reviews(
     code: Annotated[Optional[str], "股票代码筛选，如 600519，留空则不限"] = None,
@@ -96,6 +97,7 @@ async def list_trade_reviews(
     is_online=True,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def get_trade_review_detail(
     review_id: Annotated[str, "复盘ID，从复盘历史列表中获取"],
@@ -167,6 +169,7 @@ async def get_trade_review_detail(
     is_online=True,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def trigger_trade_review(
     trade_ids: Annotated[str, "要复盘的交易ID，多个用逗号分隔"],

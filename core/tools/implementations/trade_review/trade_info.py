@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
     category="trade_review",
     is_online=False,
     timeout_tier="light",
+    data_source_handling="self_contained",
 )
 def build_trade_info(
     trade_records: Annotated[List[Dict[str, Any]], "交易记录列表"],

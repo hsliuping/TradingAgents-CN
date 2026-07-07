@@ -409,7 +409,42 @@ def get_crossover_signals(
     lookback_days: Annotated[int, "回溯天数，默认 120"] = 120,
     signal_types: Annotated[str, "信号类型，逗号分隔，默认 all。可选: ma, macd, kdj, price_ma"] = "all",
 ) -> str:
-    """检测技术指标交叉信号"""
+    """检测技术指标交叉信号，覆盖均线金叉/死叉、MACD 金叉/死叉+零轴穿越、KDJ 金叉/死叉+超买超卖区、价格/均线穿越。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回溯天数，默认 120
+        signal_types: 信号类型筛选，逗号分隔，取值 "ma" | "macd" | "kdj" | "price_ma" | "all"，默认 "all"
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            data_info: 数据信息，子字段 —
+                total_bars: K 线总数
+                date_range: 日期范围，子字段 —
+                    start: 起始日期
+                    end: 结束日期
+            signals_found: 检测到的信号总数
+            summary: 汇总统计，子字段 —
+                bullish: 看涨信号数量
+                bearish: 看跌信号数量
+            ma_alignment: 均线排列状态，子字段 —
+                status: 排列状态，取值 "多头排列" | "空头排列" | "均线交织" | "insufficient_data"
+                direction: 方向，取值 "bullish" | "bearish" | "neutral"（数据不足时无此字段）
+                mas: 各均线值，子字段 — MA5、MA10、MA20、MA60
+                note: 可选，状态说明文本（仅 "均线交织" 时存在）
+            latest_signals: 最近 20 条信号列表，每个元素结构 —
+                date: 信号发生日期
+                type: 信号类型，取值如 "MA金叉" | "MA死叉" | "MACD金叉(零轴上)" | "MACD金叉(零轴下)" | "MACD死叉(零轴上)" | "MACD死叉(零轴下)" | "DIF零轴穿越(上穿)" | "DIF零轴穿越(下穿)" | "KDJ金叉" | "KDJ死叉" | "价格上穿MA{N}" | "价格下穿MA{N}"
+                pair: 信号配对标识，如 "MA5↗MA10"、"DIF↗DEA"、"K↗D"、"DIF↗0"
+                direction: 方向，取值 "bullish" | "bearish"
+                price: 信号发生时收盘价
+                strength: 信号强度（0-1）
+                （附加字段因信号类型而异：short_ma、long_ma、dif、dea、hist、zero_position、k、d、j、ma_value、zone）
+        异常时返回字段 —
+            status: "no_data" | "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 

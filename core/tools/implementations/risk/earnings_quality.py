@@ -54,7 +54,43 @@ def _safe_div(numerator, denominator) -> float | None:
     related_tools=["get_beneish_mscore", "get_piotroski_fscore"],
 )
 def get_earnings_quality_score(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """评估公司盈利质量，从应计质量、现金流稳定性、盈利持续性、自由现金流覆盖和一次性项目影响五个维度打分。"""
+    """评估公司盈利质量。从应计质量、现金流稳定性、盈利持续性、自由现金流覆盖和一次性项目影响五个维度打分。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "error" 时存在；成功时不包含该字段
+            symbol: 标的股票代码
+            total_score: 总分（满分 100）
+            rating: 评级，"优质" | "良好" | "一般" | "较差" | "差"
+            dimensions: dict，五个维度评分（每维度满分 20）——
+                — accrual_quality: dict，应计质量——
+                    — score: 得分
+                    — max: 满分 20
+                    — value: 应计比率均值（数据不足时为 None）
+                — cashflow_stability: dict，现金流稳定性——
+                    — score: 得分
+                    — max: 满分 20
+                    — value: 经营现金流变异系数（数据不足时为 None）
+                — earnings_persistence: dict，盈利持续性——
+                    — score: 得分
+                    — max: 满分 20
+                    — detail: 正增长年份占比文案
+                — fcf_coverage: dict，自由现金流覆盖——
+                    — score: 得分
+                    — max: 满分 20
+                    — value: 自由现金流 / 净利润 均值（数据不足时为 None）
+                — recurring_quality: dict，一次性项目影响（净利率稳定性）——
+                    — score: 得分
+                    — max: 满分 20
+                    — value: 净利率标准差（数据不足时为 None）
+            data_quality: dict，数据质量——
+                — years_available: 可用年报年数
+                — warnings: list[str]，告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         # 获取5年年报数据
         annual_data = get_historical_financial_annual_series(symbol, years=5)

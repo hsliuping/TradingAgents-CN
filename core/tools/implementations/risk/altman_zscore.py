@@ -9,6 +9,12 @@ from langchain_core.tools import tool
 from core.skill_runtime.data_access import get_stock_financial_periods
 from core.skill_runtime.standard_financial_apis import get_security_master
 from core.tools.base import register_tool
+from core.tools.implementations.risk.extended_risk_models import (
+    _detect_period_type,
+    _annualize_factor,
+    _period_caliber_payload,
+    _PERIOD_LABELS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +56,40 @@ def _safe_div(numerator, denominator) -> float | None:
     related_tools=["get_piotroski_fscore", "get_beneish_mscore"],
 )
 def get_altman_zscore(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """计算 Altman Z-Score 破产风险评分。"""
+    """计算 Altman Z-Score 破产风险评分。综合考虑营运资金、留存收益、EBIT、市值和销售收入五个维度。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            period_type: 当期报告期类型，"annual" | "interim" | "q1" | "q3" | "unknown"
+            period_caliber: 报告期口径信息
+            z_score: Z-Score 评分
+            zone: 风险分区，"安全区" | "灰色区" | "破产风险区"
+            components: dict，五个分量——
+                — x1_wc_to_ta: 营运资金 / 总资产
+                — x2_re_to_ta: 留存收益 / 总资产（近似值）
+                — x3_ebit_to_ta: EBIT / 总资产
+                — x4_mve_to_tl: 市值 / 总负债
+                — x5_sales_to_ta: 年化营收 / 总资产
+            raw_data: dict，原始数据——
+                — working_capital: 营运资金
+                — total_assets: 总资产
+                — ebit: 营业利润（EBIT 代理）
+                — market_cap: 市值
+                — total_liabilities: 总负债
+                — revenue: 报告期营收（未年化）
+            interpretation: dict，评分解读——
+                — score: Z-Score
+                — zone: 风险分区
+                — bankruptcy_risk: 破产风险等级，"low" | "medium" | "high"
+            data_quality: dict，数据质量——
+                — warnings: list[str]，告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         # 获取最新财务数据
         fin_data_list = get_stock_financial_periods(symbol, limit=1)
@@ -61,6 +100,10 @@ def get_altman_zscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
             )
 
         fin = fin_data_list[0]
+
+        # 🔑 检测报告期口径
+        cur_period_type = _detect_period_type(fin)
+        cur_factor = _annualize_factor(cur_period_type)
 
         # 获取市值
         master = get_security_master(symbol)
@@ -75,6 +118,9 @@ def get_altman_zscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
         oper_profit = _safe_float(fin.get("oper_profit"))
         revenue = _safe_float(fin.get("revenue"))
 
+        # 🔑 年化营收（X5 分量需要年度营收）
+        revenue_annualized = revenue * cur_factor if revenue is not None else None
+
         # 计算营运资金
         working_capital = (
             total_cur_assets - total_cur_liab
@@ -83,6 +129,9 @@ def get_altman_zscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
         )
 
         warnings: list[str] = []
+
+        if cur_period_type != "annual" and cur_period_type != "unknown":
+            warnings.append(f"当期为{_PERIOD_LABELS.get(cur_period_type, cur_period_type)}数据，营收已年化处理以消除口径差异")
 
         # X1 = 营运资金 / 总资产
         x1_wc_to_ta = _safe_div(working_capital, total_assets)
@@ -101,8 +150,8 @@ def get_altman_zscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
         # X4 = 市值 / 总负债
         x4_mve_to_tl = _safe_div(market_cap, total_liab)
 
-        # X5 = 销售收入 / 总资产
-        x5_sales_to_ta = _safe_div(revenue, total_assets)
+        # X5 = 销售收入 / 总资产 — 使用年化营收
+        x5_sales_to_ta = _safe_div(revenue_annualized, total_assets)
 
         # 计算Z-Score
         components = {
@@ -149,6 +198,8 @@ def get_altman_zscore(symbol: Annotated[str, "A 股股票代码，如 600519、0
 
         payload = {
             "symbol": symbol,
+            "period_type": cur_period_type,
+            "period_caliber": _period_caliber_payload(cur_period_type, "unknown", False),
             "z_score": z_score,
             "zone": zone,
             "components": components,

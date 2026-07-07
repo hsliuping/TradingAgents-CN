@@ -88,6 +88,7 @@ def _summarize_session_doc(session_doc: dict[str, Any]) -> dict[str, Any]:
     returns="返回 JSON 字符串，包含 session_id、AI 首轮需求沟通消息、清晰度判断，以及建议下一步。",
     example='start_external_skill_generation_session(description="创建一个可复用的 A 股杜邦分析 skill，输入 symbol，输出结构化三因素分解和趋势摘要")',
     related_tools=["respond_to_external_skill_generation_session", "preview_external_skill_spec", "generate_confirmed_external_skill", "inspect_external_skill_generation_session"],
+    data_source_handling="local_only",
 )
 async def start_external_skill_generation_session(
     description: Annotated[str, "Skill 的自然语言需求描述，需明确这是一个可复用能力而不是一次性脚本"],
@@ -139,6 +140,7 @@ async def start_external_skill_generation_session(
     returns="返回 JSON 字符串，包含 AI 新一轮回复、当前轮次和建议下一步。",
     example="respond_to_external_skill_generation_session(session_id='abc123', user_message='输入只要 symbol，输出结构化 JSON，不给交易建议')",
     related_tools=["start_external_skill_generation_session", "preview_external_skill_spec"],
+    data_source_handling="local_only",
 )
 async def respond_to_external_skill_generation_session(
     session_id: Annotated[str, "已有 Skill 创建会话 ID"],
@@ -184,6 +186,7 @@ async def respond_to_external_skill_generation_session(
     returns="返回 JSON 字符串，包含 spec 预览、侦察 fact_report、推荐生成上下文，以及建议下一步。",
     example="preview_external_skill_spec(session_id='abc123')",
     related_tools=["respond_to_external_skill_generation_session", "generate_confirmed_external_skill"],
+    data_source_handling="local_only",
 )
 async def preview_external_skill_spec(
     session_id: Annotated[str, "已有 Skill 创建会话 ID"],
@@ -228,6 +231,7 @@ async def preview_external_skill_spec(
     returns="返回 JSON 字符串，包含生成任务的启动状态、spec 摘要和后续状态查询建议。",
     example="generate_confirmed_external_skill(session_id='abc123', confirmed=true)",
     related_tools=["preview_external_skill_spec", "inspect_external_skill_generation_session"],
+    data_source_handling="local_only",
 )
 async def generate_confirmed_external_skill(
     session_id: Annotated[str, "已有 Skill 创建会话 ID"],
@@ -273,6 +277,7 @@ async def generate_confirmed_external_skill(
     returns="返回 JSON 字符串，包含会话摘要、pipeline 阶段、spec 和推荐生成上下文。",
     example="inspect_external_skill_generation_session(session_id='abc123')",
     related_tools=["generate_confirmed_external_skill", "respond_to_external_skill_generation_session"],
+    data_source_handling="local_only",
 )
 async def inspect_external_skill_generation_session(
     session_id: Annotated[str, "Skill 创建会话 ID"],

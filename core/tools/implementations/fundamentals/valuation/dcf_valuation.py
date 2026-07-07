@@ -39,7 +39,59 @@ def get_dcf_valuation(
     forecast_years: Annotated[int, "预测期年数，默认 5"] = 5,
     base_fcf: Annotated[Optional[float], "基期自由现金流覆盖值，默认 None 使用最新年报数据"] = None,
 ) -> str:
-    """DCF 两阶段估值模型"""
+    """DCF 两阶段估值模型
+
+    Args:
+        symbol: A 股股票代码，如 600519
+        growth_rate: 预测期年化增长率（小数形式，如 0.15 表示 15%），默认 None 由历史营收数据自动估算并夹钳到 [0.03, 0.25]
+        wacc: 折现率（加权平均资本成本，小数形式），默认 None 自动计算并夹钳到 [0.05, 0.20]
+        terminal_growth_rate: 永续增长率，默认 2.5（>1 时视为百分比，自动除以 100）
+        forecast_years: 预测期年数，默认 5，自动夹钳到 [3, 10]
+        base_fcf: 基期自由现金流覆盖值，默认 None 使用最新年报的 free_cashflow；若 ≤0 依次回退到 operating_cashflow、net_profit×0.7
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+            symbol: 股票代码
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            method: "two_stage_dcf"
+            parameters: 估值参数 dict —
+                growth_rate: 实际使用的增长率（小数）
+                wacc: 实际使用的折现率（小数）
+                terminal_growth_rate: 永续增长率（小数）
+                forecast_years: 实际预测年数
+            base_year: 基期信息 dict —
+                year: 基期年份
+                free_cashflow: 基期自由现金流
+            valuation: 估值结果 dict —
+                enterprise_value: 企业价值
+                equity_value: 股权价值
+                per_share_value: 每股内在价值
+                current_price: 当前股价
+                upside_pct: 相对当前价格的上行空间百分比
+                net_debt_adjustment: 净债务调整额
+            scenarios: 情景分析 dict —
+                base: 基准情景 dict — per_share_value, upside_pct
+                bull: 乐观情景 dict — per_share_value, upside_pct
+                bear: 悲观情景 dict — per_share_value, upside_pct
+            sensitivity: 敏感性分析 dict —
+                wacc_range: WACC 取值列表（3 个值）
+                growth_range: 增长率取值列表（3 个值）
+                matrix: 每股价值矩阵 [[值, 值, 值], ...]
+            data_quality: 数据质量 dict —
+                years_available: 可用年报期数
+                base_fcf_source: FCF 来源："parameter_override" | "free_cashflow" | "operating_cashflow" | "net_profit_estimated"
+                growth_source: 增长率来源："parameter_override" | "revenue_historical_mean"
+                wacc_source: WACC 来源："parameter_override" | "auto_computed"
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         from core.skill_runtime.standard_financial_apis import get_historical_financial_annual_series
 

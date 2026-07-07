@@ -204,7 +204,43 @@ def get_support_resistance_levels(
     lookback_days: Annotated[int, "回看天数，默认120"] = 120,
     method: Annotated[str, "计算方法：pivot（枢轴点）、historical（历史极值聚类）、all（两者都计算）"] = "all",
 ) -> str:
-    """计算股票支撑位和压力位。"""
+    """计算股票支撑位和压力位，基于枢轴点公式和历史价格极值聚类。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回看天数，默认 120
+        method: 计算方法，取值 "pivot"（枢轴点） | "historical"（历史极值聚类） | "all"（两者都计算），默认 "all"
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            current_price: 最新收盘价
+            date: 最新交易日
+            pivot_points: 枢轴点结果（method 不含 pivot 时为 None），子字段 —
+                pivot: 枢轴点价格
+                resistances: 阻力位列表，每个元素结构 —
+                    level: 阻力位标识，取值 "R1" | "R2" | "R3" | "R1-R2_MP"
+                    price: 价格
+                    distance_pct: 距离当前价的百分比
+                supports: 支撑位列表，每个元素结构 —
+                    level: 支撑位标识，取值 "S1" | "S2" | "S3" | "S1-S2_MP"
+                    price: 价格
+                    distance_pct: 距离当前价的百分比
+            historical_levels: 历史极值聚类结果（method 不含 historical 时为 None），子字段 —
+                resistances: 阻力位列表，每个元素结构 —
+                    price: 价格
+                    touches: 触及次数
+                    strength: 强度，取值 "very_strong" | "strong" | "moderate"
+                    distance_pct: 距离当前价的百分比
+                supports: 支撑位列表，元素结构同 resistances
+            data_quality: 数据质量，子字段 —
+                bars_analyzed: 分析的 K 线数量
+                warnings: 警告信息列表
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+            warnings: 可选，警告信息列表
+    """
     try:
         end_date = _today()
         start_date = _days_ago(int(lookback_days) + 60)

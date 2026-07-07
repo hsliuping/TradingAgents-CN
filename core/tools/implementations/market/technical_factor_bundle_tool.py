@@ -78,7 +78,35 @@ def _pick_numeric(doc: Dict[str, Any], *keys: str) -> Any:
 def get_technical_factor_bundle_tool(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"]
 ) -> str:
-    """获取标准化技术因子包。"""
+    """获取标准化技术因子包，从 MongoDB 物化快照中读取 MA20、RSI14、KDJ、MACD 等核心技术指标。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 标准化后的 6 位股票代码
+            name: 股票名称
+            current_price: 最新价格
+            trade_date: 数据交易日
+            data_source: 数据来源
+            bundle: 因子包标识，固定为 "technical_core"
+            factors: 技术因子字典，子字段 —
+                ma20: 20 日移动平均线
+                rsi14: 14 日 RSI
+                kdj_k: KDJ 的 K 值
+                kdj_d: KDJ 的 D 值
+                kdj_j: KDJ 的 J 值
+                dif: MACD 的 DIF
+                dea: MACD 的 DEA
+                macd_hist: MACD 柱状图
+            missing_factors: 缺失因子字段名列表（值为 None 的字段）
+            calculation_notes: 计算说明文本列表
+        异常时返回字段 —
+            status: "error"
+            message: 错误信息
+            symbol: 标准化后的股票代码
+    """
     normalized_symbol = _normalize_symbol(symbol)
 
     try:

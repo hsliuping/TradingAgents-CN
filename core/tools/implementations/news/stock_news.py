@@ -1608,7 +1608,24 @@ def get_stock_news_headlines_unified(
     curr_date: Annotated[str, "当前日期，格式：YYYY-MM-DD"],
     limit: Annotated[int, "返回的标题候选数量，默认12"] = 12,
 ) -> str:
-    """获取去重后的股票新闻标题候选。"""
+    """获取去重后的股票新闻标题候选，支持 A 股、港股、美股，返回标题、来源判断和去重结果。
+
+    Args:
+        ticker: 股票代码（支持 A 股、港股、美股）
+        curr_date: 当前日期，格式 YYYY-MM-DD
+        limit: 返回的标题候选数量，默认 12（实际限制在 1-30 之间）
+
+    Returns:
+        str: Markdown 格式的新闻标题候选报告，内容包括 —
+            # {ticker} 新闻标题候选：报告主标题
+            **股票类型**: 市场类型名称
+            **分析日期**: 实际使用的分析日期
+            **新闻时间范围**: 起始日期 至 结束日期
+            ## 去重后的新闻标题：标题候选列表（每条含 news_id、标题、来源、时间、摘要等）
+            底部说明：来源路径与下一步操作提示
+        无新闻时返回包含 "当前未获取到可用新闻标题" 的 Markdown 字符串
+        异常时返回以 "统一新闻标题工具执行失败" 开头的错误说明字符串
+    """
     try:
         bundle = _build_stock_news_bundle(ticker, curr_date, limit=max(1, min(limit, 30)))
         news_items = bundle.get("items") or []
@@ -1664,7 +1681,25 @@ def get_stock_news_details_unified(
     curr_date: Annotated[str, "当前日期，格式：YYYY-MM-DD"],
     news_ids: Annotated[str, "要查看明细的 news_id，可使用逗号分隔多个 ID"],
 ) -> str:
-    """根据 news_id 获取股票新闻明细。"""
+    """根据 news_id 获取股票新闻明细，返回新闻摘要、正文要点和来源明细。
+
+    Args:
+        ticker: 股票代码（支持 A 股、港股、美股）
+        curr_date: 当前日期，格式 YYYY-MM-DD
+        news_ids: 要查看明细的 news_id，可使用逗号分隔多个 ID
+
+    Returns:
+        str: Markdown 格式的新闻明细报告，内容包括 —
+            # {ticker} 新闻明细：报告主标题
+            **股票类型**: 市场类型名称
+            **分析日期**: 实际使用的分析日期
+            **新闻时间范围**: 起始日期 至 结束日期
+            新闻明细正文：每条新闻的摘要、正文要点、来源链接等（按传入 news_ids 顺序）
+            底部说明：可选，未找到的 news_id 提示与来源说明
+        未提供有效 news_id 时返回以 "统一新闻明细工具执行失败" 开头的错误说明字符串
+        未找到请求的 news_id 时返回包含未找到 ID 列表的 Markdown 字符串
+        异常时返回以 "统一新闻明细工具执行失败" 开头的错误说明字符串
+    """
     requested_ids = _parse_requested_news_ids(news_ids)
     if not requested_ids:
         return "统一新闻明细工具执行失败: 未提供有效的 news_id。"

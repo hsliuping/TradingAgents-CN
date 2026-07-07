@@ -545,7 +545,38 @@ def get_candlestick_patterns(
     trend_window: Annotated[int, "趋势判断窗口（日），默认 5"] = 5,
     min_confidence: Annotated[float, "最小置信度阈值 (0-1)，默认 0.5"] = 0.5,
 ) -> str:
-    """识别 K 线形态"""
+    """识别 K 线形态，自动识别 25+ 种经典 K 线形态（十字星、锤子线、吞没、晨星/黄昏之星等）。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_days: 回溯天数，默认 60
+        trend_window: 趋势判断窗口（日），默认 5
+        min_confidence: 最小置信度阈值 (0-1)，默认 0.5
+
+    Returns:
+        str: JSON 字符串，正常返回字段说明——
+            symbol: 股票代码
+            data_info: 数据信息，子字段 —
+                total_bars: K 线总数
+                date_range: 日期范围，子字段 —
+                    start: 起始日期
+                    end: 结束日期
+            patterns_found: 识别到的形态总数
+            summary: 汇总统计，子字段 —
+                bullish: 看涨形态数量
+                bearish: 看跌形态数量
+                neutral: 中性形态数量
+            patterns: 形态列表，每个元素结构 —
+                date: 交易日期
+                index: K 线索引
+                name: 形态名称（如 "十字星"、"锤子线"、"看涨吞没"）
+                direction: 方向，取值 "bullish" | "bearish" | "neutral"
+                confidence: 置信度 (0-1)
+                close: 该日收盘价
+        异常时返回字段 —
+            status: "no_data" | "error"
+            message: 错误信息
+    """
     try:
         from core.skill_runtime.data_access import get_stock_daily_quotes
 

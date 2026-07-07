@@ -25,6 +25,7 @@ def _sum_currencies(d: Dict[str, float]) -> float:
     category="trade_review",
     is_online=False,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 def get_account_info(
     user_id: Annotated[str, "用户ID"]

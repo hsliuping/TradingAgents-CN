@@ -411,7 +411,29 @@ def get_etf_fundamentals(
     end_date: Annotated[Optional[str], "结束日期，格式：YYYY-MM-DD"] = None,
     curr_date: Annotated[Optional[str], "当前日期，格式：YYYY-MM-DD"] = None,
 ) -> str:
-    """获取 ETF 基本面分析数据。"""
+    """获取 ETF 基本面分析数据。
+
+    Args:
+        ticker: ETF 代码（如 "510050"、"159919"）
+        start_date: 开始日期（YYYY-MM-DD），默认 None（当前未使用）
+        end_date: 结束日期（YYYY-MM-DD），默认 None（当前未使用）
+        curr_date: 当前日期（YYYY-MM-DD），为 None 时使用 datetime.now()，默认 None
+
+    Returns:
+        str: Markdown 格式字符串，包含以下章节——
+            标题: "{ticker} ETF 基本面分析数据"
+            分析日期: 当前或指定日期
+            ETF 基本信息: 名称、代码、完整代码、基金类型、跟踪指数、管理人、托管人、成立日期、上市日期
+            当前行情: 最新价、涨跌幅、成交量、成交额、规模
+            ETF 深属性: 单位净值、累计净值、净值日期、场内市价、折溢价率、净值增长率、
+                管理费、托管费、起购金额、申购开始日、赎回开始日、申购状态、赎回状态、
+                投资类型、基金状态、跟踪误差、申赎清单结构
+            近期走势: 最近 5 个交易日的日期、收盘价、涨跌幅
+            说明: 关于 ETF 不适用个股估值指标的提示
+
+            若代码非法返回 "❌ 无效的 ETF 代码..." 提示字符串；
+            若代码非 ETF 代码返回 "❌ {ticker} 不是 ETF 代码..." 提示字符串。
+    """
     logger.info(f"📊 [ETF 基本面] 分析: {ticker}")
 
     code = _normalize_etf_symbol(ticker)

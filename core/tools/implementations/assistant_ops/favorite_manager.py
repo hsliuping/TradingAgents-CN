@@ -49,6 +49,7 @@ def _parse_tags(tags: str) -> list[str]:
     is_online=True,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def list_favorite_stocks(
     tag: Annotated[str, "可选，按标签筛选，例如 巴菲特；留空表示查看全部关注股票"] = "",
@@ -97,6 +98,7 @@ async def list_favorite_stocks(
     is_online=True,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def add_stocks_to_favorites(
     stocks_json: Annotated[

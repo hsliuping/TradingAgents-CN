@@ -32,6 +32,7 @@ MAX_DETAIL_PER_GROUP = 5
     is_online=False,
     auto_register=True,
     timeout_tier="light",
+    data_source_handling="local_only",
 )
 async def batch_check_profit_consistency(
     stock_codes_json: Annotated[

@@ -72,7 +72,27 @@ def get_beta_calculation(
     benchmark: Annotated[Optional[str], "基准指数代码，默认 000300（沪深300）"] = "000300",
     lookback_days: Annotated[int, "回看交易日数，默认252（约1年）"] = 252,
 ) -> str:
-    """计算个股相对基准指数的 Beta 系数。"""
+    """计算个股相对基准指数的 Beta 系数。同时给出 Alpha、R²、相关系数等回归指标，衡量系统风险敞口。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        benchmark: 基准指数代码，默认 "000300"（沪深300）
+        lookback_days: 回看交易日数，默认 252（约 1 年）
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            beta: Beta 系数（基准缺失或方差为 0 时回退为 1.0）
+            alpha_annualized: 年化 Alpha（基准不可用时为 None）
+            r_squared: 决定系数 R²（基准不可用时为 None）
+            correlation: 相关系数（基准不可用时为 None）
+            data_points: 实际使用的有效收益率样本数
+            period_days: 入参 lookback_days
+            benchmark: 实际使用的基准代码
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         end_date = _today()
         start_date = _days_ago(int(lookback_days) * 2 + 50)
@@ -231,7 +251,29 @@ def get_sharpe_ratio(
     risk_free_rate: Annotated[Optional[float], "无风险利率，默认 0.025（2.5%）"] = 0.025,
     lookback_days: Annotated[int, "回看交易日数，默认252（约1年）"] = 252,
 ) -> str:
-    """计算综合风险调整收益指标。"""
+    """计算综合风险调整收益指标。包括夏普、索提诺、卡尔玛比率，以及年化收益、年化波动率、最大回撤。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        risk_free_rate: 无风险利率，默认 0.025（2.5%）
+        lookback_days: 回看交易日数，默认 252（约 1 年）
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            sharpe_ratio: 年化夏普比率（不可计算时为 None）
+            sortino_ratio: 年化索提诺比率（下行样本不足时为 None）
+            calmar_ratio: 卡尔玛比率（最大回撤为 0 时为 None）
+            annual_return: 年化收益率
+            annual_volatility: 年化波动率
+            max_drawdown: 最大回撤（负数）
+            risk_free_rate: 实际使用的无风险利率
+            data_points: 有效收益率样本数
+            interpretation: 风险调整收益评价文案
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         end_date = _today()
         start_date = _days_ago(int(lookback_days) * 2 + 50)
@@ -364,7 +406,30 @@ def get_var_calculation(
     lookback_days: Annotated[int, "回看交易日数，默认252（约1年）"] = 252,
     method: Annotated[str, "计算方法：historical（历史模拟法）或 parametric（参数法）"] = "historical",
 ) -> str:
-    """计算 VaR 风险价值。"""
+    """计算 VaR 风险价值。基于历史模拟法或参数法计算日度/年化 VaR 与 CVaR（预期亏损）。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        confidence: 置信度水平，默认 0.95
+        lookback_days: 回看交易日数，默认 252（约 1 年）
+        method: 计算方法，默认 "historical"；可选 "historical"（历史模拟法）或 "parametric"（参数法），
+            非法值会回退为 "historical"
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "success" | "error"
+            symbol: 标的股票代码
+            method: 实际使用的计算方法，"historical" 或 "parametric"
+            confidence: 实际使用的置信度（被夹取到 [0.5, 0.999]）
+            var_daily: 日度 VaR（负数表示亏损）
+            var_annual: 年化 VaR
+            cvar_daily: 日度 CVaR / 预期亏损
+            cvar_annual: 年化 CVaR / 预期亏损
+            data_points: 有效收益率样本数
+            interpretation: 风险等级评价文案（scipy 缺失重试场景下为 None）
+            warnings: list[str]，过程中产生的告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         end_date = _today()
         start_date = _days_ago(int(lookback_days) * 2 + 50)

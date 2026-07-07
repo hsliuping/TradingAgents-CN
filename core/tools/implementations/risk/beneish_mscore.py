@@ -67,7 +67,34 @@ def _match_financial_period_by_year(
     related_tools=["get_altman_zscore", "get_piotroski_fscore"],
 )
 def get_beneish_mscore(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """计算 Beneish M-Score 盈余操纵概率，通过8个财务比率变化检测潜在盈余管理行为。"""
+    """计算 Beneish M-Score 盈余操纵概率。通过8个财务比率变化检测潜在盈余管理行为。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "error" 时存在；成功时不包含该字段
+            symbol: 标的股票代码
+            m_score: M-Score 评分（高于阈值 -1.78 表示操纵概率较高）
+            interpretation: 解读文案，"盈余操纵概率较高" | "盈余操纵概率较低"
+            threshold: 判定阈值（-1.78）
+            components: dict，8 个分量，每个分量为 {value, weight, contribution}——
+                — dsri: 应收账款周转天数指数
+                — gmi: 毛利率指数
+                — aqi: 资产质量指数
+                — sgi: 销售增长指数
+                — depi: 折旧指数（默认 1.0）
+                — sgai: 销售管理费用指数（默认 1.0）
+                — tata: 总应计项目 / 总资产
+                — lvgi: 杠杆指数
+            data_quality: dict，数据质量——
+                — years_available: 可用年报年数
+                — depi_defaulted: 折旧指数是否使用默认值
+                — sgai_defaulted: 销售管理费用指数是否使用默认值
+                — warnings: list[str]，告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         warnings: list[str] = []
 

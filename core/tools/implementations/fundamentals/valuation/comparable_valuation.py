@@ -54,7 +54,45 @@ def _calc_percentile(values: list[float], current: float) -> float | None:
     related_tools=["get_dcf_valuation", "get_stock_valuation_context"],
 )
 def get_comparable_company_valuation(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """计算可比公司估值，通过与行业PE/PB/PS对比评估估值水平。"""
+    """计算可比公司估值，通过与行业PE/PB/PS对比评估估值水平。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀），如 600519、000001
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+            symbol: 股票代码（部分情形附带）
+            industry: 行业（仅在「未找到可比公司」错误时附）
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            name: 股票名称
+            industry: 所属行业
+            peers_in_industry: 行业内可比公司数量
+            valuation_comparison: 各指标对比 dict，键为 "pe" / "pb" / "ps"（仅含可用指标）—
+                stock: 当前股票该指标值
+                industry_median: 行业中位数
+                industry_mean: 行业均值
+                premium_pct: 相对中位数的溢价/折价百分比
+                percentile: 当前值在行业样本中的百分位
+            overall_assessment: 综合评估 dict —
+                average_premium_pct: 加权平均溢价百分比
+                valuation_level: 估值水平："偏高" | "略高" | "合理" | "略低" | "偏低"
+                peers_available: 可比公司数量
+            fair_value_estimate: 隐含公允价值 dict —
+                based_on_pe: 基于 PE 估算的公允价格（可选）
+                based_on_pb: 基于 PB 估算的公允价格（可选）
+                based_on_ps: 基于 PS 估算的公允价格（可选）
+                current_price: 当前股价
+            data_quality: 数据质量 dict —
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         warnings: list[str] = []
 

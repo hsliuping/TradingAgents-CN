@@ -49,7 +49,44 @@ def _safe_div(numerator, denominator) -> float | None:
     related_tools=["get_altman_zscore", "get_beneish_mscore"],
 )
 def get_piotroski_fscore(symbol: Annotated[str, "A 股股票代码，如 600519、000001"]) -> str:
-    """计算 Piotroski F-Score 基本面质量评分，从盈利能力、杠杆流动性和运营效率三个维度评估（满分9分）。"""
+    """计算 Piotroski F-Score 基本面质量评分。从盈利能力、杠杆流动性和运营效率三个维度评估（满分 9 分）。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+
+    Returns:
+        str: JSON 字符串，字段说明——
+            status: "error" 时存在；成功时不包含该字段
+            symbol: 标的股票代码
+            f_score: F-Score 总分（满分 9）
+            rating: 评级，"优质"（≥7） | "中性"（4-6） | "弱势"（≤3）
+            categories: dict，三类评分——
+                — profitability: dict，盈利能力（满分 4）——
+                    — score: 得分
+                    — max: 满分 4
+                    — details: dict，4 个布尔项——
+                        — p1_roa_positive: 当期 ROA > 0
+                        — p2_ocf_positive: 当期经营现金流 > 0
+                        — p3_delta_roa_positive: ROA 同比上升
+                        — p4_ocf_gt_netprofit: 经营现金流 > 净利润
+                — leverage_liquidity: dict，杠杆/流动性（满分 3）——
+                    — score / max
+                    — details: dict，3 个布尔项——
+                        — p5_deleveraging: 资产负债率下降
+                        — p6_liquidity_improving: 流动比率上升
+                        — p7_no_dilution: 无股权稀释
+                — operating_efficiency: dict，运营效率（满分 2）——
+                    — score / max
+                    — details: dict，2 个布尔项——
+                        — p8_gross_margin_improving: 毛利率上升
+                        — p9_asset_turnover_improving: 资产周转率上升
+            comparison: dict，对比年份——
+                — current_year: 当期年份
+                — prior_year: 上期年份
+            data_quality: dict，数据质量——
+                — warnings: list[str]，告警信息
+            message: 当 status 为 "error" 时的错误描述
+    """
     try:
         # 获取最近3年年报数据（需要当前年 + 至少1个前一年）
         annual_data = get_historical_financial_annual_series(symbol, years=3)

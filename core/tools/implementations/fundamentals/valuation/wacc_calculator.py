@@ -37,7 +37,53 @@ def get_wacc_calculation(
     equity_risk_premium: Annotated[Optional[float], "股权风险溢价，默认 6%"] = 0.06,
     tax_rate: Annotated[Optional[float], "企业所得税率，默认 25%"] = 0.25,
 ) -> str:
-    """WACC 加权平均资本成本计算"""
+    """WACC 加权平均资本成本计算
+
+    Args:
+        symbol: A 股股票代码，如 600519
+        risk_free_rate: 无风险利率（小数形式，如 0.025 表示 2.5%），默认 0.025
+        equity_risk_premium: 股权风险溢价（小数形式），默认 0.06
+        tax_rate: 企业所得税率（小数形式），默认 0.25
+
+    Returns:
+        str: JSON 字符串，包含以下可能结构——
+
+        错误情形返回 dict，字段：
+            status: "error"
+            message: 错误描述
+            symbol: 股票代码
+
+        成功情形返回 dict，字段：
+            symbol: 股票代码
+            parameters: 输入参数 dict —
+                risk_free_rate: 无风险利率（小数）
+                equity_risk_premium: 股权风险溢价（小数）
+                tax_rate: 所得税率（小数）
+            capital_structure: 资本结构 dict —
+                market_cap: 市值
+                total_debt: 总债务
+                total_capital: 总资本
+                equity_weight: 股权权重（小数）
+                debt_weight: 债务权重（小数）
+                debt_to_equity: 债务股权比（小数，缺失时为 None）
+            cost_of_equity: 股权成本 dict —
+                beta: Beta 系数
+                risk_free_rate: 无风险利率（小数）
+                equity_risk_premium: 股权风险溢价（小数）
+                cost_of_equity: 股权成本（小数）
+            cost_of_debt: 债权成本 dict —
+                interest_expense: 利息费用
+                total_debt: 总债务
+                pre_tax_cost: 税前债权成本（小数）
+                after_tax_cost: 税后债权成本（小数）
+            wacc: 加权平均资本成本（小数）
+            data_quality: 数据质量 dict —
+                beta_source: Beta 来源："default" | "price_returns_estimated"
+                debt_cost_source: 债权成本来源："financial_expense_based" | "default_proxy"
+                warnings: 警告信息列表
+
+        异常时返回 dict：{"status": "error", "message": ...}
+    """
     try:
         from core.skill_runtime.data_access import get_stock_financial_periods, get_stock_daily_quotes
         from core.skill_runtime.standard_financial_apis import get_security_master
@@ -68,6 +114,20 @@ def get_wacc_calculation(
             total_liab = latest_fin.get("total_liab") or 0.0
             total_equity = latest_fin.get("total_equity") or 0.0
             fin_exp = latest_fin.get("fin_exp") or 0.0
+
+            # 🔑 检测报告期口径，对利润表累计值做年化
+            from core.tools.implementations.risk.extended_risk_models import (
+                _detect_period_type, _annualize_factor, _PERIOD_LABELS,
+            )
+            cur_period = _detect_period_type(latest_fin)
+            if cur_period != "annual" and cur_period != "unknown":
+                factor = _annualize_factor(cur_period)
+                fin_exp_annualized = fin_exp * factor
+                warnings.append(
+                    f"当期为{_PERIOD_LABELS.get(cur_period, cur_period)}数据，"
+                    f"财务费用已年化处理（{fin_exp:.2f}→{fin_exp_annualized:.2f}）"
+                )
+                fin_exp = fin_exp_annualized
 
         # 3. 计算 Beta（简化：从日线收益计算，或默认 1.0）
         beta = 1.0
