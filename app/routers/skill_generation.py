@@ -37,6 +37,7 @@ class StartSessionRequest(BaseModel):
     description: str = Field(..., min_length=2, description="需求描述")
     user_id: str = Field(default="", description="用户 ID")
     handoff_context: Optional[Dict[str, Any]] = Field(default=None, description="来自上游工坊的交接上下文")
+    iterate_skill_id: Optional[str] = Field(default=None, description="迭代模式：要优化的已有 Skill 的 tool_id")
     provider: str = Field(default="deepseek", description="LLM 提供商（回退用）")
     model: Optional[str] = Field(default=None, description="模型名称（回退用）")
     reasoning_model: Optional[str] = Field(default=None, description="需求分析模型（覆盖系统默认的深度推理模型）")
@@ -227,6 +228,7 @@ async def start_session(
             description=req.description,
             user_id=req.user_id,
             handoff_context=req.handoff_context,
+            iterate_skill_id=req.iterate_skill_id,
         )
         return ok(result)
     except Exception as e:
@@ -426,6 +428,56 @@ async def get_skill_history(
     if not history:
         raise HTTPException(status_code=404, detail=f"Skill {skill_id} 不存在")
     return ok(history)
+
+
+@router.get("/skills/{skill_id}/versions")
+async def list_skill_versions(
+    skill_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """查询 Skill 的所有版本（同一系列的所有迭代版本）
+
+    如果 skill_id 是根 Skill，返回 parent_skill_id=skill_id 的所有版本 + 自己
+    如果 skill_id 是子版本，先找根，再返回整条版本链
+
+    返回按版本号升序排列，每个版本包含: tool_id, version, display_name, version_note, status, created_at
+    """
+    # 先查当前 skill，确定根 parent_skill_id
+    current = await db["external_skills"].find_one({"tool_id": skill_id})
+    if not current:
+        raise HTTPException(status_code=404, detail=f"Skill {skill_id} 不存在")
+
+    # 确定 parent_skill_id（根 Skill 的 parent_skill_id 为空，自己就是根）
+    parent_skill_id = current.get("parent_skill_id") or skill_id
+
+    # 查询同系列所有版本：根 Skill 自己 + 所有 parent_skill_id 指向根的版本
+    cursor = db["external_skills"].find({
+        "$or": [
+            {"tool_id": parent_skill_id},
+            {"parent_skill_id": parent_skill_id},
+        ]
+    }).sort("version", 1)
+
+    versions = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        versions.append({
+            "tool_id": doc.get("tool_id", ""),
+            "version": doc.get("version", 1),
+            "display_name": doc.get("display_name", ""),
+            "version_note": doc.get("version_note", ""),
+            "status": doc.get("status", ""),
+            "created_at": doc.get("created_at", ""),
+            "final_score": doc.get("final_score"),
+            "is_current": doc.get("tool_id") == skill_id,
+        })
+
+    return ok({
+        "parent_skill_id": parent_skill_id,
+        "current_tool_id": skill_id,
+        "versions": versions,
+        "total": len(versions),
+    })
 
 
 @router.put("/skills/{skill_id}/status")

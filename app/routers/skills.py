@@ -958,10 +958,47 @@ async def test_skill(
                         },
                         execution_time_ms=0
                     )
-                result = _execute_python_sandbox(code, req.args, req.timeout)
+
+                # 确定测试参数：优先级 question(LLM转参) > args > test_input > 空
+                test_args = dict(req.args) if req.args else {}
+                llm_conversion_note = None
+
+                if req.question:
+                    # 有自然语言问题：先走 LLM 转参
+                    conversion = await _convert_question_to_args_for_external_skill(ext_doc, req.question)
+                    if conversion.get("success"):
+                        test_args = conversion.get("args", {})
+                        llm_conversion_note = conversion.get("note", "")
+                        logger.info(
+                            f"💬 external_skill 测试: question='{req.question[:50]}...' → args={test_args}"
+                        )
+                    else:
+                        # LLM 转换失败，用 test_input 兜底
+                        fallback_input = ext_doc.get("test_input") or {}
+                        if fallback_input:
+                            test_args = fallback_input
+                            llm_conversion_note = f"LLM 转换失败，使用 test_input 兜底: {conversion.get('error', '')}"
+                            logger.warning(
+                                f"⚠️ external_skill 测试 LLM 转参失败，使用 test_input 兜底: {conversion.get('error')}"
+                            )
+                elif not test_args:
+                    # 既没有问题也没有 args，自动用 test_input 测试
+                    fallback_input = ext_doc.get("test_input") or {}
+                    if fallback_input:
+                        test_args = fallback_input
+                        llm_conversion_note = "自动使用 test_input 作为测试参数"
+                        logger.info(f"🔄 external_skill 测试: 无问题/参数，自动使用 test_input={test_args}")
+
+                # 使用 SandboxRunner 执行（正确处理纯函数代码）
+                result = _run_external_skill_sandbox(code, ext_doc, test_args, req.timeout)
+                resp_result = result.get("result")
+                if isinstance(resp_result, dict) and llm_conversion_note:
+                    resp_result = dict(resp_result)
+                    resp_result["_llm_conversion_note"] = llm_conversion_note
+                    resp_result["_test_args"] = test_args
                 return SkillTestResponse(
                     success=result["success"],
-                    result=result.get("result"),
+                    result=resp_result,
                     error=result.get("error"),
                     execution_time_ms=result.get("execution_time_ms", 0)
                 )
@@ -993,6 +1030,212 @@ def _is_placeholder_code(code: str) -> bool:
         if re.search(pattern, code):
             return True
     return False
+
+
+def _run_external_skill_sandbox(
+    code: str,
+    ext_doc: Dict[str, Any],
+    test_args: Dict[str, Any],
+    timeout: int,
+) -> Dict[str, Any]:
+    """用 SandboxRunner 执行 external_skill 的纯函数代码。
+
+    _execute_python_sandbox 是通过 stdin 传参的，不适用于纯函数代码。
+    SandboxRunner 会自动包装一层 main 入口来调用函数。
+
+    Args:
+        code: Skill 的 Python 函数代码
+        ext_doc: external_skills 文档（用于取 tool_id）
+        test_args: 测试参数字典
+        timeout: 超时秒数
+
+    Returns:
+        {"success": bool, "result": Any, "error": str, "execution_time_ms": int}
+    """
+    try:
+        from core.tools.external.sandbox_runner import SandboxRunner
+        from core.tools.external.skill_spec import SkillSpec
+
+        # 构造最小化的 SkillSpec（只需要 tool_id 和 test_input）
+        tool_id = ext_doc.get("tool_id", "")
+        spec = SkillSpec(
+            tool_id=tool_id,
+            display_name=ext_doc.get("display_name", tool_id),
+            description=ext_doc.get("description", ""),
+            category=ext_doc.get("category", "utility"),
+            test_input=test_args,
+        )
+
+        runner = SandboxRunner(timeout=timeout)
+        sandbox_result = runner.run(code, spec, test_input=test_args)
+
+        # 把子进程的 stdout/stderr 打到 webapi 日志，方便排查数据源选择等问题
+        if sandbox_result.stdout:
+            for line in sandbox_result.stdout.split("\n"):
+                line = line.strip()
+                if line:
+                    logger.info(f"📦 [沙箱stdout] {line}")
+        if sandbox_result.stderr:
+            for line in sandbox_result.stderr.split("\n"):
+                line = line.strip()
+                if line:
+                    logger.warning(f"📦 [沙箱stderr] {line}")
+
+        return {
+            "success": sandbox_result.success,
+            "result": sandbox_result.output,
+            "error": sandbox_result.error,
+            "execution_time_ms": int((sandbox_result.execution_time or 0) * 1000),
+        }
+    except Exception as e:
+        logger.error(f"external_skill 沙箱执行异常: {e}", exc_info=True)
+        return {"success": False, "result": None, "error": str(e), "execution_time_ms": 0}
+
+
+async def _convert_question_to_args_for_external_skill(
+    ext_doc: Dict[str, Any],
+    question: str,
+) -> Dict[str, Any]:
+    """用 LLM 把自然语言问题转换为 external_skill 的函数参数。
+
+    Args:
+        ext_doc: external_skills 集合中的文档，含 parameters、description、display_name 等
+        question: 用户的自然语言测试问题
+
+    Returns:
+        {"success": True, "args": {...}, "note": "..."} 或 {"success": False, "error": "..."}
+    """
+    import os
+    import json as _json
+
+    parameters = ext_doc.get("parameters") or []
+    display_name = ext_doc.get("display_name") or ext_doc.get("tool_id", "")
+    description = ext_doc.get("description") or ""
+    test_input = ext_doc.get("test_input") or {}
+
+    if not parameters:
+        # 没有参数定义，直接返回空参数
+        return {"success": True, "args": {}, "note": "无参数定义"}
+
+    try:
+        from core.llm.unified_client import UnifiedLLMClient
+        from core.llm.models import Message
+    except Exception as e:
+        return {"success": False, "error": f"无法导入 LLM 客户端: {e}"}
+
+    llm_client = None
+    last_err = None
+    for provider, env_key in [
+        ("dashscope", "DASHSCOPE_API_KEY"),
+        ("deepseek", "DEEPSEEK_API_KEY"),
+    ]:
+        if not os.getenv(env_key):
+            continue
+        try:
+            llm_client = UnifiedLLMClient.from_provider(provider)
+            break
+        except Exception as e:
+            last_err = e
+            continue
+
+    if llm_client is None:
+        return {"success": False, "error": f"找不到可用的 LLM 配置: {last_err}"}
+
+    # 构造参数定义的 JSON 描述
+    param_schema = []
+    for p in parameters:
+        param_schema.append({
+            "name": p.get("name", ""),
+            "type": p.get("param_type") or p.get("type", "string"),
+            "required": p.get("required", False),
+            "default": p.get("default"),
+            "description": p.get("description", ""),
+        })
+
+    system_prompt = f"""你是一个参数提取助手。你的任务是从用户的自然语言问题中，提取出调用 Skill 函数所需的参数。
+
+## Skill 信息
+- 名称: {display_name}
+- 描述: {description[:500]}
+
+## 函数参数定义
+```json
+{_json.dumps(param_schema, ensure_ascii=False, indent=2)}
+```
+
+## 参考测试输入（参数格式参考）
+```json
+{_json.dumps(test_input, ensure_ascii=False, indent=2)}
+```
+
+## 任务
+从用户问题中提取参数值，输出严格的 JSON 格式：
+```json
+{{
+  "args": {{
+    "param1": "value1",
+    "param2": 123
+  }}
+}}
+```
+
+## 规则
+1. 只输出 JSON，不要输出任何其他文字、解释、markdown 代码块
+2. 用户问题中没提到的参数，如果有默认值可以不填；如果是必填参数但问题里没给，就用参考测试输入中的值或合理默认值
+3. 股票代码为 6 位纯数字（如 000002、600519），不要带 .SH/.SZ 后缀
+4. 数字类型的参数必须是数字，不要加引号"""
+
+    try:
+        response = llm_client.chat(
+            [
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=f"用户问题：{question}\n\n请提取参数。"),
+            ],
+            max_tokens=512,
+        )
+        raw = (response.content or "").strip()
+
+        # 尝试从可能的 markdown 代码块中提取 JSON
+        if "```" in raw:
+            import re as _re
+            m = _re.search(r"```(?:json)?\s*\n(.*?)\n```", raw, _re.DOTALL)
+            if m:
+                raw = m.group(1).strip()
+
+        # 去掉可能的前缀/后缀
+        raw = raw.strip()
+        if raw.startswith("```json"):
+            raw = raw[7:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
+        raw = raw.strip()
+
+        parsed = _json.loads(raw)
+        args = parsed.get("args", {}) if isinstance(parsed, dict) else {}
+
+        # 类型校正：根据参数定义把值转成正确类型
+        for p in parameters:
+            name = p.get("name", "")
+            ptype = (p.get("param_type") or p.get("type", "")).lower()
+            if name in args:
+                try:
+                    if ptype in ("int", "integer", "number"):
+                        args[name] = int(args[name])
+                    elif ptype in ("float", "double"):
+                        args[name] = float(args[name])
+                    elif ptype == "boolean":
+                        if isinstance(args[name], str):
+                            args[name] = args[name].lower() in ("true", "1", "yes")
+                except (ValueError, TypeError):
+                    pass
+
+        return {
+            "success": True,
+            "args": args,
+            "note": f"LLM 提取自问题: {question[:60]}",
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def _check_tool_registry(tool_id: str) -> bool:

@@ -5,6 +5,7 @@ Skill 生成服务 — 业务逻辑层
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -38,7 +39,8 @@ SKILL_CODE_SNAPSHOT_DIR = PROJECT_ROOT / "data" / "code" / "skill"
 # MongoDB 集合名
 SESSION_COLLECTION = "skill_creation_sessions"
 SKILL_COLLECTION = "external_skills"
-SKILL_PIPELINE_MAX_ITERATIONS = 8
+# 与 iteration_controller.MAX_ITERATIONS 保持一致；如需调整请同步修改
+SKILL_PIPELINE_MAX_ITERATIONS = 10
 SKILL_GENERATION_AGENTIC_ENABLED = os.getenv("SKILL_GENERATION_AGENTIC_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
 
 
@@ -87,13 +89,14 @@ class SkillGenerationService:
         *,
         spec: Optional[SkillSpec] = None,
         session: Optional[SkillCreationSession] = None,
+        fact_report: Optional[Any] = None,
     ) -> Dict[str, Any]:
         if spec is not None:
-            return self._analyzer.build_recommendations(spec=spec)
+            return self._analyzer.build_recommendations(spec=spec, fact_report=fact_report)
         conversation = ""
         if session is not None:
             conversation = self._analyzer._collect_conversation(session)
-        return self._analyzer.build_recommendations(conversation=conversation)
+        return self._analyzer.build_recommendations(conversation=conversation, fact_report=fact_report)
 
     @staticmethod
     def _dedupe_text_list(items: Any) -> List[str]:
@@ -111,6 +114,46 @@ class SkillGenerationService:
             seen.add(key)
             result.append(value)
         return result
+
+    async def _search_capability_index(self, spec: SkillSpec) -> list:
+        """从能力索引（Qdrant 向量库）中搜索与 spec 语义相关的工具。
+
+        使用 spec 的 display_name + description 构造查询，召回 top_k=12 的相关工具。
+        如果能力索引服务不可用，返回空列表（不阻塞流程）。
+        """
+        try:
+            from app.services.capability_index_service import CapabilityIndexService
+            # 构造语义查询文本
+            query_parts = [
+                spec.display_name or "",
+                spec.description or "",
+                spec.category or "",
+            ]
+            # 加入参数描述，让搜索更精准
+            for param in (spec.parameters or []):
+                desc = getattr(param, "description", None) or (param.get("description") if isinstance(param, dict) else None)
+                if desc:
+                    query_parts.append(desc)
+            query = " ".join(p for p in query_parts if p).strip()
+            if not query:
+                return []
+
+            svc = CapabilityIndexService(self._db)
+            hits = await svc.search_capabilities(
+                query=query,
+                top_k=12,
+                bindable_only=True,
+                source_types=["builtin_tool", "mcp_tool"],
+            )
+            logger.info(
+                "🧭 能力索引向量搜索: query='%s...' → %d 个命中",
+                query[:40],
+                len(hits),
+            )
+            return hits
+        except Exception as exc:
+            logger.warning("⚠️ 能力索引搜索失败（不阻塞流程）: %s", exc)
+            return []
 
     @staticmethod
     def _infer_skill_role_metadata(spec: SkillSpec, session: SkillCreationSession) -> Dict[str, Any]:
@@ -820,20 +863,64 @@ test_input: {spec.test_input}
         description: str,
         user_id: str = "",
         handoff_context: Optional[Dict[str, Any]] = None,
+        iterate_skill_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         开始创建会话：提交初始需求
+
+        Args:
+            description: 用户需求描述
+            user_id: 用户 ID
+            handoff_context: 来自上游工坊的交接上下文
+            iterate_skill_id: 迭代模式下的已有 Skill tool_id
 
         Returns:
             包含 session_id, ai_message, clarity_level 等信息的 dict
         """
         # 创建会话
         context = SkillHandoffContext(**handoff_context) if handoff_context else None
-        session = self._analyzer.create_session(user_id=user_id, handoff_context=context)
+        session = self._analyzer.create_session(
+            user_id=user_id, handoff_context=context, iterate_skill_id=iterate_skill_id,
+        )
+
+        # 迭代模式：加载已有 Skill 的上下文
+        skill_context: Optional[str] = None
+        if iterate_skill_id:
+            try:
+                skill_doc = await self._db[SKILL_COLLECTION].find_one(
+                    {"tool_id": iterate_skill_id}
+                )
+                if skill_doc:
+                    skill_doc.pop("_id", None)
+                    code = skill_doc.get("code") or skill_doc.get("implementation") or ""
+                    skill_context = json.dumps({
+                        "tool_id": skill_doc.get("tool_id", ""),
+                        "display_name": skill_doc.get("display_name", ""),
+                        "description": skill_doc.get("description", ""),
+                        "category": skill_doc.get("category", ""),
+                        "parameters": skill_doc.get("parameters", []),
+                        "status": skill_doc.get("status", ""),
+                        "code_abbreviated": code[:1500] + ("..." if len(code) > 1500 else ""),
+                    }, ensure_ascii=False, indent=2)
+                    logger.info(
+                        "[SkillGeneration][Iterate] 加载已有 Skill 上下文: tool_id=%s",
+                        iterate_skill_id,
+                    )
+                else:
+                    logger.warning(
+                        "[SkillGeneration][Iterate] 未找到 Skill: tool_id=%s",
+                        iterate_skill_id,
+                    )
+            except Exception as exc:
+                logger.error("[SkillGeneration][Iterate] 加载 Skill 失败: %s", exc)
 
         # 处理第一轮输入（会做清晰度评估和边界检测）
         session, ai_message = await asyncio.get_event_loop().run_in_executor(
-            None, self._analyzer.process_user_input, session, description
+            None,
+            self._analyzer.process_user_input,
+            session,
+            description,
+            skill_context,  # 迭代模式下传入已有 Skill 上下文
         )
 
         # 持久化到 MongoDB
@@ -907,9 +994,12 @@ test_input: {spec.test_input}
         if not draft_spec:
             return None
 
-        # 运行侦察层：基于草稿 spec 探测真实数据可用性
+        # 向量搜索：用 spec 描述从能力索引中召回语义相关的工具
+        capability_hits = await self._search_capability_index(draft_spec)
+
+        # 运行侦察层：基于草稿 spec 探测真实数据可用性（附带向量搜索结果）
         fact_report = await asyncio.get_event_loop().run_in_executor(
-            None, self._reconnaissance.analyze, draft_spec
+            None, self._reconnaissance.analyze, draft_spec, capability_hits
         )
         logger.info("🧭 侦察完成 (preview)，置信度: %.0f%%", fact_report.confidence * 100)
 
@@ -928,7 +1018,7 @@ test_input: {spec.test_input}
 
         return {
             "spec": final_spec.model_dump(),
-            "recommendations": self._build_session_recommendations(spec=final_spec),
+            "recommendations": self._build_session_recommendations(spec=final_spec, fact_report=fact_report),
             "fact_report": fact_report.model_dump() if fact_report else None,
         }
 
@@ -956,8 +1046,10 @@ test_input: {spec.test_input}
                 None, self._analyzer.preview_spec, session, user_message
             )
             if draft_spec:
+                # 向量搜索：从能力索引中召回语义相关的工具
+                capability_hits = await self._search_capability_index(draft_spec)
                 fact_report = await asyncio.get_event_loop().run_in_executor(
-                    None, self._reconnaissance.analyze, draft_spec
+                    None, self._reconnaissance.analyze, draft_spec, capability_hits
                 )
                 logger.info("🧭 侦察完成 (confirm)，置信度: %.0f%%", fact_report.confidence * 100)
 
@@ -1417,8 +1509,19 @@ test_input: {spec.test_input}
         if not code:
             raise ValueError("Skill 没有代码")
 
+        # 🔬 把即将执行的代码打到日志
+        logger.info(f"🔬 [test_skill] 即将执行 skill={skill_id}, code_len={len(code)}\n" + code)
+
         # 使用 SandboxRunner 执行
         from core.tools.external import SandboxRunner, SkillSpec
+
+        # 🔬 打印前端传来的 test_args
+        logger.info(f"🔬 [test_skill] 原始 test_args={test_args}")
+
+        # 过滤掉空值参数，让函数默认值生效（前端表单可能把 null 渲染为 0）
+        if test_args:
+            test_args = {k: v for k, v in test_args.items() if v is not None and v != '' and v != 0}
+            logger.info(f"🔬 [test_skill] 过滤后 test_args={test_args}")
 
         runner = SandboxRunner()
         # 构建简单的 spec 用于测试
@@ -1429,6 +1532,18 @@ test_input: {spec.test_input}
             test_input=test_args or doc.get("test_input", {}),
         )
         sandbox_result = runner.run(code, spec)
+
+        # 把子进程的 stdout/stderr 打到 webapi 日志
+        if sandbox_result.stdout:
+            for line in sandbox_result.stdout.split("\n"):
+                line = line.strip()
+                if line:
+                    logger.info(f"📦 [Skill测试沙箱stdout] {line}")
+        if sandbox_result.stderr:
+            for line in sandbox_result.stderr.split("\n"):
+                line = line.strip()
+                if line:
+                    logger.warning(f"📦 [Skill測試沙箱stderr] {line}")
 
         return {
             "success": sandbox_result.success,
@@ -1674,8 +1789,78 @@ test_input: {spec.test_input}
                 skill_doc["origin_gap_id"] = str(getattr(handoff, "gap_id", "") or "")
                 skill_doc["origin_agent_name"] = str(getattr(handoff, "agent_name", "") or getattr(handoff, "source_name", "") or "")
 
+        # 🔧 版本管理：迭代模式下计算版本号，确保 tool_id 符合 _v{N} 命名规则
+        is_iteration = bool(session.iterate_skill_id)
+        if is_iteration:
+            original_tool_id = session.iterate_skill_id or ""
+            try:
+                original = await self._db[SKILL_COLLECTION].find_one(
+                    {"tool_id": original_tool_id}
+                )
+            except Exception as exc:
+                logger.warning("[SkillGeneration][Iterate] 查询原 Skill 失败，按新建处理: %s", exc)
+                original = None
+
+            if original:
+                # parent_skill_id 指向根 Skill（如果原 Skill 也有 parent，沿用；否则用原 tool_id）
+                parent_skill_id = original.get("parent_skill_id") or original_tool_id
+
+                # 查找当前最大版本号（在所有同系列版本中）
+                try:
+                    cursor = self._db[SKILL_COLLECTION].find({
+                        "$or": [
+                            {"tool_id": parent_skill_id},
+                            {"parent_skill_id": parent_skill_id},
+                        ]
+                    }).sort("version", -1).limit(1)
+                    max_docs = await cursor.to_list(1)
+                    new_version = (max_docs[0].get("version", 1) + 1) if max_docs else 2
+                except Exception as exc:
+                    logger.warning("[SkillGeneration][Iterate] 查询版本号失败，使用默认 v2: %s", exc)
+                    new_version = 2
+
+                # 确保 tool_id 符合命名规则：{parent_skill_id}_v{new_version}
+                expected_tool_id = f"{parent_skill_id}_v{new_version}"
+                if skill_doc["tool_id"] != expected_tool_id:
+                    # LLM 可能没遵守约束，这里强制修正
+                    logger.info(
+                        "[SkillGeneration][Iterate] 修正 tool_id: %s → %s",
+                        skill_doc["tool_id"],
+                        expected_tool_id,
+                    )
+                    skill_doc["tool_id"] = expected_tool_id
+                    spec.tool_id = expected_tool_id
+
+                # 提取版本说明（取 session 第一轮用户消息前 50 字）
+                version_note = ""
+                if session.rounds:
+                    version_note = (session.rounds[0].user_message or "")[:50]
+                if not version_note:
+                    version_note = "迭代优化"
+
+                skill_doc["parent_skill_id"] = parent_skill_id
+                skill_doc["version"] = new_version
+                skill_doc["version_note"] = version_note
+                skill_doc["iteration_session_id"] = session.session_id
+
+                logger.info(
+                    "[SkillGeneration][Iterate] 迭代保存: parent=%s, version=%d, tool_id=%s",
+                    parent_skill_id,
+                    new_version,
+                    expected_tool_id,
+                )
+            else:
+                # 原 Skill 不存在，降级为新建
+                logger.warning(
+                    "[SkillGeneration][Iterate] 原 Skill %s 不存在，降级为新建",
+                    original_tool_id,
+                )
+                skill_doc["version"] = 1
+        else:
+            skill_doc["version"] = 1
+
         await self._db[SKILL_COLLECTION].insert_one(skill_doc)
-        logger.info(f"✅ Skill '{spec.tool_id}' 已保存到数据库")
+        logger.info(f"✅ Skill '{spec.tool_id}' 已保存到数据库 (version={skill_doc.get('version', 1)})")
 
         try:
             from core.tools.registry import get_tool_registry
