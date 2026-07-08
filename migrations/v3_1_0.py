@@ -31,8 +31,17 @@ async def _migrate_agent_configs(db):
         unset_fields = {}
 
         # 顶层字段补齐
+        # 🔥 output_field 必须唯一，否则多个工坊 Agent 共用 analysis_report
+        # 会导致运行时 state 互相覆盖 + 聚合器去重后只剩第一个
         if not doc.get("output_field"):
-            updates["output_field"] = "analysis_report"
+            agent_id = doc.get("agent_id", "")
+            # 从 agent_id 生成唯一字段名：取末尾段 + _report
+            if agent_id:
+                tail = agent_id.replace("_v1", "").replace("_v2", "").split("_")[-1]
+                default_output_field = f"{tail}_report"
+            else:
+                default_output_field = "analysis_report"
+            updates["output_field"] = default_output_field
         if not doc.get("workflow_stage"):
             updates["workflow_stage"] = "analyst"
         if not doc.get("report_label"):

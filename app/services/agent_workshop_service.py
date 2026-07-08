@@ -4685,11 +4685,15 @@ class AgentWorkshopService:
         output_names = self._list_output_field_names(spec.outputs)
         category = source.get("category") or ("analyst" if spec.domain == "stock_analysis" else "researcher")
         workflow_stage = self._normalize_workflow_stage(source.get("workflow_stage"), "analyst" if category == "analyst" else "research")
+        # 🔥 output_field 必须唯一，否则多个工坊 Agent 共用 analysis_report 会导致
+        # 运行时 state 互相覆盖 + 聚合器去重后只剩第一个
+        raw_output_field = source.get("output_field") or (output_names[0] if output_names else "")
+        normalized_output_field = self._normalize_generated_output_field(version_id, raw_output_field or "analysis_report")
         return {
             "agent_id": version_id,
             "agent_name": source.get("agent_name") or spec.name,
             "description": source.get("description") or spec.primary_goal or spec.name,
-            "output_field": self._normalize_output_field_name(source.get("output_field") or (output_names[0] if output_names else "analysis_report"), "analysis"),
+            "output_field": normalized_output_field,
             "workflow_stage": workflow_stage,
             "report_label": self._normalize_report_label(source.get("report_label"), spec.name),
             "node_name": str(source.get("node_name") or spec.name or version_id).strip(),

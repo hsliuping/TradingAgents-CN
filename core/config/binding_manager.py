@@ -526,6 +526,36 @@ class BindingManager:
             except Exception as e:
                 logger.warning(f"从数据库加载IO定义失败: {e}")
 
+        # 🔥 从 agent_configs 兜底加载（Agent 工坊发布的动态 Agent）
+        # 工坊 Agent 的 inputs/outputs 存在 agent_configs 中，但可能未同步到 agent_io_definitions
+        if io_def is None and self._db is not None:
+            try:
+                agent_doc = self._db.agent_configs.find_one(
+                    {"agent_id": agent_id},
+                    {"inputs": 1, "outputs": 1, "workflow_stage": 1, "output_field": 1},
+                )
+                if agent_doc and (agent_doc.get("inputs") or agent_doc.get("outputs")):
+                    # 🔑 关键修复：用 output_field 覆盖 outputs 的字段名
+                    # Agent 实际写入 state 的 key 是 output_field（如 "valuation_report"），
+                    # 而不是 outputs 里的 name（如 "valuation_analysis_report"）。
+                    # 如果两者不一致，LangGraph 会因为字段名不匹配而丢弃 Agent 的输出。
+                    output_field = agent_doc.get("output_field")
+                    outputs = list(agent_doc.get("outputs") or [])
+                    if output_field and outputs:
+                        # 把所有 outputs 的 name 统一为 output_field
+                        for out_item in outputs:
+                            if isinstance(out_item, dict):
+                                out_item["name"] = output_field
+                    io_def = {
+                        "agent_id": agent_id,
+                        "inputs": agent_doc.get("inputs") or [],
+                        "outputs": outputs,
+                        "reads_from": [],
+                    }
+                    logger.info(f"从 agent_configs 兜底加载 IO 定义: {agent_id} (output_field={output_field})")
+            except Exception as e:
+                logger.warning(f"从 agent_configs 兜底加载 IO 定义失败: {e}")
+
         # 从代码配置加载
         if io_def is None:
             io_def = self._get_default_io_definition(agent_id)

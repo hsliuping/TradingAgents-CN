@@ -1068,19 +1068,93 @@ class WorkflowEngine:
         # 动态推导报告字段列表（新 Agent 的 output_field 自动包含）
         agent_ids = self._extract_agent_ids(self._definition) if self._definition else []
         report_fields = _get_dynamic_report_fields(agent_ids) if agent_ids else _BUILTIN_REPORT_FIELDS
-
+        
+        # 内置字段的显示名映射
+        builtin_display_names = {
+            "market_report": "📈 市场技术研究",
+            "sentiment_report": "💭 情绪研究",
+            "news_report": "📰 新闻研究",
+            "fundamentals_report": "💰 基本面研究",
+            "index_report": "📊 大盘环境研究",
+            "sector_report": "🏭 行业板块研究",
+            "social_report": "💭 社交媒体研究",
+            "chip_report": "🧮 筹码分布研究",
+            "bull_report": "🐂 乐观情景研究员",
+            "bear_report": "🐻 审慎情景研究员",
+            "investment_plan": "📋 研究经理简报",
+            "trader_investment_plan": "🧩 研究简报",
+            "risky_opinion": "🔥 高弹性情景观点",
+            "safe_opinion": "🛡️ 防御情景观点",
+            "neutral_opinion": "⚖️ 基准情景观点",
+            "risk_assessment": "⚠️ 风险治理结论",
+            "risk_management_decision": "⚠️ 风险治理结论",
+            "final_trade_decision": "📝 综合研究结论",
+        }
+        
+        # 工坊 Agent 的显示名缓存（从 agent_configs 读取）
+        workshop_display_names = {}
+        try:
+            from tradingagents.config.mongodb_utils import build_mongodb_connection_string, get_mongodb_database_name
+            from pymongo import MongoClient as _MC
+            _client = _MC(build_mongodb_connection_string(), serverSelectionTimeoutMS=2000)
+            _db = _client[get_mongodb_database_name()]
+            _docs = list(_db.agent_configs.find(
+                {"enabled": True, "version_status": "active", "runtime_status": "active"},
+                {"agent_id": 1, "display_name": 1, "name": 1, "output_field": 1}
+            ))
+            _client.close()
+            for _doc in _docs:
+                _output_field = _doc.get("output_field")
+                if _output_field:
+                    _display_name = _doc.get("display_name") or _doc.get("name")
+                    if _display_name:
+                        workshop_display_names[_output_field] = f"📊 {_display_name}"
+        except Exception as _e:
+            logger.warning(f"⚠️ [WorkflowEngine] 读取工坊 Agent 显示名失败: {_e}")
+        
         structured = {}
-        for f in report_fields:
-            if f in result:
-                text = self._extract_text_value(result.get(f))
-                success = bool(isinstance(text, str) and text.strip())
-                d = {"content": text, "success": success}
-                if f == "bull_report":
-                    d["stance"] = "bull"
-                if f == "bear_report":
-                    d["stance"] = "bear"
-                structured[f] = d
+        manifest = []
+        
+        for idx, f in enumerate(report_fields):
+            if f not in result:
+                continue
+                
+            text = self._extract_text_value(result.get(f))
+            success = bool(isinstance(text, str) and text.strip())
+            
+            d = {"content": text, "success": success}
+            if f == "bull_report":
+                d["stance"] = "bull"
+            if f == "bear_report":
+                d["stance"] = "bear"
+            structured[f] = d
+            
+            # 获取显示名
+            display_name = workshop_display_names.get(f) or builtin_display_names.get(f) or f.replace("_", " ").title()
+            
+            # 分配 category
+            category = "analyst"
+            if f in ["bull_report", "bear_report", "investment_plan", "trader_investment_plan", "research_team_decision"]:
+                category = "research"
+            elif f in ["risky_opinion", "safe_opinion", "neutral_opinion", "risk_assessment", "risk_management_decision"]:
+                category = "risk"
+            elif f == "final_trade_decision":
+                category = "manager"
+            
+            manifest.append({
+                "field": f,
+                "display_name": display_name,
+                "category": category,
+                "order": idx,
+                "is_primary": f == "final_trade_decision",
+                "format_hint": "markdown",
+                "icon": "📊",
+                "description": "",
+                "has_content": success,
+            })
+        
         result["structured_reports"] = structured
+        result["report_manifest"] = manifest
 
         existing_ftd = result.get("final_trade_decision")
         has_action = existing_ftd and isinstance(existing_ftd, dict) and (

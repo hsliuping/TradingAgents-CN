@@ -1329,6 +1329,32 @@ class WorkflowBuilder:
             skip_cache: Annotated[bool, keep_non_empty]  # 是否跳过缓存
             prompt_overrides: Annotated[dict, merge_dict]  # 提示词覆盖
 
+        # 🔥 动态注入工坊 Agent 的 output_field 到 State schema
+        # LangGraph 的 StateGraph 只会保留 schema 中声明的字段，未声明的字段会被丢弃
+        # 工坊创建的 Agent（如 valuation_analyst_v1）使用自定义 output_field（如 valuation_report）
+        # 必须在这里动态声明，否则 Agent 返回的输出会被 LangGraph 丢掉
+        try:
+            from tradingagents.config.mongodb_utils import build_mongodb_connection_string, get_mongodb_database_name
+            from pymongo import MongoClient as _MC
+            _client = _MC(build_mongodb_connection_string(), serverSelectionTimeoutMS=2000)
+            _db = _client[get_mongodb_database_name()]
+            _docs = list(_db.agent_configs.find(
+                {"enabled": True, "version_status": "active", "runtime_status": "active"},
+                {"agent_id": 1, "output_field": 1, "metadata.output_field": 1, "_id": 0},
+            ))
+            _client.close()
+            _builtin_fields = set(WorkflowState.__annotations__.keys())
+            _added = []
+            for _doc in _docs:
+                _field = _doc.get("output_field") or (_doc.get("metadata") or {}).get("output_field")
+                if _field and _field not in _builtin_fields and _field not in _added:
+                    WorkflowState.__annotations__[_field] = Annotated[str, keep_non_empty]
+                    _added.append(_field)
+            if _added:
+                logger.info(f"[StateSchema] 动态注入工坊 Agent output_field: {_added}")
+        except Exception as _e:
+            logger.warning(f"[StateSchema] 动态注入工坊 Agent output_field 失败: {_e}")
+
         return WorkflowState
     
     def _create_node_function(self, node: NodeDefinition) -> Callable:
