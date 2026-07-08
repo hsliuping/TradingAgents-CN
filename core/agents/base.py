@@ -372,7 +372,27 @@ class BaseAgent(ABC):
         子类应覆盖此方法设置提示词
         """
         pass
-    
+
+    def _apply_global_trading_advice_guard(self, system_prompt: str) -> str:
+        """
+        全局交易建议合规防护：在系统提示词末尾追加合规约束，
+        避免 LLM 输出违规的交易建议术语（如"买入/卖出/目标价"等）。
+
+        子类可覆盖此方法实现更严格的防护逻辑。
+        默认实现追加一段合规提示，确保输出使用合规术语。
+        """
+        if not system_prompt:
+            return system_prompt
+        guard = (
+            "\n\n【合规防护·必须遵守】\n"
+            '1. 禁止输出具体买卖指令（如"买入""卖出""加仓""减仓"），'
+            "改用合规术语：看涨 / 看跌 / 中性。\n"
+            '2. 禁止给出具体目标价或止损价，可输出"价格分析区间"并标注不确定性。\n'
+            "3. 禁止承诺收益或保证盈利，必须提示风险。\n"
+            "4. 所有结论必须基于已获取的数据，不得编造数据或指标。\n"
+        )
+        return system_prompt + guard
+
     def register_tool(
         self,
         func: Callable,
