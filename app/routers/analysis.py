@@ -415,6 +415,106 @@ async def test_route():
     logger.info("🧪 测试路由被调用了！")
     return {"message": "测试路由工作正常", "timestamp": time.time()}
 
+
+# =============================================================================
+# 分析前预检接口
+# =============================================================================
+
+# 缓存层/非真实 API 数据源类型，不视为可用数据源
+_CACHE_SOURCE_TYPES = {"local", "mongodb", "local_file"}
+
+
+@router.get("/precheck", response_model=Dict[str, Any])
+async def precheck_analysis(
+    symbol: Optional[str] = Query(None, description="待分析的股票代码（可选）"),
+    user: dict = Depends(get_current_user),
+):
+    """
+    分析提交前预检：检查数据源配置、基础数据同步状态、目标股票是否存在。
+
+    返回 can_submit=False 时，前端应阻止提交并引导用户先完成对应步骤。
+    """
+    from app.services.config_service import config_service
+
+    try:
+        # ── 1. 检查数据源配置 ──
+        config = await config_service.get_system_config()
+        enabled_real_sources: List[str] = []
+        if config and config.data_source_configs:
+            for ds in config.data_source_configs:
+                if ds.enabled and ds.type not in _CACHE_SOURCE_TYPES:
+                    enabled_real_sources.append(ds.type)
+
+        if not enabled_real_sources:
+            return {
+                "can_submit": False,
+                "reason": "no_datasource",
+                "message": "尚未配置可用的数据源，请先完成数据源配置",
+                "redirect": "/settings/config",
+                "redirect_tab": "datasource",
+                "details": {"enabled_real_sources": []},
+            }
+
+        # ── 2. 检查基础数据同步 ──
+        db = get_mongo_db()
+        basics_count = await db["stock_basic_info"].count_documents({})
+        if basics_count == 0:
+            return {
+                "can_submit": False,
+                "reason": "no_basics",
+                "message": "股票基础数据尚未同步，请先执行数据同步",
+                "redirect": "/settings/sync",
+                "details": {
+                    "enabled_real_sources": enabled_real_sources,
+                    "basics_count": 0,
+                },
+            }
+
+        # ── 3. 检查目标股票是否存在（如果传了 symbol） ──
+        target_exists = True
+        if symbol:
+            sym = symbol.strip()
+            # 同时匹配 code 和 symbol 字段
+            query = {"$or": [{"code": sym}, {"symbol": sym}]}
+            doc = await db["stock_basic_info"].find_one(query)
+            target_exists = doc is not None
+
+        if symbol and not target_exists:
+            return {
+                "can_submit": False,
+                "reason": "stock_not_found",
+                "message": f"股票 {symbol} 的基础数据未同步，请先同步该股票数据",
+                "redirect": "/settings/sync",
+                "details": {
+                    "enabled_real_sources": enabled_real_sources,
+                    "basics_count": basics_count,
+                    "symbol": symbol,
+                },
+            }
+
+        # ── 4. 全部通过 ──
+        return {
+            "can_submit": True,
+            "reason": "ok",
+            "message": "数据就绪，可以开始分析",
+            "details": {
+                "enabled_real_sources": enabled_real_sources,
+                "basics_count": basics_count,
+                "symbol": symbol,
+                "target_exists": target_exists,
+            },
+        }
+    except Exception as e:
+        logger.error(f"❌ 分析预检失败: {e}", exc_info=True)
+        # 预检本身失败不阻止分析（降级），让后续 Worker 的校验兜底
+        return {
+            "can_submit": True,
+            "reason": "precheck_error",
+            "message": "预检服务异常，已放行提交",
+            "details": {"error": str(e)},
+        }
+
+
 @router.get("/tasks/{task_id}/status", response_model=Dict[str, Any])
 async def get_task_status_new(
     task_id: str,

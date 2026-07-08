@@ -1333,6 +1333,44 @@ const submitAnalysis = async () => {
     return
   }
 
+  // 🔥 分析前预检：检查数据源配置、基础数据同步状态
+  try {
+    const precheckResp = await analysisApi.precheck(analysisForm.symbol)
+    const precheck = precheckResp.data || precheckResp
+    if (!precheck.can_submit) {
+      // 阻止提交，引导用户先完成配置/同步
+      const redirect = precheck.redirect || '/settings/config'
+      const reason = precheck.reason || 'unknown'
+      const message = precheck.message || '请先完成系统配置'
+
+      // 根据原因设置跳转参数
+      let redirectUrl = redirect
+      if (precheck.redirect_tab) {
+        redirectUrl = `${redirect}?tab=${precheck.redirect_tab}`
+      }
+
+      await ElMessageBox.confirm(
+        message,
+        '无法开始分析',
+        {
+          confirmButtonText: reason === 'no_datasource' ? '去配置数据源' : '去同步数据',
+          cancelButtonText: '取消',
+          type: 'warning',
+          showClose: true,
+        }
+      )
+      router.push(redirectUrl)
+      return
+    }
+  } catch (precheckErr: any) {
+    // 用户点击取消或预检异常时，不继续提交
+    if (precheckErr === 'cancel' || precheckErr?.toString?.().includes('cancel')) {
+      return
+    }
+    // 预检接口本身异常，降级放行（后端 Worker 还有兜底校验）
+    console.warn('⚠️ 分析预检异常，降级放行:', precheckErr)
+  }
+
   submitting.value = true
 
   try {
@@ -1864,20 +1902,18 @@ const getAnalysisReports = (data: any) => {
     { key: 'sentiment_report', title: '💭 情绪研究' },
     { key: 'news_report', title: '📰 新闻研究' },
     { key: 'chip_report', title: '🧮 筹码分布研究' },
-    { key: 'bull_researcher', title: '🐂 乐观情景研究员' },
+    // 工坊 Agent 新增
+    { key: 'valuation_report', title: '📊 多维度估值分析' },
+    // 研究团队（去重：优先用带后缀的）
     { key: 'bull_report', title: '🐂 乐观情景研究员' },
-    { key: 'bear_researcher', title: '🐻 审慎情景研究员' },
     { key: 'bear_report', title: '🐻 审慎情景研究员' },
     { key: 'research_team_decision', title: '🔬 平衡研究结论' },
     { key: 'investment_plan', title: '📋 研究经理简报' },
     { key: 'trader_investment_plan', title: '🧩 研究简报' },
-    { key: 'risky_analyst', title: '🔥 高弹性情景观点' },
+    // 风险团队（去重：优先用带后缀的）
     { key: 'risky_opinion', title: '🔥 高弹性情景观点' },
-    { key: 'safe_analyst', title: '🛡️ 防御情景观点' },
     { key: 'safe_opinion', title: '🛡️ 防御情景观点' },
-    { key: 'neutral_analyst', title: '⚖️ 基准情景观点' },
     { key: 'neutral_opinion', title: '⚖️ 基准情景观点' },
-    { key: 'risk_management_decision', title: '⚠️ 风险治理结论' },
     { key: 'risk_assessment', title: '⚠️ 风险治理结论' },
     { key: 'final_trade_decision', title: '📝 综合研究结论' },
   ]
@@ -1896,6 +1932,22 @@ const getAnalysisReports = (data: any) => {
 
   Object.keys(reportsData).forEach(key => {
     if (key === 'structured_reports' || addedKeys.has(key)) {
+      return
+    }
+
+    // 跳过重复的 key（避免 researcher/analyst 后缀的重复项）
+    const skipPatterns = [
+      // 研究团队：跳过 _researcher 后缀（优先用 _report）
+      /^bull_researcher$/,
+      /^bear_researcher$/,
+      // 风险团队：跳过 _analyst 后缀（优先用 _opinion）
+      /^risky_analyst$/,
+      /^safe_analyst$/,
+      /^neutral_analyst$/,
+      /^risk_management_decision$/, // 跳过这个（优先用 risk_assessment）
+    ]
+    if (skipPatterns.some(p => p.test(key))) {
+      addedKeys.add(key)
       return
     }
 

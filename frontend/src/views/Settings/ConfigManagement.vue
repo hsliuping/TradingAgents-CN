@@ -1408,6 +1408,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Setting,
@@ -1448,6 +1449,7 @@ import DataSourceGroupingDialog from './components/DataSourceGroupingDialog.vue'
 import SortableDataSourceList from './components/SortableDataSourceList.vue'
 
 // 响应式数据
+const router = useRouter()
 const activeTab = ref('providers')
 const providers = ref<LLMProvider[]>([])
 const llmConfigs = ref<LLMConfig[]>([])
@@ -2417,8 +2419,26 @@ const handleUpdateDataSourceOrder = async (categoryId: string, orderedItems: Arr
 }
 
 // 数据源配置成功回调
-const handleDataSourceConfigSuccess = () => {
-  loadDataSourceConfigs()
+const handleDataSourceConfigSuccess = async () => {
+  await loadDataSourceConfigs()
+
+  // 🔥 数据源配置成功后，引导用户去同步数据
+  try {
+    await ElMessageBox.confirm(
+      '数据源已配置完成，建议立即同步股票基础数据，以便开始分析。',
+      '数据源配置成功',
+      {
+        confirmButtonText: '立即同步数据',
+        cancelButtonText: '稍后再说',
+        type: 'success',
+        showClose: true,
+      }
+    )
+    // 用户点击"立即同步数据"，跳转到同步页面
+    router.push('/settings/sync')
+  } catch (action) {
+    // 用户点击"稍后再说"或关闭，不做任何操作
+  }
 }
 
 // 市场分类管理成功回调

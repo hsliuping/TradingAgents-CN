@@ -132,6 +132,12 @@ export const analysisApi = {
     return request.post('/api/analysis/single', analysisRequest)
   },
 
+  // 分析前预检：检查数据源配置、基础数据同步状态
+  precheck(symbol?: string): Promise<ApiResponse<any>> {
+    const params = symbol ? { symbol } : {}
+    return request.get('/api/analysis/precheck', { params })
+  },
+
   // 获取任务状态
   getTaskStatus(taskId: string): Promise<ApiResponse<any>> {
     return request.get(`/api/analysis/tasks/${taskId}/status`)

@@ -32,6 +32,47 @@
     </div>
 
 
+    <!-- 🔥 系统就绪度引导卡片（未就绪时显示） -->
+    <el-card
+      v-if="systemReadiness && !systemReadiness.overall_ready && systemReadiness.next_step !== 'error'"
+      class="readiness-guide-card"
+      shadow="hover"
+    >
+      <div class="readiness-guide">
+        <div class="readiness-icon">
+          <el-icon size="36" :color="systemReadiness.next_step === 'sync_data' ? '#E6A23C' : '#409EFF'">
+            <SetUp />
+          </el-icon>
+        </div>
+        <div class="readiness-content">
+          <h3>{{ systemReadiness.next_step_message }}</h3>
+          <div class="readiness-steps">
+            <span :class="['step-item', systemReadiness.datasource_configured ? 'done' : (systemReadiness.next_step === 'configure_datasource' ? 'current' : '')]">
+              <el-icon v-if="systemReadiness.datasource_configured"><DocumentChecked /></el-icon>
+              <span v-else>1</span>
+              配置数据源
+            </span>
+            <span :class="['step-item', systemReadiness.llm_configured ? 'done' : (systemReadiness.next_step === 'configure_llm' ? 'current' : '')]">
+              <el-icon v-if="systemReadiness.llm_configured"><DocumentChecked /></el-icon>
+              <span v-else>2</span>
+              配置大模型
+            </span>
+            <span :class="['step-item', systemReadiness.basics_synced ? 'done' : (systemReadiness.next_step === 'sync_data' ? 'current' : '')]">
+              <el-icon v-if="systemReadiness.basics_synced"><DocumentChecked /></el-icon>
+              <span v-else>3</span>
+              同步数据
+            </span>
+          </div>
+        </div>
+        <div class="readiness-action">
+          <el-button type="primary" size="large" @click="goToNextStep">
+            前往设置
+            <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+      </div>
+    </el-card>
+
     <!-- v3.0 智能助手推荐卡片 -->
     <el-card class="assistant-highlight-card">
       <div class="learning-highlight">
@@ -514,6 +555,7 @@ import { analysisApi } from '@/api/analysis'
 import { newsApi } from '@/api/news'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
 import { ensureReportExportAccess } from '@/utils/featureAccess'
+import { request } from '@/api/request'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -538,6 +580,29 @@ const favoriteStocks = ref<any[]>([])
 const marketNews = ref<any[]>([])
 // 模拟交易账户数据
 const paperAccount = ref<PaperAccountSummary | null>(null)
+
+// 🔥 系统就绪度（首页引导卡片用）
+const systemReadiness = ref<any>(null)
+
+const loadSystemReadiness = async () => {
+  try {
+    const resp = await request.get('/api/system/readiness')
+    systemReadiness.value = resp
+  } catch (e) {
+    console.warn('⚠️ 系统就绪度检查失败:', e)
+  }
+}
+
+const goToNextStep = () => {
+  if (!systemReadiness.value) return
+  const redirect = systemReadiness.value.next_step_redirect || '/settings/config'
+  const tab = systemReadiness.value.next_step_tab
+  if (tab) {
+    router.push(`${redirect}?tab=${tab}`)
+  } else {
+    router.push(redirect)
+  }
+}
 
 // 首次登录引导弹窗
 const showGuideDialog = ref(false)
@@ -857,6 +922,9 @@ onMounted(async () => {
   // 检查是否是首次登录用户
   checkFirstTimeUser()
   
+  // 🔥 加载系统就绪度（引导卡片）
+  await loadSystemReadiness()
+  
   // 加载自选股数据
   await loadFavoriteStocks()
   // 加载最近分析
@@ -908,6 +976,65 @@ onMounted(async () => {
     .welcome-actions {
       display: flex;
       gap: 16px;
+    }
+  }
+
+  .readiness-guide-card {
+    margin-bottom: 24px;
+    border: 2px solid #409EFF;
+    background: linear-gradient(135deg, #ecf5ff 0%, #f0f9ff 100%);
+
+    .readiness-guide {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      padding: 8px 0;
+
+      .readiness-icon {
+        flex-shrink: 0;
+      }
+
+      .readiness-content {
+        flex: 1;
+
+        h3 {
+          margin: 0 0 12px 0;
+          font-size: 18px;
+          color: #303133;
+        }
+
+        .readiness-steps {
+          display: flex;
+          gap: 20px;
+
+          .step-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-size: 13px;
+            background: #f5f7fa;
+            color: #909399;
+
+            &.done {
+              background: #f0f9eb;
+              color: #67c23a;
+            }
+
+            &.current {
+              background: #ecf5ff;
+              color: #409EFF;
+              font-weight: 600;
+              box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+            }
+          }
+        }
+      }
+
+      .readiness-action {
+        flex-shrink: 0;
+      }
     }
   }
 
