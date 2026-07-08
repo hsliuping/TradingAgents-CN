@@ -606,12 +606,11 @@ class AKShareAdapter(DataSourceAdapter):
             logger.warning("AKShare: Trade calendar API failed, using yesterday")
             yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
             
-            # 保存到缓存
+            # 保存到缓存（与成功分支一致，使用同步方法避免在事件循环中调用 asyncio.run）
             try:
-                import asyncio
                 from app.services.trade_date_cache_service import get_trade_date_cache_service
                 cache_service = get_trade_date_cache_service()
-                asyncio.run(cache_service.set_cached_trade_date("akshare", yesterday))
+                cache_service.set_cached_trade_date_sync("akshare", yesterday)
             except Exception as e:
                 logger.debug(f"AKShare: Failed to cache trade date: {e}")
             
