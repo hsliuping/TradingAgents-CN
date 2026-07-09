@@ -1,151 +1,139 @@
-# TradingAgents-CN 文档中心 (v0.1.12)
+# TradingAgents-CN 文档中心
 
-欢迎来到 TradingAgents-CN 多智能体金融交易框架的文档中心。本文档适用于中文增强版 v0.1.12，包含智能新闻分析模块、多LLM提供商集成、模型选择持久化、完整的A股支持、国产LLM集成、Docker容器化部署和专业报告导出功能。
+> 本文档体系按"产品发展、迭代、开发"三层规划，服务于不同角色的读者。
+>
+> **当前版本：v3.0** | [版本号管理规范](#版本号管理规范)
 
-> 说明：本索引保留了较多 v0.1.x 历史条目。当前主线版本的系统结构请优先查看 [当前系统架构](./architecture/system-architecture.md)；带版本目录的架构稿视为历史参考。
+## 文档体系总览
 
-## 🎯 版本亮点 (v0.1.12)
+| 层级 | 目录 | 面向角色 | 说明 |
+|------|------|---------|------|
+| 产品层 | [01-product](./01-product/) | 所有人 | 产品定位、路线图、发布说明、版本对比 |
+| 用户层 | [02-user-guide](./02-user-guide/) | 最终用户 | 安装、配置、功能使用、进阶指南 |
+| 开发层 | [03-development](./03-development/) | 开发者 | 架构设计、API 文档、开发指南、开发流程 |
+| 运维层 | [04-operations](./04-operations/) | 运维人员 | 部署、数据库、监控、故障排查 |
+| 设计层 | [05-design](./05-design/) | 产品/架构师 | **按版本号管理**：v3.0/v4.0/v5.0 |
+| 知识层 | [06-knowledge](./06-knowledge/) | 全体成员 | 经验教训、Bug 编年史、合规要求 |
+| 课程层 | [07-courses](./07-courses/) | 用户/学员 | 高级交易课程（24 课） |
+| 博客层 | [08-blog](./08-blog/) | 所有人 | 技术博客、版本发布博客 |
+| 归档区 | [99-archive](./99-archive/) | 历史参考 | **按版本号归档**：v0.1.x/v1.0.x/v2.0/v2.1 |
 
-- 🧠 **智能新闻分析模块** - AI驱动的新闻过滤、质量评估、相关性分析
-- 🔍 **多层次新闻过滤** - 智能过滤器、增强过滤器、统一新闻工具
-- 📊 **新闻质量评估** - 深度语义分析、情感倾向识别、关键词提取
-- 🛠️ **技术修复优化** - DashScope适配器修复、DeepSeek死循环修复
-- 📚 **完善测试文档** - 15+测试文件、8个技术文档、用户指南
-- 🗂️ **项目结构优化** - 文档分类整理、测试文件统一、根目录整洁
-- 🤖 **多LLM提供商集成** - 4大提供商，60+模型，一站式AI体验
-- 💾 **模型选择持久化** - URL参数存储，刷新保持，配置分享
+## 快速导航
 
-## 文档结构
+### 新用户入门
+1. [快速开始](./02-user-guide/getting-started/quick-start.md)
+2. [安装指南](./02-user-guide/getting-started/installation.md)
+3. [数据库配置](./02-user-guide/getting-started/database-setup.md)
+4. [LLM 配置](./02-user-guide/configuration/llm-config.md)
+5. [数据源配置](./02-user-guide/configuration/config-guide.md)
 
-### 📋 概览文档
+### 功能使用
+- [个股分析](./02-user-guide/features/stock-analysis.md)
+- [模拟交易](./02-user-guide/features/paper-trading.md)
+- [持仓分析](./02-user-guide/features/portfolio-analysis.md)
+- [定时分析](./02-user-guide/features/scheduled-analysis.md)
+- [报告导出](./02-user-guide/features/report-export.md)
 
-- [项目概述](./overview/project-overview.md) - 项目的基本介绍和目标
-- [快速开始](./overview/quick-start.md) - 快速上手指南
-- [安装指南](./overview/installation.md) - 详细的安装说明
+### 进阶功能
+- [Agent 工坊](./02-user-guide/advanced/prompt-management.md)
+- [提示词管理](./02-user-guide/advanced/prompt-management.md)
+- [QMT 对接](./02-user-guide/advanced/qmt-usage.md)
 
-### 🏗️ 架构文档
+### 开发者
+- [开发环境搭建](./03-development/getting-started/setup.md)
+- [项目结构](./03-development/getting-started/project-structure.md)
+- [系统架构](./03-development/architecture/system-overview.md)
+- [API 文档](./03-development/api/)
+- [开发流程](./03-development/workflow/development-workflow.md)
+- [分支策略](./03-development/workflow/branch-guide.md)
 
-- [当前系统架构](./architecture/system-architecture.md) - v3.0 当前运行架构、组件拓扑与技术框架
-- [部署拓扑图](./architecture/deployment-topology.md) - 当前部署形态、端口、网络和侧车组件说明
-- [当前数据流架构](./architecture/data-flow-architecture.md) - 当前分析、通知、同步、IM 助手链路
-- [后端模块架构](./architecture/backend-module-architecture.md) - 当前后端目录边界与职责说明
-- [历史系统架构（v0.1.16）](./architecture/v0.1.16/system-architecture.md) - 旧版系统架构说明
-- [历史智能体架构（v0.1.13）](./architecture/v0.1.13/agent-architecture.md) - 旧版智能体设计
-- [历史数据流架构（v0.1.13）](./architecture/v0.1.13/data-flow-architecture.md) - 旧版数据处理流程
-- [历史图结构设计（v0.1.13）](./architecture/v0.1.13/graph-structure.md) - 旧版 LangGraph 图结构
-- [技术因子治理](./architecture/technical-factor-governance.md) - 当前技术因子治理架构
-- [报告模块结构](./architecture/report-modules-structure.md) - 当前报告模块编排结构
+### 运维部署
+- [Docker 部署](./04-operations/deployment/docker-deployment-guide.md)
+- [Windows 便携版](./04-operations/deployment/windows-portable.md)
+- [数据库运维](./04-operations/database/)
+- [故障排查](./04-operations/troubleshooting/)
 
-### 🤖 智能体文档
+### 产品演进（按版本号管理）
+- **[v3.0（当前版本）](./05-design/v3.0/)** - 当前发布版本的设计文档
+- **[v4.0（下一版本）](./05-design/v4.0/)** - 下一版本规划
+- **[v5.0（远期愿景）](./05-design/v5.0/)** - 远期愿景
+- [前沿探索](./05-design/research/) - 不绑定版本的前沿研究
 
-- [分析师团队](./agents/analysts.md) - 各类分析师智能体详解
-- [研究员团队](./agents/researchers.md) - 研究员智能体设计
-- [交易员](./agents/trader.md) - 交易决策智能体
-- [风险管理](./agents/risk-management.md) - 风险管理智能体
-- [管理层](./agents/managers.md) - 管理层智能体
+## 版本号管理规范
 
-### 📊 数据处理
+### 核心原则
 
-- [数据源集成](./data/data-sources.md) - 支持的数据源和API (含A股支持) ✨
-- [Tushare数据接口集成](./data/china_stock-api-integration.md) - A股数据源详解 ✨
-- [数据处理流程](./data/data-processing.md) - 数据获取和处理
-- [缓存机制](./data/caching.md) - 数据缓存策略
+**设计文档（05-design）和归档文档（99-archive）必须使用明确版本号目录**，禁止使用 `current`、`latest`、`new` 等相对概念命名。
 
-### 🎯 核心功能
+### 05-design 版本号目录规则
 
-- [🧠 智能新闻分析模块](./features/NEWS_FILTERING_SOLUTION_DESIGN.md) - AI驱动的新闻过滤与质量评估 (v0.1.12新增) ✨
-- [📊 新闻质量分析](./features/NEWS_QUALITY_ANALYSIS_REPORT.md) - 新闻质量评估与相关性分析 (v0.1.12新增) ✨
-- [🔧 新闻分析师工具修复](./features/NEWS_ANALYST_TOOL_CALL_FIX_REPORT.md) - 工具调用修复报告 (v0.1.12新增) ✨
-- [🤖 多LLM提供商集成](./features/multi-llm-integration.md) - 4大提供商，60+模型支持 (v0.1.11) ✨
-- [💾 模型选择持久化](./features/model-persistence.md) - URL参数存储，配置保持 (v0.1.11) ✨
-- [📄 报告导出功能](./features/report-export.md) - Word/PDF/Markdown多格式导出 (v0.1.7) ✨
-- [🐳 Docker容器化部署](./features/docker-deployment.md) - 一键部署完整环境 (v0.1.7) ✨
-- [📰 新闻分析系统](./features/news-analysis-system.md) - 多源实时新闻聚合与分析 ✨
+```
+05-design/
+├── v3.0/              # 当前发布版本（v3.0.x 系列）的设计文档
+├── v4.0/              # 下一版本规划
+├── v5.0/              # 远期愿景
+└── research/          # 前沿探索（不绑定版本）
+```
 
-### ⚙️ 配置与部署
+**版本号命名规则**：
+- 主版本号目录：`v3.0`、`v4.0`、`v5.0`（对应 major.minor 中的 major）
+- 同一主版本号下的小版本迭代不新建目录，直接在原目录内更新文件
+- 例如 v3.0.1、v3.0.2、v3.1.0 的设计文档都放在 `v3.0/` 目录下
 
-- [配置说明](./configuration/config-guide.md) - 配置文件详解 (v0.1.11更新) ✨
-- [LLM配置](./configuration/llm-config.md) - 大语言模型配置 (v0.1.11更新) ✨
-- [多提供商配置](./configuration/multi-provider-config.md) - 4大LLM提供商配置指南 (v0.1.11新增) ✨
-- [OpenRouter配置](./configuration/openrouter-config.md) - OpenRouter 60+模型配置 (v0.1.11新增) ✨
-- [Docker配置](./configuration/docker-config.md) - Docker环境配置指南 (v0.1.7) ✨
-- [DeepSeek配置](./configuration/deepseek-config.md) - DeepSeek V3模型配置 ✨
-- [阿里百炼配置](./configuration/dashscope-config.md) - 阿里百炼模型配置 ✨
-- [Google AI配置](./configuration/google-ai-setup.md) - Google AI (Gemini)模型配置指南 ✨
-- [Token追踪指南](./configuration/token-tracking-guide.md) - Token使用监控 (v0.1.7更新) ✨
-- [数据目录配置](./configuration/data-directory-configuration.md) - 数据存储路径配置
-- [Web界面配置](../web/README.md) - Web管理界面使用指南
+### 99-archive 版本号目录规则
 
-### 🤖 LLM集成专区
+```
+99-archive/
+├── v0.1.x/            # v0.1.x 时代所有文档
+├── v1.0.x/            # v1.0.x 时代所有文档
+├── v2.0/              # v2.0 设计文档
+├── v2.1/              # v2.1 设计文档
+├── deprecated-features/ # 已废弃功能（跨版本）
+└── historical-fixes/    # 历史修复记录（跨版本）
+```
 
-- [📚 LLM文档目录](./llm/README.md) - 大语言模型集成完整文档 ✨
-- [🔧 LLM集成指南](./llm/LLM_INTEGRATION_GUIDE.md) - 新LLM提供商接入指导 ✨
-- [🧪 LLM测试验证](./llm/LLM_TESTING_VALIDATION_GUIDE.md) - LLM功能测试指南 ✨
-- [🎯 千帆模型接入](./llm/QIANFAN_INTEGRATION_GUIDE.md) - 百度千帆专项接入指南 ✨
+### 版本迭代流程
 
-### 🔧 开发指南
+当发布新主版本（如 v3.0 → v4.0）时：
 
-- [开发环境搭建](./development/dev-setup.md) - 开发环境配置
-- [代码结构](./development/code-structure.md) - 代码组织结构
-- [扩展开发](./development/extending.md) - 如何扩展框架
-- [测试指南](./development/testing.md) - 测试策略和方法
+1. **设计文档迁移**：
+   - `05-design/v3.0/` → `99-archive/v3.0/`（当前版本归档）
+   - `05-design/v4.0/` → `05-design/v4.0/`（保持不变，成为新的当前版本）
+   - 新建 `05-design/v5.0/`（开始下一版本规划）
 
-### 📋 版本发布 (v0.1.7更新)
+2. **发布说明**：
+   - 在 `01-product/release-notes/` 新建 `v4.0.0.md`
 
-- [更新日志](./releases/CHANGELOG.md) - 所有版本更新记录 ✨
-- [v0.1.7发布说明](./releases/v0.1.7-release-notes.md) - 最新版本详细说明 ✨
-- [版本对比](./releases/version-comparison.md) - 各版本功能对比 ✨
-- [升级指南](./releases/upgrade-guide.md) - 版本升级详细指南 ✨
+3. **知识沉淀**：
+   - 将本版本周期内的重大 Bug 整理到 `06-knowledge/bug-chronicle/`
 
-### 📚 API参考
+4. **禁止的操作**：
+   - ❌ 禁止在 `05-design/` 下使用 `current/`、`next/`、`future/` 等相对命名
+   - ❌ 禁止把旧版本文档留在 `05-design/v3.0/` 中不归档
+   - ❌ 禁止跨版本修改已归档的文档（如需修改，复制到当前版本目录）
 
-- [核心API](./api/core-api.md) - 核心类和方法
-- [智能体API](./api/agents-api.md) - 智能体接口
-- [数据API](./api/data-api.md) - 数据处理接口
+### 其他层的版本管理
 
-### 🌐 使用指南
+| 层级 | 版本管理方式 | 说明 |
+|------|-------------|------|
+| 01-product | 按版本号命名文件 | `release-notes/v3.0.0.md`、`comparison/v2.1-vs-v3.0.md` |
+| 02-user-guide | 跟随当前版本 | 文档内容随当前版本更新，不保留历史版本 |
+| 03-development | 跟随当前版本 | 文档内容随当前版本更新，不保留历史版本 |
+| 04-operations | 跟随当前版本 | 文档内容随当前版本更新，不保留历史版本 |
+| 05-design | **按版本号目录** | 每个主版本一个目录，版本迭代时归档 |
+| 06-knowledge | 跨版本积累 | 按季度/主题组织，不绑定版本 |
+| 99-archive | **按版本号目录** | 每个主版本一个目录 |
 
-- [🧠 新闻过滤使用指南](./guides/NEWS_FILTERING_USER_GUIDE.md) - 智能新闻分析模块使用方法 (v0.1.12新增) ✨
-- [🤖 多LLM提供商使用指南](./guides/multi-llm-usage-guide.md) - 4大提供商使用方法 (v0.1.11) ✨
-- [💾 模型选择持久化指南](./guides/model-persistence-guide.md) - 配置保存和分享方法 (v0.1.11) ✨
-- [🔗 OpenRouter使用指南](./guides/openrouter-usage-guide.md) - 60+模型使用指南 (v0.1.11) ✨
-- [🌐 Web界面指南](./usage/web-interface-guide.md) - Web界面详细使用指南 (v0.1.11更新) ✨
-- [📊 投资分析指南](./usage/investment_analysis_guide.md) - 投资分析完整流程
-- [🇨🇳 A股分析指南](./guides/a-share-analysis-guide.md) - A股市场分析专项指南 (v0.1.7) ✨
-- [⚙️ 配置管理指南](./guides/config-management-guide.md) - 配置管理和成本统计使用方法 (v0.1.7) ✨
-- [🐳 Docker部署指南](./guides/docker-deployment-guide.md) - Docker容器化部署详细指南 (v0.1.7) ✨
-- [📄 报告导出指南](./guides/report-export-guide.md) - 专业报告导出使用指南 (v0.1.7) ✨
-- [🧠 DeepSeek使用指南](./guides/deepseek-usage-guide.md) - DeepSeek V3模型使用指南 (v0.1.7) ✨
-- [📰 新闻分析系统使用指南](./guides/news-analysis-guide.md) - 实时新闻获取与分析指南 ✨
+## 文档命名规范
 
-### 💡 示例和教程
+- 统一使用小写 kebab-case（如 `quick-start.md`）
+- 版本相关文件加版本后缀（如 `docker-deployment-v1.md`）
+- 临时文件加日期前缀（如 `2025-10-26-bugfix.md`）
 
-- [基础示例](./examples/basic-examples.md) - 基本使用示例
-- [高级示例](./examples/advanced-examples.md) - 高级功能示例
-- [自定义智能体](./examples/custom-agents.md) - 创建自定义智能体
+## ADR（架构决策记录）
 
-### ❓ 常见问题
-
-- [FAQ](./faq/faq.md) - 常见问题解答
-- [故障排除](./faq/troubleshooting.md) - 问题诊断和解决
-
-### 📋 版本历史
-
-- [📄 v0.1.12 发布说明](./releases/v0.1.12-release-notes.md) - 智能新闻分析模块与项目结构优化 ✨
-- [📄 v0.1.12 更新日志](./releases/CHANGELOG_v0.1.12.md) - 详细技术更新记录 ✨
-- [📄 v0.1.11 发布说明](./releases/v0.1.11-release-notes.md) - 多LLM提供商集成与模型选择持久化
-- [📄 v0.1.11 更新日志](./releases/CHANGELOG_v0.1.11.md) - 详细技术更新记录
-- [📄 完整更新日志](./releases/CHANGELOG.md) - 所有版本历史记录
-- [📄 升级指南](./releases/upgrade-guide.md) - 版本升级操作指南
-- [📄 版本对比](./releases/version-comparison.md) - 各版本功能对比
-
-## 贡献指南
-
-如果您想为文档做出贡献，请参考 [贡献指南](../CONTRIBUTING.md)。
-
-## 联系我们
-
-- **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
-- **邮箱**: [hsliup@163.com](mailto:hsliup@163.com)
-- 项目ＱＱ群：782124367
-- **原项目**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
+重要架构决策记录在 [03-development/decisions/](./03-development/decisions/)，每个 ADR 包含：
+- 背景：面临什么问题
+- 决策：选择了什么方案
+- 原因：为什么选这个方案
+- 后果：带来了什么影响
