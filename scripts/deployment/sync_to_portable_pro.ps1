@@ -575,6 +575,31 @@ if (Test-Path $sourceVendorsDir) {
         Write-Host "  Copying MongoDB..." -ForegroundColor Gray
         Copy-Item -Path $sourceMongoDB -Destination $destMongoDB -Recurse -Force
         Write-Host "  ✓ MongoDB copied" -ForegroundColor Green
+
+        # Copy VC++ Runtime DLLs to MongoDB bin directory (fixes missing DLL on user machines)
+        $mongoBinDir = Get-ChildItem -Path $destMongoDB -Recurse -Directory -Filter "bin" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($mongoBinDir) {
+            $vcDlls = @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+            $system32 = Join-Path $env:SystemRoot "System32"
+            # Also check vendors/vcredist/ as fallback
+            $vcredistDir = Join-Path $sourceVendorsDir "vcredist"
+            foreach ($dll in $vcDlls) {
+                $srcDll = $null
+                # Try vcredist dir first, then system32
+                $srcFromVcredist = Join-Path $vcredistDir $dll
+                $srcFromSystem = Join-Path $system32 $dll
+                if (Test-Path -LiteralPath $srcFromVcredist) {
+                    $srcDll = $srcFromVcredist
+                } elseif (Test-Path -LiteralPath $srcFromSystem) {
+                    $srcDll = $srcFromSystem
+                }
+                if ($srcDll) {
+                    $destDll = Join-Path $mongoBinDir.FullName $dll
+                    Copy-Item -LiteralPath $srcDll -Destination $destDll -Force
+                    Write-Host "  ✓ $dll copied to MongoDB bin" -ForegroundColor Gray
+                }
+            }
+        }
     } else {
         Write-Host "  ⚠ MongoDB not found at $sourceMongoDB" -ForegroundColor Yellow
     }

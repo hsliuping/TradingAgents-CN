@@ -88,4 +88,31 @@ try {
   Write-Host "Redis download failed or blocked. Please place a redis*.zip under install/vendors and use stage_local_vendors.ps1" -ForegroundColor Yellow
 }
 
+# VC++ Runtime DLLs (required by MongoDB on Windows)
+# Copy from system System32 to vendors/vcredist/
+Write-Host ""
+Write-Host "Collecting VC++ Runtime DLLs for MongoDB..." -ForegroundColor Cyan
+$vcredistDir = Join-Path $absTarget "vcredist"
+Ensure-Dir $vcredistDir
+$vcDlls = @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+$system32 = Join-Path $env:SystemRoot "System32"
+$copiedCount = 0
+foreach ($dll in $vcDlls) {
+    $srcDll = Join-Path $system32 $dll
+    $destDll = Join-Path $vcredistDir $dll
+    if (Test-Path -LiteralPath $srcDll) {
+        Copy-Item -LiteralPath $srcDll -Destination $destDll -Force
+        Write-Host "  Copied: $dll" -ForegroundColor Green
+        $copiedCount++
+    } else {
+        Write-Host "  WARNING: $dll not found in System32" -ForegroundColor Yellow
+    }
+}
+if ($copiedCount -eq 0) {
+    Write-Host "  WARNING: No VC++ Runtime DLLs found. MongoDB may fail to start on user machines." -ForegroundColor Yellow
+    Write-Host "  Please install VC++ 2015-2022 Redistributable x64 on this build machine." -ForegroundColor Yellow
+} else {
+    Write-Host "  VC++ Runtime DLLs staged at: $vcredistDir ($copiedCount files)" -ForegroundColor Green
+}
+
 Write-Host "Vendor downloads completed (where possible)." -ForegroundColor Green
