@@ -172,7 +172,7 @@ Write-Host ""
 
 # ── Step 3: Build installer (includes portable + 7z + update package) ─────────
 Write-Host "[3/5] Building installer (portable + 7z + NSIS + update package)..." -ForegroundColor Yellow
-$installerScript = Join-Path $root "scripts\windows-installer\build\build_installer.ps1"
+$installerScript = Join-Path $root "scripts\deployment\build_installer.ps1"
 if ($SkipInstaller) {
     Write-Host "  Skipped (SkipInstaller)" -ForegroundColor Gray
     $proScript = Join-Path $root "scripts\deployment\build_pro_package.ps1"
@@ -191,7 +191,7 @@ if ($SkipInstaller) {
     & powershell -ExecutionPolicy Bypass -File $installerScript -Version $resolvedBuildVersion -ArchiveRoot $ArchiveRoot
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } else {
-    Write-Host "  ERROR: build_installer.ps1 not found" -ForegroundColor Red
+    Write-Host "  ERROR: build_installer.ps1 not found at: $installerScript" -ForegroundColor Red
     exit 1
 }
 Write-Host ""

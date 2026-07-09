@@ -13,7 +13,8 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 param(
     [switch]$SkipBuild,
-    [string]$Version = ""
+    [string]$Version = "",
+    [string]$ArchiveRoot = "D:\release"
 )
 
 $ErrorActionPreference = "Stop"
