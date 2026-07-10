@@ -1,4 +1,4 @@
-﻿; ============================================================================
+﻿﻿; ============================================================================
 ; TradingAgentsCN Windows Installer (NSIS 3.x)
 ; 特性：
 ;   1. 全中文界面
@@ -553,9 +553,9 @@ RMDir "$TEMP\TradingAgentsCN-Install"
 ; 升级模式：恢复配置和数据
 ${If} $InstallMode == 1
   DetailPrint "恢复配置和数据（升级模式）..."
-  nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$instDir = ''$INSTDIR''; $$backupRoot = Join-Path $$instDir ''backup''; $$latest = Get-ChildItem -Path $$backupRoot -Directory -Filter ''pre_install_*'' | Sort-Object CreationTime -Descending | Select-Object -First 1; if ($$latest) { $$items = @(''.env'', ''runtime'', ''data'', ''logs''); foreach ($$item in $$items) { $$src = Join-Path $$latest.FullName $$item; $$dst = Join-Path $$instDir $$item; if (Test-Path $$src) { if (Test-Path $$dst) { Remove-Item -Path $$dst -Recurse -Force -ErrorAction SilentlyContinue }; Copy-Item -Path $$src -Destination $$dst -Recurse -Force; Write-Host (''Restored: '' + $$item) } }; Write-Host (''Restore completed from '' + $$latest.Name) }"'
+  nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -File "$INSTDIR\scripts\installer\restore_backup.ps1" -InstallDir "$INSTDIR"'
   Pop $0
-  DetailPrint "配置和数据已恢复"
+  DetailPrint "配置和数据已恢复 (exit code: $0)"
 ${EndIf}
 
 ;----------------------------------------------------------------------------
@@ -595,26 +595,10 @@ ${EndIf}
 ; 更新配置文件端口（升级模式跳过，保留旧配置）
 ;----------------------------------------------------------------------------
 ${If} $InstallMode != 1
-  DetailPrint "更新配置文件..."
+  DetailPrint "更新配置文件端口..."
 
-  ; 从 .env.example 创建 .env（全新安装时）
-  nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$envFile = \"$INSTDIR\.env\"; $$envExample = \"$INSTDIR\.env.example\"; if (-not (Test-Path $$envFile) -and (Test-Path $$envExample)) { Copy-Item -Path $$envExample -Destination $$envFile -Force; Write-Host (''Created .env from .env.example'') }"'
-  Pop $0
-
-  ; 更新 .env 端口配置
-  nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$envFile = \"$INSTDIR\.env\"; if (Test-Path $$envFile) { $$content = Get-Content $$envFile -Raw -Encoding UTF8; $$content = $$content -replace \"PORT=.*\", \"PORT=$BackendPort\"; $$content = $$content -replace \"API_PORT=.*\", \"API_PORT=$BackendPort\"; $$content = $$content -replace \"MONGODB_PORT=.*\", \"MONGODB_PORT=$MongoPort\"; $$content = $$content -replace \"REDIS_PORT=.*\", \"REDIS_PORT=$RedisPort\"; $$content = $$content -replace \"NGINX_PORT=.*\", \"NGINX_PORT=$NginxPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$envFile, $$content, $$utf8) }"'
-
-  ; 更新 Redis 配置
-  DetailPrint "更新 Redis 配置..."
-  nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$redisConf = \"$INSTDIR\runtime\redis.conf\"; if (Test-Path $$redisConf) { $$content = Get-Content $$redisConf -Raw -Encoding UTF8; $$content = $$content -replace \"^port\\s+\\d+\", \"port $RedisPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$redisConf, $$content, $$utf8) }"'
-
-  ; 更新 MongoDB 配置
-  DetailPrint "更新 MongoDB 配置..."
-  nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$mongoConf = \"$INSTDIR\runtime\mongodb.conf\"; if (Test-Path $$mongoConf) { $$content = Get-Content $$mongoConf -Raw -Encoding UTF8; $$content = $$content -replace \"port:\\s*\\d+\", \"port: $MongoPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$mongoConf, $$content, $$utf8) }"'
-
-  ; 更新 Nginx 配置（监听端口和后端代理）
-  DetailPrint "更新 Nginx 配置..."
-  nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$nginxConf = \"$INSTDIR\runtime\nginx.conf\"; if (Test-Path $$nginxConf) { $$content = Get-Content $$nginxConf -Raw -Encoding UTF8; $$content = $$content -replace \"listen\\s+\\d+;\", \"listen       $NginxPort;\"; $$content = $$content -replace \"proxy_pass http://127\\.0\\.0\\.1:\\d+\", \"proxy_pass http://127.0.0.1:$BackendPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$nginxConf, $$content, $$utf8) }"'
+  ; 调用外部 PowerShell 脚本更新所有端口配置（避免 NSIS 转义问题）
+  nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -File "$INSTDIR\scripts\installer\update_ports.ps1" -InstallDir "$INSTDIR" -BackendPort $BackendPort -MongoPort $MongoPort -RedisPort $RedisPort -NginxPort $NginxPort'
 ${Else}
   DetailPrint "升级模式：跳过端口配置更新（保留现有配置）"
 ${EndIf}
@@ -646,6 +630,15 @@ CreateShortcut "$SMPROGRAMS\TradingAgentsCN\停止 TradingAgentsCN.lnk" \
   "" \
   "停止 TradingAgentsCN"
 
+CreateShortcut "$SMPROGRAMS\TradingAgentsCN\重启 TradingAgentsCN.lnk" \
+  "powershell.exe" \
+  '-ExecutionPolicy Bypass -NoExit -Command "Set-Location \"$INSTDIR\"; & \".\restart_all.ps1\""' \
+  "$INSTDIR\frontend\dist\favicon.ico" \
+  0 \
+  SW_SHOWNORMAL \
+  "" \
+  "重启 TradingAgentsCN"
+
 CreateShortcut "$SMPROGRAMS\TradingAgentsCN\卸载.lnk" \
   "$INSTDIR\Uninstall.exe" \
   "" \
@@ -672,6 +665,9 @@ nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $$lnkPath 
 Pop $0
 
 nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $$lnkPath = \"$SMPROGRAMS\TradingAgentsCN\停止 TradingAgentsCN.lnk\"; if (Test-Path $$lnkPath) { $$bytes = [System.IO.File]::ReadAllBytes($$lnkPath); $$bytes[0x15] = $$bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($$lnkPath, $$bytes); Write-Host \"停止快捷方式管理员标志已设置\" } } catch { Write-Host \"Error: $$_\" }"'
+Pop $0
+
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $$lnkPath = \"$SMPROGRAMS\TradingAgentsCN\重启 TradingAgentsCN.lnk\"; if (Test-Path $$lnkPath) { $$bytes = [System.IO.File]::ReadAllBytes($$lnkPath); $$bytes[0x15] = $$bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($$lnkPath, $$bytes); Write-Host \"重启快捷方式管理员标志已设置\" } } catch { Write-Host \"Error: $$_\" }"'
 Pop $0
 
 nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $$lnkPath = \"$DESKTOP\TradingAgentsCN.lnk\"; if (Test-Path $$lnkPath) { $$bytes = [System.IO.File]::ReadAllBytes($$lnkPath); $$bytes[0x15] = $$bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($$lnkPath, $$bytes); Write-Host \"桌面快捷方式管理员标志已设置\" } } catch { Write-Host \"Error: $$_\" }"'
