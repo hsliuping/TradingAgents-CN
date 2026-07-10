@@ -23,6 +23,7 @@ param(
     [switch]$SkipInstaller = $false,
     [switch]$SkipPrepare = $false,
     [switch]$SkipGovernanceValidations = $false,
+    [switch]$SkipExport = $false,
     [string]$ArchiveRoot = "D:\release"
 )
 
@@ -188,7 +189,9 @@ if ($SkipInstaller) {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 } elseif (Test-Path $installerScript) {
-    & powershell -ExecutionPolicy Bypass -File $installerScript -Version $resolvedBuildVersion -ArchiveRoot $ArchiveRoot
+    $installerArgs = @("-Version", $resolvedBuildVersion, "-ArchiveRoot", $ArchiveRoot)
+    if ($SkipExport) { $installerArgs += "-SkipExport" }
+    & powershell -ExecutionPolicy Bypass -File $installerScript @installerArgs
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } else {
     Write-Host "  ERROR: build_installer.ps1 not found at: $installerScript" -ForegroundColor Red

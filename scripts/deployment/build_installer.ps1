@@ -6,16 +6,17 @@
 # ============================================================================
 
 # UTF-8编码设置
+param(
+    [switch]$SkipBuild,
+    [switch]$SkipExport,
+    [string]$Version = "",
+    [string]$ArchiveRoot = "D:\release"
+)
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 $PSDefaultParameterValues['*:Encoding'] = 'utf8'
 $OutputEncoding = [System.Text.Encoding]::UTF8
-
-param(
-    [switch]$SkipBuild,
-    [string]$Version = "",
-    [string]$ArchiveRoot = "D:\release"
-)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -62,6 +63,33 @@ if (-not $nsisPath) {
 }
 
 Write-Host "  ✅ NSIS found: $nsisPath" -ForegroundColor Green
+Write-Host ""
+
+# ============================================================================
+# Step 1.5: 导出演示数据库到 install 目录
+# ============================================================================
+
+if (-not $SkipExport) {
+    Write-Host "[1.5/6] 导出演示数据库..." -ForegroundColor Yellow
+    Write-Host ""
+
+    $exportScript = Join-Path $PSScriptRoot "export_database.py"
+    $venvPython = Join-Path $root "env\Scripts\python.exe"
+    $pythonCmd = if (Test-Path $venvPython) { $venvPython } else { "python" }
+
+    & $pythonCmd $exportScript
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: 数据库导出失败" -ForegroundColor Red
+        Write-Host "如需跳过导出，请使用 -SkipExport 参数" -ForegroundColor Yellow
+        exit 1
+    }
+
+    Write-Host "  ✅ 演示数据库导出完成" -ForegroundColor Green
+} else {
+    Write-Host "[1.5/6] 跳过数据库导出 (-SkipExport)" -ForegroundColor Yellow
+}
+
 Write-Host ""
 
 # ============================================================================
