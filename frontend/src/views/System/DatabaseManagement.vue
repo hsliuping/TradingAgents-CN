@@ -676,40 +676,48 @@ const exportData = async () => {
   try {
     // 配置数据集合列表（用于演示系统）
     const configCollections = [
-      // v2.0 核心配置
-      'workflow_definitions',      // 工作流定义
-      'workflows',                 // 工作流实例
-      'agent_configs',             // Agent 配置
-      'tool_configs',              // 工具配置
-      'tool_agent_bindings',       // 工具-Agent 绑定
-      'agent_workflow_bindings',   // Agent-工作流 绑定
-      'agent_io_definitions',      // Agent IO 定义
-
       // 系统配置
       'system_configs',            // 系统配置（包括 LLM 配置）
+      'platform_configs',          // 平台配置
       'llm_providers',             // LLM 提供商
       'model_catalog',             // 模型目录
-      'platform_configs',          // 平台配置
+      'smtp_config',               // SMTP 配置
       'datasource_groupings',      // 数据源分组
       'market_categories',         // 市场分类
       'stock_industry_mappings',   // 行业映射数据
-      'smtp_config',               // SMTP 配置
+      'mcp_server_configs',        // MCP 服务器配置
       'sync_status',               // 同步状态
 
-      // 用户相关
+      // 用户/认证
       'users',                     // 用户数据（脱敏模式下只导出结构）
       'user_tags',                 // 用户标签
-      'user_favorites',            // 用户收藏
+
+      // Agent/工作流
+      'workflow_definitions',      // 工作流定义
+      'workflows',                 // 工作流实例
+      'agent_configs',             // Agent 配置
+      'agent_io_definitions',      // Agent IO 定义
+      'agent_specs',               // Agent 规格定义
+      'agent_versions',            // Agent 版本
+      'tool_configs',              // 工具配置
+      'tool_agent_bindings',       // 工具-Agent 绑定
+      'agent_workflow_bindings',   // Agent-工作流 绑定
+      'skills',                    // Skill 定义
+      'custom_tools',              // 自定义工具
+      'external_skills',           // 外部 Skill
+
+      // 模板/预设
+      'prompt_templates',          // 提示词模板
+      'report_templates',          // 报告模板
+      'screening_presets',         // 选股预设
+      'industry_analysis_profiles',// 行业分析配置
+      'user_template_configs',     // 用户模板配置
 
       // 交易系统
       'trading_systems',           // 个人交易计划
+      'trading_system_versions',   // 交易系统版本
       'paper_accounts',            // 模拟账户
       'paper_market_rules',        // 模拟市场规则
-      'real_accounts',             // 实盘账户
-
-      // 提示词
-      'prompt_templates',          // 提示词模板
-      'user_template_configs',     // 用户模板配置
 
       // 调度任务
       'scheduled_analysis_configs', // 定时分析配置
@@ -718,16 +726,8 @@ const exportData = async () => {
       // 其他配置
       'watchlist_groups',           // 自选股分组
 
-      // v3.0 新增集合
-      'external_skills',            // Skill 自动生成系统产出的外部技能
-      'workflow_generation_sessions', // AI 工作流架构师会话记录
-      'assistant_user_profiles',    // 智能助手用户画像
-      'assistant_threads',          // 智能助手主题会话
-      'assistant_thread_checkpoints', // 主题会话摘要快照
-      'user_identity_mappings',     // Gateway IM 用户身份映射
-      'user_channel_configs'        // 通知渠道配置
-
       // 注意: 不包含 market_quotes 和 stock_basic_info（数据量大，不适合演示系统）
+      // 注意: 不包含运行时数据（user_favorites, real_accounts, assistant_threads 等）
     ]
 
     // 研究报告集合列表
