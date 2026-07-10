@@ -42,7 +42,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
-import sample000001Content from '../../../../docs/courses/advanced/expanded/000001_研究报告_2026-04-30.md?raw'
+import sample000001Content from '../../../../docs/07-courses/advanced/expanded/000001_研究报告_2026-04-30.md?raw'
 
 type SampleDefinition = {
   title: string

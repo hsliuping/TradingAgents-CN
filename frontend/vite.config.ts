@@ -6,7 +6,7 @@ import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
-const COURSE_IMAGES_DIR = resolve(__dirname, '../docs/courses/advanced/expanded/images')
+const COURSE_IMAGES_DIR = resolve(__dirname, '../docs/07-courses/advanced/expanded/images')
 
 /** 开发时将 /course-images/* 映射到 docs 目录，构建后复制到 dist */
 function courseImagesPlugin() {
