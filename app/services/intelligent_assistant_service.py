@@ -131,7 +131,7 @@ def _should_force_tool_retry(user_message: str) -> bool:
 
 # =============================================================================
 # 用户记忆元工具：让 LLM 在用户表达"请记住""请帮我记下"等意图时主动登记
-# 设计文档参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
+# 设计文档参考：docs/05-design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
 # =============================================================================
 
 REMEMBER_THIS_TOOL_NAME = "remember_this"
@@ -1009,7 +1009,7 @@ class IntelligentAssistantService:
                     self._tool_functions[tool.id] = func
 
         # 注入 `remember_this` 元工具：允许用户主动让助手记住偏好
-        # 参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
+        # 参考：docs/05-design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
         if self._user_id:
             self._openai_tools.append(_build_remember_this_tool_def())
             self._tool_functions[REMEMBER_THIS_TOOL_NAME] = _make_remember_this_callable(

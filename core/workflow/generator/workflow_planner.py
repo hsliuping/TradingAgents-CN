@@ -8,7 +8,7 @@
 - generate_blueprint()  — 将对话转为结构化 WorkflowBlueprint JSON
 - generate_optimization() — 迭代优化阶段
 
-参考: docs/design/v3.0/ai-workflow-generation.md §4.2
+参考: docs/05-design/v3.0/ai-workflow-generation.md §4.2
 """
 
 import json

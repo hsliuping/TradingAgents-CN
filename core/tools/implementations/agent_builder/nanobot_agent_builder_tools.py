@@ -3705,9 +3705,9 @@ async def inspect_runtime_agent_configs(
             "count": len(results),
             "results": results,
             "design_references": [
-                "docs/design/v3.0/ai-workflow-generation.md",
-                "docs/design/v3.0/agent-workshop-interface-sequence.md",
-                "docs/design/v3.0/implementation-status-report.md",
+                "docs/05-design/v3.0/ai-workflow-generation.md",
+                "docs/05-design/v3.0/agent-workshop-interface-sequence.md",
+                "docs/05-design/v3.0/implementation-status-report.md",
             ],
         })
     except Exception as exc:
@@ -3950,8 +3950,8 @@ async def inspect_agent_workshop_assets(
                     "versions": [],
                     "message": f"未找到 session_id={clean_workshop_session_id} 对应的 Agent 工坊会话",
                     "design_references": [
-                        "docs/design/v3.0/agent-workshop-interface-sequence.md",
-                        "docs/design/v3.0/implementation-status-report.md",
+                        "docs/05-design/v3.0/agent-workshop-interface-sequence.md",
+                        "docs/05-design/v3.0/implementation-status-report.md",
                     ],
                 })
             spec_snapshot = _read_mapping_or_attr(session_doc, "current_spec_snapshot", {}) or {}
@@ -4062,8 +4062,8 @@ async def inspect_agent_workshop_assets(
             "specs": spec_results,
             "versions": version_results,
             "design_references": [
-                "docs/design/v3.0/agent-workshop-interface-sequence.md",
-                "docs/design/v3.0/implementation-status-report.md",
+                "docs/05-design/v3.0/agent-workshop-interface-sequence.md",
+                "docs/05-design/v3.0/implementation-status-report.md",
             ],
         })
     except Exception as exc:

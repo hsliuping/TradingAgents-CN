@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 
 const BASE = 'http://localhost:3000';
-const IMGS = path.resolve(__dirname, '../../docs/courses/advanced/expanded/images');
+const IMGS = path.resolve(__dirname, '../../docs/07-courses/advanced/expanded/images');
 const EDGE_PATH = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 
 const mkd = (p) => fs.mkdirSync(p, { recursive: true });

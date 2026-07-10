@@ -10,7 +10,7 @@ Skill 编排器 — 根据蓝图中的 Skill 缺口，自动创建并绑定缺�
    d. 失败 → 标记 status=failed，记录错误
 3. 将所有新创建的 Skill 绑定到对应 Agent
 
-参考: docs/design/v3.0/ai-workflow-generation.md §4.4
+参考: docs/05-design/v3.0/ai-workflow-generation.md §4.4
 """
 
 import logging

@@ -699,7 +699,7 @@ async function fetchAll() {
 
 // ============================================================================
 // 偏好与纪律记忆（user_preference + trade_pattern）
-// 参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-3
+// 参考：docs/05-design/v3.0/unified-memory-layer-mem0.md §15.5 P0-3
 // ============================================================================
 
 const preferenceList = ref<MemoryItem[]>([])

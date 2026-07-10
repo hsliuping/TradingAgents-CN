@@ -4,7 +4,7 @@ AI 工作流架构师 API — v3.0
 提供对话式工作流创建（多轮需求沟通）、蓝图确认、自动补全（提示词/Skill）、
 迭代优化和沟通记录等端点。
 
-参考: docs/design/v3.0/ai-workflow-generation.md §6
+参考: docs/05-design/v3.0/ai-workflow-generation.md §6
 """
 
 import logging

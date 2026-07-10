@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const DOCS = path.resolve(__dirname, '../../docs/courses/advanced/expanded');
+const DOCS = path.resolve(__dirname, '../../docs/07-courses/advanced/expanded');
 
 // Mapping: { file, oldFilename, newFilename }
 // oldFilename  = the filename in the placeholder

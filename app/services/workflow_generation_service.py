@@ -4,7 +4,7 @@ AI 工作流架构师 — 服务层
 会话管理 + MongoDB 持久化 + 业务编排。
 整合 ResourceCollector / WorkflowPlanner / PromptGenerator / SkillOrchestrator 四大核心模块。
 
-参考: docs/design/v3.0/ai-workflow-generation.md §5
+参考: docs/05-design/v3.0/ai-workflow-generation.md §5
 """
 
 import logging

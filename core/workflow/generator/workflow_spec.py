@@ -4,7 +4,7 @@
 定义 AI 工作流生成过程中使用的所有数据结构。
 包括会话状态、对话轮次、缺口分析、蓝图结构等。
 
-参考: docs/design/v3.0/ai-workflow-generation.md
+参考: docs/05-design/v3.0/ai-workflow-generation.md
 """
 
 from datetime import datetime

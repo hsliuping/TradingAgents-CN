@@ -8,7 +8,7 @@
 4. agent_configs — MongoDB 中的 Agent 配置（可能包含用户自定义 Agent）
 5. prompt_templates — 提示词模板摘要（用于理解 Agent 默认能力）
 
-参考: docs/design/v3.0/ai-workflow-generation.md §4.1
+参考: docs/05-design/v3.0/ai-workflow-generation.md §4.1
 """
 
 import logging

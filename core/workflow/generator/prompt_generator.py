@@ -7,7 +7,7 @@
 加载机制（已有，无需修改）:
     Debug模板 > 工作流专属模板(workflow_id) > 用户模板 > 系统默认模板
 
-参考: docs/design/v3.0/ai-workflow-generation.md §4.3
+参考: docs/05-design/v3.0/ai-workflow-generation.md §4.3
 """
 
 import logging
