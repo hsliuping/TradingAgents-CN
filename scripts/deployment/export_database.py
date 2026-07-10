@@ -108,7 +108,7 @@ async def run_export(output_dir: str, test_mode: bool = False) -> str:
             collections=COLLECTIONS,
             export_dir=temp_export_dir,
             format="json",
-            sanitize=False,
+            sanitize=True,
         )
         print(f"  ✅ 导出完成: {os.path.basename(zip_path)}")
 

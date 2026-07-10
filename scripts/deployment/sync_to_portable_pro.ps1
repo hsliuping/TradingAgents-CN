@@ -446,6 +446,8 @@ $essentialScripts = @(
     "scripts\installer\start_services_clean.ps1", # MongoDB/Redis 服务启动脚本
     "scripts\installer\collect_service_logs.ps1", # 错误日志收集脚本（诊断包）
     "scripts\installer\restart_all.ps1",         # Restart all services (for tray menu)
+    "scripts\installer\restore_backup.ps1",       # 升级安装时恢复用户配置
+    "scripts\installer\update_ports.ps1",         # 全新安装时更新端口配置
     # 🔥 进程监控脚本
     "scripts\monitor\process_monitor.py",        # 进程监控守护进程（包含退出报告功能）
     "scripts\monitor\start_monitor.ps1",         # 启动监控脚本
@@ -568,13 +570,23 @@ if (Test-Path $sourceVendorsDir) {
         New-Item -ItemType Directory -Path $destVendorsDir -Force | Out-Null
     }
 
-    # Copy MongoDB
+    # Copy MongoDB (delete first to avoid nesting on repeated builds)
     $sourceMongoDB = Join-Path $sourceVendorsDir "mongodb"
     $destMongoDB = Join-Path $destVendorsDir "mongodb"
     if (Test-Path $sourceMongoDB) {
         Write-Host "  Copying MongoDB..." -ForegroundColor Gray
+        if (Test-Path $destMongoDB) { Remove-Item -Path $destMongoDB -Recurse -Force }
         Copy-Item -Path $sourceMongoDB -Destination $destMongoDB -Recurse -Force
         Write-Host "  ✓ MongoDB copied" -ForegroundColor Green
+
+        # Remove .pdb debug symbol files (not needed at runtime, save ~2GB)
+        $pdbFiles = Get-ChildItem -Path $destMongoDB -Recurse -Filter "*.pdb" -ErrorAction SilentlyContinue
+        if ($pdbFiles) {
+            $pdbCount = $pdbFiles.Count
+            $pdbSize = [math]::Round(($pdbFiles | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
+            $pdbFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Removed $pdbCount .pdb debug files ($pdbSize MB saved)" -ForegroundColor Gray
+        }
 
         # Copy VC++ Runtime DLLs to MongoDB bin directory (fixes missing DLL on user machines)
         $mongoBinDir = Get-ChildItem -Path $destMongoDB -Recurse -Directory -Filter "bin" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -604,33 +616,36 @@ if (Test-Path $sourceVendorsDir) {
         Write-Host "  ⚠ MongoDB not found at $sourceMongoDB" -ForegroundColor Yellow
     }
 
-    # Copy Redis
+    # Copy Redis (delete first to avoid nesting)
     $sourceRedis = Join-Path $sourceVendorsDir "redis"
     $destRedis = Join-Path $destVendorsDir "redis"
     if (Test-Path $sourceRedis) {
         Write-Host "  Copying Redis..." -ForegroundColor Gray
+        if (Test-Path $destRedis) { Remove-Item -Path $destRedis -Recurse -Force }
         Copy-Item -Path $sourceRedis -Destination $destRedis -Recurse -Force
         Write-Host "  ✓ Redis copied" -ForegroundColor Green
     } else {
         Write-Host "  ⚠ Redis not found at $sourceRedis" -ForegroundColor Yellow
     }
 
-    # Copy Nginx
+    # Copy Nginx (delete first to avoid nesting)
     $sourceNginx = Join-Path $sourceVendorsDir "nginx"
     $destNginx = Join-Path $destVendorsDir "nginx"
     if (Test-Path $sourceNginx) {
         Write-Host "  Copying Nginx..." -ForegroundColor Gray
+        if (Test-Path $destNginx) { Remove-Item -Path $destNginx -Recurse -Force }
         Copy-Item -Path $sourceNginx -Destination $destNginx -Recurse -Force
         Write-Host "  ✓ Nginx copied" -ForegroundColor Green
     } else {
         Write-Host "  ⚠ Nginx not found at $sourceNginx" -ForegroundColor Yellow
     }
 
-    # 🔥 Copy Python (embedded Python with DLLs)
+    # 🔥 Copy Python (embedded Python with DLLs) — delete first to avoid nesting
     $sourcePython = Join-Path $sourceVendorsDir "python"
     $destPython = Join-Path $destVendorsDir "python"
     if (Test-Path $sourcePython) {
         Write-Host "  Copying Python (embedded)..." -ForegroundColor Gray
+        if (Test-Path $destPython) { Remove-Item -Path $destPython -Recurse -Force }
         Copy-Item -Path $sourcePython -Destination $destPython -Recurse -Force
         Write-Host "  ✓ Python copied (including DLLs)" -ForegroundColor Green
         

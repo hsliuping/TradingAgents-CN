@@ -16,7 +16,7 @@ param(
     [switch]$SkipPackage = $false,
     [ValidateSet("zip", "7z", "both")]
     [string]$Format = "7z",  # Package format: 7z (default, for NSIS), zip (for users), or both
-    [string]$PythonVersion = "3.10.11"
+    [string]$PythonVersion = "3.11.9"  # 默认为 3.11.9（最后提供嵌入包的 3.11 版本）
 )
 
 # 设置控制台和文件编码为UTF-8

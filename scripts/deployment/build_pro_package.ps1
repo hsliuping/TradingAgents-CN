@@ -17,7 +17,7 @@ param(
     [string]$Version = "",
     [switch]$SkipSync = $false,
     [switch]$SkipEmbeddedPython = $false,
-    [string]$PythonVersion = "3.10.11",
+    [string]$PythonVersion = "3.11.9",
     [switch]$Interactive = $false  # 🔥 交互模式：每步后确认
 )
 
