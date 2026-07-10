@@ -82,8 +82,13 @@ COLLECTIONS = [
 ]
 
 
-async def run_export(output_dir: str) -> str:
-    """调用后端导出函数，返回最终 JSON 文件路径。"""
+async def run_export(output_dir: str, test_mode: bool = False) -> str:
+    """调用后端导出函数，返回最终 JSON 文件路径。
+
+    Args:
+        output_dir: 输出目录
+        test_mode: 测试模式，生成带日期的文件（不覆盖稳定版）
+    """
     from app.core.database import init_database, close_database
     from app.services.database.backups import export_data
 
@@ -112,20 +117,23 @@ async def run_export(output_dir: str) -> str:
             json_filename = zf.namelist()[0]
             data = json.loads(zf.read(json_filename))
 
-        # 保存 JSON 到目标目录
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        dated_filename = f"database_export_config_{date_str}.json"
-        dated_path = os.path.join(output_dir, dated_filename)
-
-        with open(dated_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-        # 更新稳定版文件名
-        stable_path = os.path.join(output_dir, "database_export_config.json")
-        shutil.copy2(dated_path, stable_path)
-
-        print(f"  ✅ 已保存: {dated_filename}")
-        print(f"  ✅ 已更新: database_export_config.json")
+        # 根据模式选择输出文件名
+        if test_mode:
+            # 测试模式：只生成带日期的文件（不覆盖稳定版）
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            output_filename = f"database_export_config_{date_str}.json"
+            output_path = os.path.join(output_dir, output_filename)
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"  ✅ 已保存（测试版）: {output_filename}")
+            print(f"  ℹ️  稳定版 database_export_config.json 未修改")
+        else:
+            # 正式模式：只生成稳定版（覆盖旧文件）
+            output_filename = "database_export_config.json"
+            output_path = os.path.join(output_dir, output_filename)
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"  ✅ 已保存（正式版）: {output_filename}")
 
         # 输出统计
         export_data_content = data.get("data", {})
@@ -138,7 +146,7 @@ async def run_export(output_dir: str) -> str:
             print(f"    {coll_name}: {count} 条")
         print(f"  总计: {total_docs} 条记录, {len(export_data_content)} 个集合")
 
-        return dated_path
+        return output_path
 
     finally:
         # 清理临时目录
@@ -154,25 +162,31 @@ def main():
         default=str(PROJECT_ROOT / "install"),
         help="输出目录（默认: install/）",
     )
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="测试模式：生成带日期的文件（不覆盖稳定版）",
+    )
     args = parser.parse_args()
 
     output_dir = os.path.abspath(args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
+    mode_label = "测试" if args.test else "正式"
     print("=" * 70)
-    print("  导出演示数据库到 install 目录")
+    print(f"  导出演示数据库到 install 目录（{mode_label}模式）")
     print("=" * 70)
     print()
 
     try:
-        result_path = asyncio.run(run_export(output_dir))
+        result_path = asyncio.run(run_export(output_dir, test_mode=args.test))
         print()
         print("=" * 70)
         print("  数据库导出完成!")
         print("=" * 70)
+        print(f"  模式: {mode_label}")
         print(f"  输出目录: {output_dir}")
-        print(f"  日期版本: {os.path.basename(result_path)}")
-        print(f"  稳定版本: database_export_config.json")
+        print(f"  输出文件: {os.path.basename(result_path)}")
         print()
         return 0
     except Exception as e:

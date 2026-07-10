@@ -38,7 +38,11 @@ ManifestDPIAware true
 !endif
 
 Name "${PRODUCT_NAME}"
-OutFile "${OUTPUT_DIR}\TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
+!ifdef TEST_BUILD
+  OutFile "${OUTPUT_DIR}\TradingAgentsCNSetup-${PRODUCT_VERSION}-test.exe"
+!else
+  OutFile "${OUTPUT_DIR}\TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
+!endif
 InstallDir "C:\TradingAgentsCN"
 RequestExecutionLevel admin
 SetDatablockOptimize on

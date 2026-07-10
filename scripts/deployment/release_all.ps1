@@ -24,6 +24,7 @@ param(
     [switch]$SkipPrepare = $false,
     [switch]$SkipGovernanceValidations = $false,
     [switch]$SkipExport = $false,
+    [switch]$Test = $false,
     [string]$ArchiveRoot = "D:\release"
 )
 
@@ -191,6 +192,7 @@ if ($SkipInstaller) {
 } elseif (Test-Path $installerScript) {
     $installerArgs = @("-Version", $resolvedBuildVersion, "-ArchiveRoot", $ArchiveRoot)
     if ($SkipExport) { $installerArgs += "-SkipExport" }
+    if ($Test) { $installerArgs += "-Test" }
     & powershell -ExecutionPolicy Bypass -File $installerScript @installerArgs
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } else {
