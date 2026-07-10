@@ -364,6 +364,31 @@ async def lifespan(app: FastAPI):
             result.total_documents,
             result.vector_backend,
         )
+
+        # 索引跳过时，向所有管理员发送系统通知
+        if result.sync_mode.startswith("skipped_"):
+            try:
+                from app.services.user_service import UserService
+                from app.services.notifications_service import get_notifications_service
+                from app.models.notification import NotificationCreate
+
+                user_svc = UserService()
+                users = await user_svc.list_users(limit=100)
+                notif_svc = get_notifications_service()
+
+                skip_reason = "Embedding API 不可用" if "embedding" in result.sync_mode else "未配置 Embedding"
+                for u in users:
+                    await notif_svc.create_and_publish(NotificationCreate(
+                        user_id=u.id,
+                        type="system",
+                        title="能力索引未构建",
+                        content=f"系统启动时能力索引构建被跳过（{skip_reason}）。请先在系统设置中配置有效的 Embedding API Key，然后在「系统设置 → 工具能力索引」中手动重建索引。",
+                        source="capability_index",
+                        severity="warning",
+                    ))
+                logger.info("📢 已向 %d 位用户发送能力索引跳过通知", len(users))
+            except Exception as ne:
+                logger.warning(f"⚠️ 发送能力索引通知失败: {ne}")
     except Exception as e:
         logger.error(f"❌ 能力索引同步失败: {e}", exc_info=True)
 
@@ -1228,7 +1253,11 @@ register_router_with_log(app, unified_tasks_router.router, "统一任务中心�
 
 # MCP 路由
 from app.routers import mcp as mcp_router
+from app.routers import capability_index as capability_index_router
 app.include_router(mcp_router.router)
+
+# 能力索引路由
+app.include_router(capability_index_router.router, prefix="/api", tags=["capability-index"])
 
 # 路由注册完成，打印总结
 logger.info("=" * 70)

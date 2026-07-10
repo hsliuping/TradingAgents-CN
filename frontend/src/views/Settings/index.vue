@@ -79,6 +79,10 @@
                 <el-icon><Refresh /></el-icon>
                 <span>多数据源同步</span>
               </el-menu-item>
+              <el-menu-item index="capability-index">
+                <el-icon><Collection /></el-icon>
+                <span>工具能力索引</span>
+              </el-menu-item>
             </template>
           </el-menu>
         </el-card>
@@ -435,6 +439,48 @@
           </div>
         </el-card>
 
+        <!-- 工具能力索引 -->
+        <el-card v-show="activeTab === 'capability-index'" class="settings-content" shadow="never">
+          <template #header>
+            <h3>工具能力索引</h3>
+          </template>
+
+          <div class="capability-index-content">
+            <el-alert
+              type="info"
+              :closable="false"
+              style="margin-bottom: 20px;"
+            >
+              <template #title>
+                工具能力索引用于语义搜索匹配工具和技能。系统启动时如果 Embedding API 不可用，会跳过索引构建（使用关键词匹配回退）。
+              </template>
+            </el-alert>
+
+            <el-descriptions :column="2" border style="margin-bottom: 20px;" v-loading="indexLoading">
+              <el-descriptions-item label="同步模式">
+                <el-tag :type="indexStateTagType">{{ indexStateText }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="向量后端">
+                {{ indexState.vector_backend || '-' }}
+              </el-descriptions-item>
+              <el-descriptions-item label="已索引工具">
+                {{ indexState.indexed_documents ?? 0 }} / {{ indexState.total_documents ?? 0 }}
+              </el-descriptions-item>
+              <el-descriptions-item label="跳过数量">
+                {{ indexState.skipped_documents ?? 0 }}
+              </el-descriptions-item>
+            </el-descriptions>
+
+            <el-button
+              type="primary"
+              :loading="rebuildLoading"
+              @click="handleRebuild"
+            >
+              重建索引
+            </el-button>
+          </div>
+        </el-card>
+
       </el-col>
     </el-row>
 
@@ -509,8 +555,10 @@ import {
   Document,
   Refresh,
   DataAnalysis,
-  ChatDotRound
+  ChatDotRound,
+  Collection
 } from '@element-plus/icons-vue'
+import { getCapabilityIndexState, rebuildCapabilityIndex, type CapabilityIndexState } from '@/api/capabilityIndex'
 
 const router = useRouter()
 const route = useRoute()
@@ -582,6 +630,9 @@ const updateSectionFromRoute = () => {
   } else if (path === '/settings/sync') {
     currentSection.value = 'admin'
     activeTab.value = 'sync'
+  } else if (path === '/settings/capability-index') {
+    currentSection.value = 'admin'
+    activeTab.value = 'capability-index'
   }
 }
 
@@ -809,6 +860,61 @@ const goToMultiSourceSync = () => {
   router.push('/settings/sync')
 }
 
+// ========== 工具能力索引 ==========
+const indexLoading = ref(false)
+const rebuildLoading = ref(false)
+const indexState = ref<CapabilityIndexState>({})
+
+const indexStateText = computed(() => {
+  const mode = indexState.value.sync_mode
+  if (!mode) return '未初始化'
+  const map: Record<string, string> = {
+    'full_rebuild': '全量重建',
+    'incremental_sync': '增量同步',
+    'no_change': '无变化',
+    'skipped_no_embedding': '跳过（未配置 Embedding）',
+    'skipped_embedding_unavailable': '跳过（Embedding API 不可用）',
+  }
+  return map[mode] || mode
+})
+
+const indexStateTagType = computed(() => {
+  const mode = indexState.value.sync_mode || ''
+  if (mode.startsWith('skipped')) return 'warning'
+  if (mode === 'full_rebuild' || mode === 'incremental_sync') return 'success'
+  return 'info'
+})
+
+const loadIndexState = async () => {
+  indexLoading.value = true
+  try {
+    const res = await getCapabilityIndexState()
+    indexState.value = (res as any)?.data || {}
+  } catch {
+    indexState.value = {}
+  } finally {
+    indexLoading.value = false
+  }
+}
+
+const handleRebuild = async () => {
+  rebuildLoading.value = true
+  try {
+    const res = await rebuildCapabilityIndex()
+    const data = (res as any)?.data || {}
+    if (data.indexed_documents > 0) {
+      ElMessage.success(`索引重建完成：${data.indexed_documents}/${data.total_documents} 个工具已索引`)
+    } else {
+      ElMessage.warning('索引跳过：Embedding API 不可用，请先在配置管理中设置有效的 API Key')
+    }
+    await loadIndexState()
+  } catch {
+    ElMessage.error('索引重建失败')
+  } finally {
+    rebuildLoading.value = false
+  }
+}
+
 // 修改密码相关
 const changePasswordDialogVisible = ref(false)
 const changePasswordLoading = ref(false)
@@ -892,7 +998,8 @@ onMounted(() => {
   analysisSettings.value.autoRefresh = appStore.preferences.autoRefresh
   analysisSettings.value.refreshInterval = appStore.preferences.refreshInterval
 
-
+  // 加载能力索引状态
+  loadIndexState()
 })
 </script>
 

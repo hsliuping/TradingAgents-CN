@@ -77,6 +77,25 @@ class CapabilityIndexService:
             )
 
         if force or not previous_hashes:
+            # 预检查：先测试第一个 embedding 调用是否成功
+            # 如果 API Key 无效或网络不通，快速跳过避免长时间超时
+            test_embedding, _ = self._embedding_manager.get_embedding("test")
+            if test_embedding is None:
+                logger.warning(
+                    "[CapabilityIndex] ⚠️ Embedding API 不可用，跳过索引构建"
+                    "（%d 个工具将使用关键词匹配回退）",
+                    len(documents),
+                )
+                self._cached_documents = {doc.capability_id: doc for doc in documents}
+                return CapabilityIndexSyncResult(
+                    collection_name=CAPABILITY_INDEX_COLLECTION,
+                    fingerprint=fingerprint,
+                    total_documents=len(documents),
+                    indexed_documents=0,
+                    skipped_documents=len(documents),
+                    vector_backend=self._vector_store_manager.backend,
+                    sync_mode="skipped_embedding_unavailable",
+                )
             logger.info(
                 "[CapabilityIndex] 🔄 开始构建索引（%d 个工具，向量维度: %d）...",
                 len(documents), self._embedding_manager.get_embedding_dimension(),

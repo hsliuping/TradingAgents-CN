@@ -458,6 +458,15 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'capability-index',
+        name: 'CapabilityIndex',
+        component: () => import('@/views/Settings/index.vue'),
+        meta: {
+          title: '工具能力索引',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'cache',
         name: 'CacheManagement',
         component: () => import('@/views/Settings/CacheManagement.vue'),
