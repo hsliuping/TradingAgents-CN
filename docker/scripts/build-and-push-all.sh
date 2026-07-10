@@ -111,8 +111,8 @@ fi
 # 镜像名称
 BACKEND_IMAGE="$REGISTRY/tradingagents-pro-backend:$TAG"
 FRONTEND_IMAGE="$REGISTRY/tradingagents-pro-frontend:$TAG"
-BACKEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-backend:latest"
-FRONTEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-frontend:latest"
+BACKEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-backend:3-latest"
+FRONTEND_LATEST_IMAGE="$REGISTRY/tradingagents-pro-frontend:3-latest"
 BASE_IMAGE="$REGISTRY/tradingagents-pro-backend-base:$BASE_TAG"
 
 echo -e "${CYAN}========================================${NC}"
