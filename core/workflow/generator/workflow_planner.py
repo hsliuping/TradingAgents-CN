@@ -107,7 +107,7 @@ SYSTEM_PROMPT_BLUEPRINT = """\
         {{"id": "end", "type": "end", "label": "结束", "position_x": 400, "position_y": 800}}
     ],
     "edges": [
-        {{"id": "e1", "source": "start", "target": "parallel_1"}}
+        {{"id": "e1", "source": "start", "target": "parallel_1", "type": "normal", "condition": null}}
     ],
     "config": {{"analysis_depth": 3, "debate_rounds": "auto"}},
     "summary": "方案概述",
@@ -149,6 +149,18 @@ SYSTEM_PROMPT_BLUEPRINT = """\
         "analysis_summary": "4 个 Agent 需要定制提示词，3 个使用默认，需创建 1 个新 Skill"
     }}
 }}
+
+## 条件分支
+当用户需求包含条件逻辑时（如"如果...则...否则..."），使用条件边：
+- 边的 type 设为 "conditional"
+- condition 设为 "true" 或 "false"
+- 从条件节点出发的两条边分别标记 true 和 false
+- 条件节点的 condition_expr 字段写判断表达式
+
+示例：
+节点：check_risk（CONDITION 类型，condition_expr: "state.get('risk_score', 0) > 80"）
+边：check_risk -> deep_analysis（type: conditional, condition: "true"）
+边：check_risk -> simple_decision（type: conditional, condition: "false"）
 
 ## 重要规则
 1. 只输出一个 JSON 对象，不要添加 markdown 代码块标记或其他文本

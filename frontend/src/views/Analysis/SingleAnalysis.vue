@@ -1392,7 +1392,8 @@ const submitAnalysis = async () => {
         language: analysisForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
         deep_analysis_model: modelSettings.value.deepAnalysisModel,
-        engine: 'v2'  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
+        engine: 'v2',  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
+        workflow_id: selectedWorkflowId.value
       }
     }
 

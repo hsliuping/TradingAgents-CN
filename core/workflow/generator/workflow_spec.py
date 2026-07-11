@@ -61,6 +61,8 @@ class PlannedEdge(BaseModel):
     target: str                          # 目标节点 ID
     label: Optional[str] = None
     animated: bool = False
+    type: Optional[str] = "normal"       # edge 类型（normal/conditional）
+    condition: Optional[str] = None      # 条件表达（"true"/"false"）
 
 
 # ==================== 缺口分析模型 ====================

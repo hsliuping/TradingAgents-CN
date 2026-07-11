@@ -214,66 +214,72 @@
         <span class="section-desc">您创建和自定义的分析流程</span>
       </div>
 
-      <el-row :gutter="20">
-        <el-col v-for="workflow in userWorkflows" :key="workflow.id" :xs="24" :sm="12" :md="8" :lg="6">
-          <el-card class="workflow-card" shadow="hover">
-            <template #header>
-              <div class="card-header">
-                <span class="workflow-name">
-                  {{ workflow.name }}
-                  <el-tag v-if="workflow.is_default" type="success" size="small" effect="dark">默认</el-tag>
-                </span>
-                <el-dropdown trigger="click" @command="handleCommand($event, workflow.id)">
-                  <el-button text size="small" @click.stop>
-                    <el-icon><MoreFilled /></el-icon>
-                  </el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item command="edit">
-                        <el-icon><Edit /></el-icon> 编辑
-                      </el-dropdown-item>
-                      <!-- 🔥 只对单股分析流程显示执行选项，持仓分析和复盘分析暂时不显示 -->
-                      <el-dropdown-item 
-                        v-if="isStockAnalysisWorkflow(workflow)" 
-                        command="execute"
-                      >
-                        <el-icon><VideoPlay /></el-icon> 执行
-                      </el-dropdown-item>
-                      <el-dropdown-item command="duplicate">
-                        <el-icon><DocumentCopy /></el-icon> 复制
-                      </el-dropdown-item>
-                      <el-dropdown-item command="setDefault" divided>
-                        <el-icon><Star /></el-icon> 设为默认
-                      </el-dropdown-item>
-                      <el-dropdown-item command="delete">
-                        <el-icon><Delete /></el-icon> 删除
-                      </el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+      <div v-for="(typeWorkflows, type) in groupedWorkflows" :key="type" class="workflow-group">
+        <h3 class="group-title">
+          {{ getWorkflowTypeLabel(type) }}
+          <span class="group-count">({{ typeWorkflows.length }}个)</span>
+        </h3>
+        <el-row :gutter="20" class="workflow-cards">
+          <el-col v-for="workflow in typeWorkflows" :key="workflow.id" :xs="24" :sm="12" :md="8" :lg="6">
+            <el-card class="workflow-card" shadow="hover">
+              <template #header>
+                <div class="card-header">
+                  <span class="workflow-name">
+                    {{ workflow.name }}
+                    <el-tag v-if="workflow.is_default" type="success" size="small" effect="dark">默认</el-tag>
+                  </span>
+                  <el-dropdown trigger="click" @command="handleCommand($event, workflow.id)">
+                    <el-button text size="small" @click.stop>
+                      <el-icon><MoreFilled /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="edit">
+                          <el-icon><Edit /></el-icon> 编辑
+                        </el-dropdown-item>
+                        <!-- 🔥 只对单股分析流程显示执行选项，持仓分析和复盘分析暂时不显示 -->
+                        <el-dropdown-item 
+                          v-if="isStockAnalysisWorkflow(workflow)" 
+                          command="execute"
+                        >
+                          <el-icon><VideoPlay /></el-icon> 执行
+                        </el-dropdown-item>
+                        <el-dropdown-item command="duplicate">
+                          <el-icon><DocumentCopy /></el-icon> 复制
+                        </el-dropdown-item>
+                        <el-dropdown-item command="setDefault" divided>
+                          <el-icon><Star /></el-icon> 设为默认
+                        </el-dropdown-item>
+                        <el-dropdown-item command="delete">
+                          <el-icon><Delete /></el-icon> 删除
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
+              </template>
+              <p class="workflow-desc">{{ workflow.description || '暂无描述' }}</p>
+              <div class="workflow-meta">
+                <span class="version">v{{ workflow.version }}</span>
+                <span class="date">{{ formatDate(workflow.updated_at) }}</span>
               </div>
-            </template>
-            <p class="workflow-desc">{{ workflow.description || '暂无描述' }}</p>
-            <div class="workflow-meta">
-              <span class="version">v{{ workflow.version }}</span>
-              <span class="date">{{ formatDate(workflow.updated_at) }}</span>
-            </div>
-            <div class="card-actions">
-              <el-button size="small" type="primary" @click="openWorkflow(workflow.id)">
-                编辑
-              </el-button>
-              <!-- 🔥 只对单股分析流程显示执行按钮，持仓分析和复盘分析暂时不显示 -->
-              <el-button 
-                v-if="isStockAnalysisWorkflow(workflow)" 
-                size="small" 
-                @click="executeWorkflow(workflow.id)"
-              >
-                执行
-              </el-button>
-            </div>
-          </el-card>
-        </el-col>
-      </el-row>
+              <div class="card-actions">
+                <el-button size="small" type="primary" @click="openWorkflow(workflow.id)">
+                  编辑
+                </el-button>
+                <!-- 🔥 只对单股分析流程显示执行按钮，持仓分析和复盘分析暂时不显示 -->
+                <el-button 
+                  v-if="isStockAnalysisWorkflow(workflow)" 
+                  size="small" 
+                  @click="executeWorkflow(workflow.id)"
+                >
+                  执行
+                </el-button>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
+      </div>
     </div>
 
     <!-- 空状态 - 仅当没有用户工作流且模板加载完成时显示引导 -->
@@ -312,6 +318,17 @@
           <div style="color: #909399; font-size: 12px; margin-top: 4px;">
             💡 提示：选择"空白流程"可以从零开始构建；选择其他模板可以在现有流程基础上修改
           </div>
+        </el-form-item>
+        <el-form-item label="流程类型" required>
+          <el-select v-model="newWorkflow.workflow_type" placeholder="选择流程类型" style="width: 100%">
+            <el-option
+              v-for="(config, type) in WORKFLOW_TYPE_CONFIG"
+              :key="type"
+              :label="config.label"
+              :value="type"
+            />
+          </el-select>
+          <div class="form-tip">{{ WORKFLOW_TYPE_CONFIG[newWorkflow.workflow_type]?.description }}</div>
         </el-form-item>
         <el-form-item label="名称" required>
           <el-input v-model="newWorkflow.name" placeholder="输入分析流名称，如：选股初选流程" />
@@ -476,11 +493,41 @@ const templateName = ref('')
 const newWorkflow = ref({
   templateId: '',
   name: '',
-  description: ''
+  description: '',
+  workflow_type: 'stock_analysis'
 })
 
 // 计算属性：用户创建的工作流（非模板）
 const userWorkflows = computed(() => workflows.value.filter(w => !w.is_template))
+
+// 工作流类型配置
+const WORKFLOW_TYPE_CONFIG: Record<string, { label: string; icon: string; description: string }> = {
+  stock_analysis: { label: '单股研究流程', icon: 'Document', description: '用于分析单只股票，结果在"研究报告"中查看' },
+  etf_analysis: { label: 'ETF 分析流程', icon: 'DataAnalysis', description: '用于分析 ETF 基金' },
+  position_analysis: { label: '持仓分析流程', icon: 'Wallet', description: '用于分析持仓股票健康度' },
+  trade_review: { label: '操作复盘流程', icon: 'Refresh', description: '用于复盘交易操作' },
+  portfolio_health: { label: '组合健康度流程', icon: 'Monitor', description: '用于组合整体诊断' },
+  general: { label: '通用研究流程', icon: 'Search', description: '自由探索，结果在"流程中心"查看' },
+}
+
+function getWorkflowType(wf: any): string {
+  return wf.workflow_type || wf.config?.workflow_type || 'general'
+}
+
+function getWorkflowTypeLabel(type: string): string {
+  return WORKFLOW_TYPE_CONFIG[type]?.label || '通用研究流程'
+}
+
+// 按类型分组的工作流
+const groupedWorkflows = computed(() => {
+  const groups: Record<string, any[]> = {}
+  for (const wf of userWorkflows.value) {
+    const type = getWorkflowType(wf)
+    if (!groups[type]) groups[type] = []
+    groups[type].push(wf)
+  }
+  return groups
+})
 
 // 加载数据
 const loadWorkflows = async () => {
@@ -747,6 +794,7 @@ const createWorkflow = async () => {
     let workflowData: any = {
       name: newWorkflow.value.name,
       description: newWorkflow.value.description,
+      workflow_type: newWorkflow.value.workflow_type,
       tags: ['custom', 'v2'],  // 🆕 添加 v2 标签标识
       version: '2.0.0',  // 🆕 使用 v2.0 版本，以便编辑器加载 v2.0 Agent
       nodes: [],
@@ -773,7 +821,7 @@ const createWorkflow = async () => {
     if (result.success && result.data) {
       ElMessage.success('创建成功')
       showCreateDialog.value = false
-      newWorkflow.value = { templateId: '', name: '', description: '' }
+      newWorkflow.value = { templateId: '', name: '', description: '', workflow_type: 'stock_analysis' }
       router.push(`/workflow/editor/${result.data.id}`)
     } else {
       ElMessage.error(result.message || '创建失败')
@@ -1280,6 +1328,38 @@ onMounted(() => {
     gap: 8px;
     justify-content: flex-end;
   }
+}
+
+// 工作流分组
+.workflow-group {
+  margin-bottom: 24px;
+
+  .group-title {
+    margin: 0 0 16px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    .group-count {
+      font-size: 13px;
+      font-weight: normal;
+      color: var(--el-text-color-secondary);
+    }
+  }
+
+  .workflow-cards {
+    margin-bottom: 0;
+  }
+}
+
+.form-tip {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-top: 4px;
+  line-height: 1.5;
 }
 
 // 空状态引导

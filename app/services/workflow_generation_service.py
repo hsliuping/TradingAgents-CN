@@ -184,7 +184,8 @@ class WorkflowGenerationService:
     # ================================================================
 
     async def confirm_and_create(
-        self, session_id: str, message: str = "确认"
+        self, session_id: str, message: str = "确认",
+        workflow_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         确认方案并执行完整创建流程
@@ -272,7 +273,7 @@ class WorkflowGenerationService:
         await self._save_session(session)
 
         try:
-            wf_data = self._blueprint_to_workflow_dict(blueprint, workflow_id)
+            wf_data = self._blueprint_to_workflow_dict(blueprint, workflow_id, workflow_type=workflow_type)
             from core.api import WorkflowAPI
             api = WorkflowAPI()
             result = api.create(wf_data, user_id=session.user_id or None)
@@ -714,13 +715,14 @@ class WorkflowGenerationService:
     # ================================================================
 
     def _blueprint_to_workflow_dict(
-        self, blueprint: WorkflowBlueprint, workflow_id: str
+        self, blueprint: WorkflowBlueprint, workflow_id: str,
+        workflow_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         将 AI 蓝图转换为标准 WorkflowDefinition 字典
 
-        PlannedNode → NodeDefinition 格式
-        PlannedEdge → EdgeDefinition 格式
+        PlannedNode -> NodeDefinition 格式
+        PlannedEdge -> EdgeDefinition 格式
         """
         nodes = []
         for n in blueprint.nodes:
@@ -739,7 +741,8 @@ class WorkflowGenerationService:
                 "id": e.id,
                 "source": e.source,
                 "target": e.target,
-                "type": "normal",
+                "type": e.type or "normal",
+                "condition": e.condition,
                 "label": e.label,
                 "animated": e.animated,
             })
@@ -756,6 +759,7 @@ class WorkflowGenerationService:
             "config": blueprint.config or {},
             "tags": tags,
             "is_template": False,
+            "workflow_type": workflow_type or "stock_analysis",
             "status": "draft",  # 草稿状态，发布后才变为 active
         }
 

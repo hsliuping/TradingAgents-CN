@@ -19,6 +19,7 @@ V2_ETF_ANALYSIS_WORKFLOW = WorkflowDefinition(
     description="ETF 专用分析流程。包含 ETF 分析师（净值、规模、跟踪误差）、市场分析师（技术面）、新闻分析师。无牛熊辩论，单一风险分析。",
     version="2.0.0",
     is_template=True,
+    workflow_type="etf_analysis",
     tags=["v2.0", "ETF", "基金", "简化流程"],
 
     nodes=[

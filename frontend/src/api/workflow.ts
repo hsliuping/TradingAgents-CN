@@ -44,6 +44,7 @@ export interface WorkflowDefinition {
   config?: Record<string, any>
   tags: string[]
   is_template: boolean
+  workflow_type?: string
 }
 
 export interface WorkflowSummary {

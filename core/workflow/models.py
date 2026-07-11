@@ -136,6 +136,7 @@ class WorkflowDefinition(BaseModel):
     # 标签
     tags: List[str] = Field(default_factory=list)
     is_template: bool = False        # 是否为模板
+    workflow_type: Optional[str] = None  # 流程类型（stock_analysis/etf_analysis/position_analysis/trade_review/portfolio_health/general）
     
     def get_node(self, node_id: str) -> Optional[NodeDefinition]:
         """获取节点"""
