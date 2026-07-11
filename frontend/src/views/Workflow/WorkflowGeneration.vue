@@ -421,10 +421,6 @@ const WORKFLOW_TYPE_OPTIONS = [
   { value: 'general', label: '通用研究流程', description: '自由探索，结果在"流程中心"查看' },
 ]
 
-function getTypeDescription(type: string): string {
-  return WORKFLOW_TYPE_OPTIONS.find(o => o.value === type)?.description || ''
-}
-
 interface ChatMsg { role: 'user' | 'ai'; content: string }
 const chatMessages = ref<ChatMsg[]>([])
 const chatLoading = ref(false)

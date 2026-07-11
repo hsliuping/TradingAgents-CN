@@ -812,11 +812,13 @@ const executeWorkflow = () => {
 }
 
 function openTypeEditor() {
+  if (!workflow.value) return
   editingType.value = getWorkflowType(workflow.value)
   showTypeEditor.value = true
 }
 
 async function saveWorkflowType() {
+  if (!workflow.value) return
   await workflowApi.update(workflow.value.id, {
     workflow_type: editingType.value,
   })
