@@ -2369,6 +2369,18 @@ class PortfolioService:
             )
 
             response = await llm.ainvoke(prompt)
+
+            # 记录 token 使用
+            try:
+                from app.services.usage_statistics_service import usage_statistics_service
+                await usage_statistics_service.record_llm_usage(
+                    response=response,
+                    session_id="portfolio",
+                    analysis_type="portfolio"
+                )
+            except Exception as e:
+                logger.warning(f"记录 token 使用失败: {e}")
+
             content = response.content if hasattr(response, 'content') else str(response)
 
             # 解析响应
@@ -4146,6 +4158,19 @@ class PortfolioService:
 
             logger.info(f"📤 [持仓AI分析] 开始调用 LLM...")
             response = await llm.ainvoke(prompt)
+
+            # 记录 token 使用
+            try:
+                from app.services.usage_statistics_service import usage_statistics_service
+                await usage_statistics_service.record_llm_usage(
+                    response=response,
+                    session_id=user_id or "portfolio",
+                    analysis_type="portfolio",
+                    stock_code=snapshot.code
+                )
+            except Exception as e:
+                logger.warning(f"记录 token 使用失败: {e}")
+
             content = response.content if hasattr(response, 'content') else str(response)
             logger.info(f"📥 [持仓AI分析] LLM 响应成功，内容长度: {len(content)}")
 
@@ -4190,6 +4215,19 @@ class PortfolioService:
             )
 
             response = await llm.ainvoke(prompt)
+
+            # 记录 token 使用
+            try:
+                from app.services.usage_statistics_service import usage_statistics_service
+                await usage_statistics_service.record_llm_usage(
+                    response=response,
+                    session_id="portfolio",
+                    analysis_type="portfolio",
+                    stock_code=snapshot.code
+                )
+            except Exception as e:
+                logger.warning(f"记录 token 使用失败: {e}")
+
             content = response.content if hasattr(response, 'content') else str(response)
             return self._parse_position_ai_response(content, snapshot)
 

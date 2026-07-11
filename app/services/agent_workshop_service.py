@@ -6790,6 +6790,16 @@ class AgentWorkshopService:
             )
             raise
         request_elapsed = round(perf_counter() - request_started_at, 3)
+        # 记录 token 使用
+        try:
+            from app.services.usage_statistics_service import usage_statistics_service
+            await usage_statistics_service.record_llm_usage(
+                response=response,
+                session_id=base_spec.spec_id,
+                analysis_type="agent_workshop",
+            )
+        except Exception as e:
+            logger.warning(f"记录 token 使用失败: {e}")
         raw_content = (response.content or "").strip()
         finish_reason = str(getattr(response, "finish_reason", "") or "").strip().lower()
         if finish_reason == "length":
@@ -7092,6 +7102,16 @@ class AgentWorkshopService:
                 Message(role="system", content=system_prompt),
                 Message(role="user", content=prompt),
             ])
+            # 记录 token 使用
+            try:
+                from app.services.usage_statistics_service import usage_statistics_service
+                await usage_statistics_service.record_llm_usage(
+                    response=response,
+                    session_id=spec.spec_id,
+                    analysis_type="agent_workshop",
+                )
+            except Exception as e:
+                logger.warning(f"记录 token 使用失败: {e}")
             raw_content = (response.content or "").strip()
             self._log_llm_exchange(
                 "tooling_plan",
@@ -7928,6 +7948,16 @@ class AgentWorkshopService:
                         exc,
                     )
                     continue
+                # 记录 token 使用
+                try:
+                    from app.services.usage_statistics_service import usage_statistics_service
+                    await usage_statistics_service.record_llm_usage(
+                        response=response,
+                        session_id=spec.spec_id,
+                        analysis_type="agent_workshop",
+                    )
+                except Exception as e:
+                    logger.warning(f"记录 token 使用失败: {e}")
                 raw = response.content or ""
                 used_prompt = attempt_prompt
                 request_name = attempt_name
@@ -9969,6 +9999,17 @@ class AgentWorkshopService:
                     "version_status": version.status.value if hasattr(version.status, "value") else str(version.status),
                 },
             )
+            # 记录 token 使用（service.chat 返回 dict；仅当响应含 usage 时记录）
+            try:
+                from app.services.usage_statistics_service import usage_statistics_service
+                if hasattr(response, "usage") and response.usage:
+                    await usage_statistics_service.record_llm_usage(
+                        response=response,
+                        session_id=version.version_id,
+                        analysis_type="agent_workshop",
+                    )
+            except Exception as e:
+                logger.warning(f"记录 token 使用失败: {e}")
             parsed = self._load_json_response(str((response or {}).get("content") or ""))
             status = str(parsed.get("status") or "").strip().lower()
             if status not in {"confirmed", "disproved", "insufficient_evidence"}:
@@ -10769,6 +10810,16 @@ class AgentWorkshopService:
                 Message(role="system", content=system_prompt),
                 Message(role="user", content=prompt),
             ])
+            # 记录 token 使用
+            try:
+                from app.services.usage_statistics_service import usage_statistics_service
+                await usage_statistics_service.record_llm_usage(
+                    response=response,
+                    session_id=f"llm_review:{dimension}",
+                    analysis_type="agent_workshop",
+                )
+            except Exception as e:
+                logger.warning(f"记录 token 使用失败: {e}")
             raw = (response.content or "").strip()
             return self._extract_json_from_text(raw)
         except Exception as e:
@@ -10963,6 +11014,17 @@ class AgentWorkshopService:
                 Message(role="system", content=system_prompt),
                 Message(role="user", content=prompt),
             ])
+            # 记录 token 使用
+            try:
+                from app.services.usage_statistics_service import usage_statistics_service
+                await usage_statistics_service.record_llm_usage(
+                    response=response,
+                    session_id=version.version_id,
+                    analysis_type="agent_workshop",
+                    stock_code=runtime_result.get("symbol"),
+                )
+            except Exception as e:
+                logger.warning(f"记录 token 使用失败: {e}")
             raw_content = (response.content or "").strip()
             self._log_llm_exchange(
                 "runtime_review",

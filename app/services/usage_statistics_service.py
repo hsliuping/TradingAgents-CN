@@ -231,6 +231,109 @@ class UsageStatisticsService:
             logger.error(f"❌ 删除旧记录失败: {e}")
             return 0
 
+    async def record_llm_usage(
+        self,
+        response,  # LLMResponse 或 langchain AIMessage
+        session_id: str,
+        analysis_type: str,
+        stock_code: Optional[str] = None
+    ) -> bool:
+        """
+        记录 LLM 调用的 token 使用情况（通用方法）
+        
+        兼容两种 LLM 响应对象：
+        - UnifiedLLMClient 的 LLMResponse：response.usage（Dict: prompt_tokens/completion_tokens/total_tokens）
+        - LangChain 的 AIMessage：response.usage_metadata（Dict: input_tokens/output_tokens/token_usage）
+        
+        Args:
+            response: LLM 响应对象
+            session_id: 会话ID
+            analysis_type: 功能类型
+            stock_code: 股票代码（可选）
+        
+        Returns:
+            bool: 是否记录成功
+        """
+        try:
+            if not response:
+                logger.debug(f"LLM 响应为空，跳过记录: {analysis_type}")
+                return False
+            
+            # 兼容 LLMResponse（UnifiedLLMClient）和 AIMessage（LangChain）
+            usage = None
+            provider = "unknown"
+            model_name = "unknown"
+            
+            if hasattr(response, 'usage') and response.usage:
+                # UnifiedLLMClient 的 LLMResponse
+                usage = response.usage
+                provider = response.provider.value if response.provider else "unknown"
+                model_name = response.model or "unknown"
+            elif hasattr(response, 'usage_metadata') and response.usage_metadata:
+                # LangChain 的 AIMessage
+                usage = response.usage_metadata
+                # AIMessage 没有 provider 字段，尝试从 response_metadata 获取
+                meta = getattr(response, 'response_metadata', {})
+                model_name = meta.get('model_name', '') or meta.get('model', '') or "unknown"
+            
+            if not usage:
+                logger.debug(f"LLM 响应无 usage 信息，跳过记录: {analysis_type}")
+                return False
+            
+            # 统一提取 token 数（兼容两种格式）
+            input_tokens = usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0)
+            output_tokens = usage.get("completion_tokens", 0) or usage.get("output_tokens", 0)
+            
+            if input_tokens == 0 and output_tokens == 0:
+                logger.debug(f"Token 数为 0，跳过记录: {analysis_type}")
+                return False
+            
+            # 获取模型价格配置
+            from app.services.config_service import config_service
+            config = await config_service.get_system_config()
+            
+            # 查找对应的 LLM 配置
+            llm_config = None
+            if config and config.llm_configs:
+                for cfg in config.llm_configs:
+                    if cfg.provider == provider and cfg.model_name == model_name:
+                        llm_config = cfg
+                        break
+            
+            # 计算成本
+            cost = 0.0
+            currency = "CNY"
+            if llm_config:
+                input_price = llm_config.input_price_per_1k or 0.0
+                output_price = llm_config.output_price_per_1k or 0.0
+                cost = (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)
+                currency = llm_config.currency or "CNY"
+            
+            # 创建使用记录
+            usage_record = UsageRecord(
+                timestamp=datetime.now().isoformat(),
+                provider=provider,
+                model_name=model_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost=cost,
+                currency=currency,
+                session_id=session_id,
+                analysis_type=analysis_type,
+                stock_code=stock_code
+            )
+            
+            # 保存到数据库
+            success = await self.add_usage_record(usage_record)
+            
+            if success:
+                logger.info(f"💰 记录 token 使用: {provider}/{model_name} - 输入:{input_tokens} 输出:{output_tokens} [{analysis_type}]")
+            
+            return success
+        except Exception as e:
+            logger.error(f"❌ 记录 LLM token 使用失败: {e}")
+            return False
+
 
 # 创建全局实例
 usage_statistics_service = UsageStatisticsService()

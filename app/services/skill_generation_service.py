@@ -11,7 +11,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.llm import Message
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -520,10 +520,17 @@ class SkillGenerationService:
         self,
         session: SkillCreationSession,
         feedback: str,
-    ) -> str:
+    ) -> Tuple[str, Optional[Any]]:
+        """
+        生成修正计划消息。
+
+        Returns:
+            (ai_message, llm_response) — llm_response 可能为 None（无规格或回退方案）。
+            llm_response 供异步调用方记录 token 使用，避免在同步上下文中调用异步方法。
+        """
         spec = session.spec
         if not spec:
-            return "当前会话还没有可用的 Skill 规格，无法生成修正计划。"
+            return "当前会话还没有可用的 Skill 规格，无法生成修正计划。", None
 
         accumulated_exp = self._build_accumulated_experience(
             pipeline_history=session.pipeline_history,
@@ -580,11 +587,11 @@ test_input: {spec.test_input}
             response = client.chat([Message(role="user", content=prompt)])
             content = (getattr(response, "content", "") or "").strip()
             if content:
-                return content
+                return content, response
         except Exception as e:
             logger.warning(f"生成修正计划失败，使用回退方案: {e}")
 
-        return self._build_repair_plan_fallback(spec, feedback, pipeline_feedback)
+        return self._build_repair_plan_fallback(spec, feedback, pipeline_feedback), None
 
     async def _launch_pipeline_task(
         self,
@@ -1154,12 +1161,24 @@ test_input: {spec.test_input}
         if session.status != SessionStatus.FAILED:
             raise ValueError("只有失败的创建会话才能先生成修正计划")
 
-        ai_message = await asyncio.get_event_loop().run_in_executor(
+        ai_message, repair_llm_response = await asyncio.get_event_loop().run_in_executor(
             None,
             self._generate_repair_plan_message,
             session,
             feedback,
         )
+
+        # 记录 token 使用（LLM 调用在同步方法中完成，此处在其异步调用方中记录）
+        try:
+            if repair_llm_response is not None:
+                from app.services.usage_statistics_service import usage_statistics_service
+                await usage_statistics_service.record_llm_usage(
+                    response=repair_llm_response,
+                    session_id=session_id,
+                    analysis_type="skill_generation",
+                )
+        except Exception as e:
+            logger.warning(f"记录 token 使用失败: {e}")
 
         session.rounds.append(ConversationRound(
             round_number=len(session.rounds) + 1,
