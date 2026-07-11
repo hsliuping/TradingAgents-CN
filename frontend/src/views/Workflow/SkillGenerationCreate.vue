@@ -1372,7 +1372,7 @@ const handleChatSend = async () => {
       const res = await skillGenerationApi.startSession({
         description: text,
         handoff_context: handoffContext.value || undefined,
-        iterate_skill_id: isIterateMode.value ? iterateSkillInfo.value.toolId : undefined,
+        iterate_skill_id: isIterateMode.value ? iterateSkillInfo.value?.toolId : undefined,
       })
       sessionId.value = res.session_id
       currentRound.value = res.current_round

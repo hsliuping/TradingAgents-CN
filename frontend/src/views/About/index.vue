@@ -13,9 +13,22 @@
           </p>
           <p class="hero-description">
             专注于AI辅助分析技术的学习与验证平台。通过优化的工作流引擎和全流程分析辅助，
-            帮助您系统学习股票分析方法，提升分析能力。所有分析结论用于学习和验证AI股票分析技术，
-            不作为真实炒股操盘指导。
+            帮助您系统学习股票分析方法，提升分析能力。
           </p>
+          <div class="hero-positioning">
+            <div class="positioning-item">
+              <el-icon><CircleCheck /></el-icon>
+              <span>用于学习AI股票分析技术</span>
+            </div>
+            <div class="positioning-item">
+              <el-icon><CircleCheck /></el-icon>
+              <span>不作操盘指导</span>
+            </div>
+            <div class="positioning-item">
+              <el-icon><CircleCheck /></el-icon>
+              <span>实践学习方法论</span>
+            </div>
+          </div>
           <div class="hero-acknowledgment">
             <el-icon><Star /></el-icon>
             <span>基于 <a href="https://github.com/TauricResearch/TradingAgents" target="_blank" rel="noopener noreferrer">TradingAgents</a> 项目开发，感谢原项目的贡献</span>
@@ -25,9 +38,9 @@
               <el-icon><TrendCharts /></el-icon>
               开始分析
             </el-button>
-            <el-button size="large" @click="viewDocumentation">
-              <el-icon><Document /></el-icon>
-              查看文档
+            <el-button size="large" @click="goToLearning">
+              <el-icon><Reading /></el-icon>
+              查看课程
             </el-button>
           </div>
         </div>
@@ -35,16 +48,16 @@
           <div class="hero-card">
             <div class="hero-stats">
               <div class="stat-item">
-                <div class="stat-number">12</div>
-                <div class="stat-label">智能体</div>
+                <div class="stat-number">v3.0</div>
+                <div class="stat-label">全新升级</div>
               </div>
               <div class="stat-item">
-                <div class="stat-number">12+</div>
-                <div class="stat-label">数据源</div>
+                <div class="stat-number">多</div>
+                <div class="stat-label">智能体协作</div>
               </div>
               <div class="stat-item">
-                <div class="stat-number">24/7</div>
-                <div class="stat-label">实时监控</div>
+                <div class="stat-number">AI</div>
+                <div class="stat-label">辅助分析</div>
               </div>
             </div>
           </div>
@@ -52,163 +65,20 @@
       </div>
     </div>
 
-    <!-- 学习平台定位说明 -->
-    <div class="learning-platform-section">
-      <div class="platform-card">
-        <div class="platform-header">
-          <div class="platform-icon">
-            <el-icon><Document /></el-icon>
-          </div>
-          <div class="platform-content">
-            <h3>AI辅助分析技术学习平台</h3>
-            <p>
-              TradingAgents-CN 是一个专注于<strong>AI辅助股票分析技术学习与验证</strong>的平台。
-              我们致力于帮助用户通过实践学习专业的股票分析方法，理解AI如何辅助分析决策，
-              提升股票分析的学习能力和思维水平。
-            </p>
-            <div class="platform-features">
-              <div class="platform-feature-item">
-                <el-icon class="feature-icon"><CircleCheck /></el-icon>
-                <span>所有分析结论用于学习和验证AI股票分析技术</span>
-              </div>
-              <div class="platform-feature-item">
-                <el-icon class="feature-icon"><CircleCheck /></el-icon>
-                <span>不作为真实炒股操盘指导</span>
-              </div>
-              <div class="platform-feature-item">
-                <el-icon class="feature-icon"><CircleCheck /></el-icon>
-                <span>通过实践学习专业的分析方法论</span>
-              </div>
-              <div class="platform-feature-item">
-                <el-icon class="feature-icon"><CircleCheck /></el-icon>
-                <span>理解AI辅助分析的原理和过程</span>
-              </div>
-            </div>
+    <!-- 学习中心引导 -->
+    <div class="learning-banner">
+      <div class="banner-content">
+        <div class="banner-text">
+          <el-icon class="banner-icon"><Reading /></el-icon>
+          <div>
+            <h3>系统化学习课程</h3>
+            <p>从入门到实战，24学时核心课程 + 入门/提高/全流程方法构建，助您掌握 AI 辅助股票分析技术</p>
           </div>
         </div>
-      </div>
-    </div>
-
-    <!-- 学习中心 -->
-    <div class="learning-center-section">
-      <div class="section-header">
-        <h2 class="section-title">学习中心</h2>
-        <p class="section-subtitle">系统化的学习课程，从入门到提高，助您掌握AI辅助股票分析技术</p>
-      </div>
-
-      <div class="learning-courses">
-        <div class="course-card featured">
-          <div class="course-badge">重点推荐</div>
-          <div class="course-header">
-            <div class="course-icon">
-              <el-icon><TrendCharts /></el-icon>
-            </div>
-            <div class="course-info">
-              <h3>全流程AI辅助学习课程</h3>
-              <div class="course-meta">
-                <el-tag type="primary" size="small">24学时</el-tag>
-                <el-tag type="success" size="small">系统化</el-tag>
-                <el-tag type="warning" size="small">实战导向</el-tag>
-              </div>
-            </div>
-          </div>
-          <div class="course-content">
-            <p class="course-description">
-              本课程是学习中心的<strong>核心课程</strong>，通过24学时的系统化学习，
-              帮助您全面掌握AI辅助股票分析的全流程方法，最终形成全流程使用AI辅助的
-              <strong>计划→执行→复盘→提升</strong>的炒股方法提升思路。
-            </p>
-            <div class="course-features">
-              <div class="course-feature">
-                <el-icon class="feature-icon"><CircleCheck /></el-icon>
-                <span>从基础概念到高级应用，循序渐进</span>
-              </div>
-              <div class="course-feature">
-                <el-icon class="feature-icon"><CircleCheck /></el-icon>
-                <span>全流程模拟演练，理论与实践结合</span>
-              </div>
-              <div class="course-feature">
-                <el-icon class="feature-icon"><CircleCheck /></el-icon>
-                <span>AI辅助分析工具的实际应用</span>
-              </div>
-              <div class="course-feature">
-                <el-icon class="feature-icon"><CircleCheck /></el-icon>
-                <span>形成计划→执行→复盘→提升的循环提升方法</span>
-              </div>
-            </div>
-            <div class="course-outcomes">
-              <h4>学习成果</h4>
-              <ul>
-                <li>掌握AI辅助股票分析的核心方法论</li>
-                <li>熟练使用平台的分析工具和功能</li>
-                <li>理解工作流引擎和配置化架构的应用</li>
-                <li>能够形成全流程使用AI辅助的分析方法，建立持续提升的学习循环</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
-        <div class="course-grid">
-          <div class="course-card">
-            <div class="course-header">
-              <div class="course-icon beginner">
-                <el-icon><Document /></el-icon>
-              </div>
-              <div class="course-info">
-                <h3>入门课程</h3>
-                <p class="course-level">适合零基础学员</p>
-              </div>
-            </div>
-            <div class="course-content">
-              <p>从股票分析基础概念开始，了解AI辅助分析的基本原理，学习平台的基本使用方法。</p>
-              <div class="course-topics">
-                <span class="topic-tag">基础概念</span>
-                <span class="topic-tag">平台入门</span>
-                <span class="topic-tag">工具使用</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="course-card">
-            <div class="course-header">
-              <div class="course-icon intermediate">
-                <el-icon><Search /></el-icon>
-              </div>
-              <div class="course-info">
-                <h3>提高课程</h3>
-                <p class="course-level">适合有一定基础的学员</p>
-              </div>
-            </div>
-            <div class="course-content">
-              <p>深入学习高级分析技巧，掌握多维度分析方法，提升分析能力和决策水平。</p>
-              <div class="course-topics">
-                <span class="topic-tag">高级技巧</span>
-                <span class="topic-tag">多维分析</span>
-                <span class="topic-tag">策略优化</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="course-card">
-            <div class="course-header">
-              <div class="course-icon advanced">
-                <el-icon><Setting /></el-icon>
-              </div>
-              <div class="course-info">
-                <h3>全流程方法构建</h3>
-                <p class="course-level">高级实战课程</p>
-              </div>
-            </div>
-            <div class="course-content">
-              <p>学习如何构建全流程使用AI辅助的分析方法，整合计划、执行、复盘、提升四个环节，形成持续改进的学习循环。</p>
-              <div class="course-topics">
-                <span class="topic-tag">计划制定</span>
-                <span class="topic-tag">执行复盘</span>
-                <span class="topic-tag">持续提升</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <el-button type="primary" @click="goToLearning">
+          查看课程
+          <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+        </el-button>
       </div>
     </div>
 
@@ -227,7 +97,7 @@
             </div>
             <h3>优化分析引擎</h3>
           </div>
-          <p>v2.0 全新工作流引擎，支持可视化流程定义，配置化架构让分析流程更灵活、更强大。多智能体协作，从基本面、技术面、新闻、社媒等多维度提供全方位分析视角</p>
+          <p>v3.0 工作流引擎全面升级，支持可视化流程定义、Agent 工坊、Skill 中心和 MCP 服务器。多智能体协作，从基本面、技术面、新闻、社媒等多维度提供全方位分析视角</p>
           <div class="feature-tags">
             <el-tag size="small">工作流引擎</el-tag>
             <el-tag size="small">可视化配置</el-tag>
@@ -268,42 +138,12 @@
 
         <div class="feature-card">
           <div class="feature-header">
-            <div class="feature-icon info">
-              <el-icon><Document /></el-icon>
-            </div>
-            <h3>学习平台定位</h3>
-          </div>
-          <p>专注于AI辅助分析技术的学习与验证。所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。通过实践学习，理解AI如何辅助分析，提升分析思维</p>
-          <div class="feature-tags">
-            <el-tag size="small" type="info">学习平台</el-tag>
-            <el-tag size="small" type="info">技术验证</el-tag>
-            <el-tag size="small" type="info">思维提升</el-tag>
-          </div>
-        </div>
-
-        <div class="feature-card">
-          <div class="feature-header">
-            <div class="feature-icon danger">
-              <el-icon><Monitor /></el-icon>
-            </div>
-            <h3>批量分析处理</h3>
-          </div>
-          <p>支持批量股票分析，并行处理提高效率。适合学习不同股票的分析方法对比，理解市场差异和个股特性</p>
-          <div class="feature-tags">
-            <el-tag size="small" type="danger">批量处理</el-tag>
-            <el-tag size="small" type="danger">并行计算</el-tag>
-            <el-tag size="small" type="danger">对比学习</el-tag>
-          </div>
-        </div>
-
-        <div class="feature-card">
-          <div class="feature-header">
             <div class="feature-icon primary">
               <el-icon><Setting /></el-icon>
             </div>
             <h3>配置化架构</h3>
           </div>
-          <p>v2.0 全新配置化架构，工作流、智能体、工具、提示词均可动态配置。支持可视化工作流编辑器，无需修改代码即可调整分析流程，灵活适应不同学习需求</p>
+          <p>v3.0 配置化架构，工作流、智能体、工具、提示词均可动态配置。支持可视化工作流编辑器、Agent 工坊和 Skill 中心，无需修改代码即可调整分析流程，灵活适应不同学习需求</p>
           <div class="feature-tags">
             <el-tag size="small">动态配置</el-tag>
             <el-tag size="small">可视化编辑</el-tag>
@@ -313,11 +153,81 @@
       </div>
     </div>
 
+    <!-- 版本信息 -->
+    <div class="version-section">
+      <div class="section-header">
+        <h2 class="section-title">版本信息</h2>
+      </div>
+
+      <div class="version-info" v-loading="systemInfoLoading">
+        <div class="version-card">
+          <div class="version-main">
+            <div class="version-number">{{ systemInfo.version || 'v3.0' }}</div>
+            <div class="version-status" :class="versionStatusClass">{{ versionStatusText }}</div>
+          </div>
+          <div class="version-details">
+            <div class="version-item" v-if="systemInfo.full_version">
+              <span class="label">完整版本</span>
+              <span class="value">{{ systemInfo.full_version }}</span>
+            </div>
+            <div class="version-item" v-if="systemInfo.build_date">
+              <span class="label">构建时间</span>
+              <span class="value">{{ formatBuildDate(systemInfo.build_date) }}</span>
+            </div>
+            <div class="version-item" v-if="systemInfo.build_type">
+              <span class="label">构建类型</span>
+              <span class="value">{{ formatBuildType(systemInfo.build_type) }}</span>
+            </div>
+            <div class="version-item" v-if="systemInfo.git_commit">
+              <span class="label">Git提交</span>
+              <span class="value code">{{ systemInfo.git_commit }}</span>
+            </div>
+            <div class="version-item" v-if="!systemInfo.build_date">
+              <span class="label">构建时间</span>
+              <span class="value">{{ buildTime }}</span>
+            </div>
+            <div class="version-item">
+              <span class="label">API版本</span>
+              <span class="value">v3.0</span>
+            </div>
+          </div>
+          <div class="version-actions" v-if="systemInfo.full_version">
+            <el-button type="primary" size="small" @click="copyVersionInfo" plain>
+              <el-icon><DocumentCopy /></el-icon>
+              复制版本信息
+            </el-button>
+          </div>
+        </div>
+
+        <div class="framework-info">
+          <h4>技术版本</h4>
+          <div class="framework-list">
+            <div class="framework-item">
+              <span class="name">Vue</span>
+              <span class="version">3.4.0</span>
+            </div>
+            <div class="framework-item">
+              <span class="name">Element Plus</span>
+              <span class="version">2.4.4</span>
+            </div>
+            <div class="framework-item">
+              <span class="name">FastAPI</span>
+              <span class="version">0.104.0</span>
+            </div>
+            <div class="framework-item">
+              <span class="name">Python</span>
+              <span class="version">3.11.9</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 技术架构 -->
     <div class="tech-section">
       <div class="section-header">
         <h2 class="section-title">技术架构</h2>
-        <p class="section-subtitle">v2.0 全新架构，配置化设计，为学习平台提供强大支撑</p>
+        <p class="section-subtitle">v3.0 全新架构，配置化设计，为学习平台提供强大支撑</p>
       </div>
 
       <div class="tech-stack">
@@ -365,7 +275,7 @@
               <span class="tech-desc">高性能API框架</span>
             </div>
             <div class="tech-item">
-              <span class="tech-name">Python 3.10+</span>
+              <span class="tech-name">Python 3.11.9</span>
               <span class="tech-desc">现代Python开发</span>
             </div>
             <div class="tech-item">
@@ -388,7 +298,7 @@
             <div class="tech-icon ai">
               <el-icon><Cpu /></el-icon>
             </div>
-            <h3>v2.0 核心引擎</h3>
+            <h3>v3.0 核心引擎</h3>
           </div>
           <div class="tech-list">
             <div class="tech-item">
@@ -396,20 +306,20 @@
               <span class="tech-desc">可视化流程定义</span>
             </div>
             <div class="tech-item">
-              <span class="tech-name">配置化架构</span>
-              <span class="tech-desc">动态配置管理</span>
+              <span class="tech-name">Agent 工坊</span>
+              <span class="tech-desc">自定义智能体开发</span>
             </div>
             <div class="tech-item">
-              <span class="tech-name">多智能体系统</span>
-              <span class="tech-desc">协作式AI分析</span>
+              <span class="tech-name">Skill 中心</span>
+              <span class="tech-desc">AI 生成分析工具</span>
             </div>
             <div class="tech-item">
-              <span class="tech-name">统一LLM客户端</span>
-              <span class="tech-desc">多模型支持</span>
+              <span class="tech-name">MCP 服务器</span>
+              <span class="tech-desc">外部能力扩展</span>
             </div>
             <div class="tech-item">
-              <span class="tech-name">全流程辅助</span>
-              <span class="tech-desc">端到端分析支持</span>
+              <span class="tech-name">能力索引面板</span>
+              <span class="tech-desc">能力发现与缺口分析</span>
             </div>
           </div>
         </div>
@@ -452,111 +362,25 @@
             <ul class="origin-improvements">
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>v2.0 工作流引擎：</strong>全新配置化架构，支持可视化流程定义，灵活调整分析流程</span>
+                <span><strong>v3.0 工作流引擎：</strong>配置化架构，支持 Agent 工坊、Skill 中心和 MCP 服务器</span>
               </li>
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>全流程分析辅助：</strong>从数据收集到报告生成的完整流程支持，帮助系统学习分析方法</span>
+                <span><strong>全流程分析辅助：</strong>从数据收集到报告生成的完整流程支持，多场景分析学习</span>
               </li>
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>学习平台定位：</strong>专注于AI辅助分析技术的学习与验证，提升股票分析学习能力</span>
+                <span><strong>中文本地化：</strong>针对中国A股市场优化，集成 Tushare/AKShare 等中文数据源</span>
               </li>
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>完整的中文支持：</strong>针对中国A股市场优化，支持中文数据源和分析</span>
-              </li>
-              <li>
-                <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>现代化Web界面：</strong>基于 Vue 3 + Element Plus 开发的全新前端界面</span>
-              </li>
-              <li>
-                <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>增强的数据源：</strong>集成 Tushare、AKShare 等中国市场数据源</span>
-              </li>
-              <li>
-                <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>多LLM支持：</strong>支持国内外主流大语言模型（OpenAI、Claude、智谱AI、DeepSeek等）</span>
-              </li>
-              <li>
-                <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>批量分析功能：</strong>支持批量股票分析和任务管理，适合对比学习</span>
+                <span><strong>多 LLM 支持：</strong>支持 DeepSeek、通义千问、OpenAI、Claude 等主流大语言模型</span>
               </li>
             </ul>
             <p class="origin-thanks">
               <el-icon><Star /></el-icon>
               <strong>特别感谢</strong> Tauric Research 团队的开源贡献，为我们提供了优秀的技术基础和设计理念。
             </p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 版本信息 -->
-    <div class="version-section">
-      <div class="section-header">
-        <h2 class="section-title">版本信息</h2>
-      </div>
-
-      <div class="version-info" v-loading="systemInfoLoading">
-        <div class="version-card">
-          <div class="version-main">
-            <div class="version-number">{{ systemInfo.version || 'v3.0' }}</div>
-            <div class="version-status">正式版</div>
-          </div>
-          <div class="version-details">
-            <div class="version-item" v-if="systemInfo.full_version">
-              <span class="label">完整版本</span>
-              <span class="value">{{ systemInfo.full_version }}</span>
-            </div>
-            <div class="version-item" v-if="systemInfo.build_date">
-              <span class="label">构建时间</span>
-              <span class="value">{{ formatBuildDate(systemInfo.build_date) }}</span>
-            </div>
-            <div class="version-item" v-if="systemInfo.build_type">
-              <span class="label">构建类型</span>
-              <span class="value">{{ formatBuildType(systemInfo.build_type) }}</span>
-            </div>
-            <div class="version-item" v-if="systemInfo.git_commit">
-              <span class="label">Git提交</span>
-              <span class="value code">{{ systemInfo.git_commit }}</span>
-            </div>
-            <div class="version-item" v-if="!systemInfo.build_date">
-              <span class="label">构建时间</span>
-              <span class="value">{{ buildTime }}</span>
-            </div>
-            <div class="version-item">
-              <span class="label">API版本</span>
-              <span class="value">v2.0</span>
-            </div>
-          </div>
-          <div class="version-actions" v-if="systemInfo.full_version">
-            <el-button type="primary" size="small" @click="copyVersionInfo" plain>
-              <el-icon><DocumentCopy /></el-icon>
-              复制版本信息
-            </el-button>
-          </div>
-        </div>
-
-        <div class="framework-info">
-          <h4>技术版本</h4>
-          <div class="framework-list">
-            <div class="framework-item">
-              <span class="name">Vue</span>
-              <span class="version">3.4.0</span>
-            </div>
-            <div class="framework-item">
-              <span class="name">Element Plus</span>
-              <span class="version">2.4.4</span>
-            </div>
-            <div class="framework-item">
-              <span class="name">FastAPI</span>
-              <span class="version">0.104.0</span>
-            </div>
-            <div class="framework-item">
-              <span class="name">Python</span>
-              <span class="version">3.10+</span>
-            </div>
           </div>
         </div>
       </div>
@@ -626,7 +450,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -642,7 +466,9 @@ import {
   Star,
   Link,
   CircleCheck,
-  DocumentCopy
+  DocumentCopy,
+  Reading,
+  ArrowRight
 } from '@element-plus/icons-vue'
 import { ApiClient } from '@/api/request'
 
@@ -658,6 +484,22 @@ const systemInfo = ref<{
   git_commit?: string
   build_type?: string
 }>({})
+
+// 版本状态文本（根据版本号自动判断）
+const versionStatusText = computed(() => {
+  const v = systemInfo.value.version || systemInfo.value.full_version || ''
+  if (v.includes('beta') || v.includes('alpha') || v.includes('rc')) return '测试版'
+  if (v.includes('dev')) return '开发版'
+  return '正式版'
+})
+
+// 版本状态样式类
+const versionStatusClass = computed(() => {
+  const text = versionStatusText.value
+  if (text === '测试版') return 'status-beta'
+  if (text === '开发版') return 'status-dev'
+  return 'status-stable'
+})
 
 // 加载系统信息
 const loadSystemInfo = async () => {
@@ -706,7 +548,7 @@ const formatBuildType = (type: string) => {
 // 复制版本信息
 const copyVersionInfo = async () => {
   const info = [
-    `版本号: ${systemInfo.value.version || 'v2.0'}`,
+    `版本号: ${systemInfo.value.version || 'v3.0'}`,
     systemInfo.value.full_version ? `完整版本: ${systemInfo.value.full_version}` : '',
     systemInfo.value.build_date ? `构建时间: ${formatBuildDate(systemInfo.value.build_date)}` : '',
     systemInfo.value.build_type ? `构建类型: ${formatBuildType(systemInfo.value.build_type)}` : '',
@@ -726,8 +568,8 @@ const goToAnalysis = () => {
   router.push('/analysis/single')
 }
 
-const viewDocumentation = () => {
-  window.open('https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw', '_blank')
+const goToLearning = () => {
+  router.push('/learning')
 }
 
 // 页面加载时获取系统信息
@@ -805,6 +647,30 @@ onMounted(() => {
         margin: 0 0 20px 0;
         opacity: 0.8;
         max-width: 600px;
+      }
+
+      .hero-positioning {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin: 0 0 20px 0;
+
+        .positioning-item {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 13px;
+          padding: 6px 12px;
+          background: rgba(255, 255, 255, 0.15);
+          border-radius: 16px;
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+
+          .el-icon {
+            font-size: 14px;
+            color: #4ade80;
+          }
+        }
       }
 
       .hero-acknowledgment {
@@ -905,96 +771,42 @@ onMounted(() => {
     }
   }
 
-  // Learning Platform Section
-  .learning-platform-section {
-    margin-bottom: 80px;
+  // Learning Banner
+  .learning-banner {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border: 1px solid #bae6fd;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 48px;
 
-    .platform-card {
-      background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
-      border-radius: 16px;
-      padding: 40px;
-      border: 2px solid rgba(102, 126, 234, 0.2);
-      position: relative;
-      overflow: hidden;
+    .banner-content {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
 
-      &::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: linear-gradient(90deg, #667eea, #764ba2);
+    .banner-text {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+
+      .banner-icon {
+        font-size: 32px;
+        color: #0284c7;
       }
 
-      .platform-header {
-        display: flex;
-        gap: 24px;
-        align-items: flex-start;
+      h3 {
+        margin: 0 0 4px 0;
+        font-size: 16px;
+        color: #0c4a6e;
+      }
 
-        .platform-icon {
-          width: 64px;
-          height: 64px;
-          border-radius: 16px;
-          background: linear-gradient(135deg, #667eea, #764ba2);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 28px;
-          color: white;
-          flex-shrink: 0;
-        }
-
-        .platform-content {
-          flex: 1;
-
-          h3 {
-            margin: 0 0 16px 0;
-            font-size: 24px;
-            font-weight: 700;
-            color: var(--el-text-color-primary);
-          }
-
-          p {
-            color: var(--el-text-color-regular);
-            line-height: 1.8;
-            margin: 0 0 24px 0;
-            font-size: 16px;
-
-            strong {
-              color: var(--el-color-primary);
-              font-weight: 600;
-            }
-          }
-
-          .platform-features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 16px;
-
-            .platform-feature-item {
-              display: flex;
-              align-items: center;
-              gap: 12px;
-              padding: 12px;
-              background: var(--el-bg-color);
-              border-radius: 8px;
-              border: 1px solid var(--el-border-color-lighter);
-
-              .feature-icon {
-                color: var(--el-color-success);
-                font-size: 18px;
-                flex-shrink: 0;
-              }
-
-              span {
-                color: var(--el-text-color-regular);
-                font-size: 14px;
-                line-height: 1.5;
-              }
-            }
-          }
-        }
+      p {
+        margin: 0;
+        font-size: 13px;
+        color: #075985;
+        line-height: 1.5;
       }
     }
   }
@@ -1018,217 +830,6 @@ onMounted(() => {
       max-width: 600px;
       margin-left: auto;
       margin-right: auto;
-    }
-  }
-
-  // Learning Center Section
-  .learning-center-section {
-    margin-bottom: 80px;
-
-    .learning-courses {
-      .course-card {
-        background: var(--el-bg-color);
-        border-radius: 16px;
-        padding: 32px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-        border: 1px solid var(--el-border-color-lighter);
-        transition: all 0.3s ease;
-        position: relative;
-        overflow: hidden;
-
-        &.featured {
-          background: linear-gradient(135deg, rgba(102, 126, 234, 0.03), rgba(118, 75, 162, 0.03));
-          border: 2px solid rgba(102, 126, 234, 0.3);
-          margin-bottom: 32px;
-
-          &::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-          }
-        }
-
-        &:hover {
-          transform: translateY(-4px);
-          box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-        }
-
-        .course-badge {
-          position: absolute;
-          top: 20px;
-          right: 20px;
-          background: linear-gradient(135deg, #667eea, #764ba2);
-          color: white;
-          padding: 6px 16px;
-          border-radius: 20px;
-          font-size: 12px;
-          font-weight: 600;
-        }
-
-        .course-header {
-          display: flex;
-          align-items: flex-start;
-          gap: 20px;
-          margin-bottom: 24px;
-
-          .course-icon {
-            width: 64px;
-            height: 64px;
-            border-radius: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 28px;
-            color: white;
-            flex-shrink: 0;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-
-            &.beginner {
-              background: linear-gradient(135deg, var(--el-color-success), #52c41a);
-            }
-
-            &.intermediate {
-              background: linear-gradient(135deg, var(--el-color-warning), #faad14);
-            }
-
-            &.advanced {
-              background: linear-gradient(135deg, var(--el-color-danger), #ff4d4f);
-            }
-          }
-
-          .course-info {
-            flex: 1;
-
-            h3 {
-              margin: 0 0 8px 0;
-              font-size: 24px;
-              font-weight: 700;
-              color: var(--el-text-color-primary);
-            }
-
-            .course-level {
-              margin: 0;
-              font-size: 14px;
-              color: var(--el-text-color-regular);
-            }
-
-            .course-meta {
-              display: flex;
-              gap: 8px;
-              margin-top: 8px;
-            }
-          }
-        }
-
-        .course-content {
-          .course-description {
-            color: var(--el-text-color-regular);
-            line-height: 1.8;
-            margin: 0 0 24px 0;
-            font-size: 16px;
-
-            strong {
-              color: var(--el-color-primary);
-              font-weight: 600;
-            }
-          }
-
-          .course-features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 16px;
-            margin-bottom: 24px;
-
-            .course-feature {
-              display: flex;
-              align-items: center;
-              gap: 12px;
-              padding: 12px;
-              background: var(--el-bg-color-page);
-              border-radius: 8px;
-              border: 1px solid var(--el-border-color-lighter);
-
-              .feature-icon {
-                color: var(--el-color-success);
-                font-size: 18px;
-                flex-shrink: 0;
-              }
-
-              span {
-                color: var(--el-text-color-regular);
-                font-size: 14px;
-                line-height: 1.5;
-              }
-            }
-          }
-
-          .course-outcomes {
-            background: var(--el-bg-color-page);
-            border-radius: 12px;
-            padding: 20px;
-            border-left: 4px solid var(--el-color-primary);
-
-            h4 {
-              margin: 0 0 16px 0;
-              font-size: 18px;
-              font-weight: 600;
-              color: var(--el-text-color-primary);
-            }
-
-            ul {
-              margin: 0;
-              padding-left: 20px;
-              list-style: none;
-
-              li {
-                position: relative;
-                padding-left: 24px;
-                margin-bottom: 12px;
-                color: var(--el-text-color-regular);
-                line-height: 1.6;
-
-                &::before {
-                  content: '✓';
-                  position: absolute;
-                  left: 0;
-                  color: var(--el-color-success);
-                  font-weight: 600;
-                }
-
-                &:last-child {
-                  margin-bottom: 0;
-                }
-              }
-            }
-          }
-
-          .course-topics {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 16px;
-
-            .topic-tag {
-              background: var(--el-color-primary-light-9);
-              color: var(--el-color-primary);
-              padding: 4px 12px;
-              border-radius: 12px;
-              font-size: 12px;
-              font-weight: 500;
-            }
-          }
-        }
-      }
-
-      .course-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-        gap: 24px;
-      }
     }
   }
 
@@ -1614,6 +1215,21 @@ onMounted(() => {
             font-size: 14px;
             display: inline-block;
             backdrop-filter: blur(10px);
+
+            &.status-stable {
+              background: #67c23a;
+              color: white;
+            }
+
+            &.status-beta {
+              background: #e6a23c;
+              color: white;
+            }
+
+            &.status-dev {
+              background: #909399;
+              color: white;
+            }
           }
         }
 
@@ -1840,77 +1456,6 @@ onMounted(() => {
         .hero-actions {
           justify-content: center;
           flex-wrap: wrap;
-        }
-      }
-    }
-
-    .learning-platform-section {
-      .platform-card {
-        padding: 24px;
-
-        .platform-header {
-          flex-direction: column;
-          gap: 20px;
-
-          .platform-icon {
-            margin: 0 auto;
-          }
-
-          .platform-content {
-            h3 {
-              text-align: center;
-              font-size: 20px;
-            }
-
-            .platform-features {
-              grid-template-columns: 1fr;
-            }
-          }
-        }
-      }
-    }
-
-    .learning-center-section {
-      .learning-courses {
-        .course-card {
-          padding: 24px;
-
-          &.featured {
-            margin-bottom: 24px;
-
-            .course-badge {
-              top: 16px;
-              right: 16px;
-              font-size: 11px;
-              padding: 4px 12px;
-            }
-          }
-
-          .course-header {
-            flex-direction: column;
-            gap: 16px;
-            text-align: center;
-
-            .course-icon {
-              margin: 0 auto;
-            }
-
-            .course-info {
-              h3 {
-                font-size: 20px;
-              }
-            }
-          }
-
-          .course-content {
-            .course-features {
-              grid-template-columns: 1fr;
-            }
-          }
-        }
-
-        .course-grid {
-          grid-template-columns: 1fr;
         }
       }
     }

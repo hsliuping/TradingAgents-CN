@@ -7,15 +7,24 @@
         欢迎使用 TradingAgents-CN
       </h1>
       <p class="guide-subtitle">按照以下步骤完成初始设置，开始学习AI辅助股票分析技术</p>
+      <el-button v-if="!loading" text type="primary" @click="loadAllStatus" class="refresh-btn">
+        <el-icon><Refresh /></el-icon>
+        刷新进度
+      </el-button>
     </div>
 
     <!-- 步骤列表 -->
-    <div class="steps-container">
+    <div class="steps-container" v-loading="loading" element-loading-text="正在检测配置进度...">
       <el-steps :active="currentStep" direction="vertical" finish-status="success">
         <!-- 步骤1：获取大模型API密钥 -->
         <el-step title="获取大模型API密钥" description="选择并获取大语言模型的API密钥">
           <template #description>
             <div class="step-content">
+              <p v-if="stepStatus.llmKey" class="step-completed-tip">
+                <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                大模型 API 密钥已配置
+              </p>
+              <template v-else>
               <p>系统支持多种主流大语言模型，推荐优先使用国内模型，您需要选择其中一个并获取API密钥：</p>
               <ul class="step-list">
                 <li>
@@ -42,6 +51,7 @@
                 <li>其他支持的大语言模型提供商</li>
               </ul>
               <p class="step-tip">💡 提示：国内用户推荐优先使用阿里云百炼或DeepSeek，访问速度更快，使用更稳定</p>
+              </template>
             </div>
           </template>
         </el-step>
@@ -50,6 +60,11 @@
         <el-step title="获取数据源API密钥" description="注册Tushare账号并获取API Token">
           <template #description>
             <div class="step-content">
+              <p v-if="stepStatus.dataKey" class="step-completed-tip">
+                <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                数据源 Token 已配置
+              </p>
+              <template v-else>
               <p>系统使用 <strong>Tushare</strong> 作为数据源，您需要注册账号并获取API Token：</p>
               <ul class="step-list">
                 <li>访问 Tushare 官网注册账号</li>
@@ -66,6 +81,7 @@
                   前往个人中心获取Token
                 </el-link>
               </div>
+              </template>
             </div>
           </template>
         </el-step>
@@ -91,7 +107,7 @@
                   <div style="margin-top: 8px; padding-left: 0;">
                     <p style="margin-bottom: 8px; color: var(--el-text-color-regular); font-size: 14px;">
                       <strong>重要提示：</strong>Tushare 数据源需要账户积分达到 <strong style="color: var(--el-color-warning);">2000积分以上</strong>才能使用完整功能。
-                      如果积分不足，系统会自动使用免费的开源数据源（AKShare、Baostock）作为替代。
+                      如果积分不足，系统会自动使用免费的开源数据源（AKShare）作为替代。
                       <strong style="color: var(--el-color-warning);">请注意：</strong>开源数据源因稳定性问题，<strong>仅作为体验本平台使用</strong>，不建议用于正式学习或分析场景。
                     </p>
                     <ol style="margin-top: 8px; padding-left: 24px;">
@@ -99,7 +115,7 @@
                       <li>找到 Tushare 数据源并点击"编辑"</li>
                       <li>填入步骤2获取的Token（在 <a href="https://tushare.pro/user/index" target="_blank" rel="noopener noreferrer" class="tushare-link">Tushare个人中心</a> 获取）</li>
                       <li>保存配置</li>
-                      <li>如果积分不足2000，系统会自动使用 AKShare 或 Baostock 等免费数据源（仅用于体验，不建议正式使用）</li>
+                      <li>如果积分不足2000，系统会自动使用 AKShare 等免费数据源（仅用于体验，不建议正式使用）</li>
                     </ol>
                   </div>
                 </li>
@@ -113,10 +129,41 @@
           </template>
         </el-step>
 
-        <!-- 步骤4：同步数据 -->
+        <!-- 步骤4：激活License -->
+        <el-step title="激活 License 授权" description="输入 License 密钥激活系统">
+          <template #description>
+            <div class="step-content">
+              <p v-if="stepStatus.licenseValid" class="step-completed-tip">
+                <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                License 已激活，无需重复操作
+              </p>
+              <template v-else>
+                <p>v3.0 版本需要激活 License 才能使用完整功能：</p>
+                <ul class="step-list">
+                  <li>进入"设置" → "个人设置" → "授权管理"页面</li>
+                  <li>输入收到的 License 密钥</li>
+                  <li>点击"激活"按钮完成激活</li>
+                  <li>激活后即可使用所有功能</li>
+                </ul>
+                <p class="step-tip">💡 提示：如果未收到 License 密钥，请联系管理员获取</p>
+              </template>
+              <el-button type="primary" @click="goToLicense">
+                <el-icon><Key /></el-icon>
+                前往授权管理
+              </el-button>
+            </div>
+          </template>
+        </el-step>
+
+        <!-- 步骤5：同步数据 -->
         <el-step title="同步股票数据" description="同步基础股票数据到系统">
           <template #description>
             <div class="step-content">
+              <p v-if="stepStatus.dataSynced" class="step-completed-tip">
+                <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                股票数据已同步完成
+              </p>
+              <template v-else>
               <p>完成数据同步，获取最新的股票基础信息：</p>
               <ul class="step-list">
                 <li>
@@ -142,11 +189,12 @@
                 <el-icon><Refresh /></el-icon>
                 前往数据同步
               </el-button>
+              </template>
             </div>
           </template>
         </el-step>
 
-        <!-- 步骤5：搜索股票 -->
+        <!-- 步骤6：搜索股票 -->
         <el-step title="搜索并添加自选股" description="搜索感兴趣的股票并添加到自选列表">
           <template #description>
             <div class="step-content">
@@ -169,10 +217,15 @@
           </template>
         </el-step>
 
-        <!-- 步骤6：完成第一次研究 -->
+        <!-- 步骤7：完成第一次研究 -->
         <el-step title="完成第一次研究" description="对自选股进行 AI 研究">
           <template #description>
             <div class="step-content">
+              <p v-if="stepStatus.hasAnalysis" class="step-completed-tip">
+                <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                已完成首次研究分析
+              </p>
+              <template v-else>
               <p>开始您的第一次 AI 股票研究：</p>
               <ul class="step-list">
                 <li>
@@ -196,40 +249,18 @@
                 </li>
                 <li>
                   <strong>等待并查看结果：</strong>
-                  等待几分钟（通常5-8分钟），研究完成后查看详细的研究报告和研究结论
+                  等待研究完成（低深度约 5-8 分钟，高深度可能 15-20 分钟），研究完成后查看详细的研究报告和研究结论
                 </li>
               </ul>
               <el-button type="primary" @click="goToAnalysis">
                 <el-icon><TrendCharts /></el-icon>
                 开始研究
               </el-button>
+              </template>
             </div>
           </template>
         </el-step>
       </el-steps>
-    </div>
-
-    <!-- 快速操作 -->
-    <div class="quick-actions">
-      <h3>快速操作</h3>
-      <div class="action-buttons">
-        <el-button type="primary" @click="goToSettings">
-          <el-icon><Setting /></el-icon>
-          配置管理
-        </el-button>
-        <el-button @click="goToScreening">
-          <el-icon><Search /></el-icon>
-          股票筛选
-        </el-button>
-        <el-button @click="goToAnalysis">
-          <el-icon><TrendCharts /></el-icon>
-          单股研究
-        </el-button>
-        <el-button @click="goToDashboard">
-          <el-icon><HomeFilled /></el-icon>
-          返回首页
-        </el-button>
-      </div>
     </div>
 
     <!-- 提示信息 -->
@@ -253,7 +284,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Document,
@@ -261,12 +292,111 @@ import {
   Refresh,
   Search,
   TrendCharts,
-  HomeFilled,
-  Link
+  Link,
+  Key,
+  CircleCheck
 } from '@element-plus/icons-vue'
+import { ApiClient } from '@/api/request'
 
 const router = useRouter()
-const currentStep = ref(0) // 当前步骤，可以根据用户完成情况动态设置
+const currentStep = ref(0)
+const loading = ref(true)
+
+// 各步骤完成状态
+const stepStatus = ref({
+  llmKey: false,        // 步骤1: LLM API密钥
+  dataKey: false,       // 步骤2: 数据源Token
+  configDone: false,    // 步骤3: 填写配置
+  dataSynced: false,    // 步骤5: 数据同步
+  hasFavorites: false,  // 步骤6: 添加自选股
+  hasAnalysis: false,   // 步骤7: 完成研究
+  licenseValid: false   // License激活
+})
+
+// 检测 LLM API 密钥配置状态
+const checkLLMKey = async () => {
+  try {
+    const resp = await ApiClient.get('/api/config/llm/providers')
+    if (resp.success && resp.data) {
+      const providers = Array.isArray(resp.data) ? resp.data : (resp.data.providers || [])
+      stepStatus.value.llmKey = providers.some((p: any) => p.has_api_key || p.has_api_secret)
+    }
+  } catch (e) {
+    console.error('检查LLM配置失败:', e)
+  }
+}
+
+// 检测数据源同步状态（间接判断Token是否配置）
+const checkDataSync = async () => {
+  try {
+    const resp = await ApiClient.get('/api/sync/stock_basics/status')
+    if (resp.success && resp.data) {
+      // 如果有同步记录或数据量 > 0，说明 Token 已配置并同步过
+      const status = resp.data
+      if (status.total_count > 0 || status.status === 'completed') {
+        stepStatus.value.dataKey = true
+        stepStatus.value.dataSynced = true
+      }
+    }
+  } catch (e) {
+    console.error('检查数据同步状态失败:', e)
+  }
+}
+
+// 检测是否已完成过分析任务
+const checkAnalysisHistory = async () => {
+  try {
+    const resp = await ApiClient.get('/api/v2/tasks/list', {
+      params: { status: 'completed', limit: 1 }
+    })
+    if (resp.success && resp.data) {
+      stepStatus.value.hasAnalysis = (resp.data.total || 0) > 0
+    }
+  } catch (e) {
+    console.error('检查分析历史失败:', e)
+  }
+}
+
+// 检测 License 状态
+const checkLicense = async () => {
+  try {
+    const resp = await ApiClient.get('/api/license/status')
+    if (resp.success && resp.data) {
+      stepStatus.value.licenseValid = resp.data.is_valid || resp.data.has_token || false
+    }
+  } catch (e) {
+    console.error('检查License状态失败:', e)
+  }
+}
+
+// 根据完成状态计算当前步骤
+const updateCurrentStep = () => {
+  let step = 0
+  if (stepStatus.value.llmKey) step = 1
+  if (stepStatus.value.dataKey) step = 2
+  if (stepStatus.value.llmKey && stepStatus.value.dataKey) step = 3
+  if (stepStatus.value.licenseValid) step = 4
+  if (stepStatus.value.dataSynced) step = 5
+  if (stepStatus.value.hasAnalysis) step = 7
+  currentStep.value = step
+}
+
+// 加载所有状态
+const loadAllStatus = async () => {
+  loading.value = true
+  await Promise.allSettled([
+    checkLLMKey(),
+    checkDataSync(),
+    checkAnalysisHistory(),
+    checkLicense()
+  ])
+  updateCurrentStep()
+  loading.value = false
+}
+
+onMounted(() => {
+  loadAllStatus()
+})
 
 const goToSettings = () => {
   router.push('/settings/config')
@@ -284,8 +414,8 @@ const goToAnalysis = () => {
   router.push('/analysis/single')
 }
 
-const goToDashboard = () => {
-  router.push('/dashboard')
+const goToLicense = () => {
+  router.push('/settings/license')
 }
 </script>
 
@@ -298,6 +428,10 @@ const goToDashboard = () => {
   .guide-header {
     text-align: center;
     margin-bottom: 48px;
+
+    .refresh-btn {
+      margin-top: 12px;
+    }
 
     .guide-title {
       font-size: 36px;
@@ -385,6 +519,14 @@ const goToDashboard = () => {
         color: var(--el-text-color-regular);
         font-size: 15px;
         line-height: 1.8;
+
+        &.step-completed-tip {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          color: var(--el-color-success);
+          font-weight: 500;
+        }
 
         &.step-tip {
           background: var(--el-color-info-light-9);
