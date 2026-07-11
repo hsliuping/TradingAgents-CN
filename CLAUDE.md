@@ -132,6 +132,30 @@ test: 测试相关
 - 小版本（2.1 → 2.2）：允许结构变更，但需提供迁移和回滚脚本
 - 补丁版本不包含数据库结构变更，确保可安全回退
 
+## Python 开发环境
+
+**统一使用 `env/` 虚拟环境**，不要创建新的虚拟环境。
+
+| 项目 | 说明 |
+|------|------|
+| 虚拟环境目录 | `env/`（项目根目录下） |
+| Python 解释器 | `env/Scripts/python.exe` |
+| Python 版本 | 3.11.9 |
+| 激活方式 | IDE 自动激活（`.vscode/settings.json` 已配置） |
+| 依赖安装 | `env/Scripts/pip install -e .` 或 `env/Scripts/python -m pip install -e .` |
+| 运行命令 | 使用 `env/Scripts/python` 而非系统 `python` |
+
+**禁止操作**：
+- ❌ 禁止创建 `.venv/`、`venv/` 等新的虚拟环境
+- ❌ 禁止使用系统 Python 直接运行项目
+- ❌ 禁止在虚拟环境外安装项目依赖
+
+**AI 助手注意事项**：
+- 执行 Python 命令时，使用 `env/Scripts/python.exe` 而非 `python`
+- 执行 pip 安装时，使用 `env/Scripts/pip.exe` 或 `env/Scripts/python.exe -m pip`
+- 运行测试时，使用 `env/Scripts/python.exe -m pytest`
+- 启动后端服务时，使用 `env/Scripts/python.exe -m uvicorn` 或通过 `env/Scripts/python.exe main.py`
+
 ## 开发环境隔离
 
 三个版本使用独立目录、独立端口、独立数据卷，互不干扰：
