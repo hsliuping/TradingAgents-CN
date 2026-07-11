@@ -1,7 +1,7 @@
 # Backend base Dockerfile for FastAPI service (TradingAgents-CN Pro)
 # 提供后端发布镜像复用的公共基础层：系统依赖、编译工具和 Python 依赖
 
-FROM python:3.10-slim-bookworm
+FROM python:3.11-slim-bookworm
 
 ARG TARGETARCH
 ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
