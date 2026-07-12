@@ -312,18 +312,124 @@
           </div>
 
           <div v-else-if="activeStep === 'gap'" class="step-layout single-column">
-            <el-card class="step-card" shadow="never">
+            <!-- 缺口分析报告 -->
+            <el-card v-if="gapReport" class="step-card" shadow="never">
               <template #header>
                 <div class="card-header">
-                  <span>高级流程已隐藏</span>
+                  <span>缺口分析报告</span>
                   <div class="session-toolbar-actions">
-                    <el-button size="small" @click="activeStep = latestVersion ? 'version' : 'spec'">返回当前流程</el-button>
+                    <el-tag v-if="gapReport.blocking_gaps?.length" type="danger" size="small">{{ gapReport.blocking_gaps.length }} 个阻断性缺口</el-tag>
+                    <el-tag v-else type="success" size="small">无阻断性缺口</el-tag>
+                    <el-button size="small" type="primary" :loading="analyzing" @click="handleAnalyzeGaps">重新分析</el-button>
+                    <el-button size="small" @click="activeStep = latestVersion ? 'version' : 'spec'">返回</el-button>
                   </div>
                 </div>
               </template>
-              <div class="empty-state compact">简单模式下已隐藏能力检查和工具缺口分析。需要时可以后续再补一个高级模式入口。</div>
+
+              <!-- 错误消息 -->
+              <el-alert v-if="gapReport.error_message" type="error" :closable="false" show-icon style="margin-bottom:16px">
+                <template #title>分析过程中出现错误</template>
+                {{ gapReport.error_message }}
+              </el-alert>
+
+              <!-- 现有工具 -->
+              <div class="gap-section" v-if="gapReport.existing_tools?.length">
+                <h4>现有工具（{{ gapReport.existing_tools.length }} 个）</h4>
+                <div class="gap-tool-chips">
+                  <el-tag v-for="tool in gapReport.existing_tools" :key="tool" type="info" size="small" effect="plain" style="margin:2px 4px 2px 0">
+                    {{ gapExistingToolLabelMap.get(tool) || tool }}
+                  </el-tag>
+                </div>
+              </div>
+
+              <!-- 阻断性缺口 -->
+              <div class="gap-section" v-if="gapReport.blocking_gaps?.length">
+                <h4 style="color:#f56c6c">阻断性缺口（{{ gapReport.blocking_gaps.length }} 个）</h4>
+                <ul class="gap-list danger">
+                  <li v-for="(gap, idx) in gapReport.blocking_gaps" :key="idx">{{ gap }}</li>
+                </ul>
+              </div>
+
+              <!-- 建议工具 -->
+              <div class="gap-section" v-if="gapReport.suggested_tools?.length">
+                <h4>建议补齐工具（{{ gapReport.suggested_tools.length }} 个）</h4>
+                <el-table :data="gapReport.suggested_tools" size="small" border stripe max-height="300">
+                  <el-table-column prop="tool_id" label="工具 ID" width="220" />
+                  <el-table-column prop="name" label="名称" width="160" />
+                  <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
+                  <el-table-column prop="rationale" label="推荐理由" min-width="180" show-overflow-tooltip />
+                </el-table>
+              </div>
+
+              <!-- 可推断缺口 -->
+              <div class="gap-section" v-if="gapReport.inferable_gaps?.length">
+                <h4>可推断覆盖（{{ gapReport.inferable_gaps.length }} 个）</h4>
+                <el-table :data="gapReport.inferable_gaps" size="small" border stripe max-height="300">
+                  <el-table-column prop="gap" label="缺口" min-width="200" show-overflow-tooltip />
+                  <el-table-column label="可从以下工具推断" min-width="250">
+                    <template #default="{ row }">
+                      <el-tag v-for="t in row.inferable_from" :key="t" size="small" effect="plain" style="margin:1px 3px 1px 0">{{ t }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="inference_approach" label="推断方式" width="160" show-overflow-tooltip />
+                </el-table>
+              </div>
+
+              <!-- 降级策略 -->
+              <div class="gap-section" v-if="gapReport.fallback_strategy?.length">
+                <h4>降级策略</h4>
+                <ul class="gap-list">
+                  <li v-for="(s, idx) in gapReport.fallback_strategy" :key="idx">{{ s }}</li>
+                </ul>
+              </div>
+
+              <!-- 构建建议 -->
+              <div class="gap-section" v-if="gapReport.build_recommendations?.length">
+                <h4>构建建议</h4>
+                <ul class="gap-list">
+                  <li v-for="(r, idx) in gapReport.build_recommendations" :key="idx">{{ r }}</li>
+                </ul>
+              </div>
+
+              <!-- 手动依赖 -->
+              <div class="gap-section" v-if="gapReport.manual_dependencies?.length">
+                <h4>手动依赖</h4>
+                <ul class="gap-list">
+                  <li v-for="(d, idx) in gapReport.manual_dependencies" :key="idx">{{ d }}</li>
+                </ul>
+              </div>
+
+              <!-- 备注 -->
+              <div class="gap-section" v-if="gapReport.notes?.length">
+                <h4>备注</h4>
+                <ul class="gap-list">
+                  <li v-for="(n, idx) in gapReport.notes" :key="idx">{{ n }}</li>
+                </ul>
+              </div>
+
+              <!-- 原始 LLM 输出（调试用） -->
+              <el-collapse v-if="gapReport.raw_response" style="margin-top:16px">
+                <el-collapse-item title="原始 LLM 输出（调试用）">
+                  <el-input type="textarea" :model-value="gapReport.raw_response" readonly :rows="10" />
+                </el-collapse-item>
+              </el-collapse>
             </el-card>
 
+            <!-- 未分析状态 -->
+            <el-card v-else class="step-card" shadow="never">
+              <template #header>
+                <div class="card-header">
+                  <span>缺口分析</span>
+                  <div class="session-toolbar-actions">
+                    <el-button size="small" type="primary" :loading="analyzing" @click="handleAnalyzeGaps">开始分析</el-button>
+                    <el-button size="small" @click="activeStep = 'spec'">返回</el-button>
+                  </div>
+                </div>
+              </template>
+              <div class="empty-state compact">
+                <p>尚未执行能力缺口分析。点击"开始分析"扫描平台现有工具能力，对比 Agent 需求，生成缺口报告。</p>
+              </div>
+            </el-card>
           </div>
 
           <div v-else-if="activeStep === 'version'" class="step-layout single-column">
@@ -4471,6 +4577,31 @@ onUnmounted(() => {
 
 .empty-state.compact {
   min-height: 220px;
+}
+
+/* 缺口分析面板 */
+.gap-section {
+  margin-bottom: 16px;
+}
+.gap-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.gap-list {
+  margin: 0;
+  padding-left: 20px;
+}
+.gap-list li {
+  margin-bottom: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.gap-list.danger li {
+  color: #f56c6c;
+}
+.gap-tool-chips {
+  line-height: 2;
 }
 
 @media (max-width: 1100px) {

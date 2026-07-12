@@ -127,9 +127,18 @@ export interface AgentWorkshopGapAnalysis {
   fallback_strategy: string[]
   build_recommendations: string[]
   notes: string[]
+  inferable_gaps?: InferableGapItem[]
   generated_by?: string
   error_message?: string
   raw_response?: string
+}
+
+/** 可推断缺口 — 可由已有数据组合推理出，不构成 blocking gap */
+export interface InferableGapItem {
+  gap: string
+  inferable_from: string[]
+  inference_approach: string
+  confidence: string
 }
 
 export interface AgentWorkshopToolSchemaField {
