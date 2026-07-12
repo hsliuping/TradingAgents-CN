@@ -13,28 +13,53 @@ logger = logging.getLogger(__name__)
 
 
 class _ToolMetadataWrapper:
-    """包装 ToolMetadata，提供 to_schema() 方法。"""
+    """包装 ToolMetadata，提供 to_schema() 和 func 属性。"""
 
-    def __init__(self, metadata: Any):
+    def __init__(self, metadata: Any, executor: Any = None):
         self._metadata = metadata
+        self._executor = executor  # StandardToolRegistryAdapter 引用，用于执行工具
         self.name = metadata.id
 
+    # func 属性供 agent_builder_nodes.py 的 _run_node_llm_fc 使用，
+    # 它在 wrapper 上查找 func/execute/run/handler 属性来执行工具。
+    @property
+    def func(self):
+        if not self._executor:
+            return None
+        # 返回一个 async callable，签名为(**kwargs) -> str
+        async def _execute(**kwargs):
+            return await self._executor.execute(self.name, kwargs)
+        return _execute
+
     def to_schema(self) -> dict[str, Any]:
-        # 把 ToolParameter Pydantic 模型转为 dict，避免 LLM 客户端 json.dumps 时报错
-        # "Object of type ToolParameter is not JSON serializable"
         raw_params = self._metadata.parameters
+        # 必须转成 OpenAI Function Calling 要求的 JSON Schema 对象格式：
+        # {"type": "object", "properties": {...}, "required": [...]}
         if raw_params:
-            serialized_params = []
+            properties = {}
+            required = []
             for p in raw_params:
                 if hasattr(p, "model_dump"):
-                    serialized_params.append(p.model_dump(mode="json"))
+                    d = p.model_dump(mode="json", exclude_none=True)
                 elif hasattr(p, "dict"):
-                    serialized_params.append(p.dict())
+                    d = p.dict()
                 elif isinstance(p, dict):
-                    serialized_params.append(p)
+                    d = p
                 else:
-                    serialized_params.append(str(p))
-            params_payload = serialized_params
+                    continue
+                name = d.pop("name", None)
+                if not name:
+                    continue
+                if d.pop("required", False):
+                    required.append(name)
+                properties[name] = d
+            params_payload = {"type": "object", "properties": properties}
+            if required:
+                params_payload["required"] = required
+            # 也保留原始数组格式给可能直接遍历参数的旧代码
+            params_payload["__raw_params__"] = [
+                dict(name=name, **prop) for name, prop in properties.items()
+            ]
         else:
             params_payload = {"type": "object", "properties": {}}
         return {
@@ -45,7 +70,7 @@ class _ToolMetadataWrapper:
 
 
 class StandardToolRegistryAdapter:
-    """适配器：core.tools.registry → Nanobot ToolRegistry 接口。"""
+    """适配器：core.tools.registry → ToolRegistry 接口。"""
 
     def __init__(self):
         from core.tools import get_tool_registry
@@ -57,7 +82,7 @@ class StandardToolRegistryAdapter:
 
     def get(self, name: str) -> _ToolMetadataWrapper | None:
         meta = self._metadata_map.get(name)
-        return _ToolMetadataWrapper(meta) if meta else None
+        return _ToolMetadataWrapper(meta, executor=self) if meta else None
 
     def has(self, name: str) -> bool:
         return name in self._metadata_map

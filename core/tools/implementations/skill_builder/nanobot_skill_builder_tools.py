@@ -267,7 +267,7 @@ async def generate_confirmed_external_skill(
 @register_tool(
     tool_id="inspect_external_skill_generation_session",
     name="查看 External Skill 生成会话",
-    description="查看 external skill 生成会话的当前状态、spec、侦察摘要和生成进度，便于 Nanobot 跟踪异步生成结果。",
+    description="查看 external skill 生成会话的当前状态、spec、侦察摘要和生成进度，便于跟踪异步生成结果。",
     category="external",
     is_online=True,
     auto_register=True,
