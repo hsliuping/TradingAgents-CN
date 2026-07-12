@@ -621,7 +621,7 @@ class AgentWorkshopService:
         )
 
         summary_lines = [
-            f"Nanobot 已将候选 Agent 同步为 Agent 工坊 Draft：{clean_agent_name}（{clean_agent_id}）。",
+            f"已将候选 Agent 同步为 Agent 工坊 Draft：{clean_agent_name}（{clean_agent_id}）。",
             f"单一职责：{clean_responsibility}",
             f"输出字段：{clean_output_field}",
         ]
@@ -4778,7 +4778,7 @@ class AgentWorkshopService:
         preferred_methods: List[str],
     ) -> str:
         lines = [
-            f"请基于 Nanobot 已确认的候选方案继续治理这个 Agent：{agent_name}（{agent_id}）。",
+            f"请基于已确认的候选方案继续治理这个 Agent：{agent_name}（{agent_id}）。",
             f"职责：{target_responsibility}",
             f"输出字段：{output_field}",
         ]
@@ -4788,7 +4788,7 @@ class AgentWorkshopService:
             lines.append(f"非目标：{'、'.join(non_goals)}")
         if preferred_methods:
             lines.append(f"方法范围：{'、'.join(preferred_methods)}")
-        lines.append("这是一份从 Nanobot 同步进 Agent 工坊的 Draft，请在此基础上继续做缺口分析、版本构建和治理。")
+        lines.append("这是一份从对话同步进 Agent 工坊的 Draft，请在此基础上继续做缺口分析、版本构建和治理。")
         return "\n".join(lines)
 
     async def _load_session(self, session_id: str) -> Optional[AgentWorkshopSession]:
@@ -4957,9 +4957,11 @@ class AgentWorkshopService:
                     categories=self._gap_analysis_search_categories(),
                 )
                 accepted_for_query = 0
+                query_hit_ids: List[Dict[str, Any]] = []
                 for rank, hit in enumerate(hits, start=1):
                     cap_id = hit.capability.capability_id
                     score = float(hit.score or 0.0)
+                    query_hit_ids.append({"id": cap_id, "label": hit.capability.label, "score": round(score, 4)})
                     if score < self._GAP_ANALYSIS_MIN_RETRIEVAL_SCORE:
                         below_threshold.append((cap_id, hit.capability.label, score, query_index))
                         continue
@@ -4968,6 +4970,14 @@ class AgentWorkshopService:
                         per_query_top_ids.append(cap_id)
                     if cap_id not in merged_hits or score > merged_hits[cap_id][1]:
                         merged_hits[cap_id] = (hit, score, rank)
+                # 🔍 日志：每个查询返回的 top 结果
+                logger.info(
+                    "[CapabilitySnapshot][PerQuery] query_%d accepted=%d total=%d top6=%s",
+                    query_index,
+                    accepted_for_query,
+                    len(query_hit_ids),
+                    query_hit_ids[:6],
+                )
 
             if not merged_hits:
                 return await self._collect_capability_snapshot_fallback()
@@ -7716,13 +7726,28 @@ class AgentWorkshopService:
         return f"{normalized_tool_id} 可调用能力"
 
     def _build_capability_search_queries(self, spec: AgentSpec) -> List[str]:
-        queries: List[str] = []
-        base_query = self._build_valuation_requirement_text(spec).strip()
-        if base_query:
-            queries.append(base_query)
+        """从 spec 中提取多个分析维度，每个维度独立生成搜索查询。
 
+        核心思路：不把所有需求揉成一个大 query（估值词会淹没现金流/ROIC 等维度），
+        而是将 spec 的 primary_goal 按段落/标题拆分为子维度，各自搜索匹配的工具。
+        这样「安全边际评估→估值工具」「内在价值判断→ROIC/现金流/盈利稳定性工具」
+        各自独立召回，互不干扰。
+        """
+        queries: List[str] = []
+
+        # ── 1. 从 primary_goal 中提取分析维度子查询 ──
+        goal = str(spec.primary_goal or "").strip()
+        dimension_queries = self._extract_dimension_subqueries(goal)
+        queries.extend(dimension_queries)
+
+        # ── 2. 如果没有提取到维度，用完整文本兜底 ──
+        if not queries:
+            base_query = self._build_valuation_requirement_text(spec).strip()
+            if base_query:
+                queries.append(base_query)
+
+        # ── 3. 补充 responsibilities 和 success_criteria ──
         for text in [
-            spec.primary_goal,
             " ".join(spec.responsibilities or []),
             " ".join(spec.success_criteria or []),
         ]:
@@ -7730,13 +7755,80 @@ class AgentWorkshopService:
             if clean and clean not in queries:
                 queries.append(clean)
 
+        # ── 4. 显式 capability_requirements（每个独立搜索） ──
         for req in (spec.capability_requirements or []):
             parts = [req.capability_name, req.description, req.delivery_requirement]
             q = " ".join(p for p in parts if p).strip()
             if q and q not in queries:
                 queries.append(q)
 
+        logger.info(
+            "[CapabilitySearch] queries_count=%d dimensions=%d",
+            len(queries),
+            len(dimension_queries),
+        )
         return queries[:10]
+
+    @staticmethod
+    def _extract_dimension_subqueries(goal_text: str) -> List[str]:
+        """从 primary_goal 文本中提取分析维度，每个维度生成一个独立搜索查询。
+
+        识别模式：
+        - Markdown 标题行（### 安全边际评估）
+        - 数字编号维度（1. 安全边际 / 2. 内在价值）
+        - 作为分段锚点，将后续的描述文本附带为该维度的搜索上下文
+
+        例如输入：
+            ### 1. 安全边际评估
+            - PE/PB/PS 历史分位
+            ### 2. 内在价值判断
+            - ROE/ROIC 趋势
+        输出：
+            ["安全边际评估 PE PB PS 历史分位", "内在价值判断 ROE ROIC 趋势"]
+        """
+        if not goal_text or len(goal_text.strip()) < 10:
+            return []
+
+        # 用标题行做分段切分
+        # 匹配 ### 标题、数字编号、中文编号（一、二、1. 2. 等）
+        section_pattern = re.compile(
+            r'(?:^|\n)(?:#{1,3}\s*)?(?:[（(]?\d+[)）]\.?\s*|'
+            r'[一二三四五六七八九十]+[、，]\s*|'
+            r'#{1,3}\s+)',
+            re.MULTILINE,
+        )
+
+        # 找到所有分段边界
+        splits = list(section_pattern.finditer(goal_text))
+        subqueries: List[str] = []
+
+        for i, match in enumerate(splits):
+            # 当前段从匹配位置开始
+            start = match.start()
+            # 下一段的开始位置（或文本末尾）
+            end = splits[i + 1].start() if i + 1 < len(splits) else len(goal_text)
+            section_text = goal_text[start:end].strip()
+
+            if len(section_text) < 10:
+                continue
+
+            # 提取维度名（标题行）和描述文本
+            lines = section_text.split("\n")
+            dimension_name = lines[0].lstrip("#- 0123456789.一、二三四五六七八九十（）() ").strip()
+            # 提取描述中的关键术语：中英文混合词、专业缩写
+            body = " ".join(lines[1:]) if len(lines) > 1 else ""
+            # 合并为搜索查询：维度名 + 前 200 字描述
+            query = f"{dimension_name} {body}"[:300].strip()
+            if len(query) >= 10:
+                subqueries.append(query)
+
+        logger.info(
+            "[CapabilitySearch] dimension_split source=%s sections=%d queries=%s",
+            "primary_goal" if goal_text else "none",
+            len(subqueries),
+            [(i, q[:100]) for i, q in enumerate(subqueries)],
+        )
+        return subqueries
 
     async def analyze_spec_gaps(
         self,
@@ -7749,6 +7841,12 @@ class AgentWorkshopService:
         capability_snapshot = capability_inventory
         if capability_snapshot is None:
             query_texts = self._build_capability_search_queries(spec)
+            # 🔍 日志：显示拆解出的所有查询维度
+            logger.info(
+                "[AnalyzeGaps] generated_queries count=%d detail=%s",
+                len(query_texts),
+                [(i, q[:120]) for i, q in enumerate(query_texts)],
+            )
             capability_snapshot = await self._collect_capability_snapshot_multi(
                 query_texts,
                 top_k=16,
@@ -8015,7 +8113,7 @@ class AgentWorkshopService:
             raise AgentWorkshopLLMStageError("gap_analysis", str(exc), raw_response=raw) from exc
 
         known_tool_set = set(known_tools)
-        existing_tools_raw = self._require_list_field(data, "existing_tools", "gap_analysis")
+        existing_tools_raw = self._require_list_field(data, "existing_tools", "gap_analysis", allow_missing=True)
         invalid_tools = [item for item in existing_tools_raw if item not in known_tool_set]
         existing_tools = [item for item in existing_tools_raw if item in known_tool_set]
         if invalid_tools:
@@ -8071,10 +8169,10 @@ class AgentWorkshopService:
             existing_tools=self._dedupe(existing_tools)[:12],
             suggested_tools=suggested_tools,
             suggested_capabilities=suggested_capabilities,
-            manual_dependencies=self._dedupe(self._require_list_field(data, "manual_dependencies", "gap_analysis"))[:8],
+            manual_dependencies=self._dedupe(self._require_list_field(data, "manual_dependencies", "gap_analysis", allow_missing=True))[:8],
             inferable_gaps=inferable_gaps,
-            blocking_gaps=self._dedupe(self._require_list_field(data, "blocking_gaps", "gap_analysis"))[:8],
-            fallback_strategy=self._dedupe(self._require_list_field(data, "fallback_strategy", "gap_analysis"))[:8],
+            blocking_gaps=self._dedupe(self._require_list_field(data, "blocking_gaps", "gap_analysis", allow_missing=True))[:8],
+            fallback_strategy=self._dedupe(self._require_list_field(data, "fallback_strategy", "gap_analysis", allow_missing=True))[:8],
             build_recommendations=build_recommendations,
             notes=self._dedupe(notes)[:10],
             generated_by="llm",
@@ -9507,8 +9605,8 @@ class AgentWorkshopService:
         details = {
             "mode": "production-review",
             "evaluation_engine": (
-                "evidence-first-nanobot-assisted"
-                if evidence_bundle.orchestrator and evidence_bundle.orchestrator.worker_execution_mode == "nanobot-assisted"
+                "evidence-first-assisted"
+                if evidence_bundle.orchestrator and evidence_bundle.orchestrator.worker_execution_mode == "assisted"
                 else "evidence-first-primary"
             ),
             "review_mode": "evidence-first",
@@ -9965,7 +10063,7 @@ class AgentWorkshopService:
         if isinstance(runtime_flag, bool):
             return runtime_flag
         worker_mode = str(runtime_result.get("review_worker_mode") or "").strip().lower()
-        if worker_mode == "nanobot-assisted":
+        if worker_mode == "assisted":
             return True
         return bool((version.evaluation_policy or {}).get("nanobot_evidence_workers"))
 
@@ -9982,7 +10080,7 @@ class AgentWorkshopService:
             if task.worker_name in {"ToolUsageWorker", "NumericTraceabilityWorker", "RuntimeFailureWorker", "PromptEvidenceWorker"}
         ]
         if not eligible_tasks:
-            evidence_bundle.orchestrator.worker_execution_mode = "nanobot-assisted"
+            evidence_bundle.orchestrator.worker_execution_mode = "assisted"
             evidence_bundle.orchestrator.nanobot_worker_enabled = True
             return evidence_bundle
 
@@ -10007,7 +10105,7 @@ class AgentWorkshopService:
             updated_results.append(nanobot_result)
 
         evidence_bundle.worker_results = updated_results
-        evidence_bundle.orchestrator.worker_execution_mode = "nanobot-assisted"
+        evidence_bundle.orchestrator.worker_execution_mode = "assisted"
         evidence_bundle.orchestrator.nanobot_worker_enabled = True
         evidence_bundle.orchestrator.completed_worker_count = len(updated_results)
         return self._refresh_production_review_evidence_bundle(evidence_bundle, rule_details)
@@ -10086,14 +10184,14 @@ class AgentWorkshopService:
             logger.warning("[AgentWorkshop] Nanobot evidence worker 执行失败: %s", exc, exc_info=True)
             fallback_evidence = list((fallback_result.evidence if fallback_result else []) or [])
             fallback_artifacts = list((fallback_result.artifacts if fallback_result else []) or [])
-            fallback_evidence.append(f"Nanobot worker 执行失败：{exc}")
+            fallback_evidence.append(f"后台 worker 执行失败：{exc}")
             return AgentEvaluationWorkerResult(
                 task_id=task.task_id,
                 finding_id=task.finding_id,
                 worker_name=task.worker_name,
                 status=fallback_result.status if fallback_result else "insufficient_evidence",
                 source="nanobot-fallback",
-                summary=fallback_result.summary if fallback_result and fallback_result.summary else f"Nanobot worker 执行失败，回退到规则结果：{task.objective}",
+                summary=fallback_result.summary if fallback_result and fallback_result.summary else f"后台 worker 执行失败，回退到规则结果：{task.objective}",
                 evidence=self._dedupe(fallback_evidence),
                 artifacts=fallback_artifacts,
             )

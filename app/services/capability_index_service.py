@@ -148,8 +148,10 @@ class CapabilityIndexService:
             return []
 
         hits = self._vector_search(query, top_k=max(top_k * 4, top_k))
+        search_method = "vector"
         if not hits:
             hits = self._lexical_search(query, filtered_documents, top_k=max(top_k * 4, top_k))
+            search_method = "lexical"
 
         filtered: List[CapabilitySearchHit] = []
         allowed_ids = {doc.capability_id for doc in filtered_documents}
@@ -170,6 +172,13 @@ class CapabilityIndexService:
                 filtered.append(hit)
                 if len(filtered) >= top_k:
                     break
+        logger.debug(
+            "[CapabilityIndex] search method=%s query_len=%d results=%d top3=%s",
+            search_method,
+            len(query),
+            len(filtered),
+            [(h.capability.capability_id, round(float(h.score or 0), 3)) for h in filtered[:3]],
+        )
         return filtered
 
     async def list_capabilities(self) -> List[CapabilityDocument]:
@@ -765,6 +774,8 @@ class CapabilityIndexService:
                 doc.when_to_use,
                 doc.returns,
                 " ".join(doc.coverage_terms),
+                " ".join(doc.capability_tags),
+                " ".join(doc.preferred_for),
             )
             score = 0.0
             for token in tokens:
