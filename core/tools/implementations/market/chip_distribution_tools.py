@@ -21,7 +21,11 @@ logger = logging.getLogger(__name__)
     description="获取股票筹码分布数据，分析获利比例、平均成本和筹码集中度（AkShare优先，Tushare备用）",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["chip_distribution", "cost_distribution", "profit_ratio", "chip_concentration", "holder_cost"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["chip_distribution_analysis", "cost_structure_analysis", "support_resistance_identification"],
 )
 def get_chip_distribution(
     ticker: Annotated[str, "股票代码（如 000001 或 000001.SZ）"],
@@ -60,7 +64,11 @@ def get_chip_distribution(
     description="通过 AkShare 获取股票筹码分布数据（东方财富数据源，免费）",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["chip_distribution", "akshare", "cost_distribution", "profit_ratio", "eastmoney"],
+    tool_role_hint="specialized",
+    output_shape="structured_json",
+    preferred_for=["chip_distribution_via_akshare", "cost_structure_analysis", "free_data_source_chip"],
 )
 def get_chip_distribution_akshare_tool(
     ticker: Annotated[str, "股票代码（如 000001 或 000001.SZ）"],
@@ -97,7 +105,11 @@ def get_chip_distribution_akshare_tool(
     description="通过 Tushare 获取股票筹码分布数据（官方API，需要5000积分）",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["chip_distribution", "tushare", "cost_distribution", "cyq_perf", "profit_ratio"],
+    tool_role_hint="specialized",
+    output_shape="structured_json",
+    preferred_for=["chip_distribution_via_tushare", "cost_structure_analysis", "official_api_chip"],
 )
 def get_chip_distribution_tushare_tool(
     ticker: Annotated[str, "股票代码（如 000001 或 000001.SZ）"],

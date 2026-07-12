@@ -56,12 +56,18 @@ def _fmt_rules_section(title: str, rules) -> str:
 @register_tool(
     tool_id="list_trading_plans",
     name="查看投资计划列表",
-    description="列出用户创建的所有个人交易计划（投资纪律），显示名称、风格、状态、是否激活。",
+    description="列出用户创建的所有个人交易计划（投资纪律）。返回每个计划的名称、风格、风险偏好、状态、版本和是否激活。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["trading_plan", "investment_plan", "list", "query", "assistant_ops", "trading_system", "plan_overview", "investment_discipline", "plan_listing", "trading_rules"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["查看投资计划列表", "浏览已有交易计划", "回顾投资纪律", "确认激活的计划"],
+    when_to_use="当用户想查看自己创建的所有投资计划、了解每个计划的状态和风格时使用。",
+    returns="返回文本格式的投资计划列表，包含名称、风格、风险偏好、状态、版本和是否激活。",
 )
 async def list_trading_plans() -> str:
     """列出用户的所有个人交易计划。"""
@@ -102,6 +108,12 @@ async def list_trading_plans() -> str:
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["trading_plan", "investment_plan", "query", "active_plan", "assistant_ops", "trading_system", "plan_detail", "investment_discipline", "stock_selection", "risk_management", "position_management"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["查看当前激活的投资计划", "获取投资纪律详情", "回顾交易规则", "确认选股与止盈止损规则"],
+    when_to_use="当用户想查看当前正在使用的投资计划的完整内容，包括选股规则、择时、仓位管理、止盈止损等时使用。",
+    returns="返回文本格式的投资计划详情，包含各规则模块（选股/择时/仓位/止盈止损/纪律）和执行提醒。",
 )
 async def get_active_trading_plan() -> str:
     """获取当前激活的投资计划完整详情。"""

@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["position_analysis", "position", "list", "query", "assistant_ops", "portfolio", "holdings", "position_query", "real_position", "paper_position", "portfolio_view"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["持仓列表查看", "持仓股票查询", "实盘持仓浏览", "模拟持仓查看", "持仓盈亏查询"],
+    when_to_use="当用户想查看当前持有的所有股票、了解持仓成本、现价和浮动盈亏时使用，支持按实盘/模拟筛选。",
+    returns="返回文本消息，包含持仓数量及每只股票的代码、名称、数量、成本价、现价、市值和浮动盈亏。",
 )
 async def list_positions(
     source: Annotated[str, "数据来源：all=全部, real=实盘持仓, paper=模拟持仓"] = "all",
@@ -74,6 +80,12 @@ async def list_positions(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["position_analysis", "position", "query", "report", "assistant_ops", "ai_analysis", "position_report", "action_suggestion", "price_target", "risk_assessment", "holdings_analysis"],
+    tool_role_hint="primary",
+    output_shape="report",
+    preferred_for=["持仓分析报告查看", "操作建议查询", "目标价位确认", "持仓风险评估"],
+    when_to_use="当用户想查看某只持仓股票的最新 AI 分析报告、获取加仓/减仓/持有/清仓等操作建议时使用。",
+    returns="返回文本报告，包含操作建议、置信度、持仓摘要、目标价位、止损价和分析详情。",
 )
 async def get_position_analysis(
     code: Annotated[str, "股票代码，如 600519、00700"],
@@ -164,6 +176,12 @@ async def get_position_analysis(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["position_analysis", "position", "trigger", "create", "assistant_ops", "ai_analysis", "async_task", "position_analysis_task", "action_suggestion", "deep_analysis", "holdings_analysis"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["持仓分析触发", "持仓 AI 分析发起", "操作建议生成", "持仓深度分析"],
+    when_to_use="当用户要求对某只持仓股票发起 AI 分析、生成操作建议和目标价位时使用，任务在后台异步执行（约2-5分钟）。",
+    returns="返回文本消息，包含任务ID、股票代码、市场、持仓类型、分析重点和预计完成时间。",
 )
 async def trigger_position_analysis(
     code: Annotated[str, "股票代码，如 600519、00700"],

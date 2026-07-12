@@ -4,15 +4,18 @@
 提供工具列表查询、Agent 工具配置等接口
 """
 
+import asyncio
+import logging
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Query, Body, HTTPException, Depends
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.permissions import require_feature
+from app.core.database import get_mongo_db
+from app.services.capability_index_service import CapabilityIndexService
 from core.tools import get_tool_registry, ToolMetadata, ToolCategory, BUILTIN_TOOLS
 from core.tools.custom_tool import CustomToolDefinition, register_custom_tool
-from app.core.database import get_mongo_db
 
 router = APIRouter(
     prefix="/api/tools",
@@ -304,7 +307,10 @@ async def delete_custom_tool(
     # 从内存注销
     registry = get_tool_registry()
     registry.unregister(tool_id)
-    
+
+    # 异步触发能力索引同步，清理幽灵工具
+    asyncio.create_task(CapabilityIndexService.refresh_after_change(db))
+
     return {"success": True, "message": "工具删除成功"}
 
 

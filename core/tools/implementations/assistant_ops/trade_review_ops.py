@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["trade_review", "review", "history", "list", "query", "assistant_ops", "trade_history", "review_records", "trade_analysis", "backtesting", "review_filtering"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["查看复盘历史", "复盘记录查询", "交易复盘列表", "按股票查复盘"],
+    when_to_use="当用户想查看自己的交易复盘记录列表、按股票代码或数据来源筛选复盘历史时使用。",
+    returns="返回文本格式的复盘记录列表，每条含股票代码、名称、复盘类型、盈亏、评分、状态和复盘ID。",
 )
 async def list_trade_reviews(
     code: Annotated[Optional[str], "股票代码筛选，如 600519，留空则不限"] = None,
@@ -98,6 +104,12 @@ async def list_trade_reviews(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["trade_review", "review", "detail", "report", "query", "assistant_ops", "review_detail", "ai_review", "review_report", "trade_analysis", "review_suggestions"],
+    tool_role_hint="primary",
+    output_shape="report",
+    preferred_for=["复盘报告详情", "查看复盘结果", "AI评价查看", "复盘改进建议"],
+    when_to_use="当用户想查看某篇交易复盘的完整报告详情、获取 AI 评价和改进建议时使用，需提供复盘ID。",
+    returns="返回格式化的复盘报告文本，包含基本信息、综合评分、总结、优点、不足和具体建议。",
 )
 async def get_trade_review_detail(
     review_id: Annotated[str, "复盘ID，从复盘历史列表中获取"],
@@ -170,6 +182,12 @@ async def get_trade_review_detail(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["trade_review", "review", "trigger", "create", "assistant_ops", "ai_review", "review_task", "trade_analysis", "backtesting", "async_task", "review_creation"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["发起交易复盘", "创建复盘任务", "AI交易分析", "交易记录复盘"],
+    when_to_use="当用户想对指定交易记录发起新的 AI 复盘分析任务、获取交易评价和改进建议时使用。",
+    returns="返回文本消息，包含任务ID、交易笔数、数据来源和预计完成时间，后台异步执行。",
 )
 async def trigger_trade_review(
     trade_ids: Annotated[str, "要复盘的交易ID，多个用逗号分隔"],

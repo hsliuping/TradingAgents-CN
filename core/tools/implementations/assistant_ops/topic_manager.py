@@ -229,13 +229,18 @@ async def _resolve_target_thread_id(db, user_id: str, title: Optional[str]) -> O
 @register_tool(
     tool_id="list_assistant_topics",
     name="查看研究主题树",
-    description="列出当前用户的研究主题树，包括主题层级、主题 ID 和消息数量。",
+    description="列出当前用户的研究主题树。返回主题层级缩进、主题ID和各主题消息数量，便于查看研究目录结构。",
     when_to_use="当用户想查看当前研究目录、主题结构、行业与公司子主题层级时使用。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["topic_management", "research_topic", "topic_tree", "list", "query", "assistant_ops", "thread_management", "topic_hierarchy", "topic_structure", "research_directory"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["topic_tree_viewing", "research_structure_browsing", "topic_hierarchy_query", "thread_listing", "research_directory_viewing"],
+    returns="返回文本格式的主题树，包含主题层级缩进、主题ID和各主题消息数量。",
 )
 async def list_assistant_topics() -> str:
     """查看当前用户的研究主题树。"""
@@ -257,13 +262,18 @@ async def list_assistant_topics() -> str:
 @register_tool(
     tool_id="create_assistant_topic",
     name="创建研究主题",
-    description="创建一个新的顶层研究主题，用于行业、策略或独立研究主线。",
+    description="创建新的顶层研究主题，用于行业、策略或独立研究主线。返回创建结果（新建/复用）和主题ID。",
     when_to_use="当用户明确表示要新建研究主题、行业目录、研究主线时使用。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["topic_management", "research_topic", "create", "assistant_ops", "thread_management", "topic_creation", "research_mainline", "new_topic"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["topic_creation", "research_mainline_setup", "new_topic_initialization", "research_directory_creation"],
+    returns="返回文本消息，包含创建结果（新建/复用）和主题ID。",
 )
 async def create_assistant_topic(
     title: Annotated[str, "要创建的主题名称，如 电池行业跟踪 或 券商板块研究"],
@@ -293,13 +303,18 @@ async def create_assistant_topic(
 @register_tool(
     tool_id="create_assistant_subtopic",
     name="创建研究子主题",
-    description="在当前主题或指定父主题下创建子主题，用于行业下拆公司、公司下拆估值/风险等子问题。",
+    description="在当前或指定父主题下创建子主题（行业拆公司、公司拆估值等）。返回子主题创建结果、父主题和子主题ID。",
     when_to_use="当用户说‘在这个主题下新增子主题’、‘在某个行业下面加公司’、‘拆一个子问题出来’时使用。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["topic_management", "research_topic", "create", "subtopic", "assistant_ops", "thread_management", "topic_hierarchy", "subtopic_creation", "child_topic"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["subtopic_creation", "topic_branching", "research_subdivision", "child_topic_setup"],
+    returns="返回文本消息，包含子主题创建结果、父主题ID和子主题ID。",
 )
 async def create_assistant_subtopic(
     title: Annotated[str, "子主题名称，如 宁德时代、估值拆解、风险点"],
@@ -340,13 +355,18 @@ async def create_assistant_subtopic(
 @register_tool(
     tool_id="get_current_assistant_topic",
     name="查看当前研究主题",
-    description="查看当前外部会话绑定的研究主题，便于确认后续讨论会落在哪条研究主线上。",
+    description="查看当前外部会话绑定的研究主题。返回主题名称和主题ID，便于确认后续讨论归属的研究主线。",
     when_to_use="当用户问当前在聊哪个主题、这个主题是什么、现在挂在哪个研究目录下时使用。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["topic_management", "research_topic", "query", "current_topic", "assistant_ops", "thread_management", "context_query", "session_context"],
+    tool_role_hint="supporting",
+    output_shape="text",
+    preferred_for=["current_topic_query", "session_context_check", "active_topic_verification"],
+    returns="返回文本消息，包含当前主题名称和主题ID。",
 )
 async def get_current_assistant_topic() -> str:
     """查看当前外部会话绑定的研究主题。"""
@@ -367,13 +387,18 @@ async def get_current_assistant_topic() -> str:
 @register_tool(
     tool_id="switch_assistant_topic",
     name="切换当前研究主题",
-    description="将当前外部会话绑定到某个已有研究主题，后续提到“这个主题”时默认指向它。",
+    description="将当前会话切换绑定到某个已有研究主题，后续讨论默认指向该主题。返回切换结果和目标主题ID。",
     when_to_use="当用户明确要求切换到某个主题、继续另一个行业或公司主题、或指定当前会话应绑定到某条研究主线时使用。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["topic_management", "research_topic", "switch", "assistant_ops", "thread_management", "topic_switching", "context_binding", "active_topic_change"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["topic_switching", "research_mainline_change", "session_binding_update", "active_topic_selection"],
+    returns="返回文本消息，包含切换结果和目标主题ID。",
 )
 async def switch_assistant_topic(
     title: Annotated[str, "要切换到的主题标题，如 新能源车研究、宁德时代、券商板块研究"],
@@ -410,13 +435,18 @@ async def switch_assistant_topic(
 @register_tool(
     tool_id="delete_assistant_topic",
     name="删除研究主题树",
-    description="删除一个研究主题以及其下全部子主题、消息和摘要。默认删除当前主题，也可按主题标题删除。",
+    description="删除研究主题及其全部子主题、消息和摘要（默认当前主题或按标题）。返回删除主题数量和主题ID列表。",
     when_to_use="仅当用户明确要求删除某个研究主题、清理某条研究主线、或删除当前主题及其子主题时使用。涉及破坏性操作，必须在用户明确表达删除意图后调用。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["topic_management", "research_topic", "delete", "assistant_ops", "thread_management", "topic_deletion", "destructive_operation", "topic_tree_removal"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["topic_deletion", "research_cleanup", "topic_tree_removal", "theme_removal"],
+    returns="返回文本消息，包含删除结果、删除主题数和删除的主题ID列表。",
 )
 async def delete_assistant_topic(
     title: Annotated[Optional[str], "可选，要删除的主题标题；不填时默认删除当前主题"] = None,

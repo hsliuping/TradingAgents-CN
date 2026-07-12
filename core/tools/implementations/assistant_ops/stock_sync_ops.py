@@ -45,6 +45,12 @@ def _format_sync_section(title: str, payload: dict | None) -> str:
     auto_register=True,
     timeout_tier="heavy",
     data_source_handling="self_contained",
+    capability_tags=["data_sync", "stock_data", "sync", "assistant_ops", "historical_data", "financial_data", "data_pipeline", "local_database", "stock_sync", "data_ingestion"],
+    tool_role_hint="specialized",
+    output_shape="text",
+    preferred_for=["同步单只股票数据", "更新股票历史行情", "更新股票财务数据", "补充股票基础数据"],
+    when_to_use="当用户明确要求同步某只股票的历史行情、财务数据，或更新某只股票的本地数据时使用。",
+    returns="返回文本格式的同步结果，包含历史数据、财务数据、基础数据的同步状态和记录数。",
 )
 async def sync_single_stock_data(
     symbol: Annotated[str, "股票代码，支持 6 位数字或带交易所后缀，如 000001、600519.SH"],

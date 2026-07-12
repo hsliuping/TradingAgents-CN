@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @register_tool(
     tool_id="get_dcf_valuation",
     name="DCF 两阶段估值",
-    description="基于两阶段自由现金流折现模型（DCF）对 A 股进行绝对估值，自动估算增长率和 WACC",
+    description="基于两阶段 DCF 模型对 A 股绝对估值，返回内在价值、安全边际、各阶段现金流、WACC、终值等结构化结果，适用于成熟企业",
     category="fundamentals",
     is_online=False,
     auto_register=True,

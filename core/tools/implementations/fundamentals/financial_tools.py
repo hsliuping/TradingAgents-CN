@@ -156,7 +156,7 @@ def _get_financial_data_from_cache_or_api(symbol: str, limit: int = 8) -> Option
 @register_tool(
     tool_id="get_income_analysis",
     name="利润表分析",
-    description="分析股票的营收、利润、费用等利润表核心指标及多期趋势",
+    description="分析股票利润表核心指标及多期增长趋势，结构化返回营收、净利润、毛利率、净利率、费用率等的多期序列数据",
     category="fundamentals",
     is_online=True,
     auto_register=True
@@ -255,7 +255,7 @@ def get_income_analysis(
 @register_tool(
     tool_id="get_balance_sheet_analysis",
     name="资产负债表分析",
-    description="分析股票的资产负债结构、偿债能力、财务健康度",
+    description="分析股票资产负债结构、偿债能力与财务健康度，结构化返回资产负债率、流动比率、速动比率、权益乘数等指标",
     category="fundamentals",
     is_online=True,
     auto_register=True
@@ -937,7 +937,7 @@ def get_dividend_data(
 @register_tool(
     tool_id="get_main_business",
     name="主营业务构成",
-    description="获取股票的主营业务构成，分析收入来源结构",
+    description="获取股票主营业务构成并分析收入来源结构，结构化返回按产品/地区分部收入占比、毛利率、集中度等明细数据",
     category="fundamentals",
     is_online=True,
     auto_register=True

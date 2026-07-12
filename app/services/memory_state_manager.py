@@ -146,7 +146,7 @@ class MemoryStateManager:
 
         # 获取分析参数
         research_depth = parameters.get('research_depth', '标准')
-        selected_analysts = parameters.get('selected_analysts', [])
+        selected_analysts = parameters.get('selected_analysts') or []
         llm_provider = parameters.get('llm_provider', 'dashscope')
 
         # 研究深度映射

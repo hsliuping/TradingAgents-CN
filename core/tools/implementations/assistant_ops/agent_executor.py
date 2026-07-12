@@ -397,6 +397,12 @@ async def _write_invocation_ref_to_thread(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["agent", "callable", "list", "query", "assistant_ops", "agent_registry", "agent_capability", "agent_search", "ai_agent", "agent_inventory", "agent_lookup"],
+    tool_role_hint="supporting",
+    output_shape="text",
+    preferred_for=["查看可调用Agent", "Agent能力列表", "Agent搜索", "可用Agent查询"],
+    when_to_use="当用户想查看系统中有哪些可直接调用的 Agent、按关键词搜索可用 Agent 能力时使用，通常作为 execute_callable_agent 的前置查询。",
+    returns="返回文本列表，包含可调用 Agent 的名称、ID、类别、来源和说明。",
 )
 async def list_callable_agents(
     keyword: Annotated[Optional[str], "按关键词筛选 Agent，可传估值、复盘、风险、ETF、情绪等；为空则列出全部常用 Agent"] = None,
@@ -428,6 +434,12 @@ async def list_callable_agents(
     auto_register=True,
     timeout_tier="heavy",
     data_source_handling="local_only",
+    capability_tags=["agent", "callable", "execute", "invoke", "assistant_ops", "agent_invocation", "agent_execution", "ai_agent", "workflow", "capability_invocation", "agent_call"],
+    tool_role_hint="primary",
+    output_shape="report",
+    preferred_for=["调用Agent能力", "执行完整Agent", "估值分析Agent", "研究Agent调用", "风控Agent调用"],
+    when_to_use="当用户想直接调用一个已封装的 Agent 完成估值、研究、复盘、风控等完整任务、而非拆成多个底层工具时使用。",
+    returns="返回文本报告，包含调用的 Agent 名称、调用ID、分析对象、分析日期、任务目标和 Agent 生成的完整分析结果。",
 )
 async def execute_callable_agent(
     agent_identifier: Annotated[str, "Agent 的 ID 或名称，例如 valuation_analyst_v1、股票估值分析师"],

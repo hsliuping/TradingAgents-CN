@@ -32,6 +32,10 @@ MAX_DETAIL_PER_GROUP = 5
     is_online=False,
     auto_register=True,
     timeout_tier="light",
+    capability_tags=["profit_consistency", "batch_screening", "roe", "profitability", "stability", "screening", "earnings_quality"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["batch_profitability_screening", "earnings_stability_verification", "roe_consistency_check"],
     data_source_handling="local_only",
 )
 async def batch_check_profit_consistency(

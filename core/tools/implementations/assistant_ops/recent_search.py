@@ -158,6 +158,12 @@ def run_recent_information_search(query: str) -> str:
     is_online=True,
     auto_register=True,
     data_source_handling="local_only",
+    capability_tags=["information_search", "recent_news", "web_search", "assistant_ops", "fact_check", "news_query", "current_events", "online_search", "market_information", "real_time_info"],
+    tool_role_hint="specialized",
+    output_shape="report",
+    preferred_for=["搜索近期公开新闻", "确认最新事实信息", "查询近期公告或事件", "核实最新持股或市场动态"],
+    when_to_use="当用户问及‘截至目前’‘最新’‘近期是否有变化’或需要确认最新持股比例、公告、市场消息等时使用。",
+    returns="返回文本格式的搜索结果，包含最新结论、确证依据、参考报道和不确定点。",
 )
 def search_recent_information(
     query: Annotated[str, "搜索关键词，例如：比亚迪 伯克希尔 减持 持股比例，或 宁德时代 最新 公告"],

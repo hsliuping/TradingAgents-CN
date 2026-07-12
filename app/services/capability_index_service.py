@@ -179,6 +179,23 @@ class CapabilityIndexService:
     async def rebuild_index(self) -> CapabilityIndexSyncResult:
         return await self.ensure_index(force=True)
 
+    @staticmethod
+    async def refresh_after_change(db) -> None:
+        """工具变更（删除/新增/修改）后触发索引同步，清理幽灵工具。
+
+        增量同步会自动检测并删除已不存在的工具向量。
+        不抛异常，失败只记录日志——搜索时的 allowed_ids 过滤会兜底。
+        """
+        try:
+            service = CapabilityIndexService(db)
+            result = await service.ensure_index()
+            logger.info(
+                "[CapabilityIndex] 工具变更后同步完成: mode=%s, total=%d, indexed=%d",
+                result.sync_mode, result.total_documents, result.indexed_documents,
+            )
+        except Exception as e:
+            logger.warning(f"[CapabilityIndex] 工具变更后同步失败: {e}")
+
     async def get_index_state(self) -> Dict[str, Any]:
         state = await self._load_state()
         return state or {}

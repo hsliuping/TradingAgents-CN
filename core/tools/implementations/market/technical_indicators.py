@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
     category="market",
     is_online=True,
     auto_register=True,
+    capability_tags=["technical_indicators", "technical_analysis", "macd", "rsi", "kdj", "boll", "momentum"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["technical_indicator_analysis", "trend_analysis", "momentum_analysis", "overbought_oversold_detection"],
     related_tools=["get_stock_market_data_unified", "get_stock_fundamentals_unified", "get_technical_factor_bundle_tool", "get_crossover_signals", "get_candlestick_patterns"],
 )
 def get_technical_indicators(

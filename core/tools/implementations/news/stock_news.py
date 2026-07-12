@@ -1601,7 +1601,11 @@ def _build_a_share_footer(enabled_sources: List[str]) -> str:
     description="获取股票新闻标题候选、来源判断和去重结果，供后续按需拉取明细",
     category="news",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["stock_news", "news_headlines", "news_articles", "company_news", "market_news", "news", "event_driven"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["news_headline_screening", "news_deduplication", "company_event_discovery"],
 )
 def get_stock_news_headlines_unified(
     ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],
@@ -1674,7 +1678,11 @@ def get_stock_news_headlines_unified(
     description="根据标题工具返回的 news_id 获取股票新闻摘要、正文要点和来源明细",
     category="news",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["stock_news", "news_details", "news_articles", "company_news", "news_summary", "news", "event_driven"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["news_detail_review", "news_content_analysis", "event_investigation"],
 )
 def get_stock_news_details_unified(
     ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],
@@ -1756,10 +1764,14 @@ def get_stock_news_details_unified(
 @register_tool(
     tool_id="get_stock_news_unified",
     name="统一股票新闻",
-    description="获取股票相关新闻，支持A股、港股、美股",
+    description="获取股票相关新闻（支持A股、港股、美股），结构化返回新闻标题、摘要、来源链接、情感倾向、重要性等字段",
     category="news",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["stock_news", "news", "news_articles", "company_news", "market_news", "event_driven", "market_sentiment"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["news_analysis", "company_event_review", "market_sentiment_collection"],
 )
 def get_stock_news_unified(
     ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],

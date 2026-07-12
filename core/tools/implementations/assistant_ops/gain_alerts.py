@@ -30,12 +30,18 @@ def _normalize_market(market: str) -> str:
 @register_tool(
     tool_id="set_stop_gain_alert",
     name="设置止盈提醒",
-    description="为一只股票设置止盈提醒价格（上限）。触发后将通过系统通知推送提醒。",
+    description="为股票设置止盈价格上限，价格接近时通过系统通知推送。返回股票名称、代码、市场和已设置的止盈价。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["gain_alerts", "stop_gain", "alert", "set", "assistant_ops", "price_alert", "profit_taking", "notification", "alert_setup", "price_threshold"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["止盈提醒设置", "止盈价配置", "盈利目标提醒", "价格上限提醒"],
+    when_to_use="当用户想为某只股票设置止盈价格、希望在价格上涨到目标位时收到通知时使用。",
+    returns="返回文本消息，包含股票名称、代码、市场和已设置的止盈价格。",
 )
 async def set_stop_gain_alert(
     symbol: Annotated[str, "股票代码，如 300033、00700、AAPL"],
@@ -85,12 +91,18 @@ async def set_stop_gain_alert(
 @register_tool(
     tool_id="list_stop_gain_alerts",
     name="查看止盈提醒",
-    description="查看当前已设置的止盈提醒列表（股票、市场、止盈价格）。",
+    description="查看当前已设置的所有止盈提醒。返回提醒数量及每条提醒的股票名称、代码、市场和止盈价格。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["gain_alerts", "stop_gain", "alert", "list", "query", "assistant_ops", "price_alert", "profit_taking", "alert_query", "notification_list"],
+    tool_role_hint="supporting",
+    output_shape="text",
+    preferred_for=["止盈提醒查看", "止盈列表查询", "已配置提醒浏览", "盈利目标确认"],
+    when_to_use="当用户想查看当前已设置的所有止盈提醒、确认哪些股票配置了止盈价格时使用。",
+    returns="返回文本消息，包含止盈提醒数量及每条提醒的股票、市场、止盈价格。",
 )
 async def list_stop_gain_alerts() -> str:
     """查看已配置的止盈提醒列表。"""
@@ -121,12 +133,18 @@ async def list_stop_gain_alerts() -> str:
 @register_tool(
     tool_id="clear_stop_gain_alert",
     name="清除止盈提醒",
-    description="清除某只股票的止盈提醒价格（仅清除提醒，不移除自选股）。",
+    description="清除指定股票的止盈提醒价格（仅清提醒，不移除自选股）。返回操作结果或未找到配置的提示。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["gain_alerts", "stop_gain", "alert", "clear", "delete", "assistant_ops", "price_alert", "profit_taking", "alert_removal", "notification_cleanup"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["止盈提醒清除", "止盈价移除", "提醒配置删除", "盈利目标取消"],
+    when_to_use="当用户想清除某只股票的止盈提醒、不再接收该股票的止盈通知时使用（仅清除提醒，不移除自选股）。",
+    returns="返回文本消息，确认止盈提醒已清除或提示未找到相关配置。",
 )
 async def clear_stop_gain_alert(
     symbol: Annotated[str, "股票代码，如 300033、00700、AAPL"],

@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
     is_online=False,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["trade_records", "trade_history", "transaction_history", "trade_review", "trading", "position_changes", "paper_trades", "持仓", "模拟交易"],
+    tool_role_hint="specialized",
+    output_shape="structured_json",
+    preferred_for=["trade_history_query", "position_changes_review", "paper_trades_lookup", "transaction_record_retrieval"],
 )
 def get_trade_records(
     user_id: Annotated[str, "用户ID"],

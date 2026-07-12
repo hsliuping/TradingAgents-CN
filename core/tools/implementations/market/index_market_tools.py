@@ -184,7 +184,11 @@ def _tushare_unavailable_msg(dimensions: str) -> str:
     description="获取主要指数数据（上证、深证、创业板等），分析大盘走势和趋势",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["index_data", "index_trend", "market_trend", "moving_average", "main_index"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["index_trend_analysis", "market_direction_assessment", "moving_average_analysis"],
 )
 def get_index_data(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],
@@ -219,10 +223,14 @@ def get_index_data(
 @register_tool(
     tool_id="get_market_breadth",
     name="市场宽度",
-    description="分析市场宽度（涨跌家数、涨停跌停等），评估市场整体情绪",
+    description="分析市场宽度评估整体参与情绪，返回上涨家数、下跌家数、涨停数、跌停数、涨跌比、市场温度等结构化参与度指标",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["market_breadth", "market_sentiment", "advance_decline", "limit_up_down", "participation"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["market_breadth_analysis", "market_sentiment_assessment", "participation_level_evaluation"],
 )
 def get_market_breadth(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"]
@@ -254,10 +262,14 @@ def get_market_breadth(
 @register_tool(
     tool_id="get_market_environment",
     name="市场环境",
-    description="综合评估市场环境，包括波动、换手与市场规模等",
+    description="综合评估市场环境多维度状态，返回波动率、换手率、成交额、市场规模、市场温度标签等综合市场环境指标数据",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["market_environment", "market_overview", "volatility", "turnover", "market_scale"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["market_environment_assessment", "comprehensive_market_evaluation", "volatility_analysis"],
 )
 def get_market_environment(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"]
@@ -294,10 +306,14 @@ def get_market_environment(
 @register_tool(
     tool_id="identify_market_cycle",
     name="市场周期识别",
-    description="识别当前市场所处的周期阶段（牛市、熊市、震荡等）",
+    description="识别当前市场所处的周期阶段，返回牛市/熊市/震荡周期阶段标签、趋势强度、判断依据和置信度等周期判断结果",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["market_cycle", "cycle_identification", "bull_bear", "regime_detection", "market_phase"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["market_cycle_identification", "regime_classification", "bull_bear_assessment"],
 )
 def identify_market_cycle(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"]
@@ -341,7 +357,11 @@ def identify_market_cycle(
     description="获取整体市场环境概览，包括指数走势、涨跌统计、资金流向等综合数据",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["market_overview", "market_environment", "market_breadth", "capital_flow", "market_sentiment"],
+    tool_role_hint="general",
+    output_shape="markdown",
+    preferred_for=["overall_market_overview", "comprehensive_market_analysis", "market_environment_snapshot"],
 )
 def get_market_overview(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"]
@@ -387,7 +407,11 @@ def get_market_overview(
     description="根据当前分析数据源自动选择 QMT 或 Tushare 路径，返回统一的大盘分析结果。",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["market_analysis", "market_overview", "unified_analysis", "data_source_routing", "comprehensive_market"],
+    tool_role_hint="general",
+    output_shape="markdown",
+    preferred_for=["unified_market_analysis", "multi_source_market_overview", "comprehensive_market_report"],
 )
 def get_market_analysis(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],
@@ -458,10 +482,14 @@ def get_market_analysis(
 @register_tool(
     tool_id="get_north_flow",
     name="北向资金流向",
-    description="获取沪深港通北向资金流向数据，分析外资动向",
+    description="获取沪深港通北向资金流向数据并分析外资动向，返回净买入额、累计持仓、行业分布、活跃个股等外资结构化数据",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["north_flow", "capital_flow", "foreign_capital", "stock_connect", "liquidity"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["northbound_capital_analysis", "foreign_investor_sentiment", "liquidity_assessment"],
 )
 def get_north_flow(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],
@@ -493,10 +521,14 @@ def get_north_flow(
 @register_tool(
     tool_id="get_margin_trading",
     name="两融余额",
-    description="获取融资融券余额数据，描述余额水平并识别异常字段",
+    description="获取融资融券余额数据并识别异常字段，返回融资余额、融券余额、融资买入额、余额变化趋势等两融余额指标数据",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["margin_trading", "financing_balance", "securities_lending", "leverage", "margin_balance"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["margin_balance_analysis", "leverage_level_assessment", "financing_lending_monitoring"],
 )
 def get_margin_trading(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],
@@ -528,10 +560,14 @@ def get_margin_trading(
 @register_tool(
     tool_id="get_limit_stats",
     name="涨跌停统计",
-    description="获取涨跌停家数和涨跌家数统计，描述涨跌分布事实",
+    description="获取涨跌停家数和涨跌家数统计描述涨跌分布，返回涨停/跌停家数、涨跌比、连板高度、炸板率等涨跌分布统计数据",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["limit_stats", "limit_up_down", "advance_decline", "price_distribution", "market_breadth"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["limit_up_down_statistics", "market_breadth_assessment", "price_distribution_analysis"],
 )
 def get_limit_stats(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"]
@@ -569,10 +605,14 @@ def get_limit_stats(
 @register_tool(
     tool_id="get_index_technical",
     name="指数技术指标",
-    description="获取指数技术指标（MACD、RSI、KDJ）及规则标签",
+    description="获取指数技术指标及规则标签，返回 MACD/RSI/KDJ 数值序列、金叉死叉信号、趋势标签等技术指标数据",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["index_technical", "technical_indicators", "technical_analysis", "macd", "rsi", "kdj"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["index_technical_analysis", "index_momentum_assessment", "index_signal_detection"],
 )
 def get_index_technical(
     trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],

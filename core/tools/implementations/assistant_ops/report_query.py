@@ -56,6 +56,12 @@ def _resolve_date_range(date_range: Optional[str]):
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["report_query", "analysis_report", "search", "query", "assistant_ops", "report_search", "report_history", "report_filtering", "stock_report"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["report_search", "report_history_query", "analysis_report_filtering", "stock_report_lookup", "report_summary_viewing"],
+    returns="返回文本格式的报告摘要列表，包含任务ID、股票代码、日期和结论摘要。",
+    when_to_use="当用户想搜索、查找或筛选历史分析报告时使用，支持按股票代码、关键词或日期范围筛选。",
 )
 async def search_reports(
     symbol: Annotated[Optional[str], "股票代码筛选，如 600519"] = None,
@@ -123,6 +129,12 @@ async def search_reports(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["report_query", "analysis_report", "detail", "query", "assistant_ops", "report_detail", "report_content", "full_report", "markdown_report"],
+    tool_role_hint="primary",
+    output_shape="report",
+    preferred_for=["report_detail_viewing", "full_report_reading", "report_content_retrieval", "analysis_report_detail"],
+    returns="返回格式化 Markdown 报告，包含投资建议、置信度、风险等级、关键要点和摘要。",
+    when_to_use="当用户想查看某份分析报告的完整正文内容时使用，需提供任务ID。",
 )
 async def get_report_detail(
     task_id: Annotated[str, "分析任务ID"],
@@ -226,6 +238,12 @@ _EXCERPT_CHARS = 500      # 每个分析师报告的摘录字数
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["report_query", "analysis_report", "latest", "query", "assistant_ops", "latest_report", "recent_report", "stock_report", "analyst_summary"],
+    tool_role_hint="primary",
+    output_shape="report",
+    preferred_for=["latest_report_viewing", "recent_report_query", "stock_analysis_summary", "analyst_report_summary"],
+    returns="返回格式化文本报告，包含投资观点、价格区间、决策依据、关键要点和各分析师摘录。",
+    when_to_use="当用户想快速查看某只股票最近一次已完成的分析报告摘要时使用，不会创建新任务。",
 )
 async def get_latest_report(
     symbol: Annotated[str, "股票代码，如 600519。若用户未指定可传空字符串，则返回最近一次任意股票的报告"],
@@ -349,6 +367,12 @@ async def get_latest_report(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["report_query", "analysis_report", "search", "attachable", "assistant_ops", "report_attachment", "topic_report_linking", "report_search"],
+    tool_role_hint="specialized",
+    output_shape="text",
+    preferred_for=["attachable_report_search", "report_attachment_query", "topic_report_linking_prep"],
+    returns="返回文本列表，包含可关联旧报告的标题、股票代码、创建时间和报告标识。",
+    when_to_use="当用户想把某只股票的旧报告关联到当前主题前，需要先查看有哪些可选报告时使用。",
 )
 async def search_attachable_reports(
     keyword: Annotated[Optional[str], "股票代码、公司名或报告关键词，如 宁德时代 / 比亚迪 / 300750"] = None,
@@ -406,6 +430,12 @@ async def search_attachable_reports(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["report_query", "analysis_report", "attach", "link", "assistant_ops", "report_attachment", "topic_report_linking", "report_binding"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["report_attachment", "topic_report_linking", "historical_report_binding", "report_to_topic_association"],
+    returns="返回文本消息，包含关联结果和报告标识。",
+    when_to_use="当用户要求把某只股票的历史旧报告直接挂到当前研究主题时使用。",
 )
 async def attach_existing_report_to_current_topic(
     keyword: Annotated[str, "股票代码、公司名或报告关键词，如 宁德时代 / 比亚迪 / 300750"],

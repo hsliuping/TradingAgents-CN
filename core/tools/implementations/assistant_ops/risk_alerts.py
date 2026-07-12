@@ -30,12 +30,18 @@ def _normalize_market(market: str) -> str:
 @register_tool(
     tool_id="set_stop_loss_alert",
     name="设置止损提醒",
-    description="为一只股票设置止损提醒价格（下限）。支持持仓股票优先场景。触发后将通过系统通知推送提醒。",
+    description="为股票设置止损价格下限，价格接近或跌破时通过系统通知推送。返回股票名称、代码、市场和止损价格。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["risk_alerts", "stop_loss", "alert", "set", "assistant_ops", "price_alert", "risk_management", "notification", "alert_setup", "price_threshold", "loss_prevention"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["止损提醒设置", "止损价配置", "风险控制提醒", "价格下限提醒"],
+    when_to_use="当用户想为某只股票设置止损价格、希望在价格跌破阈值时收到通知时使用。",
+    returns="返回文本消息，包含股票名称、代码、市场和已设置的止损价格。",
 )
 async def set_stop_loss_alert(
     symbol: Annotated[str, "股票代码，如 300033、00700、AAPL"],
@@ -90,12 +96,18 @@ async def set_stop_loss_alert(
 @register_tool(
     tool_id="list_stop_loss_alerts",
     name="查看止损提醒",
-    description="查看当前已设置的止损提醒列表（股票、市场、止损价格）。",
+    description="查看当前已设置的所有止损提醒。返回提醒数量及每条提醒的股票名称、代码、市场和止损价格。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["risk_alerts", "stop_loss", "alert", "list", "query", "assistant_ops", "price_alert", "risk_management", "alert_query", "notification_list"],
+    tool_role_hint="supporting",
+    output_shape="text",
+    preferred_for=["止损提醒查看", "止损列表查询", "已配置提醒浏览", "风险控制确认"],
+    when_to_use="当用户想查看当前已设置的所有止损提醒、确认哪些股票配置了止损价格时使用。",
+    returns="返回文本消息，包含止损提醒数量及每条提醒的股票、市场、止损价格。",
 )
 async def list_stop_loss_alerts() -> str:
     """查看已配置的止损提醒列表。"""
@@ -126,12 +138,18 @@ async def list_stop_loss_alerts() -> str:
 @register_tool(
     tool_id="clear_stop_loss_alert",
     name="清除止损提醒",
-    description="清除某只股票的止损提醒价格（仅清除提醒，不移除自选股）。",
+    description="清除指定股票的止损提醒价格（仅清提醒，不移除自选股）。返回操作结果或未找到配置的提示。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["risk_alerts", "stop_loss", "alert", "clear", "delete", "assistant_ops", "price_alert", "risk_management", "alert_removal", "notification_cleanup"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["止损提醒清除", "止损价移除", "提醒配置删除", "风险提醒取消"],
+    when_to_use="当用户想清除某只股票的止损提醒、不再接收该股票的止损通知时使用（仅清除提醒，不移除自选股）。",
+    returns="返回文本消息，确认止损提醒已清除或提示未找到相关配置。",
 )
 async def clear_stop_loss_alert(
     symbol: Annotated[str, "股票代码，如 300033、00700、AAPL"],

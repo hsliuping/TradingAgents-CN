@@ -266,10 +266,14 @@ def _ensure_fresh_china_data(ticker: str, data_source: Optional[str] = None) -> 
 @register_tool(
     tool_id="get_stock_market_data_unified",
     name="统一股票市场数据",
-    description="获取股票市场数据和技术指标，支持A股、港股、美股",
+    description="获取股票市场数据和技术指标，支持A股、港股、美股，返回K线数据、成交量、技术指标和基础行情快照等数据",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["stock_market_data", "market_data", "stock_price", "price_history", "market_quote", "technical_indicators"],
+    tool_role_hint="general",
+    output_shape="markdown",
+    preferred_for=["stock_market_data_retrieval", "price_history_analysis", "multi_market_data_query"],
 )
 def get_stock_market_data_unified(
     ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],

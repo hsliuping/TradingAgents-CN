@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
     description="获取中国股市主要指数行情概览（上证、深证、创业板、科创50）",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["china_market_overview", "market_overview", "index_data", "market_quote", "main_index"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["china_market_overview", "index_performance_review", "main_index_tracking"],
 )
 def get_china_market_overview(
     curr_date: Annotated[str, "当前日期，格式 yyyy-mm-dd"]
