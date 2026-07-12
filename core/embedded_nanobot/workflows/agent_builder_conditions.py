@@ -190,7 +190,20 @@ def route_start(state: "AgentBuilderState") -> str:
         _log_route("route_start", state, result)
         return result
 
+    # 版本冲突等待用户决策：用户回复后直接回到 build_or_ready 重建
+    if state.get("build_status") == "pending_user_decision":
+        logger.info(
+            "[RouteStart][Debug] pending_user_decision detected | current_node=%s | decision_ctx_keys=%s | build_status=%s",
+            node,
+            list(state.get("decision_context", {}).keys()) if state.get("decision_context") else [],
+            state.get("build_status"),
+        )
+        result = "build_or_ready"
+        _log_route("route_start", state, result)
+        return result
+
     # 从 wait / evaluate / error 节点恢复 → 先走 LLM 意图分类
+    # build_or_ready 不在列表中：当 pending_user_decision 状态时，用户回复直接回到 build_or_ready 重新构建
     if node in (
         "wait_intake_confirmation",
         "wait_requirement_confirmation",
@@ -543,7 +556,7 @@ def route_after_generate(state: "AgentBuilderState") -> str:
 def route_after_build(state: "AgentBuilderState") -> str:
     """构建后的路由。"""
     build_status = state.get("build_status", "")
-    if build_status in ("built", "skipped"):
+    if build_status in ("built", "skipped", "pending_user_decision"):
         result = "wait_test_request"
     elif build_status == "skipped_no_session":
         # 没有 workshop_session_id，无法构建版本 → 进入错误恢复

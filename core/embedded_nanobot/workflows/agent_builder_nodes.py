@@ -728,7 +728,11 @@ def _build_force_call_params(tool_name: str, state: AgentBuilderState) -> dict:
         }
     if tool_name == "build_agent_workshop_version":
         # 需要 session_id，从 state 中获取
-        return {"session_id": state.get("workshop_session_id", "")}
+        # 如果用户已确认要覆盖旧版本，传 overwrite_existing=True
+        params: dict = {"session_id": state.get("workshop_session_id", "")}
+        if state.get("build_status") == "pending_user_decision":
+            params["overwrite_existing"] = True
+        return params
     if tool_name == "run_agent_workshop_real_data_test":
         # 需要 version_id 和 stock_symbol
         version_id = _sanitize_version_id(state.get("version_id", ""))
@@ -2610,6 +2614,17 @@ async def node_build_or_ready(
 
 你必须调用 build_agent_workshop_version 工具。"""
 
+    # 如果是用户选择了"覆盖旧版本"后重新进入，告知 LLM 要传 overwrite_existing=True
+    if state.get("build_status") == "pending_user_decision":
+        decision_ctx = state.get("decision_context", {}) or {}
+        old_version_id = decision_ctx.get("current_version_id", "未知")
+        session_id = decision_ctx.get("session_id", "") or state.get("workshop_session_id", "")
+        system_prompt += f"""
+
+⚠️ 用户已确认要**覆盖旧版本 {old_version_id}**（删除后重建）。
+你必须调用 build_agent_workshop_version，并传入 overwrite_existing=True：
+  build_agent_workshop_version(session_id="{session_id}", overwrite_existing=True)"""
+
     final_text, tool_events, tool_results = await _run_node_llm(
         state, system_prompt, tool_registry, llm_client,
         required_tool_name="build_agent_workshop_version",
@@ -2624,6 +2639,16 @@ async def node_build_or_ready(
 
     build_result = _extract_json_from_result(
         tool_results.get("build_agent_workshop_version", "{}")
+    )
+    # 🔍 诊断日志：打印完整解析结果（截断到 500 字符）
+    _raw_tool_result = tool_results.get("build_agent_workshop_version", "")
+    logger.info(
+        "[BuildOrReady][Debug] raw_len=%d | build_result_status=%s | build_result_keys=%s | current_version_id=%s | options_count=%d",
+        len(str(_raw_tool_result)),
+        build_result.get("status") if build_result else "None",
+        list(build_result.keys())[:10] if build_result else [],
+        build_result.get("current_version_id", "MISSING") if build_result else "None",
+        len(build_result.get("options", [])) if build_result else 0,
     )
     if build_result:
         # version_id 可能在顶层、summary.version_id 或 version.version_id
@@ -2643,8 +2668,33 @@ async def node_build_or_ready(
             state["version_id"] = version_id
 
         # status="ok" 表示构建成功 → build_status="built"
-        if build_result.get("status") == "ok":
+        build_status = build_result.get("status")
+        if build_status == "ok":
             state["build_status"] = "built"
+        elif build_status == "needs_user_decision":
+            # 已有版本处于测试中，需要用户决策是覆盖还是继续
+            state["build_status"] = "pending_user_decision"
+            state["awaiting_user"] = True
+            state["decision_context"] = {
+                "type": "overwrite_or_continue",
+                "existing_version": build_result.get("existing_version", {}),
+                "current_version_id": build_result.get("current_version_id", ""),
+                "session_id": build_result.get("session_id", ""),
+                "message": build_result.get("message", ""),
+                "options": build_result.get("options", []),
+            }
+            # 生成用户友好的选择提示
+            existing_info = build_result.get("existing_version", {}) or {}
+            old_version_id = build_result.get("current_version_id", "") or "未知"
+            options = build_result.get("options", [])
+            option_lines = "\n".join(
+                f"- **{opt.get('label', '')}**：{opt.get('description', '')}"
+                for opt in options
+            )
+            state["final_response"] = (
+                f"当前已有一个版本 **{old_version_id}** 处于测试/构建阶段，不能直接覆盖。\n\n"
+                f"请选择以下操作：\n{option_lines}"
+            )
         else:
             state["build_status"] = "failed"
             err_msg = build_result.get("message") or build_result.get("error") or "构建失败"
@@ -2668,8 +2718,31 @@ async def node_wait_test_request(
     state["awaiting_user"] = True
     state["stage"] = "testing"
 
-    # 若上一轮意图无法识别（如给了股票名而非代码），输出澄清提示，
-    # 而不是把上一次的生成结果重复展示一遍。
+    # 版本冲突需要用户决策：展示覆盖/继续选项
+    if state.get("build_status") == "pending_user_decision":
+        decision_ctx = state.get("decision_context", {}) or {}
+        old_version_id = decision_ctx.get("current_version_id", "未知")
+        options = decision_ctx.get("options", [])
+        # 🔍 诊断日志
+        logger.info(
+            "[WaitTest][Debug] pending_user_decision | decision_ctx_keys=%s | current_version_id=%s | options_count=%d | build_status=%s",
+            list(decision_ctx.keys()) if decision_ctx else [],
+            old_version_id,
+            len(options),
+            state.get("build_status"),
+        )
+        option_lines = "\n".join(
+            f"- **{opt.get('label', '')}**：{opt.get('description', '')}"
+            for opt in options
+        )
+        state["final_response"] = (
+            f"当前已有一个版本 **{old_version_id}** 处于测试/构建阶段，不能直接覆盖。\n\n"
+            f"请选择以下操作：\n{option_lines}"
+        )
+        await _invoke_stream(on_stream, state["final_response"])
+        await _emit_event(event_callback, "progress", "需要用户决策：覆盖旧版本还是继续推进")
+        return state
+
     if state.get("skill_creation_requested"):
         spec_name = state.get("spec_name", "") or "候选 Agent"
         gap_report = state.get("gap_report", {}) or {}
