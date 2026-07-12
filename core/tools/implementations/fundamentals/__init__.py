@@ -31,6 +31,12 @@ from .option_tools import (
     get_option_greeks,
     get_option_strategy_pnl,
 )
+from .management_assessment import (
+    get_audit_opinion,
+    get_disclosure_rating,
+    get_equity_incentive,
+    get_management_penalties,
+)
 
 __all__ = [
     'get_stock_fundamentals_unified',
@@ -54,5 +60,9 @@ __all__ = [
     'get_implied_volatility',
     'get_option_greeks',
     'get_option_strategy_pnl',
+    'get_audit_opinion',
+    'get_disclosure_rating',
+    'get_equity_incentive',
+    'get_management_penalties',
 ]
 

@@ -2775,6 +2775,216 @@ class TushareProvider(BaseStockDataProvider):
             return None
 
 
+    async def get_audit_opinion(
+        self,
+        ts_code: str = None,
+        ann_date: str = None,
+        start_date: str = None,
+        end_date: str = None,
+        period: str = None,
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取A股公司审计意见（stk_audit）
+
+        Args:
+            ts_code: 股票代码（TS格式，如 600519.SH）
+            ann_date: 公告日期 (YYYYMMDD)
+            start_date: 公告开始日期 (YYYYMMDD)
+            end_date: 公告结束日期 (YYYYMMDD)
+            period: 报告期 (YYYYMMDD)
+
+        Returns:
+            DataFrame 包含:
+            - ts_code: TS股票代码
+            - ann_date: 公告日期
+            - end_date: 报告期截止日
+            - audit_result: 审计结果
+            - audit_fees: 审计总费用（元）
+            - audit_sign: 审计师
+            - audit_company: 审计机构
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if ts_code:
+                params['ts_code'] = ts_code
+            if ann_date:
+                params['ann_date'] = ann_date.replace('-', '')
+            if start_date:
+                params['start_date'] = start_date.replace('-', '')
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
+            if period:
+                params['period'] = period.replace('-', '')
+
+            df = await asyncio.to_thread(
+                self.api.stk_audit,
+                **params
+            )
+
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取审计意见: {len(df)} 条 | ts_code={ts_code or 'all'}")
+                return df
+            return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取审计意见失败: {e}")
+            return None
+
+    async def get_disclosure_rating(
+        self,
+        ts_code: str = None,
+        end_date: str = None,
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取交易所信息披露考评结果（disclosure_rating）
+
+        Args:
+            ts_code: 股票代码（TS格式，如 600519.SH）
+            end_date: 报告期 (YYYYMMDD)
+
+        Returns:
+            DataFrame 包含:
+            - ts_code: TS股票代码
+            - end_date: 考评年度
+            - disclosure_result: 考评结果（A/B/C/D）
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if ts_code:
+                params['ts_code'] = ts_code
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
+
+            df = await asyncio.to_thread(
+                self.api.disclosure_rating,
+                **params
+            )
+
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取信息披露评级: {len(df)} 条 | ts_code={ts_code or 'all'}")
+                return df
+            return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取信息披露评级失败: {e}")
+            return None
+
+    async def get_equity_incentive(
+        self,
+        ts_code: str = None,
+        ann_date: str = None,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取股权激励计划明细（equity_incentive）
+
+        Args:
+            ts_code: 股票代码（TS格式，如 600519.SH）
+            ann_date: 公告日期 (YYYYMMDD)
+            start_date: 公告开始日期 (YYYYMMDD)
+            end_date: 公告结束日期 (YYYYMMDD)
+
+        Returns:
+            DataFrame 包含:
+            - ts_code: TS股票代码
+            - ann_date: 公告日期
+            - inc_plan: 激励方案
+            - grant_num: 授予数量（万股）
+            - grant_price: 授予价格
+            - inc_duration: 激励年限（年）
+            - inc_perf: 行权条件/业绩要求
+            - stockholder_rt: 总股本占比
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if ts_code:
+                params['ts_code'] = ts_code
+            if ann_date:
+                params['ann_date'] = ann_date.replace('-', '')
+            if start_date:
+                params['start_date'] = start_date.replace('-', '')
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
+
+            df = await asyncio.to_thread(
+                self.api.equity_incentive,
+                **params
+            )
+
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取股权激励: {len(df)} 条 | ts_code={ts_code or 'all'}")
+                return df
+            return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取股权激励失败: {e}")
+            return None
+
+    async def get_management_penalties(
+        self,
+        ts_code: str = None,
+        ann_date: str = None,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取违规处罚记录（stk_penalty）
+
+        Args:
+            ts_code: 股票代码（TS格式，如 600519.SH）
+            ann_date: 公告日期 (YYYYMMDD)
+            start_date: 公告开始日期 (YYYYMMDD)
+            end_date: 公告结束日期 (YYYYMMDD)
+
+        Returns:
+            DataFrame 包含:
+            - ts_code: TS股票代码
+            - ann_date: 公告日期
+            - punish_type: 处罚类型（警告/罚款/市场禁入等）
+            - punish_object: 处罚对象（公司/个人）
+            - punish_amount: 处罚金额（万元）
+            - violat_type: 违规类型
+            - violate_content: 违规事由
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if ts_code:
+                params['ts_code'] = ts_code
+            if ann_date:
+                params['ann_date'] = ann_date.replace('-', '')
+            if start_date:
+                params['start_date'] = start_date.replace('-', '')
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
+
+            df = await asyncio.to_thread(
+                self.api.stk_penalty,
+                **params
+            )
+
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取违规处罚: {len(df)} 条 | ts_code={ts_code or 'all'}")
+                return df
+            return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取违规处罚失败: {e}")
+            return None
+
+
 # 全局提供器实例
 _tushare_provider = None
 _tushare_provider_initialized = False
