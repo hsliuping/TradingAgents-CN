@@ -154,17 +154,49 @@ test: 测试相关
 - 执行 Python 命令时，使用 `env/Scripts/python.exe` 而非 `python`
 - 执行 pip 安装时，使用 `env/Scripts/pip.exe` 或 `env/Scripts/python.exe -m pip`
 - 运行测试时，使用 `env/Scripts/python.exe -m pytest`
-- 启动后端服务时，使用 `env/Scripts/python.exe -m uvicorn` 或通过 `env/Scripts/python.exe main.py`
+- **启动后端服务时，必须使用 `start_dev.ps1` 脚本，禁止手动 `uvicorn`**
+- **操作数据库时，必须确认连接的是哪个版本的端口，禁止混用**
 
-## 开发环境隔离
+## 开发环境隔离 ⚠️ 严格执行
 
-三个版本使用独立目录、独立端口、独立数据卷，互不干扰：
+三个版本使用**独立 Docker 容器、独立端口、独立数据卷**，互不干扰。**不同版本的数据库绝对不能混用。**
 
 | 版本 | MongoDB | Redis | Backend | 前端 | Docker 项目名 |
 |------|---------|-------|---------|------|--------------|
-| v3.0 | 27019 | 6381 | 8002 | 8082 | `ta-v3` |
+| v3.0 | **27019** | **6381** | **8002** | 8082 | `ta-v3` |
 | v2.1.0 | 27018 | 6380 | 8001 | 8081 | `ta-v210` |
 | v2.0.1 | 27017 | 6379 | 8000 | 8080 | `ta-v201` |
+
+### 启动方式（统一使用 `start_dev.ps1`）
+
+```powershell
+# 启动 v3.0 开发环境
+.\start_dev.ps1 docker 3.0      # 终端1: 启动 MongoDB(27019) + Redis(6381)
+.\start_dev.ps1 backend 3.0     # 终端2: 启动后端 http://127.0.0.1:8002
+.\start_dev.ps1 frontend 3.0    # 终端3: 启动前端 http://localhost:3002
+
+# 启动 v2.1.0 开发环境
+.\start_dev.ps1 docker 2.1      # 终端1: MongoDB(27018) + Redis(6380)
+.\start_dev.ps1 backend 2.1     # 终端2: 后端 http://127.0.0.1:8001
+
+# 查看所有版本的端口配置
+.\start_dev.ps1 status
+```
+
+脚本会自动：
+- 选择项目虚拟环境 `env\Scripts\python.exe`
+- 设置正确的 `MONGODB_PORT`、`REDIS_PORT`、`PORT` 环境变量
+- 使用对应版本的 Docker 项目名启动容器
+
+### 数据库操作铁律 🔴
+
+1. **禁止手动 `uvicorn` 启动后端** — 这会导致环境变量未设，连到错误的数据库
+2. **写 MongoDB 脚本时，连接串端口必须匹配目标版本**：
+   - v3.0 → `mongodb://...:27019/...`
+   - v2.1.0 → `mongodb://...:27018/...`
+   - v2.0.1 → `mongodb://...:27017/...`
+3. **永远不要跨版本共用数据库** — 数据结构可能不兼容
+4. 当前 `main` 分支对应 **v3.0**，开发时应使用 27019 端口
 
 ## 分发渠道
 
