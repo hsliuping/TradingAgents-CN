@@ -5,6 +5,7 @@ Skill 管理 API
 支持：导入 SKILL.md、从 URL 导入、列表查询、更新、删除、启用/禁用、注册到 ToolRegistry
 """
 
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path

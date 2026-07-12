@@ -186,12 +186,16 @@ class MigrationRunner:
 
     @staticmethod
     def _version_key(version: str):
-        """将版本号字符串转为可排序的元组，如 '2.0.1' -> (2, 0, 1)"""
+        """将版本号字符串转为可排序的元组，如 '2.0.1' -> (2, 0, 1)。
+        非数字段（如 beta.4）保留为字符串，统一转 int 失败的 fallback 到 0。"""
         parts = []
         for p in version.split("."):
-            try:
-                parts.append(int(p))
-            except ValueError:
-                parts.append(p)
+            # 去掉非数字前缀（如 'beta' → ''），但不丢失语义段
+            digits = "".join(ch for ch in p if ch.isdigit())
+            if digits:
+                parts.append(int(digits))
+            else:
+                # 纯非数字段赋一个大值使其排在末尾
+                parts.append(9999)
         return tuple(parts)
 
