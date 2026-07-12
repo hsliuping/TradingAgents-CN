@@ -68,6 +68,7 @@ class AgentBuilderState(TypedDict, total=False):
     workshop_session_id: str
     version_id: str
     build_status: str
+    decision_context: dict  # 版本冲突/迭代决策上下文（pending_user_decision / pending_iteration_decision）
 
     # ── 测试阶段 ──
     test_symbol: str
@@ -125,6 +126,7 @@ def new_agent_builder_state(
         workshop_session_id="",
         version_id="",
         build_status="",
+        decision_context={},
         test_symbol="",
         test_result={},
         official_acceptance_decision="",

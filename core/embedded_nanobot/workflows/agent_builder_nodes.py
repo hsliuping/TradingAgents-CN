@@ -2363,6 +2363,56 @@ async def node_generate_candidate_agent(
     # 🔑 清除旧错误，避免 error_recovery 叠加显示不相关的历史错误
     state["errors"] = []
 
+    # 🔑 已发布版本决策：用户确认创建新版本后，自动 iterate 创建新草稿 session
+    # 保留之前的 gap 报告和方案选择，只是创建新草稿环境来写入配置
+    if state.get("build_status") == "pending_iteration_decision":
+        version_id = _sanitize_version_id(state.get("version_id", ""))
+        if version_id:
+            try:
+                from app.core.database import get_mongo_db
+                from app.services.agent_workshop_service import AgentWorkshopService
+                db = get_mongo_db()
+                iterate_result = await AgentWorkshopService(db=db).iterate_version(
+                    version_id,
+                    feedback="基于新的 gap 分析创建迭代版本",
+                )
+                new_session_id = str(iterate_result.get("session_id") or "").strip()
+                new_version_id = _sanitize_version_id(iterate_result.get("version_id", ""))
+                new_spec_id = str(iterate_result.get("spec_id") or "").strip()
+                if new_session_id:
+                    state["workshop_session_id"] = new_session_id
+                if new_version_id:
+                    state["version_id"] = new_version_id
+                if new_spec_id:
+                    state["spec_id"] = new_spec_id
+                # 清除 pending_iteration_decision，让后续生成逻辑正常执行
+                state["build_status"] = ""
+                logger.info(
+                    "[GenerateAgent][AutoIterate] 已创建新草稿版本 session_id=%s version_id=%s spec_id=%s",
+                    new_session_id, new_version_id, new_spec_id,
+                )
+                await _emit_event(event_callback, "progress", "已创建新草稿版本，继续生成 Agent")
+            except Exception as iterate_exc:
+                logger.error("[GenerateAgent][AutoIterate] iterate 失败: %s", iterate_exc, exc_info=True)
+                state["build_status"] = "failed"
+                state["errors"] = [{
+                    "node": "generate_candidate_agent",
+                    "error": f"创建新版本失败: {iterate_exc}",
+                    "stage": "iterating",
+                }]
+                state["final_response"] = f"创建新版本失败：{iterate_exc}"
+                return state
+        else:
+            logger.warning("[GenerateAgent][AutoIterate] version_id 为空，无法 iterate")
+            state["build_status"] = "failed"
+            state["errors"] = [{
+                "node": "generate_candidate_agent",
+                "error": "version_id 为空，无法创建新版本",
+                "stage": "iterating",
+            }]
+            state["final_response"] = "无法创建新版本：缺少已发布版本 ID"
+            return state
+
     # 条件函数对 state 的修改不会持久化到节点，这里重新解析 selected_plan_id
     if not state.get("selected_plan_id"):
         from core.embedded_nanobot.workflows.agent_builder_conditions import _resolve_plan_selection
@@ -2500,6 +2550,7 @@ Agent 信息：
                 or ""
             )
             is_version_in_progress = blocked_code == "version_already_in_progress"
+            is_active_requires_iteration = blocked_code == "active_version_requires_iteration"
 
             if is_version_in_progress:
                 # 版本已存在，提取已有版本信息，直接进入测试阶段
@@ -2535,6 +2586,46 @@ Agent 信息：
                     state.get("spec_id"),
                 )
                 # 不添加错误，让路由正常进入 wait_test_request
+            elif is_active_requires_iteration:
+                # 已发布版本不能直接覆盖，提示用户是否创建新版本（iterate）
+                existing_version_id = (
+                    nested_result.get("version_id")
+                    or gen_result.get("version_id")
+                    or ""
+                )
+                existing_spec_id = (
+                    nested_result.get("spec_id")
+                    or gen_result.get("spec_id")
+                    or state.get("spec_id")
+                    or ""
+                )
+                if existing_version_id:
+                    state["version_id"] = _sanitize_version_id(existing_version_id)
+                if existing_spec_id:
+                    state["spec_id"] = existing_spec_id
+                state["build_status"] = "pending_iteration_decision"
+                state["awaiting_user"] = True
+                state["decision_context"] = {
+                    "type": "iterate_or_cancel",
+                    "existing_version_id": existing_version_id,
+                    "spec_id": existing_spec_id,
+                    "message": nested_result.get("message", "") or gen_result.get("message", ""),
+                    "next_action": nested_result.get("next_action", "") or gen_result.get("next_action", ""),
+                }
+                state["final_response"] = (
+                    f"检测到该 Agent 已有已发布版本 **{existing_version_id}**。\n\n"
+                    f"已发布版本不能直接覆盖，需要基于该版本创建新的迭代版本。\n\n"
+                    f"请选择：\n"
+                    f"- 回复「确认」：基于已发布版本发起迭代，在新会话中继续优化\n"
+                    f"- 回复「取消」：结束当前流程"
+                )
+                logger.info(
+                    "[GenerateAgent][PhaseGuardBypass] active_version_requires_iteration → "
+                    "等待用户决策 version_id=%s spec_id=%s",
+                    state.get("version_id"),
+                    state.get("spec_id"),
+                )
+                # 不添加错误，让路由进入 wait_test_request 展示决策选项
             else:
                 state["build_status"] = "failed"
                 err_msg = gen_result.get("message", "")
@@ -2741,6 +2832,31 @@ async def node_wait_test_request(
         )
         await _invoke_stream(on_stream, state["final_response"])
         await _emit_event(event_callback, "progress", "需要用户决策：覆盖旧版本还是继续推进")
+        return state
+
+    # 已发布版本需要用户决策：是否创建新版本（iterate）
+    if state.get("build_status") == "pending_iteration_decision":
+        decision_ctx = state.get("decision_context", {}) or {}
+        # 优先从 decision_context 读取，兜底从 state.version_id 读取（确保跨请求恢复时可用）
+        existing_version_id = (
+            decision_ctx.get("existing_version_id")
+            or state.get("version_id", "")
+            or "未知"
+        )
+        logger.info(
+            "[WaitTest][Debug] pending_iteration_decision | existing_version_id=%s | build_status=%s",
+            existing_version_id,
+            state.get("build_status"),
+        )
+        state["final_response"] = (
+            f"检测到该 Agent 已有已发布版本 **{existing_version_id}**。\n\n"
+            f"已发布版本不能直接覆盖，需要基于该版本创建新的迭代版本。\n\n"
+            f"请选择：\n"
+            f"- 回复「确认」：基于已发布版本发起迭代，在新会话中继续优化\n"
+            f"- 回复「取消」：结束当前流程"
+        )
+        await _invoke_stream(on_stream, state["final_response"])
+        await _emit_event(event_callback, "progress", "需要用户决策：是否基于已发布版本创建新版本")
         return state
 
     if state.get("skill_creation_requested"):

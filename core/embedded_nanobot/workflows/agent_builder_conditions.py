@@ -202,6 +202,17 @@ def route_start(state: "AgentBuilderState") -> str:
         _log_route("route_start", state, result)
         return result
 
+    # 已发布版本等待用户决策：用户回复后走 classify_intent 判断是创建新版本还是取消
+    if state.get("build_status") == "pending_iteration_decision":
+        logger.info(
+            "[RouteStart][Debug] pending_iteration_decision detected | current_node=%s | user_message=%s",
+            node,
+            (state.get("user_message", "") or "")[:100],
+        )
+        result = "classify_intent"
+        _log_route("route_start", state, result)
+        return result
+
     # 从 wait / evaluate / error 节点恢复 → 先走 LLM 意图分类
     # build_or_ready 不在列表中：当 pending_user_decision 状态时，用户回复直接回到 build_or_ready 重新构建
     if node in (
@@ -367,7 +378,18 @@ def route_after_classify(state: "AgentBuilderState") -> str:
 
     # ── wait_test_request：等待测试标的 ──
     elif current_node == "wait_test_request":
-        if state.get("test_symbol"):
+        if state.get("build_status") == "pending_iteration_decision":
+            # 已发布版本决策点：用户确认创建新版本 → 回到 generate_candidate_agent
+            # （节点入口会自动 iterate 创建新 session，然后用之前选好的方案继续生成）
+            if intent in ("confirmed", "select_option"):
+                result = "generate_candidate_agent"
+            elif intent == "cancel":
+                result = "end"
+                state["stage"] = "cancelled"
+            else:
+                result = "wait_test_request"
+                state["clarification_needed"] = True
+        elif state.get("test_symbol"):
             result = "real_data_test"
         elif intent == "create_skill":
             # 用户要创建缺失的 skill，停在当前节点，由 node 输出提示
@@ -539,7 +561,10 @@ def route_wait_plan_selection(state: "AgentBuilderState") -> str:
 
 def route_after_generate(state: "AgentBuilderState") -> str:
     """生成 Agent 后的路由。"""
-    if state.get("errors"):
+    if state.get("build_status") == "pending_iteration_decision":
+        # 已发布版本被 phase_guard 拦截 → 展示决策选项给用户
+        result = "wait_test_request"
+    elif state.get("errors"):
         result = "error_recovery"
     elif state.get("selected_plan_id") == "quick":
         result = "wait_test_request"

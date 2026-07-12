@@ -28,6 +28,7 @@ _KNOWN_KEYS = frozenset({
     "candidate_plans", "pending_options", "recommended_plan_id",
     "selected_plan_id", "acknowledged_gaps",
     "generated_agent", "workshop_session_id", "version_id", "build_status",
+    "decision_context",
     "test_symbol", "test_result", "official_acceptance_decision",
     "errors", "conversation_summary", "tool_events", "final_response",
     # ── 意图分类 v2 字段 ──
