@@ -20,10 +20,27 @@ class _ToolMetadataWrapper:
         self.name = metadata.id
 
     def to_schema(self) -> dict[str, Any]:
+        # 把 ToolParameter Pydantic 模型转为 dict，避免 LLM 客户端 json.dumps 时报错
+        # "Object of type ToolParameter is not JSON serializable"
+        raw_params = self._metadata.parameters
+        if raw_params:
+            serialized_params = []
+            for p in raw_params:
+                if hasattr(p, "model_dump"):
+                    serialized_params.append(p.model_dump(mode="json"))
+                elif hasattr(p, "dict"):
+                    serialized_params.append(p.dict())
+                elif isinstance(p, dict):
+                    serialized_params.append(p)
+                else:
+                    serialized_params.append(str(p))
+            params_payload = serialized_params
+        else:
+            params_payload = {"type": "object", "properties": {}}
         return {
             "name": self._metadata.id,
             "description": self._metadata.description or self._metadata.name,
-            "parameters": self._metadata.parameters or {"type": "object", "properties": {}},
+            "parameters": params_payload,
         }
 
 

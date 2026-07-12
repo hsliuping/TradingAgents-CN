@@ -1505,6 +1505,42 @@ async def _resolve_workshop_session_phase_context(db: Any, session_id: str) -> d
     }
 
 
+async def _get_existing_version_summary(db: Any, version_id: str) -> dict[str, Any]:
+    """获取已有版本的摘要信息，用于"覆盖或继续"决策展示。"""
+    if not version_id:
+        return {"version_id": "", "found": False}
+    versions = _get_collection(db, _WORKSHOP_VERSION_COLLECTION)
+    if versions is None:
+        return {"version_id": version_id, "found": False}
+    version_doc = await versions.find_one({"version_id": version_id})
+    if not version_doc:
+        return {"version_id": version_id, "found": False}
+
+    required_tools = version_doc.get("required_tools") or []
+    required_capabilities = version_doc.get("required_capabilities") or []
+    # required_tools 可能是 ["tool_id|tool_name", ...] 格式，提取 tool_id
+    tool_ids = []
+    for item in required_tools[:20]:
+        if isinstance(item, str):
+            tool_ids.append(item.split("|")[0].strip())
+        elif isinstance(item, dict):
+            tool_ids.append(str(item.get("tool_id") or item.get("id") or "").strip())
+
+    return {
+        "version_id": version_id,
+        "found": True,
+        "status": version_doc.get("status") or "",
+        "created_at": str(version_doc.get("created_at") or "")[:19],
+        "required_tools": tool_ids,
+        "required_tools_count": len(tool_ids),
+        "required_capabilities_count": len(required_capabilities),
+        "agent_metadata": {
+            "name": (version_doc.get("agent_metadata") or {}).get("name") or "",
+            "type": (version_doc.get("agent_metadata") or {}).get("type") or "",
+        },
+    }
+
+
 def _get_current_thread_context_spec_id() -> str:
     """从 contextvar 读取当前线程的 spec_id。"""
     try:
@@ -2048,34 +2084,55 @@ def _generate_short_agent_name_llm(user_request: str, target_responsibility: str
             Message(role="system", content=system_prompt),
             Message(role="user", content=user_prompt),
         ]
-        response = client.chat(messages, temperature=0.3, max_tokens=150)
+        # DeepSeek 推理模型会先输出思考过程再输出 JSON，需要足够的 token 配额
+        response = client.chat(messages, temperature=0.3, max_tokens=1000)
         raw_content = str(response.content or "").strip()
 
-        logger.info("[AgentName][LLM] 原始响应: %s", raw_content[:300])
+        logger.info("[AgentName][LLM] 原始响应: %s", raw_content[:400])
 
-        # 尝试解析 JSON
+        # 尝试解析 JSON（支持推理模型在 JSON 前后输出思考文本）
         import json as _json
         try:
-            # 清理可能的 markdown 代码块标记
             cleaned = raw_content.strip()
+            # 去掉 markdown 代码块标记
             if cleaned.startswith("```"):
-                # 去掉 ```json 或 ``` 标记
                 cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
                 cleaned = re.sub(r"\s*```$", "", cleaned)
-            # 尝试从文本中提取 JSON 对象（兼容跨行和带前后文的情况）
+            # 优先尝试从文本中提取 JSON 对象
             json_match = re.search(r'\{[^{}]*"name"[^{}]*"slug"[^{}]*\}', cleaned, re.DOTALL)
-            if json_match:
+            if not json_match:
+                # 宽松匹配：找最后一个 { 到最后一个 } 之间的内容
+                last_brace = cleaned.rfind("{")
+                last_close = cleaned.rfind("}")
+                if last_brace >= 0 and last_close > last_brace:
+                    json_match = re.search(
+                        r'\{.*\}', cleaned[last_brace:last_close + 1], re.DOTALL
+                    )
+                    if json_match:
+                        cleaned = json_match.group(0)
+            if json_match and json_match is not cleaned:
                 cleaned = json_match.group(0)
             result = _json.loads(cleaned)
             name = str(result.get("name", "")).strip()
             slug = str(result.get("slug", "")).strip().lower()
             logger.info("[AgentName][LLM] 解析成功: name=%s slug=%s", name, slug)
         except Exception as parse_exc:
-            # JSON 解析失败，尝试从文本中提取
+            # JSON 解析失败，尝试从文本中智能提取名字
             logger.warning("[AgentName][LLM] JSON 解析失败: %s, raw=%s", parse_exc, raw_content[:200])
-            name = raw_content.strip().strip("\"'""''「」【】 ").split("\n")[0].strip()
-            name = name.rstrip("。.；;")
+            # 尝试从思考文本中提取 "中文名：xxx" 或 "名字：xxx" 模式
+            name = ""
             slug = ""
+            name_match = re.search(r'(?:中文名|名字)[：:]\s*([^\n。]{2,12})', raw_content)
+            if name_match:
+                name = name_match.group(1).strip()
+            if not name:
+                # 尝试找 slug 模式: "英文slug：xxx"
+                slug_match = re.search(r'(?:英文\s*slug|slug)[：:]\s*([a-z][a-z0-9_]{2,39})', raw_content)
+                if slug_match:
+                    slug = slug_match.group(1).strip().lower()
+                # 最后兜底：取第一行
+                name = raw_content.strip().strip("\"'""''「」【】 ").split("\n")[0].strip()
+                name = name.rstrip("。.；;")
 
         # 清理中文名
         name = name.rstrip("。.；;")
@@ -3389,10 +3446,13 @@ async def propose_agent_build_plans(
         gap_report = _parse_optional_json_object(gap_report_json, "gap_report_json")
         blocking_gaps = gap_report.get("blocking_gaps") or []
         non_blocking_gaps = gap_report.get("non_blocking_gaps") or []
+        inferable_gaps = gap_report.get("inferable_gaps") or []
         if not isinstance(blocking_gaps, list):
             blocking_gaps = []
         if not isinstance(non_blocking_gaps, list):
             non_blocking_gaps = []
+        if not isinstance(inferable_gaps, list):
+            inferable_gaps = []
 
         # 构造 LLM 提示词
         system_prompt = (
@@ -3409,20 +3469,25 @@ async def propose_agent_build_plans(
             "5. quick/strict 方案必须说明哪些输出会被降级、收窄或要求更严格的数据依据。\n"
             "6. narrow 方案必须给出建议缩小后的职责范围。\n"
             "7. 必须设置 recommended_plan_id：0 个 blocking gap 时推荐 direct；有 blocking gap 时默认推荐 complete。\n"
+            "8. 每个方案必须包含 gap_summary 字段，说明该方案下的数据覆盖情况：哪些数据有直接工具支撑、哪些通过推断获取、哪些缺失。\n"
+            "9. 每个方案必须包含 feasibility 字段，说明实现可行性：能否实现、有哪些困难、需要哪些额外开发或数据接入。\n"
+            "10. 对于有 blocking_gaps 的方案，必须在 feasibility 中明确说明这些缺口能否补齐、补齐方式（新建 Skill/接入外部数据/降级处理）以及补齐失败的影响。\n"
         )
 
         user_prompt = (
             f"Agent 职责：{agent_responsibility or '（未提供）'}\n"
             f"Agent 输出：{agent_output_shape or '（未提供）'}\n\n"
             "能力缺口分析结果：\n"
-            f"blocking_gaps（阻塞性缺口）数量：{len(blocking_gaps)}\n"
+            f"blocking_gaps（阻塞性缺口，无法实现的分析维度）数量：{len(blocking_gaps)}\n"
             f"blocking_gaps 详情：{_json_compact_dump(blocking_gaps)}\n"
-            f"non_blocking_gaps（非阻塞性缺口）数量：{len(non_blocking_gaps)}\n"
+            f"inferable_gaps（可推断缺口，有相关数据可定性推断但不阻塞）数量：{len(inferable_gaps)}\n"
+            f"inferable_gaps 详情：{_json_compact_dump(inferable_gaps)}\n"
+            f"non_blocking_gaps（其他非阻塞性缺口）数量：{len(non_blocking_gaps)}\n"
             f"non_blocking_gaps 详情：{_json_compact_dump(non_blocking_gaps)}\n\n"
             "请按以下固定 JSON 格式输出：\n"
             "{\n"
             '  "candidate_plans": [\n'
-            '    {"plan_id": "direct|strict|enhanced|complete|quick|narrow", "plan_name": "...", "description": "...", "required_new_skills": [...], "estimated_effort": "高|中|低", "risk": "...", "recommended": true|false}\n'
+            '    {"plan_id": "direct|strict|enhanced|complete|quick|narrow", "plan_name": "...", "description": "...", "required_new_skills": [...], "estimated_effort": "高|中|低", "risk": "...", "gap_summary": "该方案的数据覆盖情况说明", "feasibility": "实现可行性说明，包括能否实现、困难和补齐方式", "recommended": true|false}\n'
             '  ],\n'
             '  "recommended_plan_id": "...",\n'
             '  "pending_question": "..."\n'
@@ -3480,6 +3545,8 @@ async def propose_agent_build_plans(
                 "required_new_skills": _to_str_list(p.get("required_new_skills")),
                 "estimated_effort": str(p.get("estimated_effort") or "中"),
                 "risk": str(p.get("risk") or ""),
+                "gap_summary": str(p.get("gap_summary") or ""),
+                "feasibility": str(p.get("feasibility") or ""),
                 "recommended": bool(p.get("recommended", False)),
             })
 
@@ -3499,6 +3566,8 @@ async def propose_agent_build_plans(
                     "required_new_skills": _to_str_list(fallback_plan.get("required_new_skills")),
                     "estimated_effort": str(fallback_plan.get("estimated_effort") or "中"),
                     "risk": str(fallback_plan.get("risk") or ""),
+                    "gap_summary": str(fallback_plan.get("gap_summary") or ""),
+                    "feasibility": str(fallback_plan.get("feasibility") or ""),
                     "recommended": bool(fallback_plan.get("recommended", False)),
                 })
                 seen_plan_ids.add(fallback_plan_id)
@@ -3524,6 +3593,8 @@ async def propose_agent_build_plans(
                 "description": p["description"],
                 "recommended": bool(p.get("recommended")),
                 "acknowledged_gaps": blocking_gaps if p["plan_id"] in {"complete", "quick"} else [],
+                "gap_summary": p.get("gap_summary", ""),
+                "feasibility": p.get("feasibility", ""),
             }
             for i, p in enumerate(normalized_plans)
         ]
@@ -4786,20 +4857,21 @@ async def generate_agent_workshop_tooling_plan(
 @register_tool(
     tool_id="build_agent_workshop_version",
     name="生成 Agent 工坊版本草案",
-    description="让 Nanobot 直接触发 Agent 工坊版本草案生成，并返回生成后的版本信息。",
+    description="让 Nanobot 直接触发 Agent 工坊版本草案生成，并返回生成后的版本信息。如果已有版本处于测试中，会返回 needs_user_decision 状态让用户选择是覆盖还是继续推进。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Agent Draft 已生成但尚未产生测试版本（READY_TO_BUILD 阶段）时使用。该工具会在内部完成真实 gap 分析、工具计划和版本草案生成。",
-    when_not_to_use="不适合在 session_id 缺失或规格尚未准备好时调用。也不适合在版本已构建（处于 BUILDING/TESTING 阶段）、已发布（PUBLISHED）后重复构建。如需改进已构建版本，应使用 iterate_agent_workshop_version。",
-    returns="返回 JSON 字符串，包含 session_id、spec_id 和 version。",
+    when_to_use="当 Agent Draft 已生成但尚未产生测试版本（READY_TO_BUILD 阶段）时使用。该工具会在内部完成真实 gap 分析、工具计划和版本草案生成。如果返回 status=needs_user_decision，必须向用户展示旧版本信息（existing_version 中的工具列表）并询问用户选择：覆盖旧版本（用户确认后用 overwrite_existing=True 再次调用）还是继续推进旧版本（引导用户使用 iterate_agent_workshop_version 或继续测试）。",
+    when_not_to_use="不适合在 session_id 缺失或规格尚未准备好时调用。用户未明确确认要覆盖时，不要传 overwrite_existing=True。",
+    returns="返回 JSON 字符串。正常时包含 session_id、spec_id 和 version；已有版本时返回 status=needs_user_decision 及旧版本信息和选项。",
     example="build_agent_workshop_version(session_id='session_123')",
-    related_tools=["analyze_agent_workshop_gaps", "generate_agent_workshop_tooling_plan"],
+    related_tools=["analyze_agent_workshop_gaps", "generate_agent_workshop_tooling_plan", "iterate_agent_workshop_version"],
     data_source_handling="local_only",
 )
 async def build_agent_workshop_version(
     session_id: Annotated[str, "Agent 工坊会话 ID"],
+    overwrite_existing: Annotated[bool, "是否覆盖已有版本（删除旧版本后重建）。仅在用户明确确认要覆盖时传 True。"] = False,
 ) -> str:
     """生成 Agent 工坊版本草案并返回结构化结果。"""
     try:
@@ -4831,24 +4903,56 @@ async def build_agent_workshop_version(
                 },
             )
         if phase_context.get("guard_available") and version_status and version_status != "draft":
-            next_action = "当前已有测试流程在推进，请直接继续真数据测试或发布。"
-            if version_status == "active":
-                next_action = "当前版本已发布，如需继续优化，请先开始下一轮。"
-            return _build_phase_guard_blocked_response(
-                tool_name="build_agent_workshop_version",
-                blocked_code="active_version_requires_iteration" if version_status == "active" else "version_already_in_progress",
-                message=(
-                    f"当前阶段为{phase_context.get('phase_label')}，不能再次补建测试版本；"
-                    "当前会话已经有可继续推进的版本。"
-                ),
-                next_action=next_action,
-                phase_context=phase_context,
-                target_fields={
+            current_version_id = str(phase_context.get("current_version_id") or "").strip()
+
+            # 用户确认要覆盖旧版本：先删除旧版本再继续构建
+            if overwrite_existing and current_version_id:
+                svc = AgentWorkshopService(db=db)
+                delete_result = await svc.delete_version(current_version_id, force=True)
+                if not delete_result.get("deleted"):
+                    return _json_response({
+                        "status": "error",
+                        "message": f"删除旧版本 {current_version_id} 失败：{delete_result.get('message', '未知原因')}",
+                        "current_version_id": current_version_id,
+                    })
+                # 删除成功后继续执行 build_version
+            else:
+                # 返回"需要用户决策"的响应，让 LLM 询问用户是覆盖还是继续推进
+                existing_version_summary = await _get_existing_version_summary(db, current_version_id)
+                phase_label = phase_context.get("phase_label") or version_status
+                return _json_response({
+                    "status": "needs_user_decision",
+                    "decision_type": "overwrite_or_continue",
+                    "message": (
+                        f"当前会话已有一个处于「{phase_label}」阶段的版本 {current_version_id}。"
+                        f"请向用户展示旧版本信息，并询问用户是要覆盖旧版本（删除后重建）还是继续推进旧版本。"
+                    ),
+                    "existing_version": existing_version_summary,
+                    "options": [
+                        {
+                            "label": "覆盖旧版本",
+                            "description": "删除当前版本并基于最新需求重新构建（适用于工具选择或 gap 分析有误需要重建的情况）",
+                            "action": "调用 build_agent_workshop_version(session_id, overwrite_existing=True)",
+                        },
+                        {
+                            "label": "继续推进旧版本",
+                            "description": "保留当前版本，按流程继续推进：先运行真数据测试，评估通过后可发布或迭代创建 v2",
+                            "action": "先调用 run_agent_workshop_real_data_test 执行真数据测试；评估通过后可调用 publish_agent_workshop_version 发布，或调用 iterate_agent_workshop_version 创建 v2 版本（注意：iterate 要求版本已进入 evaluation/publish-ready/published 阶段，testing 阶段不能直接 iterate）",
+                        },
+                    ],
+                    "current_phase": phase_context.get("phase"),
+                    "current_phase_label": phase_label,
                     "session_id": clean_session_id,
                     "spec_id": phase_context.get("spec_id"),
-                    "current_version_id": phase_context.get("current_version_id"),
-                },
-            )
+                    "current_version_id": current_version_id,
+                    "_tool_events": [
+                        _build_tool_stage_event(
+                            "build_agent_workshop_version.needs_user_decision",
+                            "needs_user_decision",
+                            f"已有版本 {current_version_id} 处于 {phase_label} 阶段，需要用户决策是否覆盖",
+                        ),
+                    ],
+                })
 
         result = await AgentWorkshopService(db=db).build_version(clean_session_id)
         version = result.get("version") if isinstance(result, dict) else None
@@ -5435,6 +5539,14 @@ async def evaluate_agent_workshop_version(
         )
         evaluation = result.get("evaluation") if isinstance(result, dict) else None
         decision = _read_mapping_or_attr(evaluation, "decision", None)
+        # 把 Pydantic 模型转为 dict，避免 _json_response 的 default=str 把它序列化成字符串
+        # 导致前端解析时 evaluation 不是 dict，decision/scores 取不到值
+        if result and "evaluation" in result:
+            eval_obj = result["evaluation"]
+            if hasattr(eval_obj, "model_dump"):
+                result["evaluation"] = eval_obj.model_dump(mode="json")
+            elif hasattr(eval_obj, "dict"):
+                result["evaluation"] = eval_obj.dict()
         return _json_response({
             "status": "ok",
             **(result or {}),
@@ -7378,6 +7490,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "低",
                 "risk": "能力已覆盖，主要风险来自真实数据质量和后续验收结果。",
+                "gap_summary": "所有分析维度均有直接工具支撑，无数据缺口。",
+                "feasibility": "可直接实现，无需额外开发。",
                 "recommended": True,
             },
             {
@@ -7387,6 +7501,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "低",
                 "risk": "覆盖更稳健，但报告表达会更保守，部分扩展解读不会展开。",
+                "gap_summary": "所有分析维度均有直接工具支撑，但对推断性结论做严格限制。",
+                "feasibility": "可直接实现，无需额外开发。",
                 "recommended": False,
             },
             {
@@ -7396,6 +7512,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "中",
                 "risk": "不是当前交付的必要条件；如果扩展过多，可能增加测试和解释复杂度。",
+                "gap_summary": "核心维度有直接工具支撑，扩展维度可能需要额外数据接入。",
+                "feasibility": "可实现，但扩展部分需要额外开发和数据接入。",
                 "recommended": False,
             },
         ]
@@ -7409,6 +7527,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": blocking_descriptions,
                 "estimated_effort": "高",
                 "risk": "需要生成新能力，可能失败或耗时",
+                "gap_summary": f"有 {blocking_count} 个阻塞性缺口需要补齐，补齐后所有维度均可覆盖。",
+                "feasibility": f"需要新建 Skill 补齐 {blocking_count} 个缺口，可能失败或耗时。补齐方式：新建 Skill 或接入外部数据源。",
                 "recommended": True,
             },
             {
@@ -7418,6 +7538,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "低",
                 "risk": "功能不完整，部分输出会降级或省略",
+                "gap_summary": f"有 {blocking_count} 个维度无法覆盖，将标注为'数据不足'或做降级处理。",
+                "feasibility": "可直接实现，但部分分析维度会缺失或降级。",
                 "recommended": False,
             },
         ]
@@ -7431,6 +7553,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": blocking_descriptions,
                 "estimated_effort": "高",
                 "risk": "需要生成多个新能力，周期较长",
+                "gap_summary": f"有 {blocking_count} 个阻塞性缺口需要补齐，补齐后所有维度均可覆盖。",
+                "feasibility": f"需要新建多个 Skill 补齐 {blocking_count} 个缺口，周期较长，可能失败。补齐方式：新建 Skill 或接入外部数据源。",
                 "recommended": True,
             },
             {
@@ -7440,6 +7564,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "低",
                 "risk": "功能不完整，部分输出会降级或省略",
+                "gap_summary": f"有 {blocking_count} 个维度无法覆盖，将标注为'数据不足'或做降级处理。",
+                "feasibility": "可直接实现，但多个分析维度会缺失或降级。",
                 "recommended": False,
             },
             {
@@ -7449,6 +7575,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "低",
                 "risk": "只覆盖部分需求",
+                "gap_summary": f"缩小范围后，只覆盖现有能力可支撑的维度，{blocking_count} 个缺口维度不在范围内。",
+                "feasibility": "可实现，但需要缩小 Agent 的职责范围。",
                 "recommended": False,
             },
         ]
