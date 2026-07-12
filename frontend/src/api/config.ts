@@ -739,22 +739,6 @@ export const DEFAULT_MARKET_CATEGORIES: Partial<MarketCategory>[] = [
     sort_order: 1
   },
   {
-    id: 'us_stocks',
-    name: 'us_stocks',
-    display_name: '美股',
-    description: '美国股票市场数据源',
-    enabled: true,
-    sort_order: 2
-  },
-  {
-    id: 'hk_stocks',
-    name: 'hk_stocks',
-    display_name: '港股',
-    description: '香港股票市场数据源',
-    enabled: true,
-    sort_order: 3
-  },
-  {
     id: 'crypto',
     name: 'crypto',
     display_name: '数字货币',

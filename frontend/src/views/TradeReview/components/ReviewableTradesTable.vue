@@ -132,9 +132,7 @@ const formatPnl = (value?: number) => {
 
 const getMarketType = (market?: string): TagType => {
   const map: Record<string, TagType> = {
-    CN: 'danger',
-    HK: 'warning',
-    US: 'primary'
+    CN: 'danger'
   }
   return map[market || 'CN'] || 'info'
 }

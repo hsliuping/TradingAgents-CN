@@ -503,7 +503,7 @@ const handleAnalyze = async () => {
             // 跳转到单股分析页面，带上股票代码参数
             const marketName = props.position.market === 'CN'
               ? getMarketByStockCode(props.position.code)
-              : ({ HK: '港股', US: '美股' }[props.position.market] || 'A股')
+              : 'A股'
             router.push(`/analysis/single?stock_code=${props.position.code}&market=${marketName}`)
             visible.value = false // 关闭当前对话框
           }

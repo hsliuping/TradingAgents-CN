@@ -18,9 +18,7 @@
         <el-button @click="onToggleFavorite">
           <el-icon><Star /></el-icon> {{ favoriteButtonText }}
         </el-button>
-        <!-- 🔥 港股和美股不显示"同步数据"按钮 -->
         <el-button
-          v-if="market !== 'HK' && market !== 'US'"
           type="primary"
           @click="showSyncDialog"
           :loading="syncLoading"

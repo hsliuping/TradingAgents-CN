@@ -59,7 +59,7 @@ import type { AccountSummary } from '@/api/portfolio'
 
 const props = defineProps<{
   summary: AccountSummary | null
-  currency: 'CNY' | 'HKD' | 'USD'
+  currency: 'CNY'
   symbol: string
 }>()
 

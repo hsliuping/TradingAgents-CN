@@ -180,7 +180,6 @@
               >
                 <el-option label="AKShare（推荐，免费无需密钥）" value="akshare" />
                 <el-option label="Tushare（专业A股数据）" value="tushare" />
-                <el-option label="FinnHub（美股数据）" value="finnhub" />
               </el-select>
             </el-form-item>
 
@@ -191,16 +190,6 @@
               <el-input
                 v-model="datasourceToken"
                 placeholder="请输入 Tushare Token"
-              />
-            </el-form-item>
-
-            <el-form-item
-              v-if="datasourceType === 'finnhub'"
-              label="FinnHub API Key"
-            >
-              <el-input
-                v-model="datasourceApiKey"
-                placeholder="请输入 FinnHub API Key"
               />
             </el-form-item>
           </el-form>
@@ -433,12 +422,6 @@ const datasourceToken = computed({
   }
 })
 
-const datasourceApiKey = computed({
-  get: () => wizardData.value.datasource.apiKey,
-  set: (value: string) => {
-    wizardData.value.datasource.apiKey = value
-  }
-})
 
 // 方法
 const handleProviderChange = () => {
@@ -481,8 +464,7 @@ const getProviderUrl = (provider: string) => {
 const getDataSourceName = (type: string) => {
   const names: Record<string, string> = {
     akshare: 'AKShare',
-    tushare: 'Tushare',
-    finnhub: 'FinnHub'
+    tushare: 'Tushare'
   }
   return names[type] || type
 }

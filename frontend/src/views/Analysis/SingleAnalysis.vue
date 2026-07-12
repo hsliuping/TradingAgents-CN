@@ -1105,10 +1105,14 @@ const validateStockCodeInput = () => {
     stockCodeHelp.value = `✓ ${validation.market}代码格式正确`
 
     // 自动更新市场类型（如果识别出的市场与当前选择不同）
+    // V3.0 聚焦 A 股，港美股已暂停
     if (validation.market && validation.market !== analysisForm.market) {
-      analysisForm.market = validation.market
-      onMarketChange()  // 同步更新分析师选择（如 ETF 固定分析师）
-      ElMessage.success(`已自动识别为${validation.market}`)
+      const validMarkets: MarketType[] = ['A股', 'ETF']
+      if ((validMarkets as string[]).includes(validation.market)) {
+        analysisForm.market = validation.market as MarketType
+        onMarketChange()  // 同步更新分析师选择（如 ETF 固定分析师）
+        ElMessage.success(`已自动识别为${validation.market}`)
+      }
     }
 
     // 标准化代码
@@ -2356,7 +2360,7 @@ const goSimOrder = async () => {
       code: code,
       side: recommendation.action,
       quantity: tradeForm.quantity,
-      market: analysisForm.market === 'ETF' ? 'ETF' : analysisForm.market === '港股' ? 'HK' : analysisForm.market === '美股' ? 'US' : 'CN',
+      market: analysisForm.market === 'ETF' ? 'ETF' : 'CN',
       analysis_id: analysisId ? String(analysisId) : undefined
     })
 

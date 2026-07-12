@@ -28,8 +28,6 @@
         <el-col :span="4">
           <el-select v-model="selectedMarket" placeholder="市场" clearable>
             <el-option label="A股" value="A股" />
-            <el-option label="港股" value="港股" />
-            <el-option label="美股" value="美股" />
           </el-select>
         </el-col>
 
@@ -232,8 +230,6 @@
         <el-form-item label="市场类型" prop="market">
           <el-select v-model="addForm.market" @change="handleMarketChange">
             <el-option label="A股" value="A股" />
-            <el-option label="港股" value="港股" />
-            <el-option label="美股" value="美股" />
           </el-select>
         </el-form-item>
 
@@ -250,9 +246,6 @@
 
         <el-form-item label="股票名称" prop="stock_name">
           <el-input v-model="addForm.stock_name" placeholder="股票名称" />
-          <div v-if="addForm.market !== 'A股'" style="font-size: 12px; color: #E6A23C; margin-top: 4px;">
-            {{ addForm.market }}不支持自动获取，请手动输入股票名称
-          </div>
         </el-form-item>
 
         <el-form-item label="标签">
@@ -628,18 +621,6 @@ const validateStockCode = (_rule: any, value: any, callback: any) => {
       callback(new Error('A股代码必须是6位数字，如：000001'))
       return
     }
-  } else if (market === '港股') {
-    // 港股：4位数字 或 4-5位数字+.HK
-    if (!/^\d{4,5}$/.test(code) && !/^\d{4,5}\.HK$/i.test(code)) {
-      callback(new Error('港股代码格式：4位数字（如：0700）或带后缀（如：0700.HK）'))
-      return
-    }
-  } else if (market === '美股') {
-    // 美股：1-5个字母
-    if (!/^[A-Z]{1,5}$/i.test(code)) {
-      callback(new Error('美股代码必须是1-5个字母，如：AAPL'))
-      return
-    }
   }
 
   callback()
@@ -948,10 +929,6 @@ const getStockCodePlaceholder = () => {
   const market = addForm.value.market
   if (market === 'A股') {
     return '请输入6位数字代码，如：000001 或 ETF 代码如 510300'
-  } else if (market === '港股') {
-    return '请输入4位数字代码，如：0700'
-  } else if (market === '美股') {
-    return '请输入股票代码，如：AAPL'
   }
   return '请输入股票代码'
 }
@@ -961,10 +938,6 @@ const getStockCodeHint = () => {
   const market = addForm.value.market
   if (market === 'A股') {
     return '支持股票和 ETF 代码，输入后失焦将自动填充名称'
-  } else if (market === '港股') {
-    return '港股不支持自动获取名称，请手动输入'
-  } else if (market === '美股') {
-    return '美股不支持自动获取名称，请手动输入'
   }
   return ''
 }
@@ -976,7 +949,6 @@ const fetchStockInfo = async () => {
     const symbol = addForm.value.stock_code.trim()
     const market = addForm.value.market
 
-    // 🔥 只有A股支持自动获取股票名称
     if (market === 'A股') {
       // 从后台获取股票基础信息
       const res = await ApiClient.get(`/api/stock-data/basic-info/${symbol}`)
@@ -992,7 +964,6 @@ const fetchStockInfo = async () => {
         ElMessage.warning('未找到该股票信息，请手动输入股票名称')
       }
     }
-    // 港股和美股不调用API，用户需要手动输入
   } catch (error: any) {
     console.error('获取股票信息失败:', error)
     ElMessage.warning('获取股票信息失败，请手动输入股票名称')

@@ -24,7 +24,7 @@ export interface AppState {
 
   // 用户偏好
   preferences: {
-    defaultMarket: 'A股' | '美股' | '港股'
+    defaultMarket: 'A股'
     defaultDepth: '1' | '2' | '3' | '4' | '5'  // 1-5级分析深度
     autoRefresh: boolean
     refreshInterval: number

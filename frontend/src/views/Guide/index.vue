@@ -167,7 +167,7 @@
               <p>完成数据同步，获取最新的股票基础信息：</p>
               <ul class="step-list">
                 <li>
-                  <strong>重要说明：</strong>目前数据同步功能<strong style="color: var(--el-color-warning);">仅支持A股市场</strong>，港股和美股数据暂不支持同步。
+                  <strong>重要说明：</strong>目前数据同步功能<strong style="color: var(--el-color-warning);">仅支持A股市场</strong>。
                 </li>
                 <li>
                   <strong>多数据源同步步骤：</strong>

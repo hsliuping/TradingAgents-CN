@@ -37,28 +37,6 @@
             @withdraw="() => openWithdrawDialog('CNY')"
           />
         </el-tab-pane>
-
-        <!-- 港股 (HKD) -->
-        <el-tab-pane label="🇭🇰 港股 (HKD)" name="HKD">
-          <CurrencyAccount
-            :summary="summary"
-            currency="HKD"
-            symbol="HK$"
-            @deposit="() => openDepositDialog('HKD')"
-            @withdraw="() => openWithdrawDialog('HKD')"
-          />
-        </el-tab-pane>
-
-        <!-- 美股 (USD) -->
-        <el-tab-pane label="🇺🇸 美股 (USD)" name="USD">
-          <CurrencyAccount
-            :summary="summary"
-            currency="USD"
-            symbol="$"
-            @deposit="() => openDepositDialog('USD')"
-            @withdraw="() => openWithdrawDialog('USD')"
-          />
-        </el-tab-pane>
       </el-tabs>
     </div>
 
@@ -67,12 +45,6 @@
       <el-form :model="initForm" label-width="120px">
         <el-form-item label="A股 (CNY)">
           <el-input-number v-model="initForm.CNY" :min="0" :max="100000000" :step="10000" :precision="0" style="width: 100%" placeholder="可选" />
-        </el-form-item>
-        <el-form-item label="港股 (HKD)">
-          <el-input-number v-model="initForm.HKD" :min="0" :max="100000000" :step="10000" :precision="0" style="width: 100%" placeholder="可选" />
-        </el-form-item>
-        <el-form-item label="美股 (USD)">
-          <el-input-number v-model="initForm.USD" :min="0" :max="100000000" :step="10000" :precision="0" style="width: 100%" placeholder="可选" />
         </el-form-item>
         <el-alert type="info" :closable="false" style="margin-bottom: 16px">
           <template #default>
@@ -92,8 +64,6 @@
         <el-form-item label="市场">
           <el-radio-group v-model="transactionForm.currency">
             <el-radio-button value="CNY">🇨🇳 A股</el-radio-button>
-            <el-radio-button value="HKD">🇭🇰 港股</el-radio-button>
-            <el-radio-button value="USD">🇺🇸 美股</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="金额">
@@ -116,8 +86,6 @@
         <el-form-item label="市场">
           <el-radio-group v-model="transactionForm.currency">
             <el-radio-button value="CNY">🇨🇳 A股</el-radio-button>
-            <el-radio-button value="HKD">🇭🇰 港股</el-radio-button>
-            <el-radio-button value="USD">🇺🇸 美股</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="金额">
@@ -178,7 +146,7 @@ const emit = defineEmits<{
 const loading = ref(false)
 const submitting = ref(false)
 const summary = ref<AccountSummary | null>(null)
-const activeCurrency = ref<'CNY' | 'HKD' | 'USD'>('CNY')
+const activeCurrency = ref<'CNY'>('CNY')
 
 // 对话框状态
 const showInitDialog = ref(false)
@@ -187,16 +155,14 @@ const showWithdrawDialog = ref(false)
 const showSettingsDialog = ref(false)
 
 // 表单数据
-const initForm = ref({ CNY: 0, HKD: 0, USD: 0 })
+const initForm = ref({ CNY: 0 })
 const transactionForm = ref({ amount: 10000, currency: 'CNY' as string, description: '' })
 const settingsForm = ref({ max_position_pct: 30, max_loss_pct: 10 })
 
-// 是否已初始化 (任意一个币种有资金就算已初始化)
+// 是否已初始化
 const hasInitialized = computed(() => {
   const cny = (summary.value?.initial_capital?.CNY || 0) + (summary.value?.total_deposit?.CNY || 0)
-  const hkd = (summary.value?.initial_capital?.HKD || 0) + (summary.value?.total_deposit?.HKD || 0)
-  const usd = (summary.value?.initial_capital?.USD || 0) + (summary.value?.total_deposit?.USD || 0)
-  return cny > 0 || hkd > 0 || usd > 0
+  return cny > 0
 })
 
 // 格式化金额
@@ -206,12 +172,12 @@ const formatMoney = (val: number) => {
 
 // 货币相关方法
 const getCurrencySymbol = (currency: string) => {
-  const map: Record<string, string> = { CNY: '¥', HKD: 'HK$', USD: '$' }
+  const map: Record<string, string> = { CNY: '¥' }
   return map[currency] || '¥'
 }
 
 const getCurrencyLabel = (currency: string) => {
-  const map: Record<string, string> = { CNY: 'A股 (CNY)', HKD: '港股 (HKD)', USD: '美股 (USD)' }
+  const map: Record<string, string> = { CNY: 'A股 (CNY)' }
   return map[currency] || currency
 }
 
@@ -253,31 +219,23 @@ const loadData = async () => {
 
 // 初始化账户
 const handleInitialize = async () => {
-  // 验证至少有一个币种的初始资金
-  const hasAny = initForm.value.CNY > 0 || initForm.value.HKD > 0 || initForm.value.USD > 0
-  if (!hasAny) {
-    ElMessage.warning('请至少设置一个币种的初始资金')
+  const amount = initForm.value.CNY
+  if (amount <= 0) {
+    ElMessage.warning('请输入有效的初始资金')
     return
   }
 
   submitting.value = true
   try {
-    // 逐个初始化各币种
-    const currencies = ['CNY', 'HKD', 'USD'] as const
-    for (const currency of currencies) {
-      const amount = initForm.value[currency]
-      if (amount > 0) {
-        const res = await portfolioApi.initializeAccount(amount, currency)
-        if (!res.success) {
-          ElMessage.error(`${currency} 初始资金设置失败: ${res.message}`)
-          return
-        }
-      }
+    const res = await portfolioApi.initializeAccount(amount, 'CNY')
+    if (!res.success) {
+      ElMessage.error(`CNY 初始资金设置失败: ${res.message}`)
+      return
     }
 
     ElMessage.success('初始资金设置成功')
     showInitDialog.value = false
-    initForm.value = { CNY: 0, HKD: 0, USD: 0 }
+    initForm.value = { CNY: 0 }
     await loadData()
     emit('updated')
   } catch (e: any) {

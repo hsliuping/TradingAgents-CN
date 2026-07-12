@@ -309,13 +309,13 @@ const formatDateTime = (dt: string) => {
 
 const getMarketName = (m: string, code?: string) => {
   if (m === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'ETF'
-  return ({ CN: 'A股', HK: '港股', US: '美股' }[m] || m)
+  return ({ CN: 'A股' }[m] || m)
 }
 const getMarketTagType = (m: string, code?: string) => {
   if (m === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'success'
-  return ({ CN: 'danger', HK: 'warning', US: 'primary' }[m] || 'info') as any
+  return ({ CN: 'danger' }[m] || 'info') as any
 }
-const getCurrencySymbol = (c: string) => ({ CNY: '¥', HKD: 'HK$', USD: '$' }[c] || c)
+const getCurrencySymbol = (c: string) => ({ CNY: '¥' }[c] || c)
 const getChangeTypeName = (t: string) => ({ buy: '买入', add: '加仓', reduce: '减仓', sell: '卖出', adjust: '调整', dividend: '分红', split: '拆股', merge: '合股' }[t] || t)
 const getChangeTypeTag = (t: string) => ({ buy: 'success', add: 'primary', reduce: 'warning', sell: 'danger', adjust: 'info', dividend: '', split: '', merge: '' }[t] || 'info') as any
 const getScoreTagType = (score: number | undefined) => {

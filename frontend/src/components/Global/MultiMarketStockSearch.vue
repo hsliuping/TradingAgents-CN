@@ -77,7 +77,7 @@ const getPlaceholder = () => {
   return '输入股票代码或名称（如：000001 或 平安银行）'
 }
 
-const getMarketLabel = (market: string) => {
+const getMarketLabel = (_market: string) => {
   return 'A股'
 }
 

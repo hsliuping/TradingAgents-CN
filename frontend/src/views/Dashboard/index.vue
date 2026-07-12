@@ -461,39 +461,7 @@
               </div>
             </div>
 
-            <!-- 港股账户 -->
-            <div class="account-section" v-if="hasCurrency(paperAccount.cash, 'HKD')">
-              <div class="account-section-title">🇭🇰 港股账户</div>
-              <div class="account-item">
-                <div class="account-label">现金</div>
-                <div class="account-value">HK${{ formatMoney(getCurrencyAmount(paperAccount.cash, 'HKD')) }}</div>
-              </div>
-              <div class="account-item">
-                <div class="account-label">持仓市值</div>
-                <div class="account-value">HK${{ formatMoney(getCurrencyAmount(paperAccount.positions_value, 'HKD')) }}</div>
-              </div>
-              <div class="account-item">
-                <div class="account-label">总资产</div>
-                <div class="account-value primary">HK${{ formatMoney(getCurrencyAmount(paperAccount.equity, 'HKD')) }}</div>
-              </div>
-            </div>
 
-            <!-- 美股账户 -->
-            <div class="account-section" v-if="hasCurrency(paperAccount.cash, 'USD')">
-              <div class="account-section-title">🇺🇸 美股账户</div>
-              <div class="account-item">
-                <div class="account-label">现金</div>
-                <div class="account-value">${{ formatMoney(getCurrencyAmount(paperAccount.cash, 'USD')) }}</div>
-              </div>
-              <div class="account-item">
-                <div class="account-label">持仓市值</div>
-                <div class="account-value">${{ formatMoney(getCurrencyAmount(paperAccount.positions_value, 'USD')) }}</div>
-              </div>
-              <div class="account-item">
-                <div class="account-label">总资产</div>
-                <div class="account-value primary">${{ formatMoney(getCurrencyAmount(paperAccount.equity, 'USD')) }}</div>
-              </div>
-            </div>
           </div>
 
           <div v-else class="empty-state">
@@ -880,20 +848,13 @@ const formatMoney = (value: number | null | undefined) => {
 }
 
 const getCurrencyAmount = (
-  value: number | { CNY: number; HKD: number; USD: number } | undefined,
-  currency: 'CNY' | 'HKD' | 'USD'
+  value: number | { CNY: number } | undefined,
+  currency: 'CNY'
 ) => {
   if (typeof value === 'number') {
     return currency === 'CNY' ? value : 0
   }
-  return value?.[currency] ?? 0
-}
-
-const hasCurrency = (
-  value: number | { CNY: number; HKD: number; USD: number } | undefined,
-  currency: 'HKD' | 'USD'
-) => {
-  return typeof value === 'object' && value !== null && value[currency] !== undefined
+  return value?.CNY ?? 0
 }
 
 // 处理引导弹窗确认

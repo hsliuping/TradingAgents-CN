@@ -814,8 +814,6 @@ const isExternalSourceMatched = (item: ExternalDataSourceCatalogItem) => {
   const category = String(spec.category || '').toLowerCase()
   if (item.source_id === 'tushare' && (category === 'fundamentals' || text.includes('分红') || text.includes('report_period'))) return true
   if (item.source_id === 'akshare' && ((category === 'technical' || category === 'market') || text.includes('免费'))) return true
-  if (item.source_id === 'google_news' && (text.includes('港股') || text.includes('google news'))) return true
-  if (item.source_id === 'finnhub' && (text.includes('美股') || text.includes('company news'))) return true
   if (item.source_id === 'eastmoney_via_akshare' && (text.includes('东方财富') || text.includes('东财'))) return true
 
   return false

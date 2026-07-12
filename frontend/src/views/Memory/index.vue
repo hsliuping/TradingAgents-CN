@@ -390,8 +390,6 @@ const stats = reactive<{
 
 const marketOptions = [
   { label: 'A股', value: 'cn' },
-  { label: '港股', value: 'hk' },
-  { label: '美股', value: 'us' },
 ]
 
 const normalizedSymbol = computed(() => symbolFilter.value.trim().toUpperCase())
@@ -438,8 +436,6 @@ function getScopeColor(scope: string): ElTagType {
 function getMarketLabel(market: string) {
   const normalized = String(market || '').trim().toLowerCase()
   if (normalized === 'cn') return 'A股'
-  if (normalized === 'hk') return '港股'
-  if (normalized === 'us') return '美股'
   return normalized || '-'
 }
 

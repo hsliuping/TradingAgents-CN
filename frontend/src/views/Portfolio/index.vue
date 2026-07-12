@@ -70,15 +70,13 @@
                     <el-radio-button value="all">全部</el-radio-button>
                     <el-radio-button value="CN">A股</el-radio-button>
                     <el-radio-button value="ETF">ETF</el-radio-button>
-                    <el-radio-button value="HK">港股</el-radio-button>
-                    <el-radio-button value="US">美股</el-radio-button>
                   </el-radio-group>
                 </div>
               </template>
 
               <!-- 按市场分组展示 -->
-              <div v-if="selectedMarket === 'all'" class="market-groups">
-                <template v-for="market in ['CN', 'HK', 'US']" :key="market">
+              <div v-if="paperSelectedMarket === 'all'" class="market-groups">
+                <template v-for="market in ['CN']" :key="market">
                   <div v-if="getPositionsByMarket(realPositions, market).length > 0" class="market-group">
                     <div class="market-group-header">
                       <el-tag :type="getMarketTagType(market)" size="small">{{ getMarketName(market) }}</el-tag>
@@ -303,15 +301,13 @@
                     <el-radio-button value="all">全部</el-radio-button>
                     <el-radio-button value="CN">A股</el-radio-button>
                     <el-radio-button value="ETF">ETF</el-radio-button>
-                    <el-radio-button value="HK">港股</el-radio-button>
-                    <el-radio-button value="US">美股</el-radio-button>
                   </el-radio-group>
                 </div>
               </template>
 
               <!-- 按市场分组展示 -->
               <div v-if="paperSelectedMarket === 'all'" class="market-groups">
-                <template v-for="market in ['CN', 'HK', 'US']" :key="market">
+                <template v-for="market in ['CN']" :key="market">
                   <div v-if="getPositionsByMarket(paperPositions, market).length > 0" class="market-group">
                     <div class="market-group-header">
                       <el-tag :type="getMarketTagType(market)" size="small">{{ getMarketName(market) }}</el-tag>
@@ -531,8 +527,8 @@ const positions = ref<PositionItem[]>([])
 const stats = ref<PortfolioStats | null>(null)
 const accountCardRef = ref<InstanceType<typeof AccountCard> | null>(null)
 const activeTab = ref<'real' | 'paper'>('real')
-const selectedMarket = ref<'all' | 'CN' | 'ETF' | 'HK' | 'US'>('all')
-const paperSelectedMarket = ref<'all' | 'CN' | 'ETF' | 'HK' | 'US'>('all')
+const selectedMarket = ref<'all' | 'CN' | 'ETF'>('all')
+const paperSelectedMarket = ref<'all' | 'CN' | 'ETF'>('all')
 const showAddDialog = ref(false)
 const showAnalysisDialog = ref(false)
 const showPositionAnalysisDialog = ref(false)
@@ -658,18 +654,14 @@ const matchesSelectedMarket = (position: PositionItem, selected: string) => {
 // 市场相关方法
 const getMarketName = (market: string) => {
   const map: Record<string, string> = {
-    CN: 'A股',
-    HK: '港股',
-    US: '美股'
+    CN: 'A股'
   }
   return map[market] || market
 }
 
 const getMarketTagType = (market: string) => {
   const map: Record<string, any> = {
-    CN: 'danger',
-    HK: 'warning',
-    US: 'primary'
+    CN: 'danger'
   }
   return map[market] || 'info'
 }
@@ -677,9 +669,7 @@ const getMarketTagType = (market: string) => {
 // 币种符号
 const getCurrencySymbol = (market: string) => {
   const map: Record<string, string> = {
-    CN: '¥',
-    HK: 'HK$',
-    US: '$'
+    CN: '¥'
   }
   return map[market] || '¥'
 }

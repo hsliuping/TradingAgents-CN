@@ -1,6 +1,6 @@
 /**
  * 股票代码格式验证工具
- * 支持 A股、美股、港股的代码格式验证
+ * 支持 A股、ETF 的代码格式验证
  */
 
 export interface StockValidationResult {
@@ -133,7 +133,7 @@ export function validateHKStock(code: string): StockValidationResult {
  */
 export function validateStockCode(
   code: string,
-  marketHint?: 'A股' | '美股' | '港股' | 'ETF'
+  marketHint?: 'A股' | 'ETF'
 ): StockValidationResult {
   if (!code || !code.trim()) {
     return {
@@ -149,10 +149,6 @@ export function validateStockCode(
     switch (marketHint) {
       case 'A股':
         return validateAStock(trimmedCode)
-      case '美股':
-        return validateUSStock(trimmedCode)
-      case '港股':
-        return validateHKStock(trimmedCode)
       case 'ETF':
         return validateETF(trimmedCode)
     }
@@ -171,20 +167,10 @@ export function validateStockCode(
       return validateAStock(cleanCode)
     }
     
-    // 1-5位数字 -> 港股
-    if (cleanCode.length >= 1 && cleanCode.length <= 5) {
-      return validateHKStock(cleanCode)
-    }
-    
     return {
       valid: false,
-      message: '数字代码长度不正确（A股6位，港股1-5位）'
+      message: '数字代码长度不正确（A股必须是6位数字）'
     }
-  }
-  
-  // 包含字母 -> 美股
-  if (/[A-Za-z]/.test(trimmedCode)) {
-    return validateUSStock(trimmedCode)
   }
   
   return {
@@ -234,7 +220,7 @@ export function getStockCodeExamples(market: 'A股' | '美股' | '港股' | 'ETF
  * @param code 原始代码
  * @param market 市场类型
  */
-export function formatStockCode(code: string, market: 'A股' | '美股' | '港股'): string {
+export function formatStockCode(code: string, market: 'A股' | 'ETF'): string {
   const validation = validateStockCode(code, market)
   return validation.normalizedCode || code
 }

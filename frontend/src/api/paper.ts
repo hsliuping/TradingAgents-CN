@@ -2,8 +2,6 @@ import { ApiClient } from './request'
 
 export interface CurrencyAmount {
   CNY: number
-  HKD: number
-  USD: number
 }
 
 export interface PaperAccountSummary {

@@ -26,9 +26,7 @@
         <el-form-item label="市场">
           <el-select v-model="filters.market" clearable placeholder="全部" style="width: 120px">
             <el-option label="全部" value="" />
-            <el-option label="美股" value="美股" />
             <el-option label="A股" value="A股" />
-            <el-option label="港股" value="港股" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">

@@ -58,34 +58,6 @@
                   </el-descriptions-item>
                 </el-descriptions>
               </el-tab-pane>
-
-              <!-- 港股账户 -->
-              <el-tab-pane label="🇭🇰 港股" name="HK">
-                <el-descriptions :column="1" border>
-                  <el-descriptions-item label="可用资金">HK${{ fmtAmount(account.cash?.HKD || 0) }}</el-descriptions-item>
-                  <el-descriptions-item label="持仓市值">HK${{ fmtAmount(account.positions_value?.HKD || 0) }}</el-descriptions-item>
-                  <el-descriptions-item label="总资产">HK${{ fmtAmount(account.equity?.HKD || 0) }}</el-descriptions-item>
-                  <el-descriptions-item label="已实现盈亏">
-                    <span :style="{ color: (account.realized_pnl?.HKD || 0) >= 0 ? '#67C23A' : '#F56C6C' }">
-                      HK${{ fmtAmount(account.realized_pnl?.HKD || 0) }}
-                    </span>
-                  </el-descriptions-item>
-                </el-descriptions>
-              </el-tab-pane>
-
-              <!-- 美股账户 -->
-              <el-tab-pane label="🇺🇸 美股" name="US">
-                <el-descriptions :column="1" border>
-                  <el-descriptions-item label="可用资金">${{ fmtAmount(account.cash?.USD || 0) }}</el-descriptions-item>
-                  <el-descriptions-item label="持仓市值">${{ fmtAmount(account.positions_value?.USD || 0) }}</el-descriptions-item>
-                  <el-descriptions-item label="总资产">${{ fmtAmount(account.equity?.USD || 0) }}</el-descriptions-item>
-                  <el-descriptions-item label="已实现盈亏">
-                    <span :style="{ color: (account.realized_pnl?.USD || 0) >= 0 ? '#67C23A' : '#F56C6C' }">
-                      ${{ fmtAmount(account.realized_pnl?.USD || 0) }}
-                    </span>
-                  </el-descriptions-item>
-                </el-descriptions>
-              </el-tab-pane>
             </el-tabs>
 
             <div style="margin-top: 12px; text-align: center; color: #909399; font-size: 12px">
@@ -116,11 +88,8 @@
               <template #default="{ row }">{{ row.name || '-' }}</template>
             </el-table-column>
             <el-table-column label="市场" width="70">
-              <template #default="{ row }">
-                <el-tag v-if="row.market === 'CN'" type="success" size="small">🇨🇳 A股</el-tag>
-                <el-tag v-else-if="row.market === 'HK'" type="warning" size="small">🇭🇰 港股</el-tag>
-                <el-tag v-else-if="row.market === 'US'" type="info" size="small">🇺🇸 美股</el-tag>
-                <el-tag v-else size="small">{{ row.market || 'CN' }}</el-tag>
+              <template #default>
+                <el-tag type="success" size="small">🇨🇳 A股</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="数量" width="80">
@@ -233,18 +202,14 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="代码">
-          <el-input v-model="order.code" placeholder="A股: 600519 | 港股: 0700 | 美股: AAPL" @input="detectMarket" />
+          <el-input v-model="order.code" placeholder="A股: 600519" @input="detectMarket" />
         </el-form-item>
         <el-form-item label="市场" v-if="detectedMarket">
           <el-tag v-if="detectedMarket === 'ETF'" type="success">📈 ETF 基金 (CNY)</el-tag>
-          <el-tag v-else-if="detectedMarket === 'CN'" type="success">🇨🇳 A股市场 (CNY)</el-tag>
-          <el-tag v-else-if="detectedMarket === 'HK'" type="warning">🇭🇰 港股市场 (HKD)</el-tag>
-          <el-tag v-else-if="detectedMarket === 'US'" type="info">🇺🇸 美股市场 (USD)</el-tag>
+          <el-tag v-else type="success">🇨🇳 A股市场 (CNY)</el-tag>
           <div style="margin-top: 8px; font-size: 12px; color: #909399">
             <span v-if="detectedMarket === 'ETF'">💡 场内 ETF 按 A 股规则模拟，T+1，今天买入明天可卖</span>
-            <span v-else-if="detectedMarket === 'CN'">💡 A股T+1，今天买入明天可卖</span>
-            <span v-else-if="detectedMarket === 'HK'">💡 港股T+0，买入后立即可卖</span>
-            <span v-else-if="detectedMarket === 'US'">💡 美股T+0，买入后立即可卖 | 零佣金</span>
+            <span v-else>💡 A股T+1，今天买入明天可卖</span>
           </div>
         </el-form-item>
         <el-form-item label="数量">
@@ -301,38 +266,6 @@
             默认: ¥1,000,000.00
           </div>
         </el-form-item>
-        
-        <el-form-item label="🇭🇰 港股初始资金 (HKD)">
-          <el-input-number
-            v-model="initialCash.HKD"
-            :min="0"
-            :precision="2"
-            :step="10000"
-            style="width: 100%"
-            placeholder="请输入港股初始资金"
-          >
-            <template #prefix>HK$</template>
-          </el-input-number>
-          <div style="font-size: 12px; color: #909399; margin-top: 4px;">
-            默认: HK$1,000,000.00
-          </div>
-        </el-form-item>
-        
-        <el-form-item label="🇺🇸 美股初始资金 (USD)">
-          <el-input-number
-            v-model="initialCash.USD"
-            :min="0"
-            :precision="2"
-            :step="1000"
-            style="width: 100%"
-            placeholder="请输入美股初始资金"
-          >
-            <template #prefix>$</template>
-          </el-input-number>
-          <div style="font-size: 12px; color: #909399; margin-top: 4px;">
-            默认: $100,000.00
-          </div>
-        </el-form-item>
       </el-form>
       
       <template #footer>
@@ -373,10 +306,8 @@ const detectedMarket = ref<string>('')
 // 初始化账户对话框
 const initializeDialog = ref(false)
 const initializing = ref(false)
-const initialCash = ref<{ CNY: number; HKD: number; USD: number }>({
-  CNY: 1000000,
-  HKD: 1000000,
-  USD: 100000
+const initialCash = ref<{ CNY: number }>({
+  CNY: 1000000
 })
 const activeMarketTab = ref<string>('CN')
 const useCustomPrice = ref(false)
@@ -417,12 +348,8 @@ function fmtAmount(n: number | null | undefined) {
 }
 
 // 获取货币符号
-function getCurrencySymbol(currency: string | undefined) {
-  if (!currency) return '¥'
-  if (currency === 'CNY') return '¥'
-  if (currency === 'HKD') return 'HK$'
-  if (currency === 'USD') return '$'
-  return ''
+function getCurrencySymbol(_currency: string | undefined) {
+  return '¥'
 }
 
 // 获取价格信息（当前价格和价格区间）
@@ -460,20 +387,6 @@ function detectMarket() {
     detectedMarket.value = ''
     currentPrice.value = null
     priceRange.value = null
-    return
-  }
-
-  // 美股：纯字母
-  if (/^[A-Z]+$/.test(code)) {
-    detectedMarket.value = 'US'
-    fetchPriceInfo()
-    return
-  }
-
-  // 港股：4-5位数字或.HK后缀
-  if (/^\d{4,5}$/.test(code) || code.endsWith('.HK')) {
-    detectedMarket.value = 'HK'
-    fetchPriceInfo()
     return
   }
 
@@ -621,24 +534,18 @@ function openInitializeDialog(isReset: boolean = false) {
     const cash = account.value.cash
     if (typeof cash === 'object' && cash !== null) {
       initialCash.value = {
-        CNY: cash.CNY || 1000000,
-        HKD: cash.HKD || 1000000,
-        USD: cash.USD || 100000
+        CNY: cash.CNY || 1000000
       }
     } else if (typeof cash === 'number') {
       // 兼容旧格式
       initialCash.value = {
-        CNY: cash,
-        HKD: 1000000,
-        USD: 100000
+        CNY: cash
       }
     }
   } else {
     // 重置操作或新账户，使用默认值
     initialCash.value = {
-      CNY: 1000000,
-      HKD: 1000000,
-      USD: 100000
+      CNY: 1000000
     }
   }
   initializeDialog.value = true
@@ -648,23 +555,21 @@ function openInitializeDialog(isReset: boolean = false) {
 async function handleInitialize() {
   try {
     // 验证金额
-    if (initialCash.value.CNY < 0 || initialCash.value.HKD < 0 || initialCash.value.USD < 0) {
+    if (initialCash.value.CNY < 0) {
       ElMessage.error('初始金额不能为负数')
       return
     }
     
-    // 检查是否所有金额都为0
-    if (initialCash.value.CNY === 0 && initialCash.value.HKD === 0 && initialCash.value.USD === 0) {
-      ElMessage.warning('至少需要设置一个市场的初始金额')
+    // 检查金额是否>0
+    if (initialCash.value.CNY <= 0) {
+      ElMessage.warning('初始金额必须大于0')
       return
     }
     
     initializing.value = true
     const res = await paperApi.initializeAccount({
       initial_cash: {
-        CNY: initialCash.value.CNY,
-        HKD: initialCash.value.HKD,
-        USD: initialCash.value.USD
+        CNY: initialCash.value.CNY
       }
     })
     
@@ -814,11 +719,7 @@ onMounted(() => {
     const normalizedMarket = normalizeMarketForAnalysis(qMarket)
     if (normalizedMarket === 'ETF') {
       detectedMarket.value = 'ETF'
-    } else if (normalizedMarket === '港股') {
-      detectedMarket.value = 'HK'
-    } else if (normalizedMarket === '美股') {
-      detectedMarket.value = 'US'
-    } else if (normalizedMarket === 'A股') {
+    } else {
       detectedMarket.value = 'CN'
     }
     hasPrefill = true

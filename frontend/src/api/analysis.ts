@@ -416,10 +416,8 @@ export const formatMarketType = (market: string): string => {
 
 export const formatDataSource = (source: string): string => {
   const sourceMap: Record<string, string> = {
-    finnhub: 'FinnHub',
     tushare: 'Tushare',
-    akshare: 'AKShare',
-    yahoo: 'Yahoo Finance'
+    akshare: 'AKShare'
   }
   return sourceMap[source] ?? source
 }
@@ -457,11 +455,11 @@ export const getAllTasks = async (params: {
 }
 
 // 工具函数
-export const getStockExamples = (market: string): string[] => {
+export const getStockExamples = (): string[] => {
   return ['000001', '600519', '000002', '600036', '000858', '002415', '300059', '688981']
 }
 
-export const getStockPlaceholder = (market: string): string => {
+export const getStockPlaceholder = (): string => {
   return '输入A股代码，如 000001, 600519'
 }
 
