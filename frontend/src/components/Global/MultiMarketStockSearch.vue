@@ -74,28 +74,14 @@ const loading = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const getPlaceholder = () => {
-  const placeholders: Record<string, string> = {
-    CN: '输入股票代码或名称（如：000001 或 平安银行）',
-    HK: '输入股票代码或名称（如：00700 或 腾讯）',
-    US: '输入股票代码或名称（如：AAPL 或 Apple）'
-  }
-  return placeholders[selectedMarket.value] || '输入股票代码或名称'
+  return '输入股票代码或名称（如：000001 或 平安银行）'
 }
 
 const getMarketLabel = (market: string) => {
-  const labels: Record<string, string> = {
-    CN: 'A股',
-    HK: '港股',
-    US: '美股'
-  }
-  return labels[market] || market
+  return 'A股'
 }
 
 const formatStockCode = (stock: StockInfo) => {
-  if (stock.market === 'HK') {
-    // 港股代码格式化为5位（如：00700）
-    return stock.code.padStart(5, '0')
-  }
   return stock.code
 }
 

@@ -55,9 +55,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<Emits>()
 
 const markets: Market[] = [
-  { code: 'CN', label: 'A股', flag: '🇨🇳' },
-  { code: 'HK', label: '港股', flag: '🇭🇰' },
-  { code: 'US', label: '美股', flag: '🇺🇸' }
+  { code: 'CN', label: 'A股', flag: '🇨🇳' }
 ]
 
 const selectedMarket = ref(props.modelValue)

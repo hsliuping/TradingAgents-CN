@@ -88,14 +88,6 @@
                           <span>🇨🇳 A股市场</span>
                           <span style="color: #909399; font-size: 12px; margin-left: 8px;">（6位数字）</span>
                         </el-option>
-                        <el-option label="🇺🇸 美股市场" value="美股">
-                          <span>🇺🇸 美股市场</span>
-                          <span style="color: #909399; font-size: 12px; margin-left: 8px;">（1-5个字母）</span>
-                        </el-option>
-                        <el-option label="🇭🇰 港股市场" value="港股">
-                          <span>🇭🇰 港股市场</span>
-                          <span style="color: #909399; font-size: 12px; margin-left: 8px;">（1-5位数字）</span>
-                        </el-option>
                         <el-option label="📈 ETF 基金" value="ETF">
                           <span>📈 ETF 基金</span>
                           <span style="color: #909399; font-size: 12px; margin-left: 8px;">（510050、159919 等）</span>
@@ -819,7 +811,7 @@ marked.setOptions({
 })
 
 // 市场类型定义
-type MarketType = 'A股' | '美股' | '港股' | 'ETF'
+type MarketType = 'A股' | 'ETF'
 
 // 分析引擎类型
 type AnalysisEngineType = 'legacy' | 'v2'
@@ -1187,8 +1179,6 @@ const handleValidateData = async () => {
   // 确定市场类型（用于API调用）
   const marketTypeMap: Record<string, string> = {
     'A股': 'cn',
-    '港股': 'hk',
-    '美股': 'us',
     'ETF': 'cn'  // ETF 为 A 股场内基金
   }
   const marketType = marketTypeMap[analysisForm.market] || 'cn'
