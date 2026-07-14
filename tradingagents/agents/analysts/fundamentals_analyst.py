@@ -191,8 +191,12 @@ def create_fundamentals_analyst(llm, toolkit):
             f"- 计算并提供合理价位区间（使用{market_info['currency_name']}{market_info['currency_symbol']}）"
             "- 分析当前股价是否被低估或高估"
             "- 提供基于基本面的目标价位建议"
-            "- 包含PE、PB、PEG等估值指标分析"
-            "- 结合市场特点进行分析"
+            "🔴 报告必须包含的具体内容（必须全部包含）："
+            "- **估值指标表格**：必须包含以下格式的表格"
+            "| 指标 | 数值 | 评价 |\n|------|------|------|\n| **市盈率（PE）** | **XX.XX倍** | 🔴🟡🟢估值评价 |\n| **市净率（PB）** | **X.XX倍** | 🔴🟡🟢估值评价 |"
+            "- **总市值**、**流通市值**"
+            "- **PE、PB、PEG等估值指标的具体数值**（不允许只写定性描述）"
+            "- **合理价位区间**（使用具体数值，如¥5.00~¥6.00）"
             "🌍 语言和货币要求："
             "- 所有分析内容必须使用中文"
             "- 投资建议必须使用中文：买入、持有、卖出"
@@ -205,12 +209,14 @@ def create_fundamentals_analyst(llm, toolkit):
             "- 不允许直接回答而不调用工具"
             "- 不允许回复'无法确定价位'或'需要更多信息'"
             "- 不允许使用英文投资建议（buy/hold/sell）"
+            "- ⚠️ **绝对禁止**在估值指标部分只写定性描述（如'历史中低水平'、'历史低位'）而不写具体数值！"
             "✅ 你必须："
             "- 立即调用统一基本面分析工具"
             "- 等待工具返回真实数据"
             "- 基于真实数据进行分析"
             "- 提供具体的价位区间和目标价"
             "- 使用中文投资建议（买入/持有/卖出）"
+            "- 🔴 **必须**在报告中包含具体的PE、PB数值表格！不允许省略！"
             "现在立即开始调用工具！不要说任何其他话！"
         )
 
@@ -224,9 +230,10 @@ def create_fundamentals_analyst(llm, toolkit):
             "3. 【生成报告】收到工具数据后，必须立即生成完整的基本面分析报告，包含："
             f"4. 【股票代码约束】{instrument_context}"
             "   - 公司基本信息和财务数据分析"
-            "   - PE、PB、PEG等估值指标分析"
+            "   🔴 【重要】PE、PB数值表格（必须包含具体数值，如PE=21.6倍，PB=5.04倍）"
+            "   🔴 【重要】绝对禁止只写定性描述（如'历史中低水平'），必须写具体数值！"
             "   - 当前股价是否被低估或高估的判断"
-            "   - 合理价位区间和目标价位建议"
+            "   - 合理价位区间和目标价位建议（使用具体数值）"
             "   - 基于基本面的投资建议（买入/持有/卖出）"
             "4. 🚨 重要：工具只需调用一次！一次调用返回所有需要的数据！不要重复调用！🚨"
             "5. 🚨 如果你已经看到ToolMessage，说明工具已经返回数据，直接生成报告，不要再调用工具！🚨"
@@ -613,6 +620,20 @@ def create_fundamentals_analyst(llm, toolkit):
 
                         logger.info(f"✅ [工具调用] 统一工具调用成功")
                         logger.info(f"📊 [工具调用] 返回数据长度: {len(combined_data)}字符")
+
+                        # 🔥 数据有效性检查：如果返回"❌"或太短（<200字符），判断为获取失败
+                        is_invalid = (
+                            not combined_data
+                            or len(str(combined_data).strip()) < 200
+                            or "❌" in str(combined_data)
+                            or "无法获取" in str(combined_data)
+                            or "所有数据源" in str(combined_data)
+                        )
+                        if is_invalid:
+                            error_content = str(combined_data)[:300] if combined_data else "空数据"
+                            logger.warning(f"⚠️ [数据验证] 基本面数据无效 (长度: {len(str(combined_data)) if combined_data else 0}, 内容: {error_content})")
+                            # 返回工具调用信号，让LangGraph重新尝试（或最终失败）
+                            raise ValueError(f"基本面数据获取失败（无效数据）: {error_content}")
                         logger.debug(f"📊 [DEBUG] 统一工具数据获取成功，长度: {len(combined_data)}字符")
                         # 将统一工具返回的数据写入日志，便于排查与分析
                         try:
@@ -634,6 +655,8 @@ def create_fundamentals_analyst(llm, toolkit):
                     else:
                         combined_data = "统一基本面分析工具不可用"
                         logger.debug(f"📊 [DEBUG] 统一工具未找到")
+                except ValueError:
+                    raise  # 数据验证失败，向上传播中断分析
                 except Exception as e:
                     combined_data = f"统一基本面分析工具调用失败: {e}"
                     logger.debug(f"📊 [DEBUG] 统一工具调用异常: {e}")

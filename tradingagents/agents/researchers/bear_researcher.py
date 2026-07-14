@@ -19,6 +19,16 @@ def create_bear_researcher(llm, memory):
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
 
+        # 🔥 2026-06-14: 社交媒体情绪数据缺失哨兵
+        # 原因：当用户未选择 Social Analyst 时，sentiment_report 为空字符串，
+        # 直接渲染成 "社交媒体情绪报告：\n\n" 会诱导 LLM 幻觉填充
+        # 修复：空值时显式标记为缺失，要求 LLM 在辩论中跳过此维度
+        if not sentiment_report or len(sentiment_report.strip()) < 50:
+            sentiment_report = "（⚠️ 社交媒体情绪数据缺失：用户在本次分析中未选择 Social Analyst。辩论双方请勿臆测情绪倾向，并基于其他报告维度展开论证。）"
+            logger.warning(
+                f"⚠️ [空头研究员] sentiment_report 为空，注入缺失哨兵（ticker={state.get('company_of_interest', 'Unknown')}）"
+            )
+
         # 使用统一的股票类型检测
         ticker = state.get('company_of_interest', 'Unknown')
         from tradingagents.utils.stock_utils import StockUtils

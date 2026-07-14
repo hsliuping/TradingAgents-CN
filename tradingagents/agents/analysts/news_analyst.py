@@ -1,4 +1,5 @@
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import ToolMessage
 import time
 import json
 from datetime import datetime
@@ -6,8 +7,6 @@ from datetime import datetime
 # 导入统一日志系统和分析模块日志装饰器
 from tradingagents.utils.logging_init import get_logger
 from tradingagents.utils.tool_logging import log_analyst_module
-# 导入统一新闻工具
-from tradingagents.tools.unified_news_tool import create_unified_news_tool
 # 导入股票工具类
 from tradingagents.utils.stock_utils import StockUtils
 # 导入Google工具调用处理器
@@ -97,13 +96,9 @@ def create_news_analyst(llm, toolkit):
         instrument_context = build_instrument_context(ticker)
         logger.info(f"[新闻分析师] 公司名称: {company_name}")
         
-        # 🔧 使用统一新闻工具，简化工具调用
-        logger.info(f"[新闻分析师] 使用统一新闻工具，自动识别股票类型并获取相应新闻")
-   # 创建统一新闻工具
-        unified_news_tool = create_unified_news_tool(toolkit)
-        unified_news_tool.name = "get_stock_news_unified"
-        
-        tools = [unified_news_tool]
+        # 🔧 使用 toolkit 统一新闻工具（与 ToolNode 一致）
+        logger.info(f"[新闻分析师] 使用 toolkit 统一新闻工具，自动识别股票类型并获取相应新闻")
+        tools = [toolkit.get_stock_news_unified]
         logger.info(f"[新闻分析师] 已加载统一新闻工具: get_stock_news_unified")
 
         system_message = (
@@ -215,7 +210,7 @@ def create_news_analyst(llm, toolkit):
                 logger.info(f"[新闻分析师] 🔧 预处理：强制调用统一新闻工具...")
                 logger.info(f"[新闻分析师] 📊 调用参数: stock_code={ticker}, max_news=10, model_info={model_info}")
 
-                pre_fetched_news = unified_news_tool(stock_code=ticker, max_news=10, model_info=model_info)
+                pre_fetched_news = toolkit.get_stock_news_unified.invoke({"ticker": ticker, "curr_date": current_date})
 
                 logger.info(f"[新闻分析师] 📋 预处理返回结果长度: {len(pre_fetched_news) if pre_fetched_news else 0} 字符")
                 logger.info(f"[新闻分析师] 📄 预处理返回结果预览 (前500字符): {pre_fetched_news[:500] if pre_fetched_news else 'None'}")
@@ -345,7 +340,7 @@ def create_news_analyst(llm, toolkit):
                     logger.info(f"[新闻分析师] 🔧 强制调用统一新闻工具获取新闻数据...")
                     logger.info(f"[新闻分析师] 📊 调用参数: stock_code={ticker}, max_news=10")
 
-                    forced_news = unified_news_tool(stock_code=ticker, max_news=10, model_info=model_info)
+                    forced_news = toolkit.get_stock_news_unified.invoke({"ticker": ticker, "curr_date": current_date})
 
                     logger.info(f"[新闻分析师] 📋 强制获取返回结果长度: {len(forced_news) if forced_news else 0} 字符")
                     logger.info(f"[新闻分析师] 📄 强制获取返回结果预览 (前500字符): {forced_news[:500] if forced_news else 'None'}")
@@ -390,14 +385,63 @@ def create_news_analyst(llm, toolkit):
                     logger.error(f"[新闻分析师] 📋 异常堆栈: {traceback.format_exc()}")
                     report = result.content if hasattr(result, 'content') else ""
             else:
-                # 有工具调用，直接使用结果
-                report = result.content
+                # ✅ LLM调用了工具 — 检查消息历史中是否已有工具返回的数据
+                messages = state.get("messages", [])
+                has_tool_result = any(
+                    isinstance(msg, ToolMessage) for msg in messages
+                )
+
+                if has_tool_result:
+                    # 🔧 工具已返回数据，但LLM仍请求调用工具 — 强制生成报告
+                    logger.warning(f"[新闻分析师] ⚠️ 工具已返回数据但LLM仍请求调用工具，强制基于现有数据生成报告")
+
+                    force_system_prompt = (
+                        f"你是专业的财经新闻分析师。"
+                        f"你已经收到了股票 {company_name}（代码：{ticker}）的新闻数据。\n\n"
+                        f"🚨 现在你必须基于消息历史中的真实新闻数据生成完整的新闻分析报告！🚨\n\n"
+                        f"报告必须包含：\n"
+                        f"1. 最新新闻事件总结\n"
+                        f"2. 对股票价格的潜在影响分析\n"
+                        f"3. 市场情绪评估\n"
+                        f"4. 基于新闻的投资建议\n\n"
+                        f"要求：\n"
+                        f"- 使用中文撰写报告\n"
+                        f"- 基于消息历史中的真实数据进行分析\n"
+                        f"- 分析要详细且专业\n"
+                        f"- 不得调用任何工具"
+                    )
+                    force_prompt = ChatPromptTemplate.from_messages([
+                        ("system", force_system_prompt),
+                        MessagesPlaceholder(variable_name="messages"),
+                    ])
+                    force_chain = force_prompt | llm
+                    force_result = force_chain.invoke({"messages": messages})
+                    report = str(force_result.content) if hasattr(force_result, 'content') else "新闻分析完成"
+                    logger.info(f"[新闻分析师] ✅ 强制生成报告成功，长度: {len(report)}字符")
+                    logger.info(f"[新闻分析师] 📄 报告预览 (前300字符): {report[:300]}")
+
+                    # 强制生成的报告不用继续调用了，返回清洁消息
+                    from langchain_core.messages import AIMessage
+                    clean_message = AIMessage(content=report)
+                    return {
+                        "messages": [clean_message],
+                        "news_report": report,
+                        "news_tool_call_count": tool_call_count
+                    }
+                else:
+                    # 第一次调用工具 — 返回原始结果让图执行工具
+                    logger.info(f"[新闻分析师] ✅ LLM请求调用 {len(result.tool_calls)} 个工具，返回原始结果让图执行工具")
+                    report = result.content if hasattr(result, 'content') else ""
+                    return {
+                        "messages": [result],
+                        "news_report": report,
+                        "news_tool_call_count": tool_call_count  # ⚠️ 不增加计数器
+                    }
         
         total_time_taken = (datetime.now() - start_time).total_seconds()
         logger.info(f"[新闻分析师] 新闻分析完成，总耗时: {total_time_taken:.2f}秒")
 
-        # 🔧 修复死循环问题：返回清洁的AIMessage，不包含tool_calls
-        # 这确保工作流图能正确判断分析已完成，避免重复调用
+        # 分析已完成（无工具调用），返回清洁消息
         from langchain_core.messages import AIMessage
         clean_message = AIMessage(content=report)
 

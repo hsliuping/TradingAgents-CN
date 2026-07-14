@@ -1,0 +1,31 @@
+fix(llm-hallucination): research_manager 动态检测量化评分段，缺失时注入哨兵
+
+600926 报告：fundamentals_report.md 评级"低估"（PE=5.80、PB=0.81 破净），
+但 final_trade_decision.md LLM 编造"PE较高""PB较高""PE可能失真"表格，
+最终给出"立即卖出"建议——与真实数据方向完全相反。
+
+## 根因
+
+research_manager.py 提示词硬编码：
+  "基本面报告末尾附带了『数据质量验证 & 量化评分』表格"
+
+但 fundamentals_report 模板（optimized_china_data.py:325）只有
+comprehensive 模式（line 660）才附加量化评分段。standard 模式（600926 实际使用）
+生成的报告根本不含量化评分。
+
+LLM 看到提示词硬编码，幻觉编造：
+- "PE较高""PB较高"（与"低估"反向）
+- "PE可能失真"（示例性警告被当作真实数据）
+- 完整评分表
+
+## 修复
+
+1. 动态扫描 fundamentals_report 是否含"量化评分总计"/"数据质量验证 & 量化评分"等关键字
+2. 含 → 附加评分指引（保留旧行为）
+3. 不含 → 注入缺失哨兵 + 严禁捏造 + 强制引用具体数字
+4. 新增"估值判断铁律"段落，禁止反向"低估"→"较高"
+
+## 测试
+
+tests/tradingagents/agents/managers/test_research_manager_quant_sentinel.py
+5/5 覆盖：哨兵注入 / 评分指引 / 硬编码清除 / 铁律 / 报告原文引用

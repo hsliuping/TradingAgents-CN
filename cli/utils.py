@@ -133,15 +133,15 @@ def get_analysis_date() -> str:
 
 def select_analysts(ticker: str = None) -> List[AnalystType]:
     """Select analysts using an interactive checkbox."""
+    # 🔥 2026-06-14: 移除 A股隐藏 Social Analyst 的限制
+    # 原因：get_stock_sentiment_unified 已接入 5 个 AKShare 股吧接口（综合/意愿/关注/评分/机构参与度）
+    # 参考：docs/bugfix/2026-06-13-data-accuracy-fix-design.md
     available_analysts = ANALYST_ORDER.copy()
 
     if ticker and StockUtils.is_china_stock(ticker):
-        available_analysts = [
-            (display, value)
-            for display, value in ANALYST_ORDER
-            if value != AnalystType.SOCIAL
-        ]
-        console.print(f"[yellow]💡 检测到A股代码 {ticker}，社交媒体分析师不可用（国内数据源限制）[/yellow]")
+        console.print(
+            f"[green]💡 检测到 A股代码 {ticker}，社交媒体分析师已可用（AKShare 股吧情绪接口）[/green]"
+        )
 
     choices = questionary.checkbox(
         "选择您的分析师团队 | Select Your [Analysts Team]:",

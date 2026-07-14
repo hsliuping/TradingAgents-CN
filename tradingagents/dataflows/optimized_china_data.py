@@ -22,6 +22,14 @@ logger = get_logger('agents')
 # 导入 MongoDB 缓存适配器
 from .cache.mongodb_cache_adapter import get_mongodb_cache_adapter, get_stock_data_with_fallback, get_financial_data_with_fallback
 
+# 导入数据质量验证和量化评分模块
+from tradingagents.dataflows.data_validator import (
+    annotate_fundamentals_with_validation,
+    validate_pe,
+    detect_industry,
+)
+from tradingagents.quantitative_scoring import compute_quantitative_score
+
 
 class OptimizedChinaDataProvider:
     """优化的A股数据提供器 - 集成缓存和Tushare数据接口"""
@@ -491,15 +499,37 @@ class OptimizedChinaDataProvider:
 
 ## 💰 核心财务指标
 - **总市值**: {financial_estimates.get('total_mv', 'N/A')}
+- **流通市值**: {financial_estimates.get('circ_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
 - **净资产收益率(ROE)**: {financial_estimates.get('roe', 'N/A')}
 - **资产负债率**: {financial_estimates.get('debt_ratio', 'N/A')}
 
+## 📊 行业相对估值（广发证券）
+- **PE 行业均值**: {financial_estimates.get('pe_industry_avg', 'N/A')}
+- **PE 历史百分位**: {financial_estimates.get('pe_percentile', 'N/A')}
+- **PB 行业均值**: {financial_estimates.get('pb_industry_avg', 'N/A')}
+- **PB 历史百分位**: {financial_estimates.get('pb_percentile', 'N/A')}
+
+## 📊 行业相对估值（申万一级）
+- **申万行业**: {financial_estimates.get('sw_industry_name', 'N/A')} ({financial_estimates.get('sw_industry_code', 'N/A')})
+- **申万行业 PE_TTM**: {financial_estimates.get('sw_industry_pe_ttm', 'N/A')}
+- **申万行业 PE_静态**: {financial_estimates.get('sw_industry_pe_static', 'N/A')}
+- **申万行业 PB**: {financial_estimates.get('sw_industry_pb', 'N/A')}
+- **申万行业股息率**: {financial_estimates.get('sw_industry_dividend_yield', 'N/A')}
+- **申万行业成份股数**: {financial_estimates.get('sw_industry_constituents', 'N/A')}
+
+{financial_estimates.get('sw_sub_industries_md', '')}
+
+> ⚠️ 广发行业 PE 可能包含异常 PE 子行业（如电力归到含光伏/新能源发电的全行业），请结合下方申万二级/三级子行业 PE 列表与可比公司列表综合判断行业基准是否合理
+
+## 📊 同行业可比公司 PE 列表
+{financial_estimates.get('peer_pe_list', 'N/A')}
+
 ## 💡 基础评估
-- **基本面评分**: {financial_estimates['fundamental_score']}/10
-- **风险等级**: {financial_estimates['risk_level']}
+- **基本面评分**: {financial_estimates.get('fundamental_score', 'N/A')}/10
+- **风险等级**: {financial_estimates.get('risk_level', 'N/A')}
 
 ---
 **重要声明**: 本报告基于公开数据和模型估算生成，仅供参考，不构成投资建议。
@@ -524,23 +554,45 @@ class OptimizedChinaDataProvider:
 
 ### 估值指标
 - **总市值**: {financial_estimates.get('total_mv', 'N/A')}
+- **流通市值**: {financial_estimates.get('circ_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
 - **市销率(PS)**: {financial_estimates.get('ps', 'N/A')}
 - **股息收益率**: {financial_estimates.get('dividend_yield', 'N/A')}
 
+### 行业相对估值（广发证券）
+- **PE 行业均值**: {financial_estimates.get('pe_industry_avg', 'N/A')}
+- **PE 历史百分位**: {financial_estimates.get('pe_percentile', 'N/A')}
+- **PB 行业均值**: {financial_estimates.get('pb_industry_avg', 'N/A')}
+- **PB 历史百分位**: {financial_estimates.get('pb_percentile', 'N/A')}
+
+### 行业相对估值（申万一级）
+- **申万行业**: {financial_estimates.get('sw_industry_name', 'N/A')} ({financial_estimates.get('sw_industry_code', 'N/A')})
+- **申万行业 PE_TTM**: {financial_estimates.get('sw_industry_pe_ttm', 'N/A')}
+- **申万行业 PE_静态**: {financial_estimates.get('sw_industry_pe_static', 'N/A')}
+- **申万行业 PB**: {financial_estimates.get('sw_industry_pb', 'N/A')}
+- **申万行业股息率**: {financial_estimates.get('sw_industry_dividend_yield', 'N/A')}
+- **申万行业成份股数**: {financial_estimates.get('sw_industry_constituents', 'N/A')}
+
+{financial_estimates.get('sw_sub_industries_md', '')}
+
+> ⚠️ 广发行业 PE 可能包含异常 PE 子行业（如电力归到含光伏/新能源发电的全行业），请结合下方申万二级/三级子行业 PE 列表与可比公司列表综合判断行业基准是否合理
+
+### 同行业可比公司 PE 列表
+{financial_estimates.get('peer_pe_list', 'N/A')}
+
 ### 盈利能力指标
-- **净资产收益率(ROE)**: {financial_estimates['roe']}
-- **总资产收益率(ROA)**: {financial_estimates['roa']}
-- **毛利率**: {financial_estimates['gross_margin']}
-- **净利率**: {financial_estimates['net_margin']}
+- **净资产收益率(ROE)**: {financial_estimates.get('roe', 'N/A')}
+- **总资产收益率(ROA)**: {financial_estimates.get('roa', 'N/A')}
+- **毛利率**: {financial_estimates.get('gross_margin', 'N/A')}
+- **净利率**: {financial_estimates.get('net_margin', 'N/A')}
 
 ### 财务健康度
-- **资产负债率**: {financial_estimates['debt_ratio']}
-- **流动比率**: {financial_estimates['current_ratio']}
-- **速动比率**: {financial_estimates['quick_ratio']}
-- **现金比率**: {financial_estimates['cash_ratio']}
+- **资产负债率**: {financial_estimates.get('debt_ratio', 'N/A')}
+- **流动比率**: {financial_estimates.get('current_ratio', 'N/A')}
+- **速动比率**: {financial_estimates.get('quick_ratio', 'N/A')}
+- **现金比率**: {financial_estimates.get('cash_ratio', 'N/A')}
 
 ## 📈 行业分析
 {industry_info['analysis']}
@@ -553,10 +605,10 @@ class OptimizedChinaDataProvider:
 {self._analyze_growth_potential(symbol, industry_info)}
 
 ## 💡 投资建议
-- **基本面评分**: {financial_estimates['fundamental_score']}/10
-- **估值吸引力**: {financial_estimates['valuation_score']}/10
-- **成长潜力**: {financial_estimates['growth_score']}/10
-- **风险等级**: {financial_estimates['risk_level']}
+- **基本面评分**: {financial_estimates.get('fundamental_score', 'N/A')}/10
+- **估值吸引力**: {financial_estimates.get('valuation_score', 'N/A')}/10
+- **成长潜力**: {financial_estimates.get('growth_score', 'N/A')}/10
+- **风险等级**: {financial_estimates.get('risk_level', 'N/A')}
 
 {self._generate_investment_advice(financial_estimates, industry_info)}
 
@@ -583,11 +635,18 @@ class OptimizedChinaDataProvider:
 
 ### 估值指标
 - **总市值**: {financial_estimates.get('total_mv', 'N/A')}
+- **流通市值**: {financial_estimates.get('circ_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
 - **市销率(PS)**: {financial_estimates.get('ps', 'N/A')}
 - **股息收益率**: {financial_estimates.get('dividend_yield', 'N/A')}
+
+### 行业相对估值（广发证券）
+- **PE 行业均值**: {financial_estimates.get('pe_industry_avg', 'N/A')}
+- **PE 历史百分位**: {financial_estimates.get('pe_percentile', 'N/A')}
+- **PB 行业均值**: {financial_estimates.get('pb_industry_avg', 'N/A')}
+- **PB 历史百分位**: {financial_estimates.get('pb_percentile', 'N/A')}
 
 ### 盈利能力指标
 - **净资产收益率(ROE)**: {financial_estimates.get('roe', 'N/A')}
@@ -596,10 +655,10 @@ class OptimizedChinaDataProvider:
 - **净利率**: {financial_estimates.get('net_margin', 'N/A')}
 
 ### 财务健康度
-- **资产负债率**: {financial_estimates['debt_ratio']}
-- **流动比率**: {financial_estimates['current_ratio']}
-- **速动比率**: {financial_estimates['quick_ratio']}
-- **现金比率**: {financial_estimates['cash_ratio']}
+- **资产负债率**: {financial_estimates.get('debt_ratio', 'N/A')}
+- **流动比率**: {financial_estimates.get('current_ratio', 'N/A')}
+- **速动比率**: {financial_estimates.get('quick_ratio', 'N/A')}
+- **现金比率**: {financial_estimates.get('cash_ratio', 'N/A')}
 
 ## 📈 行业分析
 
@@ -625,10 +684,10 @@ class OptimizedChinaDataProvider:
 ## 💡 投资建议
 
 ### 综合评分
-- **基本面评分**: {financial_estimates['fundamental_score']}/10
-- **估值吸引力**: {financial_estimates['valuation_score']}/10
-- **成长潜力**: {financial_estimates['growth_score']}/10
-- **风险等级**: {financial_estimates['risk_level']}
+- **基本面评分**: {financial_estimates.get('fundamental_score', 'N/A')}/10
+- **估值吸引力**: {financial_estimates.get('valuation_score', 'N/A')}/10
+- **成长潜力**: {financial_estimates.get('growth_score', 'N/A')}/10
+- **风险等级**: {financial_estimates.get('risk_level', 'N/A')}
 
 ### 操作建议
 {self._generate_investment_advice(financial_estimates, industry_info)}
@@ -668,15 +727,156 @@ class OptimizedChinaDataProvider:
 - **仓位建议**：根据风险承受能力合理配置仓位
 - **关注指标**：重点关注ROE、PE、现金流等核心指标
 
----
+|---
 **重要声明**: 本报告基于公开数据和模型估算生成，仅供参考，不构成投资建议。
 实际投资决策请结合最新财报数据和专业分析师意见。
 
 **数据来源**: {data_source if data_source else "多源数据"}数据接口 + 基本面分析模型
 **生成时间**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d %H:%M:%S')}
+
+---
+
+## 🔍 数据质量验证 & 量化评分（辅助参考）
+
+{self._append_data_validation_and_scoring(symbol, company_name, financial_estimates, industry_info)}
 """
 
         return report
+
+    def _append_data_validation_and_scoring(
+        self,
+        symbol: str,
+        company_name: str,
+        financial_estimates: dict,
+        industry_info: dict,
+    ) -> str:
+        """
+        在基本面报告末尾附加数据质量验证和量化评分。
+        帮助下游LLM判断数据可靠性，并提供一致的量化基准。
+
+        Returns:
+            str: 格式化的验证和评分文本
+        """
+        try:
+            from tradingagents.dataflows.data_validator import (
+                annotate_fundamentals_with_validation as _annotate,
+                validate_pe as _val_pe,
+                detect_industry as _detect_ind,
+            )
+            from tradingagents.quantitative_scoring import (
+                compute_quantitative_score as _score,
+            )
+
+            lines = []
+
+            # ---- 1. 数据质量验证 ----
+            pe_raw = financial_estimates.get("pe", financial_estimates.get("pe_ttm"))
+            pb_raw = financial_estimates.get("pb")
+            sector = industry_info.get("industry", "")
+
+            annotations = _annotate(
+                {"pe": pe_raw, "pb": pb_raw},
+                company_name,
+                sector,
+                symbol,
+            )
+
+            pe_check = annotations.get("pe_validation", {})
+            if pe_check.get("severity") in ("warning", "error"):
+                lines.append(f"⚠️ **数据质量提示**: {pe_check.get('message', '')}")
+                hint = annotations.get("pe_annual_hint")
+                if hint:
+                    lines.append(f"   {hint}")
+                ind_range = pe_check.get("industry_pe_range")
+                if ind_range:
+                    lines.append(
+                        f"   ℹ️ 行业{_detect_ind(company_name, sector)}合理PE范围: "
+                        f"[{ind_range[0]}, {ind_range[1]}]"
+                    )
+
+            pb_check = annotations.get("pb_validation", {})
+            if pb_check.get("severity") in ("warning", "error"):
+                lines.append(f"⚠️ **数据质量提示**: {pb_check.get('message', '')}")
+
+            if not lines:
+                lines.append("✅ 数据质量检查通过，未发现异常。")
+
+            # ---- 2. 量化评分 ----
+            def _sf(v):
+                """安全的浮点数转换"""
+                if v is None or v == "N/A":
+                    return None
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    return None
+
+            pe = _sf(pe_raw)
+            pb = _sf(pb_raw)
+            roe = _sf(financial_estimates.get("roe"))
+            gross_margin = _sf(financial_estimates.get("gross_margin"))
+            debt_ratio = _sf(financial_estimates.get("debt_ratio"))
+
+            score_result = _score(
+                fundamentals={
+                    "pe": pe,
+                    "pb": pb,
+                    "roe": roe,
+                    "gross_margin": gross_margin,
+                    "debt_ratio": debt_ratio,
+                },
+                technical={},  # 技术数据在market_report中，此处仅给基本面分
+                company_name=company_name,
+                sector=sector,
+            )
+
+            lines.append("")
+            lines.append("### 📊 量化评分总计（0-100）")
+            lines.append(f"| 维度 | 得分 | 说明 |")
+            lines.append(f"|------|:---:|------|")
+            lines.append(
+                f"| **总分** | **{score_result['total_score']}** | "
+                f"建议: {score_result['suggested_action']} |"
+            )
+            score_detail = score_result.get("detail", {})
+
+            pe_detail = score_detail.get("pe", {})
+            lines.append(
+                f"| PE估值 | {pe_detail.get('score', 'N/A')} | "
+                f"{pe_detail.get('note', '')} |"
+            )
+            pb_detail = score_detail.get("pb", {})
+            lines.append(
+                f"| PB估值 | {pb_detail.get('score', 'N/A')} | "
+                f"{pb_detail.get('note', '')} |"
+            )
+            roe_detail = score_detail.get("roe", {})
+            lines.append(
+                f"| ROE质量 | {roe_detail.get('score', 'N/A')} | "
+                f"{roe_detail.get('note', '')} |"
+            )
+            debt_detail = score_detail.get("debt_ratio", {})
+            lines.append(
+                f"| 负债风险 | {debt_detail.get('score', 'N/A')} | "
+                f"{debt_detail.get('note', '')} |"
+            )
+
+            macro_info = score_detail.get("macro", {})
+            lines.append(
+                f"| 行业属性 | {macro_info.get('score', 'N/A')} | "
+                f"{macro_info.get('note', '')} |"
+            )
+
+            lines.append("")
+            lines.append(
+                "> ⚠️ 量化评分为辅助参考，最终决策请结合辩论和实际市场状况。"
+            )
+
+            return "\n".join(lines)
+
+        except Exception as e:
+            logger.warning(f"⚠️ 数据验证/评分生成失败（不影响主报告）: {e}")
+            return "数据质量验证暂不可用。"
 
     def _get_industry_info(self, symbol: str) -> dict:
         """根据股票代码获取行业信息（优先使用数据库真实数据）"""
@@ -822,79 +1022,761 @@ class OptimizedChinaDataProvider:
         }
 
     def _estimate_financial_metrics(self, symbol: str, current_price: str) -> dict:
-        """获取真实财务指标（从 MongoDB、AKShare、Tushare 获取，失败则抛出异常）"""
+        """获取真实财务指标（从 MongoDB、AKShare、BaoStock 获取，失败则抛出异常）"""
 
-        # 提取价格数值
+        # 🔴 修复：验证股价是否有效，拒绝使用默认值
+        price_value = None
         try:
-            price_value = float(current_price.replace('¥', '').replace(',', ''))
-        except:
-            price_value = 10.0  # 默认值
+            if current_price and current_price != 'N/A':
+                price_str = current_price.replace('¥', '').replace(',', '').strip()
+                price_value = float(price_str)
+                # 基本验证：股价应该在合理范围内（0.01 ~ 10000元）
+                if price_value <= 0 or price_value > 10000:
+                    logger.warning(f"⚠️ [股价验证失败] 股价值异常: {price_value}元，期望范围: 0.01~10000元")
+                    price_value = None
+        except (ValueError, AttributeError, TypeError) as e:
+            logger.warning(f"⚠️ [股价验证失败] 股价解析失败: {current_price}, 错误: {e}")
 
-        # 尝试获取真实财务数据
-        real_metrics = self._get_real_financial_metrics(symbol, price_value)
-        if real_metrics:
-            logger.info(f"✅ 使用真实财务数据: {symbol}")
-            return real_metrics
+        # 如果股价无效，尝试从BaoStock获取实时PE/PB
+        if price_value is None:
+            logger.warning(f"⚠️ [PE/PB计算] 股价无效({current_price})，尝试从BaoStock获取实时数据: {symbol}")
+            
+            # 🔥 优先尝试BaoStock获取实时PE/PB
+            baostock_metrics = self._get_baostock_pe_pb(symbol)
+            if baostock_metrics:
+                logger.info(f"✅ [BaoStock] 获取成功: {symbol} PE={baostock_metrics['pe']}, PB={baostock_metrics['pb']}")
+                
+                # 🔥 使用BaoStock数据构建财务指标
+                from .providers.china.akshare import get_akshare_provider
+                import asyncio
+                
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                akshare_provider = get_akshare_provider()
+                
+                try:
+                    # 尝试获取完整财务数据
+                    financial_data = loop.run_until_complete(
+                        akshare_provider.get_stock_financial_data(symbol)
+                    )
+                    
+                    if financial_data:
+                        # 合并BaoStock的PE/PB数据
+                        # 创建临时的stock_info字典
+                        stock_info = {
+                            'code': symbol,
+                            'price': baostock_metrics.get('current_price_numeric', 10.0),
+                        }
+                        metrics = self._parse_akshare_financial_data(financial_data, stock_info, baostock_metrics.get('current_price_numeric', 10.0))
+                        if metrics:
+                            logger.info(f"✅ [财务指标] 合并BaoStock PE/PB成功: {symbol}")
+                            return metrics
+                except Exception as e:
+                    logger.warning(f"⚠️ [AKShare] 获取财务数据失败: {e}")
+                
+                # 如果AKShare失败，直接返回BaoStock的PE/PB数据
+                return baostock_metrics
+            
+            # 🔥 如果BaoStock也失败，抛出明确的告警错误
+            error_msg = (
+                f"🔴 [数据获取失败告警] 股票 {symbol} 无法获取有效估值数据！\n"
+                f"   - 股价获取失败: {current_price}\n"
+                f"   - BaoStock PE/PB获取失败\n"
+                f"   - 请检查网络连接或股票代码是否正确"
+            )
+            logger.error(f"❌ {error_msg}")
+            raise ValueError(error_msg)
+
+        # 股价有效，继续正常流程
+        logger.info(f"📊 [股价验证通过] {symbol} 股价: {price_value}元")
+
+        # 🔥 开关：BaoStock 早返回 vs 完整路径
+        # - False（默认）：股价有效时不立即返回，继续走 _get_real_financial_metrics 拿三表和市值，
+        #   最后用 BaoStock 数据补/覆盖 PE/PB。这样能在保留 PE/PB 准确性的同时拿到完整财报数据。
+        # - True：旧行为，BaoStock 命中就立即返回（无财报数据，仅 PE/PB + 市值）。
+        BAOSTOCK_FAST_RETURN = False
+
+        # 先尝试 BaoStock 拿 PE/PB（准确性高）
+        logger.info(f"🔍 [PE/PB优化] 股价有效，优先从BaoStock获取PE/PB数据以确保准确性")
+        baostock_metrics = self._get_baostock_pe_pb(symbol)
+        if baostock_metrics:
+            logger.info(f"✅ [BaoStock] 获取成功: {symbol} PE={baostock_metrics['pe']}, PB={baostock_metrics['pb']}")
+
+            # 旧行为：BaoStock 命中立即返回（无财报数据）
+            if BAOSTOCK_FAST_RETURN:
+                logger.info(f"⚡ [BaoStock-快路径] BAOSTOCK_FAST_RETURN=True，直接返回 BaoStock 数据")
+                return baostock_metrics
+
+            # 新行为：继续走完整路径，拿三表和其他指标
+            logger.info(f"🔄 [BaoStock-完整路径] 股价有效，继续走 _get_real_financial_metrics 拿三表和市值")
+            real_metrics = self._get_real_financial_metrics(symbol, price_value)
+            if real_metrics:
+                # 用 BaoStock 的 PE/PE_TTM/PB 覆盖（准确性更高），保留 real_metrics 的其他字段
+                # real_metrics 里如果已经有 total_mv/circ_mv 也保留（除非 BaoStock 路径已补）
+                logger.info(f"✅ [BaoStock-合并] 使用 BaoStock PE/PB 覆盖，保留 real_metrics 的财报数据")
+                real_metrics['pe'] = baostock_metrics['pe']
+                real_metrics['pe_ttm'] = baostock_metrics['pe_ttm']
+                real_metrics['pb'] = baostock_metrics['pb']
+                # 如果 real_metrics 没有市值字段，用 BaoStock 路径已补的市值
+                if 'total_mv' not in real_metrics and 'total_mv' in baostock_metrics:
+                    real_metrics['total_mv'] = baostock_metrics['total_mv']
+                if 'circ_mv' not in real_metrics and 'circ_mv' in baostock_metrics:
+                    real_metrics['circ_mv'] = baostock_metrics['circ_mv']
+                # 标注 PE/PB 数据来源
+                real_metrics['pe_pb_source'] = 'BaoStock'
+                # 保留 BaoStock 的分析日期（更准确）
+                if baostock_metrics.get('analysis_date'):
+                    real_metrics['analysis_date'] = baostock_metrics['analysis_date']
+                return real_metrics
+            else:
+                # 完整路径失败，回退到 BaoStock 数据（已含市值）
+                logger.warning(f"⚠️ [BaoStock-完整路径] _get_real_financial_metrics 失败，回退到 BaoStock 数据")
+                return baostock_metrics
+        else:
+            # BaoStock 失败，走原有财务数据获取逻辑
+            logger.warning(f"⚠️ [PE/PB优化] BaoStock获取失败，尝试AKShare获取财务数据")
+            real_metrics = self._get_real_financial_metrics(symbol, price_value)
+            if real_metrics:
+                logger.info(f"✅ 使用真实财务数据: {symbol}")
+                return real_metrics
 
         # 如果无法获取真实数据，抛出异常
-        error_msg = f"无法获取股票 {symbol} 的财务数据。已尝试所有数据源（MongoDB、AKShare、Tushare）均失败。"
+        error_msg = f"无法获取股票 {symbol} 的财务数据。已尝试所有数据源（MongoDB、AKShare、BaoStock）均失败。"
         logger.error(f"❌ {error_msg}")
         raise ValueError(error_msg)
 
-    def _get_real_financial_metrics(self, symbol: str, price_value: float) -> dict:
-        """获取真实财务指标 - 优先使用数据库缓存，再使用API"""
+    def _get_baostock_pe_pb(self, symbol: str) -> Optional[dict]:
+        """
+        🔥 从BaoStock获取实时PE/PB数据（新增方法）
+        
+        Args:
+            symbol: 6位股票代码（如：600930）
+        
+        Returns:
+            dict: 包含 PE、PB、PE_TTM 等指标的字典，失败返回 None
+        
+        Raises:
+            不抛出异常，只记录日志并返回 None
+        """
         try:
-            # 🔥 优先从 market_quotes 获取实时股价，替换传入的 price_value
-            from tradingagents.config.database_manager import get_database_manager
-            db_manager = get_database_manager()
-            db_client = None
+            import baostock as bs
+            from datetime import datetime, timedelta
+            
+            # 标准化股票代码
+            code = str(symbol).zfill(6)
+            if code.startswith('6'):
+                bs_code = f"sh.{code}"
+            else:
+                bs_code = f"sz.{code}"
+            
+            logger.info(f"🔍 [BaoStock] 开始获取 {symbol} 的PE/PB数据 (代码: {bs_code})")
+            
+            # 登录BaoStock
+            bs.login()
+            
+            try:
+                # 获取最近10个交易日的日线数据（包含PE/PB）
+                end_date = datetime.now().strftime('%Y-%m-%d')
+                start_date = (datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d')
+                
+                rs = bs.query_history_k_data_plus(
+                    bs_code,
+                    'date,close,peTTM,pbMRQ',
+                    start_date=start_date,
+                    end_date=end_date,
+                    frequency='d',
+                    adjustflag='3'
+                )
+                
+                data_list = []
+                while rs.error_code == '0' and rs.next():
+                    data_list.append(rs.get_row_data())
+                
+                if not data_list:
+                    logger.warning(f"⚠️ [BaoStock] 无数据返回: {symbol}, bs_code={bs_code}")
+                    return None
+                
+                # 获取最新有效数据
+                latest_valid = None
+                for row in reversed(data_list):
+                    if row[2] and row[2] != 'None' and row[3] and row[3] != 'None':
+                        latest_valid = row
+                        break
+                
+                if not latest_valid:
+                    logger.warning(f"⚠️ [BaoStock] 所有数据PE/PB均为空: {symbol}")
+                    return None
+                
+                # 解析数据
+                date = latest_valid[0]
+                price = float(latest_valid[1]) if latest_valid[1] and latest_valid[1] != 'None' else None
+                pe_ttm = float(latest_valid[2]) if latest_valid[2] and latest_valid[2] != 'None' else None
+                pb = float(latest_valid[3]) if latest_valid[3] and latest_valid[3] != 'None' else None
+                
+                if not pe_ttm or not pb:
+                    logger.warning(f"⚠️ [BaoStock] PE/PB解析失败: PE={pe_ttm}, PB={pb}")
+                    return None
+                
+                logger.info(f"✅ [BaoStock] 获取成功: {symbol} 日期={date}, 股价={price}元, PE_TTM={pe_ttm:.2f}, PB={pb:.2f}")
 
-            if db_manager.is_mongodb_available():
+                # 计算基本面评分
+                fundamental_score = self._calculate_pe_pb_score(pe_ttm, pb)
+
+                # 🔥 方案A：补总市值/流通市值（BaoStock 不返回市值字段，调东财 push2 一次拿两个字段）
+                # 东财 push2 接口字段：f117=总市值（元），f85=流通市值（元）
+                market_value_data = None
                 try:
-                    db_client = db_manager.get_mongodb_client()
-                    db = db_client['tradingagents']
-
-                    # 标准化股票代码为6位
-                    code6 = symbol.replace('.SH', '').replace('.SZ', '').zfill(6)
-
-                    # 从 market_quotes 获取实时股价
-                    quote = db.market_quotes.find_one({"code": code6})
-                    if quote and quote.get("close"):
-                        realtime_price = float(quote.get("close"))
-                        logger.info(f"✅ 从 market_quotes 获取实时股价: {code6} = {realtime_price}元 (原价格: {price_value}元)")
-                        price_value = realtime_price
+                    from .providers.china.eastmoney_quote import EastMoneyQuoteProvider
+                    market_value_data = EastMoneyQuoteProvider.get_market_value(symbol)
+                    if market_value_data:
+                        logger.info(
+                            f"✅ [BaoStock-补市值] 来源=EastMoney push2: "
+                            f"总市值={market_value_data.get('total_mv')}亿元, "
+                            f"流通市值={market_value_data.get('circ_mv')}亿元"
+                        )
                     else:
-                        logger.info(f"⚠️ market_quotes 中未找到{code6}的实时股价，使用传入价格: {price_value}元")
-                except Exception as e:
-                    logger.warning(f"⚠️ 从 market_quotes 获取实时股价失败: {e}，使用传入价格: {price_value}元")
-            else:
-                logger.info(f"⚠️ MongoDB 不可用，使用传入价格: {price_value}元")
+                        logger.warning(f"⚠️ [BaoStock-补市值] EastMoney push2 未返回数据: {symbol}")
+                except Exception as mv_e:
+                    logger.warning(f"⚠️ [BaoStock-补市值] 获取市值失败: {mv_e}")
 
-            # 第一优先级：从 MongoDB stock_financial_data 集合获取标准化财务数据
-            from tradingagents.config.runtime_settings import use_app_cache_enabled
-            if use_app_cache_enabled(False):
-                logger.info(f"🔍 优先从 MongoDB stock_financial_data 集合获取{symbol}财务数据")
-
-                # 直接从 MongoDB 获取标准化的财务数据
-                from tradingagents.dataflows.cache.mongodb_cache_adapter import get_mongodb_cache_adapter
-                adapter = get_mongodb_cache_adapter()
-                financial_data = adapter.get_financial_data(symbol)
-
-                if financial_data:
-                    logger.info(f"✅ [财务数据] 从 stock_financial_data 集合获取{symbol}财务数据")
-                    # 解析 MongoDB 标准化的财务数据
-                    metrics = self._parse_mongodb_financial_data(financial_data, price_value)
-                    if metrics:
-                        logger.info(f"✅ MongoDB 财务数据解析成功，返回指标")
-                        return metrics
+                # 🔥 广发 Skills 接口：补行业相对估值字段（PE/PB 行业均值、历史百分位）+ 总市值优先层
+                # 广发返回的 total_mv 准确度高于东财 push2，作为市值的优先来源
+                gf_valuation = None
+                try:
+                    from .providers.china.gf_quote import GFQuoteProvider
+                    gf_valuation = GFQuoteProvider.get_valuation(symbol)
+                    if gf_valuation:
+                        logger.info(
+                            f"✅ [广发-估值] {symbol}: 总市值={gf_valuation.get('total_mv')}亿元, "
+                            f"PE_TTM={gf_valuation.get('pe_ttm')}, PE行业均值={gf_valuation.get('pe_ttm_avg')}, "
+                            f"PE百分位={gf_valuation.get('pe_ttm_percent')}%, PB={gf_valuation.get('pb')}, "
+                            f"PB行业均值={gf_valuation.get('pb_avg')}, PB百分位={gf_valuation.get('pb_percent')}%"
+                        )
                     else:
-                        logger.warning(f"⚠️ MongoDB 财务数据解析失败")
-                else:
-                    logger.info(f"🔄 MongoDB 未找到{symbol}财务数据，尝试从 AKShare API 获取")
-            else:
-                logger.info(f"🔄 数据库缓存未启用，直接从AKShare API获取{symbol}财务数据")
+                        logger.warning(f"⚠️ [广发-估值] 未返回数据: {symbol}")
+                except Exception as gf_e:
+                    logger.warning(f"⚠️ [广发-估值] 获取失败: {gf_e}")
 
-            # 第二优先级：从AKShare API获取
+                result = {
+                    'pe': f"{pe_ttm:.1f}倍",
+                    'pe_ttm': f"{pe_ttm:.1f}倍",
+                    'pb': f"{pb:.2f}倍",
+                    'price': f"¥{price:.2f}" if price else None,
+                    'current_price_numeric': price,
+                    'data_source': 'BaoStock',
+                    'fundamental_score': fundamental_score,
+                    'analysis_date': date,
+                    'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                }
+
+                # 合并市值字段：广发优先，东财兜底
+                # 1) 总市值：广发 > 东财
+                if gf_valuation and gf_valuation.get('total_mv') and gf_valuation['total_mv'] > 0:
+                    result['total_mv'] = f"{gf_valuation['total_mv']:.2f}亿元 (广发)"
+                elif market_value_data and market_value_data.get('total_mv') and market_value_data['total_mv'] > 0:
+                    result['total_mv'] = f"{market_value_data['total_mv']:.2f}亿元 (实时)"
+
+                # 2) 流通市值：东财 stock/get 的 f85 实测返回错误值（300750 返回 42.57亿，实际应≈15000亿）
+                #    改用腾讯 qt.gtimg 的 parts[44] 作为流通市值数据源（2026-07-09 实测验证准确）
+                from tradingagents.dataflows.providers.china.eastmoney_quote import TencentQuoteProvider
+                tencent_data = None
+                try:
+                    tencent_data = TencentQuoteProvider.get_market_value(symbol)
+                    if tencent_data and tencent_data.get('circ_mv'):
+                        circ_mv_tx = tencent_data['circ_mv']
+                        if circ_mv_tx > 0:
+                            result['circ_mv'] = f"{circ_mv_tx:.2f}亿元 (腾讯实时)"
+                            logger.info(f"✅ [BaoStock-补流通市值] 来源=Tencent parts[44]: 流通市值={circ_mv_tx:.2f}亿元")
+                except Exception as e_tx:
+                    logger.warning(f"⚠️ 腾讯获取流通市值失败: {e_tx}")
+
+                # 东财 total_share 仍可用（总股本数据不影响流通市值正确性）
+                if market_value_data and market_value_data.get('total_share'):
+                    result['total_share'] = f"{market_value_data['total_share']:.2f}亿股"
+
+                # 3) 行业相对估值字段（广发提供，当前完全缺失的新指标）
+                if gf_valuation:
+                    if gf_valuation.get('pe_ttm_avg') is not None:
+                        result['pe_industry_avg'] = f"{gf_valuation['pe_ttm_avg']:.2f}倍"
+                    if gf_valuation.get('pe_ttm_percent') is not None:
+                        result['pe_percentile'] = f"{gf_valuation['pe_ttm_percent']:.2f}%"
+                    if gf_valuation.get('pb_avg') is not None:
+                        result['pb_industry_avg'] = f"{gf_valuation['pb_avg']:.2f}倍"
+                    if gf_valuation.get('pb_percent') is not None:
+                        result['pb_percentile'] = f"{gf_valuation['pb_percent']:.2f}%"
+                    if gf_valuation.get('list_date'):
+                        result['list_date'] = gf_valuation['list_date']
+                    # 标注市值来源（便于追溯）
+                    if 'total_mv' in result and '(广发)' in result['total_mv']:
+                        result['market_value_source'] = 'GF-Skills'
+
+                # 🔥 申万一级行业 PE 补充层：多源口径对比 + 同行业可比公司 PE 列表
+                # 广发行业 PE 口径可能包含异常 PE 子行业（如电力归到含光伏/新能源发电的全行业）
+                # 申万一级 31 个行业分类更稳定，成份股更纯
+                sub_industries = None  # 预初始化，避免内部 try 失败时引用未定义变量
+                try:
+                    sw_data = self._get_sw_industry_valuation(symbol)
+                    if sw_data:
+                        result['sw_industry_name'] = sw_data['industry_name']
+                        result['sw_industry_code'] = sw_data['industry_code']
+                        result['sw_industry_pe_ttm'] = f"{sw_data['pe_ttm']:.2f}倍"
+                        result['sw_industry_pe_static'] = f"{sw_data['pe_static']:.2f}倍"
+                        result['sw_industry_pb'] = f"{sw_data['pb']:.2f}倍"
+                        result['sw_industry_dividend_yield'] = f"{sw_data['dividend_yield']:.2f}%"
+                        result['sw_industry_constituents'] = sw_data['constituents']
+                        logger.info(
+                            f"✅ [申万-行业PE] {symbol}: 行业={sw_data['industry_name']}, "
+                            f"PE_TTM={sw_data['pe_ttm']:.2f}, PB={sw_data['pb']:.2f}, "
+                            f"股息率={sw_data['dividend_yield']:.2f}%, 成份股={sw_data['constituents']}"
+                        )
+
+                        # 🔥 申万二级/三级子行业 PE 多层口径
+                        # 申万一级"公用事业"过粗，二级"电力"PE_TTM≈18 才是合理基准
+                        # 三级"核力发电"PE_TTM≈21 是最精确的同业口径
+                        try:
+                            sub_industries = self._get_sw_sub_industries(
+                                sw_data['industry_code'], sw_data['industry_name']
+                            )
+                            if sub_industries:
+                                # 拼装 markdown 字符串给报告模板直接展示
+                                md_lines = []
+                                if sub_industries['level2_list']:
+                                    md_lines.append(f"**申万二级子行业（{sw_data['industry_name']} 下属）**")
+                                    md_lines.append("")
+                                    md_lines.append("| 行业代码 | 行业名称 | 成份股 | PE_TTM | PE_静态 | PB | 股息率 |")
+                                    md_lines.append("|:--------|:--------|:------:|:------:|:------:|:--:|:------:|")
+                                    for r in sub_industries['level2_list']:
+                                        md_lines.append(
+                                            f"| {r['code']} | {r['name']} | {r['constituents']} | "
+                                            f"{r['pe_ttm']:.2f} | {r['pe_static']:.2f} | {r['pb']:.2f} | {r['dividend_yield']:.2f}% |"
+                                        )
+                                    md_lines.append("")
+
+                                if sub_industries['level3_list_under_power']:
+                                    md_lines.append("**申万三级子行业（电力下属，最精确同业口径）**")
+                                    md_lines.append("")
+                                    md_lines.append("| 行业代码 | 行业名称 | 成份股 | PE_TTM | PE_静态 | PB | 股息率 |")
+                                    md_lines.append("|:--------|:--------|:------:|:------:|:------:|:--:|:------:|")
+                                    for r in sub_industries['level3_list_under_power']:
+                                        md_lines.append(
+                                            f"| {r['code']} | {r['name']} | {r['constituents']} | "
+                                            f"{r['pe_ttm']:.2f} | {r['pe_static']:.2f} | {r['pb']:.2f} | {r['dividend_yield']:.2f}% |"
+                                        )
+                                    md_lines.append("")
+                                    md_lines.append(
+                                        "> 💡 上述为申万二级 \"电力\" 下属的三级子行业 PE 列表，"
+                                        f"请结合个股所属细分行业（如 {symbol} 所属的核力/火力/水力/风力/光伏发电）"
+                                        "优先参照对应子行业 PE_TTM 作为同业基准"
+                                    )
+
+                                if md_lines:
+                                    result['sw_sub_industries_md'] = "\n".join(md_lines)
+                                    logger.info(
+                                        f"✅ [申万-多层] {symbol}: 二级子行业 {len(sub_industries['level2_list'])} 个, "
+                                        f"电力下属三级 {len(sub_industries['level3_list_under_power'])} 个"
+                                    )
+                        except Exception as sub_e:
+                            logger.warning(f"⚠️ [申万-二级/三级] 获取失败: {sub_e}")
+                except Exception as sw_e:
+                    logger.warning(f"⚠️ [申万-行业PE] 获取失败: {sw_e}")
+
+                # 🔥 同行业可比公司 PE 列表（让 LLM 自己判断行业基准是否合理）
+                try:
+                    peer_list_md = self._get_peer_pe_list(symbol)
+                    if peer_list_md:
+                        result['peer_pe_list'] = peer_list_md
+                except Exception as peer_e:
+                    logger.warning(f"⚠️ [可比公司PE列表] 获取失败: {peer_e}")
+
+                return result
+
+            finally:
+                bs.logout()
+                
+        except ImportError:
+            logger.error(f"❌ [BaoStock] 模块未安装，请运行: pip install baostock")
+            return None
+        except Exception as e:
+            logger.error(f"❌ [BaoStock] 获取失败: {symbol}, 错误类型: {type(e).__name__}, 错误信息: {e}")
+            return None
+
+    # 申万一级行业 → 同行业龙头股映射（用于"同行业可比公司 PE 列表"）
+    # 注：申万一级 31 个行业，这里只列常见行业的代表性龙头，其他行业按需扩展
+    _SW_INDUSTRY_PEERS = {
+        '801160.SI': ['600011', '600027', '600023', '600795', '601991', '601985'],  # 公用事业：华能/华电/浙能/国电/大唐/中国核电
+        '801780.SI': ['601398', '601939', '601288', '601988', '600036'],  # 银行
+        '801120.SI': ['600519', '000858', '600809', '000568', '002304'],  # 食品饮料（白酒）
+        '801790.SI': ['601318', '601628', '600030', '601688', '601601'],  # 非银金融
+        '801180.SI': ['000002', '600048', '001979', '600340', '600606'],  # 房地产
+        '801110.SI': ['000333', '600690', '000651', '002508', '600690'],  # 家用电器
+        '801150.SI': ['600276', '000538', '600436', '300015', '600085'],  # 医药生物
+        '801730.SI': ['300750', '002594', '601012', '002129', '600089'],  # 电力设备（新能源）
+        '801080.SI': ['688981', '603501', '002049', '600584', '300142'],  # 电子
+        '801880.SI': ['600104', '601238', '000625', '601633', '600006'],  # 汽车
+        '801050.SI': ['601899', '600547', '601898', '600489', '002460'],  # 有色金属
+        '801950.SI': ['601088', '600188', '601225', '600971', '600997'],  # 煤炭
+        '801960.SI': ['601857', '600028', '600585', '002493', '600346'],  # 石油石化
+        '801040.SI': ['600019', '600010', '000898', '600010', '000709'],  # 钢铁
+    }
+
+    def _get_sw_industry_valuation(self, symbol: str) -> Optional[dict]:
+        """获取个股所属申万一级行业的 PE/PB/股息率
+
+        实现：
+        1. 调用 ak.sw_index_first_info() 拿申万一级 31 个行业的 PE/PB 全表
+        2. 通过 ak.stock_individual_info_em 拿个股的"行业"字段（东财行业名）
+        3. 用 hardcoded 东财行业名 → 申万一级代码 映射表查找
+        4. 返回对应行业的 PE_TTM / PE_静态 / PB / 股息率 / 成份股个数
+
+        失败时返回 None（不影响现有数据）
+        """
+        import akshare as ak
+
+        # 1) 拿申万一级行业 PE 全表
+        try:
+            sw_df = ak.sw_index_first_info()
+        except Exception as e:
+            logger.warning(f"⚠️ [申万] sw_index_first_info 调用失败: {e}")
+            return None
+
+        if sw_df is None or len(sw_df) == 0:
+            return None
+
+        # 2) 拿个股行业（东财口径）
+        industry_name_em = None
+        for _ in range(2):
+            try:
+                info_df = ak.stock_individual_info_em(symbol=symbol)
+                if info_df is not None and len(info_df) > 0:
+                    row = info_df[info_df['item'] == '行业']
+                    if len(row) > 0:
+                        industry_name_em = str(row.iloc[0]['value']).strip()
+                        break
+            except Exception:
+                import time
+                time.sleep(0.5)
+            break
+
+        # 2.1) 兜底：东财接口失败时，用 hardcoded 反向映射表查申万行业
+        # 从 _SW_INDUSTRY_PEERS 反向构建"股票代码 → 申万一级代码"映射
+        sw_code_from_map = None
+        for sw_code, peer_list in self._SW_INDUSTRY_PEERS.items():
+            if symbol in peer_list:
+                sw_code_from_map = sw_code
+                break
+
+        # 如果东财接口失败但 hardcoded 映射命中，直接用 hardcoded 结果
+        if not industry_name_em and sw_code_from_map:
+            logger.info(f"[申万] 东财接口失败，用 hardcoded 映射: {symbol} → {sw_code_from_map}")
+            row = sw_df[sw_df['行业代码'] == sw_code_from_map]
+            if len(row) > 0:
+                r = row.iloc[0]
+                return {
+                    'industry_code': sw_code_from_map,
+                    'industry_name': str(r['行业名称']),
+                    'constituents': int(r['成份个数']),
+                    'pe_static': float(r['静态市盈率']) if r['静态市盈率'] is not None else 0.0,
+                    'pe_ttm': float(r['TTM(滚动)市盈率']) if r['TTM(滚动)市盈率'] is not None else 0.0,
+                    'pb': float(r['市净率']) if r['市净率'] is not None else 0.0,
+                    'dividend_yield': float(r['静态股息率']) if r['静态股息率'] is not None else 0.0,
+                }
+
+        if not industry_name_em:
+            logger.debug(f"[申万] 未拿到 {symbol} 的东财行业名，且不在 hardcoded 映射表里，跳过")
+            return None
+
+        # 3) 东财行业名 → 申万一级代码 映射
+        sw_code = self._map_em_industry_to_sw(industry_name_em, sw_df)
+        if not sw_code:
+            logger.debug(f"[申万] 东财行业 '{industry_name_em}' 未找到申万映射，跳过")
+            return None
+
+        # 4) 在申万全表里查对应行业
+        row = sw_df[sw_df['行业代码'] == sw_code]
+        if len(row) == 0:
+            return None
+        r = row.iloc[0]
+
+        return {
+            'industry_code': sw_code,
+            'industry_name': str(r['行业名称']),
+            'constituents': int(r['成份个数']),
+            'pe_static': float(r['静态市盈率']) if r['静态市盈率'] is not None else 0.0,
+            'pe_ttm': float(r['TTM(滚动)市盈率']) if r['TTM(滚动)市盈率'] is not None else 0.0,
+            'pb': float(r['市净率']) if r['市净率'] is not None else 0.0,
+            'dividend_yield': float(r['静态股息率']) if r['静态股息率'] is not None else 0.0,
+        }
+
+    def _get_sw_sub_industries(self, sw_level1_code: str, sw_level1_name: str) -> Optional[dict]:
+        """🔥 获取申万一级下所有二级子行业 + 电力子行业下的三级子行业 PE 多层口径
+
+        Args:
+            sw_level1_code: 申万一级代码，如 '801160.SI'
+            sw_level1_name: 申万一级名称，如 '公用事业'
+
+        Returns:
+            {
+                'level2_list': [{code, name, parent, constituents, pe_ttm, pe_static, pb, dividend_yield}, ...],
+                'level3_list_under_power': [{code, name, parent, constituents, pe_ttm, pe_static, pb, dividend_yield}, ...],
+            }
+            level3_list_under_power 是申万二级"电力"下属的所有三级子行业
+            (适用于电力股、热力股等公用事业子类)
+
+        失败时返回 None
+        """
+        import akshare as ak
+
+        result = {'level2_list': [], 'level3_list_under_power': []}
+
+        # 1) 拿申万二级行业全表
+        try:
+            sw2_df = ak.sw_index_second_info()
+        except Exception as e:
+            logger.warning(f"⚠️ [申万-二级] sw_index_second_info 调用失败: {e}")
+            return None
+
+        if sw2_df is None or len(sw2_df) == 0:
+            return None
+
+        # 2) 过滤出"上级行业=申万一级名称"的所有二级子行业
+        level2_rows = sw2_df[sw2_df['上级行业'] == sw_level1_name]
+        for _, r in level2_rows.iterrows():
+            result['level2_list'].append({
+                'code': str(r['行业代码']),
+                'name': str(r['行业名称']),
+                'parent': str(r['上级行业']),
+                'constituents': int(r['成份个数']) if r['成份个数'] is not None else 0,
+                'pe_static': float(r['静态市盈率']) if r['静态市盈率'] is not None else 0.0,
+                'pe_ttm': float(r['TTM(滚动)市盈率']) if r['TTM(滚动)市盈率'] is not None else 0.0,
+                'pb': float(r['市净率']) if r['市净率'] is not None else 0.0,
+                'dividend_yield': float(r['静态股息率']) if r['静态股息率'] is not None else 0.0,
+            })
+
+        # 3) 拿申万三级行业全表，过滤出"上级行业=电力"的所有三级子行业
+        # 电力股通常归申万二级"电力"下，包括：火电/水电/核电/风电/光伏/热力/其他能源发电/电能综合服务
+        try:
+            sw3_df = ak.sw_index_third_info()
+        except Exception as e:
+            logger.warning(f"⚠️ [申万-三级] sw_index_third_info 调用失败: {e}")
+            return result  # 二级数据已有，三级失败不影响
+
+        if sw3_df is None or len(sw3_df) == 0:
+            return result
+
+        # "电力"是申万二级下的固定名称
+        level3_rows = sw3_df[sw3_df['上级行业'] == '电力']
+        for _, r in level3_rows.iterrows():
+            result['level3_list_under_power'].append({
+                'code': str(r['行业代码']),
+                'name': str(r['行业名称']),
+                'parent': str(r['上级行业']),
+                'constituents': int(r['成份个数']) if r['成份个数'] is not None else 0,
+                'pe_static': float(r['静态市盈率']) if r['静态市盈率'] is not None else 0.0,
+                'pe_ttm': float(r['TTM(滚动)市盈率']) if r['TTM(滚动)市盈率'] is not None else 0.0,
+                'pb': float(r['市净率']) if r['市净率'] is not None else 0.0,
+                'dividend_yield': float(r['静态股息率']) if r['静态股息率'] is not None else 0.0,
+            })
+
+        return result
+
+    def _map_em_industry_to_sw(self, em_name: str, sw_df) -> Optional[str]:
+        """东财行业名 → 申万一级代码 映射
+
+        优先用名称包含匹配（如东财"电力行业" → 申万"公用事业"）
+        """
+        # 简化映射表：东财行业名关键词 → 申万一级代码
+        # 申万 31 个一级代码已通过 sw_index_first_info 拿到
+        keyword_map = {
+            '电力': '801160.SI',  # 公用事业
+            '燃气': '801160.SI',
+            '水务': '801160.SI',
+            '环保': '801160.SI',
+            '银行': '801780.SI',
+            '保险': '801790.SI',
+            '证券': '801790.SI',
+            '白酒': '801120.SI',
+            '食品': '801120.SI',
+            '饮料': '801120.SI',
+            '家电': '801110.SI',
+            '医药': '801150.SI',
+            '生物': '801150.SI',
+            '医疗': '801150.SI',
+            '电池': '801730.SI',
+            '光伏': '801730.SI',
+            '新能源': '801730.SI',
+            '半导体': '801080.SI',
+            '芯片': '801080.SI',
+            '电子': '801080.SI',
+            '汽车': '801880.SI',
+            '有色': '801050.SI',
+            '煤炭': '801950.SI',
+            '石油': '801960.SI',
+            '石化': '801960.SI',
+            '钢铁': '801040.SI',
+            '房地产': '801180.SI',
+            '地产': '801180.SI',
+            '计算机': '801750.SI',
+            '软件': '801750.SI',
+            '通信': '801770.SI',
+            '传媒': '801760.SI',
+            '军工': '801740.SI',
+            '国防': '801740.SI',
+            '农业': '801010.SI',
+            '化工': '801030.SI',
+            '建材': '801710.SI',
+            '建筑': '801720.SI',
+            '机械': '801890.SI',
+            '交通运输': '801170.SI',
+            '商贸': '801200.SI',
+            '社会服务': '801210.SI',
+            '纺织': '801130.SI',
+            '轻工': '801140.SI',
+            '美容': '801980.SI',
+            '环保': '801970.SI',
+        }
+
+        for kw, sw_code in keyword_map.items():
+            if kw in em_name:
+                return sw_code
+
+        # 兜底：直接在申万表里查名称完全匹配
+        row = sw_df[sw_df['行业名称'] == em_name]
+        if len(row) > 0:
+            return str(row.iloc[0]['行业代码'])
+
+        return None
+
+    def _get_peer_pe_list(self, symbol: str) -> Optional[str]:
+        """获取同行业可比公司 PE/PB 列表（markdown 字符串）
+
+        实现：
+        1. 先拿申万一级代码
+        2. 从 hardcoded 龙头股映射表拿同行业 3-5 只龙头
+        3. 对每只龙头调广发 API get_valuation 拿 PE_TTM / PB / 总市值
+        4. 组装成 markdown 表格字符串
+
+        失败时返回 None
+        """
+        # 1) 拿申万一级代码（复用 _get_sw_industry_valuation 的逻辑）
+        sw_data = self._get_sw_industry_valuation(symbol)
+        if not sw_data:
+            return None
+
+        sw_code = sw_data['industry_code']
+        sw_name = sw_data['industry_name']
+
+        # 2) 拿同行业龙头股
+        peer_codes = self._SW_INDUSTRY_PEERS.get(sw_code, [])
+        if not peer_codes:
+            logger.debug(f"[可比公司] 申万行业 {sw_code} 无龙头股映射，跳过")
+            return None
+
+        # 把目标股票本身也加进去
+        all_codes = [symbol] + [c for c in peer_codes if c != symbol]
+
+        # 3) 对每只调广发 API 拿估值
+        from .providers.china.gf_quote import GFQuoteProvider
+        rows = []
+        for code in all_codes:
+            try:
+                val = GFQuoteProvider.get_valuation(code)
+                if val:
+                    name = val.get('name') or code
+                    rows.append({
+                        'code': code,
+                        'name': name,
+                        'pe_ttm': val.get('pe_ttm'),
+                        'pb': val.get('pb'),
+                        'total_mv': val.get('total_mv'),
+                    })
+            except Exception:
+                continue
+
+        if not rows:
+            return None
+
+        # 4) 组装 markdown 表格
+        md_lines = [
+            f"**所属申万一级行业**: {sw_name} ({sw_code})，成份股 {sw_data['constituents']} 只",
+            "",
+            "| 代码 | 名称 | PE_TTM | PB | 总市值(亿) |",
+            "|:----|:----|:------:|:--:|:--------:|",
+        ]
+        for r in rows:
+            pe_str = f"{r['pe_ttm']:.2f}" if r['pe_ttm'] is not None else "N/A"
+            pb_str = f"{r['pb']:.2f}" if r['pb'] is not None else "N/A"
+            mv_str = f"{r['total_mv']:.1f}" if r['total_mv'] is not None else "N/A"
+            md_lines.append(f"| {r['code']} | {r['name']} | {pe_str} | {pb_str} | {mv_str} |")
+
+        # 加一行行业 PE 中位数
+        pe_vals = [r['pe_ttm'] for r in rows if r['pe_ttm'] is not None]
+        if pe_vals:
+            pe_sorted = sorted(pe_vals)
+            median_pe = pe_sorted[len(pe_sorted) // 2]
+            md_lines.append("")
+            md_lines.append(f"**同行业 PE_TTM 中位数**: {median_pe:.2f} 倍（含目标公司）")
+            md_lines.append(f"**申万行业 PE_TTM**: {sw_data['pe_ttm']:.2f} 倍")
+
+        return "\n".join(md_lines)
+
+    def _calculate_pe_pb_score(self, pe_ttm: float, pb: float) -> float:
+        """
+        🔥 根据PE/PB计算基本面评分
+        
+        Args:
+            pe_ttm: 市盈率（TTM）
+            pb: 市净率
+        
+        Returns:
+            float: 评分结果（0-10分）
+        """
+        # 基于PE/PB的量化评分逻辑
+        # PE评分（满分5分）
+        if pe_ttm < 10:
+            pe_score = 5.0  # 极低估值
+        elif pe_ttm < 20:
+            pe_score = 4.5  # 低估
+        elif pe_ttm < 30:
+            pe_score = 4.0  # 合理偏低
+        elif pe_ttm < 40:
+            pe_score = 3.5  # 合理
+        elif pe_ttm < 50:
+            pe_score = 3.0  # 偏高
+        elif pe_ttm < 60:
+            pe_score = 2.5  # 高估
+        else:
+            pe_score = 2.0  # 极高估
+        
+        # PB评分（满分5分）
+        if pb < 1:
+            pb_score = 5.0  # 极低估值
+        elif pb < 2:
+            pb_score = 4.5  # 低估
+        elif pb < 3:
+            pb_score = 4.0  # 合理偏低
+        elif pb < 4:
+            pb_score = 3.5  # 合理
+        elif pb < 5:
+            pb_score = 3.0  # 偏高
+        else:
+            pb_score = 2.5  # 高估
+        
+        # 综合评分
+        total_score = (pe_score + pb_score) / 2
+        return round(total_score, 1)
+
+    def _get_real_financial_metrics(self, symbol: str, price_value: float) -> dict:
+        """获取真实财务指标 - 直接走 API（MongoDB 缓存已禁用）"""
+        try:
+            # 🚫 项目策略：完全不用 MongoDB 缓存，直接走 API
+            #    传入的 price_value 来自 BaoStock 实时股价，已经是最新价，无需再查 market_quotes
+            logger.info(f"🔄 [跳过MongoDB] 直接从API获取{symbol}财务数据，股价: {price_value}元")
+
+            # 第一优先级：从AKShare API获取
             from .providers.china.akshare import get_akshare_provider
             import asyncio
 
@@ -918,7 +1800,7 @@ class OptimizedChinaDataProvider:
                         logger.info(f"✅ AKShare解析成功，返回指标")
                         # 缓存原始财务数据到数据库（而不是解析后的指标）
                         self._cache_raw_financial_data(symbol, financial_data, stock_info)
-                        return metrics
+                        return self._supplement_with_gf_indicators(metrics, symbol)
                     else:
                         logger.warning(f"⚠️ AKShare解析失败，返回None")
                 else:
@@ -951,12 +1833,265 @@ class OptimizedChinaDataProvider:
             if metrics:
                 # 缓存原始财务数据到数据库
                 self._cache_raw_financial_data(symbol, financial_data, stock_info)
-                return metrics
+                return self._supplement_with_gf_indicators(metrics, symbol)
 
         except Exception as e:
             logger.debug(f"获取{symbol}真实财务数据失败: {e}")
 
+        # 🔥 兜底：广发 Skills 工具2（compare_indicator_post）
+        # 当 MongoDB/AKShare/Tushare 三表全部失败时，用广发接口拿财务指标 5 大维度
+        # 优点：返回精炼的指标摘要，无需解析三表原始数据
+        # 限制：必须传2只股票，会用行业映射表选同业对比股
+        try:
+            from .providers.china.gf_quote import GFQuoteProvider
+            from datetime import datetime as _dt
+            import time as _time
+            now = _dt.now()
+            y = now.year
+            # 报告期 fallback 顺序：当年最近报告期 → 上一年年报 → 上一年三季报 → 上一年中报
+            # 注意：广发工具2 对未披露的报告期返回空，需要按顺序 fallback
+            report_periods = []
+            if now.month <= 4:
+                report_periods.append((str(y - 1), 12))  # 上一年年报
+            elif now.month <= 8:
+                report_periods.append((str(y), 1))  # 当年一季报
+                report_periods.append((str(y - 1), 12))  # 兜底：上一年年报
+            elif now.month <= 10:
+                report_periods.append((str(y), 6))  # 当年中报
+                report_periods.append((str(y), 1))  # 兜底：当年一季报
+            else:
+                report_periods.append((str(y), 9))  # 当年三季报
+                report_periods.append((str(y), 6))  # 兜底：当年中报
+            report_periods.append((str(y - 1), 12))  # 上一年年报
+            report_periods.append((str(y - 1), 9))  # 上一年三季报
+
+            # 去重（保持顺序）
+            seen = set()
+            unique_periods = []
+            for p in report_periods:
+                if p not in seen:
+                    seen.add(p)
+                    unique_periods.append(p)
+
+            logger.info(f"🔄 [广发-兜底] 三表全部失败，尝试用广发工具2获取 {symbol} 财务指标 "
+                        f"(候选报告期: {unique_periods})")
+            gf_indicators = None
+            used_period = None
+            for gf_year, gf_report_type in unique_periods:
+                gf_indicators = GFQuoteProvider.get_financial_indicators(symbol, gf_year, gf_report_type)
+                if gf_indicators:
+                    used_period = (gf_year, gf_report_type)
+                    break
+                _time.sleep(0.2)
+
+            if gf_indicators:
+                rt_name = {1: '一季报', 6: '中报', 9: '三季报', 12: '年报'}.get(
+                    used_period[1] if used_period else None, '?'
+                )
+                logger.info(f"✅ [广发-兜底] 获取成功: {symbol}, "
+                            f"报告期: {used_period[0] if used_period else '?'} {rt_name}, "
+                            f"字段数={len(gf_indicators)}")
+                metrics = self._parse_gf_financial_indicators(gf_indicators, price_value)
+                if metrics and used_period:
+                    rt_name = {1: '一季报', 6: '中报', 9: '三季报', 12: '年报'}.get(used_period[1], '?')
+                    metrics['supplementary_source'] = f'GF-Skills compare_indicator_post ({used_period[0]} {rt_name})'
+                return metrics
+            else:
+                logger.warning(f"⚠️ [广发-兜底] 所有报告期均未返回数据: {symbol}")
+        except Exception as gf_e:
+            logger.warning(f"⚠️ [广发-兜底] 获取财务指标失败: {gf_e}")
+
         return None
+
+    def _parse_gf_financial_indicators(self, gf_data: dict, price_value: float) -> dict:
+        """解析广发工具2返回的财务指标为 metrics 字典
+
+        广发返回的指标已经是精炼摘要，直接映射到现有 metrics 字段名。
+        """
+        metrics = {
+            'data_source': 'GF-Skills',
+            'price': f"¥{price_value:.2f}" if price_value else None,
+            'current_price_numeric': price_value,
+            'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        }
+
+        # 盈利能力
+        if gf_data.get('roe') is not None:
+            metrics['roe'] = f"{float(gf_data['roe']):.2f}%"
+        if gf_data.get('net_profit2totalincome') is not None:
+            metrics['net_margin'] = f"{float(gf_data['net_profit2totalincome']):.2f}%"
+        if gf_data.get('sale_gross_rate') is not None:
+            metrics['gross_margin'] = f"{float(gf_data['sale_gross_rate']):.2f}%"
+
+        # 资本结构/财务健康度
+        if gf_data.get('liablity2asset') is not None:
+            metrics['debt_ratio'] = f"{float(gf_data['liablity2asset']):.2f}%"
+        if gf_data.get('equity2asset') is not None:
+            metrics['equity_ratio'] = f"{float(gf_data['equity2asset']):.2f}%"
+        if gf_data.get('quick_ratio') is not None:
+            metrics['quick_ratio'] = f"{float(gf_data['quick_ratio']):.2f}"
+
+        # 现金流
+        if gf_data.get('cashflow_oper2income') is not None:
+            metrics['cashflow_income_ratio'] = f"{float(gf_data['cashflow_oper2income']):.2f}"
+        if gf_data.get('net_cashflow_oper2net_profit') is not None:
+            metrics['cashflow_profit_ratio'] = f"{float(gf_data['net_cashflow_oper2net_profit']):.2f}"
+        if gf_data.get('net_cashflow_oper_ps') is not None:
+            metrics['ocf_per_share'] = f"{float(gf_data['net_cashflow_oper_ps']):.2f}元"
+
+        # 成长性
+        if gf_data.get('operate_income_yoy') is not None:
+            metrics['revenue_yoy'] = f"{float(gf_data['operate_income_yoy']):.2f}%"
+        if gf_data.get('net_profit_yoy') is not None:
+            metrics['net_profit_yoy'] = f"{float(gf_data['net_profit_yoy']):.2f}%"
+        if gf_data.get('total_asset_yoy') is not None:
+            metrics['asset_yoy'] = f"{float(gf_data['total_asset_yoy']):.2f}%"
+        if gf_data.get('equity_growth_rate') is not None:
+            metrics['equity_yoy'] = f"{float(gf_data['equity_growth_rate']):.2f}%"
+
+        # 运营效率
+        if gf_data.get('inventory_turnover') is not None:
+            metrics['inventory_turnover'] = f"{float(gf_data['inventory_turnover']):.2f}次"
+        if gf_data.get('acctreceivable_turnover') is not None:
+            metrics['receivables_turnover'] = f"{float(gf_data['acctreceivable_turnover']):.2f}次"
+        if gf_data.get('totalasset_turnover') is not None:
+            metrics['asset_turnover'] = f"{float(gf_data['totalasset_turnover']):.2f}次"
+
+        # 其他
+        if gf_data.get('goodwill2equity') is not None:
+            metrics['goodwill_ratio'] = f"{float(gf_data['goodwill2equity']):.2f}%"
+        if gf_data.get('interest_coverage_ratio') is not None:
+            metrics['interest_coverage'] = f"{float(gf_data['interest_coverage_ratio']):.2f}"
+        if gf_data.get('end_date'):
+            metrics['report_date'] = gf_data['end_date']
+        if gf_data.get('peer_stock_name'):
+            metrics['peer_stock'] = gf_data['peer_stock_name']
+
+        logger.info(f"✅ [广发-解析] 解析完成，共 {len(metrics)} 个字段")
+        return metrics
+
+    def _supplement_with_gf_indicators(self, metrics: dict, symbol: str) -> dict:
+        """🔥 广发补充层：用广发工具2 补充 metrics 里缺失或 N/A 的财务字段
+
+        策略：
+        - 不覆盖 metrics 里已有的有效字段（非 N/A、非空）
+        - 只补充 metrics 里缺失或为 "N/A" 的字段
+        - 即使 AKShare/Tushare 已拿到部分数据，也调一次广发工具2 补齐缺失项
+
+        补充字段（来自广发 compare_indicator_post）：
+        - 盈利：roe / net_margin / gross_margin
+        - 资本结构：debt_ratio / equity_ratio / quick_ratio
+        - 现金流：cashflow_income_ratio / cashflow_profit_ratio / ocf_per_share
+        - 成长性：revenue_yoy / net_profit_yoy / asset_yoy / equity_yoy
+        - 运营效率：inventory_turnover / receivables_turnover / asset_turnover
+        - 其他：goodwill_ratio / interest_coverage / report_date / peer_stock
+        """
+        if not metrics:
+            return metrics
+
+        # 1) 收集 metrics 里缺失或 N/A 的字段
+        missing_keys = []
+        for k, v in metrics.items():
+            if v is None or v == "N/A" or v == "" or (isinstance(v, str) and v.strip() in ("N/A", "")):
+                missing_keys.append(k)
+
+        # 即使没有缺失字段，也尝试拿成长性/周转率等"现有 metrics 通常不包含"的字段
+        # 这些字段是广发工具2 独有的补充项，不在 AKShare/Tushare 解析结果里
+        gf_only_fields = [
+            'cashflow_income_ratio', 'cashflow_profit_ratio', 'ocf_per_share',
+            'revenue_yoy', 'net_profit_yoy', 'asset_yoy', 'equity_yoy',
+            'inventory_turnover', 'receivables_turnover', 'asset_turnover',
+            'goodwill_ratio', 'interest_coverage', 'report_date', 'peer_stock',
+        ]
+        for f in gf_only_fields:
+            if f not in metrics:
+                missing_keys.append(f)
+
+        if not missing_keys:
+            return metrics  # 无缺失，无需补充
+
+        # 2) 调广发工具2 拿补充数据
+        # 报告期 fallback 顺序：当年最近报告期 → 上一年年报 → 上一年三季报 → 上一年中报
+        try:
+            from .providers.china.gf_quote import GFQuoteProvider
+            from datetime import datetime as _dt
+            now = _dt.now()
+            y = now.year
+            # 按"最近披露"优先级排列：当年一季报 → 上一年年报 → 上一年三季报 → 上一年中报
+            # 注意：广发工具2 对未披露的报告期返回空，需要按顺序 fallback
+            report_periods = []
+            if now.month <= 4:
+                report_periods.append((str(y - 1), 12))  # 上一年年报
+            elif now.month <= 8:
+                report_periods.append((str(y), 1))  # 当年一季报
+                report_periods.append((str(y - 1), 12))  # 兜底：上一年年报
+            elif now.month <= 10:
+                report_periods.append((str(y), 6))  # 当年中报
+                report_periods.append((str(y), 1))  # 兜底：当年一季报
+            else:
+                report_periods.append((str(y), 9))  # 当年三季报
+                report_periods.append((str(y), 6))  # 兜底：当年中报
+            # 再加几个明确的 fallback
+            report_periods.append((str(y - 1), 12))  # 上一年年报
+            report_periods.append((str(y - 1), 9))  # 上一年三季报
+
+            # 去重（保持顺序）
+            seen = set()
+            unique_periods = []
+            for p in report_periods:
+                if p not in seen:
+                    seen.add(p)
+                    unique_periods.append(p)
+
+            gf_data = None
+            used_period = None
+            for gf_year, gf_report_type in unique_periods:
+                gf_data = GFQuoteProvider.get_financial_indicators(symbol, gf_year, gf_report_type)
+                if gf_data:
+                    used_period = (gf_year, gf_report_type)
+                    logger.debug(f"[广发-补充] {symbol} 命中报告期 year={gf_year}, report_type={gf_report_type}")
+                    break
+                # 节流，避免连续高频请求
+                import time as _time
+                _time.sleep(0.2)
+
+            if not gf_data:
+                logger.debug(f"[广发-补充] {symbol} 所有报告期均未返回数据，跳过补充")
+                return metrics
+
+            gf_metrics = self._parse_gf_financial_indicators(gf_data, 0.0)
+            if not gf_metrics:
+                return metrics
+
+            # 3) 只补充缺失或 N/A 的字段（不覆盖已有数据）
+            supplemented = 0
+            for k, v in gf_metrics.items():
+                if k in ('data_source', 'price', 'current_price_numeric', 'updated_at'):
+                    continue
+                # 当前 metrics 里该字段为空/N/A 或不存在 → 补充
+                current = metrics.get(k)
+                if current is None or current == "N/A" or current == "":
+                    if v is not None and v != "N/A" and v != "":
+                        metrics[k] = v
+                        supplemented += 1
+
+            if supplemented > 0:
+                # 标注实际命中的报告期（便于追溯）
+                if used_period:
+                    used_y, used_rt = used_period
+                    rt_name = {1: '一季报', 6: '中报', 9: '三季报', 12: '年报'}.get(used_rt, '?')
+                    metrics['supplementary_source'] = f'GF-Skills compare_indicator_post ({used_y} {rt_name})'
+                else:
+                    metrics['supplementary_source'] = 'GF-Skills compare_indicator_post'
+                logger.info(
+                    f"✅ [广发-补充] {symbol} 补充 {supplemented} 个缺失字段 "
+                    f"(报告期: {used_period}), "
+                    f"字段: {[k for k in gf_metrics if k in metrics and metrics[k] != 'N/A' and k not in ('data_source','price','updated_at','supplementary_source')][:8]}..."
+                )
+        except Exception as e:
+            logger.warning(f"⚠️ [广发-补充] {symbol} 补充失败: {e}")
+
+        return metrics
 
     def _parse_mongodb_financial_data(self, financial_data: dict, price_value: float) -> dict:
         """解析 MongoDB 标准化的财务数据为指标"""
@@ -1036,13 +2171,104 @@ class OptimizedChinaDataProvider:
             else:
                 metrics["net_margin"] = "N/A"
 
-            # 计算 PE/PB - 优先使用实时计算，降级到静态数据
+            # 计算 PE/PB - 降级链（按数据准确性从高到低）
             # 同时获取 PE 和 PE_TTM 两个指标
             pe_value = None
             pe_ttm_value = None
             pb_value = None
             is_loss_stock = False  # 🔥 标记是否为亏损股
+            # 修复：_parse_mongodb_financial_data 没有 symbol 参数，从 financial_data 取
+            code6 = (
+                financial_data.get("code")
+                or financial_data.get("symbol", "").replace(".SZ", "").replace(".SH", "")
+            ).zfill(6) if (
+                financial_data.get("code") or financial_data.get("symbol")
+            ) else ""
 
+            # 🔥 第 1 层：stock_basic_info 静态（Tushare daily_basic 官方静态）— 最准
+            pe_static = latest_indicators.get('pe')
+            pe_ttm_static = latest_indicators.get('pe_ttm')
+            pb_static = latest_indicators.get('pb')
+            if pe_ttm_static is not None and pe_ttm_static > 0 and str(pe_ttm_static) != 'nan' and pe_ttm_static != '--':
+                pe_ttm_value = float(pe_ttm_static)
+                metrics["pe_ttm"] = f"{pe_ttm_value:.2f}倍"
+                logger.info(f"✅ [PE_TTM-第1层成功] 来自 stock_basic_info: {pe_ttm_value}倍")
+            if pe_static is not None and pe_static > 0 and str(pe_static) != 'nan' and pe_static != '--':
+                pe_value = float(pe_static)
+                metrics["pe"] = f"{pe_value:.2f}倍"
+                logger.info(f"✅ [PE-第1层成功] 来自 stock_basic_info: {pe_value}倍")
+            if pb_static is not None and pb_static > 0 and str(pb_static) != 'nan' and pb_static != '--':
+                pb_value = float(pb_static)
+                metrics["pb"] = f"{pb_value:.2f}倍"
+                logger.info(f"✅ [PB-第1层成功] 来自 stock_basic_info: {pb_value}倍")
+
+            # 🔥 第 2 层：BaoStock（独立数据源、含 PE/PB）
+            if not metrics.get("pe") or not metrics.get("pb"):
+                try:
+                    baostock_metrics = self._get_baostock_pe_pb(code6)
+                    if baostock_metrics:
+                        if not metrics.get("pe") and baostock_metrics.get("pe"):
+                            pe_value = baostock_metrics["pe"]
+                            metrics["pe"] = f"{pe_value:.2f}倍"
+                            logger.info(f"✅ [PE-第2层成功] 来自 BaoStock: {pe_value}倍")
+                        if not metrics.get("pe_ttm") and baostock_metrics.get("pe_ttm"):
+                            pe_ttm_value = baostock_metrics["pe_ttm"]
+                            metrics["pe_ttm"] = f"{pe_ttm_value:.2f}倍"
+                            logger.info(f"✅ [PE_TTM-第2层成功] 来自 BaoStock: {pe_ttm_value}倍")
+                        if not metrics.get("pb") and baostock_metrics.get("pb"):
+                            pb_value = baostock_metrics["pb"]
+                            metrics["pb"] = f"{pb_value:.2f}倍"
+                            logger.info(f"✅ [PB-第2层成功] 来自 BaoStock: {pb_value}倍")
+                except Exception as e:
+                    logger.warning(f"⚠️ [BaoStock-第2层异常] {e}")
+
+            # 🔥 第 3 层：腾讯 qt.gtimg（轻量级、含 PE_TTM/PB）
+            if not metrics.get("pe_ttm") or not metrics.get("pb"):
+                try:
+                    from tradingagents.dataflows.providers.china.eastmoney_quote import TencentQuoteProvider
+                    tx_quote = TencentQuoteProvider.get_market_value(code6)
+                    if tx_quote:
+                        if not metrics.get("pe_ttm") and tx_quote.get("pe_ttm"):
+                            pe_ttm_value = tx_quote["pe_ttm"]
+                            metrics["pe_ttm"] = f"{pe_ttm_value:.2f}倍"
+                            logger.info(f"✅ [PE_TTM-第3层成功] 来自 Tencent: {pe_ttm_value}倍")
+                        if not metrics.get("pb") and tx_quote.get("pb"):
+                            pb_value = tx_quote["pb"]
+                            metrics["pb"] = f"{pb_value:.2f}倍"
+                            logger.info(f"✅ [PB-第3层成功] 来自 Tencent: {pb_value}倍")
+                except Exception as e:
+                    logger.warning(f"⚠️ [Tencent-第3层异常] {e}")
+
+            # 🔥 第 4 层：东财 push2（可能被风控、含动态 PE/PB）
+            if not metrics.get("pe") or not metrics.get("pb"):
+                try:
+                    from tradingagents.dataflows.providers.china.eastmoney_quote import EastMoneyQuoteProvider
+                    em_quote = EastMoneyQuoteProvider.get_market_value(code6)
+                    if em_quote:
+                        if not metrics.get("pe") and em_quote.get("pe_dynamic"):
+                            pe_value = em_quote["pe_dynamic"]
+                            metrics["pe"] = f"{pe_value:.2f}倍"
+                            logger.info(f"✅ [PE-第4层成功] 来自 EastMoney: {pe_value}倍")
+                        if not metrics.get("pb") and em_quote.get("pb"):
+                            pb_value = em_quote["pb"]
+                            metrics["pb"] = f"{pb_value:.2f}倍"
+                            logger.info(f"✅ [PB-第4层成功] 来自 EastMoney: {pb_value}倍")
+                except Exception as e:
+                    logger.warning(f"⚠️ [EastMoney-第4层异常] {e}")
+
+            # 如果前 4 层都拿到了 PE/PB，提前返回（避免被后续降级逻辑重写）
+            if metrics.get("pe") and metrics.get("pe_ttm") and metrics.get("pb"):
+                logger.info(f"✅ [PE/PB] 前 4 层完整命中，跳过 MongoDB 动态计算和后续降级")
+                return metrics
+            elif metrics.get("pe") and metrics.get("pe_ttm") and not metrics.get("pb"):
+                logger.info(f"⚠️ [PE/PB] PE/PE_TTM 已拿到，PB 缺失，继续 MongoDB 动态补 PB")
+            elif not metrics.get("pe") and not metrics.get("pe_ttm") and metrics.get("pb"):
+                logger.info(f"⚠️ [PE/PB] PB 已拿到，PE 缺失，继续 MongoDB 动态补 PE")
+            else:
+                logger.info(f"⚠️ [PE/PB] 前 4 层不完整，降级到 MongoDB 动态计算")
+
+            # 🔥 第 5 层（兜底）：MongoDB 动态计算（实时股价 × TTM 净利润）
+            # 注意：依赖 TTM 季度数据，对亏损股/重组股不可靠，仅作为最后兜底
             try:
                 # 优先使用实时计算
                 from tradingagents.dataflows.realtime_metrics import get_pe_pb_with_fallback
@@ -1052,7 +2278,7 @@ class OptimizedChinaDataProvider:
                 if db_manager.is_mongodb_available():
                     client = db_manager.get_mongodb_client()
                     # 从symbol中提取股票代码
-                    stock_code = latest_indicators.get('code') or latest_indicators.get('symbol', '').replace('.SZ', '').replace('.SH', '')
+                    stock_code = code6 or latest_indicators.get('code') or latest_indicators.get('symbol', '').replace('.SZ', '').replace('.SH', '')
 
                     logger.info(f"📊 [PE计算] 开始计算股票 {stock_code} 的PE/PB")
 
@@ -1145,8 +2371,36 @@ class OptimizedChinaDataProvider:
                         metrics["total_mv"] = f"{total_mv_yi:.2f}亿元"
                         logger.info(f"✅ [总市值-第3层成功] 总市值={total_mv_yi:.2f}亿元 (从money_cap转换)")
                     else:
-                        metrics["total_mv"] = "N/A"
-                        logger.warning(f"⚠️ [总市值-全部失败] 无可用总市值数据")
+                        # 🔥 第 4 层：腾讯 qt.gtimg 兜底（轻量级、稳定、含市值/PE/PB）
+                        try:
+                            from tradingagents.dataflows.providers.china.eastmoney_quote import TencentQuoteProvider
+                            tx_quote = TencentQuoteProvider.get_market_value(symbol)
+                            if tx_quote and tx_quote.get("total_mv", 0) > 0:
+                                metrics["total_mv"] = f"{tx_quote['total_mv']:.2f}亿元 (实时)"
+                                if tx_quote.get("pe_ttm"):
+                                    metrics["pe_ttm_fallback"] = f"{tx_quote['pe_ttm']:.2f}倍"
+                                if tx_quote.get("pb"):
+                                    metrics["pb_fallback"] = f"{tx_quote['pb']:.2f}倍"
+                                if tx_quote.get("price"):
+                                    metrics["price_fallback"] = f"{tx_quote['price']:.2f}元"
+                                logger.info(f"✅ [总市值-第4层成功] 来源=Tencent qt.gtimg: {tx_quote['total_mv']:.2f}亿元")
+                            else:
+                                # 🔥 第 5 层：东财 push2 兜底（可能被风控）
+                                from tradingagents.dataflows.providers.china.eastmoney_quote import EastMoneyQuoteProvider
+                                em_quote = EastMoneyQuoteProvider.get_market_value(symbol)
+                                if em_quote and em_quote.get("total_mv", 0) > 0:
+                                    metrics["total_mv"] = f"{em_quote['total_mv']:.2f}亿元 (实时)"
+                                    if em_quote.get("pb"):
+                                        metrics["pb_fallback"] = f"{em_quote['pb']:.2f}倍"
+                                    if em_quote.get("total_share"):
+                                        metrics["total_share"] = f"{em_quote['total_share']:.2f}亿股"
+                                    logger.info(f"✅ [总市值-第5层成功] 来源=EastMoney push2: {em_quote['total_mv']:.2f}亿元")
+                                else:
+                                    metrics["total_mv"] = "N/A"
+                                    logger.warning(f"⚠️ [总市值-全部失败] 腾讯/东财兜底均失败")
+                        except Exception as e:
+                            metrics["total_mv"] = "N/A"
+                            logger.warning(f"⚠️ [总市值-兜底异常] {e}")
 
             # 如果实时计算失败，尝试传统计算方式
             if pe_value is None:
@@ -1310,12 +2564,15 @@ class OptimizedChinaDataProvider:
 
             if revenue_for_ps and revenue_for_ps > 0:
                 try:
-                    # 使用市值/营业收入计算PS
-                    money_cap = latest_indicators.get('money_cap')
-                    if money_cap and money_cap > 0:
-                        ps_calculated = money_cap / revenue_for_ps
+                    # 🔥 修复：money_cap 是"货币资金"不是"总市值"，PS = 总市值 / 营业收入
+                    # total_mv 单位是"亿元"，revenue 单位是"万元"，统一转为"元"
+                    total_mv_yi = latest_indicators.get('total_mv')
+                    if total_mv_yi and total_mv_yi > 0:
+                        total_mv_yuan = total_mv_yi * 1e8       # 亿元 → 元
+                        revenue_yuan = revenue_for_ps * 1e4      # 万元 → 元
+                        ps_calculated = total_mv_yuan / revenue_yuan
                         metrics["ps"] = f"{ps_calculated:.2f}倍"
-                        logger.debug(f"✅ 计算PS({revenue_type}): 市值{money_cap}万元 / 营业收入{revenue_for_ps}万元 = {metrics['ps']}")
+                        logger.debug(f"✅ 计算PS({revenue_type}): 总市值{total_mv_yi}亿元 / 营业收入{revenue_for_ps}万元 = {metrics['ps']}")
                     else:
                         metrics["ps"] = "N/A"
                 except (ValueError, TypeError, ZeroDivisionError):
@@ -1342,8 +2599,15 @@ class OptimizedChinaDataProvider:
             logger.error(f"❌ MongoDB财务数据解析失败: {e}", exc_info=True)
             return None
 
-    def _parse_akshare_financial_data(self, financial_data: dict, stock_info: dict, price_value: float) -> dict:
-        """解析AKShare财务数据为指标"""
+    def _parse_akshare_financial_data(self, financial_data: dict, stock_info: dict, price_value: float, baostock_metrics: dict = None) -> dict:
+        """解析AKShare财务数据为指标
+        
+        Args:
+            financial_data: AKShare财务数据字典
+            stock_info: 股票信息字典
+            price_value: 当前股价
+            baostock_metrics: 可选的BaoStock PE/PB数据，用于数据融合
+        """
         try:
             # 获取最新的财务数据
             balance_sheet = financial_data.get('balance_sheet', [])
@@ -1394,6 +2658,34 @@ class OptimizedChinaDataProvider:
             pe_value = None
             pe_ttm_value = None
             pb_value = None
+
+            # 🔥 如果传入了BaoStock数据，优先使用它
+            if baostock_metrics:
+                logger.info(f"✅ [PE/PB融合] 使用BaoStock数据源")
+                pe_str = baostock_metrics.get('pe', '')
+                pe_ttm_str = baostock_metrics.get('pe_ttm', '')
+                pb_str = baostock_metrics.get('pb', '')
+                
+                if '倍' in pe_str:
+                    pe_value = float(pe_str.replace('倍', '').strip())
+                    metrics["pe"] = f"{pe_value:.1f}倍 (BaoStock)"
+                    logger.info(f"✅ [BaoStock-PE] PE={pe_value:.1f}倍")
+                
+                if '倍' in pe_ttm_str:
+                    pe_ttm_value = float(pe_ttm_str.replace('倍', '').strip())
+                    metrics["pe_ttm"] = f"{pe_ttm_value:.1f}倍 (BaoStock)"
+                    logger.info(f"✅ [BaoStock-PE_TTM] PE_TTM={pe_ttm_value:.1f}倍")
+                
+                if '倍' in pb_str:
+                    pb_value = float(pb_str.replace('倍', '').strip())
+                    metrics["pb"] = f"{pb_value:.2f}倍 (BaoStock)"
+                    logger.info(f"✅ [BaoStock-PB] PB={pb_value:.2f}倍")
+                
+                # 更新price_value
+                if baostock_metrics.get('current_price_numeric'):
+                    price_value = baostock_metrics['current_price_numeric']
+                    metrics['price'] = f"¥{price_value:.2f}"
+                    logger.info(f"✅ [BaoStock-股价] 股价={price_value:.2f}元")
 
             try:
                 # 获取股票代码
@@ -1447,6 +2739,41 @@ class OptimizedChinaDataProvider:
                             logger.warning(f"⚠️ [AKShare-PE计算-第1层失败] 实时计算返回空结果，将尝试降级计算")
             except Exception as e:
                 logger.warning(f"⚠️ [AKShare-PE计算-第1层异常] 实时计算失败: {e}，将尝试降级计算")
+            
+            # 🔥 如果MongoDB的实时计算失败，尝试从BaoStock获取PE/PB（新增降级方案）
+            if pe_value is None or pb_value is None:
+                logger.info(f"🔄 [AKShare-PE计算-降级方案] 尝试从BaoStock获取PE/PB")
+                try:
+                    baostock_metrics = self._get_baostock_pe_pb(stock_code)
+                    if baostock_metrics:
+                        # 使用BaoStock的数据填充PE/PB
+                        if pe_value is None:
+                            pe_str = baostock_metrics.get('pe', '')
+                            if '倍' in pe_str:
+                                pe_value = float(pe_str.replace('倍', ''))
+                                metrics["pe"] = f"{pe_value:.1f}倍 (BaoStock)"
+                                logger.info(f"✅ [AKShare-BaoStock降级] PE={pe_value:.1f}倍")
+                        
+                        if pe_ttm_value is None:
+                            pe_ttm_str = baostock_metrics.get('pe_ttm', '')
+                            if '倍' in pe_ttm_str:
+                                pe_ttm_value = float(pe_ttm_str.replace('倍', ''))
+                                metrics["pe_ttm"] = f"{pe_ttm_value:.1f}倍 (BaoStock)"
+                                logger.info(f"✅ [AKShare-BaoStock降级] PE_TTM={pe_ttm_value:.1f}倍")
+                        
+                        if pb_value is None:
+                            pb_str = baostock_metrics.get('pb', '')
+                            if '倍' in pb_str:
+                                pb_value = float(pb_str.replace('倍', ''))
+                                metrics["pb"] = f"{pb_value:.2f}倍 (BaoStock)"
+                                logger.info(f"✅ [AKShare-BaoStock降级] PB={pb_value:.2f}倍")
+                        
+                        # 如果有股价信息，也更新总市值
+                        if baostock_metrics.get('current_price_numeric') and metrics.get('total_mv') == 'N/A':
+                            # 需要总股本来计算市值，这里暂时跳过
+                            pass
+                except Exception as e:
+                    logger.warning(f"⚠️ [AKShare-BaoStock降级失败] {e}")
 
             # 获取ROE - 直接从指标中获取
             roe_value = indicators_dict.get('净资产收益率(ROE)')
@@ -1984,7 +3311,10 @@ class OptimizedChinaDataProvider:
 
     def _analyze_valuation(self, financial_estimates: dict) -> str:
         """分析估值水平"""
-        valuation_score = financial_estimates['valuation_score']
+        try:
+            valuation_score = float(financial_estimates.get('valuation_score', 5))
+        except (ValueError, TypeError):
+            valuation_score = 5.0
 
         if valuation_score >= 8:
             return "当前估值水平较为合理，具有一定的投资价值。市盈率和市净率相对较低，安全边际较高。"
@@ -2004,7 +3334,7 @@ class OptimizedChinaDataProvider:
 
     def _analyze_risks(self, symbol: str, financial_estimates: dict, industry_info: dict) -> str:
         """分析投资风险"""
-        risk_level = financial_estimates['risk_level']
+        risk_level = financial_estimates.get('risk_level', '中等')
 
         risk_analysis = f"**风险等级**: {risk_level}\n\n"
 
@@ -2031,9 +3361,21 @@ class OptimizedChinaDataProvider:
 
     def _generate_investment_advice(self, financial_estimates: dict, industry_info: dict) -> str:
         """生成投资建议"""
-        fundamental_score = financial_estimates['fundamental_score']
-        valuation_score = financial_estimates['valuation_score']
-        growth_score = financial_estimates['growth_score']
+        # 处理可能的字符串类型评分
+        try:
+            fundamental_score = float(financial_estimates.get('fundamental_score', 5))
+        except (ValueError, TypeError):
+            fundamental_score = 5.0
+        
+        try:
+            valuation_score = float(financial_estimates.get('valuation_score', 5))
+        except (ValueError, TypeError):
+            valuation_score = 5.0
+        
+        try:
+            growth_score = float(financial_estimates.get('growth_score', 5))
+        except (ValueError, TypeError):
+            growth_score = 5.0
 
         total_score = (fundamental_score + valuation_score + growth_score) / 3
 

@@ -1,6 +1,7 @@
 import functools
 import time
 import json
+import re
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
@@ -63,11 +64,17 @@ def create_trader(llm, memory):
 ⚠️ 重要提醒：当前分析的股票代码是 {company_name}，请使用正确的货币单位：{currency}（{currency_symbol}）
 {instrument_context}
 
-🔴 严格要求：
+🔴 严格要求（请逐条遵守）：
 - 股票代码 {company_name} 的公司名称必须严格按照基本面报告中的真实数据
 - 绝对禁止使用错误的公司名称或混淆不同的股票
 - 所有分析必须基于提供的真实数据，不允许假设或编造
 - **必须提供具体的目标价位，不允许设置为null或空值**
+- 【关键】禁止以任何形式模拟工具调用、函数调用或数据获取。您已经拥有了完整的市场报告、基本面报告、情绪报告和新闻报告，不应再调用任何外部工具。
+- 【关键】不要试图从外部获取"最新数据"——您已有的数据就是分析的基础
+- 【关键】不要虚构盘面数据（股价、成交量、技术指标等）——所有价格和技术指标已在市场报告和基本面报告中提供
+- 【关键】不要更改分析日期——当前日期就是报告中的日期，不要假装是"其他时间点"来重新获取数据
+- 【关键】绝对不要以"当前时间是XXXX年X月X日，我需要核实数据"开头——这会触发工具调用幻觉
+- 直接基于已有报告中的数据输出分析，不要模拟任何数据加载过程
 
 请在您的分析中包含以下关键信息：
 1. **投资建议**: 明确的买入/持有/卖出决策
@@ -81,7 +88,7 @@ def create_trader(llm, memory):
 
 🎯 目标价位计算指导：
 - 基于基本面分析中的估值数据（P/E、P/B、DCF等）
-- 参考技术分析的支撑位和阻力位
+- 参考技术分析的支撑位和阻力位（已在市场报告中提供）
 - 考虑行业平均估值水平
 - 结合市场情绪和新闻影响
 - 即使市场情绪过热，也要基于合理估值给出目标价
@@ -92,6 +99,7 @@ def create_trader(llm, memory):
 - 目标价位必须与当前股价的货币单位保持一致
 - 必须使用基本面报告中提供的正确公司名称
 - **绝对不允许说"无法确定目标价"或"需要更多信息"**
+- **不要尝试调用任何函数或工具**，直接用文字输出完整分析
 
 请用中文撰写分析内容，并始终以'最终交易建议: **买入/持有/卖出**'结束您的回应以确认您的建议。
 
@@ -105,6 +113,27 @@ def create_trader(llm, memory):
 
         result = llm.invoke(messages)
 
+        # 安全后处理：清除LLM可能生成的工具调用标记
+        raw_content = result.content
+        # 清除 <tool_calls> 到 </tool_calls> 之间的内容（包括标签本身）
+        cleaned = re.sub(r'<tool_calls>.*?</tool_calls>', '', raw_content, flags=re.DOTALL)
+        # 清除 <｜｜DSML｜｜invoke> 块
+        cleaned = re.sub(r'<invoke[^>]*>.*?</invoke>', '', cleaned, flags=re.DOTALL)
+        # 清除 <｜｜DSML｜｜parameter> 块
+        cleaned = re.sub(r'<parameter[^>]*>.*?</parameter>', '', cleaned, flags=re.DOTALL)
+        # 清除遗留的 XML 标签
+        cleaned = re.sub(r'</?reasoning>', '', cleaned, flags=re.DOTALL)
+        # 清理多余空白行
+        cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+        cleaned = cleaned.strip()
+
+        # 如果清理后有内容，使用清理后的；否则回退到原始内容
+        if cleaned:
+            result.content = cleaned
+        else:
+            result.content = raw_content
+
+        logger.debug(f"💰 [DEBUG] 后处理: 原始长度={len(raw_content)}, 清理后长度={len(cleaned)}")
         logger.debug(f"💰 [DEBUG] LLM调用完成")
         logger.debug(f"💰 [DEBUG] 交易员回复长度: {len(result.content)}")
         logger.debug(f"💰 [DEBUG] 交易员回复前500字符: {result.content[:500]}...")

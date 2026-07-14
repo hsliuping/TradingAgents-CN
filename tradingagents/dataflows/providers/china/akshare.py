@@ -1230,20 +1230,30 @@ class AKShareProvider(BaseStockDataProvider):
                             retry_delay *= 2  # 指数退避
                         else:
                             self.logger.error(f"❌ {symbol} 获取新闻失败(JSON解析错误): {e}")
-                            return None
+                            # ⚠️ 尝试直接调用东方财富 API 作为最后手段
+                            self.logger.warning(f"⚠️ {symbol} AKShare新闻获取失败，尝试直接调用东方财富 API...")
+                            break  # 退出重试，走直接API调用
                     except Exception as e:
                         if attempt < max_retries - 1:
                             self.logger.warning(f"⚠️ {symbol} 第{attempt+1}次获取新闻失败: {e}，{retry_delay}秒后重试...")
                             time.sleep(retry_delay)
                             retry_delay *= 2
                         else:
-                            raise
+                            self.logger.error(f"❌ {symbol} AKShare新闻获取失败，重试用完: {e}")
+                            # ⚠️ 最后一次重试也失败了，不抛出异常，而是走直接API调用
+                            break
 
                 if news_df is not None and not news_df.empty:
                     self.logger.info(f"✅ {symbol} AKShare新闻获取成功: {len(news_df)} 条")
                     return news_df.head(limit) if limit else news_df
                 else:
-                    self.logger.warning(f"⚠️ {symbol} 未获取到AKShare新闻数据")
+                    # ⚠️ AKShare失败后，尝试直接调用东方财富 API（绕过akshare的PyArrow兼容问题）
+                    self.logger.warning(f"⚠️ {symbol} AKShare新闻获取失败或为空，尝试直接调用东方财富 API...")
+                    direct_df = self._get_stock_news_direct(symbol=symbol_6, limit=limit)
+                    if direct_df is not None and not direct_df.empty:
+                        self.logger.info(f"✅ {symbol} 直接调用东方财富 API 获取新闻成功: {len(direct_df)} 条")
+                        return direct_df
+                    self.logger.error(f"❌ {symbol} 所有新闻获取方式均失败")
                     return None
             else:
                 # 获取市场新闻
