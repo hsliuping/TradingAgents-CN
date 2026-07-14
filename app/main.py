@@ -392,6 +392,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ 能力索引同步失败: {e}", exc_info=True)
 
+    # 启动期同步系统默认提示词模板：将代码中的 fallback 提示词写入数据库统一管理
+    try:
+        from app.services.system_prompt_seed_service import ensure_system_prompt_templates
+        await ensure_system_prompt_templates()
+        logger.info("✅ 系统默认提示词模板同步完成")
+    except Exception as e:
+        logger.error(f"❌ 系统默认提示词模板同步失败: {e}", exc_info=True)
+
     # Apply dynamic settings (log_level, enable_monitoring) from ConfigProvider
     try:
         from app.services.config_provider import provider as config_provider  # local import to avoid early DB init issues
@@ -1234,6 +1242,7 @@ from app.routers import skill_generation as skill_generation_router
 from app.routers import skill_gaps as skill_gaps_router
 from app.routers import skill_center as skill_center_router
 from app.routers import agent_workshop as agent_workshop_router
+from app.routers import workflow_generation as workflow_generation_router
 register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
 register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
 register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
@@ -1242,6 +1251,7 @@ register_router_with_log(app, skill_generation_router.router, "AI Skill 工坊�
 register_router_with_log(app, skill_gaps_router.router, "Skill 缺口路由 (skill-gaps)", tags=["skill-gaps"])
 register_router_with_log(app, skill_center_router.router, "Skill 中心聚合路由 (skill-center)", tags=["skill-center"])
 register_router_with_log(app, agent_workshop_router.router, "Agent 工坊路由 (agent-workshop)", tags=["agent-workshop"])
+register_router_with_log(app, workflow_generation_router.router, "AI 工作流创建路由 (workflow-generation)", tags=["workflow-generation"])
 
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router

@@ -40,6 +40,9 @@ EXPAND_PROMPT = """\
 - 工作流名称: {workflow_name}
 - 工作流描述: {workflow_description}
 
+## 原始提示词（参考基线）
+{original_prompt}
+
 ## 定制方向
 {reshaping_direction}
 
@@ -48,7 +51,13 @@ EXPAND_PROMPT = """\
 
 ## 输出要求
 
-请基于上述定制方向和关键分析维度，输出一个完整的提示词配置，包含以下 6 个字段：
+请基于原始提示词和上述定制方向，生成工作流专属提示词。要求：
+- 在原始提示词的基础上做增量修改，而非从零重写
+- 保留原始提示词中的工具使用约定、输出字段约定和核心约束
+- 根据定制方向调整分析重点和角色定位
+- 根据关键分析维度补充新的分析要求
+
+输出一个完整的提示词配置，包含以下 6 个字段：
 
 1. **system_prompt** — 系统提示词，定义 AI 角色和核心行为准则（200-500字）
 2. **user_prompt** — 用户提示词模板，使用 {{stock_symbol}} 等变量（可留空）
@@ -202,6 +211,9 @@ class PromptGenerator:
         else:
             focus_text = "（未指定，请根据角色需求自行规划）"
 
+        # 从数据库读取该 Agent 的系统默认提示词作为基线
+        original_prompt = await self._fetch_original_prompt(plan.agent_id)
+
         prompt = EXPAND_PROMPT.format(
             agent_id=plan.agent_id,
             original_role=plan.original_role,
@@ -210,6 +222,7 @@ class PromptGenerator:
             workflow_description=blueprint.description,
             reshaping_direction=plan.reshaping_direction or "根据新角色定位生成专属提示词",
             key_focus_areas=focus_text,
+            original_prompt=original_prompt,
         )
 
         messages = [
@@ -248,6 +261,43 @@ class PromptGenerator:
             "output_format": data.get("output_format", ""),
             "constraints": data.get("constraints", ""),
         }
+
+    async def _fetch_original_prompt(self, agent_id: str) -> str:
+        """从数据库读取该 Agent 的系统默认提示词作为基线"""
+        if self._db is None:
+            return "（无数据库连接，无法获取原始提示词）"
+        try:
+            agent_type = await self._resolve_agent_type(agent_id)
+            doc = await self._db.prompt_templates.find_one({
+                "agent_type": agent_type,
+                "agent_name": agent_id,
+                "is_system": True,
+                "workflow_id": None,
+                "status": "active",
+                "$or": [
+                    {"node_id": {"$exists": False}},
+                    {"node_id": None},
+                    {"node_id": ""},
+                ],
+            })
+            if doc and doc.get("content"):
+                content = doc["content"]
+                parts = []
+                if content.get("system_prompt"):
+                    parts.append(f"### system_prompt\n{content['system_prompt']}")
+                if content.get("tool_guidance"):
+                    parts.append(f"### tool_guidance\n{content['tool_guidance']}")
+                if content.get("analysis_requirements"):
+                    parts.append(f"### analysis_requirements\n{content['analysis_requirements']}")
+                if content.get("output_format"):
+                    parts.append(f"### output_format\n{content['output_format']}")
+                if content.get("constraints"):
+                    parts.append(f"### constraints\n{content['constraints']}")
+                return "\n\n".join(parts) if parts else "（数据库中未找到系统默认提示词）"
+            return "（数据库中未找到系统默认提示词）"
+        except Exception as e:
+            logger.warning(f"[PromptGenerator] 读取原始提示词失败: {e}")
+            return f"（读取失败: {e}）"
 
     async def _resolve_agent_type(self, agent_id: str) -> str:
         """根据 agent_id 确定 prompt_templates 中的 agent_type"""
