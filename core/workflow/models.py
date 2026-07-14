@@ -105,6 +105,47 @@ class WorkflowOutputConfig(BaseModel):
         use_enum_values = True
 
 
+# ==================== 输入参数定义 ====================
+
+class InputFieldType(str, Enum):
+    """输入参数控件类型"""
+    STRING = "string"          # 单行文本
+    TEXTAREA = "textarea"      # 多行文本
+    NUMBER = "number"          # 数字
+    BOOLEAN = "boolean"        # 开关
+    DATE = "date"              # 日期选择
+    SELECT = "select"          # 下拉选择
+    MULTISELECT = "multiselect"  # 多选
+
+
+class InputFieldConfig(BaseModel):
+    """单个输入参数定义"""
+    name: str                                # 参数名（传给后端的 key）
+    label: str = ""                          # 表单显示标签
+    type: InputFieldType = InputFieldType.STRING
+    required: bool = False
+    default: Optional[Any] = None            # 默认值
+    description: str = ""                    # 参数描述/提示
+    placeholder: str = ""                    # 输入框占位提示
+    options: Optional[List[Any]] = None      # 选项列表（select/multiselect 时使用）
+    option_labels: Optional[List[str]] = None  # 选项显示名（与 options 一一对应）
+    min: Optional[float] = None              # 数值最小值
+    max: Optional[float] = None              # 数值最大值
+    group: str = ""                          # 分组标签（如"基本参数"/"高级参数"）
+    order: int = 0                           # 排序
+
+    class Config:
+        use_enum_values = True
+
+
+class WorkflowInputConfig(BaseModel):
+    """工作流输入参数配置"""
+    fields: List[InputFieldConfig] = Field(default_factory=list)
+
+    class Config:
+        use_enum_values = True
+
+
 class WorkflowDefinition(BaseModel):
     """
     工作流定义
@@ -131,6 +172,11 @@ class WorkflowDefinition(BaseModel):
     # 产出物配置
     output_config: WorkflowOutputConfig = Field(
         default_factory=WorkflowOutputConfig
+    )
+
+    # 🆕 输入参数配置（定义工作流需要哪些输入参数，用于动态生成执行表单）
+    input_config: WorkflowInputConfig = Field(
+        default_factory=WorkflowInputConfig
     )
     
     # 标签

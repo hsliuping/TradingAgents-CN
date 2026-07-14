@@ -10,11 +10,7 @@ from typing import Any, Dict, Optional
 
 from .models import WorkflowDefinition
 from .templates import v2_stock_analysis_workflow as v2_stock_analysis_workflow_module
-from .templates.default_workflow import DEFAULT_WORKFLOW
-from .templates.simple_workflow import SIMPLE_WORKFLOW
-from .templates.trade_review_workflow import TRADE_REVIEW_WORKFLOW
 from .templates.trade_review_workflow_v2 import TRADE_REVIEW_WORKFLOW_V2
-from .templates.position_analysis_workflow import POSITION_ANALYSIS_WORKFLOW
 from .templates.position_analysis_workflow_v2 import POSITION_ANALYSIS_WORKFLOW_V2
 from .templates.v2_stock_analysis_workflow import V2_STOCK_ANALYSIS_WORKFLOW
 from .templates.v2_etf_analysis_workflow import V2_ETF_ANALYSIS_WORKFLOW
@@ -23,10 +19,6 @@ logger = logging.getLogger(__name__)
 
 # 系统默认工作流 ID
 SYSTEM_DEFAULT_WORKFLOW_ID = "v2_stock_analysis"
-SYSTEM_LEGACY_WORKFLOW_ID = "default_analysis"
-SYSTEM_SIMPLE_WORKFLOW_ID = "simple_analysis"
-SYSTEM_TRADE_REVIEW_WORKFLOW_ID = "trade_review"
-SYSTEM_POSITION_ANALYSIS_WORKFLOW_ID = "position_analysis"
 SYSTEM_TRADE_REVIEW_WORKFLOW_V2_ID = "trade_review_v2"
 SYSTEM_POSITION_ANALYSIS_WORKFLOW_V2_ID = "position_analysis_v2"
 SYSTEM_V2_STOCK_ANALYSIS_WORKFLOW_ID = "v2_stock_analysis"
@@ -40,13 +32,9 @@ WORKFLOW_TYPE_DEFAULTS = {
 }
 
 WORKFLOW_ID_TO_TYPE = {
-    SYSTEM_LEGACY_WORKFLOW_ID: "stock_analysis",
     SYSTEM_V2_STOCK_ANALYSIS_WORKFLOW_ID: "stock_analysis",
-    SYSTEM_SIMPLE_WORKFLOW_ID: "stock_analysis",
     SYSTEM_V2_ETF_ANALYSIS_WORKFLOW_ID: "etf_analysis",
-    SYSTEM_POSITION_ANALYSIS_WORKFLOW_ID: "position_analysis",
     SYSTEM_POSITION_ANALYSIS_WORKFLOW_V2_ID: "position_analysis",
-    SYSTEM_TRADE_REVIEW_WORKFLOW_ID: "trade_review",
     SYSTEM_TRADE_REVIEW_WORKFLOW_V2_ID: "trade_review",
 }
 
@@ -60,12 +48,8 @@ class DefaultWorkflowProvider:
     3. 获取当前活动工作流
     """
 
-    # 系统预置工作流
+    # 系统预置工作流（只保留 v2 版本）
     SYSTEM_WORKFLOWS = {
-        SYSTEM_LEGACY_WORKFLOW_ID: DEFAULT_WORKFLOW,
-        SYSTEM_SIMPLE_WORKFLOW_ID: SIMPLE_WORKFLOW,
-        SYSTEM_TRADE_REVIEW_WORKFLOW_ID: TRADE_REVIEW_WORKFLOW,
-        SYSTEM_POSITION_ANALYSIS_WORKFLOW_ID: POSITION_ANALYSIS_WORKFLOW,
         SYSTEM_TRADE_REVIEW_WORKFLOW_V2_ID: TRADE_REVIEW_WORKFLOW_V2,
         SYSTEM_POSITION_ANALYSIS_WORKFLOW_V2_ID: POSITION_ANALYSIS_WORKFLOW_V2,
         SYSTEM_V2_STOCK_ANALYSIS_WORKFLOW_ID: V2_STOCK_ANALYSIS_WORKFLOW,
@@ -108,8 +92,8 @@ class DefaultWorkflowProvider:
         return V2_STOCK_ANALYSIS_WORKFLOW
 
     def get_simple_workflow(self) -> WorkflowDefinition:
-        """获取简单工作流"""
-        return SIMPLE_WORKFLOW
+        """获取简单工作流（已移除，返回默认 v2 工作流）"""
+        return V2_STOCK_ANALYSIS_WORKFLOW
 
     def get_system_workflow(self, workflow_id: str) -> Optional[WorkflowDefinition]:
         """获取系统预置工作流"""
@@ -140,6 +124,8 @@ class DefaultWorkflowProvider:
             return mapped_type
 
         text = " ".join([str(wf_id), name, " ".join(map(str, tags))]).lower()
+        if "general" in text or "通用" in text:
+            return "general"
         if "etf" in text or "基金" in text:
             return "etf_analysis"
         if "position" in text or "持仓" in text:

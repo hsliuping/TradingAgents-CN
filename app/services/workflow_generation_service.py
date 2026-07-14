@@ -25,6 +25,9 @@ from core.workflow.generator import (
     WorkflowBlueprint,
     GenerationSessionStatus,
     ConversationRound,
+    GapAnalysisResult,
+    SkillCreationRequest,
+    AgentReshapingPlan,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,6 +61,7 @@ class WorkflowGenerationService:
         self._planner: Optional[WorkflowPlanner] = None
         self._prompt_gen: Optional[PromptGenerator] = None
         self._skill_orch = SkillOrchestrator(db)
+        self._capability_index = None  # 延迟初始化
 
     # ================================================================
     # 延迟初始化
@@ -79,10 +83,12 @@ class WorkflowGenerationService:
             if config:
                 # 覆盖 timeout：蓝图生成需要更长的推理时间
                 config.timeout = max(config.timeout, self._LLM_TIMEOUT)
+                # 覆盖 max_tokens：蓝图 JSON 输出可能较长，设置更大的值
+                config.max_tokens = max(config.max_tokens or 0, 8192)
                 self._llm_client = UnifiedLLMClient.from_config(config)
                 logger.info(
                     f"[WorkflowGen] LLM 客户端初始化: "
-                    f"provider={config.provider}, model={config.model}, timeout={config.timeout}s"
+                    f"provider={config.provider}, model={config.model}, timeout={config.timeout}s, max_tokens={config.max_tokens}"
                 )
                 return self._llm_client
         except Exception as e:
@@ -90,7 +96,7 @@ class WorkflowGenerationService:
 
         # 回退到 provider
         self._llm_client = UnifiedLLMClient.from_provider(
-            self._provider, model=self._model, timeout=self._LLM_TIMEOUT
+            self._provider, model=self._model, timeout=self._LLM_TIMEOUT, max_tokens=8192
         )
         return self._llm_client
 
@@ -109,6 +115,20 @@ class WorkflowGenerationService:
                 db=self._db, llm_client=client
             )
         return self._prompt_gen
+
+    async def _ensure_capability_index(self):
+        """确保 CapabilityIndexService 已初始化（延迟加载）"""
+        if self._capability_index is None:
+            from app.services.capability_index_service import CapabilityIndexService
+            try:
+                self._capability_index = CapabilityIndexService(self._db)
+                await self._capability_index.ensure_index()
+            except Exception as e:
+                logger.warning(
+                    "[WorkflowGen] CapabilityIndex 初始化失败，Agent 过滤降级为全部返回: %s", e
+                )
+                self._capability_index = None
+        return self._capability_index
 
     # ================================================================
     # 阶段 1-2：对话式需求沟通
@@ -133,11 +153,14 @@ class WorkflowGenerationService:
             status=GenerationSessionStatus.GATHERING,
         )
 
-        # 收集资源上下文
-        resource_context = (await self._collector.collect_all())["context_text"]
+        # 收集资源上下文 + 结构化 agents
+        resources = await self._collector.collect_all(user_query=description, capability_index=await self._ensure_capability_index())
+        resource_context = resources["context_text"]
+        available_agents = resources.get("agents", [])
 
         # 第一轮对话
         planner = await self._ensure_planner()
+        planner.set_available_agents(available_agents)
         session, ai_message = planner.chat(session, description, resource_context)
 
         # 持久化
@@ -166,11 +189,13 @@ class WorkflowGenerationService:
         ):
             raise ValueError(f"会话状态 {session.status.value} 不允许继续对话")
 
-        resource_context = (await self._collector.collect_all())["context_text"]
-        planner = await self._ensure_planner()
-        session, ai_message = planner.chat(session, user_message, resource_context)
+        resources = await self._collector.collect_all(user_query=user_message, capability_index=await self._ensure_capability_index())
+        resource_context = resources["context_text"]
+        available_agents = resources.get("agents", [])
 
-        await self._save_session(session)
+        planner = await self._ensure_planner()
+        planner.set_available_agents(available_agents)
+        session, ai_message = planner.chat(session, user_message, resource_context)
 
         return {
             "session_id": session.session_id,
@@ -205,8 +230,14 @@ class WorkflowGenerationService:
 
         # 3. 生成蓝图
         session.status = GenerationSessionStatus.PLANNING
-        resource_context = (await self._collector.collect_all())["context_text"]
+        # 用所有用户消息构建查询，用于 Agent 相关性过滤
+        user_query = " ".join(r.user_message for r in session.rounds if r.user_message)
+        resources = await self._collector.collect_all(user_query=user_query, capability_index=await self._ensure_capability_index())
+        resource_context = resources["context_text"]
+        available_agents = resources.get("agents", [])
+
         planner = await self._ensure_planner()
+        planner.set_available_agents(available_agents)
         session, blueprint = planner.generate_blueprint(session, resource_context)
 
         if not blueprint:
@@ -224,7 +255,10 @@ class WorkflowGenerationService:
         session.status = GenerationSessionStatus.COMPLETING
         await self._save_session(session)
 
-        # 4a. 提示词自动补全
+        # 4. Capability-based 缺口分析（为每个 Agent 搜索匹配工具）
+        await self._run_capability_gap_analysis(blueprint)
+
+        # 5a. 提示词自动补全
         prompt_gen = await self._ensure_prompt_gen()
         created_prompt_ids: List[str] = []
         try:
@@ -235,7 +269,7 @@ class WorkflowGenerationService:
         except Exception as e:
             logger.error(f"[WorkflowGen] 提示词生成异常: {e}", exc_info=True)
 
-        # 4b. Skill 自动创建
+        # 5b. Skill 自动创建
         skill_results: List[Dict[str, Any]] = []
         try:
             skill_results = await self._skill_orch.create_missing_skills(
@@ -248,7 +282,7 @@ class WorkflowGenerationService:
         except Exception as e:
             logger.error(f"[WorkflowGen] Skill 创建异常: {e}", exc_info=True)
 
-        # 4c. Skill 绑定（将新创建的 Skill 绑定到 Agent 级别）
+        # 5c. Skill 绑定（将新创建的 Skill 绑定到 Agent 级别）
         bindings_created = 0
         try:
             bindings_created = await self._skill_orch.bind_skills_to_agents(
@@ -257,7 +291,7 @@ class WorkflowGenerationService:
         except Exception as e:
             logger.error(f"[WorkflowGen] Skill 绑定异常: {e}", exc_info=True)
 
-        # 4d. 节点级工具绑定（将 agent_reshaping.additional_tools 绑定到对应节点）
+        # 5d. 节点级工具绑定（将 agent_reshaping.additional_tools 绑定到对应节点）
         try:
             node_bindings = await self._skill_orch.bind_additional_tools_to_nodes(
                 workflow_id=workflow_id, blueprint=blueprint, is_active=False
@@ -268,7 +302,7 @@ class WorkflowGenerationService:
         except Exception as e:
             logger.error(f"[WorkflowGen] 节点级工具绑定异常: {e}", exc_info=True)
 
-        # 5. 转换 Blueprint → WorkflowDefinition 并保存
+        # 6. 转换 Blueprint → WorkflowDefinition 并保存
         session.status = GenerationSessionStatus.CREATING
         await self._save_session(session)
 
@@ -301,12 +335,30 @@ class WorkflowGenerationService:
         session.creation_report = creation_report
         await self._save_session(session)
 
+        # 自动发布：将提示词、Skill、绑定、工作流从 draft 激活为 active
+        # 用户在对话阶段已确认方案，confirm_and_create 即为最终确认，
+        # 无需额外手动点击"发布"按钮
+        publish_result = {}
+        try:
+            publish_result = await self.publish(session_id)
+            logger.info(
+                f"[WorkflowGen] ✅ 自动发布完成: "
+                f"prompts={publish_result.get('published_prompts', 0)}, "
+                f"skills={publish_result.get('published_skills', 0)}, "
+                f"bindings={publish_result.get('published_bindings', 0)}, "
+                f"workflow={publish_result.get('workflow_published', False)}"
+            )
+        except Exception as e:
+            logger.error(f"[WorkflowGen] 自动发布失败（不影响工作流创建结果）: {e}", exc_info=True)
+
         return {
             "status": "completed",
             "session_id": session_id,
             "workflow_id": workflow_id,
             "blueprint_summary": blueprint.summary,
             "creation_report": creation_report,
+            "published": True,
+            "publish_result": publish_result,
         }
 
     # ================================================================
@@ -330,8 +382,12 @@ class WorkflowGenerationService:
             raise ValueError(f"会话状态 {session.status.value} 不允许优化")
 
         session.status = GenerationSessionStatus.OPTIMIZING
-        resource_context = (await self._collector.collect_all())["context_text"]
+        resources = await self._collector.collect_all(user_query=feedback, capability_index=await self._ensure_capability_index())
+        resource_context = resources["context_text"]
+        available_agents = resources.get("agents", [])
+
         planner = await self._ensure_planner()
+        planner.set_available_agents(available_agents)
         session, ai_message = planner.generate_optimization(
             session, feedback, resource_context
         )
@@ -366,8 +422,13 @@ class WorkflowGenerationService:
             raise ValueError("会话没有关联的工作流，无法优化")
 
         # 重新生成蓝图
-        resource_context = (await self._collector.collect_all())["context_text"]
+        user_query = " ".join(r.user_message for r in session.rounds if r.user_message)
+        resources = await self._collector.collect_all(user_query=user_query, capability_index=await self._ensure_capability_index())
+        resource_context = resources["context_text"]
+        available_agents = resources.get("agents", [])
+
         planner = await self._ensure_planner()
+        planner.set_available_agents(available_agents)
         session, blueprint = planner.generate_blueprint(session, resource_context)
 
         if not blueprint:
@@ -711,8 +772,168 @@ class WorkflowGenerationService:
         )
 
     # ================================================================
-    # 蓝图 → 工作流定义 转换
+    # Capability-based 缺口分析
     # ================================================================
+
+    async def _run_capability_gap_analysis(
+        self, blueprint: WorkflowBlueprint
+    ) -> None:
+        """
+        使用 CapabilityIndex 为蓝图中的每个 Agent 搜索匹配的工具和 Skill。
+
+        替代之前全量传给 LLM 的方式（300+ 工具太大），
+        改为为每个 Agent 精准搜索相关工具，填充 available_tools / available_agents / missing_skills。
+        """
+        try:
+            from app.services.capability_index_service import CapabilityIndexService
+        except ImportError:
+            logger.warning("[WorkflowGen] CapabilityIndexService 不可用，跳过工具匹配")
+            return
+
+        capability_index = CapabilityIndexService(self._db)
+        try:
+            await capability_index.ensure_index()
+        except Exception as e:
+            logger.warning(f"[WorkflowGen] CapabilityIndex 初始化失败: {e}, 跳过工具匹配")
+            return
+
+        if not blueprint.gap_analysis:
+            blueprint.gap_analysis = GapAnalysisResult()
+
+        gap = blueprint.gap_analysis
+
+        # 收集蓝图中的所有 Agent（去重）
+        seen_agent_ids: set = set()
+        for node in blueprint.nodes:
+            if node.agent_id:
+                seen_agent_ids.add(node.agent_id)
+        # 辩论节点可能有 participants
+        for node in blueprint.nodes:
+            if node.type == "debate" and node.config:
+                participants = node.config.get("participants", [])
+                for p in participants:
+                    if isinstance(p, dict) and p.get("agent_id"):
+                        seen_agent_ids.add(p["agent_id"])
+
+        if not seen_agent_ids:
+            logger.info("[WorkflowGen] 蓝图中无 Agent 节点，跳过工具匹配")
+            return
+
+        logger.info(f"[WorkflowGen] 为 {len(seen_agent_ids)} 个 Agent 搜索匹配工具")
+
+        available_tools: List[Dict[str, str]] = []
+        available_agents: List[Dict[str, str]] = []
+        tool_id_set: set = set()
+
+        # 每个 Agent 按其角色描述搜索工具
+        for agent_id in sorted(seen_agent_ids):
+            # 构建搜索查询：Agent 的角色描述
+            query_text = self._build_agent_tool_query(agent_id, blueprint)
+
+            try:
+                hits = await capability_index.search_capabilities(
+                    query=query_text or f"{agent_id} 分析工具",
+                    top_k=8,
+                    bindable_only=True,
+                    source_types=["builtin_tool", "skill", "external_skill"],
+                )
+            except Exception as e:
+                logger.warning(f"[WorkflowGen] 搜索 {agent_id} 工具失败: {e}")
+                continue
+
+            for hit in hits:
+                cap = hit.capability
+                if cap.capability_id in tool_id_set:
+                    continue
+                tool_id_set.add(cap.capability_id)
+                available_tools.append({
+                    "id": cap.capability_id,
+                    "name": cap.name or cap.label or cap.capability_id,
+                    "used_by_agent": agent_id,
+                })
+
+            available_agents.append({
+                "id": agent_id,
+                "name": agent_id,
+                "role_in_workflow": self._get_agent_role(agent_id, blueprint),
+            })
+
+            logger.info(
+                f"[WorkflowGen]   {agent_id}: 找到 {len(hits)} 个匹配工具"
+            )
+
+        gap.available_tools = available_tools
+        gap.available_agents = available_agents
+
+        # 分析缺口：检查 agent_reshaping 中的 additional_tools 是否需要新 Skill
+        for reshaping in gap.agent_reshaping:
+            for tool_name in reshaping.additional_tools:
+                if tool_name not in tool_id_set:
+                    existing = gap.missing_skills or []
+                    if not any(s.skill_name == tool_name for s in existing):
+                        gap.missing_skills.append(SkillCreationRequest(
+                            skill_name=tool_name,
+                            skill_description=f"为 {reshaping.new_role or reshaping.agent_id} 提供 {tool_name} 能力",
+                            target_agent_id=reshaping.agent_id,
+                            priority="optional",
+                        ))
+
+        # 更新分析摘要
+        if not gap.analysis_summary:
+            gap.analysis_summary = (
+                f"共 {len(seen_agent_ids)} 个 Agent，"
+                f"{len(gap.agent_reshaping)} 个需定制提示词，"
+                f"找到 {len(available_tools)} 个可用工具"
+                + (f"，{len(gap.missing_skills)} 个可选新 Skill" if gap.missing_skills else "")
+            )
+
+        # 更新蓝图创建进度
+        blueprint.creation_progress["skills_total"] = len(gap.missing_skills)
+        blueprint.creation_progress["prompts_total"] = len(gap.agent_reshaping)
+
+        logger.info(
+            f"[WorkflowGen] ✅ 工具匹配完成: {len(available_tools)} 个工具, "
+            f"{len(gap.missing_skills)} 个缺失 Skill"
+        )
+
+    def _build_agent_tool_query(
+        self, agent_id: str, blueprint: WorkflowBlueprint
+    ) -> str:
+        """为 Agent 构建工具搜索查询文本"""
+        parts = [agent_id.replace("_", " ")]
+
+        # 从 agent_reshaping 获取角色描述
+        if blueprint.gap_analysis:
+            for r in blueprint.gap_analysis.agent_reshaping:
+                if r.agent_id == agent_id:
+                    if r.new_role:
+                        parts.append(r.new_role)
+                    if r.reshaping_direction:
+                        parts.append(r.reshaping_direction)
+                    if r.key_focus_areas:
+                        parts.append(" ".join(r.key_focus_areas))
+                    break
+
+        # 从节点描述获取
+        for node in blueprint.nodes:
+            if node.agent_id == agent_id and node.description:
+                parts.append(node.description)
+                break
+
+        return " ".join(parts)[:500]
+
+    def _get_agent_role(
+        self, agent_id: str, blueprint: WorkflowBlueprint
+    ) -> str:
+        """获取 Agent 在工作流中的角色描述"""
+        if blueprint.gap_analysis:
+            for r in blueprint.gap_analysis.agent_reshaping:
+                if r.agent_id == agent_id:
+                    return r.new_role or r.original_role or ""
+        for node in blueprint.nodes:
+            if node.agent_id == agent_id:
+                return node.description or node.label or ""
+        return ""
 
     def _blueprint_to_workflow_dict(
         self, blueprint: WorkflowBlueprint, workflow_id: str,
@@ -760,6 +981,7 @@ class WorkflowGenerationService:
             "tags": tags,
             "is_template": False,
             "workflow_type": workflow_type or "stock_analysis",
+            "input_config": blueprint.input_config or {"fields": []},
             "status": "draft",  # 草稿状态，发布后才变为 active
         }
 

@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 
 # ==================== 枚举类型 ====================
@@ -125,10 +125,16 @@ class WorkflowBlueprint(BaseModel):
     description: str = ""
     tags: List[str] = Field(default_factory=list)
 
+    # 🛡️ 防幻觉：记录白名单校验中发现的非法 agent_id 及其建议替换（PrivateAttr，不参与序列化）
+    _invalid_agent_ids: Dict[str, str] = PrivateAttr(default_factory=dict)
+
     # 工作流结构
     nodes: List[PlannedNode] = Field(default_factory=list)
     edges: List[PlannedEdge] = Field(default_factory=list)
     config: Dict[str, Any] = Field(default_factory=dict)
+
+    # 🆕 输入参数定义（前端根据此字段动态生成执行表单）
+    input_config: Dict[str, Any] = Field(default_factory=lambda: {"fields": []})
 
     # AI 方案说明
     summary: str = ""                    # 方案概述
