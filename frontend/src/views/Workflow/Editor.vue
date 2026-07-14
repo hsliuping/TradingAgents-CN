@@ -827,7 +827,7 @@ async function saveWorkflowType() {
   ElMessage.success('流程类型已更新')
 }
 
-// 判断是否为单股分析流程（只有单股分析流程支持执行功能）
+// 判断工作流是否支持执行（调试）功能
 const isStockAnalysisWorkflow = (workflow: WorkflowDefinition): boolean => {
   const id = (workflow.id || '').toLowerCase()
   const name = (workflow.name || '').toLowerCase()
@@ -838,6 +838,11 @@ const isStockAnalysisWorkflow = (workflow: WorkflowDefinition): boolean => {
   }
   if (id.includes('trade_review') || name.includes('复盘') || name.includes('交易复盘')) {
     return false
+  }
+
+  // 🆕 general 类型工作流支持调试
+  if (workflow.workflow_type === 'general') {
+    return true
   }
 
   // 支持执行的工作流类型：

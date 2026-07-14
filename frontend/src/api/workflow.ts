@@ -45,6 +45,39 @@ export interface WorkflowDefinition {
   tags: string[]
   is_template: boolean
   workflow_type?: string
+  input_config?: WorkflowInputConfig
+  output_config?: any
+}
+
+/**
+ * 输入参数控件类型
+ */
+export type InputFieldType = 'string' | 'textarea' | 'number' | 'boolean' | 'date' | 'select' | 'multiselect'
+
+/**
+ * 单个输入参数定义
+ */
+export interface InputFieldConfig {
+  name: string                  // 参数名（传给后端的 key）
+  label: string                 // 表单显示标签
+  type: InputFieldType
+  required: boolean
+  default?: any
+  description?: string          // 参数描述/提示
+  placeholder?: string
+  options?: any[]               // 选项列表（select/multiselect 时使用）
+  option_labels?: string[]      // 选项显示名（与 options 一一对应）
+  min?: number
+  max?: number
+  group?: string                // 分组标签
+  order?: number
+}
+
+/**
+ * 工作流输入参数配置
+ */
+export interface WorkflowInputConfig {
+  fields: InputFieldConfig[]
 }
 
 export interface WorkflowSummary {

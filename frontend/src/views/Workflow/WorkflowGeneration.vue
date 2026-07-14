@@ -567,6 +567,10 @@ const handleConfirm = async () => {
     genSteps.value.forEach(s => s.status = 'done')
     genProgress.value = 100
     confirmResult.value = res
+    // 后端 confirm_and_create 已自动发布，同步前端状态
+    if (res?.published) {
+      published.value = true
+    }
 
     setTimeout(() => { step.value = 4 }, 600)
   } catch (e: any) {
