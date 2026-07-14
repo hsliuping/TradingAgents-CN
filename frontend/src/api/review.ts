@@ -178,6 +178,7 @@ export interface CreateTradeReviewRequest {
   code?: string
   source?: 'real' | 'paper'  // 数据源：用户持仓或模拟持仓
   trading_system_id?: string  // 关联的交易计划ID
+  workflow_id?: string  // 关联的工作流ID
   use_workflow?: boolean  // 是否使用工作流引擎（v2.0）
 }
 

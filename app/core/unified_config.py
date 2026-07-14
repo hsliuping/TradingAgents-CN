@@ -18,6 +18,37 @@ from app.models.config import (
 )
 
 
+# 🆕 .env 中数据源开关覆盖映射：env_key -> DataSourceType value
+_ENV_OVERRIDE_MAP = {
+    "ENABLE_BAOSTOCK": "baostock",
+    "ENABLE_TUSHARE": "tushare",
+}
+
+
+def _apply_env_overrides(data_sources: List) -> None:
+    """
+    将 .env 中的 ENABLE_* 开关应用到数据源配置。
+    .env 设置优先级高于数据库缓存配置。
+    """
+    try:
+        from app.core.config import settings as runtime_settings
+
+        for env_key, ds_type in _ENV_OVERRIDE_MAP.items():
+            env_val = getattr(runtime_settings, env_key, None)
+            if env_val is None:
+                continue  # .env 中未设置该 key，不覆盖
+
+            for ds in data_sources:
+                if ds.type == ds_type:
+                    old_enabled = ds.enabled
+                    ds.enabled = bool(env_val)
+                    if old_enabled != ds.enabled:
+                        print(f"🔧 [unified_config] .env 覆盖: {ds.name} enabled={ds.enabled} (原={old_enabled})")
+                    break
+    except Exception as e:
+        print(f"⚠️ [unified_config] .env 覆盖检查失败: {e}")
+
+
 @dataclass
 class ConfigPaths:
     """配置文件路径"""
@@ -300,6 +331,10 @@ class UnifiedConfigManager:
 
                 # 按优先级排序（数字越大优先级越高）
                 result.sort(key=lambda x: x.priority, reverse=True)
+
+                # 🆕 应用 .env 中的 enabled 覆盖（.env 设置的开关优先级最高）
+                _apply_env_overrides(result)
+
                 UnifiedConfigManager._ds_config_cache = result
                 UnifiedConfigManager._ds_config_cache_time = now
                 return result
@@ -371,6 +406,18 @@ class UnifiedConfigManager:
                     config_params=qmt_config_params,
                 )
                 data_sources.append(qmt_config)
+
+            # BaoStock
+            baostock_enabled = bool(getattr(runtime_settings, "ENABLE_BAOSTOCK", False))
+            baostock_config = DataSourceConfig(
+                name="BaoStock",
+                type=DataSourceType.BAOSTOCK,
+                endpoint="baostock://local",
+                enabled=baostock_enabled,
+                priority=0,
+                description="BaoStock 开源金融数据接口"
+            )
+            data_sources.append(baostock_config)
         except Exception:
             pass
 
@@ -408,6 +455,10 @@ class UnifiedConfigManager:
 
                 # 按优先级排序（数字越大优先级越高）
                 result.sort(key=lambda x: x.priority, reverse=True)
+
+                # 🆕 应用 .env 中的 enabled 覆盖
+                _apply_env_overrides(result)
+
                 return result
             else:
                 print("⚠️ [unified_config] 数据库中没有数据源配置，使用硬编码配置")
@@ -477,6 +528,18 @@ class UnifiedConfigManager:
                     config_params=qmt_config_params,
                 )
                 data_sources.append(qmt_config)
+
+            # BaoStock
+            baostock_enabled = bool(getattr(runtime_settings, "ENABLE_BAOSTOCK", False))
+            baostock_config = DataSourceConfig(
+                name="BaoStock",
+                type=DataSourceType.BAOSTOCK,
+                endpoint="baostock://local",
+                enabled=baostock_enabled,
+                priority=0,
+                description="BaoStock 开源金融数据接口"
+            )
+            data_sources.append(baostock_config)
         except Exception:
             pass
 

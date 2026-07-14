@@ -132,37 +132,40 @@ def _register_new_analysts():
     注册新的分析师到 AnalystRegistry
 
     这些分析师不需要工具调用循环，直接执行并返回结果
+    
+    🔥 v3.0: 统一使用 _v2 后缀的 BUILTIN_AGENTS 元数据注册，
+    不再使用 v1 DEPRECATED 的 agent_id
     """
     from ..analyst_registry import get_analyst_registry
     from ..config import BUILTIN_AGENTS
 
     registry = get_analyst_registry()
 
-    # 注册板块分析师
-    if "sector_analyst" in BUILTIN_AGENTS:
+    # 注册板块分析师 v2
+    if "sector_analyst_v2" in BUILTIN_AGENTS:
         registry.register(
-            "sector_analyst",
+            "sector_analyst_v2",
             agent_class=SectorAnalystAgent,
-            metadata=BUILTIN_AGENTS["sector_analyst"],
+            metadata=BUILTIN_AGENTS["sector_analyst_v2"],
             override=True
         )
 
-    # 注册大盘分析师
-    if "index_analyst" in BUILTIN_AGENTS:
+    # 注册大盘分析师 v2
+    if "index_analyst_v2" in BUILTIN_AGENTS:
         registry.register(
-            "index_analyst",
+            "index_analyst_v2",
             agent_class=IndexAnalystAgent,
-            metadata=BUILTIN_AGENTS["index_analyst"],
+            metadata=BUILTIN_AGENTS["index_analyst_v2"],
             override=True
         )
 
-    # 注册复盘相关智能体到 AnalystRegistry
+    # 注册复盘相关智能体 v2 到 AnalystRegistry
     review_agents = [
-        ("timing_analyst", TimingAnalystAgent),
-        ("position_analyst", PositionAnalystAgent),
-        ("emotion_analyst", EmotionAnalystAgent),
-        ("attribution_analyst", AttributionAnalystAgent),
-        ("review_manager", ReviewManagerAgent),
+        ("timing_analyst_v2", TimingAnalystAgent),
+        ("position_analyst_v2", PositionAnalystAgent),
+        ("emotion_analyst_v2", EmotionAnalystAgent),
+        ("attribution_analyst_v2", AttributionAnalystAgent),
+        ("review_manager_v2", ReviewManagerAgent),
     ]
 
     for agent_id, agent_class in review_agents:
@@ -174,12 +177,12 @@ def _register_new_analysts():
                 override=True
             )
 
-    # 注册持仓分析相关智能体到 AnalystRegistry
+    # 注册持仓分析相关智能体 v2 到 AnalystRegistry
     position_agents = [
-        ("pa_technical", TechnicalAnalystAgent),
-        ("pa_fundamental", FundamentalAnalystAgent),
-        ("pa_risk", RiskAssessorAgent),
-        ("pa_advisor", ActionAdvisorAgent),
+        ("pa_technical_v2", TechnicalAnalystAgent),
+        ("pa_fundamental_v2", FundamentalAnalystAgent),
+        ("pa_risk_v2", RiskAssessorAgent),
+        ("pa_advisor_v2", ActionAdvisorAgent),
     ]
 
     for agent_id, agent_class in position_agents:

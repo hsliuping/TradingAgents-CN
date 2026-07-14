@@ -2451,6 +2451,13 @@ Agent 信息：
         on_stream=on_stream,
     )
 
+    # 🔍 调试日志：查看 tool_results 的 keys 和 generate_confirmed_candidate_agent 的原始值
+    logger.info(
+        "[GenerateAgent][Debug] tool_results keys=%s gen_tool_raw=%s",
+        list(tool_results.keys()) if isinstance(tool_results, dict) else type(tool_results).__name__,
+        (tool_results.get("generate_confirmed_candidate_agent", "")[:500] if isinstance(tool_results, dict) else "N/A"),
+    )
+
     state["final_response"] = final_text
     state["tool_events"] = tool_events
     state["current_node"] = "generate_candidate_agent"
@@ -2459,6 +2466,16 @@ Agent 信息：
     # 提取生成结果
     gen_result = _extract_json_from_result(
         tool_results.get("generate_confirmed_candidate_agent", "{}")
+    )
+    # 🔍 调试日志：查看 gen_result 的实际结构和 blocked_code
+    logger.info(
+        "[GenerateAgent][Debug] gen_result type=%s status=%s stage=%s blocked_code=%s nested_blocked_code=%s keys=%s",
+        type(gen_result).__name__,
+        gen_result.get("status") if isinstance(gen_result, dict) else "N/A",
+        gen_result.get("stage") if isinstance(gen_result, dict) else "N/A",
+        gen_result.get("blocked_code") if isinstance(gen_result, dict) else "N/A",
+        (gen_result.get("result", {}).get("blocked_code") if isinstance(gen_result, dict) and isinstance(gen_result.get("result"), dict) else "N/A"),
+        list(gen_result.keys()) if isinstance(gen_result, dict) else "N/A",
     )
     if gen_result:
         state["generated_agent"] = gen_result

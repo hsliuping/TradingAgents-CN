@@ -27,6 +27,8 @@
       </el-tab-pane>
     </el-tabs>
 
+
+
     <!-- 筛选条件 -->
     <el-card shadow="never" class="filter-card">
       <el-form :inline="true" :model="filterForm" class="filter-form">
@@ -416,6 +418,7 @@ import { ElMessage, type TabPaneName } from 'element-plus'
 import { TrendCharts, Refresh, Search, RefreshRight, Goods, Wallet } from '@element-plus/icons-vue'
 import { reviewApi, type ReviewListItem, type TradingStatistics, type ReviewableStock, type ReviewType, type PeriodicReviewListItem } from '@/api/review'
 import { portfolioApi } from '@/api/portfolio'
+
 import ReviewHistoryTable from './components/ReviewHistoryTable.vue'
 import CaseLibraryTable from './components/CaseLibraryTable.vue'
 import ReviewableTradesTable from './components/ReviewableTradesTable.vue'
@@ -429,6 +432,8 @@ import SaveAsCaseDialog from './components/SaveAsCaseDialog.vue'
 // 复盘来源类型
 type ReviewSourceType = 'paper' | 'position'
 const reviewSource = ref<ReviewSourceType>('position')  // 默认显示持仓操作复盘
+
+
 
 // 筛选表单
 const filterForm = ref<{
@@ -1192,6 +1197,8 @@ const handlePositionCasesPageChange = (page: number) => {
   loadPositionCases()
 }
 
+
+
 // 初始化
 onMounted(async () => {
   // 根据默认的 reviewSource 加载对应的数据
@@ -1229,6 +1236,8 @@ onMounted(async () => {
       font-size: 14px;
     }
   }
+
+
 
   .filter-card {
     margin-bottom: 20px;

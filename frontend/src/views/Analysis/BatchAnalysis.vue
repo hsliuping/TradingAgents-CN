@@ -47,12 +47,28 @@
             </template>
 
             <div class="stock-input-section">
+              <!-- 市场类型选择 -->
+              <div style="margin-bottom: 16px;">
+                <el-select v-model="batchForm.market" size="default" style="width: 240px;">
+                  <el-option label="🇨🇳 A股市场" value="A股">
+                    <span>🇨🇳 A股市场</span>
+                    <span style="color: #909399; font-size: 12px; margin-left: 8px;">（6位数字）</span>
+                  </el-option>
+                  <el-option label="📈 ETF 基金" value="ETF">
+                    <span>📈 ETF 基金</span>
+                    <span style="color: #909399; font-size: 12px; margin-left: 8px;">（510050、159919 等）</span>
+                  </el-option>
+                </el-select>
+              </div>
+              
               <div class="input-area">
                 <el-input
                   v-model="stockInput"
                   type="textarea"
                   :rows="8"
-                  placeholder="请输入股票代码，每行一个&#10;支持格式：&#10;000001&#10;000002.SZ&#10;600036.SH&#10;AAPL&#10;TSLA"
+                  :placeholder="batchForm.market === 'ETF' 
+                    ? etfPlaceholder 
+                    : stockPlaceholder"
                   @input="parseStockCodes"
                   class="stock-textarea"
                 />
@@ -143,6 +159,29 @@
                   </el-select>
                 </el-form-item>
 
+                <!-- 流程选择 -->
+                <el-form-item v-if="workflowsSorted.length > 0" label="分析流程">
+                  <div style="display: flex; align-items: center; width: 100%;">
+                    <el-select
+                      :key="`workflow-select-${batchForm.market}`"
+                      v-model="selectedWorkflowId"
+                      size="small"
+                      style="flex: 1;"
+                      placeholder="选择分析流程"
+                    >
+                      <el-option
+                        v-for="workflow in workflowsSorted"
+                        :key="workflow.id"
+                        :label="`${workflow.name} v${workflow.version}`"
+                        :value="workflow.id"
+                      />
+                    </el-select>
+                    <el-tooltip content="选择不同的分析流程，系统会使用该流程对应的智能体和步骤进行批量分析" placement="top">
+                      <el-icon style="margin-left: 8px; color: #909399; cursor: help;"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </div>
+                </el-form-item>
+
                 <!-- 分析引擎选择 - 已隐藏，默认使用 v2.0 引擎 -->
                 <!-- 旧版引擎已移除，统一使用 v2.0 工作流引擎 -->
               </div>
@@ -153,10 +192,10 @@
                 <div class="analysts-selection">
                   <el-checkbox-group v-model="batchForm.analysts" class="analysts-group">
                     <div
-                      v-for="analyst in ANALYSTS"
-                      :key="analyst.id"
-                      class="analyst-option"
-                    >
+                    v-for="analyst in availableAnalysts"
+                    :key="analyst.id"
+                    class="analyst-option"
+                  >
                       <el-checkbox :label="analyst.name" class="analyst-checkbox">
                         <div class="analyst-info">
                           <span class="analyst-name">{{ analyst.name }}</span>
@@ -207,8 +246,8 @@
                 :analysis-depth="batchForm.depth"
               />
 
-              <!-- 分析选项 -->
-              <div class="config-section">
+              <!-- 分析选项 - 已隐藏，流程内置 -->
+              <!-- <div class="config-section">
                 <h4 class="config-title">⚙️ 分析选项</h4>
                 <div class="analysis-options">
                   <div class="option-item">
@@ -237,7 +276,7 @@
                     </div>
                   </div>
                 </div>
-              </div>
+              </div> -->
             </div>
           </el-card>
         </el-col>
@@ -289,15 +328,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Files, TrendCharts, Check, Close } from '@element-plus/icons-vue'
+import { Files, TrendCharts, Check, Close, InfoFilled } from '@element-plus/icons-vue'
 import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
 import { configApi } from '@/api/config'
+import { workflowApi, type WorkflowSummary } from '@/api/workflow'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ModelConfig from '@/components/ModelConfig.vue'
-import { getMarketByStockCode } from '@/utils/market'
 import { resolveModelSelection } from '@/utils/modelSelection'
 import { validateStockCode } from '@/utils/stockValidator'
 
@@ -317,12 +356,69 @@ const modelSettings = ref({
   deepAnalysisModel: 'qwen-max'
 })
 
+// 流程选择
+const workflows = ref<WorkflowSummary[]>([])
+const selectedWorkflowId = ref<string>('')
+
+// 输入框提示文本
+const stockPlaceholder = '请输入股票代码，每行一个\n支持格式：\n000001\n000002.SZ\n600036.SH'
+const etfPlaceholder = '请输入ETF代码，每行一个\n支持格式：\n510050\n510300.SH\n159919.SZ'
+
+const ETF_ANALYST_NAMES = ['ETF分析师', '市场分析师', '新闻分析师']
+
+const normalizeSelectedAnalystsForMarket = (market: string, analysts: string[]) => {
+  if (market === 'ETF') {
+    return [...ETF_ANALYST_NAMES]
+  }
+
+  const disallowedAnalysts = ['ETF分析师']
+  return analysts.filter(name => !disallowedAnalysts.includes(name))
+}
+
+// 根据市场类型过滤可用的分析师
+const availableAnalysts = computed(() => {
+  const isETF = batchForm.market === 'ETF'
+  const etfAnalystIds = ['etf', 'market', 'news']
+
+  return ANALYSTS.filter(analyst => {
+    if (isETF) return etfAnalystIds.includes(analyst.id)
+    if (analyst.id === 'etf') return false
+    return true
+  })
+})
+
+const parseVersion = (v: string): number[] => {
+  const parts = String(v || '0.0.0').split('.')
+  return parts.map(p => parseInt(p, 10) || 0)
+}
+
+const workflowsSorted = computed(() => {
+  const expectedType = batchForm.market === 'ETF' ? 'etf_analysis' : 'stock_analysis'
+  const arr = workflows.value.filter(
+    (w: WorkflowSummary) => w.workflow_type === expectedType
+  )
+  arr.sort((a, b) => {
+    const vA = a.version || ''
+    const vB = b.version || ''
+    const verA = parseVersion(vA)
+    const verB = parseVersion(vB)
+    for (let i = 0; i < Math.max(verA.length, verB.length); i++) {
+      const numA = verA[i] || 0
+      const numB = verB[i] || 0
+      if (numA !== numB) return numB - numA
+    }
+    return 0
+  })
+  return arr
+})
+
 // 可用的模型列表（从配置中获取）
 const availableModels = ref<any[]>([])
 
 const batchForm = reactive({
   title: '',
   description: '',
+  market: 'A股' as 'A股' | 'ETF',  // 市场类型
   depth: '3',  // 默认3级标准分析，将在 onMounted 中从用户偏好加载
   analysts: [...DEFAULT_ANALYSTS],  // 将在 onMounted 中从用户偏好加载
   includeSentiment: true,
@@ -330,6 +426,23 @@ const batchForm = reactive({
   language: 'zh-CN',
   engine: 'v2' as 'legacy' | 'v2'  // 默认使用 v2.0 引擎（推荐）
 })
+
+// 监听市场类型变化，自动切换到对应类型的默认流程
+watch(
+  () => batchForm.market,
+  (newMarket) => {
+    const expectedType = newMarket === 'ETF' ? 'etf_analysis' : 'stock_analysis'
+    const targetWorkflows = workflows.value.filter(w => w.workflow_type === expectedType)
+    
+    if (targetWorkflows.length > 0) {
+      const defaultWf = targetWorkflows.find(w => w.is_default)
+      selectedWorkflowId.value = defaultWf ? defaultWf.id : targetWorkflows[0].id
+    }
+
+    // 调整选中的分析师列表，适配新的市场
+    batchForm.analysts = normalizeSelectedAnalystsForMarket(newMarket, batchForm.analysts)
+  }
+)
 
 // 使用通用校验器规范化代码，自动识别市场
 const normalizeCodeSmart = (raw: string): { symbol?: string; error?: string } => {
@@ -463,6 +576,19 @@ onMounted(async () => {
     // 触发解析以更新 symbols
     parseStockCodes()
   }
+
+  // 加载可用工作流
+  try {
+    const data = await workflowApi.listAll()
+    workflows.value = data
+    const targetWorkflows = data.filter(w => w.workflow_type === 'stock_analysis')
+    if (targetWorkflows.length > 0) {
+      const defaultWf = targetWorkflows.find(w => w.is_default)
+      selectedWorkflowId.value = defaultWf ? defaultWf.id : targetWorkflows[0].id
+    }
+  } catch (e) {
+    console.error('加载工作流列表失败:', e)
+  }
 })
 
 const removeStock = (index: number) => {
@@ -513,7 +639,7 @@ const submitBatchAnalysis = async () => {
   try {
     // 🔥 固定使用 v2.0 引擎
     await ElMessageBox.confirm(
-      `确定要提交批量分析任务吗？\n股票数量：${stockCodes.value.length}只\n分析引擎：v2.0引擎`,
+      `确定要提交批量分析任务吗？\n市场：${batchForm.market}\n数量：${stockCodes.value.length}只\n分析引擎：v2.0引擎`,
       '确认提交',
       {
         confirmButtonText: '确定',
@@ -531,11 +657,8 @@ const submitBatchAnalysis = async () => {
       symbols: symbols.value,
       stock_codes: symbols.value,  // 兼容字段
       parameters: {
-        // 若全部代码可识别为同一市场则携带；否则省略让后端自行判断
-        market_type: (() => {
-          const markets = new Set(symbols.value.map(s => getMarketByStockCode(s)))
-          return markets.size === 1 ? Array.from(markets)[0] : undefined
-        })(),
+        // 使用用户选择的市场类型
+        market_type: batchForm.market === 'ETF' ? 'ETF' : 'A股',
         research_depth: getDepthDescription(Number.parseInt(batchForm.depth)),  // 转换为中文
         selected_analysts: convertAnalystNamesToIds(batchForm.analysts),
         include_sentiment: batchForm.includeSentiment,
@@ -543,7 +666,8 @@ const submitBatchAnalysis = async () => {
         language: batchForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
         deep_analysis_model: modelSettings.value.deepAnalysisModel,
-        engine: 'v2'  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
+        engine: 'v2',  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
+        workflow_id: selectedWorkflowId.value || undefined
       }
     }
 

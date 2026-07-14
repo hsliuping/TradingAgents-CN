@@ -69,6 +69,31 @@
     <!-- 分析参数设置 -->
     <div class="analysis-params" v-if="!analysisResult && analysisStatus !== 'pending' && analysisStatus !== 'processing'">
       <el-divider content-position="left">分析设置</el-divider>
+      
+      <!-- 流程选择 -->
+      <div class="config-section" v-if="workflowsSorted.length > 0">
+        <el-form-item label="分析流程">
+          <div style="display: flex; align-items: center; width: 100%;">
+            <el-select
+              v-model="selectedWorkflowId"
+              size="small"
+              style="flex: 1;"
+              placeholder="选择分析流程"
+            >
+              <el-option
+                v-for="workflow in workflowsSorted"
+                :key="workflow.id"
+                :label="`${workflow.name} v${workflow.version}`"
+                :value="workflow.id"
+              />
+            </el-select>
+            <el-tooltip content="选择不同的分析流程，系统会使用该流程对应的智能体和步骤进行分析" placement="top">
+              <el-icon style="margin-left: 8px; color: #909399; cursor: help;"><InfoFilled /></el-icon>
+            </el-tooltip>
+          </div>
+        </el-form-item>
+      </div>
+      
       <el-form :model="params" label-width="120px">
         <el-form-item label="目标收益率">
           <el-input-number v-model="params.target_profit_pct" :min="5" :max="100" :step="5" />
@@ -309,12 +334,13 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { WarningFilled, StarFilled, WalletFilled, Loading, Refresh, Clock } from '@element-plus/icons-vue'
+import { WarningFilled, StarFilled, WalletFilled, Loading, Refresh, Clock, InfoFilled } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PositionAnalysisResult, type PositionAnalysisParams, type AccountSummary } from '@/api/portfolio'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { marked } from 'marked'
 import { getMarketByStockCode } from '@/utils/market'
+import { workflowApi, type WorkflowSummary } from '@/api/workflow'
 import PositionAnalysisHistoryDialog from './PositionAnalysisHistoryDialog.vue'
 
 // 配置marked选项
@@ -352,6 +378,34 @@ const analysisResult = ref<PositionAnalysisResult | null>(null)
 const enableCapitalAnalysis = ref(false)
 const accountSummary = ref<AccountSummary | null>(null)
 const showHistoryDialog = ref(false)
+
+// 流程选择
+const workflows = ref<WorkflowSummary[]>([])
+const selectedWorkflowId = ref<string>('')
+
+const parseVersion = (v: string): number[] => {
+  const parts = String(v || '0.0.0').split('.')
+  return parts.map(p => parseInt(p, 10) || 0)
+}
+
+const workflowsSorted = computed(() => {
+  const arr = workflows.value.filter(
+    (w: WorkflowSummary) => w.workflow_type === 'position_analysis'
+  )
+  arr.sort((a, b) => {
+    const vA = a.version || ''
+    const vB = b.version || ''
+    const verA = parseVersion(vA)
+    const verB = parseVersion(vB)
+    for (let i = 0; i < Math.max(verA.length, verB.length); i++) {
+      const numA = verA[i] || 0
+      const numB = verB[i] || 0
+      if (numA !== numB) return numB - numA
+    }
+    return 0
+  })
+  return arr
+})
 
 // 异步分析相关状态
 const analysisId = ref<string | null>(null)
@@ -403,6 +457,21 @@ const loadAccountSummary = async () => {
 }
 
 // 重置状态
+// 加载可用工作流
+const loadWorkflows = async () => {
+  try {
+    const data = await workflowApi.listAll()
+    workflows.value = data
+    const targetWorkflows = data.filter((w: WorkflowSummary) => w.workflow_type === 'position_analysis')
+    if (targetWorkflows.length > 0) {
+      const defaultWf = targetWorkflows.find((w: WorkflowSummary) => w.is_default)
+      selectedWorkflowId.value = defaultWf ? defaultWf.id : targetWorkflows[0].id
+    }
+  } catch (e) {
+    console.error('加载工作流列表失败:', e)
+  }
+}
+
 watch(visible, (val) => {
   if (val) {
     // 打开对话框时先重置状态，再加载数据
@@ -414,6 +483,7 @@ watch(visible, (val) => {
     // 加载资金账户信息和已有分析报告
     loadAccountSummary()
     loadExistingAnalysis()
+    loadWorkflows()
   }
 })
 
@@ -527,7 +597,8 @@ const handleAnalyze = async () => {
     const positionType = props.position.source === 'paper' ? 'simulated' : 'real'
     const analysisParams = {
       ...params.value,
-      position_type: positionType
+      position_type: positionType,
+      workflow_id: selectedWorkflowId.value || undefined
     }
 
     const res = await portfolioApi.analyzePositionByCode(

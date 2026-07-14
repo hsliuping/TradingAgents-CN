@@ -11,9 +11,10 @@ from app.models.capability_index import (
     CapabilityIndexSyncResult,
     CapabilitySearchHit,
 )
+from core.agents.config import AgentMaintenanceStatus, BUILTIN_AGENTS
 from core.llm.embedding_manager import EmbeddingManager
 from core.memory.memory_manager import VectorStoreManager
-from core.tools import get_tool_registry
+from core.tools.registry import get_tool_registry
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +214,7 @@ class CapabilityIndexService:
         registry_docs = self._build_registry_documents()
         await self._merge_skills_documents(registry_docs)
         await self._merge_external_skills_documents(registry_docs)
+        await self._merge_agents_documents(registry_docs)  # 🔥 v3.0: Agent 纳入统一能力索引（含DB自定义）
 
         documents = sorted(registry_docs.values(), key=lambda item: (item.source_type, item.capability_id))
         payload = [
@@ -417,6 +419,144 @@ class CapabilityIndexService:
                 },
             )
             documents[tool_id] = merged
+
+    async def _merge_agents_documents(self, documents: Dict[str, CapabilityDocument]) -> None:
+        """
+        将 BUILTIN_AGENTS + MongoDB 自定义 Agent 合并到能力索引
+
+        每个 Agent 作为一个独立的能力项，source_type="agent"。
+        内置只收录 MAINTAINED 状态的，DB 只收录 enabled=True 的。
+        """
+        before_count = len(documents)
+        # ── 1. 内置 Agent ──
+        builtin_added = 0
+        for agent_id, meta in BUILTIN_AGENTS.items():
+            status = meta.maintenance_status
+            if status not in (AgentMaintenanceStatus.MAINTAINED,):
+                logger.debug(
+                    "[CapabilityIndex] 跳过 Agent: %s (status=%s)",
+                    agent_id, status.value if hasattr(status, 'value') else status,
+                )
+                continue
+            self._add_agent_document(
+                documents, agent_id,
+                name=meta.name,
+                description=meta.description or "",
+                category=meta.category.value if hasattr(meta.category, 'value') else str(meta.category),
+                default_tools=list(meta.default_tools) if meta.default_tools else [],
+                inputs=[i.name for i in meta.inputs] if meta.inputs else [],
+                outputs=[o.name for o in meta.outputs] if meta.outputs else [],
+                output_field=meta.output_field or "",
+                source="builtin",
+            )
+            builtin_added += 1
+
+        logger.info(
+            "[CapabilityIndex] 📥 Agent 文档: 内置 %d 个, 合并前总文档 %d, 合并后 %d",
+            builtin_added, before_count, len(documents),
+        )
+
+        # ── 2. MongoDB 自定义 Agent ──
+        if self._db is not None:
+            try:
+                builtin_ids = {agent_id for agent_id, _ in BUILTIN_AGENTS.items()}
+                cursor = self._db.agent_configs.find({"enabled": True})
+                async for doc in cursor:
+                    aid = doc.get("agent_id", "").strip()
+                    if not aid or aid in builtin_ids:
+                        continue
+                    self._add_agent_document(
+                        documents, aid,
+                        name=doc.get("name", aid),
+                        description=doc.get("description", ""),
+                        category=doc.get("category", "custom"),
+                        default_tools=doc.get("default_tools", []) or [],
+                        inputs=doc.get("inputs", []) or [],
+                        outputs=doc.get("outputs", []) or [],
+                        output_field=doc.get("output_field", doc.get("report_label", "")) or "",
+                        source="database",
+                    )
+                    logger.info(
+                        f"📥 [CapabilityIndex] 已索引自定义 Agent: {aid} ({doc.get('name', '')})"
+                    )
+            except Exception as e:
+                logger.warning(f"从 MongoDB 加载自定义 Agent 到索引失败: {e}")
+
+    def _add_agent_document(
+        self, documents: Dict[str, CapabilityDocument],
+        agent_id: str, name: str, description: str, category: str,
+        default_tools: list, inputs: list, outputs: list,
+        output_field: str, source: str,
+    ) -> None:
+        """为单个 Agent 构建 CapabilityDocument 并加入索引"""
+        safe_inputs = self._safe_list_to_str(inputs)
+        safe_outputs = self._safe_list_to_str(outputs)
+        safe_tools = self._safe_list_to_str(default_tools)
+
+        when_to_use_parts = []
+        if safe_inputs:
+            when_to_use_parts.append(f"需要的输入: {', '.join(safe_inputs)}")
+        if safe_outputs:
+            when_to_use_parts.append(f"产生的输出: {', '.join(safe_outputs)}")
+        if safe_tools:
+            when_to_use_parts.append(f"默认工具: {', '.join(safe_tools)}")
+        if output_field:
+            when_to_use_parts.append(f"产出字段: {output_field}")
+
+        documents[agent_id] = self._merge_capability_document(
+            base=None,
+            capability_id=agent_id,
+            registry_tool_id=None,
+            source_type="agent",
+            status="active",
+            bindable=True,
+            fc_enabled=False,
+            category=category,
+            name=name,
+            label=f"{agent_id} | {name}",
+            description=description,
+            when_to_use="; ".join(when_to_use_parts) if when_to_use_parts else "",
+            when_not_to_use="",
+            returns="报告文本",
+            related_tools=list(safe_tools),
+            data_source=source,
+            capability_tags=list(safe_tools),
+            tool_role_hint="agent",
+            output_shape="report",
+            preferred_for=[],
+            not_replacement_for=[],
+            metadata={
+                "agent_id": agent_id,
+                "source": source,
+                "output_field": output_field,
+                "default_tools": list(safe_tools),
+                "has_inputs": len(safe_inputs) > 0,
+                "has_outputs": len(safe_outputs) > 0,
+            },
+        )
+
+    @staticmethod
+    def _safe_list_to_str(items: list) -> List[str]:
+        """将列表安全转为字符串列表，处理 dict 元素和非 list 输入"""
+        if not items:
+            return []
+        if not isinstance(items, list):
+            return [str(items)]
+        result = []
+        for item in items:
+            if isinstance(item, str):
+                result.append(item)
+            elif isinstance(item, dict):
+                # 尝试取常用字段名，取不到则 str()
+                for key in ("field", "name", "desc", "key", "label"):
+                    if key in item:
+                        result.append(str(item[key]))
+                        break
+                else:
+                    result.append(str(item))
+            else:
+                result.append(str(item))
+        return result
 
     def _merge_capability_document(
         self,

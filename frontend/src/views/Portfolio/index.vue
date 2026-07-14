@@ -455,6 +455,7 @@
     <PositionAnalysisDialog
       v-model="showPositionAnalysisDialog"
       :position="selectedPosition"
+      :workflow-id="selectedWorkflowId"
     />
 
     <!-- 持仓变动记录对话框 -->
@@ -541,6 +542,7 @@ const showPositionOperationDialog = ref(false)
 const showStockHistoryDialog = ref(false)
 const editingPosition = ref<PositionItem | null>(null)
 const selectedPosition = ref<PositionItem | null>(null)
+const selectedWorkflowId = ref<string>('')
 const selectedAggregatedPosition = ref<AggregatedPosition | null>(null)
 const selectedStockForHistory = ref<{ code: string; name?: string; market: string } | null>(null)
 const selectedPositionForAnalysisHistory = ref<PositionItem | null>(null)
