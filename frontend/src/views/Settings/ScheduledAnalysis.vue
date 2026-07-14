@@ -318,6 +318,78 @@
                   </el-form-item>
                 </el-col>
               </el-row>
+              <el-form-item label="分析流程">
+                <el-select
+                  v-model="selectedWorkflowIds[index]"
+                  placeholder="选择通用研究流程"
+                  clearable
+                  size="small"
+                  style="width: 100%"
+                  @change="onWorkflowChange(index)"
+                >
+                  <el-option
+                    v-for="wf in workflows"
+                    :key="wf.id"
+                    :label="`${wf.name} v${wf.version}`"
+                    :value="wf.id"
+                  />
+                </el-select>
+              </el-form-item>
+
+              <!-- 流程参数配置（仅在选择流程后显示） -->
+              <template v-if="selectedWorkflowIds[index]">
+                <el-form-item label="分析目标">
+                  <el-input
+                    v-model="(slot as any)._analysisTarget"
+                    type="textarea"
+                    :rows="2"
+                    placeholder="请输入分析目标，如：分析新能源行业趋势、对比000001和000002等"
+                    maxlength="500"
+                    show-word-limit
+                    size="small"
+                  />
+                </el-form-item>
+
+                <el-form-item label="自定义参数">
+                  <div class="custom-params-container" style="width: 100%;">
+                    <div
+                      v-for="(param, pIdx) in (slot as any)._customParams"
+                      :key="pIdx"
+                      class="custom-param-row"
+                    >
+                      <el-input
+                        v-model="param.key"
+                        placeholder="参数名"
+                        size="small"
+                        style="flex: 1"
+                      />
+                      <el-input
+                        v-model="param.value"
+                        placeholder="参数值"
+                        size="small"
+                        style="flex: 1.5"
+                      />
+                      <el-button
+                        link
+                        type="danger"
+                        size="small"
+                        @click="removeCustomParam(index, pIdx)"
+                      >
+                        <el-icon><Delete /></el-icon>
+                      </el-button>
+                    </div>
+                    <el-button
+                      link
+                      type="primary"
+                      size="small"
+                      @click="addCustomParam(index)"
+                    >
+                      <el-icon><Plus /></el-icon>
+                      添加参数
+                    </el-button>
+                  </div>
+                </el-form-item>
+              </template>
             </el-card>
           </div>
           <el-button @click="addTimeSlot" style="width: 100%; margin-top: 10px">
@@ -358,6 +430,7 @@ import {
   type ScheduledAnalysisHistory
 } from '@/api/scheduled-analysis'
 import { getWatchlistGroups, type WatchlistGroup } from '@/api/watchlist-groups'
+import { workflowApi, type WorkflowSummary } from '@/api/workflow'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
@@ -520,6 +593,8 @@ const router = useRouter()
 const loading = ref(false)
 const configs = ref<ScheduledAnalysisConfig[]>([])
 const groups = ref<WatchlistGroup[]>([])
+const workflows = ref<WorkflowSummary[]>([])
+const selectedWorkflowIds = ref<Record<number, string>>({})  // 每个时间段的流程选择
 
 const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
@@ -598,6 +673,17 @@ const loadGroups = async () => {
   }
 }
 
+// 加载通用研究流程列表
+const loadWorkflows = async () => {
+  try {
+    const data = await workflowApi.listAll()
+    const list = Array.isArray(data) ? data : (data as any)?.data || []
+    workflows.value = list.filter((w: WorkflowSummary) => w.workflow_type === 'general')
+  } catch (e) {
+    console.error('加载流程失败', e)
+  }
+}
+
 // 显示创建对话框
 const showCreateDialog = () => {
   dialogMode.value = 'create'
@@ -614,6 +700,7 @@ const showCreateDialog = () => {
     notify_on_error: true,
     send_email: false
   }
+  selectedWorkflowIds.value = {}
   dialogVisible.value = true
 }
 
@@ -622,18 +709,37 @@ const editConfig = (config: ScheduledAnalysisConfig) => {
   dialogMode.value = 'edit'
   const timeSlots = JSON.parse(JSON.stringify(config.time_slots)).map((slot: any) => {
     const uiState = parseCronToUi(slot.cron_expression)
+    // 从 workflow_params 反序列化恢复 UI 字段
+    const wp = slot.workflow_params || {}
+    const customParams: Array<{ key: string; value: string }> = []
+    if (wp.custom_params && typeof wp.custom_params === 'object') {
+      for (const [k, v] of Object.entries(wp.custom_params)) {
+        customParams.push({ key: k, value: String(v ?? '') })
+      }
+    }
     const newSlot = {
       ...slot,
       _mode: uiState.mode,
       _time: uiState.time,
       _days: uiState.days,
-      _nextRuns: []
+      _nextRuns: [],
+      _analysisTarget: wp.analysis_target || '',
+      _customParams: customParams
     }
     // 立即获取一次预览
     fetchNextRuns(newSlot)
     return newSlot
   })
-  
+
+  // 加载已保存的流程选择到 selectedWorkflowIds
+  const workflowMap: Record<number, string> = {}
+  ;(config.time_slots || []).forEach((slot: any, index: number) => {
+    if (slot.workflow_id) {
+      workflowMap[index] = slot.workflow_id
+    }
+  })
+  selectedWorkflowIds.value = workflowMap
+
   formData.value = {
     id: config.id,
     name: config.name,
@@ -667,7 +773,9 @@ const addTimeSlot = () => {
     _mode: defaultState.mode,
     _time: defaultState.time,
     _days: defaultState.days,
-    _nextRuns: []
+    _nextRuns: [],
+    _analysisTarget: '',  // 流程分析目标（UI 临时字段）
+    _customParams: [] as Array<{ key: string; value: string }>  // 流程自定义参数（UI 临时字段）
   }
   
   formData.value.time_slots.push(slot)
@@ -678,6 +786,43 @@ const addTimeSlot = () => {
 // 移除时间段
 const removeTimeSlot = (index: number) => {
   formData.value.time_slots?.splice(index, 1)
+  // 同步移除流程选择状态
+  const newMap: Record<number, string> = {}
+  for (const [k, v] of Object.entries(selectedWorkflowIds.value)) {
+    const idx = Number(k)
+    if (idx < index) newMap[idx] = v
+    else if (idx > index) newMap[idx - 1] = v
+  }
+  selectedWorkflowIds.value = newMap
+}
+
+// 流程选择变更时，确保该时间段有对应的 UI 字段
+const onWorkflowChange = (index: number) => {
+  const slots = formData.value.time_slots || []
+  const slot: any = slots[index]
+  if (!slot) return
+  if (selectedWorkflowIds.value[index]) {
+    // 选中流程：初始化 UI 字段（若不存在）
+    if (slot._analysisTarget === undefined) slot._analysisTarget = ''
+    if (!Array.isArray(slot._customParams)) slot._customParams = []
+  }
+}
+
+// 添加自定义参数（指定时间段）
+const addCustomParam = (slotIndex: number) => {
+  const slots = formData.value.time_slots || []
+  const slot: any = slots[slotIndex]
+  if (!slot) return
+  if (!Array.isArray(slot._customParams)) slot._customParams = []
+  slot._customParams.push({ key: '', value: '' })
+}
+
+// 移除自定义参数（指定时间段）
+const removeCustomParam = (slotIndex: number, paramIndex: number) => {
+  const slots = formData.value.time_slots || []
+  const slot: any = slots[slotIndex]
+  if (!slot || !Array.isArray(slot._customParams)) return
+  slot._customParams.splice(paramIndex, 1)
 }
 
 // 查看历史记录
@@ -709,8 +854,42 @@ const submitForm = async () => {
 
     submitting.value = true
     try {
+      // 构造提交数据：将流程选择注入到对应的 time slot
+      const payload = JSON.parse(JSON.stringify(formData.value))
+      if (payload.time_slots) {
+        payload.time_slots.forEach((slot: any, index: number) => {
+          const wfId = selectedWorkflowIds.value[index]
+          slot.workflow_id = wfId || undefined
+
+          // 序列化流程参数到 workflow_params
+          if (wfId) {
+            const customParamsObj: Record<string, string> = {}
+            const cpList: Array<{ key: string; value: string }> = slot._customParams || []
+            for (const p of cpList) {
+              if (p.key && p.key.trim()) {
+                customParamsObj[p.key.trim()] = p.value
+              }
+            }
+            slot.workflow_params = {
+              analysis_target: slot._analysisTarget || '',
+              custom_params: customParamsObj
+            }
+          } else {
+            slot.workflow_params = undefined
+          }
+
+          // 清理临时 UI 字段（后端不需要）
+          delete slot._mode
+          delete slot._time
+          delete slot._days
+          delete slot._nextRuns
+          delete slot._analysisTarget
+          delete slot._customParams
+        })
+      }
+
       if (dialogMode.value === 'create') {
-        const res = await createScheduledAnalysisConfig(formData.value) as any
+        const res = await createScheduledAnalysisConfig(payload) as any
         if (res?.success) {
           ElMessage.success('创建成功')
           dialogVisible.value = false
@@ -719,7 +898,7 @@ const submitForm = async () => {
           ElMessage.error(res?.message || '创建失败')
         }
       } else {
-        const { id, ...updateData } = formData.value
+        const { id, ...updateData } = payload
         if (!id) return
 
         const res = await updateScheduledAnalysisConfig(id, updateData as ScheduledAnalysisConfigUpdate) as any
@@ -845,6 +1024,7 @@ const deleteConfig = async (config: ScheduledAnalysisConfig) => {
 onMounted(() => {
   loadConfigs()
   loadGroups()
+  loadWorkflows()
 })
 </script>
 
@@ -871,6 +1051,18 @@ onMounted(() => {
   .slot-header {
     display: flex;
     justify-content: space-between;
+    align-items: center;
+  }
+}
+
+.custom-params-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  .custom-param-row {
+    display: flex;
+    gap: 8px;
     align-items: center;
   }
 }

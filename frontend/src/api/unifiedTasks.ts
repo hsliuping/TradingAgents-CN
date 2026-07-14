@@ -194,3 +194,87 @@ export const TaskStatusColors: Record<TaskStatus, TaskTagType> = {
   [TaskStatus.SUSPENDED]: 'warning'
 }
 
+
+// ==================== 通用研究任务专用 API ====================
+
+/**
+ * 通用研究任务列表项
+ */
+export interface GeneralTaskListItem {
+  task_id: string
+  task_type: string
+  status: string
+  progress: number
+  workflow_id?: string
+  analysis_target: string
+  research_depth?: string
+  created_at?: string
+  started_at?: string
+  completed_at?: string
+  execution_time: number
+  error_message?: string
+  current_step?: string
+}
+
+/**
+ * 通用研究任务查询参数
+ */
+export interface GeneralTaskListParams {
+  workflow_id?: string
+  date_start?: string
+  date_end?: string
+  keyword?: string
+  status?: string
+  limit?: number
+  skip?: number
+}
+
+/**
+ * 获取通用研究任务列表
+ */
+export function getGeneralTaskList(params?: GeneralTaskListParams) {
+  return ApiClient.get<{
+    tasks: GeneralTaskListItem[]
+    total: number
+    limit: number
+    skip: number
+  }>('/api/v2/tasks/general/list', params)
+}
+
+/**
+ * 获取通用研究任务统计
+ */
+export function getGeneralTaskStatistics() {
+  return ApiClient.get<{
+    total: number
+    completed: number
+    failed: number
+    processing: number
+    pending: number
+  }>('/api/v2/tasks/general/statistics')
+}
+
+/**
+ * 通用研究任务状态中文名
+ */
+export const GeneralTaskStatusNames: Record<string, string> = {
+  pending: '等待中',
+  processing: '进行中',
+  completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+  suspended: '已挂起'
+}
+
+/**
+ * 通用研究任务状态颜色
+ */
+export const GeneralTaskStatusColors: Record<string, TaskTagType> = {
+  pending: 'info',
+  processing: 'warning',
+  completed: 'success',
+  failed: 'danger',
+  cancelled: 'info',
+  suspended: 'warning'
+}
+

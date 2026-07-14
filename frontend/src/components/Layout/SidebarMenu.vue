@@ -34,6 +34,11 @@
       </template>
     </el-menu-item>
 
+    <el-menu-item index="/analysis/general">
+      <el-icon><Search /></el-icon>
+      <template #title>通用研究</template>
+    </el-menu-item>
+
     <el-menu-item index="/assistant">
       <el-icon><ChatDotRound /></el-icon>
       <template #title>智能助手</template>

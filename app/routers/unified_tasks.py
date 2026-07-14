@@ -265,3 +265,163 @@ async def resume_task(
         logger.error(f"恢复任务失败: {e}")
         raise HTTPException(status_code=500, detail=f"恢复任务失败: {str(e)}")
 
+
+# ==================== 通用研究任务专用查询 ====================
+
+@router.get("/general/list", summary="获取通用研究任务列表")
+async def get_general_task_list(
+    workflow_id: Optional[str] = Query(None, description="按工作流ID筛选"),
+    date_start: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
+    date_end: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    keyword: Optional[str] = Query(None, description="关键字搜索（匹配分析目标）"),
+    status: Optional[AnalysisStatus] = Query(None, description="状态过滤"),
+    limit: int = Query(50, ge=1, le=500, description="返回数量"),
+    skip: int = Query(0, ge=0, description="跳过数量"),
+    user: dict = Depends(get_current_user)
+):
+    """获取通用研究任务列表
+
+    专门查询 task_params.task_category == "general" 的任务，
+    支持按工作流、时间范围、关键字筛选。
+    """
+    try:
+        from datetime import datetime, timedelta
+        from app.core.database import get_mongo_db
+        from bson import ObjectId
+
+        user_id = user["id"]
+        # user_id 可能是字符串或 ObjectId，统一处理
+        try:
+            user_oid = ObjectId(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            user_oid = user_id
+
+        # 构建查询条件
+        query = {
+            "user_id": user_oid,
+            "task_params.task_category": "general",
+        }
+
+        # 按工作流筛选
+        if workflow_id:
+            query["workflow_id"] = workflow_id
+
+        # 按状态筛选
+        if status:
+            query["status"] = status
+
+        # 按时间范围筛选
+        if date_start or date_end:
+            time_query = {}
+            if date_start:
+                try:
+                    start_dt = datetime.strptime(date_start, "%Y-%m-%d")
+                    time_query["$gte"] = start_dt
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="date_start 格式应为 YYYY-MM-DD")
+            if date_end:
+                try:
+                    end_dt = datetime.strptime(date_end, "%Y-%m-%d") + timedelta(days=1)
+                    time_query["$lt"] = end_dt
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="date_end 格式应为 YYYY-MM-DD")
+            if time_query:
+                query["created_at"] = time_query
+
+        # 关键字搜索（匹配 task_params.symbol / stock_code）
+        if keyword and keyword.strip():
+            kw = keyword.strip()
+            # 使用正则匹配分析目标
+            query["$or"] = [
+                {"task_params.symbol": {"$regex": kw, "$options": "i"}},
+                {"task_params.stock_code": {"$regex": kw, "$options": "i"}},
+            ]
+
+        logger.info(f"🎯 [通用研究任务列表] 查询条件: {query}")
+
+        db = get_mongo_db()
+        cursor = db.unified_analysis_tasks.find(query).sort("created_at", -1).skip(skip).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        total = await db.unified_analysis_tasks.count_documents(query)
+
+        # 构建响应
+        items = []
+        for doc in docs:
+            task_params = doc.get("task_params", {}) or {}
+            items.append({
+                "task_id": doc.get("task_id", ""),
+                "task_type": doc.get("task_type", ""),
+                "status": doc.get("status", ""),
+                "progress": doc.get("progress", 0),
+                "workflow_id": doc.get("workflow_id"),
+                "analysis_target": task_params.get("symbol") or task_params.get("stock_code") or "",
+                "research_depth": task_params.get("research_depth"),
+                "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None,
+                "started_at": doc.get("started_at").isoformat() if doc.get("started_at") else None,
+                "completed_at": doc.get("completed_at").isoformat() if doc.get("completed_at") else None,
+                "execution_time": doc.get("execution_time", 0),
+                "error_message": doc.get("error_message"),
+                "current_step": doc.get("current_step"),
+            })
+
+        return {
+            "success": True,
+            "data": {
+                "tasks": items,
+                "total": total,
+                "limit": limit,
+                "skip": skip
+            },
+            "message": "ok"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取通用研究任务列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取通用研究任务列表失败: {str(e)}")
+
+
+@router.get("/general/statistics", summary="获取通用研究任务统计")
+async def get_general_task_statistics(
+    user: dict = Depends(get_current_user)
+):
+    """获取通用研究任务的统计信息"""
+    try:
+        from app.core.database import get_mongo_db
+        from bson import ObjectId
+
+        user_id = user["id"]
+        try:
+            user_oid = ObjectId(user_id) if isinstance(user_id, str) else user_id
+        except Exception:
+            user_oid = user_id
+
+        query = {
+            "user_id": user_oid,
+            "task_params.task_category": "general",
+        }
+
+        db = get_mongo_db()
+        total = await db.unified_analysis_tasks.count_documents(query)
+        completed = await db.unified_analysis_tasks.count_documents({**query, "status": "completed"})
+        failed = await db.unified_analysis_tasks.count_documents({**query, "status": "failed"})
+        processing = await db.unified_analysis_tasks.count_documents({**query, "status": "processing"})
+        pending = await db.unified_analysis_tasks.count_documents({**query, "status": "pending"})
+
+        return {
+            "success": True,
+            "data": {
+                "total": total,
+                "completed": completed,
+                "failed": failed,
+                "processing": processing,
+                "pending": pending,
+            },
+            "message": "ok"
+        }
+
+    except Exception as e:
+        logger.error(f"获取通用研究任务统计失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取通用研究任务统计失败: {str(e)}")
+
