@@ -180,6 +180,12 @@ class ConfigManager:
             connection_string = build_mongodb_connection_string()
             database_name = get_mongodb_database_name()
 
+            # 🔧 当 MONGODB_CONNECTION_STRING 未设置时，自动构建并写入环境变量
+            # 这样其他模块读取 MONGODB_CONNECTION_STRING 环境变量时也能获取到正确的连接字符串
+            if not os.getenv('MONGODB_CONNECTION_STRING'):
+                os.environ['MONGODB_CONNECTION_STRING'] = connection_string
+                logger.info(f"🔍 [ConfigManager] 已自动构建 MONGODB_CONNECTION_STRING (长度: {len(connection_string)})")
+
             logger.info(f"🔍 [ConfigManager] MongoDB 连接字符串已构建 (长度: {len(connection_string)})")
             logger.info(f"🔍 [ConfigManager] MONGODB_DATABASE_NAME={database_name}")
 
