@@ -494,6 +494,51 @@ def _get_default_provider_by_model(model_name: str) -> str:
     return provider
 
 
+def _load_model_config_from_db(model_name: str) -> dict:
+    """
+    从数据库读取模型配置参数（max_tokens, temperature, timeout, reasoning_effort 等）
+
+    Args:
+        model_name: 模型名称
+
+    Returns:
+        dict: 模型配置字典，如 {"max_tokens": 4000, "temperature": 0.7, "reasoning_effort": "low"}
+    """
+    try:
+        from pymongo import MongoClient
+        from app.core.config import settings
+
+        client = MongoClient(settings.MONGO_URI)
+        db = client[settings.MONGO_DB]
+        configs_collection = db.system_configs
+        doc = configs_collection.find_one({"is_active": True}, sort=[("version", -1)])
+
+        if doc and "llm_configs" in doc:
+            for config_dict in doc["llm_configs"]:
+                if config_dict.get("model_name") == model_name:
+                    result = {
+                        "max_tokens": config_dict.get("max_tokens", 4000),
+                        "temperature": config_dict.get("temperature", 0.7),
+                        "timeout": config_dict.get("timeout", 180),
+                        "retry_times": config_dict.get("retry_times", 3),
+                        "api_base": config_dict.get("api_base"),
+                    }
+                    # 🔧 火山方舟推理模型支持 reasoning_effort
+                    if config_dict.get("reasoning_effort"):
+                        result["reasoning_effort"] = config_dict["reasoning_effort"]
+                        logger.info(f"🔧 [模型配置] {model_name} reasoning_effort={result['reasoning_effort']}")
+                    else:
+                        logger.info(f"🔧 [模型配置] {model_name} reasoning_effort 未设置")
+                    client.close()
+                    return result
+
+        client.close()
+        return {}
+    except Exception as e:
+        logger.warning(f"⚠️ 读取模型配置失败: {e}")
+        return {}
+
+
 def create_analysis_config(
     research_depth,  # 支持数字(1-5)或字符串("快速", "标准", "深度")
     selected_analysts: list,
@@ -1537,6 +1582,14 @@ class SimpleAnalysisService:
             market_type = request.parameters.market_type if request.parameters else "A股"
             logger.info(f"📊 [市场类型] 使用市场类型: {market_type}")
 
+            # 🔧 从数据库读取模型配置参数（max_tokens, temperature, timeout, reasoning_effort 等）
+            quick_model_config = _load_model_config_from_db(quick_model)
+            deep_model_config = _load_model_config_from_db(deep_model)
+            if quick_model_config:
+                logger.info(f"🔧 [快速模型配置] {quick_model_config}")
+            if deep_model_config:
+                logger.info(f"🔧 [深度模型配置] {deep_model_config}")
+
             # 创建分析配置（支持混合模式）
             config = create_analysis_config(
                 research_depth=research_depth,
@@ -1544,7 +1597,9 @@ class SimpleAnalysisService:
                 quick_model=quick_model,
                 deep_model=deep_model,
                 llm_provider=quick_provider,  # 主要使用快速模型的供应商
-                market_type=market_type  # 使用前端传递的市场类型
+                market_type=market_type,  # 使用前端传递的市场类型
+                quick_model_config=quick_model_config,
+                deep_model_config=deep_model_config,
             )
 
             # 🔧 添加混合模式配置

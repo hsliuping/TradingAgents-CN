@@ -172,6 +172,8 @@ class AnalysisService:
                                 "retry_times": llm_config.get("retry_times", 3),
                                 "api_base": llm_config.get("api_base")
                             }
+                            if llm_config.get("reasoning_effort"):
+                                quick_model_config["reasoning_effort"] = llm_config["reasoning_effort"]
                             logger.info(f"✅ 读取快速模型配置: {quick_model}")
                             logger.info(f"   max_tokens={quick_model_config['max_tokens']}, temperature={quick_model_config['temperature']}")
                             logger.info(f"   timeout={quick_model_config['timeout']}, retry_times={quick_model_config['retry_times']}")
@@ -185,6 +187,8 @@ class AnalysisService:
                                 "retry_times": llm_config.get("retry_times", 3),
                                 "api_base": llm_config.get("api_base")
                             }
+                            if llm_config.get("reasoning_effort"):
+                                deep_model_config["reasoning_effort"] = llm_config["reasoning_effort"]
                             logger.info(f"✅ 读取深度模型配置: {deep_model} - {deep_model_config}")
                 else:
                     logger.warning("⚠️ MongoDB 中没有找到系统配置，将使用默认参数")
@@ -305,6 +309,8 @@ class AnalysisService:
                                 "retry_times": llm_config.get("retry_times", 3),
                                 "api_base": llm_config.get("api_base")
                             }
+                            if llm_config.get("reasoning_effort"):
+                                quick_model_config["reasoning_effort"] = llm_config["reasoning_effort"]
                             logger.info(f"✅ 读取快速模型配置: {quick_model}")
                             logger.info(f"   max_tokens={quick_model_config['max_tokens']}, temperature={quick_model_config['temperature']}")
                             logger.info(f"   timeout={quick_model_config['timeout']}, retry_times={quick_model_config['retry_times']}")
@@ -318,6 +324,8 @@ class AnalysisService:
                                 "retry_times": llm_config.get("retry_times", 3),
                                 "api_base": llm_config.get("api_base")
                             }
+                            if llm_config.get("reasoning_effort"):
+                                deep_model_config["reasoning_effort"] = llm_config["reasoning_effort"]
                             logger.info(f"✅ 读取深度模型配置: {deep_model} - {deep_model_config}")
                 else:
                     logger.warning("⚠️ MongoDB 中没有找到系统配置，将使用默认参数")
@@ -698,6 +706,8 @@ class AnalysisService:
                         "retry_times": llm_config.retry_times,
                         "api_base": llm_config.api_base
                     }
+                    if getattr(llm_config, "reasoning_effort", None):
+                        quick_model_config["reasoning_effort"] = llm_config.reasoning_effort
 
                 if llm_config.model_name == deep_model:
                     deep_model_config = {
@@ -707,6 +717,8 @@ class AnalysisService:
                         "retry_times": llm_config.retry_times,
                         "api_base": llm_config.api_base
                     }
+                    if getattr(llm_config, "reasoning_effort", None):
+                        deep_model_config["reasoning_effort"] = llm_config.reasoning_effort
 
             # 根据模型名称动态查找供应商
             llm_provider = await get_provider_by_model_name(quick_model)
