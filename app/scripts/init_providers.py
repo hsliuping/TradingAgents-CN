@@ -114,6 +114,26 @@ async def init_providers():
             "default_base_url": "https://aihubmix.com/v1",
             "is_active": True,
             "supported_features": ["chat", "completion", "embedding", "vision", "function_calling", "streaming"]
+        },
+        {
+            "name": "volcengine",
+            "display_name": "火山方舟",
+            "description": "火山方舟 Ark API（Agent Plan）",
+            "website": "https://www.volcengine.com/solutions/ark",
+            "default_base_url": "https://ark.cn-beijing.volces.com/api/v3",
+            "test_model": "doubao-seed-2-1-turbo-260628",
+            "is_active": True,
+            "supported_features": ["chat", "completion", "embedding", "function_calling", "streaming"]
+        },
+        {
+            "name": "volcengine_coding",
+            "display_name": "火山方舟编程",
+            "description": "火山方舟 Ark API（Coding Plan）",
+            "website": "https://www.volcengine.com/solutions/ark",
+            "default_base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+            "test_model": "doubao-seed-2.0-code",
+            "is_active": True,
+            "supported_features": ["chat", "completion", "function_calling", "streaming"]
         }
     ]
     

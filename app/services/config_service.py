@@ -5128,6 +5128,8 @@ class ConfigService:
             "openai",      # OpenAI
             "anthropic",   # Anthropic
             "google",      # Google
+            "volcengine",          # 火山方舟
+            "volcengine_coding",   # 火山方舟编程
         ]
 
         # 常见模型名称前缀（用于识别不带厂商前缀的模型）
@@ -5137,6 +5139,8 @@ class ConfigService:
             "claude-": "anthropic",     # claude-3-opus, claude-3-sonnet
             "gemini-": "google",        # gemini-pro, gemini-1.5-pro
             "gemini": "google",         # gemini (不带连字符)
+            "doubao-": "volcengine",    # 火山方舟豆包模型
+            "ep-": "volcengine",        # 火山方舟推理接入点 (Endpoint)
         }
 
         # 排除的关键词
