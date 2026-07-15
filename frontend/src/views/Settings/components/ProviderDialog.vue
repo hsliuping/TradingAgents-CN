@@ -426,6 +426,28 @@ const presetProviders = [
     register_guide: '请先安装并启动 LocalAI 服务，然后配置 API 地址'
   },
   {
+    name: 'volcengine',
+    display_name: '火山方舟',
+    description: '火山引擎火山方舟大模型服务平台，提供豆包等模型，OpenAI 兼容接口',
+    website: 'https://www.volcengine.com/solutions/ark',
+    api_doc_url: 'https://www.volcengine.com/docs/82379',
+    default_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+    supported_features: ['chat', 'completion', 'embedding', 'function_calling', 'streaming'],
+    register_url: 'https://www.volcengine.com/solutions/ark',
+    register_guide: '如果您还没有火山引擎账号，请先注册并开通方舟服务：'
+  },
+  {
+    name: 'volcengine_coding',
+    display_name: '火山方舟 (Coding)',
+    description: '火山方舟 Coding 专用通道，用于代码生成与编程类模型接入',
+    website: 'https://www.volcengine.com/solutions/ark',
+    api_doc_url: 'https://www.volcengine.com/docs/82379',
+    default_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+    supported_features: ['chat', 'completion', 'function_calling', 'streaming'],
+    register_url: 'https://www.volcengine.com/solutions/ark',
+    register_guide: '如果您还没有火山引擎账号，请先注册并开通方舟服务：'
+  },
+  {
     name: 'openai_compatible',
     display_name: 'OpenAI 兼容 (通用)',
     description: '通用的 OpenAI 兼容 API 服务，适用于任何兼容 OpenAI API 格式的服务提供商',

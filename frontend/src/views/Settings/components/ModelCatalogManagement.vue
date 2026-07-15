@@ -444,7 +444,7 @@ const importingForProvider = ref(false)
 const exportingForProvider = ref(false)
 
 // 聚合平台列表
-const aggregatorProviders = ['302ai', 'aihubmix', 'oneapi', 'newapi', 'openrouter', 'custom_aggregator']
+const aggregatorProviders = ['302ai', 'aihubmix', 'oneapi', 'newapi', 'openrouter', 'volcengine', 'volcengine_coding', 'custom_aggregator']
 
 // 计算属性：判断当前选择的是否为聚合平台
 const isAggregatorProvider = computed(() => {

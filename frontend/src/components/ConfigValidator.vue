@@ -408,6 +408,8 @@ const updateConfigItems = () => {
   const recommendedKeys = [
     { key: 'DEEPSEEK_API_KEY', name: 'DeepSeek API', description: 'DeepSeek 大模型 API 密钥', help: '用于 AI 分析功能' },
     { key: 'AIHUBMIX_API_KEY', name: 'AIHubMix API', description: 'AIHubMix 聚合平台 API 密钥', help: '用于统一接入多厂商模型' },
+    { key: 'VOLCENGINE_API_KEY', name: '火山方舟 API', description: '火山方舟大模型 API 密钥', help: '用于 AI 分析功能（豆包等模型）' },
+    { key: 'VOLCENGINE_CODING_API_KEY', name: '火山方舟 Coding API', description: '火山方舟 Coding 专用 API 密钥', help: '用于代码生成与编程类模型接入' },
     { key: 'DASHSCOPE_API_KEY', name: '通义千问 API', description: '阿里云通义千问 API 密钥', help: '用于 AI 分析功能' },
     { key: 'TUSHARE_TOKEN', name: 'Tushare Token', description: 'Tushare 数据源 Token', help: '用于获取专业A股数据' }
   ]

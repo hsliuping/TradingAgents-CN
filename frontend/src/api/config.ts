@@ -20,6 +20,8 @@ export interface LLMProvider {
   default_base_url?: string
   embedding_model?: string  // 🔥 新增：Embedding 模型名称
   test_model?: string  // 🔥 新增：测试模型名称（用于测试API连接，如果未填写则使用系统默认值）
+  api_key?: string  // 🔥 新增：API Key（可选，用于测试连接或覆盖环境变量）
+  api_secret?: string  // 🔥 新增：API Secret（某些厂家需要，如百度千帆）
   extra_config?: {
     has_api_key?: boolean
     source?: 'environment' | 'database'
