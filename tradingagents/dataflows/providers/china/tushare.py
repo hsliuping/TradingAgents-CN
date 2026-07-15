@@ -2,6 +2,12 @@
 统一的Tushare数据提供器
 合并app层和tradingagents层的所有优势功能
 """
+import os
+# 🔧 避免 Tushare 写用户主目录 tk.csv 导致权限错误
+os.environ['TS_CACHE_DIR'] = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'data', 'tushare_cache')
+os.environ['TS_DATA_DIR'] = os.environ['TS_CACHE_DIR']
+os.environ['TEMP'] = os.environ['TS_CACHE_DIR']
+
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime, date, timedelta
 import pandas as pd
@@ -15,6 +21,19 @@ from tradingagents.config.providers_config import get_provider_config
 try:
     import tushare as ts
     TUSHARE_AVAILABLE = True
+    # monkey patch upass 避免写 tk.csv
+    try:
+        from tushare import upass
+        _orig_set_token = upass.set_token
+        _orig_get_token = upass.get_token
+        def _patched_set_token(token):
+            os.environ['TUSHARE_TOKEN'] = token
+        def _patched_get_token():
+            return os.environ.get('TUSHARE_TOKEN', '')
+        upass.set_token = _patched_set_token
+        upass.get_token = _patched_get_token
+    except Exception:
+        pass
 except ImportError:
     TUSHARE_AVAILABLE = False
     ts = None
