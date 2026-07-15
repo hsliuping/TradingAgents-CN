@@ -478,6 +478,75 @@ class ChatCustomOpenAI(OpenAICompatibleBase):
         )
 
 
+class ChatVolcengineOpenAI(OpenAICompatibleBase):
+    """火山方舟（Volcengine Ark）Agent Plan OpenAI兼容适配器
+
+    支持 reasoning_effort 参数控制推理模型思考深度。
+    取值: none/minimal/low/medium/high/xhigh/max
+    """
+
+    def __init__(
+        self,
+        model: str = "doubao-seed-2-1-turbo-260628",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        if base_url is None:
+            env_base_url = os.getenv("VOLCENGINE_BASE_URL")
+            if env_base_url and not env_base_url.startswith('your_'):
+                base_url = env_base_url
+            else:
+                base_url = "https://ark.cn-beijing.volces.com/api/v3"
+
+        super().__init__(
+            provider_name="volcengine",
+            model=model,
+            api_key_env_var="VOLCENGINE_API_KEY",
+            base_url=base_url,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+
+
+class ChatVolcengineCodingOpenAI(OpenAICompatibleBase):
+    """火山方舟 Coding Plan OpenAI兼容适配器
+
+    Coding Plan 仅支持约10个编码相关模型，base_url 与 Agent Plan 不同。
+    """
+
+    def __init__(
+        self,
+        model: str = "doubao-seed-2.0-code",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        if base_url is None:
+            env_base_url = os.getenv("VOLCENGINE_CODING_BASE_URL")
+            if env_base_url and not env_base_url.startswith('your_'):
+                base_url = env_base_url
+            else:
+                base_url = "https://ark.cn-beijing.volces.com/api/coding/v3"
+
+        super().__init__(
+            provider_name="volcengine_coding",
+            model=model,
+            api_key_env_var="VOLCENGINE_CODING_API_KEY",
+            base_url=base_url,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+
+
 # 支持的OpenAI兼容模型配置
 OPENAI_COMPATIBLE_PROVIDERS = {
     "deepseek": {
@@ -521,6 +590,25 @@ OPENAI_COMPATIBLE_PROVIDERS = {
             "glm-4": {"context_length": 128000, "supports_function_calling": True},
             "glm-4-plus": {"context_length": 128000, "supports_function_calling": True},
             "glm-3-turbo": {"context_length": 128000, "supports_function_calling": True}
+        }
+    },
+    "volcengine": {
+        "adapter_class": ChatVolcengineOpenAI,
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "api_key_env": "VOLCENGINE_API_KEY",
+        "models": {
+            "doubao-seed-2-1-turbo-260628": {"context_length": 128000, "supports_function_calling": True},
+            "doubao-seed-2-1-turbo": {"context_length": 128000, "supports_function_calling": True},
+            "doubao-seed-2.0": {"context_length": 128000, "supports_function_calling": True},
+        }
+    },
+    "volcengine_coding": {
+        "adapter_class": ChatVolcengineCodingOpenAI,
+        "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "api_key_env": "VOLCENGINE_CODING_API_KEY",
+        "models": {
+            "doubao-seed-2.0-code": {"context_length": 128000, "supports_function_calling": True},
+            "doubao-seed-1.6-code": {"context_length": 128000, "supports_function_calling": True},
         }
     },
     "custom_openai": {

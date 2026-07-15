@@ -204,6 +204,10 @@ class LLMConfig(BaseModel):
     temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="温度参数（股票分析推荐：0.2-0.3快速分析，0.1-0.2深度分析）")
     timeout: int = Field(default=180, description="请求超时时间(秒)")
     retry_times: int = Field(default=3, description="重试次数")
+    reasoning_effort: Optional[str] = Field(
+        default=None,
+        description="推理模型思考深度 (none/minimal/low/medium/high/xhigh/max)，仅火山方舟推理模型支持"
+    )
     enabled: bool = Field(default=True, description="是否启用")
     description: Optional[str] = Field(None, description="配置描述")
 
@@ -377,6 +381,7 @@ class LLMConfigRequest(BaseModel):
     temperature: float = 0.2  # 股票分析推荐值：0.2-0.3（快速分析），0.1-0.2（深度分析）
     timeout: int = 180  # 默认超时时间改为180秒
     retry_times: int = 3
+    reasoning_effort: Optional[str] = None  # 推理模型思考深度控制
     enabled: bool = True
     description: Optional[str] = None
 

@@ -57,7 +57,7 @@ def _normalize_provider_qualified_model(provider: str, model: str) -> tuple[str,
     return normalized_provider, raw_model
 
 
-def create_llm_by_provider(provider: str, model: str, backend_url: str, temperature: float, max_tokens: int, timeout: int, api_key: str = None):
+def create_llm_by_provider(provider: str, model: str, backend_url: str, temperature: float, max_tokens: int, timeout: int, api_key: str = None, reasoning_effort: Optional[str] = None):
     """
     根据 provider 创建对应的 LLM 实例
 
@@ -69,12 +69,19 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         max_tokens: 最大 token 数
         timeout: 超时时间
         api_key: API Key（可选，如果未提供则从环境变量读取）
+        reasoning_effort: 推理模型思考深度 (none/minimal/low/medium/high/xhigh/max)，仅火山方舟推理模型支持
 
     Returns:
         LLM 实例
     """
     from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
     from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm, normalize_openai_temperature
+
+    # 🔧 reasoning_effort: 火山方舟推理模型思考深度控制，通过 model_kwargs 传递
+    _extra = {}
+    if reasoning_effort:
+        _extra["model_kwargs"] = {"reasoning_effort": reasoning_effort}
+        logger.info(f"🔧 [reasoning_effort] 设置为 {reasoning_effort}")
 
     normalized_provider, normalized_model = _normalize_provider_qualified_model(provider, model)
     if normalized_provider != provider or normalized_model != model:
@@ -168,7 +175,8 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             base_url=backend_url,  # 使用用户提供的backend_url
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout
+            timeout=timeout,
+            **_extra
         )
 
     elif provider.lower() in ["openai", "siliconflow", "openrouter", "aihubmix", "ollama"]:
@@ -200,7 +208,28 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             api_key=api_key,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout
+            timeout=timeout,
+            **_extra
+        )
+
+    elif provider.lower() in ["volcengine", "volcengine_coding"]:
+        # 🔧 火山方舟：使用专用适配器，支持 reasoning_effort
+        if not api_key:
+            env_key = "VOLCENGINE_CODING_API_KEY" if provider.lower() == "volcengine_coding" else "VOLCENGINE_API_KEY"
+            api_key = os.getenv(env_key)
+        logger.info(f"✅ [火山方舟] provider={provider}, model={model}, reasoning_effort={reasoning_effort or '未设置'}")
+        if api_key:
+            logger.info(f"🔑 [火山方舟] API Key: {truncate_api_key(api_key)}")
+
+        return create_openai_compatible_llm(
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            base_url=backend_url,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            **_extra
         )
 
     elif provider.lower() == "anthropic":
@@ -226,7 +255,8 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             base_url=backend_url,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout
+            timeout=timeout,
+            **_extra
         )
 
     else:
@@ -263,7 +293,8 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             api_key=custom_api_key,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout
+            timeout=timeout,
+            **_extra
         )
 
 
@@ -310,6 +341,10 @@ class TradingAgentsGraph:
         deep_temperature = deep_config.get("temperature", 0.7)
         deep_timeout = deep_config.get("timeout", 180)
 
+        # 🔧 reasoning_effort: 火山方舟推理模型思考深度控制
+        quick_reasoning_effort = quick_config.get("reasoning_effort")
+        deep_reasoning_effort = deep_config.get("reasoning_effort")
+
         # 🔧 检查是否为混合模式（快速模型和深度模型来自不同厂家）
         quick_provider = self.config.get("quick_provider")
         deep_provider = self.config.get("deep_provider")
@@ -333,7 +368,8 @@ class TradingAgentsGraph:
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
                 timeout=quick_timeout,
-                api_key=self.config.get("quick_api_key")  # 🔥 传递 API Key
+                api_key=self.config.get("quick_api_key"),  # 🔥 传递 API Key
+                reasoning_effort=quick_reasoning_effort  # 🔧 推理模型思考深度
             )
 
             self.deep_thinking_llm = create_llm_by_provider(
@@ -343,10 +379,37 @@ class TradingAgentsGraph:
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout,
-                api_key=self.config.get("deep_api_key")  # 🔥 传递 API Key
+                api_key=self.config.get("deep_api_key"),  # 🔥 传递 API Key
+                reasoning_effort=deep_reasoning_effort  # 🔧 推理模型思考深度
             )
 
             logger.info(f"✅ [显式模型配置] LLM 实例创建成功")
+
+        elif self.config["llm_provider"].lower() in ["volcengine", "volcengine_coding"]:
+            # 🔧 火山方舟：使用 create_llm_by_provider 支持 reasoning_effort
+            logger.info(f"🔧 [火山方舟] llm_provider={self.config['llm_provider']}")
+            volc_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key")
+
+            self.deep_thinking_llm = create_llm_by_provider(
+                provider=self.config["llm_provider"],
+                model=self.config["deep_think_llm"],
+                backend_url=self.config.get("backend_url", ""),
+                temperature=deep_temperature,
+                max_tokens=deep_max_tokens,
+                timeout=deep_timeout,
+                api_key=volc_api_key,
+                reasoning_effort=deep_reasoning_effort
+            )
+            self.quick_thinking_llm = create_llm_by_provider(
+                provider=self.config["llm_provider"],
+                model=self.config["quick_think_llm"],
+                backend_url=self.config.get("backend_url", ""),
+                temperature=quick_temperature,
+                max_tokens=quick_max_tokens,
+                timeout=quick_timeout,
+                api_key=volc_api_key,
+                reasoning_effort=quick_reasoning_effort
+            )
 
         elif self.config["llm_provider"].lower() == "openai":
             logger.info(f"🔧 [OpenAI-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
