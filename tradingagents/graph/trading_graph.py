@@ -37,6 +37,7 @@ from .propagation import Propagator
 from .reflection import Reflector
 from .signal_processing import SignalProcessor
 from app.utils.api_key_utils import truncate_api_key
+from app.core.jdyun import get_llm_max_retries
 
 
 def _normalize_provider_qualified_model(provider: str, model: str) -> tuple[str, str]:
@@ -176,6 +177,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
+            max_retries=get_llm_max_retries(),
             **_extra
         )
 
@@ -212,6 +214,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
+            max_retries=get_llm_max_retries(),
             **_extra
         )
 
@@ -232,6 +235,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
+            max_retries=get_llm_max_retries(),
             **_extra
         )
 
@@ -259,6 +263,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
+            max_retries=get_llm_max_retries(),
             **_extra
         )
 
@@ -297,6 +302,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
+            max_retries=get_llm_max_retries(),
             **_extra
         )
 
@@ -423,14 +429,16 @@ class TradingAgentsGraph:
                 base_url=self.config["backend_url"],
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
-                timeout=deep_timeout
+                timeout=deep_timeout,
+                max_retries=get_llm_max_retries()
             )
             self.quick_thinking_llm = ChatOpenAI(
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
-                timeout=quick_timeout
+                timeout=quick_timeout,
+                max_retries=get_llm_max_retries()
             )
         elif self.config["llm_provider"] == "siliconflow":
             # SiliconFlow支持：使用OpenAI兼容API
@@ -448,7 +456,8 @@ class TradingAgentsGraph:
                 api_key=siliconflow_api_key,
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
-                timeout=deep_timeout
+                timeout=deep_timeout,
+                max_retries=get_llm_max_retries()
             )
             self.quick_thinking_llm = ChatOpenAI(
                 model=self.config["quick_think_llm"],
@@ -456,7 +465,8 @@ class TradingAgentsGraph:
                 api_key=siliconflow_api_key,
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
-                timeout=quick_timeout
+                timeout=quick_timeout,
+                max_retries=get_llm_max_retries()
             )
         elif self.config["llm_provider"] == "openrouter":
             # OpenRouter支持：优先使用OPENROUTER_API_KEY，否则使用OPENAI_API_KEY
@@ -474,7 +484,8 @@ class TradingAgentsGraph:
                 api_key=openrouter_api_key,
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
-                timeout=deep_timeout
+                timeout=deep_timeout,
+                max_retries=get_llm_max_retries()
             )
             self.quick_thinking_llm = ChatOpenAI(
                 model=self.config["quick_think_llm"],
@@ -482,7 +493,8 @@ class TradingAgentsGraph:
                 api_key=openrouter_api_key,
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
-                timeout=quick_timeout
+                timeout=quick_timeout,
+                max_retries=get_llm_max_retries()
             )
         elif self.config["llm_provider"] == "aihubmix":
             aihubmix_api_key = os.getenv('AIHUBMIX_API_KEY')
@@ -499,7 +511,8 @@ class TradingAgentsGraph:
                 api_key=aihubmix_api_key,
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
-                timeout=deep_timeout
+                timeout=deep_timeout,
+                max_retries=get_llm_max_retries()
             )
             self.quick_thinking_llm = ChatOpenAI(
                 model=self.config["quick_think_llm"],
@@ -507,7 +520,8 @@ class TradingAgentsGraph:
                 api_key=aihubmix_api_key,
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
-                timeout=quick_timeout
+                timeout=quick_timeout,
+                max_retries=get_llm_max_retries()
             )
         elif self.config["llm_provider"] == "ollama":
             logger.info(f"🔧 [Ollama-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
@@ -518,14 +532,16 @@ class TradingAgentsGraph:
                 base_url=self.config["backend_url"],
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
-                timeout=deep_timeout
+                timeout=deep_timeout,
+                max_retries=get_llm_max_retries()
             )
             self.quick_thinking_llm = ChatOpenAI(
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
-                timeout=quick_timeout
+                timeout=quick_timeout,
+                max_retries=get_llm_max_retries()
             )
         elif self.config["llm_provider"].lower() == "anthropic":
             logger.info(f"🔧 [Anthropic-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")

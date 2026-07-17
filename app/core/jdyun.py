@@ -82,3 +82,47 @@ def get_jdyun_status() -> dict:
         "embedding_dims": JDYUN_EMBEDDING_DIMS,
         "tushare_token_configured": bool(get_jdyun_tushare_token()),
     }
+
+
+# ============================================================================
+# LLM 限速配置（应对京东云 API 限速）
+# ============================================================================
+
+def get_jdyun_llm_max_retries() -> int:
+    """获取 LLM 调用最大重试次数（京东云模式默认 8，应对 429 限速）"""
+    return int(os.getenv("JDYUN_LLM_MAX_RETRIES", "8"))
+
+
+def get_jdyun_llm_max_rpm() -> int:
+    """获取 LLM 每分钟最大请求数（用于限速器配置，默认 30）"""
+    return int(os.getenv("JDYUN_LLM_MAX_RPM", "30"))
+
+
+def get_jdyun_batch_max_concurrent() -> int:
+    """获取批量分析最大并发数（京东云模式默认 1，避免 LLM 限速）"""
+    return int(os.getenv("JDYUN_BATCH_MAX_CONCURRENT", "1"))
+
+
+def get_jdyun_worker_max_concurrent() -> int:
+    """获取 Worker 最大并发任务数（京东云模式默认 1，避免 LLM 限速）"""
+    return int(os.getenv("JDYUN_WORKER_MAX_CONCURRENT", "1"))
+
+
+def get_jdyun_stock_interval_seconds() -> int:
+    """获取定时分析股票间的间隔秒数（京东云模式默认 10 秒）"""
+    return int(os.getenv("JDYUN_STOCK_INTERVAL_SECONDS", "10"))
+
+
+def get_llm_max_retries(default: int = 2) -> int:
+    """
+    获取 LLM 最大重试次数（兼容京东云和非京东云模式）
+
+    Args:
+        default: 非京东云模式下的默认重试次数（默认 2）
+
+    Returns:
+        京东云模式返回 get_jdyun_llm_max_retries()，否则返回 default
+    """
+    if is_jdyun_mode():
+        return get_jdyun_llm_max_retries()
+    return default
