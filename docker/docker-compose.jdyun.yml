@@ -119,6 +119,12 @@ services:
       VECTOR_STORE_BACKEND: "qdrant"
       QDRANT_DATA_DIR: "/app/data/qdrant"
       MEMORY_ENABLED: "${MEMORY_ENABLED:-true}"
+      # 🔧 LLM 限速配置（应对京东云 API 限速，默认值已优化，通常无需修改）
+      JDYUN_LLM_MAX_RETRIES: "${JDYUN_LLM_MAX_RETRIES:-8}"
+      JDYUN_LLM_MAX_RPM: "${JDYUN_LLM_MAX_RPM:-30}"
+      JDYUN_BATCH_MAX_CONCURRENT: "${JDYUN_BATCH_MAX_CONCURRENT:-1}"
+      JDYUN_WORKER_MAX_CONCURRENT: "${JDYUN_WORKER_MAX_CONCURRENT:-1}"
+      JDYUN_STOCK_INTERVAL_SECONDS: "${JDYUN_STOCK_INTERVAL_SECONDS:-10}"
     depends_on:
       mongodb:
         condition: service_healthy

@@ -332,6 +332,32 @@ EMBEDDING_MODEL=Qwen3-Embedding-8B
 
 # Tushare 数据源 Token（由京东云统一提供）
 TUSHARE_TOKEN=your_tushare_token_here
+
+# ============================================================================
+# LLM 限速配置（应对京东云 API 限速）
+# ============================================================================
+# 以下配置用于避免定时分析和多股分析时触发京东云 LLM 限速（429 错误）
+# 默认值已针对京东云限速优化，通常无需修改
+
+# LLM 调用最大重试次数（遇到 429 限速时指数退避重试，默认 8 次）
+# langchain ChatOpenAI 内置指数退避：1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s
+JDYUN_LLM_MAX_RETRIES=8
+
+# LLM 每分钟最大请求数（用于限速器配置，默认 30 RPM）
+# 京东云 LLM API 通常有 RPM 限制，此值用于主动限速
+JDYUN_LLM_MAX_RPM=30
+
+# 批量分析最大并发数（默认 1，避免并发 LLM 调用触发限速）
+# 同时分析多只股票时的最大并发数
+JDYUN_BATCH_MAX_CONCURRENT=1
+
+# Worker 最大并发任务数（默认 1，避免并发 LLM 调用触发限速）
+# Worker 同时执行的分析任务数
+JDYUN_WORKER_MAX_CONCURRENT=1
+
+# 定时分析股票间间隔秒数（默认 10 秒）
+# 每只股票分析完成后，等待指定秒数再开始下一只，避免连续密集 LLM 调用
+JDYUN_STOCK_INTERVAL_SECONDS=10
 "@
             Set-Content -Path $jdyunExamplePath -Value $jdyunExampleContent -Encoding UTF8
             Write-Host "  ✅ Created .env.jdyun.example" -ForegroundColor Green
