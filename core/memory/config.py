@@ -327,6 +327,70 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
     LLM / Embedding 配置直接从数据库 system_configs + llm_providers 读取，
     与分析流程使用相同的模型和凭证。
     """
+    # 🔧 京东云模式：使用环境变量配置，跳过数据库查询
+    from app.core.jdyun import (
+        is_jdyun_mode, get_jdyun_api_base, get_jdyun_api_key,
+        get_jdyun_embedding_model, get_jdyun_default_model,
+        JDYUN_EMBEDDING_DIMS, JDYUN_PROVIDER_NAME,
+    )
+    if is_jdyun_mode():
+        jdyun_api_base = get_jdyun_api_base()
+        jdyun_api_key = get_jdyun_api_key()
+        jdyun_embedding_model = get_jdyun_embedding_model()
+        jdyun_chat_model = get_jdyun_default_model()
+
+        logger.info(
+            "mem0 config: 京东云模式 — embedding=%s, chat=%s, api_base=%s",
+            jdyun_embedding_model, jdyun_chat_model, jdyun_api_base,
+        )
+
+        # Embedder: 使用京东云 OpenAI 兼容接口
+        embedder = {
+            "provider": "openai",
+            "config": {
+                "model": jdyun_embedding_model,
+                "api_key": jdyun_api_key,
+                "openai_base_url": _normalize_openai_base_url(jdyun_api_base),
+                "embedding_dims": JDYUN_EMBEDDING_DIMS,
+            },
+        }
+        collection_name = _build_mem0_collection_name(embedder)
+
+        # Vector Store
+        qdrant_base = _env("QDRANT_DATA_DIR", "./data/qdrant")
+        mem0_qdrant_path = os.path.join(qdrant_base, "mem0")
+        vector_store = {
+            "provider": "qdrant",
+            "config": {
+                "path": mem0_qdrant_path,
+                "collection_name": collection_name,
+                "on_disk": True,
+            },
+        }
+
+        # LLM: 使用京东云 OpenAI 兼容接口
+        llm = {
+            "provider": "openai",
+            "config": {
+                "api_key": jdyun_api_key,
+                "model": jdyun_chat_model,
+                "openai_base_url": _normalize_openai_base_url(jdyun_api_base),
+                "temperature": 0.1,
+                "max_tokens": 2000,
+            },
+        }
+
+        from .prompts import FINANCIAL_FACT_EXTRACTION_PROMPT
+
+        return {
+            "vector_store": vector_store,
+            "llm": llm,
+            "embedder": embedder,
+            "custom_prompt": FINANCIAL_FACT_EXTRACTION_PROMPT,
+            "version": "v1.1",
+        }
+
+    # ===== 非京东云模式：原有逻辑 =====
     config_doc = _read_active_system_config(db)
     db_settings = config_doc.get("system_settings") or {}
     llm_configs = config_doc.get("llm_configs") or []

@@ -179,7 +179,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             **_extra
         )
 
-    elif provider.lower() in ["openai", "siliconflow", "openrouter", "aihubmix", "ollama"]:
+    elif provider.lower() in ["openai", "siliconflow", "openrouter", "aihubmix", "ollama", "jdyun"]:
         # 优先使用传入的 API Key，否则从环境变量读取
         if not api_key:
             if provider.lower() == "siliconflow":
@@ -189,6 +189,9 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             elif provider.lower() == "aihubmix":
                 api_key = os.getenv('AIHUBMIX_API_KEY')
             elif provider.lower() == "openai":
+                api_key = os.getenv('OPENAI_API_KEY')
+            elif provider.lower() == "jdyun":
+                # 🔧 京东云：使用 OPENAI_API_KEY 环境变量
                 api_key = os.getenv('OPENAI_API_KEY')
             elif provider.lower() == "ollama":
                 # 🔥 Ollama 是本地模型，不需要 API Key，使用占位符

@@ -182,14 +182,24 @@ class LegacyDependencyProvider:
 
         logger.info(f"[依赖提供者] 用户传入配置: quick_model={quick_model}, deep_model={deep_model}")
 
-        # 如果用户没有传入模型名称，从数据库获取默认配置
-        if not quick_model or not deep_model:
-            db_default = self._get_default_llm_config_from_db()
+        # 🔧 京东云模式：如果没有传入模型名称，使用环境变量中的默认模型，跳过数据库查询
+        from app.core.jdyun import is_jdyun_mode, get_jdyun_default_model
+        if is_jdyun_mode():
+            jdyun_default = get_jdyun_default_model()
             if not quick_model:
-                quick_model = db_default.get("quick_think_llm", "qwen-flash")
+                quick_model = jdyun_default
             if not deep_model:
-                deep_model = db_default.get("deep_think_llm", "qwen-plus")
-            logger.info(f"[依赖提供者] 使用数据库默认配置补充: quick_model={quick_model}, deep_model={deep_model}")
+                deep_model = jdyun_default
+            logger.info(f"[依赖提供者] 京东云模式: quick_model={quick_model}, deep_model={deep_model}")
+        else:
+            # 如果用户没有传入模型名称，从数据库获取默认配置
+            if not quick_model or not deep_model:
+                db_default = self._get_default_llm_config_from_db()
+                if not quick_model:
+                    quick_model = db_default.get("quick_think_llm", "qwen-flash")
+                if not deep_model:
+                    deep_model = db_default.get("deep_think_llm", "qwen-plus")
+                logger.info(f"[依赖提供者] 使用数据库默认配置补充: quick_model={quick_model}, deep_model={deep_model}")
 
         # 根据模型名称从数据库获取完整配置（provider, url, api_key）
         # 复用 simple_analysis_service 中已有的统一查询函数

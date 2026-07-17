@@ -177,7 +177,19 @@ def bridge_config_to_env():
             logger.warning("⚠️  将尝试从 JSON 文件读取配置作为后备方案")
             data_source_configs = unified_config.get_data_source_configs()
 
+        # 🔧 京东云模式：跳过数据源配置桥接，直接使用环境变量中的 TUSHARE_TOKEN
+        from app.core.jdyun import is_jdyun_mode
+        if is_jdyun_mode():
+            tushare_token = os.getenv('TUSHARE_TOKEN', '')
+            if tushare_token:
+                logger.info(f"  ✓ 京东云模式: 使用环境变量中的 TUSHARE_TOKEN (长度: {len(tushare_token)})")
+                bridged_count += 1
+            else:
+                logger.warning("  ⚠️  京东云模式: TUSHARE_TOKEN 环境变量未设置")
+
         for ds_config in data_source_configs:
+            if is_jdyun_mode():
+                break  # 京东云模式下跳过数据源配置遍历
             if ds_config.enabled and ds_config.api_key:
                 # Tushare Token
                 # 🔥 优先级：数据库配置 > .env 文件（用户在 Web 后台修改后立即生效）

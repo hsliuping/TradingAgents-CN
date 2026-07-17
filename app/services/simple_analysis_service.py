@@ -190,6 +190,23 @@ def get_provider_and_url_by_model_sync(
             model_name = parsed_model
             logger.info(f"🔧 [同步查询] 解析旧格式模型名: {parsed_provider}::{parsed_model} → provider={preferred_provider}, model={model_name}")
 
+        # 🔧 京东云模式：直接使用环境变量配置，跳过数据库查询
+        from app.core.jdyun import (
+            is_jdyun_mode, get_jdyun_api_base, get_jdyun_api_key,
+            get_jdyun_default_model, JDYUN_PROVIDER_NAME,
+        )
+        if is_jdyun_mode():
+            api_base = get_jdyun_api_base()
+            api_key = get_jdyun_api_key()
+            if api_base and api_key:
+                effective_model = model_name if model_name else get_jdyun_default_model()
+                logger.info(f"🔧 [京东云模式] 使用京东云配置: model={effective_model}, api_base={api_base}")
+                return {
+                    "provider": JDYUN_PROVIDER_NAME,
+                    "backend_url": api_base,
+                    "api_key": api_key,
+                }
+
         normalized_provider = str(preferred_provider or "").strip().lower()
         normalized_config_id = str(preferred_config_id or "").strip()
 
