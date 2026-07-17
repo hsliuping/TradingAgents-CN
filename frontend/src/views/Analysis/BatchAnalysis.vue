@@ -339,6 +339,7 @@ import { useAuthStore } from '@/stores/auth'
 import ModelConfig from '@/components/ModelConfig.vue'
 import { resolveModelSelection } from '@/utils/modelSelection'
 import { validateStockCode } from '@/utils/stockValidator'
+import { isJdyunMode, JDYUN_CHAT_MODELS } from '@/utils/config'
 
 // 路由实例（必须在顶层调用）
 const router = useRouter()
@@ -490,7 +491,22 @@ const initializeModelSettings = async () => {
 
     // 获取所有可用的模型列表
     const llmConfigs = await configApi.getLLMConfigs()
-    availableModels.value = llmConfigs.filter((config: any) => config.enabled)
+    let enabledModels = llmConfigs.filter((config: any) => config.enabled)
+
+    // 🔧 京东云模式：仅保留预置的 4 个模型
+    if (isJdyunMode()) {
+      const jdyunModelSet = new Set<string>(JDYUN_CHAT_MODELS)
+      enabledModels = enabledModels.filter((m: any) => jdyunModelSet.has(m.model_name))
+      if (enabledModels.length === 0) {
+        enabledModels = JDYUN_CHAT_MODELS.map(name => ({
+          model_name: name,
+          model_display_name: name,
+          provider: 'jdyun',
+          enabled: true
+        })) as any
+      }
+    }
+    availableModels.value = enabledModels
 
     // 获取默认模型
     const defaultModels = await configApi.getDefaultModels()
@@ -507,18 +523,42 @@ const initializeModelSettings = async () => {
       defaultModels.default_provider
     )
 
+    // 🔧 京东云模式：若解析后的默认模型不在白名单内，回退到第一个可用模型
+    if (isJdyunMode()) {
+      const jdyunModelSet = new Set<string>(JDYUN_CHAT_MODELS)
+      if (!jdyunModelSet.has(modelSettings.value.quickAnalysisModel)) {
+        modelSettings.value.quickAnalysisModel = availableModels.value[0]?.model_name || JDYUN_CHAT_MODELS[0]
+      }
+      if (!jdyunModelSet.has(modelSettings.value.deepAnalysisModel)) {
+        modelSettings.value.deepAnalysisModel = availableModels.value[0]?.model_name || JDYUN_CHAT_MODELS[0]
+      }
+    }
+
     console.log('✅ [批量分析] 加载模型配置成功:', {
       quick: modelSettings.value.quickAnalysisModel,
       deep: modelSettings.value.deepAnalysisModel,
       available: availableModels.value.length,
-      availableModels: availableModels.value.map(m => m.model_name)
+      availableModels: availableModels.value.map(m => m.model_name),
+      jdyunMode: isJdyunMode()
     })
   } catch (error) {
     console.error('❌ [批量分析] 加载默认模型配置失败:', error)
-    // 使用硬编码的默认值
-    modelSettings.value.quickAnalysisModel = resolveModelSelection('qwen-turbo', availableModels.value)
-    modelSettings.value.deepAnalysisModel = resolveModelSelection('qwen-max', availableModels.value)
-    console.log('🔄 [批量分析] 使用硬编码默认值:', {
+    if (isJdyunMode()) {
+      // 京东云模式兜底
+      availableModels.value = JDYUN_CHAT_MODELS.map(name => ({
+        model_name: name,
+        model_display_name: name,
+        provider: 'jdyun',
+        enabled: true
+      })) as any
+      modelSettings.value.quickAnalysisModel = JDYUN_CHAT_MODELS[0]
+      modelSettings.value.deepAnalysisModel = JDYUN_CHAT_MODELS[0]
+    } else {
+      // 使用硬编码的默认值
+      modelSettings.value.quickAnalysisModel = resolveModelSelection('qwen-turbo', availableModels.value)
+      modelSettings.value.deepAnalysisModel = resolveModelSelection('qwen-max', availableModels.value)
+    }
+    console.log('🔄 [批量分析] 使用兜底默认值:', {
       quick: modelSettings.value.quickAnalysisModel,
       deep: modelSettings.value.deepAnalysisModel
     })

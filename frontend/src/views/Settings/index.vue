@@ -51,7 +51,13 @@
 
             <!-- 系统配置菜单 -->
             <template v-else-if="currentSection === 'config'">
-              <el-menu-item index="config">
+              <!-- 京东云模式：显示系统配置（只读状态页），隐藏配置管理 -->
+              <el-menu-item v-if="isJdyunMode" index="jdyun-config">
+                <el-icon><Tools /></el-icon>
+                <span>系统配置</span>
+              </el-menu-item>
+              <!-- 非京东云模式：显示完整的配置管理 -->
+              <el-menu-item v-else index="config">
                 <el-icon><Tools /></el-icon>
                 <span>配置管理</span>
               </el-menu-item>
@@ -317,8 +323,8 @@
 
 
 
-        <!-- 配置管理 -->
-        <el-card v-show="activeTab === 'config'" class="settings-content" shadow="never">
+        <!-- 配置管理（非京东云模式） -->
+        <el-card v-if="!isJdyunMode" v-show="activeTab === 'config'" class="settings-content" shadow="never">
           <template #header>
             <h3>配置管理</h3>
           </template>
@@ -333,6 +339,26 @@
             />
             <el-button type="primary" @click="goToConfigManagement">
               进入配置管理
+            </el-button>
+          </div>
+        </el-card>
+
+        <!-- 系统配置（京东云模式：只读状态页） -->
+        <el-card v-if="isJdyunMode" v-show="activeTab === 'jdyun-config'" class="settings-content" shadow="never">
+          <template #header>
+            <h3>系统配置</h3>
+          </template>
+
+          <div class="config-content">
+            <el-alert
+              title="京东云合作版"
+              type="info"
+              description="本版本通过环境变量注入大模型和数据源配置，无需手动配置。如需修改，请联系管理员更新环境变量。"
+              :closable="false"
+              style="margin-bottom: 20px;"
+            />
+            <el-button type="primary" @click="goToJdyunConfig">
+              查看配置状态
             </el-button>
           </div>
         </el-card>
@@ -540,6 +566,7 @@ import { ElMessage } from 'element-plus'
 import type { FormRules } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { isJdyunMode } from '@/utils/config'
 import {
   Setting,
   User,
@@ -613,6 +640,9 @@ const updateSectionFromRoute = () => {
   } else if (path === '/settings/config') {
     currentSection.value = 'config'
     activeTab.value = 'config'
+  } else if (path === '/settings/jdyun-config') {
+    currentSection.value = 'config'
+    activeTab.value = 'jdyun-config'
   } else if (path === '/settings/usage') {
     currentSection.value = 'config'
     activeTab.value = 'usage'
@@ -708,6 +738,11 @@ watch(() => authStore.user, (newUser) => {
 
 // 方法
 const handleMenuSelect = (index: string) => {
+  // 京东云模式：点击“系统配置”菜单项时跳转到独立的京东云配置页
+  if (index === 'jdyun-config') {
+    router.push('/settings/jdyun-config')
+    return
+  }
   activeTab.value = index
 }
 
@@ -836,6 +871,10 @@ const saveAssistantSettings = async () => {
 // 导航函数
 const goToConfigManagement = () => {
   router.push('/settings/config')
+}
+
+const goToJdyunConfig = () => {
+  router.push('/settings/jdyun-config')
 }
 
 const goToUsageStatistics = () => {

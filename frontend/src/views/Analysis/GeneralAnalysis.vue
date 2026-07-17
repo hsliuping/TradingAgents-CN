@@ -714,6 +714,7 @@ import {
   type GeneralTaskListParams,
 } from '@/api/unifiedTasks'
 import { useAuthStore } from '@/stores/auth'
+import { isJdyunMode, JDYUN_CHAT_MODELS } from '@/utils/config'
 import { marked } from 'marked'
 
 const router = useRouter()
@@ -819,9 +820,33 @@ const loadModels = async () => {
   modelsLoading.value = true
   try {
     const response = await configApi.getLLMConfigs()
-    allModels.value = Array.isArray(response) ? response : []
+    let models = Array.isArray(response) ? response : []
+
+    // 🔧 京东云模式：仅保留预置的 4 个模型
+    if (isJdyunMode()) {
+      const jdyunModelSet = new Set<string>(JDYUN_CHAT_MODELS)
+      models = models.filter((m: any) => jdyunModelSet.has(m.model_name))
+      if (models.length === 0) {
+        models = JDYUN_CHAT_MODELS.map(name => ({
+          model_name: name,
+          model_display_name: name,
+          provider: 'jdyun',
+          enabled: true
+        })) as any
+      }
+    }
+    allModels.value = models
   } catch (error) {
     console.error('加载模型配置失败:', error)
+    // 京东云模式兜底
+    if (isJdyunMode()) {
+      allModels.value = JDYUN_CHAT_MODELS.map(name => ({
+        model_name: name,
+        model_display_name: name,
+        provider: 'jdyun',
+        enabled: true
+      })) as any
+    }
   } finally {
     modelsLoading.value = false
   }
@@ -853,6 +878,8 @@ const loadWorkflows = async () => {
 // 初始化表单默认值
 const initFormValues = async () => {
   const values: Record<string, any> = {}
+  // 京东云模式：预置模型白名单，用于校验默认模型
+  const jdyunModelSet = isJdyunMode() ? new Set<string>(JDYUN_CHAT_MODELS) : null
   for (const field of inputFields.value) {
     let defaultVal = field.default
     // 特殊处理模型字段：从系统配置加载默认模型
@@ -861,11 +888,19 @@ const initFormValues = async () => {
         const defaultModels = await configApi.getDefaultModels()
         defaultVal = defaultModels.quick_analysis_model || ''
       } catch { defaultVal = '' }
+      // 🔧 京东云模式：默认模型不在白名单内时回退到第一个预置模型
+      if (isJdyunMode() && defaultVal && jdyunModelSet && !jdyunModelSet.has(defaultVal)) {
+        defaultVal = JDYUN_CHAT_MODELS[0]
+      }
     } else if (field.name === 'deep_analysis_model' && !defaultVal) {
       try {
         const defaultModels = await configApi.getDefaultModels()
         defaultVal = defaultModels.deep_analysis_model || ''
       } catch { defaultVal = '' }
+      // 🔧 京东云模式：默认模型不在白名单内时回退到第一个预置模型
+      if (isJdyunMode() && defaultVal && jdyunModelSet && !jdyunModelSet.has(defaultVal)) {
+        defaultVal = JDYUN_CHAT_MODELS[0]
+      }
     } else if (field.name === 'research_depth' && !defaultVal) {
       try {
         const authStore = useAuthStore()

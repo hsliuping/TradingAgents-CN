@@ -729,6 +729,22 @@ export const configApi = {
   // 删除空 collection
   deleteCollection(collection_name: string, source: 'main' | 'mem0'): Promise<{ success: boolean; message: string }> {
     return ApiClient.post('/api/config/qdrant/delete-collection', { collection_name, source }) as any
+  },
+
+  // ========== 京东云合作版 ==========
+
+  // 获取京东云配置状态
+  getJdyunStatus(): Promise<{
+    jdyun_mode: boolean
+    api_base: string
+    api_key_configured: boolean
+    current_model: string
+    available_models: string[]
+    embedding_model: string
+    embedding_dims: number
+    tushare_token_configured: boolean
+  }> {
+    return ApiClient.get('/api/config/jdyun/status').then((response: any) => response.data ?? response)
   }
 }
 

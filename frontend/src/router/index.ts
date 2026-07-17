@@ -655,6 +655,12 @@ const routes: RouteRecordRaw[] = [
         name: 'PromptDesignWorkspace',
         component: () => import('@/views/Settings/PromptDesignWorkspace.vue'),
         meta: { title: 'Prompt 设计助手', requiresAuth: true, requiresPro: true }
+      },
+      {
+        path: 'jdyun-config',
+        name: 'JdyunConfig',
+        component: () => import('@/views/Settings/JdyunConfig.vue'),
+        meta: { title: '系统配置', requiresAuth: true }
       }
     ]
   },

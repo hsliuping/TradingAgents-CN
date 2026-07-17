@@ -1532,6 +1532,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { isJdyunMode } from '@/utils/config'
 import {
   Setting,
   Cpu,
@@ -3129,6 +3130,11 @@ watch(
 
 // 生命周期
 onMounted(async () => {
+  // 京东云模式下：配置管理页禁用访问，重定向到京东云配置状态页
+  if (isJdyunMode()) {
+    router.replace('/settings/jdyun-config')
+    return
+  }
   // 先加载厂家信息，再加载其他数据
   await loadProviders()
   await loadProviderInfoMap()

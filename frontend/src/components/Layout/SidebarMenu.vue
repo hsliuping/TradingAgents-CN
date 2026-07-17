@@ -158,7 +158,10 @@
       <!-- 系统配置 -->
       <el-sub-menu index="/settings-config">
         <template #title>系统配置</template>
-        <el-menu-item index="/settings/config">配置管理</el-menu-item>
+        <!-- 京东云模式：显示京东云配置状态页（只读），隐藏配置管理 -->
+        <el-menu-item v-if="isJdyunMode" index="/settings/jdyun-config">系统配置</el-menu-item>
+        <!-- 非京东云模式：显示完整的配置管理 -->
+        <el-menu-item v-else index="/settings/config">配置管理</el-menu-item>
         <el-menu-item index="/settings/cache">缓存管理</el-menu-item>
       </el-sub-menu>
 
@@ -213,6 +216,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { isJdyunMode } from '@/utils/config'
 import {
   Odometer,
   Reading,
