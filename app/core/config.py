@@ -221,6 +221,16 @@ class Settings(BaseSettings):
     TUSHARE_TIER: str = Field(default="standard", description="Tushare积分等级 (free/basic/standard/premium/vip)")
     TUSHARE_RATE_LIMIT_SAFETY_MARGIN: float = Field(default=0.8, ge=0.1, le=1.0, description="速率限制安全边际")
 
+    # ==================== 京东云合作版配置 ====================
+    # 通过 JDYUN_MODE=true 启用京东云合作版模式
+    # 启用后，LLM 和数据源配置从京东云平台注入的环境变量读取：
+    # - OPENAI_API_BASE: 京东云模型服务地址
+    # - OPENAI_API_KEY: 京东云 API Key
+    # - OPENAI_MODEL: 默认对话模型（GLM-5 / GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash）
+    # - EMBEDDING_MODEL: Embedding 模型（默认 Qwen3-Embedding-8B）
+    # - TUSHARE_TOKEN: Tushare 数据源 Token
+    JDYUN_MODE: bool = Field(default=False, description="京东云合作版模式开关")
+
     # Tushare统一数据同步配置
     TUSHARE_UNIFIED_ENABLED: bool = Field(default=True)
     TUSHARE_BASIC_INFO_SYNC_ENABLED: bool = Field(default=True)
