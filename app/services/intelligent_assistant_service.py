@@ -129,9 +129,26 @@ def _should_force_tool_retry(user_message: str) -> bool:
     return (has_personal and has_domain) or (has_domain and has_query) or (has_market and has_recency)
 
 
+async def _record_assistant_token_usage(
+    resp_obj: Any,
+    session_id: str,
+    analysis_type: str = "assistant",
+) -> None:
+    """记录 LLM 调用的 token 使用情况（失败不影响主流程）。"""
+    try:
+        from app.services.usage_statistics_service import usage_statistics_service
+        await usage_statistics_service.record_llm_usage(
+            response=resp_obj,
+            session_id=session_id,
+            analysis_type=analysis_type,
+        )
+    except Exception as e:
+        logger.warning(f"记录 token 使用失败: {e}")
+
+
 # =============================================================================
 # 用户记忆元工具：让 LLM 在用户表达"请记住""请帮我记下"等意图时主动登记
-# 设计文档参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
+# 设计文档参考：docs/05-design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
 # =============================================================================
 
 REMEMBER_THIS_TOOL_NAME = "remember_this"
@@ -1009,7 +1026,7 @@ class IntelligentAssistantService:
                     self._tool_functions[tool.id] = func
 
         # 注入 `remember_this` 元工具：允许用户主动让助手记住偏好
-        # 参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
+        # 参考：docs/05-design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
         if self._user_id:
             self._openai_tools.append(_build_remember_this_tool_def())
             self._tool_functions[REMEMBER_THIS_TOOL_NAME] = _make_remember_this_callable(
@@ -1144,6 +1161,7 @@ class IntelligentAssistantService:
                 tools_used=tools_used,
                 dry_run=False,
             )
+            await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
 
             # 兜底：对于“应走工具”的个人数据查询，如果首轮未调工具，则二次强制引导
             if not tools_used and _should_force_tool_retry(resolved_user_message):
@@ -1170,6 +1188,7 @@ class IntelligentAssistantService:
                         dry_run=False,
                         tool_choice="required",
                     )
+                    await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
                 except Exception as retry_err:
                     logger.warning("[智能助手] tool_choice=required 重试失败，降级普通重试: %s", retry_err)
                     resp = await self._llm_client.achat(
@@ -1180,6 +1199,7 @@ class IntelligentAssistantService:
                         tools_used=tools_used,
                         dry_run=False,
                     )
+                    await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
 
             return resp.content
 
@@ -1305,6 +1325,7 @@ class IntelligentAssistantService:
                 dry_run=False,
                 progress_callback=_progress,
             )
+            await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
             if not tools_used and _should_force_tool_retry(resolved_user_message):
                 logger.warning("[智能助手·流式] 首轮未调用工具，触发工具重试兜底")
                 retry_messages = list(messages)
@@ -1328,6 +1349,7 @@ class IntelligentAssistantService:
                         progress_callback=_progress,
                         tool_choice="required",
                     )
+                    await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
                 except Exception:
                     resp = await self._llm_client.achat(
                         retry_messages,
@@ -1338,6 +1360,7 @@ class IntelligentAssistantService:
                         dry_run=False,
                         progress_callback=_progress,
                     )
+                    await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
             return resp.content
 
         def _stream_effective_timeout() -> int:
@@ -2359,6 +2382,7 @@ async def _build_thread_summary_with_llm(
         ]
 
         response = await client.achat(messages_for_llm)
+        await _record_assistant_token_usage(response, "assistant_summary", analysis_type="assistant_summary")
         payload = _load_summary_json(response.content or "")
         summary = _normalize_thread_summary_payload(payload, fallback)
         logger.info("[智能助手摘要] 使用 LLM 生成结构化摘要成功")

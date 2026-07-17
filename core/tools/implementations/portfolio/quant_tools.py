@@ -291,7 +291,7 @@ def get_efficient_frontier(
 @register_tool(
     tool_id="get_monte_carlo_simulation",
     name="蒙特卡洛模拟",
-    description="基于几何布朗运动模型，对单只股票进行蒙特卡洛价格路径模拟，预测未来价格分布和风险指标。",
+    description="基于几何布朗运动模型对单只股票进行蒙特卡洛价格路径模拟，返回模拟路径、终值分布、VaR、CVaR、预期收益率和置信区间等",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -464,7 +464,7 @@ def get_monte_carlo_simulation(
 @register_tool(
     tool_id="get_factor_attribution",
     name="因子归因分析",
-    description="对个股进行简化的因子归因分析，计算 Alpha、Beta、R² 以及市场因子解释度，识别收益来源。",
+    description="对个股进行简化的因子归因分析，计算 Alpha、Beta、R² 及市场因子解释度，返回因子贡献度、残差收益和归因结论，识别收益来源",
     category="fundamentals",
     is_online=False,
     auto_register=True,

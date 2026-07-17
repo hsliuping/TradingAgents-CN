@@ -15,7 +15,7 @@
 新位置提供完全相同的功能，无需修改代码逻辑。
 
 详细迁移指南：
-docs/design/v2.0/tools/TOOLS_MIGRATION_GUIDE.md
+docs/05-design/v2.0/tools/TOOLS_MIGRATION_GUIDE.md
 ====================================
 """
 

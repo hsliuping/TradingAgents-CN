@@ -21,11 +21,15 @@ def _sum_currencies(d: Dict[str, float]) -> float:
 @register_tool(
     tool_id="get_account_info",
     name="获取账户信息",
-    description="获取用户的资金账户信息，包括现金、持仓市值、总资产等",
+    description="获取用户资金账户信息，返回总资产、现金、持仓市值、盈亏及百分比、初始资金、累计出入金和多币种汇总等账户快照",
     category="trade_review",
     is_online=False,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["account_info", "account_balance", "portfolio", "trade_review", "trading", "cash", "positions_value", "total_assets", "profit"],
+    tool_role_hint="specialized",
+    output_shape="structured_json",
+    preferred_for=["account_balance_query", "portfolio_analysis", "position_value_check", "capital_summary"],
 )
 def get_account_info(
     user_id: Annotated[str, "用户ID"]

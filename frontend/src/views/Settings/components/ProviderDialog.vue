@@ -320,7 +320,7 @@ const presetProviders = [
   {
     name: 'aihubmix',
     display_name: 'AIHubMix',
-    description: 'AIHubMix 深度适配 OpenAI、Claude、Gemini、DeepSeek、智谱、千问 等全球顶级模型，多模型交叉验证，分析结论更可靠；无限并发永远在线，A股、港股、美股行情随时可分析，不卡顿不排队；内置 coding-glm-5.1-free 等多款免费模型，零成本体验 AI 分析；按量计费、价格透明，长期使用性价比远超单一厂商。',
+    description: 'AIHubMix 深度适配 OpenAI、Claude、Gemini、DeepSeek、智谱、千问 等全球顶级模型，多模型交叉验证，分析结论更可靠；无限并发永远在线，A股行情随时可分析，不卡顿不排队；内置 coding-glm-5.1-free 等多款免费模型，零成本体验 AI 分析；按量计费、价格透明，长期使用性价比远超单一厂商。',
     website: 'https://aihubmix.com/?aff=2rIi',
     api_doc_url: 'https://docs.aihubmix.com/cn/quick-start',
     default_base_url: 'https://aihubmix.com/v1',

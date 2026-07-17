@@ -71,18 +71,10 @@ export function validateSymbol(symbol: string, market?: string): boolean {
   if (market === 'A股' || market === 'CN') {
     // A股：6位数字
     return /^\d{6}$/.test(trimmed)
-  } else if (market === '美股' || market === 'US') {
-    // 美股：1-5个字母
-    return /^[A-Z]{1,5}$/.test(trimmed.toUpperCase())
-  } else if (market === '港股' || market === 'HK') {
-    // 港股：4-5位数字.HK
-    return /^\d{4,5}(\.HK)?$/.test(trimmed.toUpperCase())
   }
   
   // 未指定市场时，尝试通用验证
-  return /^\d{6}$/.test(trimmed) || // A股
-         /^[A-Z]{1,5}$/.test(trimmed.toUpperCase()) || // 美股
-         /^\d{4,5}(\.HK)?$/.test(trimmed.toUpperCase()) // 港股
+  return /^\d{6}$/.test(trimmed) // A股
 }
 
 /**
@@ -91,22 +83,10 @@ export function validateSymbol(symbol: string, market?: string): boolean {
  * @param market 市场类型（可选）
  * @returns 格式化后的代码
  */
-export function formatSymbol(symbol: string, market?: string): string {
+export function formatSymbol(symbol: string, _market?: string): string {
   if (!symbol) return ''
   
-  const trimmed = symbol.trim()
-  
-  if (market === '美股' || market === 'US') {
-    return trimmed.toUpperCase()
-  } else if (market === '港股' || market === 'HK') {
-    // 确保港股代码包含 .HK 后缀
-    if (/^\d{4,5}$/.test(trimmed)) {
-      return `${trimmed}.HK`
-    }
-    return trimmed.toUpperCase()
-  }
-  
-  return trimmed
+  return symbol.trim()
 }
 
 /**

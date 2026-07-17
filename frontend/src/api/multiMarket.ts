@@ -1,6 +1,6 @@
 /**
  * 多市场股票API
- * 支持A股、港股、美股的统一查询接口
+ * 支持A股的统一查询接口
  */
 import request from './request'
 

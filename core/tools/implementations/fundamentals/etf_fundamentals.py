@@ -404,6 +404,10 @@ def _fetch_etf_online_bundle(symbol: str, source: str, include_hist: bool = True
     category="fundamentals",
     is_online=True,
     auto_register=True,
+    capability_tags=["etf_fundamentals", "etf", "etf_nav", "fundamentals", "etf_valuation", "fund_scale", "premium_discount"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["etf_analysis", "etf_valuation_review", "fund_basics_lookup"],
 )
 def get_etf_fundamentals(
     ticker: Annotated[str, "ETF 代码（如 510050、159919）"],

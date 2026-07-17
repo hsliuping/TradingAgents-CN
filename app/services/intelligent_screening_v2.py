@@ -44,7 +44,7 @@ SCREENING_CONVERSATION_LIMIT = 50
 async def _recall_user_plans_memory(db, user_id: str, query: str) -> str:
     """召回该用户的交易计划纪律 / 偏好（user_preference）记忆，注入到选股 prompt。
 
-    参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-2
+    参考：docs/05-design/v3.0/unified-memory-layer-mem0.md §15.5 P0-2
     """
     if not user_id:
         return ""

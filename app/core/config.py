@@ -337,6 +337,9 @@ class Settings(BaseSettings):
     QMT_AUTO_DOWNLOAD_HISTORY: bool = Field(default=True, description="读取QMT K线前自动补充历史数据")
     QMT_AUTO_DOWNLOAD_FINANCIAL: bool = Field(default=False, description="读取QMT财务数据前自动下载财务数据")
     QMT_AUTO_DOWNLOAD_SECTOR: bool = Field(default=False, description="读取QMT股票列表前自动下载板块数据（默认关闭，避免卡死）")
+
+    # BaoStock 配置
+    ENABLE_BAOSTOCK: bool = Field(default=True, description="是否启用BaoStock数据源（同步股票列表、每日行情、估值数据等）")
     QMT_HISTORY_START_TIME: str = Field(default="", description="QMT历史数据自动下载起始日期 YYYYMMDD")
     QMT_HISTORICAL_SYNC_DAYS: int = Field(default=365, ge=1, le=3650, description="QMT历史数据同步天数")
     QMT_HISTORICAL_BATCH_SIZE: int = Field(default=100, ge=1, le=1000, description="QMT历史数据同步批量大小")

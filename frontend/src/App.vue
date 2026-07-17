@@ -131,8 +131,6 @@ const handleWizardComplete = async (data: any) => {
         // 根据数据源类型添加认证信息
         if (data.datasource.type === 'tushare' && data.datasource.token) {
           dsConfig.api_key = data.datasource.token
-        } else if (data.datasource.type === 'finnhub' && data.datasource.apiKey) {
-          dsConfig.api_key = data.datasource.apiKey
         }
 
         await configApi.addDataSourceConfig(dsConfig)

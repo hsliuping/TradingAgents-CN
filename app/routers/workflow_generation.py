@@ -4,7 +4,7 @@ AI 工作流架构师 API — v3.0
 提供对话式工作流创建（多轮需求沟通）、蓝图确认、自动补全（提示词/Skill）、
 迭代优化和沟通记录等端点。
 
-参考: docs/design/v3.0/ai-workflow-generation.md §6
+参考: docs/05-design/v3.0/ai-workflow-generation.md §6
 """
 
 import logging
@@ -41,6 +41,7 @@ class RespondRequest(BaseModel):
 class ConfirmRequest(BaseModel):
     """确认方案并创建"""
     message: str = Field(default="确认", description="确认消息或补充说明")
+    workflow_type: Optional[str] = Field(default=None, description="工作流类型")
 
 
 class OptimizeRequest(BaseModel):
@@ -105,7 +106,7 @@ async def confirm_and_create(
     """确认方案并创建工作流（含自动补全提示词和 Skill）"""
     try:
         svc = _get_service(db)
-        result = await svc.confirm_and_create(session_id, req.message)
+        result = await svc.confirm_and_create(session_id, req.message, workflow_type=req.workflow_type)
         return ok(result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

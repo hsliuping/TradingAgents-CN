@@ -138,13 +138,13 @@ const formatDate = (dt?: string) => {
 
 const getMarketName = (m: string, code?: string) => {
   if (m === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'ETF'
-  return ({ CN: 'A股', HK: '港股', US: '美股' }[m] || m)
+  return ({ CN: 'A股' }[m] || m)
 }
 const getMarketTagType = (m: string, code?: string) => {
   if (m === 'CN' && code && getMarketByStockCode(code) === 'ETF') return 'success'
-  return ({ CN: 'danger', HK: 'warning', US: 'primary' }[m] || 'info') as any
+  return ({ CN: 'danger' }[m] || 'info') as any
 }
-const getCurrencySymbol = (c: string) => ({ CNY: '¥', HKD: 'HK$', USD: '$' }[c] || c)
+const getCurrencySymbol = (c: string) => ({ CNY: '¥' }[c] || c)
 </script>
 
 <style scoped>

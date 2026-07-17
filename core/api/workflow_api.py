@@ -22,12 +22,8 @@ from ..workflow import (
     WorkflowValidator,
 )
 from core.workflow.templates import (
-    DEFAULT_WORKFLOW,
-    SIMPLE_WORKFLOW,
     BLANK_WORKFLOW,
-    TRADE_REVIEW_WORKFLOW,
     TRADE_REVIEW_WORKFLOW_V2,
-    POSITION_ANALYSIS_WORKFLOW,
     POSITION_ANALYSIS_WORKFLOW_V2,
     V2_STOCK_ANALYSIS_WORKFLOW,
     V2_ETF_ANALYSIS_WORKFLOW,
@@ -35,6 +31,290 @@ from core.workflow.templates import (
 from ..workflow.default_workflow_provider import get_default_workflow_provider
 
 logger = logging.getLogger(__name__)
+
+
+# ==================== 默认 input_config 生成 ====================
+
+def _merge_input_config(
+    existing: Dict[str, Any],
+    defaults: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    合并补全 input_config：已有字段保留，缺少的字段从默认值补充。
+
+    - existing: 数据库中已有的 input_config（可能只有部分字段）
+    - defaults: 完整的默认 input_config（按 workflow_type 生成）
+    - 返回：合并后的 input_config，已有字段不变，缺少的补上
+    """
+    if not existing or not existing.get("fields"):
+        return defaults
+
+    existing_field_names = {f["name"] for f in existing.get("fields", [])}
+    merged_fields = list(existing.get("fields", []))
+
+    for default_field in defaults.get("fields", []):
+        if default_field["name"] not in existing_field_names:
+            merged_fields.append(default_field)
+
+    # 按 order 重新排序
+    merged_fields.sort(key=lambda f: f.get("order", 999))
+    return {"fields": merged_fields}
+
+
+def _get_default_input_config(workflow_type: str) -> Dict[str, Any]:
+    """
+    根据 workflow_type 生成默认的 input_config，用于补充存量流程。
+
+    新创建的流程应该由 AI 生成 input_config，这里只为没有 input_config 的
+    存量流程提供兜底，确保前端能正常渲染执行表单。
+    """
+    if workflow_type == "general":
+        return {
+            "fields": [
+                {
+                    "name": "analysis_target",
+                    "label": "分析目标",
+                    "type": "textarea",
+                    "required": True,
+                    "default": None,
+                    "description": "请输入分析目标，如：分析新能源行业趋势、对比000001和000002等",
+                    "placeholder": "请输入分析目标",
+                    "options": None,
+                    "option_labels": None,
+                    "min": None,
+                    "max": None,
+                    "group": "基本参数",
+                    "order": 1,
+                },
+                {
+                    "name": "quick_analysis_model",
+                    "label": "快速分析模型",
+                    "type": "select",
+                    "required": False,
+                    "default": None,
+                    "description": "快速分析使用的 LLM 模型",
+                    "placeholder": "选择模型",
+                    "options": None, "option_labels": None, "min": None, "max": None,
+                    "group": "模型配置", "order": 2,
+                },
+                {
+                    "name": "deep_analysis_model",
+                    "label": "深度分析模型",
+                    "type": "select",
+                    "required": False,
+                    "default": None,
+                    "description": "深度分析使用的 LLM 模型",
+                    "placeholder": "选择模型",
+                    "options": None, "option_labels": None, "min": None, "max": None,
+                    "group": "模型配置", "order": 3,
+                },
+            ]
+        }
+
+    if workflow_type == "etf_analysis":
+        return _build_stock_analysis_input_config(allow_etf=True)
+
+    if workflow_type == "position_analysis":
+        return {
+            "fields": [
+                {
+                    "name": "portfolio_data",
+                    "label": "持仓数据",
+                    "type": "textarea",
+                    "required": True,
+                    "default": None,
+                    "description": "请输入持仓数据（JSON 格式或文本描述）",
+                    "placeholder": "持仓数据",
+                    "options": None, "option_labels": None, "min": None, "max": None,
+                    "group": "基本参数", "order": 1,
+                },
+                {
+                    "name": "analysis_date",
+                    "label": "分析日期",
+                    "type": "date",
+                    "required": False,
+                    "default": None,
+                    "description": "分析基准日期",
+                    "placeholder": "", "options": None, "option_labels": None,
+                    "min": None, "max": None, "group": "基本参数", "order": 2,
+                },
+                {
+                    "name": "quick_analysis_model",
+                    "label": "快速分析模型",
+                    "type": "select",
+                    "required": False,
+                    "default": None,
+                    "description": "快速分析使用的 LLM 模型",
+                    "placeholder": "选择模型",
+                    "options": None, "option_labels": None, "min": None, "max": None,
+                    "group": "模型配置", "order": 3,
+                },
+                {
+                    "name": "deep_analysis_model",
+                    "label": "深度分析模型",
+                    "type": "select",
+                    "required": False,
+                    "default": None,
+                    "description": "深度分析使用的 LLM 模型",
+                    "placeholder": "选择模型",
+                    "options": None, "option_labels": None, "min": None, "max": None,
+                    "group": "模型配置", "order": 4,
+                },
+            ]
+        }
+
+    if workflow_type == "trade_review":
+        return {
+            "fields": [
+                {
+                    "name": "trade_data",
+                    "label": "交易记录",
+                    "type": "textarea",
+                    "required": True,
+                    "default": None,
+                    "description": "请输入要复盘的交易记录",
+                    "placeholder": "交易记录",
+                    "options": None, "option_labels": None, "min": None, "max": None,
+                    "group": "基本参数", "order": 1,
+                },
+                {
+                    "name": "analysis_date",
+                    "label": "分析日期",
+                    "type": "date",
+                    "required": False,
+                    "default": None,
+                    "description": "复盘基准日期",
+                    "placeholder": "", "options": None, "option_labels": None,
+                    "min": None, "max": None, "group": "基本参数", "order": 2,
+                },
+                {
+                    "name": "quick_analysis_model",
+                    "label": "快速分析模型",
+                    "type": "select",
+                    "required": False,
+                    "default": None,
+                    "description": "快速分析使用的 LLM 模型",
+                    "placeholder": "选择模型",
+                    "options": None, "option_labels": None, "min": None, "max": None,
+                    "group": "模型配置", "order": 3,
+                },
+                {
+                    "name": "deep_analysis_model",
+                    "label": "深度分析模型",
+                    "type": "select",
+                    "required": False,
+                    "default": None,
+                    "description": "深度分析使用的 LLM 模型",
+                    "placeholder": "选择模型",
+                    "options": None, "option_labels": None, "min": None, "max": None,
+                    "group": "模型配置", "order": 4,
+                },
+            ]
+        }
+
+    # 默认：股票分析流程
+    return _build_stock_analysis_input_config()
+
+
+def _build_stock_analysis_input_config(allow_etf: bool = False) -> Dict[str, Any]:
+    """构建股票分析（或ETF分析）的默认 input_config"""
+    ticker_label = "股票代码" if not allow_etf else "ETF代码"
+    ticker_placeholder = "如: 600519.SH" if not allow_etf else "如: 510300.SH"
+    ticker_desc = "要分析的股票代码" if not allow_etf else "要分析的ETF代码"
+
+    return {
+        "fields": [
+            {
+                "name": "ticker",
+                "label": ticker_label,
+                "type": "string",
+                "required": True,
+                "default": None,
+                "description": ticker_desc,
+                "placeholder": ticker_placeholder,
+                "options": None, "option_labels": None, "min": None, "max": None,
+                "group": "基本参数", "order": 1,
+            },
+            {
+                "name": "analysis_date",
+                "label": "分析日期",
+                "type": "date",
+                "required": False,
+                "default": None,
+                "description": "分析基准日期",
+                "placeholder": "", "options": None, "option_labels": None,
+                "min": None, "max": None, "group": "基本参数", "order": 2,
+            },
+            {
+                "name": "research_depth",
+                "label": "分析深度",
+                "type": "select",
+                "required": False,
+                "default": "标准",
+                "description": "分析深度等级",
+                "placeholder": "",
+                "options": ["快速", "基础", "标准", "深度", "全面"],
+                "option_labels": ["快速 (2-4分钟)", "基础 (4-6分钟)", "标准 (6-10分钟)", "深度 (10-15分钟)", "全面 (15-25分钟)"],
+                "min": None, "max": None, "group": "基本参数", "order": 3,
+            },
+            {
+                "name": "selected_analysts",
+                "label": "分析师团队",
+                "type": "multiselect",
+                "required": False,
+                "default": ["index_analyst", "sector_analyst", "market", "fundamentals", "news", "social"],
+                "description": "选择参与分析的分析师（不选则使用全部）",
+                "placeholder": "选择分析师",
+                "options": ["index_analyst", "sector_analyst", "market", "fundamentals", "news", "social"],
+                "option_labels": ["大盘分析师", "行业分析师", "市场分析师", "基本面分析师", "新闻分析师", "社交媒体分析师"],
+                "min": None, "max": None, "group": "基本参数", "order": 4,
+            },
+            {
+                "name": "quick_analysis_model",
+                "label": "快速分析模型",
+                "type": "select",
+                "required": False,
+                "default": None,
+                "description": "快速分析使用的 LLM 模型",
+                "placeholder": "选择模型",
+                "options": None, "option_labels": None, "min": None, "max": None,
+                "group": "模型配置", "order": 4,
+            },
+            {
+                "name": "deep_analysis_model",
+                "label": "深度分析模型",
+                "type": "select",
+                "required": False,
+                "default": None,
+                "description": "深度分析使用的 LLM 模型",
+                "placeholder": "选择模型",
+                "options": None, "option_labels": None, "min": None, "max": None,
+                "group": "模型配置", "order": 5,
+            },
+            {
+                "name": "lookback_days",
+                "label": "回看天数",
+                "type": "number",
+                "required": False,
+                "default": 365,
+                "description": "历史数据回看天数",
+                "placeholder": "",
+                "options": None, "option_labels": None,
+                "min": 1, "max": 365, "group": "高级参数", "order": 6,
+            },
+            {
+                "name": "max_debate_rounds",
+                "label": "辩论轮数",
+                "type": "number",
+                "required": False,
+                "default": 2,
+                "description": "看涨/看跌分析师辩论的最大轮数",
+                "placeholder": "",
+                "options": None, "option_labels": None,
+                "min": 1, "max": 10, "group": "高级参数", "order": 7,
+            },
+        ]
+    }
 
 
 class WorkflowAPI:
@@ -195,6 +475,11 @@ class WorkflowAPI:
         system_workflow = provider.get_system_workflow(workflow_id)
         if system_workflow is not None:
             data = system_workflow.to_dict()
+            # 🆕 合并补全 input_config：已有字段保留，缺少的从默认值补充
+            if not data.get("input_config"):
+                data["input_config"] = {}
+            wf_type = provider.infer_workflow_type(system_workflow, workflow_id)
+            data["input_config"] = _merge_input_config(data["input_config"], _get_default_input_config(wf_type))
             logger.info(f"📋 [WorkflowAPI] 使用系统预置工作流: {workflow_id}")
             self._log_workflow_source(workflow_id, "system_preset", data)
             return data
@@ -210,7 +495,16 @@ class WorkflowAPI:
                         doc["created_at"] = doc["created_at"].isoformat()
                     if "updated_at" in doc and isinstance(doc["updated_at"], datetime):
                         doc["updated_at"] = doc["updated_at"].isoformat()
-                    logger.info(f"📋 [WorkflowAPI] 从数据库获取工作流: {workflow_id}")
+                    # 🆕 确保 workflow_type 字段存在（用于前端判断工作流类型）
+                    if not doc.get("workflow_type"):
+                        doc["workflow_type"] = provider.infer_workflow_type(doc, workflow_id)
+                    # 🆕 合并补全 input_config：已有字段保留，缺少的从默认值补充
+                    wf_type = doc.get("workflow_type", "stock_analysis")
+                    doc["input_config"] = _merge_input_config(
+                        doc.get("input_config") or {},
+                        _get_default_input_config(wf_type),
+                    )
+                    logger.info(f"📋 [WorkflowAPI] 从数据库获取工作流: {workflow_id} (type={doc.get('workflow_type')})")
                     self._log_workflow_source(workflow_id, "database", doc)
                     return doc
             except Exception as e:
@@ -433,12 +727,8 @@ class WorkflowAPI:
             logger.warning(f"确保系统工作流存在失败（忽略）: {e}")
 
         return [
-            DEFAULT_WORKFLOW.to_dict(),
-            SIMPLE_WORKFLOW.to_dict(),
             BLANK_WORKFLOW.to_dict(),
-            TRADE_REVIEW_WORKFLOW.to_dict(),
             TRADE_REVIEW_WORKFLOW_V2.to_dict(),
-            POSITION_ANALYSIS_WORKFLOW.to_dict(),
             POSITION_ANALYSIS_WORKFLOW_V2.to_dict(),
             V2_STOCK_ANALYSIS_WORKFLOW.to_dict(),
             V2_ETF_ANALYSIS_WORKFLOW.to_dict(),

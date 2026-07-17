@@ -53,7 +53,7 @@ class FundamentalsAnalystAgentV2(BaseAgent):
     metadata = AgentMetadata(
         id="fundamentals_analyst_v2",
         name="基本面分析师 v2.0",
-        description="分析公司财务数据和基本面指标（插件化架构版本）",
+        description="分析公司财务数据、盈利能力、成长性和基本面指标，涵盖护城河/竞争优势评估和管理层质量分析",
         category=AgentCategory.ANALYST,
         license_tier=LicenseTier.FREE,
         default_tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement", "get_peer_comparison"],

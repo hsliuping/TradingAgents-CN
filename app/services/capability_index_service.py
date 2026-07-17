@@ -11,9 +11,10 @@ from app.models.capability_index import (
     CapabilityIndexSyncResult,
     CapabilitySearchHit,
 )
+from core.agents.config import AgentMaintenanceStatus, BUILTIN_AGENTS
 from core.llm.embedding_manager import EmbeddingManager
 from core.memory.memory_manager import VectorStoreManager
-from core.tools import get_tool_registry
+from core.tools.registry import get_tool_registry
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,25 @@ class CapabilityIndexService:
             )
 
         if force or not previous_hashes:
+            # 预检查：先测试第一个 embedding 调用是否成功
+            # 如果 API Key 无效或网络不通，快速跳过避免长时间超时
+            test_embedding, _ = self._embedding_manager.get_embedding("test")
+            if test_embedding is None:
+                logger.warning(
+                    "[CapabilityIndex] ⚠️ Embedding API 不可用，跳过索引构建"
+                    "（%d 个工具将使用关键词匹配回退）",
+                    len(documents),
+                )
+                self._cached_documents = {doc.capability_id: doc for doc in documents}
+                return CapabilityIndexSyncResult(
+                    collection_name=CAPABILITY_INDEX_COLLECTION,
+                    fingerprint=fingerprint,
+                    total_documents=len(documents),
+                    indexed_documents=0,
+                    skipped_documents=len(documents),
+                    vector_backend=self._vector_store_manager.backend,
+                    sync_mode="skipped_embedding_unavailable",
+                )
             logger.info(
                 "[CapabilityIndex] 🔄 开始构建索引（%d 个工具，向量维度: %d）...",
                 len(documents), self._embedding_manager.get_embedding_dimension(),
@@ -129,8 +149,10 @@ class CapabilityIndexService:
             return []
 
         hits = self._vector_search(query, top_k=max(top_k * 4, top_k))
+        search_method = "vector"
         if not hits:
             hits = self._lexical_search(query, filtered_documents, top_k=max(top_k * 4, top_k))
+            search_method = "lexical"
 
         filtered: List[CapabilitySearchHit] = []
         allowed_ids = {doc.capability_id for doc in filtered_documents}
@@ -151,6 +173,13 @@ class CapabilityIndexService:
                 filtered.append(hit)
                 if len(filtered) >= top_k:
                     break
+        logger.debug(
+            "[CapabilityIndex] search method=%s query_len=%d results=%d top3=%s",
+            search_method,
+            len(query),
+            len(filtered),
+            [(h.capability.capability_id, round(float(h.score or 0), 3)) for h in filtered[:3]],
+        )
         return filtered
 
     async def list_capabilities(self) -> List[CapabilityDocument]:
@@ -160,6 +189,23 @@ class CapabilityIndexService:
     async def rebuild_index(self) -> CapabilityIndexSyncResult:
         return await self.ensure_index(force=True)
 
+    @staticmethod
+    async def refresh_after_change(db) -> None:
+        """工具变更（删除/新增/修改）后触发索引同步，清理幽灵工具。
+
+        增量同步会自动检测并删除已不存在的工具向量。
+        不抛异常，失败只记录日志——搜索时的 allowed_ids 过滤会兜底。
+        """
+        try:
+            service = CapabilityIndexService(db)
+            result = await service.ensure_index()
+            logger.info(
+                "[CapabilityIndex] 工具变更后同步完成: mode=%s, total=%d, indexed=%d",
+                result.sync_mode, result.total_documents, result.indexed_documents,
+            )
+        except Exception as e:
+            logger.warning(f"[CapabilityIndex] 工具变更后同步失败: {e}")
+
     async def get_index_state(self) -> Dict[str, Any]:
         state = await self._load_state()
         return state or {}
@@ -168,6 +214,7 @@ class CapabilityIndexService:
         registry_docs = self._build_registry_documents()
         await self._merge_skills_documents(registry_docs)
         await self._merge_external_skills_documents(registry_docs)
+        await self._merge_agents_documents(registry_docs)  # 🔥 v3.0: Agent 纳入统一能力索引（含DB自定义）
 
         documents = sorted(registry_docs.values(), key=lambda item: (item.source_type, item.capability_id))
         payload = [
@@ -372,6 +419,144 @@ class CapabilityIndexService:
                 },
             )
             documents[tool_id] = merged
+
+    async def _merge_agents_documents(self, documents: Dict[str, CapabilityDocument]) -> None:
+        """
+        将 BUILTIN_AGENTS + MongoDB 自定义 Agent 合并到能力索引
+
+        每个 Agent 作为一个独立的能力项，source_type="agent"。
+        内置只收录 MAINTAINED 状态的，DB 只收录 enabled=True 的。
+        """
+        before_count = len(documents)
+        # ── 1. 内置 Agent ──
+        builtin_added = 0
+        for agent_id, meta in BUILTIN_AGENTS.items():
+            status = meta.maintenance_status
+            if status not in (AgentMaintenanceStatus.MAINTAINED,):
+                logger.debug(
+                    "[CapabilityIndex] 跳过 Agent: %s (status=%s)",
+                    agent_id, status.value if hasattr(status, 'value') else status,
+                )
+                continue
+            self._add_agent_document(
+                documents, agent_id,
+                name=meta.name,
+                description=meta.description or "",
+                category=meta.category.value if hasattr(meta.category, 'value') else str(meta.category),
+                default_tools=list(meta.default_tools) if meta.default_tools else [],
+                inputs=[i.name for i in meta.inputs] if meta.inputs else [],
+                outputs=[o.name for o in meta.outputs] if meta.outputs else [],
+                output_field=meta.output_field or "",
+                source="builtin",
+            )
+            builtin_added += 1
+
+        logger.info(
+            "[CapabilityIndex] 📥 Agent 文档: 内置 %d 个, 合并前总文档 %d, 合并后 %d",
+            builtin_added, before_count, len(documents),
+        )
+
+        # ── 2. MongoDB 自定义 Agent ──
+        if self._db is not None:
+            try:
+                builtin_ids = {agent_id for agent_id, _ in BUILTIN_AGENTS.items()}
+                cursor = self._db.agent_configs.find({"enabled": True})
+                async for doc in cursor:
+                    aid = doc.get("agent_id", "").strip()
+                    if not aid or aid in builtin_ids:
+                        continue
+                    self._add_agent_document(
+                        documents, aid,
+                        name=doc.get("name", aid),
+                        description=doc.get("description", ""),
+                        category=doc.get("category", "custom"),
+                        default_tools=doc.get("default_tools", []) or [],
+                        inputs=doc.get("inputs", []) or [],
+                        outputs=doc.get("outputs", []) or [],
+                        output_field=doc.get("output_field", doc.get("report_label", "")) or "",
+                        source="database",
+                    )
+                    logger.info(
+                        f"📥 [CapabilityIndex] 已索引自定义 Agent: {aid} ({doc.get('name', '')})"
+                    )
+            except Exception as e:
+                logger.warning(f"从 MongoDB 加载自定义 Agent 到索引失败: {e}")
+
+    def _add_agent_document(
+        self, documents: Dict[str, CapabilityDocument],
+        agent_id: str, name: str, description: str, category: str,
+        default_tools: list, inputs: list, outputs: list,
+        output_field: str, source: str,
+    ) -> None:
+        """为单个 Agent 构建 CapabilityDocument 并加入索引"""
+        safe_inputs = self._safe_list_to_str(inputs)
+        safe_outputs = self._safe_list_to_str(outputs)
+        safe_tools = self._safe_list_to_str(default_tools)
+
+        when_to_use_parts = []
+        if safe_inputs:
+            when_to_use_parts.append(f"需要的输入: {', '.join(safe_inputs)}")
+        if safe_outputs:
+            when_to_use_parts.append(f"产生的输出: {', '.join(safe_outputs)}")
+        if safe_tools:
+            when_to_use_parts.append(f"默认工具: {', '.join(safe_tools)}")
+        if output_field:
+            when_to_use_parts.append(f"产出字段: {output_field}")
+
+        documents[agent_id] = self._merge_capability_document(
+            base=None,
+            capability_id=agent_id,
+            registry_tool_id=None,
+            source_type="agent",
+            status="active",
+            bindable=True,
+            fc_enabled=False,
+            category=category,
+            name=name,
+            label=f"{agent_id} | {name}",
+            description=description,
+            when_to_use="; ".join(when_to_use_parts) if when_to_use_parts else "",
+            when_not_to_use="",
+            returns="报告文本",
+            related_tools=list(safe_tools),
+            data_source=source,
+            capability_tags=list(safe_tools),
+            tool_role_hint="agent",
+            output_shape="report",
+            preferred_for=[],
+            not_replacement_for=[],
+            metadata={
+                "agent_id": agent_id,
+                "source": source,
+                "output_field": output_field,
+                "default_tools": list(safe_tools),
+                "has_inputs": len(safe_inputs) > 0,
+                "has_outputs": len(safe_outputs) > 0,
+            },
+        )
+
+    @staticmethod
+    def _safe_list_to_str(items: list) -> List[str]:
+        """将列表安全转为字符串列表，处理 dict 元素和非 list 输入"""
+        if not items:
+            return []
+        if not isinstance(items, list):
+            return [str(items)]
+        result = []
+        for item in items:
+            if isinstance(item, str):
+                result.append(item)
+            elif isinstance(item, dict):
+                # 尝试取常用字段名，取不到则 str()
+                for key in ("field", "name", "desc", "key", "label"):
+                    if key in item:
+                        result.append(str(item[key]))
+                        break
+                else:
+                    result.append(str(item))
+            else:
+                result.append(str(item))
+        return result
 
     def _merge_capability_document(
         self,
@@ -729,6 +914,8 @@ class CapabilityIndexService:
                 doc.when_to_use,
                 doc.returns,
                 " ".join(doc.coverage_terms),
+                " ".join(doc.capability_tags),
+                " ".join(doc.preferred_for),
             )
             score = 0.0
             for token in tokens:

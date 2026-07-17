@@ -52,7 +52,7 @@ def _days_ago(days: int) -> str:
 @register_tool(
     tool_id="get_beta_calculation",
     name="Beta 系数计算",
-    description="计算个股相对于基准指数的 Beta 系数、Alpha、R² 和相关系数，衡量系统风险敞口。",
+    description="计算个股相对基准指数的 Beta、Alpha、R² 和相关系数，返回回归统计、残差分析和数据点信息，用于衡量系统风险敞口",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -231,7 +231,7 @@ def get_beta_calculation(
 @register_tool(
     tool_id="get_sharpe_ratio",
     name="夏普比率",
-    description="计算夏普比率、索提诺比率、卡尔玛比率、年化收益率和波动率、最大回撤等综合风险调整收益指标。",
+    description="计算综合风险调整收益指标，返回夏普比率、索提诺比率、卡尔玛比率、年化收益率、波动率、最大回撤等综合指标，用于评估风险收益",
     category="fundamentals",
     is_online=False,
     auto_register=True,

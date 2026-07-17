@@ -131,7 +131,7 @@ def _parse_symbols_weights(symbols_str: str, weights_str: Optional[str] = None):
 @register_tool(
     tool_id="get_sortino_ratio",
     name="Sortino 比率",
-    description="计算 Sortino 比率，衡量风险调整后收益，只考虑下行风险（负收益偏离）。",
+    description="计算 Sortino 比率衡量下行风险调整后收益，返回年化收益、下行波动率、Sortino 比率、目标收益率和样本数，用于评估资产收益",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -234,7 +234,7 @@ def get_sortino_ratio(
 @register_tool(
     tool_id="get_treynor_ratio",
     name="Treynor 比率",
-    description="计算 Treynor 比率，衡量单位系统性风险（Beta）所获得的超额收益。",
+    description="计算 Treynor 比率衡量单位系统性风险超额收益，返回超额收益、Beta、Treynor 比率、无风险利率和样本区间",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -444,7 +444,7 @@ def get_information_ratio(
 @register_tool(
     tool_id="get_calmar_ratio",
     name="Calmar 比率",
-    description="计算 Calmar 比率，衡量年化收益率与最大回撤之比，反映资产的回撤调整后收益。",
+    description="计算 Calmar 比率衡量年化收益与最大回撤之比，返回年化收益、最大回撤、Calmar 比率和回撤区间，反映资产回撤调整后收益",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -763,7 +763,7 @@ def get_portfolio_stress_test(
 @register_tool(
     tool_id="get_scenario_analysis",
     name="情景分析",
-    description="对投资组合进行自定义情景分析，用户可以指定不同情景下各资产的涨跌幅，计算组合整体影响。",
+    description="对投资组合进行自定义情景分析，按用户指定各资产涨跌幅计算组合整体影响，返回各情景下组合市值变化、盈亏额、新权重和风险指标",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -905,7 +905,7 @@ def get_scenario_analysis(
 @register_tool(
     tool_id="get_brinson_attribution",
     name="Brinson 归因分析",
-    description="使用 Brinson 模型对投资组合进行绩效归因，分解为资产配置效应、选股效应和交互效应。",
+    description="使用 Brinson 模型对投资组合进行绩效归因，分解超额收益来源，返回配置效应、选股效应、交互效应、各行业贡献和超额收益分解",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -1094,7 +1094,7 @@ def get_brinson_attribution(
 @register_tool(
     tool_id="get_sector_attribution",
     name="行业归因分析",
-    description="对投资组合中各股票按行业分类，计算每个行业的收益贡献占比。",
+    description="对投资组合中各股票按行业分类计算收益贡献，返回各行业权重、收益率、贡献占比、资产数量及明细列表等结构化归因报告",
     category="fundamentals",
     is_online=False,
     auto_register=True,

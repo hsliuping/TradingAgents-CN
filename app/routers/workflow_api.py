@@ -151,25 +151,63 @@ async def execute_workflow(
     try:
         user_id = user.get("user_id") or user.get("_id")
         logger.info(f"🎯 [工作流API] 收到执行请求: workflow_id={request.workflow_id}, user={user_id}")
-        
-        # 获取股票代码
+
+        # 🆕 查询工作流类型，判断 ticker 是否必填
+        from app.core.database import get_mongo_db
+        from app.models.analysis import AnalysisTaskType
+        db = get_mongo_db()
+        wf_doc = await db.workflows.find_one(
+            {"_id": request.workflow_id},
+            {"workflow_type": 1, "input_config": 1}
+        )
+        workflow_type = wf_doc.get("workflow_type", "stock_analysis") if wf_doc else "stock_analysis"
+        input_config = wf_doc.get("input_config") if wf_doc else None
+
+        # 获取股票代码（仅 stock_analysis/etf_analysis 必填）
         ticker = request.ticker or request.stock_code
-        if not ticker:
-            raise HTTPException(status_code=400, detail="必须提供 ticker 或 stock_code 参数")
-        
-        # 构建任务参数
-        task_params = {
-            "symbol": ticker,
-            "stock_code": ticker,
-            "analysis_date": request.analysis_date or datetime.now().strftime("%Y-%m-%d"),
-            "market_type": request.market_type,
-            "research_depth": request.research_depth,
-            "quick_analysis_model": request.quick_analysis_model,
-            "deep_analysis_model": request.deep_analysis_model,
-            "lookback_days": request.lookback_days,
-            "max_debate_rounds": request.max_debate_rounds,
-            **request.custom_params  # 合并自定义参数
+        TICKER_REQUIRED_TYPES = {"stock_analysis", "etf_analysis"}
+        if workflow_type in TICKER_REQUIRED_TYPES and not ticker:
+            raise HTTPException(status_code=400, detail=f"工作流类型 {workflow_type} 必须提供 ticker 或 stock_code 参数")
+
+        # 🆕 根据 workflow_type 映射 task_type
+        WORKFLOW_TYPE_TO_TASK_TYPE = {
+            "stock_analysis": AnalysisTaskType.STOCK_ANALYSIS,
+            "etf_analysis": AnalysisTaskType.ETF_ANALYSIS,
+            "position_analysis": AnalysisTaskType.POSITION_ANALYSIS,
+            "trade_review": AnalysisTaskType.TRADE_REVIEW,
+            "general": AnalysisTaskType.STOCK_ANALYSIS,
         }
+        task_type = WORKFLOW_TYPE_TO_TASK_TYPE.get(workflow_type, AnalysisTaskType.STOCK_ANALYSIS)
+
+        # 构建任务参数
+        task_params = {}
+        if ticker:
+            task_params["symbol"] = ticker
+            task_params["stock_code"] = ticker
+        task_params["analysis_date"] = request.analysis_date or datetime.now().strftime("%Y-%m-%d")
+        task_params["market_type"] = request.market_type
+        task_params["research_depth"] = request.research_depth
+        task_params["quick_analysis_model"] = request.quick_analysis_model
+        task_params["deep_analysis_model"] = request.deep_analysis_model
+        task_params["lookback_days"] = request.lookback_days
+        task_params["max_debate_rounds"] = request.max_debate_rounds
+
+        # 🆕 根据 input_config.fields 的 default 值补充缺失参数
+        if input_config and isinstance(input_config, dict):
+            fields = input_config.get("fields", [])
+            for field in fields:
+                fname = field.get("name")
+                if fname and fname not in task_params and fname not in ("ticker", "symbol", "stock_code"):
+                    default_val = field.get("default")
+                    if default_val is not None:
+                        task_params[fname] = default_val
+
+        # 合并自定义参数
+        task_params.update(request.custom_params)
+
+        # 为 general 类型打标记
+        if workflow_type == "general":
+            task_params["task_category"] = "general"
 
         # 获取任务服务
         task_service = get_task_analysis_service()
@@ -178,7 +216,7 @@ async def execute_workflow(
             # 异步模式：创建任务并返回 task_id
             task = await task_service.create_task(
                 user_id=PyObjectId(user_id),
-                task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                task_type=task_type,
                 task_params=task_params,
                 engine_type="workflow",
                 preference_type=request.preference_type,
@@ -199,7 +237,7 @@ async def execute_workflow(
             # 同步模式：等待执行完成
             task = await task_service.create_task(
                 user_id=PyObjectId(user_id),
-                task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                task_type=task_type,
                 task_params=task_params,
                 engine_type="workflow",
                 preference_type=request.preference_type,

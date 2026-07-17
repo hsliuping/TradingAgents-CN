@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["watchlist", "group", "list", "query", "assistant_ops", "stock_group", "watchlist_group", "stock_watchlist", "portfolio_group", "self_selected", "watchlist_query"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["查看自选股分组", "自选股列表", "分组查询", "股票池查看"],
+    when_to_use="当用户想查看自己的自选股分组列表、了解每个分组包含哪些股票时使用。",
+    returns="返回文本格式的自选股分组列表，每条含分组ID、名称、股票数量和股票代码预览。",
 )
 async def list_watchlist_groups() -> str:
     """列出当前用户的自选股分组及每组股票数量。"""
@@ -67,6 +73,12 @@ async def list_watchlist_groups() -> str:
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["watchlist", "group", "add", "stock", "assistant_ops", "stock_add", "watchlist_add", "portfolio_management", "self_selected", "stock_code", "watchlist_management"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["添加自选股", "加入股票分组", "自选股管理", "新建股票分组"],
+    when_to_use="当用户想把一只或多只股票添加到自选股分组、或需要新建分组并加入股票时使用。",
+    returns="返回文本消息，提示新增股票数量、分组当前股票总数；新建分组时返回分组创建结果。",
 )
 async def add_stock_to_watchlist(
     group_name: Annotated[str, "自选股分组名称，如「科技股」"],
@@ -142,6 +154,12 @@ async def add_stock_to_watchlist(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["watchlist", "group", "remove", "stock", "assistant_ops", "stock_remove", "watchlist_remove", "portfolio_management", "self_selected", "stock_delete", "watchlist_management"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["移除自选股", "删除股票分组中的股票", "自选股管理", "清理股票池"],
+    when_to_use="当用户想从自选股分组中移除一只或多只股票、清理不再关注的股票时使用。",
+    returns="返回文本消息，提示移除股票数量和分组剩余股票数量。",
 )
 async def remove_stock_from_watchlist(
     group_name: Annotated[str, "自选股分组名称"],

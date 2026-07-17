@@ -20,6 +20,7 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
     description="基于v2.0 Agent架构的单股研究分析流程。包含6个专业分析师并行收集证据，乐观与审慎两位情景研究员围绕核心论点展开辩论，研究经理形成平衡研究结论，研究整合员整理用户可读的整合意见，风险团队补充情景与约束，最终由风险管理者给出风险治理结论与后续观察清单。",
     version="2.0.0",
     is_template=True,
+    workflow_type="stock_analysis",
     tags=["v2.0", "完整分析", "多智能体", "辩论机制"],
 
     nodes=[

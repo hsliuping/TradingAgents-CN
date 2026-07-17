@@ -15,11 +15,15 @@ logger = logging.getLogger(__name__)
 @register_tool(
     tool_id="build_trade_info",
     name="构建交易信息",
-    description="从交易记录构建完整的交易信息对象，包含统计数据和时间信息",
+    description="从交易记录构建完整交易信息对象，返回买卖数量金额、平均买卖价、已实现盈亏及百分比、持仓天数、首末交易日期和交易明细等统计",
     category="trade_review",
     is_online=False,
     timeout_tier="light",
     data_source_handling="self_contained",
+    capability_tags=["trade_info", "trade_statistics", "trade_review", "trading", "pnl", "holdings", "position", "holding_days"],
+    tool_role_hint="specialized",
+    output_shape="structured_json",
+    preferred_for=["trade_review", "trade_statistics_analysis", "holding_period_analysis", "realized_pnl_calculation"],
 )
 def build_trade_info(
     trade_records: Annotated[List[Dict[str, Any]], "交易记录列表"],

@@ -618,10 +618,14 @@ def _get_historical_valuation_summary(
 @register_tool(
     tool_id="get_stock_fundamentals_unified",
     name="统一股票基本面数据",
-    description="获取股票基本面分析数据，支持A股、港股、美股",
+    description="获取A股公司完整基本面数据：营收、净利润、ROE、ROIC、毛利率、净利率、资产负债率、每股收益等核心财务指标",
     category="fundamentals",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["基本面", "财务数据", "营收", "净利润", "ROE", "ROIC", "毛利率", "净利率", "每股收益", "资产负债率", "利润表", "资产负债表", "A股"],
+    when_to_use="需要获取A股股票的营收、利润率、ROE/ROIC、资产负债等基本面财务数据时使用",
+    tool_role_hint="primary",
+    output_shape="structured_metrics",
 )
 def get_stock_fundamentals_unified(
     ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],
@@ -787,10 +791,14 @@ def get_stock_fundamentals_unified(
 @register_tool(
     tool_id="get_financial_statements",
     name="最近季度财报明细",
-    description="获取 A 股最近几个季度的利润表、资产负债表和核心财务指标明细，并对主要利润表字段推导单季度口径",
+    description="获取A股最近几个季度的利润表（营业收入、营业成本、净利润等）、资产负债表和核心财务指标明细，并对主要利润表字段推导单季度口径",
     category="fundamentals",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["利润表", "资产负债表", "财务报表", "净利润", "营收", "营业收入", "营业成本", "A股", "财报"],
+    when_to_use="需要获取A股公司的最新季度财务报表，包括利润表和资产负债表时使用",
+    tool_role_hint="primary",
+    output_shape="structured_metrics",
 )
 def get_financial_statements(
     ticker: Annotated[str, "A股股票代码，支持 000001 或 000001.SZ 形式"],
@@ -924,10 +932,14 @@ def get_financial_statements(
 @register_tool(
     tool_id="get_cash_flow_statement",
     name="最近季度现金流量表",
-    description="获取 A 股最近几个季度的现金流量表，并对主要现金流字段推导单季度口径",
+    description="获取A股最近几个季度的现金流量表（经营现金流、投资现金流、筹资现金流、自由现金流），并对主要现金流字段推导单季度口径",
     category="fundamentals",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["现金流", "现金流量表", "经营现金流", "自由现金流", "FCF", "资本支出", "CAPEX", "折旧", "A股"],
+    when_to_use="需要获取A股公司现金流量表，包括经营/投资/筹资现金流、自由现金流、资本支出等数据时使用",
+    tool_role_hint="primary",
+    output_shape="structured_metrics",
 )
 def get_cash_flow_statement(
     ticker: Annotated[str, "A股股票代码，支持 000001 或 000001.SZ 形式"],

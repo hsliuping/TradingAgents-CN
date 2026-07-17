@@ -1505,6 +1505,42 @@ async def _resolve_workshop_session_phase_context(db: Any, session_id: str) -> d
     }
 
 
+async def _get_existing_version_summary(db: Any, version_id: str) -> dict[str, Any]:
+    """获取已有版本的摘要信息，用于"覆盖或继续"决策展示。"""
+    if not version_id:
+        return {"version_id": "", "found": False}
+    versions = _get_collection(db, _WORKSHOP_VERSION_COLLECTION)
+    if versions is None:
+        return {"version_id": version_id, "found": False}
+    version_doc = await versions.find_one({"version_id": version_id})
+    if not version_doc:
+        return {"version_id": version_id, "found": False}
+
+    required_tools = version_doc.get("required_tools") or []
+    required_capabilities = version_doc.get("required_capabilities") or []
+    # required_tools 可能是 ["tool_id|tool_name", ...] 格式，提取 tool_id
+    tool_ids = []
+    for item in required_tools[:20]:
+        if isinstance(item, str):
+            tool_ids.append(item.split("|")[0].strip())
+        elif isinstance(item, dict):
+            tool_ids.append(str(item.get("tool_id") or item.get("id") or "").strip())
+
+    return {
+        "version_id": version_id,
+        "found": True,
+        "status": version_doc.get("status") or "",
+        "created_at": str(version_doc.get("created_at") or "")[:19],
+        "required_tools": tool_ids,
+        "required_tools_count": len(tool_ids),
+        "required_capabilities_count": len(required_capabilities),
+        "agent_metadata": {
+            "name": (version_doc.get("agent_metadata") or {}).get("name") or "",
+            "type": (version_doc.get("agent_metadata") or {}).get("type") or "",
+        },
+    }
+
+
 def _get_current_thread_context_spec_id() -> str:
     """从 contextvar 读取当前线程的 spec_id。"""
     try:
@@ -2048,34 +2084,55 @@ def _generate_short_agent_name_llm(user_request: str, target_responsibility: str
             Message(role="system", content=system_prompt),
             Message(role="user", content=user_prompt),
         ]
-        response = client.chat(messages, temperature=0.3, max_tokens=150)
+        # DeepSeek 推理模型会先输出思考过程再输出 JSON，需要足够的 token 配额
+        response = client.chat(messages, temperature=0.3, max_tokens=1000)
         raw_content = str(response.content or "").strip()
 
-        logger.info("[AgentName][LLM] 原始响应: %s", raw_content[:300])
+        logger.info("[AgentName][LLM] 原始响应: %s", raw_content[:400])
 
-        # 尝试解析 JSON
+        # 尝试解析 JSON（支持推理模型在 JSON 前后输出思考文本）
         import json as _json
         try:
-            # 清理可能的 markdown 代码块标记
             cleaned = raw_content.strip()
+            # 去掉 markdown 代码块标记
             if cleaned.startswith("```"):
-                # 去掉 ```json 或 ``` 标记
                 cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
                 cleaned = re.sub(r"\s*```$", "", cleaned)
-            # 尝试从文本中提取 JSON 对象（兼容跨行和带前后文的情况）
+            # 优先尝试从文本中提取 JSON 对象
             json_match = re.search(r'\{[^{}]*"name"[^{}]*"slug"[^{}]*\}', cleaned, re.DOTALL)
-            if json_match:
+            if not json_match:
+                # 宽松匹配：找最后一个 { 到最后一个 } 之间的内容
+                last_brace = cleaned.rfind("{")
+                last_close = cleaned.rfind("}")
+                if last_brace >= 0 and last_close > last_brace:
+                    json_match = re.search(
+                        r'\{.*\}', cleaned[last_brace:last_close + 1], re.DOTALL
+                    )
+                    if json_match:
+                        cleaned = json_match.group(0)
+            if json_match and json_match is not cleaned:
                 cleaned = json_match.group(0)
             result = _json.loads(cleaned)
             name = str(result.get("name", "")).strip()
             slug = str(result.get("slug", "")).strip().lower()
             logger.info("[AgentName][LLM] 解析成功: name=%s slug=%s", name, slug)
         except Exception as parse_exc:
-            # JSON 解析失败，尝试从文本中提取
+            # JSON 解析失败，尝试从文本中智能提取名字
             logger.warning("[AgentName][LLM] JSON 解析失败: %s, raw=%s", parse_exc, raw_content[:200])
-            name = raw_content.strip().strip("\"'""''「」【】 ").split("\n")[0].strip()
-            name = name.rstrip("。.；;")
+            # 尝试从思考文本中提取 "中文名：xxx" 或 "名字：xxx" 模式
+            name = ""
             slug = ""
+            name_match = re.search(r'(?:中文名|名字)[：:]\s*([^\n。]{2,12})', raw_content)
+            if name_match:
+                name = name_match.group(1).strip()
+            if not name:
+                # 尝试找 slug 模式: "英文slug：xxx"
+                slug_match = re.search(r'(?:英文\s*slug|slug)[：:]\s*([a-z][a-z0-9_]{2,39})', raw_content)
+                if slug_match:
+                    slug = slug_match.group(1).strip().lower()
+                # 最后兜底：取第一行
+                name = raw_content.strip().strip("\"'""''「」【】 ").split("\n")[0].strip()
+                name = name.rstrip("。.；;")
 
         # 清理中文名
         name = name.rstrip("。.；;")
@@ -2386,7 +2443,7 @@ def _build_confirmation_template(
 ) -> str:
     """以财经产品专家的口吻构建用户确认稿，避免技术清单式输出。
 
-    Nanobot 收到本模板后，应以财经产品顾问的角度与用户沟通——
+    系统收到本模板后，应以财经产品顾问的角度与用户沟通——
     讲分析框架和业务价值，不要逐行念工具ID和技术参数。
     后端所需的技术绑定信息已在 JSON 的其他字段中传递。
     """
@@ -2800,7 +2857,7 @@ async def _resolve_current_thread_effective_template_input(
     if thread_doc is None:
         thread_doc = await threads.find_one({"user_id": clean_user_id, "session_key": clean_thread_id})
     if thread_doc is None:
-        return {"status": "error", "message": f"未找到 thread_id={clean_thread_id} 对应的 Nanobot 会话"}
+        return {"status": "error", "message": f"未找到 thread_id={clean_thread_id} 对应的会话"}
 
     thread_context = dict(thread_doc.get("thread_context") or {})
     channel = str(thread_doc.get("channel") or "embedded").strip() or "embedded"
@@ -2916,7 +2973,7 @@ async def _inspect_agent_overwrite_risk(db: Any, agent_id: str, status: str = "a
 @register_tool(
     tool_id="prepare_agent_requirement_intake",
     name="生成 Agent 需求采集提纲",
-    description="根据用户的初始创建请求，生成 Nanobot 下一轮应该追问的需求采集提纲，避免在需求仍模糊时直接生成 Agent。",
+    description="根据用户的初始创建请求，生成下一轮应该追问的需求采集提纲，避免在需求仍模糊时直接生成 Agent。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -3130,7 +3187,7 @@ def prepare_agent_requirement_intake(
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Nanobot 已经形成候选 Agent 方案，但还没有拿到用户对职责边界、输出形状和覆盖风险的明确确认时使用。",
+    when_to_use="当已经形成候选 Agent 方案，但还没有拿到用户对职责边界、输出形状和覆盖风险的明确确认时使用。",
     when_not_to_use="不适合直接落库创建 Agent。它只负责生成确认稿。",
     returns="返回 JSON 字符串，包含确认稿、覆盖风险和建议用户确认项。",
     example="prepare_agent_generation_confirmation(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', target_responsibility='输出A股估值结论', tool_ids='get_value_factor_bundle_tool')",
@@ -3365,7 +3422,7 @@ async def prepare_agent_generation_confirmation(
     auto_register=True,
     timeout_tier="light",
     when_to_use=(
-        "当 Nanobot 已经确认用户需求，并已完成能力盘点和 gap 分析后，"
+        "当已经确认用户需求，并已完成能力盘点和 gap 分析后，"
         "需要把技术缺口翻译成用户可理解的多个可行方案时使用。"
     ),
     when_not_to_use=(
@@ -3389,10 +3446,13 @@ async def propose_agent_build_plans(
         gap_report = _parse_optional_json_object(gap_report_json, "gap_report_json")
         blocking_gaps = gap_report.get("blocking_gaps") or []
         non_blocking_gaps = gap_report.get("non_blocking_gaps") or []
+        inferable_gaps = gap_report.get("inferable_gaps") or []
         if not isinstance(blocking_gaps, list):
             blocking_gaps = []
         if not isinstance(non_blocking_gaps, list):
             non_blocking_gaps = []
+        if not isinstance(inferable_gaps, list):
+            inferable_gaps = []
 
         # 构造 LLM 提示词
         system_prompt = (
@@ -3409,20 +3469,25 @@ async def propose_agent_build_plans(
             "5. quick/strict 方案必须说明哪些输出会被降级、收窄或要求更严格的数据依据。\n"
             "6. narrow 方案必须给出建议缩小后的职责范围。\n"
             "7. 必须设置 recommended_plan_id：0 个 blocking gap 时推荐 direct；有 blocking gap 时默认推荐 complete。\n"
+            "8. 每个方案必须包含 gap_summary 字段，说明该方案下的数据覆盖情况：哪些数据有直接工具支撑、哪些通过推断获取、哪些缺失。\n"
+            "9. 每个方案必须包含 feasibility 字段，说明实现可行性：能否实现、有哪些困难、需要哪些额外开发或数据接入。\n"
+            "10. 对于有 blocking_gaps 的方案，必须在 feasibility 中明确说明这些缺口能否补齐、补齐方式（新建 Skill/接入外部数据/降级处理）以及补齐失败的影响。\n"
         )
 
         user_prompt = (
             f"Agent 职责：{agent_responsibility or '（未提供）'}\n"
             f"Agent 输出：{agent_output_shape or '（未提供）'}\n\n"
             "能力缺口分析结果：\n"
-            f"blocking_gaps（阻塞性缺口）数量：{len(blocking_gaps)}\n"
+            f"blocking_gaps（阻塞性缺口，无法实现的分析维度）数量：{len(blocking_gaps)}\n"
             f"blocking_gaps 详情：{_json_compact_dump(blocking_gaps)}\n"
-            f"non_blocking_gaps（非阻塞性缺口）数量：{len(non_blocking_gaps)}\n"
+            f"inferable_gaps（可推断缺口，有相关数据可定性推断但不阻塞）数量：{len(inferable_gaps)}\n"
+            f"inferable_gaps 详情：{_json_compact_dump(inferable_gaps)}\n"
+            f"non_blocking_gaps（其他非阻塞性缺口）数量：{len(non_blocking_gaps)}\n"
             f"non_blocking_gaps 详情：{_json_compact_dump(non_blocking_gaps)}\n\n"
             "请按以下固定 JSON 格式输出：\n"
             "{\n"
             '  "candidate_plans": [\n'
-            '    {"plan_id": "direct|strict|enhanced|complete|quick|narrow", "plan_name": "...", "description": "...", "required_new_skills": [...], "estimated_effort": "高|中|低", "risk": "...", "recommended": true|false}\n'
+            '    {"plan_id": "direct|strict|enhanced|complete|quick|narrow", "plan_name": "...", "description": "...", "required_new_skills": [...], "estimated_effort": "高|中|低", "risk": "...", "gap_summary": "该方案的数据覆盖情况说明", "feasibility": "实现可行性说明，包括能否实现、困难和补齐方式", "recommended": true|false}\n'
             '  ],\n'
             '  "recommended_plan_id": "...",\n'
             '  "pending_question": "..."\n'
@@ -3480,6 +3545,8 @@ async def propose_agent_build_plans(
                 "required_new_skills": _to_str_list(p.get("required_new_skills")),
                 "estimated_effort": str(p.get("estimated_effort") or "中"),
                 "risk": str(p.get("risk") or ""),
+                "gap_summary": str(p.get("gap_summary") or ""),
+                "feasibility": str(p.get("feasibility") or ""),
                 "recommended": bool(p.get("recommended", False)),
             })
 
@@ -3499,6 +3566,8 @@ async def propose_agent_build_plans(
                     "required_new_skills": _to_str_list(fallback_plan.get("required_new_skills")),
                     "estimated_effort": str(fallback_plan.get("estimated_effort") or "中"),
                     "risk": str(fallback_plan.get("risk") or ""),
+                    "gap_summary": str(fallback_plan.get("gap_summary") or ""),
+                    "feasibility": str(fallback_plan.get("feasibility") or ""),
                     "recommended": bool(fallback_plan.get("recommended", False)),
                 })
                 seen_plan_ids.add(fallback_plan_id)
@@ -3524,6 +3593,8 @@ async def propose_agent_build_plans(
                 "description": p["description"],
                 "recommended": bool(p.get("recommended")),
                 "acknowledged_gaps": blocking_gaps if p["plan_id"] in {"complete", "quick"} else [],
+                "gap_summary": p.get("gap_summary", ""),
+                "feasibility": p.get("feasibility", ""),
             }
             for i, p in enumerate(normalized_plans)
         ]
@@ -3577,7 +3648,7 @@ async def propose_agent_build_plans(
     auto_register=True,
     timeout_tier="light",
     when_to_use=(
-        "当 Nanobot 需要先确认仓库里已有哪类能力，再决定如何设计或创建新 Agent 时使用。"
+        "当需要先确认仓库里已有哪类能力，再决定如何设计或创建新 Agent 时使用。"
         "适合按需求关键词搜索，而不是直接猜工具名。"
     ),
     when_not_to_use=(
@@ -3630,7 +3701,7 @@ async def search_project_capabilities(
     auto_register=True,
     timeout_tier="light",
     when_to_use=(
-        "当 Nanobot 需要确认项目里是否已经存在数据库驱动的专用 Agent，"
+        "当需要确认项目里是否已经存在数据库驱动的专用 Agent，"
         "或判断某个能力是否可以通过 UniversalAgent + agent_configs 直接承载时使用。"
     ),
     when_not_to_use="不适合执行 Agent，也不适合搜索通用工具能力；它只看数据库里的运行时 Agent 定义。",
@@ -3705,9 +3776,9 @@ async def inspect_runtime_agent_configs(
             "count": len(results),
             "results": results,
             "design_references": [
-                "docs/design/v3.0/ai-workflow-generation.md",
-                "docs/design/v3.0/agent-workshop-interface-sequence.md",
-                "docs/design/v3.0/implementation-status-report.md",
+                "docs/05-design/v3.0/ai-workflow-generation.md",
+                "docs/05-design/v3.0/agent-workshop-interface-sequence.md",
+                "docs/05-design/v3.0/implementation-status-report.md",
             ],
         })
     except Exception as exc:
@@ -3725,7 +3796,7 @@ async def inspect_runtime_agent_configs(
     auto_register=True,
     timeout_tier="light",
     when_to_use=(
-        "当 Nanobot 需要判断应该复用哪个现有 Agent 模式时使用。"
+        "当需要判断应该复用哪个现有 Agent 模式时使用。"
         "适合先按关键词、分类或维护状态筛选，再决定读哪一个实现。"
     ),
     when_not_to_use="不适合直接输出最终实现代码。它提供的是现有 Agent 的结构化蓝图摘要。",
@@ -3791,7 +3862,7 @@ def inspect_agent_blueprints(
     auto_register=True,
     timeout_tier="light",
     when_to_use=(
-        "当 Nanobot 已经通过 inspect_agent_blueprints 找到候选 Agent，"
+        "当已经通过 inspect_agent_blueprints 找到候选 Agent，"
         "需要进一步确认输入输出、默认工具、依赖关系和调用面时使用。"
     ),
     when_not_to_use="不适合用来搜索能力集合；先筛选候选，再看详情。",
@@ -3832,7 +3903,7 @@ def get_agent_blueprint_details(
     auto_register=True,
     timeout_tier="light",
     when_to_use=(
-        "当 Nanobot 需要确认是否已有接近需求的 Agent 规格、已构建版本或提示词资产时使用。"
+        "当需要确认是否已有接近需求的 Agent 规格、已构建版本或提示词资产时使用。"
         "适合在决定新建前先看已有配置式资产，或在当前线程已知 workshop_session_id/spec_id/version_id 时先做精确核验。"
         "**重要**：在 agent_workshop 渠道下，若当前线程有选中的 Agent（thread_context 含 spec_id/version_id），"
         "且调用时未指定任何过滤参数，本工具将自动仅返回当前选中 Agent 的资产，而非全量搜索。"
@@ -3950,8 +4021,8 @@ async def inspect_agent_workshop_assets(
                     "versions": [],
                     "message": f"未找到 session_id={clean_workshop_session_id} 对应的 Agent 工坊会话",
                     "design_references": [
-                        "docs/design/v3.0/agent-workshop-interface-sequence.md",
-                        "docs/design/v3.0/implementation-status-report.md",
+                        "docs/05-design/v3.0/agent-workshop-interface-sequence.md",
+                        "docs/05-design/v3.0/implementation-status-report.md",
                     ],
                 })
             spec_snapshot = _read_mapping_or_attr(session_doc, "current_spec_snapshot", {}) or {}
@@ -4062,8 +4133,8 @@ async def inspect_agent_workshop_assets(
             "specs": spec_results,
             "versions": version_results,
             "design_references": [
-                "docs/design/v3.0/agent-workshop-interface-sequence.md",
-                "docs/design/v3.0/implementation-status-report.md",
+                "docs/05-design/v3.0/agent-workshop-interface-sequence.md",
+                "docs/05-design/v3.0/implementation-status-report.md",
             ],
         })
     except Exception as exc:
@@ -4080,7 +4151,7 @@ async def inspect_agent_workshop_assets(
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当需要确认数据库中有哪些提示词模板、某个 Agent 当前绑定了哪些模板，或要为 Nanobot 查模板资产时使用。",
+    when_to_use="当需要确认数据库中有哪些提示词模板、某个 Agent 当前绑定了哪些模板，或要查模板资产时使用。",
     when_not_to_use="不适合直接修改模板正文；只做读取和筛选。",
     returns="返回 JSON 字符串，包含模板摘要列表。",
     example="inspect_prompt_templates(agent_type='universal', keyword='估值', status='active', limit=10)",
@@ -4154,7 +4225,7 @@ async def inspect_prompt_templates(
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Nanobot 已经知道 template_id，需要查看完整 system_prompt、tool_guidance、output_format 等正文时使用。",
+    when_to_use="当已经知道 template_id，需要查看完整 system_prompt、tool_guidance、output_format 等正文时使用。",
     when_not_to_use="不适合模糊搜索模板列表；那种场景应先使用 inspect_prompt_templates。",
     returns="返回 JSON 字符串，包含模板详情和完整 content 字段。",
     example="get_prompt_template_detail(template_id='69cfdf8db1828a17f6b00cfb')",
@@ -4237,12 +4308,12 @@ async def get_effective_prompt_template(
 @register_tool(
     tool_id="get_current_thread_effective_prompt_template",
     name="获取当前线程生效提示词模板",
-    description="基于当前 Nanobot 线程上下文自动推断当前正在调试或讨论的 Agent 版本，再解析该上下文下实际生效的提示词模板。",
+    description="基于当前线程上下文自动推断当前正在调试或讨论的 Agent 版本，再解析该上下文下实际生效的提示词模板。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当用户问当前线程里现在实际命中了哪份模板，且上下文已经在当前 Nanobot 会话中时优先使用。",
+    when_to_use="当用户问当前线程里现在实际命中了哪份模板，且上下文已经在当前会话中时优先使用。",
     when_not_to_use="不适合做模板库浏览；那种场景应先使用 inspect_prompt_templates。",
     returns="返回 JSON 字符串，包含线程上下文、自动推断得到的 resolution_input 和实际生效模板内容。",
     example="get_current_thread_effective_prompt_template()",
@@ -4323,12 +4394,12 @@ async def get_current_thread_effective_prompt_template(
 @register_tool(
     tool_id="create_or_update_runtime_agent_config",
     name="创建或更新运行时 Agent 配置",
-    description="为 Nanobot 创建一个可运行的 UniversalAgent 候选配置，写入 agent_configs，作为最小生成链的第一步。",
+    description="创建一个可运行的 UniversalAgent 候选配置，写入 agent_configs，作为最小生成链的第一步。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Nanobot 已经确认要生成一个新的配置式 Agent 候选，并准备把最小运行时定义写入数据库时使用。",
+    when_to_use="当已经确认要生成一个新的配置式 Agent 候选，并准备把最小运行时定义写入数据库时使用。",
     when_not_to_use="不适合做资源侦察，也不适合直接绑定工具或写提示词模板。",
     returns="返回 JSON 字符串，包含写入后的 agent_configs 摘要。",
     example="create_or_update_runtime_agent_config(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', description='输出估值结论')",
@@ -4427,12 +4498,12 @@ async def create_or_update_runtime_agent_config(
 @register_tool(
     tool_id="create_or_update_agent_workshop_draft",
     name="创建或更新 Agent 工坊 Draft",
-    description="把 Nanobot 已确认的候选 Agent 同步到 Agent 工坊 Draft 资产层，使其在工坊列表中可见并可继续做版本治理。",
+    description="把已确认的候选 Agent 同步到 Agent 工坊 Draft 资产层，使其在工坊列表中可见并可继续做版本治理。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Nanobot 已经确认了候选 Agent 的职责、输出和工具范围，希望把它沉淀为 Agent 工坊 Draft 而不是只停留在运行时候选时使用。",
+    when_to_use="当已经确认了候选 Agent 的职责、输出和工具范围，希望把它沉淀为 Agent 工坊 Draft 而不是只停留在运行时候选时使用。",
     when_not_to_use="不适合直接做版本发布，也不适合在需求尚未确认时调用。",
     returns="返回 JSON 字符串，包含写入后的 spec_id、session_id 和概览信息。",
     example="create_or_update_agent_workshop_draft(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', target_responsibility='输出A股估值结论')",
@@ -4614,7 +4685,7 @@ async def create_or_update_agent_workshop_draft(
 @register_tool(
     tool_id="analyze_agent_workshop_gaps",
     name="执行 Agent 工坊缺口分析",
-    description="让 Nanobot 直接触发 Agent 工坊会话的缺口分析阶段，并返回结构化缺口摘要。如果没有现成 session_id，可传入 agent_id 等基本信息自动创建临时 session。",
+    description="直接触发 Agent 工坊会话的缺口分析阶段，并返回结构化缺口摘要。如果没有现成 session_id，可传入 agent_id 等基本信息自动创建临时 session。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -4738,7 +4809,7 @@ async def analyze_agent_workshop_gaps(
 @register_tool(
     tool_id="generate_agent_workshop_tooling_plan",
     name="生成 Agent 工坊工具需求草案",
-    description="让 Nanobot 直接触发 Agent 工坊工具需求草案生成，并返回结构化工具计划。",
+    description="直接触发 Agent 工坊工具需求草案生成，并返回结构化工具计划。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -4786,20 +4857,21 @@ async def generate_agent_workshop_tooling_plan(
 @register_tool(
     tool_id="build_agent_workshop_version",
     name="生成 Agent 工坊版本草案",
-    description="让 Nanobot 直接触发 Agent 工坊版本草案生成，并返回生成后的版本信息。",
+    description="直接触发 Agent 工坊版本草案生成，并返回生成后的版本信息。如果已有版本处于测试中，会返回 needs_user_decision 状态让用户选择是覆盖还是继续推进。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Agent Draft 已生成但尚未产生测试版本（READY_TO_BUILD 阶段）时使用。该工具会在内部完成真实 gap 分析、工具计划和版本草案生成。",
-    when_not_to_use="不适合在 session_id 缺失或规格尚未准备好时调用。也不适合在版本已构建（处于 BUILDING/TESTING 阶段）、已发布（PUBLISHED）后重复构建。如需改进已构建版本，应使用 iterate_agent_workshop_version。",
-    returns="返回 JSON 字符串，包含 session_id、spec_id 和 version。",
+    when_to_use="当 Agent Draft 已生成但尚未产生测试版本（READY_TO_BUILD 阶段）时使用。该工具会在内部完成真实 gap 分析、工具计划和版本草案生成。如果返回 status=needs_user_decision，必须向用户展示旧版本信息（existing_version 中的工具列表）并询问用户选择：覆盖旧版本（用户确认后用 overwrite_existing=True 再次调用）还是继续推进旧版本（引导用户使用 iterate_agent_workshop_version 或继续测试）。",
+    when_not_to_use="不适合在 session_id 缺失或规格尚未准备好时调用。用户未明确确认要覆盖时，不要传 overwrite_existing=True。",
+    returns="返回 JSON 字符串。正常时包含 session_id、spec_id 和 version；已有版本时返回 status=needs_user_decision 及旧版本信息和选项。",
     example="build_agent_workshop_version(session_id='session_123')",
-    related_tools=["analyze_agent_workshop_gaps", "generate_agent_workshop_tooling_plan"],
+    related_tools=["analyze_agent_workshop_gaps", "generate_agent_workshop_tooling_plan", "iterate_agent_workshop_version"],
     data_source_handling="local_only",
 )
 async def build_agent_workshop_version(
     session_id: Annotated[str, "Agent 工坊会话 ID"],
+    overwrite_existing: Annotated[bool, "是否覆盖已有版本（删除旧版本后重建）。仅在用户明确确认要覆盖时传 True。"] = False,
 ) -> str:
     """生成 Agent 工坊版本草案并返回结构化结果。"""
     try:
@@ -4831,24 +4903,64 @@ async def build_agent_workshop_version(
                 },
             )
         if phase_context.get("guard_available") and version_status and version_status != "draft":
-            next_action = "当前已有测试流程在推进，请直接继续真数据测试或发布。"
-            if version_status == "active":
-                next_action = "当前版本已发布，如需继续优化，请先开始下一轮。"
-            return _build_phase_guard_blocked_response(
-                tool_name="build_agent_workshop_version",
-                blocked_code="active_version_requires_iteration" if version_status == "active" else "version_already_in_progress",
-                message=(
-                    f"当前阶段为{phase_context.get('phase_label')}，不能再次补建测试版本；"
-                    "当前会话已经有可继续推进的版本。"
-                ),
-                next_action=next_action,
-                phase_context=phase_context,
-                target_fields={
+            current_version_id = str(phase_context.get("current_version_id") or "").strip()
+
+            # 用户确认要覆盖旧版本：先删除旧版本再继续构建
+            if overwrite_existing and current_version_id:
+                svc = AgentWorkshopService(db=db)
+                delete_result = await svc.delete_version(current_version_id, force=True)
+                if not delete_result.get("deleted"):
+                    return _json_response({
+                        "status": "error",
+                        "message": f"删除旧版本 {current_version_id} 失败：{delete_result.get('message', '未知原因')}",
+                        "current_version_id": current_version_id,
+                    })
+                # 删除成功后继续执行 build_version
+            else:
+                # 返回"需要用户决策"的响应，让 LLM 询问用户是覆盖还是继续推进
+                existing_version_summary = await _get_existing_version_summary(db, current_version_id)
+                phase_label = phase_context.get("phase_label") or version_status
+                response_payload = {
+                    "status": "needs_user_decision",
+                    "decision_type": "overwrite_or_continue",
+                    "message": (
+                        f"当前会话已有一个处于「{phase_label}」阶段的版本 {current_version_id}。"
+                        f"请向用户展示旧版本信息，并询问用户是要覆盖旧版本（删除后重建）还是继续推进旧版本。"
+                    ),
+                    "existing_version": existing_version_summary,
+                    "options": [
+                        {
+                            "label": "覆盖旧版本",
+                            "description": "删除当前版本并基于最新需求重新构建（适用于工具选择或 gap 分析有误需要重建的情况）",
+                            "action": "调用 build_agent_workshop_version(session_id, overwrite_existing=True)",
+                        },
+                        {
+                            "label": "继续推进旧版本",
+                            "description": "保留当前版本，按流程继续推进：先运行真数据测试，评估通过后可发布或迭代创建 v2",
+                            "action": "先调用 run_agent_workshop_real_data_test 执行真数据测试；评估通过后可调用 publish_agent_workshop_version 发布，或调用 iterate_agent_workshop_version 创建 v2 版本（注意：iterate 要求版本已进入 evaluation/publish-ready/published 阶段，testing 阶段不能直接 iterate）",
+                        },
+                    ],
+                    "current_phase": phase_context.get("phase"),
+                    "current_phase_label": phase_label,
                     "session_id": clean_session_id,
                     "spec_id": phase_context.get("spec_id"),
-                    "current_version_id": phase_context.get("current_version_id"),
-                },
-            )
+                    "current_version_id": current_version_id,
+                    "_tool_events": [
+                        _build_tool_stage_event(
+                            "build_agent_workshop_version.needs_user_decision",
+                            "needs_user_decision",
+                            f"已有版本 {current_version_id} 处于 {phase_label} 阶段，需要用户决策是否覆盖",
+                        ),
+                    ],
+                }
+                logger.info(
+                    "[BuildAgent] needs_user_decision | current_version_id=%s | phase=%s | existing_version_keys=%s | options_count=%d",
+                    current_version_id,
+                    phase_label,
+                    list(existing_version_summary.keys()) if existing_version_summary else [],
+                    len(response_payload.get("options", [])),
+                )
+                return _json_response(response_payload)
 
         result = await AgentWorkshopService(db=db).build_version(clean_session_id)
         version = result.get("version") if isinstance(result, dict) else None
@@ -4892,7 +5004,7 @@ async def build_agent_workshop_version(
 @register_tool(
     tool_id="debug_agent_workshop_version",
     name="调试 Agent 工坊版本",
-    description="让 Nanobot 对指定 Agent 工坊版本执行一次真实股票样例运行，并返回调试结果；该工具不会自动写入正式评估记录。",
+    description="对指定 Agent 工坊版本执行一次真实股票样例运行，并返回调试结果；该工具不会自动写入正式评估记录。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -5020,7 +5132,7 @@ async def debug_agent_workshop_version(
 @register_tool(
     tool_id="run_agent_workshop_real_data_test",
     name="执行 Agent 工坊真数据测试",
-    description="让 Nanobot 对指定 Agent 工坊版本执行一次真实股票样例测试，并自动记录评估结果到 Agent Workshop。",
+    description="对指定 Agent 工坊版本执行一次真实股票样例测试，并自动记录评估结果到 Agent Workshop。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -5266,7 +5378,7 @@ async def run_agent_workshop_real_data_test(
 @register_tool(
     tool_id="publish_agent_workshop_version",
     name="发布 Agent 工坊版本",
-    description="在用户已经手动确认发布后，让 Nanobot 将已通过最新真数据测试评估的 Agent 工坊版本发布为 active。",
+    description="在用户已经手动确认发布后，将已通过最新真数据测试评估的 Agent 工坊版本发布为 active。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -5350,7 +5462,7 @@ async def publish_agent_workshop_version(
 @register_tool(
     tool_id="evaluate_agent_workshop_version",
     name="评估 Agent 工坊版本",
-    description="让 Nanobot 对指定 Agent 工坊版本执行一次显式评估落库，并返回最新评估结果。",
+    description="对指定 Agent 工坊版本执行一次显式评估落库，并返回最新评估结果。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -5435,6 +5547,14 @@ async def evaluate_agent_workshop_version(
         )
         evaluation = result.get("evaluation") if isinstance(result, dict) else None
         decision = _read_mapping_or_attr(evaluation, "decision", None)
+        # 把 Pydantic 模型转为 dict，避免 _json_response 的 default=str 把它序列化成字符串
+        # 导致前端解析时 evaluation 不是 dict，decision/scores 取不到值
+        if result and "evaluation" in result:
+            eval_obj = result["evaluation"]
+            if hasattr(eval_obj, "model_dump"):
+                result["evaluation"] = eval_obj.model_dump(mode="json")
+            elif hasattr(eval_obj, "dict"):
+                result["evaluation"] = eval_obj.dict()
         return _json_response({
             "status": "ok",
             **(result or {}),
@@ -5477,7 +5597,7 @@ async def evaluate_agent_workshop_version(
 @register_tool(
     tool_id="iterate_agent_workshop_version",
     name="发起 Agent 工坊下一轮迭代",
-    description="让 Nanobot 基于指定 Agent 工坊版本发起下一轮迭代，并创建新的 Session。",
+    description="基于指定 Agent 工坊版本发起下一轮迭代，并创建新的 Session。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -5570,7 +5690,7 @@ async def iterate_agent_workshop_version(
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Nanobot 已决定创建配置式 Agent 候选，并需要让该 Agent 在运行时读取到可用提示词时使用。",
+    when_to_use="当已决定创建配置式 Agent 候选，并需要让该 Agent 在运行时读取到可用提示词时使用。",
     when_not_to_use="不适合做工具绑定或能力侦察。",
     returns="返回 JSON 字符串，包含写入后的 prompt_templates 摘要。",
     example="create_or_update_universal_agent_prompt_template(agent_id='valuation_candidate_v1', template_name='估值候选模板', system_prompt='你是一名估值分析师')",
@@ -5701,7 +5821,7 @@ async def create_or_update_universal_agent_prompt_template(
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Nanobot 已写入 agent_configs 和提示词模板，准备绑定工具并确认候选 Agent 是否能被运行时正常创建时使用。",
+    when_to_use="当已写入 agent_configs 和提示词模板，准备绑定工具并确认候选 Agent 是否能被运行时正常创建时使用。",
     when_not_to_use="不适合用来搜索资源或生成提示词。",
     returns="返回 JSON 字符串，包含绑定后的工具列表、提示词模板存在性和干运行校验结果；结果仅代表运行时候选可实例化，不代表 Workshop 版本已生成或已通过正式验收。",
     example="bind_agent_tools_and_validate_candidate(agent_id='valuation_candidate_v1', tool_ids='get_value_factor_bundle_tool,get_peer_comparison')",
@@ -5828,7 +5948,7 @@ async def bind_agent_tools_and_validate_candidate(
     is_online=False,
     auto_register=True,
     timeout_tier="light",
-    when_to_use="当 Nanobot 已完成需求确认、能力盘点、方案选择，并拿到用户明确的方案选择后，用一次调用生成候选 Agent。",
+    when_to_use="当已完成需求确认、能力盘点、方案选择，并拿到用户明确的方案选择后，用一次调用生成候选 Agent。",
     when_not_to_use="未选择方案前不要调用；也不适合做资源侦察或缺口分析。",
     returns="返回 JSON 字符串，包含三步写入结果、最终干运行校验结果、可选的自动 version 生成结果，以及与 Agent Workshop 正式验收边界相关的治理提示。",
     example="generate_confirmed_candidate_agent(agent_id='valuation_candidate_v1', agent_name='估值候选Agent', target_responsibility='输出A股估值结论', tool_ids='get_value_factor_bundle_tool', system_prompt='你是一名估值分析师', selected_plan_id='complete', acknowledged_gaps='[\"financial_ratio_calculator\"]', gap_report_json='{...}')",
@@ -6275,7 +6395,7 @@ async def generate_confirmed_candidate_agent(
     when_to_use=(
         "当发现 blocking_gaps（来源不限：auto-build 的 gap_report、analyze_agent_workshop_gaps 返回值、或评估反馈），"
         "且这些缺口确实是可复用能力时使用。"
-        "Nanobot 无需手动逐个调用 Skill 创建工具，一个调用即可完成缺口补全。"
+        "无需手动逐个调用 Skill 创建工具，一个调用即可完成缺口补全。"
     ),
     when_not_to_use=(
         "不适合在缺口尚未明确时调用（先确认 blocking_gaps 存在）；"
@@ -7378,6 +7498,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "低",
                 "risk": "能力已覆盖，主要风险来自真实数据质量和后续验收结果。",
+                "gap_summary": "所有分析维度均有直接工具支撑，无数据缺口。",
+                "feasibility": "可直接实现，无需额外开发。",
                 "recommended": True,
             },
             {
@@ -7387,6 +7509,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "低",
                 "risk": "覆盖更稳健，但报告表达会更保守，部分扩展解读不会展开。",
+                "gap_summary": "所有分析维度均有直接工具支撑，但对推断性结论做严格限制。",
+                "feasibility": "可直接实现，无需额外开发。",
                 "recommended": False,
             },
             {
@@ -7396,6 +7520,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "中",
                 "risk": "不是当前交付的必要条件；如果扩展过多，可能增加测试和解释复杂度。",
+                "gap_summary": "核心维度有直接工具支撑，扩展维度可能需要额外数据接入。",
+                "feasibility": "可实现，但扩展部分需要额外开发和数据接入。",
                 "recommended": False,
             },
         ]
@@ -7409,6 +7535,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": blocking_descriptions,
                 "estimated_effort": "高",
                 "risk": "需要生成新能力，可能失败或耗时",
+                "gap_summary": f"有 {blocking_count} 个阻塞性缺口需要补齐，补齐后所有维度均可覆盖。",
+                "feasibility": f"需要新建 Skill 补齐 {blocking_count} 个缺口，可能失败或耗时。补齐方式：新建 Skill 或接入外部数据源。",
                 "recommended": True,
             },
             {
@@ -7418,6 +7546,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "低",
                 "risk": "功能不完整，部分输出会降级或省略",
+                "gap_summary": f"有 {blocking_count} 个维度无法覆盖，将标注为'数据不足'或做降级处理。",
+                "feasibility": "可直接实现，但部分分析维度会缺失或降级。",
                 "recommended": False,
             },
         ]
@@ -7431,6 +7561,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": blocking_descriptions,
                 "estimated_effort": "高",
                 "risk": "需要生成多个新能力，周期较长",
+                "gap_summary": f"有 {blocking_count} 个阻塞性缺口需要补齐，补齐后所有维度均可覆盖。",
+                "feasibility": f"需要新建多个 Skill 补齐 {blocking_count} 个缺口，周期较长，可能失败。补齐方式：新建 Skill 或接入外部数据源。",
                 "recommended": True,
             },
             {
@@ -7440,6 +7572,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "低",
                 "risk": "功能不完整，部分输出会降级或省略",
+                "gap_summary": f"有 {blocking_count} 个维度无法覆盖，将标注为'数据不足'或做降级处理。",
+                "feasibility": "可直接实现，但多个分析维度会缺失或降级。",
                 "recommended": False,
             },
             {
@@ -7449,6 +7583,8 @@ def _fallback_build_plans(blocking_gaps: list[Any], non_blocking_gaps: list[Any]
                 "required_new_skills": [],
                 "estimated_effort": "低",
                 "risk": "只覆盖部分需求",
+                "gap_summary": f"缩小范围后，只覆盖现有能力可支撑的维度，{blocking_count} 个缺口维度不在范围内。",
+                "feasibility": "可实现，但需要缩小 Agent 的职责范围。",
                 "recommended": False,
             },
         ]

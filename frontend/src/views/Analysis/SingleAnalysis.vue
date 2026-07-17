@@ -53,7 +53,7 @@
                     <el-form-item :label="analysisForm.market === 'ETF' ? 'ETF代码' : '股票代码'" required>
                       <el-input
                         v-model="analysisForm.stockCode"
-                        placeholder="如：000001、512400(ETF)、AAPL、700"
+                        placeholder="如：000001、512400(ETF)"
                         clearable
                         size="large"
                         class="stock-input"
@@ -87,14 +87,6 @@
                         <el-option label="🇨🇳 A股市场" value="A股">
                           <span>🇨🇳 A股市场</span>
                           <span style="color: #909399; font-size: 12px; margin-left: 8px;">（6位数字）</span>
-                        </el-option>
-                        <el-option label="🇺🇸 美股市场" value="美股">
-                          <span>🇺🇸 美股市场</span>
-                          <span style="color: #909399; font-size: 12px; margin-left: 8px;">（1-5个字母）</span>
-                        </el-option>
-                        <el-option label="🇭🇰 港股市场" value="港股">
-                          <span>🇭🇰 港股市场</span>
-                          <span style="color: #909399; font-size: 12px; margin-left: 8px;">（1-5位数字）</span>
                         </el-option>
                         <el-option label="📈 ETF 基金" value="ETF">
                           <span>📈 ETF 基金</span>
@@ -476,10 +468,30 @@
                 </el-alert>
               </div>
 
-              <!-- 分析引擎选择 - 已隐藏，默认使用 v2.0 引擎 -->
-              <!-- 旧版引擎已移除，统一使用 v2.0 工作流引擎 -->
+              <!--  流程选择器 -->
+              <div class="config-section" v-if="workflowsSorted.length > 0">
+                <h4 class="config-title">📋 分析流程</h4>
+                <el-select
+                  :key="`workflow-select-${analysisForm.market}`"
+                  v-model="selectedWorkflowId"
+                  size="small"
+                  style="width: 100%"
+                  placeholder="选择分析流程"
+                >
+                  <el-option
+                    v-for="workflow in workflowsSorted"
+                    :key="workflow.id"
+                    :label="`${workflow.name} v${workflow.version}`"
+                    :value="workflow.id"
+                  />
+                </el-select>
+                <el-tooltip content="选择不同的分析流程，系统会使用该流程对应的智能体和步骤进行分析" placement="top">
+                  <el-icon style="margin-left: 8px; color: #909399; cursor: help;"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </div>
 
-              <!-- 分析选项 -->
+              <!-- 分析选项 - 已隐藏，流程内置 -->
+              <!--
               <div class="config-section">
                 <h4 class="config-title">⚙️ 分析选项</h4>
                 <div class="option-list">
@@ -510,6 +522,7 @@
                   </div>
                 </div>
               </div>
+              -->
 
             </div>
           </el-card>
@@ -772,6 +785,30 @@
           </div>
         </div>
       </div>
+
+      <template #footer>
+        <div style="display: flex; align-items: center; gap: 12px; justify-content: space-between;">
+          <div v-if="syncStatus !== 'idle'" style="display: flex; align-items: center; gap: 8px;">
+            <el-icon v-if="syncStatus === 'running'" class="is-loading" style="animation: rotate 1.5s linear infinite;">
+              <Loading />
+            </el-icon>
+            <el-icon v-else-if="syncStatus === 'success'" style="color: #67c23a;">
+              <Check />
+            </el-icon>
+            <el-icon v-else style="color: #f56c6c;">
+              <WarningFilled />
+            </el-icon>
+            <span>{{ syncStatus === 'running' ? '正在同步...' : syncStatus === 'success' ? '同步完成' : '同步失败' }}</span>
+          </div>
+          <div style="display: flex; gap: 12px;">
+            <el-button type="primary" :disabled="syncStatus === 'running'" @click="handleSyncMissingData">
+              <el-icon><Refresh /></el-icon>
+              同步缺失数据
+            </el-button>
+            <el-button @click="showValidationDialog = false">关闭</el-button>
+          </div>
+        </div>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -796,9 +833,10 @@ import {
   DocumentChecked,
 } from '@element-plus/icons-vue'
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
-import { workflowApi, type WorkflowDefinition } from '@/api/workflow'
+import { workflowApi, type WorkflowSummary } from '@/api/workflow'
 import { paperApi } from '@/api/paper'
 import { stocksApi, type FundamentalsResponse } from '@/api/stocks'
+import { stockSyncApi, type StockSyncTaskStatus, type SingleStockSyncResponse } from '@/api/stockSync'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { configApi } from '@/api/config'
@@ -819,7 +857,7 @@ marked.setOptions({
 })
 
 // 市场类型定义
-type MarketType = 'A股' | '美股' | '港股' | 'ETF'
+type MarketType = 'A股' | 'ETF'
 
 // 分析引擎类型
 type AnalysisEngineType = 'legacy' | 'v2'
@@ -849,6 +887,8 @@ const showValidationDialog = ref(false)
 const validationResult = ref<any>(null)
 const factorPreviewLoading = ref(false)
 const factorPreview = ref<FundamentalsResponse | null>(null)
+const syncStatus = ref<'idle' | 'running' | 'success' | 'error'>('idle')
+const syncPollingTimer = ref<any>(null)
 
 // 分析进度和结果相关状态
 const currentTaskId = ref('')
@@ -918,26 +958,60 @@ const modelSettings = ref({
 
 // 可用的模型列表（从配置中获取）
 const availableModels = ref<any[]>([])
-const workflows = ref<WorkflowDefinition[]>([])
+const workflows = ref<WorkflowSummary[]>([])
 const workflowsSorted = computed(() => {
-  const arr = [...workflows.value]
-  const score = (t: WorkflowDefinition) => {
-    const v = t.version
-    let major = 0
-    if (typeof v === 'string') {
-      const m = parseInt(v.split('.')[0] || '0', 10)
-      if (!Number.isNaN(m)) major = m
-    } else if (typeof v === 'number') {
-      major = v
+  // 根据市场类型做级联过滤
+  const expectedType = analysisForm.market === 'ETF' ? 'etf_analysis' : 'stock_analysis'
+  const arr = workflows.value.filter(
+    (w: WorkflowSummary) => w.workflow_type === expectedType
+  )
+  
+  // 按版本号倒序排序
+  arr.sort((a, b) => {
+    const vA = a.version || ''
+    const vB = b.version || ''
+    const verA = parseVersion(vA)
+    const verB = parseVersion(vB)
+    
+    for (let i = 0; i < Math.max(verA.length, verB.length); i++) {
+      const numA = verA[i] || 0
+      const numB = verB[i] || 0
+      if (numA !== numB) {
+        return numB - numA
+      }
     }
-    const tags = Array.isArray(t.tags) ? t.tags : []
-    const isV2Tag = tags.some(tag => String(tag).toLowerCase().includes('v2'))
-    return (isV2Tag ? 1 : 0) * 100 + major
-  }
-  arr.sort((a, b) => score(b) - score(a))
+    return 0
+  })
+  
   return arr
 })
+
+// 解析版本号为数字数组
+function parseVersion(v: string | number): number[] {
+  const str = String(v || '')
+  return str.split('.').map(p => parseInt(p.trim(), 10) || 0)
+}
 const selectedWorkflowId = ref<string>('v2_stock_analysis')
+
+// 监听市场类型变化，自动切换到对应类型的默认流程
+watch(
+  () => analysisForm.market,
+  (newMarket) => {
+    const expectedType = newMarket === 'ETF' ? 'etf_analysis' : 'stock_analysis'
+    const targetWorkflows = workflows.value.filter(w => w.workflow_type === expectedType)
+    
+    if (targetWorkflows.length > 0) {
+      // 优先找 is_default 的
+      const defaultWf = targetWorkflows.find(w => w.is_default)
+      if (defaultWf) {
+        selectedWorkflowId.value = defaultWf.id
+      } else {
+        // 没找到的话选第一个（最高版本）
+        selectedWorkflowId.value = targetWorkflows[0].id
+      }
+    }
+  }
+)
 
 // 🆕 模型推荐提示
 const modelRecommendation = ref<{
@@ -1113,10 +1187,14 @@ const validateStockCodeInput = () => {
     stockCodeHelp.value = `✓ ${validation.market}代码格式正确`
 
     // 自动更新市场类型（如果识别出的市场与当前选择不同）
+    // V3.0 聚焦 A 股，港美股已暂停
     if (validation.market && validation.market !== analysisForm.market) {
-      analysisForm.market = validation.market
-      onMarketChange()  // 同步更新分析师选择（如 ETF 固定分析师）
-      ElMessage.success(`已自动识别为${validation.market}`)
+      const validMarkets: MarketType[] = ['A股', 'ETF']
+      if ((validMarkets as string[]).includes(validation.market)) {
+        analysisForm.market = validation.market as MarketType
+        onMarketChange()  // 同步更新分析师选择（如 ETF 固定分析师）
+        ElMessage.success(`已自动识别为${validation.market}`)
+      }
     }
 
     // 标准化代码
@@ -1187,8 +1265,6 @@ const handleValidateData = async () => {
   // 确定市场类型（用于API调用）
   const marketTypeMap: Record<string, string> = {
     'A股': 'cn',
-    '港股': 'hk',
-    '美股': 'us',
     'ETF': 'cn'  // ETF 为 A 股场内基金
   }
   const marketType = marketTypeMap[analysisForm.market] || 'cn'
@@ -1228,6 +1304,151 @@ const handleValidateData = async () => {
   } finally {
     validatingData.value = false
   }
+}
+
+const sleep = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
+
+const isTerminalStockSyncStatus = (status?: string): boolean => {
+  return status === 'success' || status === 'success_with_errors' || status === 'failed'
+}
+
+const buildSingleSyncTaskMessage = (task: StockSyncTaskStatus, symbol: string): string => {
+  const result = task.result as SingleStockSyncResponse | null | undefined
+  if (!result) {
+    return task.error || task.message || `股票 ${symbol} 同步失败`
+  }
+
+  const parts = [`股票 ${symbol} 数据同步完成`]
+
+  if (result.realtime_sync) {
+    if (result.realtime_sync.success) {
+      const dataSourceUsed = (result.realtime_sync as any).data_source_used
+      if (dataSourceUsed) {
+        parts.push(`实时行情同步成功（数据源 ${String(dataSourceUsed).toUpperCase()}）`)
+      } else {
+        parts.push('实时行情同步成功')
+      }
+    } else {
+      parts.push(`实时行情同步失败: ${result.realtime_sync.error || '未知错误'}`)
+    }
+  }
+
+  if (result.historical_sync) {
+    parts.push(result.historical_sync.success ? `历史数据 ${result.historical_sync.records || 0} 条` : `历史数据同步失败: ${result.historical_sync.error || '未知错误'}`)
+  }
+  if (result.financial_sync) {
+    parts.push(result.financial_sync.success ? '财务数据同步成功' : `财务数据同步失败: ${result.financial_sync.error || '未知错误'}`)
+  }
+  if (result.basic_sync) {
+    parts.push(result.basic_sync.success ? '基础数据同步成功' : `基础数据同步失败: ${result.basic_sync.error || '未知错误'}`)
+  }
+
+  return parts.join('；')
+}
+
+const STOCK_SYNC_POLL_MAX_ATTEMPTS = 60
+const STOCK_SYNC_POLL_INTERVAL_MS = 2000
+
+const waitForStockSyncTask = async (taskId: string): Promise<StockSyncTaskStatus> => {
+  for (let attempt = 0; attempt < STOCK_SYNC_POLL_MAX_ATTEMPTS; attempt += 1) {
+    const res = await stockSyncApi.getTaskStatus(taskId)
+    if (res.success && isTerminalStockSyncStatus(res.data.status)) {
+      return res.data
+    }
+
+    await sleep(STOCK_SYNC_POLL_INTERVAL_MS)
+  }
+
+  throw new Error('同步任务执行超时，请稍后刷新页面查看结果')
+}
+
+const monitorSingleSyncTask = async (taskId: string, symbol: string) => {
+  try {
+    const task = await waitForStockSyncTask(taskId)
+    const message = buildSingleSyncTaskMessage(task, symbol)
+    if (task.status === 'success') {
+      ElMessage.success(message)
+    } else if (task.status === 'success_with_errors') {
+      ElMessage.warning(message)
+    } else {
+      ElMessage.error(message)
+    }
+
+    // 同步完成后，重新调用数据检验
+    await handleValidateData()
+  } catch (error: any) {
+    if (error?.message !== '页面已离开，停止等待同步结果') {
+      ElMessage.error(error?.message || '同步结果查询失败，请稍后刷新页面查看')
+    }
+  } finally {
+    clearSyncPolling()
+  }
+}
+
+// 同步缺失数据
+const handleSyncMissingData = async () => {
+  const stockCode = analysisForm.stockCode.trim()
+  const validation = validateStockCode(stockCode, analysisForm.market)
+
+  if (!validation.valid) {
+    ElMessage.error('股票代码不正确')
+    return
+  }
+
+  const normalizedCode = validation.normalizedCode || stockCode.toUpperCase()
+  const missingData = validationResult.value?.missing_data || [] as string[]
+
+  // 根据缺失数据确定同步什么
+  const syncTypes: string[] = []
+  if (missingData.includes('实时行情')) syncTypes.push('realtime')
+  if (missingData.includes('历史数据')) syncTypes.push('historical')
+  if (missingData.includes('财务数据')) syncTypes.push('financial')
+  if (missingData.includes('基础信息')) syncTypes.push('basic')
+
+  // 如果没有明确指定缺失，默认都同步
+  if (syncTypes.length === 0) {
+    syncTypes.push('realtime', 'historical', 'financial', 'basic')
+  }
+
+  try {
+    syncStatus.value = 'running'
+    const res = await stockSyncApi.syncSingle({
+      symbol: normalizedCode,
+      sync_realtime: syncTypes.includes('realtime'),
+      sync_historical: syncTypes.includes('historical'),
+      sync_financial: syncTypes.includes('financial'),
+      sync_basic: syncTypes.includes('basic'),
+      data_source: 'akshare',
+      days: 365
+    })
+
+    if (res.success) {
+      ElMessage.success(`股票 ${normalizedCode} 同步任务已提交，后台执行中`)
+      void monitorSingleSyncTask(res.data.task_id, normalizedCode)
+    } else {
+      syncStatus.value = 'error'
+      ElMessage.error(res.message || '同步失败')
+    }
+  } catch (error: any) {
+    console.error('同步失败:', error)
+    syncStatus.value = 'error'
+    ElMessage.error(error.message || '同步失败，请稍后重试')
+  }
+}
+
+// 清理同步轮询定时器
+const clearSyncPolling = () => {
+  if (syncPollingTimer.value) {
+    clearInterval(syncPollingTimer.value)
+    syncPollingTimer.value = null
+  }
+}
+
+// 显示校验结果对话框
+const showValidationResultDialog = (result: any) => {
+  validationResult.value = result
+  showValidationDialog.value = true
+  syncStatus.value = 'idle' // 重置同步状态
 }
 
 // 格式化校验结果详情为表格数据
@@ -1293,11 +1514,7 @@ const formatValidationDetails = (details: any) => {
   return tables
 }
 
-// 显示校验结果对话框
-const showValidationResultDialog = (result: any) => {
-  validationResult.value = result
-  showValidationDialog.value = true
-}
+
 
 // 提交分析
 const submitAnalysis = async () => {
@@ -1392,7 +1609,8 @@ const submitAnalysis = async () => {
         language: analysisForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
         deep_analysis_model: modelSettings.value.deepAnalysisModel,
-        engine: 'v2'  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
+        engine: 'v2',  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
+        workflow_id: selectedWorkflowId.value
       }
     }
 
@@ -2365,7 +2583,7 @@ const goSimOrder = async () => {
       code: code,
       side: recommendation.action,
       quantity: tradeForm.quantity,
-      market: analysisForm.market === 'ETF' ? 'ETF' : analysisForm.market === '港股' ? 'HK' : analysisForm.market === '美股' ? 'US' : 'CN',
+      market: analysisForm.market === 'ETF' ? 'ETF' : 'CN',
       analysis_id: analysisId ? String(analysisId) : undefined
     })
 
@@ -2393,6 +2611,7 @@ onUnmounted(() => {
     clearInterval(pollingTimer.value)
     pollingTimer.value = null
   }
+  clearSyncPolling()
 })
 
 // 页面可见性变化时的处理
@@ -2901,13 +3120,22 @@ onMounted(async () => {
   // 🆕 初始检查模型适用性
   await checkModelSuitability()
   try {
-    workflows.value = await workflowApi.getTemplates()
-    const exists = workflows.value.some(w => w.id === selectedWorkflowId.value)
-    if (!exists && workflows.value.length > 0) {
-      selectedWorkflowId.value = workflowsSorted.value[0]?.id || workflows.value[0].id
+    workflows.value = await workflowApi.listAll()
+    console.log('[SingleAnalysis] 加载的所有流程:', workflows.value)
+    console.log('[SingleAnalysis] 过滤后的流程:', workflowsSorted.value)
+    
+    // 优先选择标记为 is_default 的流程
+    const defaultWorkflow = workflowsSorted.value.find(w => w.is_default)
+    if (defaultWorkflow) {
+      selectedWorkflowId.value = defaultWorkflow.id
+      console.log('[SingleAnalysis] 选中默认流程:', defaultWorkflow.id, defaultWorkflow.name)
+    } else if (workflowsSorted.value.length > 0) {
+      // 如果没有标记默认，选择第一个
+      selectedWorkflowId.value = workflowsSorted.value[0].id
+      console.log('[SingleAnalysis] 没有默认流程，选中第一个:', workflowsSorted.value[0].id, workflowsSorted.value[0].name)
     }
   } catch (error) {
-    console.debug('[SingleAnalysis] 加载工作流模板失败，保留当前默认模板:', error)
+    console.debug('[SingleAnalysis] 加载工作流失败，保留当前默认模板:', error)
   }
 })
 
@@ -3559,6 +3787,7 @@ onMounted(async () => {
   width: 100% !important;
   text-align: center !important;
 }
+
 
 .large-analysis-btn.el-button {
   width: 280px !important;

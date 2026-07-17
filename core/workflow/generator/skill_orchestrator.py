@@ -10,7 +10,7 @@ Skill 编排器 — 根据蓝图中的 Skill 缺口，自动创建并绑定缺�
    d. 失败 → 标记 status=failed，记录错误
 3. 将所有新创建的 Skill 绑定到对应 Agent
 
-参考: docs/design/v3.0/ai-workflow-generation.md §4.4
+参考: docs/05-design/v3.0/ai-workflow-generation.md §4.4
 """
 
 import logging
@@ -83,7 +83,7 @@ class SkillOrchestrator:
 
         results: List[Dict[str, Any]] = []
         for req in missing:
-            result = await self._create_one_skill(req, user_id)
+            result = await self._create_one_skill(req, user_id, blueprint)
             results.append(result)
 
         # 更新蓝图进度
@@ -218,6 +218,7 @@ class SkillOrchestrator:
         self,
         req: SkillCreationRequest,
         user_id: str,
+        blueprint: WorkflowBlueprint,
     ) -> Dict[str, Any]:
         """
         创建单个 Skill
@@ -248,9 +249,9 @@ class SkillOrchestrator:
                 "skipped": True,
             }
 
-        # 2. 开始创建会话
+        # 2. 开始创建会话（传入蓝图上下文，让 Skill 工坊理解大背景）
         req.status = "creating"
-        description = self._build_skill_description(req)
+        description = self._build_skill_description(req, blueprint)
 
         try:
             start_result = await self._skill_service.start_session(
@@ -345,14 +346,85 @@ class SkillOrchestrator:
         )
 
     @staticmethod
-    def _build_skill_description(req: SkillCreationRequest) -> str:
+    def _build_skill_description(req: SkillCreationRequest, blueprint: WorkflowBlueprint) -> str:
         """
         将 SkillCreationRequest 转为 SkillGenerationService 可用的自然语言描述
+
+        包含完整上下文：工作流背景 + Agent 角色 + 工具需求，
+        确保 Skill 工坊的代码生成流水线能理解大背景。
         """
-        parts = [f"工具名称: {req.skill_name}"]
+        parts = []
+
+        # ── 工作流背景 ──
+        wf_name = blueprint.name or ""
+        wf_desc = blueprint.description or blueprint.summary or ""
+        if wf_name or wf_desc:
+            parts.append("## 工作流背景")
+            if wf_name:
+                parts.append(f"- 工作流名称: {wf_name}")
+            if wf_desc:
+                parts.append(f"- 工作流目的: {wf_desc}")
+
+        # ── 目标 Agent 在本工作流中的角色 ──
+        agent_context_parts = SkillOrchestrator._find_agent_context(req, blueprint)
+        if agent_context_parts:
+            parts.append("")
+            parts.append("## 目标 Agent 在本工作流中的角色")
+            parts.append(f"- Agent ID: {req.target_agent_id}")
+            for line in agent_context_parts:
+                parts.append(f"- {line}")
+
+        # ── 工具需求本身 ──
+        parts.append("")
+        parts.append("## 需要创建的工具")
+        parts.append(f"- 工具名称: {req.skill_name}")
         if req.skill_description:
-            parts.append(f"功能描述: {req.skill_description}")
-        if req.target_agent_id:
-            parts.append(f"使用场景: 供 {req.target_agent_id} Agent 使用")
-        return "\n".join(parts)
+            parts.append(f"- 功能描述: {req.skill_description}")
+        parts.append(f"- 使用场景: 供 {req.target_agent_id} Agent 在上述工作流中使用")
+
+        result = "\n".join(parts)
+        logger.info(
+            f"[SkillOrchestrator] 📝 Skill 创建描述 ({req.skill_name}, "
+            f"长度={len(result)} 字符)"
+        )
+        return result
+
+    @staticmethod
+    def _find_agent_context(
+        req: SkillCreationRequest, blueprint: WorkflowBlueprint
+    ) -> List[str]:
+        """
+        从蓝图中提取目标 Agent 在本工作流中的角色上下文
+
+        优先级：
+        1. agent_reshaping（LLM 生成的角色重塑方案，信息最丰富）
+        2. nodes（节点的 label 和 description）
+        """
+        context: List[str] = []
+
+        # 1. 从 agent_reshaping 获取角色重塑信息
+        if blueprint.gap_analysis:
+            for reshaping in blueprint.gap_analysis.agent_reshaping:
+                if reshaping.agent_id == req.target_agent_id:
+                    if reshaping.new_role:
+                        context.append(f"角色定位: {reshaping.new_role}")
+                    if reshaping.reshaping_direction:
+                        context.append(f"定制方向: {reshaping.reshaping_direction}")
+                    if reshaping.key_focus_areas:
+                        areas = ", ".join(reshaping.key_focus_areas)
+                        context.append(f"关键分析维度: {areas}")
+                    break
+
+        # 2. 从节点补充节点级别的信息
+        for node in blueprint.nodes:
+            if node.agent_id == req.target_agent_id:
+                if node.label:
+                    # 避免重复（agent_reshaping 可能已经有类似信息）
+                    if not any("节点名称" in c for c in context):
+                        context.insert(0, f"节点名称: {node.label}")
+                if node.description:
+                    context.append(f"节点说明: {node.description}")
+                break
+
+        return context
 

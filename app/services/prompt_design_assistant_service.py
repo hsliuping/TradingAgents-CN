@@ -234,6 +234,18 @@ class PromptDesignAssistantService:
 
         client = await self._ensure_llm_client()
         resp = await client.achat(llm_messages)
+
+        # 记录 token 使用
+        try:
+            from app.services.usage_statistics_service import usage_statistics_service
+            await usage_statistics_service.record_llm_usage(
+                response=resp,
+                session_id=session_id,
+                analysis_type="prompt_design",
+            )
+        except Exception as e:
+            logger.warning(f"记录 token 使用失败: {e}")
+
         ai_content = (resp.content or "").strip()
 
         # 尝试解析 JSON 建议

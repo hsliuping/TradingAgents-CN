@@ -11,6 +11,11 @@
         <span class="workflow-title">{{ workflow?.name || '加载中...' }}</span>
         <el-tag v-if="hasUnsavedChanges" type="warning" size="small">未保存</el-tag>
         <el-tag v-if="workflow?.is_default" type="success" size="small" effect="dark">默认</el-tag>
+        <div class="workflow-type-display" v-if="workflow">
+          <span class="label">流程类型：</span>
+          <el-tag size="small">{{ getWorkflowTypeLabel(getWorkflowType(workflow)) }}</el-tag>
+          <el-button text size="small" @click="openTypeEditor">修改</el-button>
+        </div>
       </div>
       <div class="toolbar-center">
         <el-button-group>
@@ -406,6 +411,25 @@
         <el-button type="primary" @click="goToTemplateEditor">编辑模板</el-button>
       </template>
     </el-dialog>
+
+    <!-- 类型修改对话框 -->
+    <el-dialog v-model="showTypeEditor" title="修改流程类型" width="400px">
+      <el-select v-model="editingType" placeholder="选择流程类型">
+        <el-option
+          v-for="(config, type) in WORKFLOW_TYPE_CONFIG"
+          :key="type"
+          :label="config.label"
+          :value="type"
+        />
+      </el-select>
+      <div class="type-description" v-if="editingType">
+        {{ WORKFLOW_TYPE_CONFIG[editingType]?.description }}
+      </div>
+      <template #footer>
+        <el-button @click="showTypeEditor = false">取消</el-button>
+        <el-button type="primary" @click="saveWorkflowType">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -463,6 +487,29 @@ const templatePreviewContent = ref<any>(null)
 const nodeConfig = ref<Record<string, any>>({})
 const newParticipant = ref('')
 const newConnectionTarget = ref('')
+
+// 流程类型配置
+const WORKFLOW_TYPE_CONFIG: Record<string, { label: string; description: string }> = {
+  stock_analysis: { label: '单股研究流程', description: '用于分析单只股票' },
+  etf_analysis: { label: 'ETF 分析流程', description: '用于分析 ETF 基金' },
+  position_analysis: { label: '持仓分析流程', description: '用于分析持仓股票健康度' },
+  trade_review: { label: '操作复盘流程', description: '用于复盘交易操作' },
+  portfolio_health: { label: '组合健康度流程', description: '用于组合整体诊断' },
+  general: { label: '通用研究流程', description: '自由探索' },
+}
+
+function getWorkflowTypeLabel(type?: string): string {
+  if (!type) return '通用研究流程'
+  return WORKFLOW_TYPE_CONFIG[type]?.label || '通用研究流程'
+}
+
+function getWorkflowType(wf: any): string {
+  return wf?.workflow_type || wf?.config?.workflow_type || 'general'
+}
+
+// 类型编辑状态
+const showTypeEditor = ref(false)
+const editingType = ref('')
 
 // 计算属性
 const workflowId = computed(() => route.params.id as string)
@@ -704,7 +751,8 @@ const saveWorkflow = async () => {
     const result = await workflowApi.update(workflowId.value, {
       ...workflow.value,
       nodes: nodes.value,
-      edges: edges.value
+      edges: edges.value,
+      workflow_type: workflow.value.workflow_type,
     })
 
     if (result.success) {
@@ -763,7 +811,23 @@ const executeWorkflow = () => {
   router.push(`/workflow/execute/${workflowId.value}`)
 }
 
-// 判断是否为单股分析流程（只有单股分析流程支持执行功能）
+function openTypeEditor() {
+  if (!workflow.value) return
+  editingType.value = getWorkflowType(workflow.value)
+  showTypeEditor.value = true
+}
+
+async function saveWorkflowType() {
+  if (!workflow.value) return
+  await workflowApi.update(workflow.value.id, {
+    workflow_type: editingType.value,
+  })
+  workflow.value.workflow_type = editingType.value
+  showTypeEditor.value = false
+  ElMessage.success('流程类型已更新')
+}
+
+// 判断工作流是否支持执行（调试）功能
 const isStockAnalysisWorkflow = (workflow: WorkflowDefinition): boolean => {
   const id = (workflow.id || '').toLowerCase()
   const name = (workflow.name || '').toLowerCase()
@@ -774,6 +838,11 @@ const isStockAnalysisWorkflow = (workflow: WorkflowDefinition): boolean => {
   }
   if (id.includes('trade_review') || name.includes('复盘') || name.includes('交易复盘')) {
     return false
+  }
+
+  // 🆕 general 类型工作流支持调试
+  if (workflow.workflow_type === 'general') {
+    return true
   }
 
   // 支持执行的工作流类型：
@@ -1244,6 +1313,18 @@ onMounted(async () => {
       font-size: 16px;
       font-weight: 600;
     }
+
+    .workflow-type-display {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 4px;
+
+      .label {
+        font-size: 13px;
+        color: var(--el-text-color-secondary);
+      }
+    }
   }
 
   .toolbar-right {
@@ -1542,5 +1623,15 @@ onMounted(async () => {
       background: var(--el-fill-color-light);
     }
   }
+}
+
+// 类型修改对话框样式
+.type-description {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 </style>

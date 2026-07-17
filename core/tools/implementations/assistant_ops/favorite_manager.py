@@ -50,6 +50,12 @@ def _parse_tags(tags: str) -> list[str]:
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["favorite_management", "watchlist", "query", "list", "assistant_ops", "stock_favorites", "stock_watchlist", "tag_filter", "favorites_view", "self_selected_stocks"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["查看自选股列表", "浏览关注的股票", "按标签筛选自选股", "确认已关注的股票"],
+    when_to_use="当用户想查看自己的股票关注列表、自选股，或按标签筛选已关注的股票时使用。",
+    returns="返回文本格式的自选股列表，包含股票名称、代码、市场和已有标签。",
 )
 async def list_favorite_stocks(
     tag: Annotated[str, "可选，按标签筛选，例如 巴菲特；留空表示查看全部关注股票"] = "",
@@ -99,6 +105,12 @@ async def list_favorite_stocks(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["favorite_management", "watchlist", "add", "batch_add", "assistant_ops", "stock_favorites", "tag_assignment", "bulk_add", "favorites_update", "self_selected_stocks"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["批量添加自选股", "保存智能选股结果", "给关注股票打标签", "补充已有自选股标签"],
+    when_to_use="当用户想把一只或多只股票加入自选股列表，或在智能选股完成后批量保存推荐结果时使用。",
+    returns="返回文本消息，包含新增、跳过、补充标签和失败的股票代码统计。",
 )
 async def add_stocks_to_favorites(
     stocks_json: Annotated[

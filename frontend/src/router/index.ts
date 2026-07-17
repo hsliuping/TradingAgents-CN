@@ -89,6 +89,11 @@ const routes: RouteRecordRaw[] = [
         name: 'BatchAnalysis',
         component: () => import('@/views/Analysis/BatchAnalysis.vue')
       },
+      {
+        path: 'general',
+        name: 'GeneralAnalysis',
+        component: () => import('@/views/Analysis/GeneralAnalysis.vue')
+      },
 
     ]
   },
@@ -454,6 +459,15 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/System/MultiSourceSync.vue'),
         meta: {
           title: '多数据源同步',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'capability-index',
+        name: 'CapabilityIndex',
+        component: () => import('@/views/Settings/index.vue'),
+        meta: {
+          title: '工具能力索引',
           requiresAuth: true
         }
       },

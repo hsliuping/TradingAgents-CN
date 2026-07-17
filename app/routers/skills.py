@@ -5,6 +5,7 @@ Skill 管理 API
 支持：导入 SKILL.md、从 URL 导入、列表查询、更新、删除、启用/禁用、注册到 ToolRegistry
 """
 
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -1193,6 +1194,16 @@ async def _convert_question_to_args_for_external_skill(
             ],
             max_tokens=512,
         )
+        # 记录 token 使用
+        try:
+            from app.services.usage_statistics_service import usage_statistics_service
+            await usage_statistics_service.record_llm_usage(
+                response=response,
+                session_id="skill_test",
+                analysis_type="skill_test",
+            )
+        except Exception as e:
+            logger.warning(f"记录 token 使用失败: {e}")
         raw = (response.content or "").strip()
 
         # 尝试从可能的 markdown 代码块中提取 JSON
@@ -1491,6 +1502,17 @@ async def _test_skill_via_agent(
             "error": f"LLM 调用失败: {e}",
             "execution_time_ms": int((_time.time() - start) * 1000),
         }
+
+    # 记录 token 使用
+    try:
+        from app.services.usage_statistics_service import usage_statistics_service
+        await usage_statistics_service.record_llm_usage(
+            response=response,
+            session_id="skill_test",
+            analysis_type="skill_test",
+        )
+    except Exception as e:
+        logger.warning(f"记录 token 使用失败: {e}")
 
     elapsed_ms = int((_time.time() - start) * 1000)
 

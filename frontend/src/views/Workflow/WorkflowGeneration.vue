@@ -11,7 +11,7 @@
         <h1>🤖 AI 工作流架构师</h1>
       </div>
       <div class="header-right">
-        <el-button v-if="step < 2 && sessionId" text size="small" @click="goBack">
+        <el-button v-if="step < 3 && sessionId" text size="small" @click="goBack">
           保存草稿
         </el-button>
       </div>
@@ -20,6 +20,7 @@
     <!-- 步骤条 -->
     <div class="steps-bar">
       <el-steps :active="step" finish-status="success" align-center>
+        <el-step title="选择类型" />
         <el-step title="需求沟通" />
         <el-step title="方案确认" />
         <el-step title="自动补全" />
@@ -29,8 +30,34 @@
 
     <!-- 主内容区 -->
     <div class="main-content">
-      <!-- 步骤 0: 需求沟通 -->
-      <div v-if="step === 0" class="wizard-chat">
+      <!-- 步骤 0: 选择类型 -->
+      <div v-if="step === 0" class="wizard-type-select">
+        <div class="type-selector">
+          <h3>你要创建什么类型的分析流程？</h3>
+          <el-radio-group v-model="selectedWorkflowType" class="type-radio-group">
+            <el-radio
+              v-for="option in WORKFLOW_TYPE_OPTIONS"
+              :key="option.value"
+              :label="option.value"
+              class="type-radio-item"
+            >
+              <div class="type-option">
+                <div class="type-label">{{ option.label }}</div>
+                <div class="type-desc">{{ option.description }}</div>
+              </div>
+            </el-radio>
+          </el-radio-group>
+        </div>
+        <div class="type-actions">
+          <el-button type="primary" size="large" @click="step = 1">
+            下一步：描述需求
+            <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+      </div>
+
+      <!-- 步骤 1: 需求沟通 -->
+      <div v-if="step === 1" class="wizard-chat">
         <div ref="chatContainer" class="chat-messages">
           <!-- 首次进入引导语 -->
           <div v-if="chatMessages.length === 0 && !chatLoading" class="requirement-guide">
@@ -201,10 +228,10 @@
         </div>
       </div>
 
-      <!-- 步骤 1: 方案确认（由 handleConfirm 自动跳过到步骤2） -->
+      <!-- 步骤 2: 方案确认（由 handleConfirm 自动跳过到步骤3） -->
 
-      <!-- 步骤 2: 自动补全进度 -->
-      <div v-if="step === 2" class="wizard-generating">
+      <!-- 步骤 3: 自动补全进度 -->
+      <div v-if="step === 3" class="wizard-generating">
         <div class="gen-status">
           <el-icon class="gen-spinner" :size="40"><Loading /></el-icon>
           <h3>正在创建工作流...</h3>
@@ -222,8 +249,8 @@
         </div>
       </div>
 
-      <!-- 步骤 3: 完成 -->
-      <div v-if="step === 3" class="wizard-done">
+      <!-- 步骤 4: 完成 -->
+      <div v-if="step === 4" class="wizard-done">
         <el-result
           :icon="confirmResult?.workflow_id ? (published ? 'success' : 'warning') : 'error'"
           :title="confirmResult?.workflow_id
@@ -346,7 +373,7 @@
                 <el-icon><RefreshRight /></el-icon>
                 迭代优化
               </el-button>
-              <el-button v-if="!confirmResult?.workflow_id" @click="step = 0">
+              <el-button v-if="!confirmResult?.workflow_id" @click="step = 1">
                 返回修改需求
               </el-button>
               <el-button @click="goBack">返回列表</el-button>
@@ -363,7 +390,7 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, User, Connection, Loading, CircleCheck, MoreFilled, Edit, RefreshRight, Refresh, Delete } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, User, Connection, Loading, CircleCheck, MoreFilled, Edit, RefreshRight, Refresh, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import { workflowGenerationApi } from '@/api/workflowGeneration'
@@ -382,6 +409,17 @@ const router = useRouter()
 // ==================== 状态 ====================
 
 const step = ref(0)
+
+// 流程类型选择
+const selectedWorkflowType = ref('stock_analysis')
+
+const WORKFLOW_TYPE_OPTIONS = [
+  { value: 'stock_analysis', label: '单股研究流程', description: '用于分析单只股票，结果在"研究报告"中查看' },
+  { value: 'etf_analysis', label: 'ETF 分析流程', description: '用于分析 ETF 基金' },
+  { value: 'position_analysis', label: '持仓分析流程', description: '用于分析持仓股票健康度' },
+  { value: 'trade_review', label: '操作复盘流程', description: '用于复盘交易操作' },
+  { value: 'general', label: '通用研究流程', description: '自由探索，结果在"流程中心"查看' },
+]
 
 interface ChatMsg { role: 'user' | 'ai'; content: string }
 const chatMessages = ref<ChatMsg[]>([])
@@ -496,7 +534,7 @@ const handleConfirm = async () => {
     return
   }
   chatLoading.value = true
-  step.value = 2
+  step.value = 3
 
   // 模拟进度
   genSteps.value.forEach(s => s.status = 'pending')
@@ -522,17 +560,23 @@ const handleConfirm = async () => {
   }, 2000)
 
   try {
-    const res = await workflowGenerationApi.confirmAndCreate(sessionId.value)
+    const res = await workflowGenerationApi.confirmAndCreate(sessionId.value, {
+      workflow_type: selectedWorkflowType.value,
+    })
     clearInterval(progressTimer)
     genSteps.value.forEach(s => s.status = 'done')
     genProgress.value = 100
     confirmResult.value = res
+    // 后端 confirm_and_create 已自动发布，同步前端状态
+    if (res?.published) {
+      published.value = true
+    }
 
-    setTimeout(() => { step.value = 3 }, 600)
+    setTimeout(() => { step.value = 4 }, 600)
   } catch (e: any) {
     clearInterval(progressTimer)
     confirmResult.value = { status: 'failed', session_id: sessionId.value, error: e?.message || '创建失败' }
-    step.value = 3
+    step.value = 4
   } finally {
     chatLoading.value = false
   }
@@ -579,7 +623,7 @@ const handleStartOptimize = () => {
     chatMessages.value.push({ role: 'ai', content: lines.join('\n') })
   }
 
-  step.value = 0
+  step.value = 1
   scrollChat()
 }
 
@@ -587,7 +631,7 @@ const handleStartOptimize = () => {
 const handleCancelOptimize = () => {
   isOptimizeMode.value = false
   optimizeProposed.value = false
-  step.value = 3
+  step.value = 4
 }
 
 /** 确认并应用优化 */
@@ -602,7 +646,7 @@ const handleConfirmOptimize = async () => {
       // 重置优化模式，回到成果页
       isOptimizeMode.value = false
       optimizeProposed.value = false
-      step.value = 3
+      step.value = 4
     } else {
       ElMessage.error(res.error || '应用优化失败')
     }
@@ -650,7 +694,7 @@ const resumeSession = (draft: WfSessionItem) => {
     if (r.ai_message) chatMessages.value.push({ role: 'ai', content: r.ai_message })
   }
 
-  // 已完成或已发布的会话 → 直接跳到完成页（step 3）
+  // 已完成或已发布的会话 -> 直接跳到完成页（step 4）
   if (['completed', 'published'].includes(draft.status) && draft.workflow_id) {
     confirmResult.value = {
       status: draft.status,
@@ -659,11 +703,11 @@ const resumeSession = (draft: WfSessionItem) => {
       creation_report: draft.creation_report,
     }
     published.value = draft.status === 'published'
-    step.value = 3
+    step.value = 4
     return
   }
 
-  step.value = 0
+  step.value = 1
   scrollChat()
 }
 
@@ -788,6 +832,78 @@ onMounted(() => {
   border: 1px solid var(--el-border-color-lighter);
   padding: 20px;
   overflow: hidden;
+}
+
+/* ========== 类型选择 ========== */
+.wizard-type-select {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 32px 20px;
+  height: 100%;
+  overflow-y: auto;
+}
+
+.type-selector {
+  width: 100%;
+  max-width: 600px;
+  text-align: center;
+
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    margin: 0 0 24px;
+  }
+}
+
+.type-radio-group {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.type-radio-item {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: var(--el-bg-color);
+  transition: border-color 0.2s, background 0.2s;
+  height: auto;
+
+  &:hover {
+    border-color: var(--el-color-primary-light-5);
+  }
+
+  :deep(.el-radio__label) {
+    width: 100%;
+    padding-left: 8px;
+  }
+}
+
+.type-option {
+  .type-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    margin-bottom: 4px;
+  }
+
+  .type-desc {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.5;
+  }
+}
+
+.type-actions {
+  margin-top: 28px;
+  text-align: center;
 }
 
 /* ========== 需求沟通 ========== */

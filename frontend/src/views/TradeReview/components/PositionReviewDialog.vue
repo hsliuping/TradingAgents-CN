@@ -40,6 +40,27 @@
     <el-divider content-position="left">复盘分析内容</el-divider>
 
     <el-form :model="form" label-width="100px">
+      <!-- 流程选择 -->
+      <el-form-item v-if="workflowsSorted.length > 0" label="分析流程">
+        <div style="display: flex; align-items: center; width: 100%">
+          <el-select
+            v-model="selectedWorkflowId"
+            size="small"
+            style="flex: 1"
+            placeholder="选择分析流程"
+          >
+            <el-option
+              v-for="workflow in workflowsSorted"
+              :key="workflow.id"
+              :label="`${workflow.name} v${workflow.version}`"
+              :value="workflow.id"
+            />
+          </el-select>
+          <el-tooltip content="选择不同的分析流程，系统会使用该流程对应的智能体和步骤进行分析" placement="top">
+            <el-icon style="margin-left: 8px; color: #909399; cursor: help"><InfoFilled /></el-icon>
+          </el-tooltip>
+        </div>
+      </el-form-item>
       <!-- 🆕 移除分析版本选择，统一使用工作流分析 -->
       <el-form-item label="复盘分析内容">
         <el-alert type="info" :closable="false" show-icon>
@@ -110,10 +131,12 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { reviewApi, type TradeRecord } from '@/api/review'
 import * as tradingSystemApi from '@/api/tradingSystem'
 import type { TradingSystem } from '@/api/tradingSystem'
 import { useLicenseStore } from '@/stores/license'
+import { workflowApi, type WorkflowSummary } from '@/api/workflow'
 
 interface PositionData {
   code: string
@@ -132,6 +155,7 @@ const props = defineProps<{
   modelValue: boolean
   positionData: PositionData | null
   source?: 'paper' | 'real'  // 数据源: paper(模拟交易) 或 real(用户持仓)
+  workflowId?: string
 }>()
 
 const emit = defineEmits<{
@@ -154,6 +178,49 @@ const form = ref({
 })
 
 const submitting = ref(false)
+
+// 流程选择
+const workflows = ref<WorkflowSummary[]>([])
+const selectedWorkflowId = ref<string>('')
+
+const parseVersion = (v: string): number[] => {
+  const parts = String(v || '0.0.0').split('.')
+  return parts.map(p => parseInt(p, 10) || 0)
+}
+
+const workflowsSorted = computed(() => {
+  const arr = workflows.value.filter(
+    (w: WorkflowSummary) => w.workflow_type === 'trade_review'
+  )
+  arr.sort((a, b) => {
+    const vA = a.version || ''
+    const vB = b.version || ''
+    const verA = parseVersion(vA)
+    const verB = parseVersion(vB)
+    for (let i = 0; i < Math.max(verA.length, verB.length); i++) {
+      const numA = verA[i] || 0
+      const numB = verB[i] || 0
+      if (numA !== numB) return numB - numA
+    }
+    return 0
+  })
+  return arr
+})
+
+// 加载可用工作流
+const loadWorkflows = async () => {
+  try {
+    const data = await workflowApi.listAll()
+    workflows.value = data
+    const targetWorkflows = data.filter((w: WorkflowSummary) => w.workflow_type === 'trade_review')
+    if (targetWorkflows.length > 0) {
+      const defaultWf = targetWorkflows.find((w: WorkflowSummary) => w.is_default)
+      selectedWorkflowId.value = defaultWf ? defaultWf.id : targetWorkflows[0].id
+    }
+  } catch (e) {
+    console.error('加载工作流列表失败:', e)
+  }
+}
 
 // 交易计划相关
 const tradingSystems = ref<TradingSystem[]>([])
@@ -197,6 +264,8 @@ watch(visible, async (val) => {
     }
     // 打开对话框时，重新加载交易计划列表并自动选中默认计划
     await loadTradingSystems()
+    // 加载工作流列表
+    await loadWorkflows()
   }
 })
 
@@ -331,6 +400,7 @@ const handleSubmit = async () => {
       code: props.positionData.code,
       source: source,  // 使用传入的数据源
       trading_system_id: canUseTradingPlanCheck.value ? (form.value.trading_system_id || undefined) : undefined,
+      workflow_id: selectedWorkflowId.value || undefined,
       use_workflow: true  // 🆕 统一使用工作流分析
     })
 

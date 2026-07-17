@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
     category="market",
     is_online=True,
     auto_register=True,
+    capability_tags=["market_overview", "qmt", "index_data", "market_breadth", "market_activity"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["qmt_market_overview", "market_breadth_analysis", "market_activity_assessment"],
 )
 def get_market_overview_qmt(
     trade_date: Annotated[str, "分析日期，格式：YYYY-MM-DD"],
@@ -48,6 +52,10 @@ def get_market_overview_qmt(
     category="market",
     is_online=True,
     auto_register=True,
+    capability_tags=["sector_analysis", "qmt", "industry_rotation", "peer_comparison", "sector_strength"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["qmt_sector_analysis", "industry_strength_comparison", "sector_leader_identification"],
 )
 def get_sector_analysis_qmt(
     ticker: Annotated[str, "股票代码（如 600519、000001）"],

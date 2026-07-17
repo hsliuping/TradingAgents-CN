@@ -53,10 +53,14 @@ def _tushare_unavailable_msg(dimensions: str) -> str:
 @register_tool(
     tool_id="get_sector_data",
     name="板块数据",
-    description="获取股票所属板块的表现数据，分析行业趋势",
+    description="获取股票所属板块的表现数据并分析行业趋势，返回板块涨跌幅、成交额、领涨股、资金流向等板块趋势数据信息",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["sector_data", "sector_performance", "industry_trend", "sector_ranking", "industry_analysis"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["sector_performance_analysis", "industry_trend_evaluation", "sector_ranking_review"],
 )
 def get_sector_data(
     ticker: Annotated[str, "股票代码（如 000001 或 000001.SZ）"],
@@ -104,6 +108,10 @@ def get_sector_data(
     category="market",
     is_online=True,
     auto_register=True,
+    capability_tags=["fund_flow", "capital_flow", "sector_rotation", "main_capital", "liquidity_flow"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["sector_capital_flow_analysis", "sector_rotation_identification", "main_capital_tracking"],
     when_to_use="当需要板块资金流、主力资金流入流出、行业轮动资金面证据时使用。",
     when_not_to_use="不用于现金流量表分析、现金流恶化、利润含金量、财务风险或个股财务现金流质量判断；这些需求应使用现金流/财务风险工具。",
 )
@@ -140,10 +148,14 @@ def get_fund_flow_data(
 @register_tool(
     tool_id="get_peer_comparison",
     name="同业对比",
-    description="获取同行业股票对比数据，分析个股在行业中的位置",
+    description="获取同行业股票对比数据分析个股在行业中的位置，返回同业市值、PE、PB、ROE、涨跌幅排名等同业对比表",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["peer_comparison", "industry_ranking", "competitor_analysis", "competitive_positioning"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["peer_comparison_analysis", "industry_ranking_evaluation", "competitive_positioning"],
 )
 def get_peer_comparison(
     ticker: Annotated[str, "股票代码（如 000001 或 000001.SZ）"],
@@ -187,7 +199,11 @@ def get_peer_comparison(
     description="获取同行业市值排名前N的公司列表，适合快速了解行业竞争格局和同业对比",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["industry_top_companies", "industry_leaders", "competitive_landscape", "market_cap_ranking", "moat_analysis"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["industry_leader_identification", "competitive_landscape_overview", "market_cap_ranking_review"],
 )
 def get_industry_top_companies(
     ticker: Annotated[str, "股票代码（如 600519 或 600519.SH）"],
@@ -219,10 +235,14 @@ def get_industry_top_companies(
 @register_tool(
     tool_id="analyze_sector",
     name="综合板块分析",
-    description="综合分析股票所属板块，包括表现、轮动、同业对比等",
+    description="综合分析股票所属板块包括表现轮动同业对比等，返回板块表现、轮动信号、同业对比、资金流向等综合分析报告",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["sector_analysis", "sector_performance", "sector_rotation", "peer_comparison", "comprehensive_sector"],
+    tool_role_hint="general",
+    output_shape="markdown",
+    preferred_for=["comprehensive_sector_analysis", "multi_dimension_sector_evaluation", "integrated_industry_review"],
 )
 def analyze_sector(
     ticker: Annotated[str, "股票代码（如 000001 或 000001.SZ）"],
@@ -264,7 +284,11 @@ def analyze_sector(
     description="根据当前分析数据源自动选择 QMT 或 Tushare 路径，返回统一的行业分析结果。",
     category="market",
     is_online=True,
-    auto_register=True
+    auto_register=True,
+    capability_tags=["sector_analysis", "unified_analysis", "sector_performance", "data_source_routing", "comprehensive_industry"],
+    tool_role_hint="general",
+    output_shape="markdown",
+    preferred_for=["unified_sector_analysis", "multi_source_sector_evaluation", "comprehensive_industry_report"],
 )
 def get_sector_analysis(
     ticker: Annotated[str, "股票代码（如 000001 或 000001.SZ）"],
@@ -335,6 +359,10 @@ def get_sector_analysis(
     category="market",
     is_online=True,
     auto_register=True,
+    capability_tags=["sector_search", "sector_lookup", "industry_classification", "concept_classification"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["sector_lookup", "industry_classification_search", "sector_code_discovery"],
     when_to_use="当用户提到板块、行业、概念等关键词，需要先查找板块代码时使用",
 )
 def search_sector_tool(
@@ -371,6 +399,10 @@ def search_sector_tool(
     category="market",
     is_online=True,
     auto_register=True,
+    capability_tags=["sector_daily", "sector_quote", "sector_index", "sector_trend", "sector_volume"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["sector_index_quote", "sector_daily_performance", "sector_trend_review"],
     when_to_use="当用户想了解某个板块的近期走势、涨跌情况时使用",
 )
 def get_sector_daily_tool(
@@ -403,10 +435,14 @@ def get_sector_daily_tool(
 @register_tool(
     tool_id="get_sector_constituents",
     name="板块成分股",
-    description="获取板块的成分股列表及其市值、估值排名",
+    description="获取板块的成分股列表及其市值与估值排名，返回成分股代码、名称、市值、PE、PB、涨跌幅等排序表数据信息",
     category="market",
     is_online=True,
     auto_register=True,
+    capability_tags=["sector_constituents", "sector_members", "sector_leaders", "constituent_ranking"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["sector_member_listing", "sector_leader_identification", "constituent_ranking_review"],
     when_to_use="当用户想知道某个板块有哪些股票、龙头股是哪些时使用",
 )
 def get_sector_constituents_tool(
@@ -443,6 +479,10 @@ def get_sector_constituents_tool(
     category="market",
     is_online=True,
     auto_register=True,
+    capability_tags=["sector_analysis", "sector_comprehensive", "sector_performance", "fund_flow", "sector_leaders"],
+    tool_role_hint="general",
+    output_shape="markdown",
+    preferred_for=["sector_comprehensive_analysis", "sector_investment_opportunity", "multi_dimension_sector_review"],
     when_to_use="当用户问某个板块的投资机会、板块分析、行业前景时使用",
 )
 def analyze_sector_by_name_tool(

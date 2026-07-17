@@ -14,10 +14,14 @@ logger = logging.getLogger(__name__)
 @register_tool(
     tool_id="get_market_snapshot_for_review",
     name="获取市场快照",
-    description="获取交易期间的K线数据和市场快照，用于复盘分析",
+    description="获取交易期间K线数据和市场快照用于复盘分析，返回K线序列、成交量、技术指标和期间市场环境标签等结构化数据",
     category="trade_review",
     is_online=True,
     data_source_handling="self_contained",
+    capability_tags=["market_snapshot", "snapshot", "kline_data", "market_data", "trade_review", "trading", "review_analysis", "复盘"],
+    tool_role_hint="specialized",
+    output_shape="structured_json",
+    preferred_for=["trade_review_analysis", "market_context_retrieval", "kline_data_fetch", "trade_period_review"],
 )
 def get_market_snapshot_for_review(
     code: Annotated[str, "股票代码"],

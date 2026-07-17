@@ -4,6 +4,7 @@ Skill 生成 API — v3.0 AI 驱动的 Skill 创建
 提供需求沟通（多轮对话）、代码生成管线、外部 Skill 管理等端点。
 """
 
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.core.database import get_mongo_db
 from app.core.response import ok, fail
+from app.services.capability_index_service import CapabilityIndexService
 from app.services.skill_generation_service import SkillGenerationService
 from core.tools.external.external_data_source_catalog import (
     EXTERNAL_DATA_SOURCE_CATALOG,
@@ -506,6 +508,8 @@ async def delete_skill(
     deleted = await svc.delete_skill(skill_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Skill {skill_id} 不存在")
+    # 异步触发能力索引同步，清理幽灵工具
+    asyncio.create_task(CapabilityIndexService.refresh_after_change(db))
     return ok({"tool_id": skill_id, "deleted": True})
 
 

@@ -96,7 +96,7 @@ class ModelConfig(BaseModel):
 
 class WorkflowExecuteRequest(BaseModel):
     """执行工作流请求"""
-    ticker: str = Field(..., min_length=1)
+    ticker: Optional[str] = Field(default=None, description="股票代码（stock_analysis/etf_analysis 必填，其他类型可选）")
     analysis_date: Optional[datetime] = None
     research_depth: str = Field(default="标准", description="分析深度：快速/基础/标准/深度/全面")
     # 🆕 分析师选择（用于动态裁剪工作流）
@@ -112,6 +112,11 @@ class WorkflowExecuteRequest(BaseModel):
     deep_model_config: Optional[ModelConfig] = Field(default=None, description="深度分析模型完整配置")
     lookback_days: int = Field(default=30, ge=1, le=365)
     max_debate_rounds: int = Field(default=3, ge=1, le=10)
+    # 🆕 自定义参数（透传到 task_params，用于通用研究等场景）
+    custom_params: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="自定义参数，会合并到任务参数中"
+    )
 
 
 class ValidationResult(BaseModel):
@@ -258,35 +263,83 @@ async def execute_workflow(
         from app.models.analysis import AnalysisTaskType
         from app.models.user import PyObjectId
         from tradingagents.utils.stock_utils import StockUtils, StockMarket
+        from app.core.database import get_mongo_db
 
         task_service = get_task_analysis_service()
         user_id = str(user["id"])
 
-        # 🔥 修复：根据股票代码自动识别市场类型
-        market = StockUtils.identify_stock_market(data.ticker)
-        market_type_mapping = {
-            StockMarket.CHINA_A: "cn",
-            StockMarket.HONG_KONG: "hk",
-            StockMarket.US: "us",
-            StockMarket.UNKNOWN: "cn"
-        }
-        market_type = market_type_mapping.get(market, "cn")
+        # 🆕 查询工作流类型和 input_config，用于动态决定参数
+        db = get_mongo_db()
+        wf_doc = await db.workflows.find_one(
+            {"_id": workflow_id},
+            {"workflow_type": 1, "input_config": 1}
+        )
+        workflow_type = wf_doc.get("workflow_type", "stock_analysis") if wf_doc else "stock_analysis"
+        input_config = wf_doc.get("input_config") if wf_doc else None
 
-        logger.info(f"📊 [工作流执行] 股票 {data.ticker} 识别为市场: {market_type}")
+        logger.info(f"📊 [工作流执行] workflow_id={workflow_id}, workflow_type={workflow_type}")
+
+        # 🆕 根据 workflow_type 判断 ticker 是否必填
+        TICKER_REQUIRED_TYPES = {"stock_analysis", "etf_analysis"}
+        if workflow_type in TICKER_REQUIRED_TYPES and not data.ticker:
+            raise HTTPException(status_code=400, detail=f"工作流类型 {workflow_type} 必须提供 ticker 参数")
+
+        # 🆕 根据 workflow_type 映射 task_type
+        WORKFLOW_TYPE_TO_TASK_TYPE = {
+            "stock_analysis": AnalysisTaskType.STOCK_ANALYSIS,
+            "etf_analysis": AnalysisTaskType.ETF_ANALYSIS,
+            "position_analysis": AnalysisTaskType.POSITION_ANALYSIS,
+            "trade_review": AnalysisTaskType.TRADE_REVIEW,
+            "general": AnalysisTaskType.STOCK_ANALYSIS,  # general 没有独立 task_type，用 STOCK_ANALYSIS 作为载体
+        }
+        task_type = WORKFLOW_TYPE_TO_TASK_TYPE.get(workflow_type, AnalysisTaskType.STOCK_ANALYSIS)
 
         # 准备任务参数
-        task_params = {
-            "symbol": data.ticker,
-            "stock_code": data.ticker,
-            "market_type": market_type,  # 🔑 根据股票代码自动识别市场类型
-            "analysis_date": data.analysis_date.strftime("%Y-%m-%d") if data.analysis_date else None,
-            "research_depth": data.research_depth,
-            "quick_analysis_model": data.quick_analysis_model,
-            "deep_analysis_model": data.deep_analysis_model,
-            "lookback_days": data.lookback_days,
-            "max_debate_rounds": data.max_debate_rounds,
-            "selected_analysts": data.selected_analysts if hasattr(data, 'selected_analysts') else None
-        }
+        task_params = {}
+
+        # ticker 相关参数（仅当提供了 ticker 时才设置）
+        if data.ticker:
+            market = StockUtils.identify_stock_market(data.ticker)
+            market_type_mapping = {
+                StockMarket.CHINA_A: "cn",
+                StockMarket.HONG_KONG: "hk",
+                StockMarket.US: "us",
+                StockMarket.UNKNOWN: "cn"
+            }
+            market_type = market_type_mapping.get(market, "cn")
+            task_params["symbol"] = data.ticker
+            task_params["stock_code"] = data.ticker
+            task_params["market_type"] = market_type
+            logger.info(f"📊 [工作流执行] 股票 {data.ticker} 识别为市场: {market_type}")
+
+        # 通用参数
+        task_params["analysis_date"] = data.analysis_date.strftime("%Y-%m-%d") if data.analysis_date else None
+        task_params["research_depth"] = data.research_depth
+        task_params["quick_analysis_model"] = data.quick_analysis_model
+        task_params["deep_analysis_model"] = data.deep_analysis_model
+        task_params["lookback_days"] = data.lookback_days
+        task_params["max_debate_rounds"] = data.max_debate_rounds
+        task_params["selected_analysts"] = data.selected_analysts if hasattr(data, 'selected_analysts') else None
+
+        # 🆕 根据 input_config.fields 的 default 值补充缺失参数
+        if input_config and isinstance(input_config, dict):
+            fields = input_config.get("fields", [])
+            for field in fields:
+                fname = field.get("name")
+                if fname and fname not in task_params and fname not in ("ticker", "symbol", "stock_code"):
+                    default_val = field.get("default")
+                    if default_val is not None:
+                        task_params[fname] = default_val
+                        logger.debug(f"📋 [工作流执行] 从 input_config 补充参数: {fname}={default_val}")
+
+        # 🆕 合并自定义参数（通用研究等场景使用）
+        if data.custom_params:
+            task_params.update(data.custom_params)
+
+        # 🆕 为 general 类型工作流打上 task_category 标记，便于后续查询
+        if workflow_type == "general":
+            task_params["task_category"] = "general"
+            logger.info(f"🏷️ [工作流执行] 标记为通用研究任务: workflow_type=general")
 
         logger.info(f"🚀 [工作流执行] 创建任务: workflow_id={workflow_id}, ticker={data.ticker}, user={user_id}")
 
@@ -298,7 +351,7 @@ async def execute_workflow(
         # 使用 v2.0 统一任务引擎创建任务
         task = await task_service.create_task(
             user_id=PyObjectId(user_id),
-            task_type=AnalysisTaskType.STOCK_ANALYSIS,
+            task_type=task_type,
             task_params=task_params,
             engine_type="workflow",  # 强制使用工作流引擎
             preference_type=preference_type,  # 🔥 使用用户偏好设置

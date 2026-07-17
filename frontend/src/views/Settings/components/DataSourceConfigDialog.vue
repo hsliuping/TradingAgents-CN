@@ -51,7 +51,7 @@
           placeholder="请输入显示名称（用于界面展示）"
         />
         <div class="form-tip">
-          💡 显示名称可以自定义，用于在界面上展示，例如："Alpha Vantage - 美股数据"
+          💡 显示名称可以自定义，用于在界面上展示
         </div>
       </el-form-item>
 
@@ -120,7 +120,7 @@
           clearable
         />
         <div class="form-tip">
-          某些数据源（如 Alpha Vantage）需要额外的 Secret Key
+          某些数据源需要额外的 Secret Key
         </div>
       </el-form-item>
 
@@ -424,7 +424,7 @@ const testButtonText = computed(() => (isQmtType.value ? '检测本地 QMT' : '�
 const needsApiSecret = computed(() => {
   const type = formData.value.type?.toLowerCase() || ''
   // 某些数据源类型需要 API Secret
-  return ['alpha_vantage', 'wind', 'choice'].includes(type)
+  return ['wind', 'choice'].includes(type)
 })
 
 // 当前选中的数据源信息
@@ -648,32 +648,6 @@ const dataSourceTypes = [
     value: 'qmt',
     register_url: 'https://dict.thinktrader.net/nativeApi/code_examples.html',
     register_guide: 'QMT 需要本地安装并启动 QMT/xtquant。当前界面可直接配置安装目录、端口范围、初始化市场和自动补数等参数。'
-  },
-
-  // 美股数据源
-  {
-    label: 'Finnhub',
-    value: 'finnhub',
-    register_url: 'https://finnhub.io/register',
-    register_guide: '如果您还没有 Finnhub 账号，请先注册并获取 API Key：'
-  },
-  {
-    label: 'Yahoo Finance',
-    value: 'yahoo_finance',
-    register_url: 'https://finance.yahoo.com/',
-    register_guide: 'Yahoo Finance 提供免费的金融数据，部分功能无需注册。访问官网了解更多：'
-  },
-  {
-    label: 'Alpha Vantage',
-    value: 'alpha_vantage',
-    register_url: 'https://www.alphavantage.co/support/#api-key',
-    register_guide: '如果您还没有 Alpha Vantage 账号，请先注册并获取免费 API Key：'
-  },
-  {
-    label: 'IEX Cloud',
-    value: 'iex_cloud',
-    register_url: 'https://iexcloud.io/cloud-login#/register',
-    register_guide: '如果您还没有 IEX Cloud 账号，请先注册并获取 API Token：'
   },
 
   // 专业数据源

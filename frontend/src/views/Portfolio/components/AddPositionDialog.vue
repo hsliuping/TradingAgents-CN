@@ -27,8 +27,6 @@
         <el-select v-model="form.market" style="width: 100%">
           <el-option label="A股" value="CN" />
           <el-option label="ETF" value="ETF" />
-          <el-option label="港股" value="HK" />
-          <el-option label="美股" value="US" />
         </el-select>
         <div v-if="form.market === 'ETF'" style="font-size: 12px; color: #909399; margin-top: 4px;">
           ETF 持仓会按 A股账户（CNY）入库和计价，但前端会保留 ETF 语义。
@@ -160,9 +158,7 @@ const fetchStockName = async (code: string) => {
           if (res.data.market) {
             const marketMap: Record<string, string> = {
               'A股': 'CN',
-              'ETF': 'ETF',
-              '港股': 'HK',
-              '美股': 'US'
+              'ETF': 'ETF'
             }
             const marketCode = marketMap[res.data.market] || form.value.market
             if (marketCode !== form.value.market) {

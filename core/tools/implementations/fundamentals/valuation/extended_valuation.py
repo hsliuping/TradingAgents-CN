@@ -65,7 +65,7 @@ def _resolve_shares(basic_info: dict, current_price=None, warnings: Optional[lis
 @register_tool(
     tool_id="get_dcf_three_stage_valuation",
     name="DCF 三阶段估值",
-    description="基于三阶段自由现金流折现模型（高增长→过渡→永续）对 A 股进行绝对估值",
+    description="基于三阶段 DCF 模型对 A 股绝对估值，返回三阶段现金流预测、折现值、内在价值、安全边际和敏感性分析，适用于高增长企业",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -385,7 +385,7 @@ def get_dcf_three_stage_valuation(
 @register_tool(
     tool_id="get_ddm_valuation",
     name="股利贴现模型",
-    description="基于 Gordon Growth Model（GGM）对 A 股进行股利贴现估值",
+    description="基于 Gordon Growth 模型对 A 股股利贴现估值，返回预期股利、贴现率、股利增长率、内在价值和安全边际，适用于稳定派息企业",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -511,7 +511,7 @@ def get_ddm_valuation(
 @register_tool(
     tool_id="get_residual_income_valuation",
     name="剩余收益估值",
-    description="基于剩余收益模型（Residual Income Model）对 A 股进行绝对估值",
+    description="基于剩余收益模型对 A 股进行绝对估值，返回账面价值、剩余收益序列、内在价值、溢价和适用场景判断，适用于银行等资产密集型企业",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -699,7 +699,7 @@ def get_residual_income_valuation(
 @register_tool(
     tool_id="get_eva_valuation",
     name="EVA 估值",
-    description="基于经济增加值（EVA）模型计算 A 股的经济利润，反映真实价值创造能力",
+    description="基于 EVA 模型计算 A 股经济利润以反映价值创造能力，返回 NOPAT、资本占用、WACC、EVA 序列和价值创造评估",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -846,7 +846,7 @@ def get_eva_valuation(
 @register_tool(
     tool_id="get_fcff_fcfe_calculation",
     name="自由现金流计算",
-    description="计算公司自由现金流（FCFF）和股权自由现金流（FCFE）及其各组成部分",
+    description="计算公司自由现金流 FCFF 和股权自由现金流 FCFE，返回 EBIT、税率、NOPAT、资本支出、营运资本变化及多期序列",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -1046,7 +1046,7 @@ def get_fcff_fcfe_calculation(
 @register_tool(
     tool_id="get_peg_valuation",
     name="PEG 估值",
-    description="基于 PEG 指标（市盈率相对盈利增长率）评估 A 股估值合理性",
+    description="基于 PEG 指标评估 A 股成长股估值合理性，返回 PE、3 年净利润 CAGR、PEG 比率、估值判断和行业对比，适用于成长股",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -1173,7 +1173,7 @@ def get_peg_valuation(
 @register_tool(
     tool_id="get_graham_valuation",
     name="格雷厄姆估值",
-    description="基于本杰明·格雷厄姆的公式计算 A 股的内在价值（格雷厄姆数）和安全边际",
+    description="基于格雷厄姆公式计算 A 股内在价值与安全边际，返回 EPS、账面价值、格雷厄姆数、当前股价、上涨空间和安全边际百分比，适合价值投资",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -1314,7 +1314,7 @@ def get_graham_valuation(
 @register_tool(
     tool_id="get_capm_cost_of_equity",
     name="CAPM 股权成本",
-    description="基于资本资产定价模型（CAPM）计算 A 股的股权资本成本",
+    description="基于资本资产定价模型（CAPM）计算 A 股的股权资本成本，返回无风险利率、Beta、市场风险溢价、股权成本率等",
     category="fundamentals",
     is_online=False,
     auto_register=True,
@@ -1452,7 +1452,7 @@ def get_capm_cost_of_equity(
 @register_tool(
     tool_id="get_growth_adjusted_valuation",
     name="增长质量调整估值",
-    description="基于增长质量评分（营收稳健性、ROIC 持续性、现金流质量）调整 PE 估值",
+    description="基于增长质量评分（营收稳健性、ROIC、现金流质量）调整 PE 估值，返回质量评分、调整后 PE、合理估值区间和调整因子明细",
     category="fundamentals",
     is_online=False,
     auto_register=True,

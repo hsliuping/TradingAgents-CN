@@ -50,8 +50,11 @@ class UnifiedAnalysisEngine:
             self.logger.warning(f"⚠️ 校验工作流存在性失败: workflow_id={workflow_id}, error={exc}")
             return False
 
-    def _workflow_type_for_task(self, task_type: AnalysisTaskType) -> str:
+    def _workflow_type_for_task(self, task_type: AnalysisTaskType, task_params: dict = None) -> str:
         """将任务类型映射为工作流类型。"""
+        # 如果有 task_category 标记，优先使用（通用研究任务用 STOCK_ANALYSIS 作为载体但实际是 general 类型）
+        if task_params and task_params.get("task_category") == "general":
+            return "general"
         mapping = {
             AnalysisTaskType.STOCK_ANALYSIS: "stock_analysis",
             AnalysisTaskType.ETF_ANALYSIS: "etf_analysis",
@@ -61,12 +64,31 @@ class UnifiedAnalysisEngine:
         return mapping.get(task_type, task_type.value if hasattr(task_type, "value") else str(task_type))
 
     def _resolve_workflow_id(self, task: UnifiedAnalysisTask, config) -> str:
-        """解析本次任务应使用的工作流 ID。"""
+        """解析本次任务应使用的工作流 ID。
+
+        优先级：
+        1. 任务显式指定的 workflow_id（如 /api/workflows/{id}/execute 传入）
+        2. 我的分析流（用户为当前 task_type 设置的默认工作流）
+        3. 注册表默认配置
+        4. 系统硬编码默认值
+        """
         task_type = task.task_type
         if isinstance(task_type, str):
             task_type = AnalysisTaskType(task_type)
 
-        workflow_type = self._workflow_type_for_task(task_type)
+        workflow_type = self._workflow_type_for_task(task_type, task.task_params)
+
+        # 优先级 1：任务显式指定的 workflow_id
+        explicit_workflow_id = task.workflow_id or task.task_params.get("workflow_id")
+        if explicit_workflow_id:
+            if self._workflow_exists(explicit_workflow_id):
+                self.logger.info(f"📋 工作流选择: 使用任务显式指定的 workflow_id={explicit_workflow_id}")
+                return explicit_workflow_id
+            self.logger.warning(
+                f"⚠️ 任务显式指定的工作流不存在，将回退到我的分析流配置: workflow_id={explicit_workflow_id}"
+            )
+
+        # 优先级 2：我的分析流（用户为当前 task_type 设置的默认工作流）
         if task_type in (
             AnalysisTaskType.STOCK_ANALYSIS,
             AnalysisTaskType.ETF_ANALYSIS,
@@ -84,33 +106,26 @@ class UnifiedAnalysisEngine:
                         workflow_provider.load_workflow(active_workflow_id)
                     except Exception as exc:
                         self.logger.warning(
-                            f"⚠️ 我的分析流配置 {active_workflow_id} 无效，继续检查任务显式 workflow_id: {exc}"
+                            f"⚠️ 我的分析流配置 {active_workflow_id} 无效: {exc}"
                         )
                     else:
                         self.logger.info(f"📋 工作流选择: 使用我的分析流配置 type={workflow_type}, workflow_id={active_workflow_id}")
                         return active_workflow_id
                     self.logger.warning(
-                        f"⚠️ 我的分析流配置不存在，将继续检查任务显式 workflow_id: workflow_id={active_workflow_id}"
+                        f"⚠️ 我的分析流配置不存在，将回退到注册表默认: workflow_id={active_workflow_id}"
                     )
             except Exception as exc:
-                self.logger.warning(f"⚠️ 获取我的分析流配置失败，继续检查任务显式 workflow_id: {exc}")
+                self.logger.warning(f"⚠️ 获取我的分析流配置失败: {exc}")
 
-        explicit_workflow_id = task.workflow_id or task.task_params.get("workflow_id")
-        if explicit_workflow_id:
-            if self._workflow_exists(explicit_workflow_id):
-                self.logger.info(f"📋 工作流选择: 使用任务显式指定的 workflow_id={explicit_workflow_id}")
-                return explicit_workflow_id
-            self.logger.warning(
-                f"⚠️ 任务显式指定的工作流不存在，将回退到默认流程: workflow_id={explicit_workflow_id}"
-            )
-
+        # 优先级 3：注册表默认配置
         if self._workflow_exists(config.workflow_id):
             self.logger.info(f"📋 工作流选择: 使用注册表默认 workflow_id={config.workflow_id}")
             return config.workflow_id
 
+        # 优先级 4：系统硬编码默认值
         fallback_workflow_id = get_default_workflow_provider().get_default_workflow_id_for_type(workflow_type)
         self.logger.warning(
-            f"⚠️ 注册表默认工作流不存在，回退到系统默认工作流: type={workflow_type}, workflow_id={fallback_workflow_id}"
+            f"⚠️ 所有配置均无效，回退到系统默认工作流: type={workflow_type}, workflow_id={fallback_workflow_id}"
         )
         return fallback_workflow_id
 
@@ -506,16 +521,27 @@ class UnifiedAnalysisEngine:
         if "symbol" in workflow_inputs and "ticker" not in workflow_inputs:
             workflow_inputs["ticker"] = workflow_inputs["symbol"]
 
-        # 确保有 analysis_date
-        if "analysis_date" not in workflow_inputs:
-            from datetime import datetime
-            workflow_inputs["analysis_date"] = datetime.now().strftime("%Y-%m-%d")
+        # 🆕 读取工作流的 input_config，根据字段定义补充缺失参数
+        try:
+            from app.core.database import get_mongo_db
+            db = get_mongo_db()
+            wf_doc = await db.workflows.find_one({"_id": workflow_id}, {"input_config": 1, "workflow_type": 1})
+            if wf_doc and wf_doc.get("input_config"):
+                fields = wf_doc["input_config"].get("fields", [])
+                for field in fields:
+                    fname = field.get("name")
+                    if fname and fname not in workflow_inputs and fname not in ("context",):
+                        default_val = field.get("default")
+                        if default_val is not None:
+                            workflow_inputs[fname] = default_val
+                            self.logger.debug(f"📋 从 input_config 补充参数: {fname}={default_val}")
+        except Exception as e:
+            self.logger.warning(f"⚠️ 读取 input_config 失败，使用硬编码默认值: {e}")
 
-        # 确保有 research_depth
-        if "research_depth" not in workflow_inputs:
-            workflow_inputs["research_depth"] = "标准"
-
-        # 添加其他可能需要的参数
+        # 通用兜底参数（当 input_config 不存在或未定义对应字段时）
+        from datetime import datetime
+        workflow_inputs.setdefault("analysis_date", datetime.now().strftime("%Y-%m-%d"))
+        workflow_inputs.setdefault("research_depth", "标准")
         workflow_inputs.setdefault("lookback_days", 30)
         workflow_inputs.setdefault("max_debate_rounds", 3)
 

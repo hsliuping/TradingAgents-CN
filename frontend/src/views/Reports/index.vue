@@ -30,8 +30,6 @@
         <el-col :span="4">
           <el-select v-model="marketFilter" placeholder="市场筛选" clearable @change="handleMarketChange">
             <el-option label="A股" value="A股" />
-            <el-option label="港股" value="港股" />
-            <el-option label="美股" value="美股" />
           </el-select>
         </el-col>
         

@@ -737,6 +737,88 @@
                   </section>
                 </div>
               </el-tab-pane>
+              <el-tab-pane label="缺口分析" name="gap">
+                <div v-if="currentSession?.gap_report" class="detail-gap-section">
+                  <!-- 错误消息 -->
+                  <el-alert v-if="currentSession.gap_report.error_message" type="error" :closable="false" show-icon style="margin-bottom:16px">
+                    <template #title>分析过程中出现错误</template>
+                    {{ currentSession.gap_report.error_message }}
+                  </el-alert>
+
+                  <!-- 现有工具 -->
+                  <div class="gap-block" v-if="currentSession.gap_report.existing_tools?.length">
+                    <h4>现有工具（{{ currentSession.gap_report.existing_tools.length }} 个）</h4>
+                    <div class="gap-chips">
+                      <el-tag v-for="tool in currentSession.gap_report.existing_tools" :key="tool" type="info" size="small" effect="plain" style="margin:2px 4px 2px 0">
+                        {{ tool }}
+                      </el-tag>
+                    </div>
+                  </div>
+
+                  <!-- 阻断性缺口 -->
+                  <div class="gap-block" v-if="currentSession.gap_report.blocking_gaps?.length">
+                    <h4 style="color:#f56c6c">阻断性缺口（{{ currentSession.gap_report.blocking_gaps.length }} 个）</h4>
+                    <ul class="compact-gap-list danger">
+                      <li v-for="(gap, idx) in currentSession.gap_report.blocking_gaps" :key="idx">{{ gap }}</li>
+                    </ul>
+                  </div>
+
+                  <!-- 可推断缺口 -->
+                  <div class="gap-block" v-if="(currentSession.gap_report as any).inferable_gaps?.length">
+                    <h4>可推断覆盖（{{ (currentSession.gap_report as any).inferable_gaps.length }} 个）</h4>
+                    <div v-for="(ig, idx) in (currentSession.gap_report as any).inferable_gaps" :key="idx" class="inferable-item">
+                      <strong>{{ ig.gap }}</strong>
+                      <div class="inferable-from">
+                        可从以下工具推断：
+                        <el-tag v-for="t in ig.inferable_from" :key="t" size="small" effect="plain" style="margin:1px 3px">{{ t }}</el-tag>
+                      </div>
+                      <div v-if="ig.inference_approach" class="inferable-approach">推断方式：{{ ig.inference_approach }}</div>
+                    </div>
+                  </div>
+
+                  <!-- 建议工具 -->
+                  <div class="gap-block" v-if="currentSession.gap_report.suggested_tools?.length">
+                    <h4>建议补齐工具（{{ currentSession.gap_report.suggested_tools.length }} 个）</h4>
+                    <div v-for="(st, idx) in currentSession.gap_report.suggested_tools" :key="idx" class="suggested-item">
+                      <div><strong>{{ st.tool_id }}</strong></div>
+                      <div v-if="st.description" class="muted">{{ st.description }}</div>
+                      <div v-if="st.why_needed" class="muted">推荐理由：{{ st.why_needed }}</div>
+                    </div>
+                  </div>
+
+                  <!-- 降级策略 -->
+                  <div class="gap-block" v-if="currentSession.gap_report.fallback_strategy?.length">
+                    <h4>降级策略</h4>
+                    <ul class="compact-gap-list">
+                      <li v-for="(s, idx) in currentSession.gap_report.fallback_strategy" :key="idx">{{ s }}</li>
+                    </ul>
+                  </div>
+
+                  <!-- 构建建议 -->
+                  <div class="gap-block" v-if="currentSession.gap_report.build_recommendations?.length">
+                    <h4>构建建议</h4>
+                    <ul class="compact-gap-list">
+                      <li v-for="(r, idx) in currentSession.gap_report.build_recommendations" :key="idx">{{ r }}</li>
+                    </ul>
+                  </div>
+
+                  <!-- 备注 -->
+                  <div class="gap-block" v-if="currentSession.gap_report.notes?.length">
+                    <h4>备注</h4>
+                    <ul class="compact-gap-list">
+                      <li v-for="(n, idx) in currentSession.gap_report.notes" :key="idx">{{ n }}</li>
+                    </ul>
+                  </div>
+
+                  <!-- 原始 LLM 输出（调试用） -->
+                  <el-collapse v-if="currentSession.gap_report.raw_response" style="margin-top:12px">
+                    <el-collapse-item title="原始 LLM 输出（调试用）">
+                      <el-input type="textarea" :model-value="currentSession.gap_report.raw_response" readonly :rows="8" />
+                    </el-collapse-item>
+                  </el-collapse>
+                </div>
+                <div v-else class="empty-note">该会话尚未执行缺口分析。请前往 Agent 工坊执行分析。</div>
+              </el-tab-pane>
             </el-tabs>
           </div>
 
@@ -4201,6 +4283,44 @@ details.advanced summary::-webkit-details-marker {
   font-size: 12px;
   color: #64748b;
   line-height: 1.5;
+}
+
+/* 缺口分析 tab 样式 */
+.detail-gap-section .gap-block {
+  margin-bottom: 14px;
+}
+.detail-gap-section .gap-block h4 {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.compact-gap-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.compact-gap-list li {
+  margin-bottom: 3px;
+  line-height: 1.5;
+}
+.compact-gap-list.danger li {
+  color: #f56c6c;
+}
+.gap-chips {
+  line-height: 2;
+}
+.inferable-item, .suggested-item {
+  padding: 6px 0;
+  border-bottom: 1px dashed #e5e7eb;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.inferable-item:last-child, .suggested-item:last-child {
+  border-bottom: none;
+}
+.inferable-from, .inferable-approach, .muted {
+  color: #64748b;
+  margin-top: 2px;
 }
 
 @media (max-width: 1280px) {

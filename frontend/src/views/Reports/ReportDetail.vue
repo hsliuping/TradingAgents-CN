@@ -588,8 +588,6 @@ const getCashByCurrency = (account: any, stockSymbol: string): number => {
     // 映射市场类型到货币
     const currencyMap: Record<string, keyof CurrencyAmount> = {
       'A股': 'CNY',
-      '港股': 'HKD',
-      '美股': 'USD'
     }
 
     const currency = currencyMap[marketType] || 'CNY'
@@ -804,7 +802,7 @@ const applyToTrading = async () => {
       code: currentReport.stock_symbol,
       side: recommendation.action,
       quantity: tradeForm.quantity,
-      market: getMarketByStockCode(currentReport.stock_symbol) === 'ETF' ? 'ETF' : getMarketByStockCode(currentReport.stock_symbol) === '港股' ? 'HK' : getMarketByStockCode(currentReport.stock_symbol) === '美股' ? 'US' : 'CN',
+      market: getMarketByStockCode(currentReport.stock_symbol) === 'ETF' ? 'ETF' : 'CN',
       analysis_id: String(currentReport.analysis_id || currentReport.id)
     })
 

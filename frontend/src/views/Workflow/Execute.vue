@@ -30,40 +30,116 @@
             </div>
           </template>
           
-          <el-form :model="inputs" label-position="top">
-            <el-form-item label="股票代码" required>
-              <el-input v-model="inputs.ticker" placeholder="如: AAPL, 600519.SH" />
-            </el-form-item>
+          <el-form :model="formValues" label-position="top">
+            <!-- 动态表单：从 workflow.input_config.fields 生成 -->
+            <template v-if="inputFields.length > 0">
+              <template v-for="group in groupedFields" :key="group.name">
+                <div v-if="group.name" class="field-group-title">{{ group.name }}</div>
+                <el-form-item
+                  v-for="field in group.fields"
+                  :key="field.name"
+                  :label="field.label || field.name"
+                  :required="field.required"
+                >
+                  <!-- string: 单行文本 -->
+                  <el-input
+                    v-if="field.type === 'string'"
+                    v-model="formValues[field.name]"
+                    :placeholder="field.placeholder || ''"
+                  />
 
-            <el-form-item label="分析日期">
-              <el-date-picker v-model="inputs.analysis_date" type="date" placeholder="选择日期" style="width: 100%" />
-            </el-form-item>
+                  <!-- textarea: 多行文本 -->
+                  <el-input
+                    v-else-if="field.type === 'textarea'"
+                    v-model="formValues[field.name]"
+                    type="textarea"
+                    :rows="4"
+                    :placeholder="field.placeholder || ''"
+                    maxlength="500"
+                    show-word-limit
+                  />
 
-            <el-form-item label="分析深度">
-              <el-select v-model="inputs.research_depth" placeholder="选择分析深度" style="width: 100%">
-                <el-option label="快速 (2-4分钟)" value="快速" />
-                <el-option label="基础 (4-6分钟)" value="基础" />
-                <el-option label="标准 (6-10分钟，推荐)" value="标准" />
-                <el-option label="深度 (10-15分钟)" value="深度" />
-                <el-option label="全面 (15-25分钟)" value="全面" />
-              </el-select>
-            </el-form-item>
+                  <!-- number: 数字 -->
+                  <el-input-number
+                    v-else-if="field.type === 'number'"
+                    v-model="formValues[field.name]"
+                    :min="field.min ?? undefined"
+                    :max="field.max ?? undefined"
+                    style="width: 100%"
+                  />
 
-            <el-form-item label="快速分析模型">
-              <el-select v-model="inputs.quick_analysis_model" placeholder="选择模型" style="width: 100%" :loading="modelsLoading">
-                <el-option v-for="model in enabledModels" :key="model.model_name" :label="model.model_name" :value="model.model_name" />
-              </el-select>
-            </el-form-item>
+                  <!-- boolean: 开关 -->
+                  <el-switch
+                    v-else-if="field.type === 'boolean'"
+                    v-model="formValues[field.name]"
+                  />
 
-            <el-form-item label="深度分析模型">
-              <el-select v-model="inputs.deep_analysis_model" placeholder="选择模型" style="width: 100%" :loading="modelsLoading">
-                <el-option v-for="model in enabledModels" :key="model.model_name" :label="model.model_name" :value="model.model_name" />
-              </el-select>
-            </el-form-item>
+                  <!-- date: 日期选择 -->
+                  <el-date-picker
+                    v-else-if="field.type === 'date'"
+                    v-model="formValues[field.name]"
+                    type="date"
+                    placeholder="选择日期"
+                    style="width: 100%"
+                    value-format="YYYY-MM-DD"
+                  />
 
-            <el-form-item label="回看天数">
-              <el-input-number v-model="inputs.lookback_days" :min="1" :max="365" style="width: 100%" />
-            </el-form-item>
+                  <!-- select: 下拉单选 -->
+                  <el-select
+                    v-else-if="field.type === 'select'"
+                    v-model="formValues[field.name]"
+                    :placeholder="field.placeholder || '请选择'"
+                    style="width: 100%"
+                    :loading="modelsLoading"
+                  >
+                    <!-- 模型字段特殊处理：从 enabledModels 动态填充选项 -->
+                    <template v-if="field.name === 'quick_analysis_model' || field.name === 'deep_analysis_model'">
+                      <el-option
+                        v-for="model in enabledModels"
+                        :key="model.model_name"
+                        :label="model.model_name"
+                        :value="model.model_name"
+                      />
+                    </template>
+                    <!-- 普通选项 -->
+                    <template v-else>
+                      <el-option
+                        v-for="(opt, idx) in (field.options || [])"
+                        :key="idx"
+                        :label="field.option_labels?.[idx] || String(opt)"
+                        :value="opt"
+                      />
+                    </template>
+                  </el-select>
+
+                  <!-- multiselect: 下拉多选 -->
+                  <el-select
+                    v-else-if="field.type === 'multiselect'"
+                    v-model="formValues[field.name]"
+                    multiple
+                    :placeholder="field.placeholder || '请选择'"
+                    style="width: 100%"
+                  >
+                    <el-option
+                      v-for="(opt, idx) in (field.options || [])"
+                      :key="idx"
+                      :label="field.option_labels?.[idx] || String(opt)"
+                      :value="opt"
+                    />
+                  </el-select>
+
+                  <!-- 参数描述 -->
+                  <div v-if="field.description" class="field-description">{{ field.description }}</div>
+                </el-form-item>
+              </template>
+            </template>
+
+            <!-- 无输入参数提示 -->
+            <el-empty
+              v-else
+              description="此流程无需输入参数"
+              :image-size="60"
+            />
 
             <el-form-item>
               <el-button type="primary" @click="executeWorkflow" :loading="executing" style="width: 100%">
@@ -225,7 +301,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, VideoPlay, CopyDocument } from '@element-plus/icons-vue'
-import { workflowApi, type WorkflowDefinition } from '@/api/workflow'
+import { workflowApi, type WorkflowDefinition, type InputFieldConfig } from '@/api/workflow'
 import { configApi, type LLMConfig } from '@/api/config'
 import { analysisApi } from '@/api/analysis'
 import { marked } from 'marked'
@@ -243,22 +319,40 @@ const executing = ref(false)
 const executionResult = ref<any>(null)
 const executionError = ref<string | null>(null)
 const activeCollapse = ref(['report'])
+
+// 模型列表（仅用于 select 类型的模型字段动态填充选项）
 const modelsLoading = ref(false)
 const allModels = ref<LLMConfig[]>([])
-
-// 只显示已启用的模型
 const enabledModels = computed(() => allModels.value.filter(m => m.enabled))
 
-const inputs = ref({
-  ticker: '',
-  analysis_date: new Date(),
-  research_depth: '标准', // 将在 onMounted 中从用户偏好加载
-  selected_analysts: ['index_analyst', 'sector_analyst', 'market', 'fundamentals', 'news', 'social'], // 🔥 修复：包含所有6个分析师（大盘、行业、市场、基本面、新闻、社交媒体）
-  quick_analysis_model: '', // 将在 loadModels 中从系统配置加载
-  deep_analysis_model: '', // 将在 loadModels 中从系统配置加载
-  lookback_days: 365,
-  max_debate_rounds: 2
+// 🆕 动态表单值：formValues[field.name] = 值
+const formValues = ref<Record<string, any>>({})
+
+// 🆕 输入参数字段列表（从 workflow.input_config.fields 读取）
+const inputFields = computed<InputFieldConfig[]>(() => {
+  return workflow.value?.input_config?.fields || []
 })
+
+// 🆕 按分组组织字段
+const groupedFields = computed(() => {
+  const fields = [...inputFields.value].sort((a, b) => (a.order || 0) - (b.order || 0))
+  const groups: Array<{ name: string; fields: InputFieldConfig[] }> = []
+  const groupMap = new Map<string, InputFieldConfig[]>()
+
+  for (const f of fields) {
+    const g = f.group || ''
+    if (!groupMap.has(g)) groupMap.set(g, [])
+    groupMap.get(g)!.push(f)
+  }
+
+  for (const [name, fields] of groupMap) {
+    groups.push({ name, fields })
+  }
+  return groups
+})
+
+// 🆕 工作流类型（保留用于 onMounted 判断是否需要加载模型）
+const workflowType = computed(() => workflow.value?.workflow_type || 'stock_analysis')
 
 const executionSteps = ref<Array<{
   id: string
@@ -284,7 +378,7 @@ const statusText = computed(() => {
   return '待执行'
 })
 
-// 加载模型配置
+// 加载模型配置（仅加载模型列表，默认值在 initFormValues 中设置）
 const loadModels = async () => {
   modelsLoading.value = true
   try {
@@ -294,35 +388,11 @@ const loadModels = async () => {
     const response = await configApi.getLLMConfigs()
     allModels.value = Array.isArray(response) ? response : []
 
-    // 获取系统默认模型配置
-    const defaultModels = await configApi.getDefaultModels()
-    console.log('🔍 [工作流执行] 从API获取的默认模型:', defaultModels)
-
-    // 设置默认模型（优先使用系统配置）
-    if (!inputs.value.quick_analysis_model) {
-      inputs.value.quick_analysis_model = defaultModels.quick_analysis_model || 'qwen-turbo'
-    }
-    if (!inputs.value.deep_analysis_model) {
-      inputs.value.deep_analysis_model = defaultModels.deep_analysis_model || 'qwen-max'
-    }
-
     console.log('✅ [工作流执行] 加载模型配置成功:', {
-      quick: inputs.value.quick_analysis_model,
-      deep: inputs.value.deep_analysis_model,
       available: enabledModels.value.length
     })
   } catch (error) {
     console.error('❌ [工作流执行] 加载模型配置失败:', error)
-    // 降级处理：使用第一个启用的模型
-    const enabled = enabledModels.value
-    if (enabled.length > 0) {
-      if (!inputs.value.quick_analysis_model) {
-        inputs.value.quick_analysis_model = enabled[0].model_name
-      }
-      if (!inputs.value.deep_analysis_model) {
-        inputs.value.deep_analysis_model = enabled[0].model_name
-      }
-    }
   } finally {
     modelsLoading.value = false
   }
@@ -343,6 +413,8 @@ const loadWorkflow = async () => {
           status: 'pending'
         }))
     }
+    // 🆕 初始化表单默认值
+    initFormValues()
   } catch (error: any) {
     console.error('加载工作流失败:', error)
     workflowLoadError.value = error?.message || '无法加载工作流配置，请检查网络或稍后重试'
@@ -351,19 +423,73 @@ const loadWorkflow = async () => {
   }
 }
 
+// 🆕 初始化表单默认值：根据 input_config.fields 设置 formValues
+const initFormValues = async () => {
+  const values: Record<string, any> = {}
+  for (const field of inputFields.value) {
+    // 设置默认值
+    let defaultVal = field.default
+    // 特殊处理模型字段：从系统配置加载默认模型
+    if (field.name === 'quick_analysis_model' && !defaultVal) {
+      try {
+        const defaultModels = await configApi.getDefaultModels()
+        defaultVal = defaultModels.quick_analysis_model || ''
+      } catch { defaultVal = '' }
+    } else if (field.name === 'deep_analysis_model' && !defaultVal) {
+      try {
+        const defaultModels = await configApi.getDefaultModels()
+        defaultVal = defaultModels.deep_analysis_model || ''
+      } catch { defaultVal = '' }
+    } else if (field.name === 'research_depth' && !defaultVal) {
+      // 从用户偏好加载默认分析深度
+      try {
+        const authStore = useAuthStore()
+        const userPrefs = authStore.user?.preferences
+        if (userPrefs?.default_depth) {
+          defaultVal = convertDepthToText(userPrefs.default_depth)
+        }
+      } catch { /* ignore */ }
+    }
+
+    // 类型相关的默认值
+    if (defaultVal === null || defaultVal === undefined) {
+      switch (field.type) {
+        case 'boolean': defaultVal = false; break
+        case 'number': defaultVal = undefined; break
+        case 'multiselect': defaultVal = []; break
+        case 'date':
+          if (field.name === 'analysis_date') {
+            defaultVal = new Date().toISOString().slice(0, 10)
+          } else {
+            defaultVal = ''
+          }
+          break
+        default: defaultVal = ''
+      }
+    }
+    values[field.name] = defaultVal
+  }
+  formValues.value = values
+  console.log('🔍 [表单初始化] formValues:', values)
+}
+
 // 当前任务ID
 const currentTaskId = ref<string | null>(null)
 const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
 // 执行工作流 - 改为异步执行，使用 v2.0 统一任务引擎
 const executeWorkflow = async () => {
-  if (!inputs.value.ticker) {
-    ElMessage.warning('请输入股票代码')
-    return
-  }
-  if (!inputs.value.quick_analysis_model || !inputs.value.deep_analysis_model) {
-    ElMessage.warning('请选择分析模型')
-    return
+  // 🆕 校验必填字段
+  for (const field of inputFields.value) {
+    if (field.required) {
+      const val = formValues.value[field.name]
+      const empty = val === null || val === undefined || val === '' ||
+        (Array.isArray(val) && val.length === 0)
+      if (empty) {
+        ElMessage.warning(`请填写${field.label || field.name}`)
+        return
+      }
+    }
   }
 
   executing.value = true
@@ -376,17 +502,35 @@ const executeWorkflow = async () => {
   }
 
   try {
-    // 调用工作流执行 API（现在返回 task_id）
-    const result = await workflowApi.execute(workflowId.value, {
-      ticker: inputs.value.ticker,
-      analysis_date: inputs.value.analysis_date,
-      research_depth: inputs.value.research_depth,
-      selected_analysts: inputs.value.selected_analysts,
-      quick_analysis_model: inputs.value.quick_analysis_model,
-      deep_analysis_model: inputs.value.deep_analysis_model,
-      lookback_days: inputs.value.lookback_days,
-      max_debate_rounds: inputs.value.max_debate_rounds
-    })
+    // 🆕 构造请求参数：将 formValues 中所有非空值作为请求参数
+    const params: Record<string, any> = {}
+    for (const field of inputFields.value) {
+      const val = formValues.value[field.name]
+      if (val !== null && val !== undefined && val !== '') {
+        params[field.name] = val
+      }
+    }
+
+    // 如果没有 ticker 字段但有 analysis_target，复用作为 ticker（工作流引擎需要 ticker 做参数映射）
+    if (!params.ticker) {
+      if (params.analysis_target) {
+        params.ticker = params.analysis_target
+      } else if (workflowType.value === 'general') {
+        // 通用研究流程兜底
+        ElMessage.warning('通用研究流程需要 analysis_target 参数')
+        executing.value = false
+        return
+      }
+    }
+
+    // 对通用研究流程，把所有参数合并到 custom_params 中（保持后端兼容）
+    if (workflowType.value === 'general') {
+      const customParams: Record<string, any> = { ...params }
+      delete customParams.ticker  // ticker 已单独传递
+      params.custom_params = customParams
+    }
+
+    const result = await workflowApi.execute(workflowId.value, params)
 
     console.log('🔍 工作流执行响应:', result)
 
@@ -618,37 +762,10 @@ const copyResult = () => {
 
 // 初始化
 onMounted(async () => {
-  await loadWorkflow()
+  // 加载模型列表（用于 input_config 中模型选择字段的选项填充）
   await loadModels()
-
-  // 🆕 从用户偏好加载默认设置
-  const authStore = useAuthStore()
-  const userPrefs = authStore.user?.preferences
-
-  console.log('🔍 [工作流执行] 调试信息:', {
-    hasUser: !!authStore.user,
-    hasPreferences: !!userPrefs,
-    userPrefs: userPrefs,
-    currentDepth: inputs.value.research_depth
-  })
-
-  if (userPrefs) {
-    // 加载默认分析深度
-    if (userPrefs.default_depth) {
-      // 将数字深度转换为中文描述
-      const depthValue = convertDepthToText(userPrefs.default_depth)
-      console.log('🔍 [工作流执行] 深度转换:', userPrefs.default_depth, '->', depthValue)
-      inputs.value.research_depth = depthValue
-    } else {
-      console.log('⚠️ [工作流执行] 用户偏好中没有 default_depth')
-    }
-
-    console.log('✅ [工作流执行] 已加载用户偏好设置:', {
-      depth: inputs.value.research_depth
-    })
-  } else {
-    console.log('⚠️ [工作流执行] 没有找到用户偏好设置')
-  }
+  // 加载工作流（内部会调用 initFormValues 初始化表单默认值）
+  await loadWorkflow()
 })
 
 // 将数字深度转换为中文描述
@@ -772,5 +889,25 @@ const convertDepthToText = (depth: string | number): string => {
   border-radius: 4px;
   overflow-x: auto;
   max-height: 300px;
+}
+
+.field-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  margin: 12px 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+
+  &:first-child {
+    margin-top: 0;
+  }
+}
+
+.field-description {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
+  line-height: 1.5;
 }
 </style>

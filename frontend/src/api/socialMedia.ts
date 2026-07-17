@@ -7,7 +7,7 @@ export interface SocialMediaMessage {
   message_id: string
   platform: string
   symbol: string
-  market?: 'A股' | '港股' | '美股'
+  market?: 'A股'
   message_type?: string
   content: string
   media_urls?: string[]

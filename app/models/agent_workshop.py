@@ -154,6 +154,14 @@ class SuggestedToolItem(BaseModel):
     why_needed: str = ""
 
 
+class InferableGap(BaseModel):
+    """可推断缺口 — 无专门工具但有相关原始数据可定性推断"""
+
+    gap: str = ""
+    inferable_from: List[str] = Field(default_factory=list)
+    inference_approach: str = ""
+
+
 class AgentWorkshopGapAnalysis(BaseModel):
     """资源缺口分析结果"""
 
@@ -165,6 +173,7 @@ class AgentWorkshopGapAnalysis(BaseModel):
         serialization_alias="suggested_capabilities",
     )
     manual_dependencies: List[str] = Field(default_factory=list)
+    inferable_gaps: List[InferableGap] = Field(default_factory=list)
     blocking_gaps: List[str] = Field(default_factory=list)
     fallback_strategy: List[str] = Field(default_factory=list)
     build_recommendations: List[str] = Field(default_factory=list)
@@ -183,6 +192,15 @@ class AgentWorkshopGapAnalysis(BaseModel):
                         else item
                         for item in items
                     ]
+            # 兼容 inferable_gaps 的纯字符串格式
+            inferable_items = data.get("inferable_gaps")
+            if isinstance(inferable_items, list):
+                data["inferable_gaps"] = [
+                    {"gap": item, "inferable_from": [], "inference_approach": ""}
+                    if isinstance(item, str)
+                    else item
+                    for item in inferable_items
+                ]
         return data
     notes: List[str] = Field(default_factory=list)
     generated_by: str = ""

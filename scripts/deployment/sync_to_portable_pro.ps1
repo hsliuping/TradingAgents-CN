@@ -87,8 +87,8 @@ $excludePatterns = @(
 
 # 🔥 排除敏感内容
 $excludeDirs = @(
-    "docs\courses\advanced\ppt",       # 排除PPT源文件
-    "docs\design",                     # 排除设计文档
+    "docs\07-courses\advanced\ppt",    # 排除PPT源文件
+    "docs\05-design",                  # 排除设计文档
     "docs\email-to-tradingagents-team.txt"  # 排除邮件模板
 )
 
@@ -326,12 +326,12 @@ Write-Host ""
 Write-Host "Syncing docs..." -ForegroundColor Yellow
 Write-Host ""
 
-$docsSource = Join-Path $root "docs\release_v2.0"
+$docsSource = Join-Path $root "docs\02-user-guide"
 $docsDest = Join-Path $portableDir "docs"
 
 if (Test-Path $docsSource) {
     if ($DryRun) {
-        Write-Host "  [DRY RUN] Will copy release docs directory: docs\\release_v2.0 -> docs" -ForegroundColor Yellow
+        Write-Host "  [DRY RUN] Will copy release docs directory: docs\\02-user-guide -> docs" -ForegroundColor Yellow
     } else {
         try {
             # 删除目标目录（如果存在）
@@ -343,16 +343,16 @@ if (Test-Path $docsSource) {
 
             # 仅复制面向发布的用户文档
             Copy-Item -Path (Join-Path $docsSource "*") -Destination $docsDest -Recurse -Force
-            Write-Host "  ✅ Copied release_v2.0 user docs only" -ForegroundColor Green
+            Write-Host "  ✅ Copied 02-user-guide docs only" -ForegroundColor Green
 
             # 补充运行时直接读取的 API 指南、模板和示例文件
             $runtimeDocMappings = @(
-                @{ Source = (Join-Path $root "docs\api\STOCK_DATA_IMPORT_API.md"); Destination = (Join-Path $docsDest "api\STOCK_DATA_IMPORT_API.md") },
-                @{ Source = (Join-Path $root "docs\api\examples\stock_data_import_examples.py"); Destination = (Join-Path $docsDest "api\examples\stock_data_import_examples.py") },
-                @{ Source = (Join-Path $root "docs\examples\social_media_api_guide.md"); Destination = (Join-Path $docsDest "examples\social_media_api_guide.md") },
-                @{ Source = (Join-Path $root "docs\examples\social_media_api_example.py"); Destination = (Join-Path $docsDest "examples\social_media_api_example.py") },
-                @{ Source = (Join-Path $root "docs\examples\social_media_template.csv"); Destination = (Join-Path $docsDest "examples\social_media_template.csv") },
-                @{ Source = (Join-Path $root "docs\examples\social_media_template.json"); Destination = (Join-Path $docsDest "examples\social_media_template.json") }
+                @{ Source = (Join-Path $root "docs\03-development\api\stock-data-import.md"); Destination = (Join-Path $docsDest "03-development\api\stock-data-import.md") },
+                @{ Source = (Join-Path $root "docs\03-development\api\stock-data-import-examples.py"); Destination = (Join-Path $docsDest "03-development\api\stock-data-import-examples.py") },
+                @{ Source = (Join-Path $root "docs\03-development\guides\social_media_api_guide.md"); Destination = (Join-Path $docsDest "03-development\guides\social_media_api_guide.md") },
+                @{ Source = (Join-Path $root "docs\03-development\guides\social_media_api_example.py"); Destination = (Join-Path $docsDest "03-development\guides\social_media_api_example.py") },
+                @{ Source = (Join-Path $root "docs\03-development\guides\social_media_template.csv"); Destination = (Join-Path $docsDest "03-development\guides\social_media_template.csv") },
+                @{ Source = (Join-Path $root "docs\03-development\guides\social_media_template.json"); Destination = (Join-Path $docsDest "03-development\guides\social_media_template.json") }
             )
 
             foreach ($mapping in $runtimeDocMappings) {
@@ -371,8 +371,8 @@ if (Test-Path $docsSource) {
             }
 
             # 补充高级课程正文与纲要（Windows 安装版运行时由本地后端直接读取）
-            $advancedCourseSource = Join-Path $root "docs\courses\advanced"
-            $advancedCourseDest = Join-Path $docsDest "courses\advanced"
+            $advancedCourseSource = Join-Path $root "docs\07-courses\advanced"
+            $advancedCourseDest = Join-Path $docsDest "07-courses\advanced"
             if (Test-Path $advancedCourseSource) {
                 if (-not (Test-Path $advancedCourseDest)) {
                     New-Item -ItemType Directory -Path $advancedCourseDest -Force | Out-Null
@@ -391,7 +391,7 @@ if (Test-Path $docsSource) {
                         Remove-Item -Path $expandedDest -Recurse -Force
                     }
                     Copy-Item -Path $expandedSource -Destination $expandedDest -Recurse -Force
-                    Write-Host "  ✅ Copied advanced course content: courses\\advanced\\expanded" -ForegroundColor Gray
+                    Write-Host "  ✅ Copied advanced course content: 07-courses\\advanced\\expanded" -ForegroundColor Gray
                 } else {
                     Write-Host "  ⚠️ Advanced course content missing: $expandedSource" -ForegroundColor Yellow
                 }
@@ -417,7 +417,7 @@ if (Test-Path $docsSource) {
         }
     }
 } else {
-    Write-Host "  ❌ FAILED: docs\\release_v2.0 not found" -ForegroundColor Red
+    Write-Host "  ❌ FAILED: docs\\02-user-guide not found" -ForegroundColor Red
 }
 
 Write-Host ""
@@ -446,6 +446,8 @@ $essentialScripts = @(
     "scripts\installer\start_services_clean.ps1", # MongoDB/Redis 服务启动脚本
     "scripts\installer\collect_service_logs.ps1", # 错误日志收集脚本（诊断包）
     "scripts\installer\restart_all.ps1",         # Restart all services (for tray menu)
+    "scripts\installer\restore_backup.ps1",       # 升级安装时恢复用户配置
+    "scripts\installer\update_ports.ps1",         # 全新安装时更新端口配置
     # 🔥 进程监控脚本
     "scripts\monitor\process_monitor.py",        # 进程监控守护进程（包含退出报告功能）
     "scripts\monitor\start_monitor.ps1",         # 启动监控脚本
@@ -568,44 +570,82 @@ if (Test-Path $sourceVendorsDir) {
         New-Item -ItemType Directory -Path $destVendorsDir -Force | Out-Null
     }
 
-    # Copy MongoDB
+    # Copy MongoDB (delete first to avoid nesting on repeated builds)
     $sourceMongoDB = Join-Path $sourceVendorsDir "mongodb"
     $destMongoDB = Join-Path $destVendorsDir "mongodb"
     if (Test-Path $sourceMongoDB) {
         Write-Host "  Copying MongoDB..." -ForegroundColor Gray
+        if (Test-Path $destMongoDB) { Remove-Item -Path $destMongoDB -Recurse -Force }
         Copy-Item -Path $sourceMongoDB -Destination $destMongoDB -Recurse -Force
         Write-Host "  ✓ MongoDB copied" -ForegroundColor Green
+
+        # Remove .pdb debug symbol files (not needed at runtime, save ~2GB)
+        $pdbFiles = Get-ChildItem -Path $destMongoDB -Recurse -Filter "*.pdb" -ErrorAction SilentlyContinue
+        if ($pdbFiles) {
+            $pdbCount = $pdbFiles.Count
+            $pdbSize = [math]::Round(($pdbFiles | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
+            $pdbFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Removed $pdbCount .pdb debug files ($pdbSize MB saved)" -ForegroundColor Gray
+        }
+
+        # Copy VC++ Runtime DLLs to MongoDB bin directory (fixes missing DLL on user machines)
+        $mongoBinDir = Get-ChildItem -Path $destMongoDB -Recurse -Directory -Filter "bin" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($mongoBinDir) {
+            $vcDlls = @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
+            $system32 = Join-Path $env:SystemRoot "System32"
+            # Also check vendors/vcredist/ as fallback
+            $vcredistDir = Join-Path $sourceVendorsDir "vcredist"
+            foreach ($dll in $vcDlls) {
+                $srcDll = $null
+                # Try vcredist dir first, then system32
+                $srcFromVcredist = Join-Path $vcredistDir $dll
+                $srcFromSystem = Join-Path $system32 $dll
+                if (Test-Path -LiteralPath $srcFromVcredist) {
+                    $srcDll = $srcFromVcredist
+                } elseif (Test-Path -LiteralPath $srcFromSystem) {
+                    $srcDll = $srcFromSystem
+                }
+                if ($srcDll) {
+                    $destDll = Join-Path $mongoBinDir.FullName $dll
+                    Copy-Item -LiteralPath $srcDll -Destination $destDll -Force
+                    Write-Host "  ✓ $dll copied to MongoDB bin" -ForegroundColor Gray
+                }
+            }
+        }
     } else {
         Write-Host "  ⚠ MongoDB not found at $sourceMongoDB" -ForegroundColor Yellow
     }
 
-    # Copy Redis
+    # Copy Redis (delete first to avoid nesting)
     $sourceRedis = Join-Path $sourceVendorsDir "redis"
     $destRedis = Join-Path $destVendorsDir "redis"
     if (Test-Path $sourceRedis) {
         Write-Host "  Copying Redis..." -ForegroundColor Gray
+        if (Test-Path $destRedis) { Remove-Item -Path $destRedis -Recurse -Force }
         Copy-Item -Path $sourceRedis -Destination $destRedis -Recurse -Force
         Write-Host "  ✓ Redis copied" -ForegroundColor Green
     } else {
         Write-Host "  ⚠ Redis not found at $sourceRedis" -ForegroundColor Yellow
     }
 
-    # Copy Nginx
+    # Copy Nginx (delete first to avoid nesting)
     $sourceNginx = Join-Path $sourceVendorsDir "nginx"
     $destNginx = Join-Path $destVendorsDir "nginx"
     if (Test-Path $sourceNginx) {
         Write-Host "  Copying Nginx..." -ForegroundColor Gray
+        if (Test-Path $destNginx) { Remove-Item -Path $destNginx -Recurse -Force }
         Copy-Item -Path $sourceNginx -Destination $destNginx -Recurse -Force
         Write-Host "  ✓ Nginx copied" -ForegroundColor Green
     } else {
         Write-Host "  ⚠ Nginx not found at $sourceNginx" -ForegroundColor Yellow
     }
 
-    # 🔥 Copy Python (embedded Python with DLLs)
+    # 🔥 Copy Python (embedded Python with DLLs) — delete first to avoid nesting
     $sourcePython = Join-Path $sourceVendorsDir "python"
     $destPython = Join-Path $destVendorsDir "python"
     if (Test-Path $sourcePython) {
         Write-Host "  Copying Python (embedded)..." -ForegroundColor Gray
+        if (Test-Path $destPython) { Remove-Item -Path $destPython -Recurse -Force }
         Copy-Item -Path $sourcePython -Destination $destPython -Recurse -Force
         Write-Host "  ✓ Python copied (including DLLs)" -ForegroundColor Green
         
@@ -717,8 +757,8 @@ Write-Host "Files synced: $syncCount" -ForegroundColor Cyan
 Write-Host "Files skipped: $skipCount" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "Excluded content:" -ForegroundColor White
-Write-Host "  - docs/courses/advanced/ppt/ (PPT源文件)" -ForegroundColor Gray
-Write-Host "  - docs/design/ (设计文档)" -ForegroundColor Gray
+Write-Host "  - docs/07-courses/advanced/ppt/ (PPT源文件)" -ForegroundColor Gray
+Write-Host "  - docs/05-design/ (设计文档)" -ForegroundColor Gray
 Write-Host "  - __pycache__/ and *.pyc files (Python cache)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Next: Run build_portable_package.ps1 to package" -ForegroundColor Cyan

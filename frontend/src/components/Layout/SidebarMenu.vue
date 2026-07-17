@@ -34,6 +34,11 @@
       </template>
     </el-menu-item>
 
+    <el-menu-item index="/analysis/general">
+      <el-icon><Search /></el-icon>
+      <template #title>通用研究</template>
+    </el-menu-item>
+
     <el-menu-item index="/assistant">
       <el-icon><ChatDotRound /></el-icon>
       <template #title>智能助手</template>
@@ -185,6 +190,7 @@
         <el-menu-item index="/settings/logs">操作日志</el-menu-item>
         <el-menu-item index="/settings/system-logs">系统日志</el-menu-item>
         <el-menu-item index="/settings/sync">多数据源同步</el-menu-item>
+        <el-menu-item index="/settings/capability-index">工具能力索引</el-menu-item>
         <el-menu-item index="/settings/scheduler">定时任务</el-menu-item>
         <el-menu-item index="/settings/social-media">社媒消息管理</el-menu-item>
         <el-menu-item index="/settings/data-import">

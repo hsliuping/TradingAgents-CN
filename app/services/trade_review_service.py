@@ -1201,6 +1201,19 @@ class TradeReviewService:
             # 异步调用 LLM
             logger.info(f"🚀 [AI复盘] 开始调用 LLM API...")
             response = await llm.ainvoke(prompt)
+
+            # 记录 token 使用
+            try:
+                from app.services.usage_statistics_service import usage_statistics_service
+                await usage_statistics_service.record_llm_usage(
+                    response=response,
+                    session_id=user_id or "trade_review",
+                    analysis_type="trade_review",
+                    stock_code=trade_info.code
+                )
+            except Exception as e:
+                logger.warning(f"记录 token 使用失败: {e}")
+
             logger.info(f"✅ [AI复盘] LLM API 调用成功")
             logger.info(f"📦 [AI复盘] Response 类型: {type(response).__name__}")
             logger.info(f"📦 [AI复盘] Response 属性: {dir(response)}")

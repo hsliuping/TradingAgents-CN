@@ -4,14 +4,14 @@
 定义 AI 工作流生成过程中使用的所有数据结构。
 包括会话状态、对话轮次、缺口分析、蓝图结构等。
 
-参考: docs/design/v3.0/ai-workflow-generation.md
+参考: docs/05-design/v3.0/ai-workflow-generation.md
 """
 
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 
 # ==================== 枚举类型 ====================
@@ -61,6 +61,8 @@ class PlannedEdge(BaseModel):
     target: str                          # 目标节点 ID
     label: Optional[str] = None
     animated: bool = False
+    type: Optional[str] = "normal"       # edge 类型（normal/conditional）
+    condition: Optional[str] = None      # 条件表达（"true"/"false"）
 
 
 # ==================== 缺口分析模型 ====================
@@ -123,10 +125,16 @@ class WorkflowBlueprint(BaseModel):
     description: str = ""
     tags: List[str] = Field(default_factory=list)
 
+    # 🛡️ 防幻觉：记录白名单校验中发现的非法 agent_id 及其建议替换（PrivateAttr，不参与序列化）
+    _invalid_agent_ids: Dict[str, str] = PrivateAttr(default_factory=dict)
+
     # 工作流结构
     nodes: List[PlannedNode] = Field(default_factory=list)
     edges: List[PlannedEdge] = Field(default_factory=list)
     config: Dict[str, Any] = Field(default_factory=dict)
+
+    # 🆕 输入参数定义（前端根据此字段动态生成执行表单）
+    input_config: Dict[str, Any] = Field(default_factory=lambda: {"fields": []})
 
     # AI 方案说明
     summary: str = ""                    # 方案概述

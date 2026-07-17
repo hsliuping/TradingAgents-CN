@@ -22,7 +22,12 @@ class ScheduledAnalysisTimeSlot(BaseModel):
     quick_analysis_model: Optional[str] = Field(None, description="快速分析模型")
     deep_analysis_model: Optional[str] = Field(None, description="深度分析模型")
     prompt_template_id: Optional[str] = Field(None, description="提示词模板ID")
-    
+    workflow_id: Optional[str] = Field(None, description="工作流ID（选择通用研究流程）")
+    workflow_params: Optional[Dict[str, Any]] = Field(
+        None,
+        description="工作流执行参数，包含 analysis_target（分析目标）和 custom_params（自定义参数键值对）"
+    )
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -30,7 +35,15 @@ class ScheduledAnalysisTimeSlot(BaseModel):
                 "cron_expression": "0 9 * * 1-5",
                 "enabled": True,
                 "group_ids": ["group_123", "group_456"],
-                "analysis_depth": 3
+                "analysis_depth": 3,
+                "workflow_id": "wf_general_001",
+                "workflow_params": {
+                    "analysis_target": "分析新能源行业趋势",
+                    "custom_params": {
+                        "industry": "新能源",
+                        "time_range": "近3年"
+                    }
+                }
             }
         }
 

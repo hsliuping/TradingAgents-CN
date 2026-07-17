@@ -648,6 +648,164 @@ async def get_system_default_models() -> Dict[str, str]:
     }
 
 
+async def _execute_general_workflow_slot(
+    config_id: str,
+    user_id: str,
+    slot: Dict[str, Any],
+    workflow_id: str,
+    config: Dict[str, Any],
+    db,
+):
+    """
+    执行通用研究工作流时间段任务
+
+    当时间段配置了 workflow_id 时调用此函数，使用 workflow_params 中的
+    analysis_target 和 custom_params 作为工作流输入。
+
+    Args:
+        config_id: 配置ID
+        user_id: 用户ID
+        slot: 时间段配置
+        workflow_id: 工作流ID
+        config: 完整配置文档
+        db: MongoDB 数据库句柄
+    """
+    from app.services.task_analysis_service import get_task_analysis_service
+    from app.models.analysis import AnalysisTaskType
+    from app.models.user import PyObjectId
+    from app.utils.timezone import now_tz
+    from bson import ObjectId
+    import asyncio
+
+    logger.info(f"📋 通用研究流程执行参数:")
+    workflow_params = slot.get("workflow_params") or {}
+    analysis_target = workflow_params.get("analysis_target", "") or ""
+    custom_params = workflow_params.get("custom_params") or {}
+
+    logger.info(f"   分析目标: {analysis_target}")
+    logger.info(f"   自定义参数: {custom_params}")
+
+    if not analysis_target:
+        logger.warning(f"⚠️ 未配置分析目标，跳过执行")
+        # 记录失败历史
+        try:
+            history_doc = {
+                "config_id": config_id,
+                "config_name": config.get("name", "未命名"),
+                "time_slot_name": slot.get("name", "未命名"),
+                "created_at": now_tz(),
+                "status": "failed",
+                "total_count": 0,
+                "success_count": 0,
+                "failed_count": 0,
+                "task_ids": [],
+                "result_summary": "未配置分析目标"
+            }
+            await db.scheduled_analysis_history.insert_one(history_doc)
+        except Exception as e:
+            logger.error(f"❌ 记录失败历史失败: {e}")
+        return
+
+    total_success = 0
+    total_failed = 0
+    all_task_ids = []
+
+    try:
+        task_service = get_task_analysis_service()
+        analysis_date = datetime.now().strftime("%Y-%m-%d")
+
+        # 🆕 查询工作流的 input_config，用于补充默认参数
+        from app.core.database import get_mongo_db
+        db = get_mongo_db()
+        wf_doc = await db.workflows.find_one(
+            {"workflow_id": workflow_id} if isinstance(workflow_id, str) else {"_id": workflow_id},
+            {"input_config": 1, "workflow_type": 1}
+        )
+        input_config = wf_doc.get("input_config") if wf_doc else None
+
+        # 构建任务参数：分析目标作为 ticker，合并 custom_params
+        task_params = {
+            "symbol": analysis_target,
+            "stock_code": analysis_target,
+            "analysis_date": analysis_date,
+            "task_category": "general",  # 🆕 标记为通用研究任务
+            **custom_params,  # 合并自定义参数
+        }
+
+        # 🆕 根据 input_config.fields 的 default 值补充缺失参数
+        if input_config and isinstance(input_config, dict):
+            fields = input_config.get("fields", [])
+            for field in fields:
+                fname = field.get("name")
+                if fname and fname not in task_params and fname not in ("ticker", "symbol", "stock_code"):
+                    default_val = field.get("default")
+                    if default_val is not None:
+                        task_params[fname] = default_val
+
+        # 通用兜底参数
+        task_params.setdefault("research_depth", "标准")
+        task_params.setdefault("market_type", "cn")
+
+        # 获取用户风险偏好
+        try:
+            from app.routers.analysis import get_user_risk_preference
+            preference_type = await get_user_risk_preference(user_id)
+        except Exception:
+            preference_type = "default"
+
+        logger.info(f"🚀 创建通用研究任务: workflow_id={workflow_id}, target={analysis_target}")
+
+        task = await task_service.create_task(
+            user_id=PyObjectId(user_id),
+            task_type=AnalysisTaskType.STOCK_ANALYSIS,
+            task_params=task_params,
+            engine_type="workflow",
+            preference_type=preference_type,
+            workflow_id=workflow_id,
+        )
+
+        # 异步执行任务
+        asyncio.create_task(task_service.execute_task(task))
+
+        all_task_ids.append(task.task_id)
+        total_success += 1
+        logger.info(f"✅ 通用研究任务已创建: task_id={task.task_id}")
+
+    except Exception as e:
+        total_failed += 1
+        logger.error(f"❌ 创建通用研究任务失败: {e}", exc_info=True)
+
+    # 更新配置的最后运行时间
+    await db.scheduled_analysis_configs.update_one(
+        {"_id": ObjectId(config_id)},
+        {"$set": {"last_run_at": now_tz()}}
+    )
+
+    # 记录执行历史
+    try:
+        history_doc = {
+            "config_id": config_id,
+            "config_name": config.get("name", "未命名"),
+            "time_slot_name": slot.get("name", "未命名"),
+            "created_at": now_tz(),
+            "status": "success" if total_failed == 0 else ("failed" if total_success == 0 else "partial"),
+            "total_count": total_success + total_failed,
+            "success_count": total_success,
+            "failed_count": total_failed,
+            "task_ids": all_task_ids,
+            "result_summary": None
+        }
+        await db.scheduled_analysis_history.insert_one(history_doc)
+    except Exception as e:
+        logger.error(f"❌ 记录执行历史失败: {e}")
+
+    logger.info("=" * 70)
+    logger.info(f"✅ 通用研究流程时间段任务完成")
+    logger.info(f"   成功启动: {total_success} 个任务")
+    logger.info(f"   失败: {total_failed} 个")
+    logger.info("=" * 70)
+
+
 async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: int):
     """
     执行定时分析时间段任务 - 新版（支持分组和自定义参数）
@@ -696,6 +854,20 @@ async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: 
 
         logger.info(f"📅 时间段: {slot.get('name')}")
         logger.info(f"📋 分组数量: {len(slot.get('group_ids', []))}")
+
+        # 🆕 分支：若配置了通用研究流程，则调用工作流执行（跳过分组股票分析）
+        workflow_id = slot.get("workflow_id")
+        if workflow_id:
+            logger.info(f"🎯 检测到通用研究流程配置: workflow_id={workflow_id}")
+            await _execute_general_workflow_slot(
+                config_id=config_id,
+                user_id=user_id,
+                slot=slot,
+                workflow_id=workflow_id,
+                config=config,
+                db=db,
+            )
+            return
 
         # 获取要分析的分组ID列表
         group_ids = slot.get("group_ids", [])

@@ -50,7 +50,11 @@ class LegacyToolkitAdapter:
             "id": "get_stock_market_data_unified",
             "name": "统一股票市场数据",
             "category": "market",
-            "description": "获取统一格式的股票市场数据",
+            "description": "获取A股股票完整行情数据：股价、涨跌幅、成交量、市值、PE/PB、换手率、振幅等核心市场指标",
+            "capability_tags": ["行情", "股价", "市值", "涨跌幅", "成交量", "PE", "PB", "换手率", "技术指标", "A股"],
+            "when_to_use": "需要获取A股股票的股价、市值、涨跌幅、PE/PB估值、成交量行情等市场数据时使用",
+            "tool_role_hint": "primary",
+            "output_shape": "structured_metrics",
         },
         "get_stock_fundamentals_unified": {
             "id": "get_stock_fundamentals_unified",
@@ -120,7 +124,14 @@ class LegacyToolkitAdapter:
                     
                     method = getattr(toolkit, method_name)
                     
-                    # 注册到新 Registry
+                    # 注册到新 Registry，透传 capability_tags, when_to_use 等增强字段
+                    extra_kwargs = {}
+                    for key in ("capability_tags", "when_to_use", "when_not_to_use",
+                                "returns", "tool_role_hint", "output_shape",
+                                "preferred_for", "not_replacement_for", "fc_enabled",
+                                "data_source_handling"):
+                        if key in config:
+                            extra_kwargs[key] = config[key]
                     tool_registry.register_function(
                         tool_id=config["id"],
                         func=method,
@@ -128,6 +139,7 @@ class LegacyToolkitAdapter:
                         category=config["category"],
                         description=config["description"],
                         is_legacy=True,
+                        **extra_kwargs,
                     )
                     
                     registered += 1

@@ -390,8 +390,6 @@ const stats = reactive<{
 
 const marketOptions = [
   { label: 'A股', value: 'cn' },
-  { label: '港股', value: 'hk' },
-  { label: '美股', value: 'us' },
 ]
 
 const normalizedSymbol = computed(() => symbolFilter.value.trim().toUpperCase())
@@ -438,8 +436,6 @@ function getScopeColor(scope: string): ElTagType {
 function getMarketLabel(market: string) {
   const normalized = String(market || '').trim().toLowerCase()
   if (normalized === 'cn') return 'A股'
-  if (normalized === 'hk') return '港股'
-  if (normalized === 'us') return '美股'
   return normalized || '-'
 }
 
@@ -699,7 +695,7 @@ async function fetchAll() {
 
 // ============================================================================
 // 偏好与纪律记忆（user_preference + trade_pattern）
-// 参考：docs/design/v3.0/unified-memory-layer-mem0.md §15.5 P0-3
+// 参考：docs/05-design/v3.0/unified-memory-layer-mem0.md §15.5 P0-3
 // ============================================================================
 
 const preferenceList = ref<MemoryItem[]>([])

@@ -73,7 +73,7 @@ services:
       dockerfile: docker/Dockerfile.backend.compiled.ubuntu
       args:
         COMPILE_DIR: docker/build/compiled
-    image: ${DOCKER_IMAGE_NAMESPACE:-hsliup}/tradingagents-pro-backend:${IMAGE_TAG:-latest}
+    image: ${DOCKER_IMAGE_NAMESPACE:-hsliup}/tradingagents-pro-backend:${IMAGE_TAG:-3-latest}
     container_name: tradingagents-backend-pro
     restart: unless-stopped
     expose:
@@ -158,7 +158,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
-    image: ${DOCKER_IMAGE_NAMESPACE:-hsliup}/tradingagents-pro-frontend:${IMAGE_TAG:-latest}
+    image: ${DOCKER_IMAGE_NAMESPACE:-hsliup}/tradingagents-pro-frontend:${IMAGE_TAG:-3-latest}
     container_name: tradingagents-frontend-pro
     restart: unless-stopped
     expose:

@@ -6,7 +6,7 @@
 # ============================================================================
 
 param(
-    [string]$PythonVersion = "3.10.11",
+    [string]$PythonVersion = "3.11.9",
     [string]$PortableDir = ""
 )
 

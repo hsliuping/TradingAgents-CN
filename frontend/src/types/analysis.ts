@@ -19,7 +19,7 @@ export enum BatchStatus {
 
 // 分析参数
 export interface AnalysisParameters {
-  market_type: 'A股' | '美股' | '港股'
+  market_type: 'A股'
   analysis_date?: string
   research_depth: '快速' | '基础' | '标准' | '深度' | '全面'
   selected_analysts: string[]

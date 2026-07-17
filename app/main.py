@@ -364,8 +364,41 @@ async def lifespan(app: FastAPI):
             result.total_documents,
             result.vector_backend,
         )
+
+        # 索引跳过时，向所有管理员发送系统通知
+        if result.sync_mode.startswith("skipped_"):
+            try:
+                from app.services.user_service import UserService
+                from app.services.notifications_service import get_notifications_service
+                from app.models.notification import NotificationCreate
+
+                user_svc = UserService()
+                users = await user_svc.list_users(limit=100)
+                notif_svc = get_notifications_service()
+
+                skip_reason = "Embedding API 不可用" if "embedding" in result.sync_mode else "未配置 Embedding"
+                for u in users:
+                    await notif_svc.create_and_publish(NotificationCreate(
+                        user_id=u.id,
+                        type="system",
+                        title="能力索引未构建",
+                        content=f"系统启动时能力索引构建被跳过（{skip_reason}）。请先在系统设置中配置有效的 Embedding API Key，然后在「系统设置 → 工具能力索引」中手动重建索引。",
+                        source="capability_index",
+                        severity="warning",
+                    ))
+                logger.info("📢 已向 %d 位用户发送能力索引跳过通知", len(users))
+            except Exception as ne:
+                logger.warning(f"⚠️ 发送能力索引通知失败: {ne}")
     except Exception as e:
         logger.error(f"❌ 能力索引同步失败: {e}", exc_info=True)
+
+    # 启动期同步系统默认提示词模板：将代码中的 fallback 提示词写入数据库统一管理
+    try:
+        from app.services.system_prompt_seed_service import ensure_system_prompt_templates
+        await ensure_system_prompt_templates()
+        logger.info("✅ 系统默认提示词模板同步完成")
+    except Exception as e:
+        logger.error(f"❌ 系统默认提示词模板同步失败: {e}", exc_info=True)
 
     # Apply dynamic settings (log_level, enable_monitoring) from ConfigProvider
     try:
@@ -1209,6 +1242,7 @@ from app.routers import skill_generation as skill_generation_router
 from app.routers import skill_gaps as skill_gaps_router
 from app.routers import skill_center as skill_center_router
 from app.routers import agent_workshop as agent_workshop_router
+from app.routers import workflow_generation as workflow_generation_router
 register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
 register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
 register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
@@ -1217,6 +1251,7 @@ register_router_with_log(app, skill_generation_router.router, "AI Skill 工坊�
 register_router_with_log(app, skill_gaps_router.router, "Skill 缺口路由 (skill-gaps)", tags=["skill-gaps"])
 register_router_with_log(app, skill_center_router.router, "Skill 中心聚合路由 (skill-center)", tags=["skill-center"])
 register_router_with_log(app, agent_workshop_router.router, "Agent 工坊路由 (agent-workshop)", tags=["agent-workshop"])
+register_router_with_log(app, workflow_generation_router.router, "AI 工作流创建路由 (workflow-generation)", tags=["workflow-generation"])
 
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router
@@ -1228,7 +1263,11 @@ register_router_with_log(app, unified_tasks_router.router, "统一任务中心�
 
 # MCP 路由
 from app.routers import mcp as mcp_router
+from app.routers import capability_index as capability_index_router
 app.include_router(mcp_router.router)
+
+# 能力索引路由
+app.include_router(capability_index_router.router, prefix="/api", tags=["capability-index"])
 
 # 路由注册完成，打印总结
 logger.info("=" * 70)

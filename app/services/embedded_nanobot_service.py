@@ -974,7 +974,7 @@ class EmbeddedNanobotService:
             channel or "embedded",
         )
         return {
-            "content": "该通道已废弃，Nanobot Runtime 已移除。请使用 agent_workshop / api / agent_workshop_evaluation 通道。",
+            "content": "该通道已废弃，Agent 工坊 Runtime 已移除。请使用 agent_workshop / api / agent_workshop_evaluation 通道。",
             "tools_used": [],
             "messages": [],
             "stop_reason": "deprecated_channel",

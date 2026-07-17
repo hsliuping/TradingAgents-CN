@@ -828,7 +828,35 @@ class WorkflowEngine:
         return has_builtin_agents
 
     def _lookup_agent_metadata(self, agent_id: str):
-        """查询 Agent 元数据：优先 DB，再 fallback 到 registry"""
+        """查询 Agent 元数据：优先 DB 动态 Agent，再 registry，最后代码常量"""
+        # 1. 优先从 MongoDB agent_configs 查找动态 Agent（Agent 工坊创建的自定义 Agent）
+        try:
+            from app.core.database import get_mongo_db
+            db = get_mongo_db()
+            doc = db.agent_configs.find_one({"agent_id": agent_id, "enabled": True})
+            if doc:
+                from core.agents.config import AgentMetadata, AgentCategory
+                metadata_fields = doc.get("metadata", {})
+                return AgentMetadata(
+                    id=agent_id,
+                    name=doc.get("name", agent_id),
+                    description=doc.get("description", ""),
+                    category=AgentCategory(metadata_fields.get("workflow_stage", "analyst")),
+                    tools=doc.get("default_tools", []),
+                    default_tools=doc.get("default_tools", []),
+                    license_tier=metadata_fields.get("license_tier", "pro"),
+                    tags=metadata_fields.get("tags", []),
+                    icon=metadata_fields.get("icon", "📄"),
+                    color=metadata_fields.get("color", "#3498db"),
+                    output_field=doc.get("output_field", f"{agent_id}_report"),
+                    report_label=doc.get("name", agent_id),
+                    show_in_reports=True,
+                    node_name=doc.get("name", agent_id),
+                )
+        except Exception:
+            pass
+
+        # 2. 从 AgentRegistry 查找
         try:
             from core.agents.registry import get_registry
             metadata = get_registry().get_metadata(agent_id)
@@ -837,6 +865,7 @@ class WorkflowEngine:
         except Exception:
             pass
 
+        # 3. 从代码常量回退
         try:
             from core.agents.config import AGENT_METADATA_REGISTRY
             return AGENT_METADATA_REGISTRY.get(agent_id)

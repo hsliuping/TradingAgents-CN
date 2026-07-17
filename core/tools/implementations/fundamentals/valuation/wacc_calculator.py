@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 @register_tool(
     tool_id="get_wacc_calculation",
     name="WACC 计算器",
-    description="计算 A 股公司的加权平均资本成本（WACC），基于资本结构、Beta、股权成本与债权成本",
+    description="计算 A 股公司加权平均资本成本 WACC，返回股权权重、债权权重、股权成本、债权成本、税率和 WACC 明细，为 DCF 估值提供折现率",
     category="fundamentals",
     is_online=False,
     auto_register=True,

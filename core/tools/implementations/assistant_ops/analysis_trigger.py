@@ -35,6 +35,12 @@ def _depth_label(depth: int) -> str:
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["analysis_trigger", "stock_analysis", "trigger", "create", "assistant_ops", "multi_agent_analysis", "async_task", "analysis_task", "deep_analysis"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["stock_analysis_trigger", "deep_analysis_initiation", "multi_agent_analysis", "async_analysis_task_creation"],
+    returns="返回文本消息，包含任务ID、股票代码、分析深度和预计完成时间。",
+    when_to_use="当用户要求对某只股票发起深度分析、生成分析报告时使用，任务在后台异步执行。",
 )
 async def trigger_stock_analysis(
     symbol: Annotated[str, "股票代码，6位数字，如 000001、600519"],
@@ -101,6 +107,12 @@ async def trigger_stock_analysis(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["analysis_trigger", "batch_analysis", "trigger", "create", "assistant_ops", "multi_stock_analysis", "async_task", "batch_task", "multi_agent_analysis", "batch_create"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["批量股票分析触发", "多只股票同时分析", "批量分析任务创建", "组合分析快速发起"],
+    when_to_use="当用户要求一次分析多只股票、批量发起分析任务时使用，每只股票单独创建后台异步任务。",
+    returns="返回文本消息，包含批次ID、各股票任务ID、分析深度和预计完成时间。",
 )
 async def trigger_batch_analysis(
     symbols: Annotated[str, "股票代码列表，用逗号分隔，如 000001,600519,000858"],
@@ -156,6 +168,12 @@ async def trigger_batch_analysis(
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["analysis_trigger", "status_query", "query", "assistant_ops", "task_status", "analysis_progress", "task_tracking", "async_task", "monitor", "progress_check"],
+    tool_role_hint="supporting",
+    output_shape="text",
+    preferred_for=["分析任务状态查询", "分析进度跟踪", "任务完成确认", "异步分析结果检查"],
+    when_to_use="当用户想了解之前发起的分析任务是否完成、当前进度或失败原因时使用。",
+    returns="返回文本消息，包含任务状态、进度百分比、当前步骤和（如已完成）投资建议摘要。",
 )
 async def get_analysis_status(
     task_id: Annotated[str, "分析任务ID"],

@@ -45,8 +45,8 @@ if (-not $VersionTag) {
 $backendVersionImage = "$Registry/tradingagents-pro-backend:$VersionTag"
 $frontendVersionImage = "$Registry/tradingagents-pro-frontend:$VersionTag"
 $backendBaseImage = "$Registry/tradingagents-pro-backend-base:$BaseTag"
-$backendLatestImage = "$Registry/tradingagents-pro-backend:latest"
-$frontendLatestImage = "$Registry/tradingagents-pro-frontend:latest"
+$backendLatestImage = "$Registry/tradingagents-pro-backend:3-latest"
+$frontendLatestImage = "$Registry/tradingagents-pro-frontend:3-latest"
 
 Write-Host "========================================" -ForegroundColor Yellow
 Write-Host "Docker Release" -ForegroundColor Yellow

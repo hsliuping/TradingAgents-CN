@@ -154,8 +154,17 @@ export const workflowGenerationApi = {
   },
 
   /** 确认方案并创建工作流 */
-  confirmAndCreate: async (sessionId: string, message: string = '确认'): Promise<WfConfirmResult> => {
-    const res = await request.post<ApiOk<WfConfirmResult>>(`${BASE}/sessions/${sessionId}/confirm`, { message })
+  confirmAndCreate: async (
+    sessionId: string,
+    options?: { message?: string; workflow_type?: string },
+  ): Promise<WfConfirmResult> => {
+    const res = await request.post<ApiOk<WfConfirmResult>>(
+      `${BASE}/sessions/${sessionId}/confirm`,
+      {
+        message: options?.message ?? '确认',
+        workflow_type: options?.workflow_type,
+      },
+    )
     return (res as any).data
   },
 

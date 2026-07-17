@@ -8,7 +8,7 @@
 - generate_blueprint()  — 将对话转为结构化 WorkflowBlueprint JSON
 - generate_optimization() — 迭代优化阶段
 
-参考: docs/design/v3.0/ai-workflow-generation.md §4.2
+参考: docs/05-design/v3.0/ai-workflow-generation.md §4.2
 """
 
 import json
@@ -56,6 +56,17 @@ SYSTEM_PROMPT_CHAT = """\
 ### 层面 3：工具/Skill 缺口
 检查选用的 Agent 是否有足够的工具支持，识别缺失的工具。
 
+## ⚠️ 关键约束：Agent 选择规则（严格遵守）
+
+1. **只能从下方「可用资源」中列出的 Agent 中选择**，禁止编造、联想或杜撰不存在的 agent_id
+2. **仔细阅读每个 Agent 的 description**，找到能力最匹配的。例如：
+   - 需要估值分析 → 用 `valuation_analyst_v2`，不要编造 `buffett_valuation_analyst`
+   - 需要护城河/竞争优势分析 → 用 `fundamentals_analyst_v2`（基本面分析涵盖竞争优势/护城河），不要编造 `moat_analyst`
+   - 需要管理层评估 → 同样用 `fundamentals_analyst_v2`（基本面分析涵盖管理层评估），不要编造 `management_analyst`
+3. **如果确实没有合适的 Agent 能满足用户需求，在回复中明确告知用户**，而非编造一个听起来合理的名称
+4. **Agent 名称只是标签**，真正的分析方向通过提示词定制（层面 2）来实现，不需要为每个细分方向新建 Agent
+5. **agent_id 必须逐字精确复制**，包括 `_v2`、`_v1` 等后缀。例如 `fundamentals_analyst_v2` 不能写成 `fundamentals_analyst`，`valuation_analyst_v2` 不能写成 `valuation_analyst`
+
 ## 可用资源
 
 {resource_context}
@@ -67,7 +78,7 @@ SYSTEM_PROMPT_CHAT = """\
 3. 需要并行执行的分析师应放在 parallel 和 merge 节点之间
 4. 需要辩论的角色应使用 debate 节点
 5. 每个 analyst/researcher/trader/risk/manager/post_processor 节点必须指定有效的 agent_id
-6. agent_id 必须来自上面列出的可用 Agent
+6. agent_id 必须严格来自上面「可用资源」中列出的 Agent ID（直接复制，不要改动）
 7. 节点 ID 使用小写字母+下划线，如 market_node, parallel_1
 8. 节点位置按照从上到下、并行水平排列布局
 
@@ -107,60 +118,119 @@ SYSTEM_PROMPT_BLUEPRINT = """\
         {{"id": "end", "type": "end", "label": "结束", "position_x": 400, "position_y": 800}}
     ],
     "edges": [
-        {{"id": "e1", "source": "start", "target": "parallel_1"}}
+        {{"id": "e1", "source": "start", "target": "parallel_1", "type": "normal", "condition": null}}
     ],
     "config": {{"analysis_depth": 3, "debate_rounds": "auto"}},
+    "input_config": {{
+        "fields": [
+            {{
+                "name": "ticker",
+                "label": "股票代码",
+                "type": "string",
+                "required": true,
+                "default": null,
+                "description": "要分析的股票代码，如 600519.SH",
+                "placeholder": "如: 600519.SH",
+                "options": null,
+                "option_labels": null,
+                "min": null,
+                "max": null,
+                "group": "基本参数",
+                "order": 1
+            }},
+            {{
+                "name": "research_depth",
+                "label": "分析深度",
+                "type": "select",
+                "required": false,
+                "default": "标准",
+                "description": "分析深度等级",
+                "placeholder": "",
+                "options": ["快速", "基础", "标准", "深度", "全面"],
+                "option_labels": ["快速 (2-4分钟)", "基础 (4-6分钟)", "标准 (6-10分钟)", "深度 (10-15分钟)", "全面 (15-25分钟)"],
+                "min": null,
+                "max": null,
+                "group": "基本参数",
+                "order": 2
+            }}
+        ]
+    }},
     "summary": "方案概述",
     "rationale": "设计思路",
-    "gap_analysis": {{
-        "agent_reshaping": [
-            {{
-                "agent_id": "market_analyst",
-                "node_id": "cb_market_node",
-                "original_role": "市场分析师",
-                "new_role": "可转债市场分析师",
-                "reshaping_direction": "从通用市场分析转向可转债专项分析，关注转股溢价率、债券价值等指标",
-                "key_focus_areas": [
-                    "转股溢价率趋势分析",
-                    "纯债价值与转股价值对比",
-                    "强赎风险监控",
-                    "下修预期评估"
-                ],
-                "additional_tools": []
-            }}
-        ],
-        "agents_using_default": [
-            {{"agent_id": "news_analyst", "name": "新闻分析师", "reason": "新闻分析通用性强，默认提示词足够"}}
-        ],
-        "missing_skills": [
-            {{
-                "skill_name": "convertible_bond_premium_calculator",
-                "skill_description": "计算可转债的转股溢价率、纯债溢价率",
-                "target_agent_id": "fundamentals_analyst",
-                "priority": "required"
-            }}
-        ],
-        "available_agents": [
-            {{"id": "market_analyst", "name": "市场分析师", "role_in_workflow": "可转债市场分析"}}
-        ],
-        "available_tools": [
-            {{"id": "get_market_data", "name": "获取市场数据", "used_by_agent": "market_analyst"}}
-        ],
-        "analysis_summary": "4 个 Agent 需要定制提示词，3 个使用默认，需创建 1 个新 Skill"
-    }}
+    "agent_reshaping": [
+        {{
+            "agent_id": "market_analyst",
+            "node_id": "cb_market_node",
+            "original_role": "市场分析师",
+            "new_role": "可转债市场分析师",
+            "reshaping_direction": "从通用市场分析转向可转债专项分析，关注转股溢价率、债券价值等指标",
+            "key_focus_areas": [
+                "转股溢价率趋势分析",
+                "纯债价值与转股价值对比",
+                "强赎风险监控",
+                "下修预期评估"
+            ],
+            "additional_tools": [
+                "convertible_bond_data_fetcher",
+                "premium_rate_calculator"
+            ]
+        }}
+    ],
+    "agents_using_default": [
+        {{"agent_id": "news_analyst", "name": "新闻分析师", "reason": "新闻分析通用性强，默认提示词足够"}}
+    ],
+    "analysis_summary": "4 个 Agent 需要定制提示词，3 个使用默认"
 }}
+
+## input_config 字段说明
+input_config.fields 定义工作流执行时需要的输入参数，前端会根据这些定义自动生成表单：
+- name: 参数名（传给后端的 key，如 ticker / analysis_date / analysis_target）
+- label: 表单显示标签
+- type: 控件类型，可选值：string（单行文本）/ textarea（多行文本）/ number（数字）/ boolean（开关）/ date（日期）/ select（下拉单选）/ multiselect（下拉多选）
+- required: 是否必填
+- default: 默认值（null 表示无默认值）
+- description: 参数描述/提示
+- placeholder: 输入框占位提示
+- options: 选项列表（仅 select/multiselect 时使用，其他类型填 null）
+- option_labels: 选项显示名（与 options 一一对应，让用户看到更友好的选项名）
+- min/max: 数值范围（仅 number 类型使用，其他类型填 null）
+- group: 分组标签（如"基本参数"/"高级参数"，同组的参数会显示在一起）
+- order: 排序序号（数字越小越靠前）
+
+不同工作流类型的 input_config 示例：
+- 股票分析：ticker(string,必填) / analysis_date(date) / research_depth(select) / quick_analysis_model(string) / deep_analysis_model(string)
+- 通用研究：analysis_target(textarea,必填) / research_depth(select) / quick_analysis_model(select) / deep_analysis_model(select) + 该流程特需的自定义参数
+- ETF分析：ticker(string,必填) / analysis_date(date) / research_depth(select)
+- 持仓分析：portfolio_data(textarea,必填) / analysis_date(date)
+
+## 条件分支
+当用户需求包含条件逻辑时（如"如果...则...否则..."），使用条件边：
+- 边的 type 设为 "conditional"
+- condition 设为 "true" 或 "false"
+- 从条件节点出发的两条边分别标记 true 和 false
+- 条件节点的 condition_expr 字段写判断表达式
+
+示例：
+节点：check_risk（CONDITION 类型，condition_expr: "state.get('risk_score', 0) > 80"）
+边：check_risk -> deep_analysis（type: conditional, condition: "true"）
+边：check_risk -> simple_decision（type: conditional, condition: "false"）
 
 ## 重要规则
 1. 只输出一个 JSON 对象，不要添加 markdown 代码块标记或其他文本
-2. 所有 agent_id 必须来自可用资源列表
+2. 所有 agent_id 必须逐字精确复制可用资源列表中的 ID，包括 `_v2`/`_v1` 等后缀，禁止缩写或省略
 3. 节点位置按照从上到下布局，并行节点水平分布
-4. gap_analysis 中的 agent_reshaping 只包含需要定制提示词的 Agent
+4. agent_reshaping 只包含需要定制提示词的 Agent
 5. agents_using_default 包含使用默认提示词的 Agent
 6. agent_reshaping 中的 reshaping_direction 只需写一句话简述定制方向，不要写完整提示词
 7. key_focus_areas 列出 3-6 个关键分析维度即可
 8. agent_reshaping 中每个条目必须包含 node_id，与 nodes 数组中对应节点的 id 字段保持一致
 9. 同一个 agent_id 可以在多个节点出现，此时每个节点需要单独的 agent_reshaping 条目（不同 node_id，不同定制方向）
-"""
+10. 不需要填写 available_agents / available_tools / missing_skills，系统会自动完成工具匹配
+11. agent_reshaping 中的 additional_tools 字段（可选）：当该 Agent 的分析任务需要专用工具、且可用资源中没有对应工具时，列出这些工具名（snake_case 命名）。如果可用资源中的工具已足够覆盖分析需求，则省略此字段
+12. input_config.fields 必须列出该工作流执行时需要的所有输入参数，每个参数的 name 要与后端代码中使用的字段名一致（如 ticker / analysis_date / analysis_target）
+13. 对于通用研究流程（workflow_type=general），至少要包含 analysis_target（textarea, 必填）参数
+14. 对于股票分析流程，至少要包含 ticker（string, 必填）参数
+15. input_config.fields 可以为空数组（表示无需额外输入参数）"""
 
 # ── 优化阶段 System Prompt ──────────────────────────────────────────────
 
@@ -200,6 +270,24 @@ class WorkflowPlanner:
 
     def __init__(self, llm_client: Optional[UnifiedLLMClient] = None):
         self._llm_client = llm_client
+        # 结构化的可用 Agent 列表（id/name/description/category/source），
+        # 由 ResourceCollector.collect_all() 提供，用于蓝图阶段的白名单校验。
+        self._available_agents: List[Dict[str, Any]] = []
+        # 🛡️ 重试计数器：记录蓝图生成时因 agent_id 幻觉触发重试的总次数（用于监控 LLM 质量）
+        self._hallucination_retry_count: int = 0
+
+    def set_available_agents(self, agents: List[Dict[str, Any]]) -> None:
+        """
+        注入结构化可用 Agent 列表（用于后置白名单校验）
+
+        由 workflow_generation_service 在调用 chat/generate_blueprint 之前注入。
+        """
+        self._available_agents = list(agents or [])
+
+    @property
+    def available_agent_ids(self) -> set:
+        """合法的 agent_id 集合（白名单）"""
+        return {a.get("id") for a in self._available_agents if a.get("id")}
 
     # ── 阶段 1: 对话 ────────────────────────────────────────────────
 
@@ -228,6 +316,13 @@ class WorkflowPlanner:
         if not self._llm_client:
             raise RuntimeError("LLM 客户端未初始化，请先设置 llm_client")
 
+        # 🔍 调试：打印当前可用的 Agent 白名单
+        whitelist_ids = sorted(self.available_agent_ids)
+        logger.info(
+            f"📋 [WorkflowPlanner.chat] 白名单 Agent ({len(whitelist_ids)} 个): "
+            f"{whitelist_ids}"
+        )
+
         # 构建消息历史
         messages = self._build_chat_messages(session, user_message, resource_context)
 
@@ -249,6 +344,16 @@ class WorkflowPlanner:
             timestamp=datetime.utcnow(),
         ))
         session.updated_at = datetime.utcnow()
+
+        # 🔍 调试：检查 LLM 回复中是否包含不在白名单中的 agent_id
+        mentioned_ids = set(re.findall(r'\b([a-z_]+_v[12]|[a-z_]+_analyst|[a-z_]+_assistant[a-z0-9_]*)\b', ai_message))
+        whitelist_set = self.available_agent_ids
+        hallucinated_in_chat = mentioned_ids - whitelist_set
+        if hallucinated_in_chat:
+            logger.warning(
+                f"⚠️ [WorkflowPlanner.chat] LLM 回复中提到了不在白名单中的 agent_id: "
+                f"{sorted(hallucinated_in_chat)}"
+            )
 
         return session, ai_message
 
@@ -302,41 +407,103 @@ class WorkflowPlanner:
         session.status = GenerationSessionStatus.PLANNING
         session.updated_at = datetime.utcnow()
 
+        # 🔍 调试：打印蓝图生成时的 Agent 白名单
+        whitelist_ids = sorted(self.available_agent_ids)
+        logger.info(
+            f"📋 [WorkflowPlanner.generate_blueprint] 白名单 Agent ({len(whitelist_ids)} 个): "
+            f"{whitelist_ids}"
+        )
+
         # 拼接对话历史
         conversation_history = self._format_conversation_history(session)
 
-        # 构建蓝图生成 prompt
+        # 第 1 次生成
+        blueprint = self._call_llm_for_blueprint(conversation_history, resource_context, None)
+
+        # 🛡️ 如果检测到 agent_id 幻觉，注入建议后重试 1 次
+        if (
+            blueprint is not None
+            and self._available_agents
+            and blueprint._invalid_agent_ids
+        ):
+            invalid_map = dict(blueprint._invalid_agent_ids)
+            retry_hint = self._build_retry_hint(invalid_map)
+            self._hallucination_retry_count += 1
+            logger.info(
+                f"🔁 [WorkflowPlanner] 检测到 {len(invalid_map)} 个幻觉 agent_id，"
+                f"已自动建议合法替换，重试 1 次（累计重试: {self._hallucination_retry_count}）"
+            )
+            retry_bp = self._call_llm_for_blueprint(
+                conversation_history, resource_context, retry_hint
+            )
+            if retry_bp is not None:
+                blueprint = retry_bp
+
+        if blueprint:
+            session.blueprint = blueprint
+            session.status = GenerationSessionStatus.BLUEPRINT_READY
+            logger.info(
+                f"[WorkflowPlanner] 蓝图生成成功: {blueprint.name}, "
+                f"节点={len(blueprint.nodes)}, 边={len(blueprint.edges)}"
+            )
+        else:
+            session.status = GenerationSessionStatus.GATHERING
+            session.error = "蓝图 JSON 解析失败，请继续对话完善需求"
+            logger.warning("[WorkflowPlanner] 蓝图 JSON 解析失败")
+
+        session.updated_at = datetime.utcnow()
+        return session, session.blueprint
+
+    def _call_llm_for_blueprint(
+        self,
+        conversation_history: str,
+        resource_context: str,
+        retry_hint: Optional[str],
+    ) -> Optional[WorkflowBlueprint]:
+        """调用 LLM 生成蓝图并解析，可选追加重试提示"""
         system_content = SYSTEM_PROMPT_BLUEPRINT.format(
             conversation_history=conversation_history,
             resource_context=resource_context,
         )
-        messages = [
-            Message(role="system", content=system_content),
-            Message(role="user", content="请根据上述对话历史生成完整的工作流蓝图 JSON。"),
-        ]
+        messages: List[Message] = [Message(role="system", content=system_content)]
+        if retry_hint:
+            messages.append(Message(
+                role="user",
+                content=(
+                    "上一轮生成的蓝图中包含不存在的 agent_id，请用下方建议的合法 ID 替换后重新输出完整 JSON。\n"
+                    f"{retry_hint}\n\n"
+                    "请输出完整的工作流蓝图 JSON。"
+                ),
+            ))
+        else:
+            messages.append(Message(role="user", content="请根据上述对话历史生成完整的工作流蓝图 JSON。"))
 
         try:
             response = self._llm_client.chat(messages)
             raw_content = response.content or ""
-            blueprint = self._parse_blueprint_json(raw_content)
-            if blueprint:
-                session.blueprint = blueprint
-                session.status = GenerationSessionStatus.BLUEPRINT_READY
-                logger.info(
-                    f"[WorkflowPlanner] 蓝图生成成功: {blueprint.name}, "
-                    f"节点={len(blueprint.nodes)}, 边={len(blueprint.edges)}"
-                )
-            else:
-                session.status = GenerationSessionStatus.GATHERING
-                session.error = "蓝图 JSON 解析失败，请继续对话完善需求"
-                logger.warning("[WorkflowPlanner] 蓝图 JSON 解析失败")
+            logger.debug(f"[WorkflowPlanner] LLM 原始返回内容（长度={len(raw_content)}）")
+            return self._parse_blueprint_json(raw_content)
         except Exception as e:
-            logger.error(f"[WorkflowPlanner] 蓝图生成失败: {e}", exc_info=True)
-            session.status = GenerationSessionStatus.GATHERING
-            session.error = f"蓝图生成失败: {e}"
+            logger.error(f"[WorkflowPlanner] LLM 调用失败: {e}", exc_info=True)
+            return None
 
-        session.updated_at = datetime.utcnow()
-        return session, session.blueprint
+    def _build_retry_hint(self, invalid_map: Dict[str, str]) -> str:
+        """构造重试提示：列出非法 ID → 建议合法 ID 的映射"""
+        lines = ["## ⚠️ 必须修正的 agent_id 幻觉"]
+        for bad, good in invalid_map.items():
+            if good:
+                lines.append(f"- ❌ `{bad}` 不存在 → ✅ 请改为 `{good}`")
+            else:
+                lines.append(
+                    f"- ❌ `{bad}` 不存在 → 列表里没有完全等价的 Agent，请从【可用 Agent】中挑选最接近的"
+                )
+        # 强调"必须从上面列表里挑"
+        lines.append("")
+        lines.append(
+            "**重要**：agent_id 必须严格使用上文【可用的 Agent（智能体）】中列出的 ID，"
+            "禁止编造或联想任何不在列表中的 ID。"
+        )
+        return "\n".join(lines)
 
     def _format_conversation_history(self, session: WorkflowGenerationSession) -> str:
         """将会话历史格式化为文本"""
@@ -383,7 +550,7 @@ class WorkflowPlanner:
                             break
 
         if data is None:
-            logger.warning("[WorkflowPlanner] 无法从 LLM 输出中提取 JSON")
+            logger.warning(f"[WorkflowPlanner] 无法从 LLM 输出中提取 JSON，长度={len(json_str)}")
             return None
 
         return self._build_blueprint_from_dict(data)
@@ -428,28 +595,36 @@ class WorkflowPlanner:
                     animated=ed.get("animated", False),
                 ))
 
-            # 解析缺口分析
+            # 解析缺口分析（LLM 提供 agent_reshaping + agents_using_default，
+            # available_tools / missing_skills 由后续 CapabilityIndex 搜索填充）
             gap_data = data.get("gap_analysis")
-            gap_analysis = None
+            agent_reshaping_raw = data.get("agent_reshaping", [])
+            agents_using_default_raw = data.get("agents_using_default", [])
+            analysis_summary = data.get("analysis_summary", "")
+
+            # 兼容旧格式：如果还有 gap_analysis 嵌套，从中提取
             if gap_data and isinstance(gap_data, dict):
-                reshaping_fields = set(AgentReshapingPlan.__fields__.keys())
-                skill_fields = set(SkillCreationRequest.__fields__.keys())
-                reshaping = [
-                    AgentReshapingPlan(**{k: v for k, v in r.items() if k in reshaping_fields})
-                    for r in gap_data.get("agent_reshaping", [])
-                ]
-                missing_skills = [
-                    SkillCreationRequest(**{k: v for k, v in s.items() if k in skill_fields})
-                    for s in gap_data.get("missing_skills", [])
-                ]
-                gap_analysis = GapAnalysisResult(
-                    agent_reshaping=reshaping,
-                    agents_using_default=gap_data.get("agents_using_default", []),
-                    missing_skills=missing_skills,
-                    available_agents=gap_data.get("available_agents", []),
-                    available_tools=gap_data.get("available_tools", []),
-                    analysis_summary=gap_data.get("analysis_summary", ""),
-                )
+                if not agent_reshaping_raw:
+                    agent_reshaping_raw = gap_data.get("agent_reshaping", [])
+                if not agents_using_default_raw:
+                    agents_using_default_raw = gap_data.get("agents_using_default", [])
+                if not analysis_summary:
+                    analysis_summary = gap_data.get("analysis_summary", "")
+
+            reshaping_fields = set(AgentReshapingPlan.__fields__.keys())
+            reshaping = [
+                AgentReshapingPlan(**{k: v for k, v in r.items() if k in reshaping_fields})
+                for r in agent_reshaping_raw
+            ]
+
+            gap_analysis = GapAnalysisResult(
+                agent_reshaping=reshaping,
+                agents_using_default=agents_using_default_raw,
+                missing_skills=[],  # 由 CapabilityIndex 搜索填充
+                available_agents=[],  # 由 CapabilityIndex 搜索填充
+                available_tools=[],  # 由 CapabilityIndex 搜索填充
+                analysis_summary=analysis_summary,
+            )
 
             blueprint = WorkflowBlueprint(
                 name=data.get("name", ""),
@@ -458,6 +633,7 @@ class WorkflowPlanner:
                 nodes=nodes,
                 edges=edges,
                 config=data.get("config", {}),
+                input_config=data.get("input_config") or {"fields": []},
                 summary=data.get("summary", ""),
                 rationale=data.get("rationale", ""),
                 gap_analysis=gap_analysis,
@@ -473,11 +649,116 @@ class WorkflowPlanner:
                     "workflow_created": False,
                 }
 
+            # 🛡️ 防幻觉：agent_id 白名单校验（参考 Agent 工坊 gap_analysis 的做法）
+            if self._available_agents:
+                self._enforce_agent_whitelist(blueprint)
+
             return blueprint
 
         except Exception as e:
             logger.error(f"[WorkflowPlanner] 蓝图结构解析失败: {e}", exc_info=True)
             return None
+
+    # ── 阶段 2.5: 防幻觉白名单校验 ────────────────────────────────
+
+    def _enforce_agent_whitelist(self, blueprint: WorkflowBlueprint) -> None:
+        """
+        对蓝图中的 agent_id 做白名单校验，参考 Agent 工坊 gap_analysis 防幻觉逻辑。
+
+        校验范围：
+        - nodes[].agent_id      — 运行时执行节点，幻觉会导致运行时崩溃
+        - agent_reshaping[].agent_id — 提示词生成目标，幻觉会产生孤立提示词资源
+
+        行为：
+        1. nodes 中的非法 agent_id → 设为 None（节点变成无 Agent 的占位节点）
+        2. agent_reshaping 中的非法 agent_id → 记录 warning + 保留原值（不阻断，由 PromptGenerator 自行处理）
+        3. 记录到 blueprint._invalid_agent_ids 便于上层重试
+        """
+        whitelist = self.available_agent_ids
+        invalid_map: Dict[str, str] = {}  # invalid_id -> 建议的合法 ID
+
+        # 1. 校验 nodes[].agent_id
+        for node in blueprint.nodes:
+            if not node.agent_id:
+                continue
+            if node.agent_id in whitelist:
+                continue
+            # agent_id 不合法
+            suggested = self._suggest_similar_agent(node.agent_id)
+            invalid_map[node.agent_id] = suggested or ""
+            logger.warning(
+                f"🛡️ [WorkflowPlanner] LLM 幻觉 agent_id 已过滤 (node): "
+                f"node_id={node.id}, agent_id='{node.agent_id}', "
+                f"建议替换为='{suggested or '(无)'}', "
+                f"节点类型={node.type}"
+            )
+            # 清空非法 agent_id，让 AgentFactory 走兜底（避免运行时找不到 agent 崩溃）
+            node.agent_id = None
+
+        # 2. 校验 agent_reshaping[].agent_id（提示词生成目标）
+        if blueprint.gap_analysis and blueprint.gap_analysis.agent_reshaping:
+            for plan in blueprint.gap_analysis.agent_reshaping:
+                if not plan.agent_id or plan.agent_id in whitelist:
+                    continue
+                suggested = self._suggest_similar_agent(plan.agent_id)
+                logger.warning(
+                    f"🛡️ [WorkflowPlanner] LLM 幻觉 agent_id 已标记 (agent_reshaping): "
+                    f"agent_id='{plan.agent_id}', "
+                    f"new_role='{plan.new_role}', "
+                    f"建议替换为='{suggested or '(无)'}'"
+                )
+                if plan.agent_id not in invalid_map:
+                    invalid_map[plan.agent_id] = suggested or ""
+
+        # 3. 写入 blueprint 私有属性（不再使用动态 setattr）
+        if invalid_map:
+            blueprint._invalid_agent_ids.update(invalid_map)
+
+            # 写入 summary，告知用户本次自动过滤了哪些幻觉 agent
+            note = "\n\n> ⚠️ 自动校验过滤了不存在的 Agent: " + ", ".join(
+                f"`{bad}` → `{good or '(无)'}`" for bad, good in invalid_map.items()
+            )
+            if blueprint.summary:
+                blueprint.summary = blueprint.summary + note
+            else:
+                blueprint.summary = note.lstrip("\n")
+
+    def _suggest_similar_agent(self, invalid_id: str) -> Optional[str]:
+        """
+        在白名单里找与 invalid_id 字符串最相似的合法 ID（简单编辑距离启发式）。
+        """
+        if not self._available_agents or not invalid_id:
+            return None
+        invalid_lower = invalid_id.lower().replace("-", "_")
+        best_id: Optional[str] = None
+        best_score = 0
+        for a in self._available_agents:
+            aid = a.get("id", "")
+            if not aid:
+                continue
+            aid_lower = aid.lower()
+            # 1) 子串包含直接命中
+            if invalid_lower in aid_lower or aid_lower in invalid_lower:
+                return aid
+            # 2) 简单词集合相似度
+            score = self._token_overlap(invalid_lower, aid_lower)
+            if score > best_score:
+                best_score = score
+                best_id = aid
+        # 加一个下限避免误匹配
+        if best_score >= 0.4:
+            return best_id
+        return None
+
+    @staticmethod
+    def _token_overlap(a: str, b: str) -> float:
+        """粗略的 token 重叠比：按 _ 和 - 拆分后求交集/并集"""
+        import re as _re
+        ta = {t for t in _re.split(r"[_\-]", a) if t}
+        tb = {t for t in _re.split(r"[_\-]", b) if t}
+        if not ta or not tb:
+            return 0.0
+        return len(ta & tb) / len(ta | tb)
 
     # ── 阶段 3: 迭代优化 ────────────────────────────────────────────
 

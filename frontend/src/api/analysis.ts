@@ -318,9 +318,7 @@ export const analysisApi = {
 
 // 分析相关的常量
 export const MARKET_TYPES = {
-  US: '美股',
-  CN: 'A股',
-  HK: '港股'
+  CN: 'A股'
 } as const
 
 export const ANALYSIS_TYPES = {
@@ -345,12 +343,6 @@ export const DATA_SOURCES = {
   TUSHARE: 'tushare',
   AKSHARE: 'akshare',
   BAOSTOCK: 'baostock',
-
-  // 美股数据源
-  FINNHUB: 'finnhub',
-  YAHOO_FINANCE: 'yahoo_finance',
-  ALPHA_VANTAGE: 'alpha_vantage',
-  IEX_CLOUD: 'iex_cloud',
 
   // 专业数据源
   WIND: 'wind',
@@ -393,18 +385,8 @@ export const validateAnalysisRequest = (request: Partial<AnalysisRequest>): stri
   // 验证股票代码格式
   if (request.stock_symbol) {
     const symbol = request.stock_symbol.trim().toUpperCase()
-    if (request.market_type === '美股') {
-      if (!/^[A-Z]{1,5}$/.test(symbol)) {
-        errors.push('美股代码格式不正确，应为1-5个字母')
-      }
-    } else if (request.market_type === 'A股') {
-      if (!/^\d{6}$/.test(symbol)) {
-        errors.push('A股代码格式不正确，应为6位数字')
-      }
-    } else if (request.market_type === '港股') {
-      if (!/^\d{4,5}\.HK$/.test(symbol)) {
-        errors.push('港股代码格式不正确，应为4-5位数字.HK')
-      }
+    if (!/^\d{6}$/.test(symbol)) {
+      errors.push('A股代码格式不正确，应为6位数字')
     }
   }
 
@@ -434,10 +416,8 @@ export const formatMarketType = (market: string): string => {
 
 export const formatDataSource = (source: string): string => {
   const sourceMap: Record<string, string> = {
-    finnhub: 'FinnHub',
     tushare: 'Tushare',
-    akshare: 'AKShare',
-    yahoo: 'Yahoo Finance'
+    akshare: 'AKShare'
   }
   return sourceMap[source] ?? source
 }
@@ -475,22 +455,12 @@ export const getAllTasks = async (params: {
 }
 
 // 工具函数
-export const getStockExamples = (market: string): string[] => {
-  const examples: Record<string, string[]> = {
-    '美股': ['AAPL', 'TSLA', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'NFLX'],
-    'A股': ['000001', '600519', '000002', '600036', '000858', '002415', '300059', '688981'],
-    '港股': ['0700.HK', '9988.HK', '3690.HK', '0941.HK', '1810.HK', '2318.HK', '1299.HK']
-  }
-  return examples[market] ?? []
+export const getStockExamples = (): string[] => {
+  return ['000001', '600519', '000002', '600036', '000858', '002415', '300059', '688981']
 }
 
-export const getStockPlaceholder = (market: string): string => {
-  const placeholders: Record<string, string> = {
-    '美股': '输入美股代码，如 AAPL, TSLA, MSFT',
-    'A股': '输入A股代码，如 000001, 600519',
-    '港股': '输入港股代码，如 0700.HK, 9988.HK'
-  }
-  return placeholders[market] ?? '输入股票代码'
+export const getStockPlaceholder = (): string => {
+  return '输入A股代码，如 000001, 600519'
 }
 
 

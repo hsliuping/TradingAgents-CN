@@ -67,18 +67,16 @@ class DataSourceManager:
 
                 if enabled:
                     priority_map[data_source_name] = priority
-                    logger.info(f"📊 从统一配置读取 {data_source_name} 优先级: {priority}, 启用: {enabled}")
+
+            # 🔥 强制 .env 开关覆盖（.env 优先级最高，无视数据库缓存）
+            self._apply_dotenv_overrides()
 
             # 更新各个 Adapter 的优先级
             for adapter in self.adapters:
                 if adapter.name in priority_map:
-                    # 动态设置优先级
                     adapter._priority = priority_map[adapter.name]
-                    logger.info(f"✅ 设置 {adapter.name} 优先级: {adapter._priority}")
                 else:
-                    # 使用默认优先级
                     adapter._priority = adapter._get_default_priority()
-                    logger.info(f"⚠️ 统一配置中未找到 {adapter.name} 或未启用，使用默认优先级: {adapter._priority}")
 
         except Exception as e:
             logger.warning(f"⚠️ 从统一配置加载优先级失败: {e}，使用默认优先级")
@@ -87,6 +85,42 @@ class DataSourceManager:
             # 使用默认优先级
             for adapter in self.adapters:
                 adapter._priority = adapter._get_default_priority()
+
+    def _apply_dotenv_overrides(self):
+        """强制应用 .env 中的数据源开关（最高优先级）
+
+        通过 Pydantic BaseSettings 读取 .env 中显式设置的值。
+        多个 key 按优先级排列，第一个被显式设置的值生效。
+        """
+        try:
+            from app.core.config import settings as runtime_settings
+
+            # 按优先级排列：用户实际在 .env 中设置的 key 放前面
+            env_overrides = {
+                "baostock": ["BAOSTOCK_UNIFIED_ENABLED", "ENABLE_BAOSTOCK"],
+                "tushare": ["ENABLE_TUSHARE"],
+            }
+
+            for adapter_name, env_keys in env_overrides.items():
+                effective_key = None
+                env_val = None
+
+                for key in env_keys:
+                    val = getattr(runtime_settings, key, None)
+
+                    # 只有当值为 False（禁用）时才覆盖。
+                    # True 可能是 Pydantic 默认值，不要用默认 True 去覆盖数据库的 False。
+                    if val is False:
+                        env_val = False
+                        effective_key = key
+                        break
+
+                if effective_key:
+                    old_val = self._configured_enabled_map.get(adapter_name)
+                    self._configured_enabled_map[adapter_name] = env_val
+                    logger.info(f"🔧 [DataSourceManager] .env 禁用 ({effective_key}): {adapter_name} enabled=False (原={old_val})")
+        except Exception as e:
+            logger.warning(f"⚠️ [DataSourceManager] .env 覆盖失败: {e}")
 
     def get_available_adapters(self) -> List[DataSourceAdapter]:
         available: List[DataSourceAdapter] = []

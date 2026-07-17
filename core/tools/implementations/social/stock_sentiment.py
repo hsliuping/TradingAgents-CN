@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
     category="social",
     is_online=True,
     auto_register=True,
+    capability_tags=["stock_sentiment", "sentiment", "market_sentiment", "social_media_sentiment", "public_opinion", "social", "event_driven"],
+    tool_role_hint="specialized",
+    output_shape="markdown",
+    preferred_for=["sentiment_analysis", "social_media_monitoring", "market_sentiment_assessment"],
     when_to_use="当需要分析市场舆情、社交媒体情绪、投资者情绪和情绪面影响时使用。",
     when_not_to_use="不用于技术指标交叉信号、财务报表异常、现金流风险、监管处罚/诉讼等公告事件识别或基本面估值。",
 )

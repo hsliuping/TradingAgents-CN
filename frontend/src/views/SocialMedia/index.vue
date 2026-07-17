@@ -115,8 +115,6 @@
         <el-form-item label="市场类型">
           <el-select v-model="queryForm.market" placeholder="选择市场" clearable style="width: 150px;">
             <el-option label="A股" value="A股" />
-            <el-option label="港股" value="港股" />
-            <el-option label="美股" value="美股" />
           </el-select>
         </el-form-item>
         <el-form-item label="平台">
@@ -148,7 +146,7 @@
         <el-table-column prop="market" label="市场" width="80">
           <template #default="{ row }">
             <el-tag 
-              :type="row.market === 'A股' ? 'success' : row.market === '港股' ? 'warning' : 'danger'"
+              type="success"
               size="small"
             >
               {{ row.market || 'A股' }}
@@ -258,7 +256,7 @@
         <el-descriptions-item label="股票代码">{{ selectedMessage.symbol }}</el-descriptions-item>
         <el-descriptions-item label="市场类型">
           <el-tag 
-            :type="selectedMessage.market === 'A股' ? 'success' : selectedMessage.market === '港股' ? 'warning' : 'danger'"
+            type="success"
             size="small"
           >
             {{ selectedMessage.market || 'A股' }}

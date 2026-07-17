@@ -840,7 +840,7 @@ async def get_api_guide_content():
 
     try:
         # 读取 Markdown 文件
-        guide_path = Path("docs/api/STOCK_DATA_IMPORT_API.md")
+        guide_path = Path("docs/03-development/api/stock-data-import.md")
 
         if not guide_path.exists():
             raise HTTPException(

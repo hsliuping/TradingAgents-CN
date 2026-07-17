@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["schedule", "scheduled_analysis", "config", "list", "query", "assistant_ops", "cron", "scheduled_task", "task_config", "automation_config", "schedule_query"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["查看定时配置", "定时任务列表", "计划任务查询", "自动分析配置查看"],
+    when_to_use="当用户想查看自己已创建的定时分析配置列表、了解有哪些自动分析计划时使用。",
+    returns="返回文本格式的定时分析配置列表，每条含配置ID、名称、启用状态和 CRON 时间段摘要。",
 )
 async def list_scheduled_configs() -> str:
     """列出当前用户的所有定时分析配置摘要。"""
@@ -65,6 +71,12 @@ async def list_scheduled_configs() -> str:
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["schedule", "scheduled_analysis", "create", "config", "cron", "assistant_ops", "automation", "scheduled_task", "task_creation", "analysis_plan", "cron_expression"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["创建定时分析", "设置自动分析", "定时任务创建", "CRON计划配置"],
+    when_to_use="当用户想新建一个定时自动分析计划、指定 CRON 时间和自选股分组时使用。",
+    returns="返回文本消息，包含新建配置的名称、配置ID、时间段、分析深度和启用状态。",
 )
 async def create_scheduled_analysis(
     name: Annotated[str, "配置名称，如「每日早盘分析」"],
@@ -139,12 +151,18 @@ async def create_scheduled_analysis(
 @register_tool(
     tool_id="toggle_scheduled_config",
     name="启用或禁用定时分析",
-    description="启用或禁用一个已有的定时分析配置，不会删除配置本身。",
+    description="启用或禁用已有的定时分析配置（不删除配置本身）。返回操作结果，并同步注册或取消调度器任务。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
+    capability_tags=["schedule", "scheduled_analysis", "toggle", "enable", "disable", "config", "assistant_ops", "scheduled_task", "automation_control", "task_status", "schedule_management"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=["启用定时分析", "禁用定时分析", "切换任务状态", "暂停自动分析"],
+    when_to_use="当用户想启用或禁用一个已有的定时分析配置、暂停或恢复自动分析计划时使用。",
+    returns="返回文本消息，提示配置的启用/禁用操作结果。",
 )
 async def toggle_scheduled_config(
     config_id: Annotated[str, "定时分析配置ID"],
