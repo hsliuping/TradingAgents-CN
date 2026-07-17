@@ -47,6 +47,9 @@ class QdrantAdapter:
                 self._client = QdrantClient(path=data_dir)
                 logger.info(f"✅ Qdrant 客户端初始化成功 (本地模式: {data_dir})")
 
+                # 🔧 自动修复 meta.json：防止因并发写入或异常导致 collection 注册丢失
+                self._repair_meta_json(data_dir)
+
                 QdrantAdapter._initialized = True
 
             except ImportError:
@@ -86,6 +89,110 @@ class QdrantAdapter:
         except Exception as e:
             logger.error(f"❌ 删除 Qdrant 集合失败: {e}")
             return False
+
+    def list_collections(self) -> List[Dict[str, Any]]:
+        """列出所有 collection 及其信息（复用现有客户端，避免文件锁冲突）
+
+        Returns:
+            [{name, point_count, dimensions}, ...]
+        """
+        result = []
+        try:
+            for col in self._client.get_collections().collections:
+                try:
+                    info = self._client.get_collection(col.name)
+                    result.append({
+                        "name": col.name,
+                        "point_count": info.points_count or 0,
+                        "dimensions": info.config.params.vectors.size if info.config.params.vectors else 0,
+                    })
+                except Exception as e:
+                    logger.warning(f"⚠️ Qdrant 读取 collection {col.name} 信息失败: {e}")
+                    result.append({"name": col.name, "point_count": 0, "dimensions": 0})
+        except Exception as e:
+            logger.error(f"❌ Qdrant 列出 collection 失败: {e}")
+        return result
+
+    def get_raw_client(self):
+        """获取底层 QdrantClient 实例（用于迁移等需要直接操作客户端的场景）"""
+        return self._client
+
+    def _repair_meta_json(self, data_dir: str):
+        """自动修复 meta.json：将磁盘上存在但 meta.json 未注册的 collection 补回
+        
+        防止因并发写入、进程异常退出或 Qdrant 版本升级导致 collection 注册信息丢失。
+        """
+        import json, sqlite3, pickle
+
+        meta_path = os.path.join(data_dir, "meta.json")
+        collection_dir = os.path.join(data_dir, "collection")
+
+        if not os.path.exists(meta_path) or not os.path.exists(collection_dir):
+            return
+
+        try:
+            # 读取当前 meta.json
+            with open(meta_path, "r") as f:
+                meta = json.load(f)
+
+            registered = set(meta.get("collections", {}).keys())
+
+            # 扫描磁盘上实际存在的 collection
+            on_disk = set()
+            for name in os.listdir(collection_dir):
+                storage = os.path.join(collection_dir, name, "storage.sqlite")
+                if os.path.exists(storage):
+                    on_disk.add(name)
+
+            # 找出孤儿 collection（磁盘存在但未注册）
+            orphans = on_disk - registered
+            if not orphans:
+                return
+
+            logger.warning(
+                f"🔧 [Qdrant] 发现 {len(orphans)} 个孤儿 collection（磁盘存在但 meta.json 未注册），自动修复中..."
+            )
+
+            for name in sorted(orphans):
+                storage = os.path.join(collection_dir, name, "storage.sqlite")
+                dims = 1024  # 默认维度
+                try:
+                    conn = sqlite3.connect(storage)
+                    cur = conn.cursor()
+                    cur.execute("SELECT COUNT(*) FROM points")
+                    cnt = cur.fetchone()[0]
+                    if cnt > 0:
+                        cur.execute("SELECT point FROM points LIMIT 1")
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            point = pickle.loads(row[0])
+                            dims = len(point.vector)
+                    conn.close()
+                except Exception:
+                    pass
+
+                meta["collections"][name] = {
+                    "vectors": {
+                        "size": dims, "distance": "Cosine",
+                        "hnsw_config": None, "quantization_config": None,
+                        "on_disk": None, "datatype": None, "multivector_config": None
+                    },
+                    "shard_number": None, "sharding_method": None,
+                    "replication_factor": None, "write_consistency_factor": None,
+                    "on_disk_payload": None, "hnsw_config": None,
+                    "wal_config": None, "optimizers_config": None,
+                    "quantization_config": None, "sparse_vectors": None,
+                    "strict_mode_config": None, "metadata": None
+                }
+                logger.info(f"  ✅ 已修复: {name} ({dims}d)")
+
+            # 写回 meta.json
+            with open(meta_path, "w") as f:
+                json.dump(meta, f, indent=2)
+            logger.info(f"🔧 [Qdrant] meta.json 修复完成，恢复了 {len(orphans)} 个 collection")
+
+        except Exception as e:
+            logger.warning(f"⚠️ [Qdrant] meta.json 修复检查失败（忽略，不影响启动）: {e}")
 
 
 class QdrantCollection:

@@ -2,6 +2,7 @@
 配置管理服务
 """
 
+import os
 import time
 import asyncio
 import logging
@@ -1230,7 +1231,7 @@ class ConfigService:
 
                 # 🔥 Ollama 模型名称格式转换：横线转冒号
                 # Ollama 中模型名称使用冒号（如 qwen2.5:7b），但配置中可能使用横线（qwen2.5-7b）
-                model_name_for_request = llm_config.model_name
+                model_name_for_request = (llm_config.model_name or "").strip()
                 if is_local_model and provider_str.lower() == "ollama":
                     # 将横线转换为冒号（Ollama 格式）
                     if "-" in model_name_for_request and ":" not in model_name_for_request:
@@ -3426,7 +3427,7 @@ class ConfigService:
             db = await self._get_db()
             providers_collection = db.llm_providers
 
-            providers_data = await providers_collection.find().to_list(length=None)
+            providers_data = await providers_collection.find().sort({"_id": -1}).to_list(length=None)
             providers = []
 
             logger.info(f"🔍 [get_llm_providers] 从数据库获取到 {len(providers_data)} 个供应商")
@@ -3517,11 +3518,454 @@ class ConfigService:
                         "models": models
                     })
             
-            logger.info(f"✅ [get_embedding_providers] 返回 {len(result)} 个支持 embedding 的厂家")
+            # 🔧 添加本地 Embedding 选项（无需 API Key，使用 sentence-transformers）
+            result.append({
+                "name": "local",
+                "display_name": "本地 Embedding（无需联网）",
+                "models": ["Qwen/Qwen3-Embedding-0.6B"],
+            })
+            
+            logger.info(f"✅ [get_embedding_providers] 返回 {len(result)} 个支持 embedding 的厂家（含本地）")
             return result
         except Exception as e:
             logger.error(f"❌ [get_embedding_providers] 获取 Embedding 厂家列表失败: {e}", exc_info=True)
             return []
+
+    async def _get_current_embedding_model(self) -> str:
+        """获取当前系统配置的 embedding 模型标识（如 dashscope:text-embedding-v4）"""
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            # 优先获取激活的配置
+            configs = list(db.system_configs.find(
+                {"config_type": "system", "is_active": True},
+                sort=[("version", -1)]
+            ).limit(1))
+            if configs:
+                return configs[0].get("system_settings", {}).get("default_embedding_model", "")
+        except Exception:
+            pass
+        return os.environ.get("DEFAULT_EMBEDDING_MODEL", "")
+
+    async def _get_migration_records(self) -> Dict[str, Dict[str, Any]]:
+        """从 MongoDB 读取已迁移的 collection 记录
+        
+        Returns:
+            {collection_name: {model_used: "dashscope:text-embedding-v4", migrated_at: "..."}}
+        """
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            records = {}
+            for doc in db.system_configs.find({"config_key": {"$regex": "^qdrant_migration_"}}):
+                col_name = doc["config_key"].replace("qdrant_migration_", "")
+                records[col_name] = doc.get("config_value", {})
+            return records
+        except Exception:
+            return {}
+
+    async def _save_migration_record(self, collection_name: str, model_used: str):
+        """保存迁移记录到 MongoDB"""
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            db.system_configs.update_one(
+                {"config_key": f"qdrant_migration_{collection_name}"},
+                {"$set": {
+                    "config_key": f"qdrant_migration_{collection_name}",
+                    "config_type": "system",
+                    "config_value": {
+                        "model_used": model_used,
+                        "migrated_at": datetime.utcnow().isoformat(),
+                    },
+                    "updated_at": datetime.utcnow(),
+                }},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ 保存迁移记录失败: {e}")
+
+    async def get_qdrant_collections(self) -> Dict[str, List[Dict[str, Any]]]:
+        """获取 Qdrant 中所有 collection 信息（主存储 + mem0），用于迁移选择
+        
+        返回按存储区域分组的数据，包含迁移状态标记，无需初始化 embedder。
+        """
+        result = {"main": [], "mem0": []}
+        try:
+            # 获取当前 embedding 模型和迁移记录
+            current_model = await self._get_current_embedding_model()
+            migration_records = await self._get_migration_records()
+
+            def _migration_status(col_name: str, source: str) -> str:
+                """判断迁移状态"""
+                record = migration_records.get(col_name)
+                if not record:
+                    return "pending"
+                if record.get("model_used") == current_model:
+                    return "migrated"
+                return "outdated"
+
+            # 1. 主存储 — 复用 QdrantAdapter 单例的已有客户端，避免锁冲突
+            try:
+                from core.memory.qdrant_adapter import QdrantAdapter
+                adapter = QdrantAdapter()
+                for col in adapter.list_collections():
+                    result["main"].append({
+                        "name": col["name"],
+                        "point_count": col["point_count"],
+                        "dimensions": col["dimensions"],
+                        "source": "main",
+                        "migration_status": _migration_status(col["name"], "main"),
+                        "current_model": current_model,
+                        "last_migration": migration_records.get(col["name"], {}).get("migrated_at") or None,
+                    })
+                result["main"] = sorted(result["main"], key=lambda x: x["name"])
+                logger.info(f"✅ [get_qdrant_collections] 主存储: {len(result['main'])} 个 collection")
+            except Exception as e:
+                logger.warning(f"⚠️ [get_qdrant_collections] 主存储读取失败: {e}")
+
+            # 2. mem0 存储
+            try:
+                from qdrant_client import QdrantClient
+                qdrant_base = os.environ.get("QDRANT_DATA_DIR", "./data/qdrant")
+                mem0_path = os.path.join(os.path.abspath(qdrant_base), "mem0")
+                if os.path.exists(mem0_path):
+                    mem0_client = QdrantClient(path=mem0_path)
+                    for col in mem0_client.get_collections().collections:
+                        if not col.name.startswith("mem0_memories"):
+                            continue
+                        info = mem0_client.get_collection(col.name)
+                        result["mem0"].append({
+                            "name": col.name,
+                            "point_count": info.points_count or 0,
+                            "dimensions": info.config.params.vectors.size if info.config.params.vectors else 0,
+                            "source": "mem0",
+                            "migration_status": _migration_status(col.name, "mem0"),
+                            "current_model": current_model,
+                            "last_migration": migration_records.get(col.name, {}).get("migrated_at") or None,
+                        })
+                    mem0_client.close()
+                    result["mem0"] = sorted(result["mem0"], key=lambda x: x["name"])
+                    logger.info(f"✅ [get_qdrant_collections] mem0 存储: {len(result['mem0'])} 个 collection")
+            except Exception as e:
+                logger.warning(f"⚠️ [get_qdrant_collections] mem0 存储读取失败: {e}")
+
+            return result
+        except Exception as e:
+            logger.error(f"❌ [get_qdrant_collections] 获取 collection 列表失败: {e}", exc_info=True)
+            return {"main": [], "mem0": []}
+
+    async def get_mem0_collections(self) -> List[Dict[str, Any]]:
+        """[兼容旧接口] 获取 Qdrant 中所有 mem0 相关 collection 信息"""
+        data = await self.get_qdrant_collections()
+        return data.get("mem0", [])
+
+    async def delete_qdrant_collection(self, collection_name: str, source: str = "main", force: bool = False) -> Dict[str, Any]:
+        """删除 Qdrant collection
+        
+        Args:
+            collection_name: collection 名称
+            source: "main" 或 "mem0"
+            force: 是否强制删除（跳过点数和安全性检查）
+        """
+        if not collection_name:
+            raise ValueError("collection 名称不能为空")
+
+        try:
+            from qdrant_client import QdrantClient
+            from core.memory.qdrant_adapter import QdrantAdapter
+
+            qdrant_base = os.environ.get("QDRANT_DATA_DIR", "./data/qdrant")
+
+            if source == "mem0":
+                client = QdrantClient(path=os.path.join(os.path.abspath(qdrant_base), "mem0"))
+            else:
+                # 主存储，复用单例客户端
+                client = QdrantAdapter().get_raw_client()
+
+            # 检查是否存在
+            existing = {col.name for col in client.get_collections().collections}
+            if collection_name not in existing:
+                if source == "mem0":
+                    client.close()
+                raise RuntimeError(f"collection 不存在: {collection_name}")
+
+            # 安全校验：非强制模式下检查是否为空
+            if not force:
+                info = client.get_collection(collection_name)
+                if (info.points_count or 0) > 0:
+                    if source == "mem0":
+                        client.close()
+                    raise RuntimeError(
+                        f"collection {collection_name} 包含 {info.points_count} 条数据，"
+                        f"请先迁移或使用 force=true 强制删除"
+                    )
+
+            client.delete_collection(collection_name)
+            if source == "mem0":
+                client.close()
+
+            logger.info(f"🗑️ [delete_qdrant_collection] 已删除 collection: {collection_name} (source={source})")
+            return {"success": True, "message": f"已删除 {collection_name}"}
+        except Exception as e:
+            logger.error(f"❌ [delete_qdrant_collection] 删除失败: {e}", exc_info=True)
+            raise
+
+    async def migrate_qdrant_collection(self, collection_name: str, dry_run: bool = False) -> Dict[str, Any]:
+        """将主存储中的 collection 向量用当前 embedding 模型重新编码（原地迁移）
+        
+        Args:
+            collection_name: collection 名称（如 memory_bull_researcher_v2）
+            dry_run: 是否只预览不执行
+        """
+        if not collection_name:
+            raise ValueError("collection 名称不能为空")
+
+        try:
+            from qdrant_client.models import PointStruct
+            from core.llm.embedding_manager import EmbeddingManager
+            from core.memory.qdrant_adapter import QdrantAdapter
+
+            # 复用 QdrantAdapter 单例的已有客户端
+            adapter = QdrantAdapter()
+            client = adapter.get_raw_client()
+
+            # 检查 collection 是否存在
+            existing = {col.name for col in client.get_collections().collections}
+            if collection_name not in existing:
+                raise RuntimeError(f"collection 不存在: {collection_name}")
+
+            info = client.get_collection(collection_name)
+            target_dims = info.config.params.vectors.size if info.config.params.vectors else 0
+
+            # 获取当前 embedding manager
+            embed_manager = EmbeddingManager()
+
+            logger.info(
+                f"🔄 [主存储迁移] collection={collection_name} dims={target_dims} dry_run={dry_run}"
+            )
+
+            batch_size = 10
+            total_seen = 0
+            total_migrated = 0
+            total_skipped = 0
+
+            if not dry_run:
+                offset = None
+                while True:
+                    points, offset = client.scroll(
+                        collection_name=collection_name,
+                        limit=batch_size,
+                        offset=offset,
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                    if not points:
+                        break
+
+                    to_upsert = []
+                    for point in points:
+                        payload = dict(point.payload or {})
+                        # 提取文本内容用于重新编码
+                        text = str(payload.get("document") or payload.get("content") or "").strip()
+                        if not text:
+                            total_skipped += 1
+                            continue
+
+                        embedding, provider = embed_manager.get_embedding(text)
+                        if embedding is None:
+                            total_skipped += 1
+                            continue
+
+                        to_upsert.append(PointStruct(id=point.id, vector=embedding, payload=payload))
+
+                    if to_upsert:
+                        client.upsert(collection_name=collection_name, points=to_upsert)
+
+                    total_seen += len(points)
+                    total_migrated += len(to_upsert)
+                    logger.info(
+                        f"  批次: 已处理={total_seen}, 已迁移={total_migrated}, 已跳过={total_skipped}"
+                    )
+
+                    if offset is None:
+                        break
+            else:
+                # dry_run: 只统计
+                offset = None
+                while True:
+                    points, offset = client.scroll(
+                        collection_name=collection_name,
+                        limit=batch_size,
+                        offset=offset,
+                        with_payload=True,
+                        with_vectors=False,
+                    )
+                    if not points:
+                        break
+                    for point in points:
+                        payload = dict(point.payload or {})
+                        text = str(payload.get("document") or payload.get("content") or "").strip()
+                        if text:
+                            total_migrated += 1
+                        else:
+                            total_skipped += 1
+                    total_seen += len(points)
+                    if offset is None:
+                        break
+
+            result = {
+                "success": True,
+                "collection_name": collection_name,
+                "total_seen": total_seen,
+                "migrated": total_migrated,
+                "skipped": total_skipped,
+                "dry_run": dry_run,
+            }
+
+            # 迁移成功后记录状态
+            if not dry_run and total_migrated > 0:
+                current_model = await self._get_current_embedding_model()
+                await self._save_migration_record(collection_name, current_model)
+                result["model_used"] = current_model
+
+            logger.info(f"✅ [主存储迁移] 完成: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"❌ [主存储迁移] 失败: {e}", exc_info=True)
+            raise
+
+    async def migrate_mem0_collection(self, source_collection: str, dry_run: bool = False) -> Dict[str, Any]:
+        """将旧 mem0 collection 的数据迁移到当前 collection"""
+        if not source_collection or not source_collection.startswith("mem0_memories"):
+            raise ValueError("源 collection 名称必须以 mem0_memories 开头")
+
+        try:
+            from qdrant_client import QdrantClient
+            from qdrant_client.models import Distance, PointStruct, VectorParams
+            from mem0.utils.factory import EmbedderFactory
+            from core.memory.config import build_mem0_config
+            from app.core.database import get_mongo_db_sync
+
+            config = build_mem0_config(get_mongo_db_sync())
+            target_collection = (config.get("vector_store", {}).get("config", {}).get("collection_name") or "")
+            embedder_cfg = (config.get("embedder") or {}).get("config") or {}
+            vector_size = int(embedder_cfg.get("embedding_dims") or 0)
+
+            if not target_collection:
+                raise RuntimeError("当前 mem0 配置未解析出目标 collection")
+            if source_collection == target_collection:
+                raise RuntimeError("源 collection 和目标 collection 相同，拒绝执行")
+
+            qdrant_base = os.environ.get("QDRANT_DATA_DIR", "./data/qdrant")
+            mem0_path = os.path.join(qdrant_base, "mem0")
+            client = QdrantClient(path=mem0_path)
+
+            # 检查源是否存在
+            collections = {col.name for col in client.get_collections().collections}
+            if source_collection not in collections:
+                client.close()
+                raise RuntimeError(f"源 collection 不存在: {source_collection}")
+
+            logger.info(
+                f"🔄 迁移开始: source={source_collection} target={target_collection} dry_run={dry_run}"
+            )
+
+            if not dry_run:
+                # 确保目标存在
+                if target_collection not in collections:
+                    client.create_collection(
+                        collection_name=target_collection,
+                        vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE, on_disk=True),
+                    )
+
+                # 获取目标已有 ID
+                existing_ids: set = set()
+                offset = None
+                while True:
+                    points, offset = client.scroll(
+                        collection_name=target_collection,
+                        limit=256,
+                        offset=offset,
+                        with_payload=False,
+                        with_vectors=False,
+                    )
+                    if not points:
+                        break
+                    for p in points:
+                        existing_ids.add(str(p.id))
+                    if offset is None:
+                        break
+
+            # 创建 embedder
+            embedder_factory = EmbedderFactory()
+            embedder = embedder_factory.create(
+                (config.get("embedder") or {}).get("provider") or "",
+                config.get("embedder") or {},
+                (config.get("vector_store") or {}).get("config") or {},
+            )
+
+            batch_size = 20
+            total_seen = 0
+            total_migrated = 0
+            total_skipped = 0
+
+            offset = None
+            while True:
+                points, offset = client.scroll(
+                    collection_name=source_collection,
+                    limit=batch_size,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                if not points:
+                    break
+
+                to_upsert = []
+                for point in points:
+                    payload = dict(point.payload or {})
+                    memory_text = str(payload.get("data") or "").strip()
+                    if not memory_text:
+                        total_skipped += 1
+                        continue
+
+                    pid = str(point.id)
+                    if not dry_run and pid in existing_ids:
+                        total_skipped += 1
+                        continue
+
+                    vector = embedder.embed(memory_text, "add")
+                    to_upsert.append(PointStruct(id=point.id, vector=vector, payload=payload))
+
+                if not dry_run and to_upsert:
+                    client.upsert(collection_name=target_collection, points=to_upsert)
+
+                total_seen += len(points)
+                total_migrated += len(to_upsert)
+                logger.info(
+                    f"  批次: 已处理={total_seen}, 已迁移={total_migrated}, 已跳过={total_skipped}"
+                )
+
+                if offset is None:
+                    break
+
+            client.close()
+
+            result = {
+                "success": True,
+                "source_collection": source_collection,
+                "target_collection": target_collection,
+                "total_seen": total_seen,
+                "migrated": total_migrated,
+                "skipped": total_skipped,
+                "dry_run": dry_run,
+            }
+            logger.info(f"✅ 迁移完成: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"❌ 迁移失败: {e}", exc_info=True)
+            raise
 
     def _is_valid_api_key(self, api_key: Optional[str]) -> bool:
         """
@@ -4863,10 +5307,16 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    async def fetch_provider_models(self, provider_id: str) -> dict:
-        """从厂家 API 获取模型列表"""
+    async def fetch_provider_models(self, provider_id: str, filters: Optional[Dict[str, Any]] = None) -> dict:
+        """从厂家 API 获取模型列表
+
+        Args:
+            provider_id: 厂家 ID
+            filters: 可选的筛选参数（前端拉取后在客户端筛选，服务端仅做兼容接收）
+        """
         try:
-            print(f"🔍 获取厂家模型列表 - provider_id: {provider_id}")
+            filters = filters or {}
+            print(f"🔍 获取厂家模型列表 - provider_id: {provider_id}, filters: {filters}")
 
             db = await self._get_db()
             providers_collection = db.llm_providers
@@ -4893,6 +5343,28 @@ class ConfigService:
             base_url = provider_data.get("default_base_url")
             display_name = provider_data.get("display_name", provider_name)
 
+            # 火山方舟编程：直接返回硬编码的 11 个模型，不调 API
+            if provider_name == "volcengine_coding":
+                coding_plan_models = [
+                    {"id": "doubao-seed-2.0-code", "name": "Doubao-Seed-2.0-Code"},
+                    {"id": "doubao-seed-2.0-pro", "name": "Doubao-Seed-2.0-pro"},
+                    {"id": "doubao-seed-2.0-lite", "name": "Doubao-Seed-2.0-lite"},
+                    {"id": "doubao-seed-code", "name": "Doubao-Seed-Code"},
+                    {"id": "glm-5.2", "name": "GLM-5.2"},
+                    {"id": "kimi-k2.7-code", "name": "Kimi-K2.7-Code"},
+                    {"id": "minimax-m3", "name": "MiniMax-M3"},
+                    {"id": "deepseek-v4-flash", "name": "DeepSeek-V4-Flash"},
+                    {"id": "deepseek-v4-pro", "name": "DeepSeek-V4-Pro"},
+                    {"id": "minimax-m2.7", "name": "MiniMax-M2.7"},
+                    {"id": "kimi-k2.6", "name": "Kimi-K2.6"},
+                ]
+                print(f"✅ [火山方舟编程] 直接返回 {len(coding_plan_models)} 个预设模型")
+                return {
+                    "success": True,
+                    "models": coding_plan_models,
+                    "message": f"成功获取 {len(coding_plan_models)} 个预设模型"
+                }
+
             # 🔥 判断数据库中的 API Key 是否有效
             if not self._is_valid_api_key(api_key):
                 # 数据库中的 Key 无效，尝试从环境变量读取
@@ -4915,7 +5387,7 @@ class ConfigService:
             # 调用 OpenAI 兼容的 /v1/models 端点
             import asyncio
             result = await asyncio.get_event_loop().run_in_executor(
-                None, self._fetch_models_from_api, api_key, base_url, display_name
+                None, self._fetch_models_from_api, api_key, base_url, display_name, provider_name
             )
 
             return result
@@ -4929,7 +5401,7 @@ class ConfigService:
                 "message": f"获取模型列表失败: {str(e)}"
             }
 
-    def _fetch_models_from_api(self, api_key: str, base_url: str, display_name: str) -> dict:
+    def _fetch_models_from_api(self, api_key: str, base_url: str, display_name: str, provider_name: str = None) -> dict:
         """从 API 获取模型列表"""
         try:
             import requests
@@ -4983,7 +5455,7 @@ class ConfigService:
                             print(f"   - {m.get('id')}")
 
                     # 过滤：只保留主流大厂的常用模型
-                    filtered_models = self._filter_popular_models(all_models)
+                    filtered_models = self._filter_popular_models(all_models, provider_name)
                     print(f"✅ 过滤后保留 {len(filtered_models)} 个常用模型")
 
                     # 转换模型格式，包含价格信息
@@ -5119,17 +5591,21 @@ class ConfigService:
 
         return formatted
 
-    def _filter_popular_models(self, models: list) -> list:
+    def _filter_popular_models(self, models: list, provider_name: str = None) -> list:
         """过滤模型列表，只保留主流大厂的常用模型"""
         import re
+
+        # 火山方舟编程：不过滤，返回所有模型（API 已按套餐权限返回对应的模型）
+        # 火山方舟（非编程）：不过滤，返回所有模型
+        if provider_name in ("volcengine_coding", "volcengine"):
+            print(f"✅ [{provider_name}] 返回全部 {len(models)} 个模型（不过滤）")
+            return models
 
         # 只保留三大厂：OpenAI、Anthropic、Google
         popular_providers = [
             "openai",      # OpenAI
             "anthropic",   # Anthropic
             "google",      # Google
-            "volcengine",          # 火山方舟
-            "volcengine_coding",   # 火山方舟编程
         ]
 
         # 常见模型名称前缀（用于识别不带厂商前缀的模型）

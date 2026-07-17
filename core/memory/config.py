@@ -17,6 +17,8 @@ from typing import Any, Dict, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 _QDRANT_COLLECTION = "mem0_memories"
+_LOCAL_PROVIDER = "local"
+_LOCAL_EMBEDDER_PORT = 11435
 
 _MEM0_OPENAI_COMPATIBLE_PROVIDERS = {
     "openai",
@@ -245,14 +247,42 @@ def _build_mem0_llm_config_from_unified_config(llm_config: Any) -> dict:
     }
 
 
+def _build_local_ollama_embedder(model_name: str) -> dict:
+    """为本地 Embedding 模型构建 Ollama 兼容的 embedder 配置"""
+    from .local_embedder import ensure_local_embedder
+
+    ensure_local_embedder()
+
+    resolved_model = (model_name or "").strip() or "Qwen/Qwen3-Embedding-0.6B"
+    dims = _get_embedding_dimension(resolved_model) or 1024
+    base_url = f"http://127.0.0.1:{_LOCAL_EMBEDDER_PORT}"
+
+    logger.info(
+        "mem0 config: 使用本地 Embedding 模型 %s (Ollama代理 %s)", resolved_model, base_url
+    )
+    return {
+        "provider": "ollama",
+        "config": {
+            "model": resolved_model,
+            "ollama_base_url": base_url,
+            "embedding_dims": dims,
+        },
+    }
+
+
 def _resolve_embedding_from_db(db_settings: dict) -> dict:
     """从数据库 default_embedding_model 解析 embedding 配置"""
+    preferred_provider_name, preferred_model_name = _parse_default_embedding_model(db_settings)
+
+    # 本地 Embedding 模型：启动 Ollama 兼容代理，绕过外部 API
+    if preferred_provider_name == _LOCAL_PROVIDER:
+        return _build_local_ollama_embedder(preferred_model_name)
+
     sync_db = _get_sync_db()
     if sync_db is None:
         return {}
 
     try:
-        preferred_provider_name, preferred_model_name = _parse_default_embedding_model(db_settings)
         provider_docs = _get_embedding_provider_candidates(sync_db)
         if not provider_docs:
             return {}

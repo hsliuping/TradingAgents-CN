@@ -827,9 +827,10 @@ async def fetch_provider_models(
 ):
     """从厂家 API 获取模型列表"""
     try:
+        filters = request.model_dump(exclude_none=True) if request else None
         result = await config_service.fetch_provider_models(
             provider_id,
-            request.filters if request else None,
+            filters,
         )
         return result
     except HTTPException:
@@ -3028,4 +3029,115 @@ async def delete_database_config(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"删除数据库配置失败: {str(e)}"
+        )
+
+
+@router.get("/qdrant/collections")
+async def get_qdrant_collections(
+    current_user: User = Depends(get_current_user)
+):
+    """获取 Qdrant 中所有 collection 列表（主存储 + mem0），包含迁移状态标记（用于向量迁移选择）"""
+    try:
+        result = await config_service.get_qdrant_collections()
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取 collection 列表失败: {str(e)}"
+        )
+
+
+@router.get("/memory/collections", response_model=List[dict])
+async def get_mem0_collections(
+    current_user: User = Depends(get_current_user)
+):
+    """[兼容旧接口] 获取 Qdrant 中所有 mem0 collection 列表"""
+    try:
+        result = await config_service.get_mem0_collections()
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取 collection 列表失败: {str(e)}"
+        )
+
+
+@router.post("/qdrant/migrate", response_model=dict)
+async def migrate_qdrant_collection(
+    request: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """迁移 Qdrant collection 的向量数据
+    
+    Args:
+        collection_name: collection 名称
+        source: "main"（主存储，原地重编码）或 "mem0"（从旧 collection 迁移到当前 mem0 collection）
+        dry_run: 是否只预览不执行（默认 false）
+    """
+    try:
+        collection_name = request.get("collection_name", "")
+        source = request.get("source", "main")
+        dry_run = request.get("dry_run", False)
+
+        if source == "mem0":
+            result = await config_service.migrate_mem0_collection(collection_name, dry_run)
+        else:
+            result = await config_service.migrate_qdrant_collection(collection_name, dry_run)
+
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"向量迁移失败: {str(e)}"
+        )
+
+
+@router.post("/memory/migrate", response_model=dict)
+async def migrate_mem0_collection(
+    request: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """[兼容旧接口] 将旧 mem0 collection 的向量数据迁移到当前 collection"""
+    try:
+        source = request.get("source_collection", "")
+        dry_run = request.get("dry_run", False)
+        result = await config_service.migrate_mem0_collection(source, dry_run)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"向量迁移失败: {str(e)}"
+        )
+
+
+@router.post("/qdrant/delete-collection", response_model=dict)
+async def delete_qdrant_collection(
+    request: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """删除 Qdrant collection（仅允许删除空 collection 或确认后强制删除）"""
+    collection_name = request.get("collection_name", "")
+    source = request.get("source", "main")
+    force = request.get("force", False)
+
+    if not collection_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="collection 名称不能为空")
+
+    try:
+        result = await config_service.delete_qdrant_collection(collection_name, source, force)
+        return result
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"删除 collection 失败: {str(e)}"
         )

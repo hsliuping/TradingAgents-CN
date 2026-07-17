@@ -660,6 +660,75 @@ export const configApi = {
   // 测试 Gateway 平台连接
   testGatewayConnection(platform: string): Promise<{ success: boolean; data?: any; message: string }> {
     return ApiClient.post(`/api/config/gateway/${platform}/test`)
+  },
+
+  // ========== 向量迁移 ==========
+
+  // 获取 Qdrant 中所有 collection 列表（主存储 + mem0），包含迁移状态
+  getQdrantCollections(): Promise<{
+    main: Array<{
+      name: string
+      point_count: number
+      dimensions: number
+      source: string
+      migration_status: 'pending' | 'migrated' | 'outdated'
+      current_model: string
+      last_migration: string | null
+    }>
+    mem0: Array<{
+      name: string
+      point_count: number
+      dimensions: number
+      source: string
+      migration_status: 'pending' | 'migrated' | 'outdated'
+      current_model: string
+      last_migration: string | null
+    }>
+  }> {
+    return ApiClient.get('/api/config/qdrant/collections').then((response: any) => response.data ?? response)
+  },
+
+  // 获取 Qdrant 中所有 mem0 collection 列表（兼容旧接口）
+  getMem0Collections(): Promise<Array<{
+    name: string
+    point_count: number
+    dimensions: number
+    is_current: boolean
+  }>> {
+    return ApiClient.get('/api/config/memory/collections').then((response: any) => response.data ?? response)
+  },
+
+  // 迁移 collection 向量数据（主存储原地重编码 / mem0 跨 collection 迁移）
+  migrateCollection(collection_name: string, source: 'main' | 'mem0', dry_run?: boolean): Promise<{
+    success: boolean
+    collection_name?: string
+    source_collection?: string
+    target_collection?: string
+    total_seen: number
+    migrated: number
+    skipped: number
+    dry_run: boolean
+    model_used?: string
+  }> {
+    return ApiClient.post('/api/config/qdrant/migrate', { collection_name, source, dry_run: !!dry_run }) as any
+  },
+
+  // 迁移旧 mem0 collection 到当前 collection（兼容旧接口）
+  migrateMem0Collection(source_collection: string, dry_run?: boolean): Promise<{
+    success: boolean
+    source_collection: string
+    target_collection: string
+    total_seen: number
+    migrated: number
+    skipped: number
+    dry_run: boolean
+  }> {
+    return ApiClient.post('/api/config/memory/migrate', { source_collection, dry_run: !!dry_run }) as any
+  },
+
+  // 删除空 collection
+  deleteCollection(collection_name: string, source: 'main' | 'mem0'): Promise<{ success: boolean; message: string }> {
+    return ApiClient.post('/api/config/qdrant/delete-collection', { collection_name, source }) as any
   }
 }
 

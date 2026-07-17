@@ -808,7 +808,17 @@
                   </el-option>
                 </el-option-group>
               </el-select>
-              <div class="setting-description">用于文本向量化和记忆功能，从所有支持 embedding 的厂商中选择（格式：厂商:模型名，如：dashscope:text-embedding-v3）</div>
+              <div class="setting-description">
+                用于文本向量化和记忆功能，从所有支持 embedding 的厂商中选择（格式：厂商:模型名，如：dashscope:text-embedding-v3）
+                <el-button
+                  type="warning"
+                  size="small"
+                  @click="openMigrationDialog"
+                  style="margin-left: 12px;"
+                >
+                  迁移向量数据
+                </el-button>
+              </div>
             </el-form-item>
 
             <el-form-item label="启用成本跟踪">
@@ -1403,6 +1413,118 @@
         <el-button type="primary" @click="saveDatabaseConfig">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 🔧 向量迁移对话框 -->
+    <el-dialog
+      v-model="migrationDialogVisible"
+      title="迁移向量数据"
+      width="780px"
+      :close-on-click-modal="false"
+      @opened="loadMigrationData"
+    >
+      <el-alert
+        title="说明"
+        type="info"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 16px;"
+      >
+        <template #default>
+          <div>
+            更换 Embedding 模型（当前：<strong>{{ migrationCurrentModel }}</strong>）后，旧的向量数据需要用新模型重新生成。
+            状态标记：<el-tag type="warning" size="small">待迁移</el-tag> 从未迁移，
+            <el-tag type="success" size="small">已迁移</el-tag> 与当前模型一致，
+            <el-tag type="danger" size="small">已过期</el-tag> 迁移过但模型已变。
+          </div>
+        </template>
+      </el-alert>
+
+      <div style="margin-bottom: 12px;">
+        <el-button
+          type="primary"
+          :disabled="pendingMigrations.length === 0"
+          :loading="migrationLoading"
+          @click="migrateAllPending"
+        >
+          一键迁移全部（{{ pendingMigrations.length }} 个待迁移）
+        </el-button>
+      </div>
+
+      <el-table :data="allCollections" v-loading="migrationLoading" max-height="400px" size="small">
+        <el-table-column prop="name" label="Collection" min-width="240" show-overflow-tooltip />
+        <el-table-column label="来源" width="80" align="center">
+          <template #default="{ row }">
+            <el-tag :type="row.source === 'main' ? 'primary' : 'info'" size="small">
+              {{ row.source === 'main' ? '主存储' : 'mem0' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="数据" width="90" align="center">
+          <template #default="{ row }">
+            {{ row.point_count }} 条
+          </template>
+        </el-table-column>
+        <el-table-column prop="dimensions" label="维度" width="70" align="center" />
+        <el-table-column label="迁移状态" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.migration_status === 'pending'" type="warning" size="small">待迁移</el-tag>
+            <el-tag v-else-if="row.migration_status === 'migrated'" type="success" size="small">已迁移</el-tag>
+            <el-tag v-else-if="row.migration_status === 'outdated'" type="danger" size="small">已过期</el-tag>
+            <span v-else style="color: #909399;">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" align="center">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.point_count > 0 && row.migration_status !== 'migrated'"
+              size="small"
+              type="warning"
+              :loading="migratingCollections[row.name]"
+              @click="migrateOne(row)"
+            >
+              迁移
+            </el-button>
+            <template v-else-if="row.point_count === 0">
+              <span style="color: #909399; font-size: 12px;">空数据</span>
+              <el-button
+                size="small"
+                type="danger"
+                text
+                :loading="migratingCollections[row.name]"
+                @click="deleteCollection(row)"
+              >
+                删除
+              </el-button>
+            </template>
+            <el-tag v-else type="success" size="small">已完成</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div v-if="migrationResults.length > 0" style="margin-top: 16px;">
+        <el-descriptions
+          v-for="(r, i) in migrationResults"
+          :key="i"
+          :column="2"
+          border
+          size="small"
+          style="margin-bottom: 8px;"
+        >
+          <el-descriptions-item label="Collection">{{ r.collection_name || r.source_collection }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="r.success ? 'success' : 'danger'" size="small">
+              {{ r.success ? '成功' : '失败' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="处理">{{ r.total_seen }}</el-descriptions-item>
+          <el-descriptions-item label="迁移">{{ r.migrated }}</el-descriptions-item>
+        </el-descriptions>
+      </div>
+
+      <template #footer>
+        <el-button @click="migrationDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -1459,6 +1581,9 @@ const databaseConfigs = ref<DatabaseConfig[]>([])
 const systemSettings = ref<Record<string, any>>({})
 const systemSettingsMeta = ref<Record<string, SettingMeta>>({})
 const defaultLLM = ref<string>('')
+
+// 🔥 新增：用于 Embedding 模型切换提醒
+const originalEmbeddingModel = ref<string>('')
 
 // 厂家信息映射
 const providerInfoMap = ref<Record<string, any>>({})
@@ -1748,6 +1873,121 @@ const getEmbeddingModelsForProvider = (providerName: string) => {
   return provider ? provider.models : []
 }
 
+// ========== 向量迁移功能 ==========
+const migrationDialogVisible = ref(false)
+const migrationLoading = ref(false)
+const migrationCurrentModel = ref('')
+const allCollections = ref<Array<{
+  name: string
+  point_count: number
+  dimensions: number
+  source: string
+  migration_status: 'pending' | 'migrated' | 'outdated'
+  current_model: string
+  last_migration: string | null
+}>>([])
+const migratingCollections = ref<Record<string, boolean>>({})
+const migrationResults = ref<Array<{
+  success: boolean
+  collection_name?: string
+  source_collection?: string
+  total_seen: number
+  migrated: number
+  skipped: number
+}>>([])
+
+const pendingMigrations = computed(() =>
+  allCollections.value.filter(c => c.point_count > 0 && c.migration_status !== 'migrated')
+)
+
+const loadMigrationData = async () => {
+  migrationResults.value = []
+  migrationLoading.value = true
+  try {
+    const data = await configApi.getQdrantCollections()
+    // 合并 main 和 mem0，排除空 mem0 collection（无数据且来源为 mem0）
+    const merged = [...data.main, ...data.mem0].filter(c => c.source !== 'mem0' || c.point_count > 0)
+    allCollections.value = merged.sort((a, b) => {
+      const score = (c: { point_count: number; migration_status: string }) =>
+        (c.point_count > 0 ? 1000 : 0) + (c.migration_status === 'pending' ? 100 : 0)
+      return score(b) - score(a) || a.name.localeCompare(b.name)
+    })
+    migrationCurrentModel.value = merged[0]?.current_model || ''
+  } catch (error: any) {
+    ElMessage.error('获取 collection 列表失败: ' + (error?.message || error))
+  } finally {
+    migrationLoading.value = false
+  }
+}
+
+const deleteCollection = async (row: { name: string; source: string }) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除空 collection "${row.name}"？`,
+      '删除空 Collection',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  migratingCollections.value[row.name] = true
+  try {
+    // 通过迁移 API 删除（Qdrant 删除 collection）
+    await configApi.deleteCollection(row.name, row.source as 'main' | 'mem0')
+    ElMessage.success(`已删除 ${row.name}`)
+    await loadMigrationData()
+  } catch (error: any) {
+    const msg = error?.response?.data?.detail || error?.message || '未知错误'
+    ElMessage.error('删除失败: ' + msg)
+  } finally {
+    migratingCollections.value[row.name] = false
+  }
+}
+
+const migrateOne = async (row: { name: string; source: string }) => {
+  migratingCollections.value[row.name] = true
+  try {
+    const result = await configApi.migrateCollection(row.name, row.source as 'main' | 'mem0', false)
+    migrationResults.value.unshift(result)
+    if (result.success) {
+      // 刷新列表以更新状态
+      await loadMigrationData()
+      ElMessage.success(`${row.name}: 处理 ${result.total_seen} 条，迁移 ${result.migrated} 条`)
+    }
+  } catch (error: any) {
+    const msg = error?.response?.data?.detail || error?.message || '未知错误'
+    ElMessage.error(`迁移 ${row.name} 失败: ` + msg)
+    migrationResults.value.unshift({ success: false, collection_name: row.name, total_seen: 0, migrated: 0, skipped: 0 })
+  } finally {
+    migratingCollections.value[row.name] = false
+  }
+}
+
+const migrateAllPending = async () => {
+  const pending = pendingMigrations.value
+  if (pending.length === 0) return
+
+  try {
+    await ElMessageBox.confirm(
+      `确认迁移全部 ${pending.length} 个待迁移 collection？\n\n此操作将用当前 Embedding 模型重新编码所有向量。`,
+      '批量迁移',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+
+  migrationLoading.value = true
+  for (const col of pending) {
+    await migrateOne(col)
+  }
+  migrationLoading.value = false
+}
+
+const openMigrationDialog = () => {
+  migrationDialogVisible.value = true
+}
+
 // 加载厂家列表
 const loadProviders = async () => {
   providersLoading.value = true
@@ -1999,6 +2239,8 @@ const loadSystemSettings = async () => {
       ...settings
     }
     syncModelSelectionSettings()
+    // 🔥 保存原始 Embedding 模型值（用于切换提醒）
+    originalEmbeddingModel.value = systemSettings.value.default_embedding_model || ''
     // 规整元数据为map
     const metaList = meta?.items || []
     systemSettingsMeta.value = Object.fromEntries(metaList.map((m: SettingMeta) => [m.key, m]))
@@ -2010,6 +2252,30 @@ const loadSystemSettings = async () => {
     systemLoading.value = false
   }
 }
+
+// 🔥 新增：监听 Embedding 模型变化，供应商切换时提醒
+watch(() => systemSettings.value.default_embedding_model, (newValue, oldValue) => {
+  const getProvider = (val: string | undefined) => {
+    if (!val) return ''
+    const parts = val.split(':')
+    return parts[0] || ''
+  }
+  const oldProvider = getProvider(oldValue)
+  const newProvider = getProvider(newValue)
+  if (oldProvider && newProvider && oldProvider !== newProvider) {
+    ElMessageBox.alert(
+      `<p>您正在从 <strong>${oldProvider}</strong> 切换到 <strong>${newProvider}</strong> 作为默认 Embedding 供应商。</p>
+       <p style="margin-top:10px; color:#f56c6c;"><strong>重要提示：</strong>不同 Embedding 模型生成的向量语义空间不同，即使维度相同，相似度搜索结果也会完全错误。</p>
+       <p style="margin-top:10px;">建议重新生成所有向量数据（如记忆功能、知识库等），以确保准确性。</p>`,
+      '切换 Embedding 供应商提醒',
+      {
+        confirmButtonText: '我知道了',
+        dangerouslyUseHTMLString: true,
+        type: 'warning'
+      }
+    )
+  }
+})
 
 // ========== 厂家管理操作 ==========
 
