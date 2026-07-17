@@ -7,7 +7,7 @@
 export interface Lesson {
   id: string
   title: string
-  file: string  // Markdown文件路径（相对于 docs/courses/advanced/expanded/）
+  file: string  // Markdown文件路径（相对于 docs/07-courses/advanced/expanded/）
   order: number
 }
 

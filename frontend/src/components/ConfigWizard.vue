@@ -110,8 +110,9 @@
                 placeholder="请选择大模型提供商"
                 @change="handleProviderChange"
               >
+                <el-option label="火山方舟（推荐，国产稳定）" value="volcengine" />
                 <el-option label="DeepSeek（推荐，性价比高）" value="deepseek" />
-                <el-option label="通义千问（推荐，国产稳定）" value="dashscope" />
+                <el-option label="通义千问" value="dashscope" />
                 <el-option label="OpenAI" value="openai" />
                 <el-option label="Google Gemini" value="google" />
               </el-select>
@@ -396,6 +397,27 @@ const wizardData = ref<WizardData>({
 const availableModels = computed(() => {
   const provider = wizardData.value.llm.provider
   const models: Record<string, Array<{ label: string; value: string }>> = {
+    volcengine: [
+      { label: 'doubao-seed-2.0-pro', value: 'doubao-seed-2.0-pro' },
+      { label: 'doubao-seed-2.0-lite', value: 'doubao-seed-2.0-lite' },
+      { label: 'doubao-seed-code', value: 'doubao-seed-code' },
+      { label: 'glm-5.2', value: 'glm-5.2' },
+      { label: 'deepseek-v4-pro', value: 'deepseek-v4-pro' },
+      { label: 'kimi-k2.6', value: 'kimi-k2.6' }
+    ],
+    volcengine_coding: [
+      { label: 'doubao-seed-2.0-code', value: 'doubao-seed-2.0-code' },
+      { label: 'doubao-seed-2.0-pro', value: 'doubao-seed-2.0-pro' },
+      { label: 'doubao-seed-2.0-lite', value: 'doubao-seed-2.0-lite' },
+      { label: 'doubao-seed-code', value: 'doubao-seed-code' },
+      { label: 'glm-5.2', value: 'glm-5.2' },
+      { label: 'kimi-k2.7-code', value: 'kimi-k2.7-code' },
+      { label: 'deepseek-v4-flash', value: 'deepseek-v4-flash' },
+      { label: 'deepseek-v4-pro', value: 'deepseek-v4-pro' },
+      { label: 'minimax-m3', value: 'minimax-m3' },
+      { label: 'minimax-m2.7', value: 'minimax-m2.7' },
+      { label: 'kimi-k2.6', value: 'kimi-k2.6' }
+    ],
     deepseek: [
       { label: 'deepseek-chat', value: 'deepseek-chat' },
       { label: 'deepseek-coder', value: 'deepseek-coder' }
@@ -450,6 +472,7 @@ const handleProviderChange = () => {
 
 const getProviderName = (provider: string) => {
   const names: Record<string, string> = {
+    volcengine: '火山方舟',
     deepseek: 'DeepSeek',
     dashscope: '通义千问',
     openai: 'OpenAI',
@@ -460,6 +483,7 @@ const getProviderName = (provider: string) => {
 
 const getProviderHelp = (provider: string) => {
   const helps: Record<string, string> = {
+    volcengine: '注册火山引擎账号，注册即领2500万Tokens，享豆包模型',
     deepseek: '注册 DeepSeek 账号，在控制台创建 API Key',
     dashscope: '注册阿里云账号，开通百炼服务，获取 API 密钥',
     openai: '注册 OpenAI 账号，在 API Keys 页面创建密钥',
@@ -470,6 +494,7 @@ const getProviderHelp = (provider: string) => {
 
 const getProviderUrl = (provider: string) => {
   const urls: Record<string, string> = {
+    volcengine: 'https://www.volcengine.com/product/ark?utm_campaign=hw&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN',
     deepseek: 'https://platform.deepseek.com/',
     dashscope: 'https://dashscope.aliyun.com/',
     openai: 'https://platform.openai.com/',

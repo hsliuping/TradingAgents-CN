@@ -294,6 +294,30 @@ const openRegisterUrl = () => {
 // 预设厂家数据
 const presetProviders = [
   {
+    name: 'volcengine',
+    display_name: '火山方舟',
+    description: '火山引擎火山方舟大模型服务平台，提供豆包等模型，OpenAI 兼容接口',
+    website: 'https://www.volcengine.com/product/ark?utm_campaign=hw&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN',
+    api_doc_url: 'https://docs.volcengine.com/docs/82379/2373738?lang=zh&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN',
+    default_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+    embedding_model: 'doubao-embedding-vision-251215',
+    supported_features: ['chat', 'completion', 'embedding', 'function_calling', 'streaming'],
+    register_url: 'https://www.volcengine.com/product/ark?utm_campaign=hw&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN',
+    register_guide: '注册即领2500万Tokens，立即前往'
+  },
+  {
+    name: 'volcengine_coding',
+    display_name: '火山方舟 (Coding)',
+    description: '火山方舟 Coding 专用通道，用于代码生成与编程类模型接入',
+    website: 'https://www.volcengine.com/product/ark?utm_campaign=hw&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN',
+    api_doc_url: 'https://docs.volcengine.com/docs/82379/2373738?lang=zh&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN',
+    default_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+    embedding_model: 'doubao-embedding-vision-251215',
+    supported_features: ['chat', 'completion', 'function_calling', 'streaming'],
+    register_url: 'https://www.volcengine.com/product/ark?utm_campaign=hw&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN',
+    register_guide: '注册即领2500万Tokens，立即前往'
+  },
+  {
     name: 'aihubmix',
     display_name: 'AIHubMix',
     description: 'AIHubMix 深度适配 OpenAI、Claude、Gemini、DeepSeek、智谱、千问 等全球顶级模型，多模型交叉验证，分析结论更可靠；无限并发永远在线，A股、港股、美股行情随时可分析，不卡顿不排队；内置 coding-glm-5.1-free 等多款免费模型，零成本体验 AI 分析；按量计费、价格透明，长期使用性价比远超单一厂商。',
@@ -424,28 +448,6 @@ const presetProviders = [
     supported_features: ['chat', 'completion', 'embedding', 'function_calling', 'streaming'],
     register_url: 'https://localai.io/basics/installation/',
     register_guide: '请先安装并启动 LocalAI 服务，然后配置 API 地址'
-  },
-  {
-    name: 'volcengine',
-    display_name: '火山方舟',
-    description: '火山引擎火山方舟大模型服务平台，提供豆包等模型，OpenAI 兼容接口',
-    website: 'https://www.volcengine.com/solutions/ark',
-    api_doc_url: 'https://www.volcengine.com/docs/82379',
-    default_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
-    supported_features: ['chat', 'completion', 'embedding', 'function_calling', 'streaming'],
-    register_url: 'https://www.volcengine.com/solutions/ark',
-    register_guide: '如果您还没有火山引擎账号，请先注册并开通方舟服务：'
-  },
-  {
-    name: 'volcengine_coding',
-    display_name: '火山方舟 (Coding)',
-    description: '火山方舟 Coding 专用通道，用于代码生成与编程类模型接入',
-    website: 'https://www.volcengine.com/solutions/ark',
-    api_doc_url: 'https://www.volcengine.com/docs/82379',
-    default_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
-    supported_features: ['chat', 'completion', 'function_calling', 'streaming'],
-    register_url: 'https://www.volcengine.com/solutions/ark',
-    register_guide: '如果您还没有火山引擎账号，请先注册并开通方舟服务：'
   },
   {
     name: 'openai_compatible',

@@ -492,6 +492,36 @@
       </div>
     </div>
 
+    <!-- 赞助商 -->
+    <div class="sponsor-section">
+      <div class="section-header">
+        <h2 class="section-title">赞助商</h2>
+        <p class="section-subtitle">感谢以下企业对本项目的赞助与支持</p>
+      </div>
+      <div class="sponsor-content">
+        <div class="sponsor-card">
+          <div class="sponsor-header">
+            <div class="sponsor-icon">
+              <el-icon><Star /></el-icon>
+            </div>
+            <div class="sponsor-info">
+              <h3>字节火山引擎</h3>
+            </div>
+          </div>
+          <div class="sponsor-description">
+            <p>感谢字节火山引擎赞助本项目！</p>
+            <p><strong>【专属活动优惠】19元Tokens包！</strong>享字节自研豆包模型+满血版开源 SOTA模型，覆盖文本、VLM、图像生成，全模态一站配齐：Seed-2.1、Seedream-5.0、GLM-5.2、DeepSeek等。不止编程、更能解决 Agent 复杂长程任务。</p>
+            <p>
+              <el-button type="primary" size="small" @click="goToVolcengine">
+                <el-icon><Link /></el-icon>
+                注册即领2500万Tokens，立即前往
+              </el-button>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 版本信息 -->
     <div class="version-section">
       <div class="section-header">
@@ -728,6 +758,10 @@ const goToAnalysis = () => {
 
 const viewDocumentation = () => {
   window.open('https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw', '_blank')
+}
+
+const goToVolcengine = () => {
+  window.open('https://www.volcengine.com/product/ark?utm_campaign=hw&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN', '_blank')
 }
 
 // 页面加载时获取系统信息
@@ -1972,6 +2006,80 @@ onMounted(() => {
 
     .contact-section .contact-grid .contact-card {
       padding: 24px;
+    }
+  }
+
+  // Sponsor Section
+  .sponsor-section {
+    margin-bottom: 80px;
+
+    .sponsor-content {
+      max-width: 900px;
+      margin: 0 auto;
+
+      .sponsor-card {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(236, 72, 153, 0.05));
+        border-radius: 16px;
+        padding: 40px;
+        border: 2px solid rgba(102, 126, 234, 0.2);
+        position: relative;
+        overflow: hidden;
+
+        &::before {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 4px;
+          background: linear-gradient(90deg, #667eea, #ec4899);
+        }
+
+        .sponsor-header {
+          display: flex;
+          gap: 20px;
+          align-items: center;
+          margin-bottom: 24px;
+
+          .sponsor-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #667eea, #ec4899);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            flex-shrink: 0;
+          }
+
+          .sponsor-info {
+            flex: 1;
+
+            h3 {
+              margin: 0;
+              font-size: 22px;
+              font-weight: 700;
+              color: var(--el-text-color-primary);
+            }
+          }
+        }
+
+        .sponsor-description {
+          p {
+            color: var(--el-text-color-regular);
+            line-height: 1.8;
+            margin: 0 0 16px 0;
+            font-size: 15px;
+
+            strong {
+              color: var(--el-color-primary);
+              font-weight: 600;
+            }
+          }
+        }
+      }
     }
   }
 }

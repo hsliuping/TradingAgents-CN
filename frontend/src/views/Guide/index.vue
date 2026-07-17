@@ -19,11 +19,12 @@
               <p>系统支持多种主流大语言模型，推荐优先使用国内模型，您需要选择其中一个并获取API密钥：</p>
               <ul class="step-list">
                 <li>
-                  <strong>阿里云百炼：</strong>通义千问系列模型（推荐国内用户）
+                  <strong>火山方舟：</strong>豆包系列模型（推荐国内用户）<br>
+                  <span style="font-size: 13px; color: var(--el-text-color-secondary);">感谢字节火山引擎赞助本项目！注册即领2500万Tokens</span>
                   <div class="register-link-wrapper">
-                    <el-link href="https://dashscope.console.aliyun.com/" target="_blank" type="primary" :underline="false" class="register-link">
+                    <el-link href="https://www.volcengine.com/product/ark?utm_campaign=hw&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN" target="_blank" type="primary" :underline="false" class="register-link">
                       <el-icon><Link /></el-icon>
-                      立即注册百炼账号
+                      注册即领2500万Tokens，立即前往
                     </el-link>
                   </div>
                 </li>
@@ -41,7 +42,7 @@
                 <li><strong>Claude：</strong>Anthropic 的 Claude 系列模型</li>
                 <li>其他支持的大语言模型提供商</li>
               </ul>
-              <p class="step-tip">💡 提示：国内用户推荐优先使用阿里云百炼或DeepSeek，访问速度更快，使用更稳定</p>
+              <p class="step-tip">💡 提示：国内用户推荐优先使用火山方舟或DeepSeek，访问速度更快，使用更稳定</p>
             </div>
           </template>
         </el-step>
@@ -80,7 +81,7 @@
                   <strong>配置大模型API密钥：</strong>
                   <ol style="margin-top: 8px; padding-left: 24px;">
                     <li>进入"配置管理" → "厂家管理"菜单</li>
-                    <li>找到对应的厂家（如阿里云百炼、DeepSeek等）</li>
+                    <li>找到对应的厂家（如火山方舟、DeepSeek等）</li>
                     <li>点击"编辑"按钮</li>
                     <li>在API密钥字段中填入步骤1获取的密钥</li>
                     <li>保存配置</li>

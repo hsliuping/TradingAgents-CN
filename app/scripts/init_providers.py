@@ -122,6 +122,7 @@ async def init_providers():
             "website": "https://www.volcengine.com/solutions/ark",
             "default_base_url": "https://ark.cn-beijing.volces.com/api/v3",
             "test_model": "doubao-seed-2-1-turbo-260628",
+            "embedding_model": "doubao-embedding-vision-251215",
             "is_active": True,
             "supported_features": ["chat", "completion", "embedding", "function_calling", "streaming"]
         },
@@ -132,6 +133,7 @@ async def init_providers():
             "website": "https://www.volcengine.com/solutions/ark",
             "default_base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
             "test_model": "doubao-seed-2.0-code",
+            "embedding_model": "doubao-embedding-vision-251215",
             "is_active": True,
             "supported_features": ["chat", "completion", "function_calling", "streaming"]
         }
