@@ -351,6 +351,13 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  配置桥接失败: {e}")
         logger.warning("⚠️  TradingAgents 将使用 .env 文件中的配置")
 
+    # 🔧 京东云合作版：首次启动时从环境变量初始化数据库配置
+    try:
+        from app.services.jdyun_init import init_jdyun_config
+        init_jdyun_config()
+    except Exception as e:
+        logger.warning(f"⚠️  京东云配置初始化失败: {e}")
+
     # 启动期同步能力索引：工具元数据变更后，重启即可增量写入向量库。
     try:
         from app.core.database import get_mongo_db
