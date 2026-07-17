@@ -182,6 +182,14 @@ def get_provider_and_url_by_model_sync(
         configs_collection = db.system_configs
         doc = configs_collection.find_one({"is_active": True}, sort=[("version", -1)])
 
+        # 🔧 解析旧格式 "provider::model_name"（如 jdyun::GLM-5）
+        if "::" in model_name:
+            parsed_provider, parsed_model = model_name.split("::", 1)
+            if not preferred_provider:
+                preferred_provider = parsed_provider
+            model_name = parsed_model
+            logger.info(f"🔧 [同步查询] 解析旧格式模型名: {parsed_provider}::{parsed_model} → provider={preferred_provider}, model={model_name}")
+
         normalized_provider = str(preferred_provider or "").strip().lower()
         normalized_config_id = str(preferred_config_id or "").strip()
 

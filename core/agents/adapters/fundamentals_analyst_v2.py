@@ -477,6 +477,9 @@ class FundamentalsAnalystAgentV2(BaseAgent):
             return None, []
 
         effective_trade_date = trade_date or (state or {}).get("analysis_date") or datetime.now().strftime("%Y-%m-%d")
+        # 🔧 确保 curr_date 类型为 str（state 中的 trade_date 可能是 datetime 对象）
+        if isinstance(effective_trade_date, datetime):
+            effective_trade_date = effective_trade_date.strftime("%Y-%m-%d")
         market_info = self._get_market_characteristics(ticker)
         is_china = bool(market_info.get("is_china"))
 

@@ -29,7 +29,10 @@ def is_retryable_llm_error(error_msg: str) -> bool:
         "connection" in normalized_error or
         "timeout" in normalized_error or
         "timed out" in normalized_error or
+        "rate_limit" in normalized_error or  # 🔧 下划线格式
         "rate limit" in normalized_error or
+        "429" in normalized_error or
+        "limit" in normalized_error or  # 🔧 兜底
         "503" in normalized_error or
         "502" in normalized_error or
         "500" in normalized_error
@@ -696,10 +699,13 @@ class BaseAgent(ABC):
                         "null value" in error_msg.lower() or
                         "connection" in error_msg.lower() or
                         "timeout" in error_msg.lower() or
+                        "rate_limit" in error_msg.lower() or  # 🔧 修复：rate_limit 下划线匹配
                         "rate limit" in error_msg.lower() or
+                        "429" in error_msg or  # 🔧 直接检查 429 状态码
                         "503" in error_msg or
                         "502" in error_msg or
-                        "500" in error_msg
+                        "500" in error_msg or
+                        "limit" in error_msg.lower()  # 🔧 兜底：任何含 limit 的错误（如 "request limit for seconds"）
                     )
                     
                     if is_retryable and retry_count < max_retries:
@@ -956,10 +962,13 @@ class BaseAgent(ABC):
                                 "null value" in error_msg.lower() or
                                 "connection" in error_msg.lower() or
                                 "timeout" in error_msg.lower() or
+                                "rate_limit" in error_msg.lower() or  # 🔧 下划线格式
                                 "rate limit" in error_msg.lower() or
+                                "429" in error_msg or  # 🔧 直接匹配 429 状态码
                                 "503" in error_msg or
                                 "502" in error_msg or
-                                "500" in error_msg
+                                "500" in error_msg or
+                                "limit" in error_msg.lower()  # 🔧 兜底
                             )
                             
                             if is_retryable and retry_count < max_retries:
