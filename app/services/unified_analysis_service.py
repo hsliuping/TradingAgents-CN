@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from app.utils.timezone import now_tz
+from app.core.jdyun import is_jdyun_mode, get_jdyun_batch_max_concurrent
 
 from app.models.analysis import (
     AnalysisParameters,
@@ -641,6 +642,13 @@ class UnifiedAnalysisService:
         results = []
         total = len(stock_codes)
         completed = 0
+
+        # 🔧 京东云模式：降低并发数，避免 LLM 限速（429）
+        if is_jdyun_mode():
+            jdyun_max = get_jdyun_batch_max_concurrent()
+            if max_concurrent > jdyun_max:
+                logger.info(f"🔧 [京东云模式] 批量分析并发数 {max_concurrent} → {jdyun_max}（避免 LLM 限速）")
+                max_concurrent = jdyun_max
 
         # 使用信号量控制并发
         semaphore = asyncio.Semaphore(max_concurrent)
