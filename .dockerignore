@@ -50,11 +50,13 @@ env/
 
 # 大型目录（不属于镜像内容）
 release/
+releases/
 vendors/
 runtime/
 assets/
 nanobot/
 OpenViking/
+_hermes_analysis/
 
 # 环境变量文件（敏感信息，不应打包到镜像）
 .env
