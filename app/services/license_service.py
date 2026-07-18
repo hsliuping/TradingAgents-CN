@@ -16,6 +16,7 @@ from functools import lru_cache
 
 from app.core.config import settings
 from app.core.database import get_mongo_db
+from app.core.jdyun import is_jdyun_mode
 
 logger = logging.getLogger("app.services.license")
 
@@ -515,10 +516,16 @@ class LicenseService:
 
     def is_pro(self, license_info: LicenseInfo) -> bool:
         """检查是否为 PRO 用户（包括试用版）"""
+        # 🔧 京东云模式：所有功能开放，无需 License 验证
+        if is_jdyun_mode():
+            return True
         return license_info.is_valid and license_info.plan in ("trial", "pro", "enterprise")
 
     def has_feature(self, license_info: LicenseInfo, feature: str) -> bool:
         """检查是否拥有特定功能"""
+        # 🔧 京东云模式：所有功能开放，无需 License 验证
+        if is_jdyun_mode():
+            return True
         if not license_info.is_valid:
             return False
         if feature in self.FREE_ACCESS_FEATURES:

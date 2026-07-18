@@ -49,6 +49,9 @@ const FREE_ACCESS_FEATURES = new Set<ProFeature>([
 ])
 
 export const useLicenseStore = defineStore('license', () => {
+  // 🔧 京东云模式：所有功能开放，无需 License 验证
+  const isJdyunMode = import.meta.env.VITE_JDYUN_MODE === 'true'
+
   // 状态
   const appToken = ref<string | null>(localStorage.getItem('app-token'))
   const licenseInfo = ref<LicenseInfo | null>(null)
@@ -58,6 +61,8 @@ export const useLicenseStore = defineStore('license', () => {
 
   // 计算属性
   const isPro = computed(() => {
+    // 🔧 京东云模式：直接返回 true，所有功能开放
+    if (isJdyunMode) return true
     if (!licenseInfo.value) return false
     return licenseInfo.value.is_valid &&
            ['trial', 'pro', 'enterprise'].includes(licenseInfo.value.plan)
@@ -118,6 +123,8 @@ export const useLicenseStore = defineStore('license', () => {
   })
 
   const hasFeature = (_feature: ProFeature) => {
+    // 🔧 京东云模式：所有功能开放
+    if (isJdyunMode) return true
     if (FREE_ACCESS_FEATURES.has(_feature)) return true
     if (!licenseInfo.value?.is_valid) return false
     if (licenseInfo.value.features.includes(_feature)) return true
@@ -143,6 +150,20 @@ export const useLicenseStore = defineStore('license', () => {
   }
 
   const verifyLicense = async (force = false, authServer?: string): Promise<boolean> => {
+    // 🔧 京东云模式：跳过 License 验证，直接设置 PRO 状态
+    if (isJdyunMode) {
+      licenseInfo.value = {
+        email: '',
+        plan: 'pro',
+        features: [],
+        device_registered: false,
+        is_valid: true,
+        offline_mode: false
+      }
+      lastVerifiedAt.value = new Date()
+      return true
+    }
+
     loading.value = true
     error.value = null
 

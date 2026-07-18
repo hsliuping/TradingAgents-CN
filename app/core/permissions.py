@@ -10,6 +10,7 @@ from fastapi import Depends, HTTPException, Header, status
 from bson import ObjectId
 
 from app.core.database import get_mongo_db
+from app.core.jdyun import is_jdyun_mode
 from app.routers.auth_db import get_current_user
 from app.services.license_service import get_license_service, LicenseInfo
 
@@ -29,17 +30,27 @@ async def get_license_info(
 ) -> LicenseInfo:
     """
     获取用户的授权信息
-    
+
     优先级:
     1. 请求头中的 X-App-Token
     2. 用户数据库中保存的 app_token
-    
+
     Args:
         app_token: 请求头中的 App Token
         user: 当前用户信息
-        
+
     注意：设备ID由后端基于硬件信息自动生成，用户无法获取或复制
     """
+    # 🔧 京东云模式：跳过 License 验证，直接返回 PRO 权限
+    if is_jdyun_mode():
+        return LicenseInfo(
+            email=user.get("email", ""),
+            plan="pro",
+            is_valid=True,
+            error_message=None,
+            features=[]
+        )
+
     license_service = get_license_service()
     user_doc = None
     auth_server = None

@@ -33,6 +33,9 @@ import { useRouter } from 'vue-router'
 import { useLicenseStore } from '@/stores/license'
 import { WarningFilled, CircleCloseFilled, InfoFilled, Close } from '@element-plus/icons-vue'
 
+// 🔧 京东云模式：不显示 License 提醒
+const isJdyunMode = import.meta.env.VITE_JDYUN_MODE === 'true'
+
 const router = useRouter()
 const licenseStore = useLicenseStore()
 
@@ -60,6 +63,8 @@ const alertType = computed(() => {
 
 // 是否显示提醒
 const showAlert = computed(() => {
+  // 🔧 京东云模式：不显示任何 License 提醒
+  if (isJdyunMode) return false
   if (dismissed.value || isDismissedToday()) return false
   // 离线状态
   if (licenseStore.isOffline) return true
