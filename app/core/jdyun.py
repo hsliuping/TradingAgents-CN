@@ -81,6 +81,7 @@ def get_jdyun_status() -> dict:
         "embedding_model": get_jdyun_embedding_model(),
         "embedding_dims": JDYUN_EMBEDDING_DIMS,
         "tushare_token_configured": bool(get_jdyun_tushare_token()),
+        "akshare_available": True,  # AKShare 是开源免费数据源，始终可用
     }
 
 

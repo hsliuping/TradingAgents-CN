@@ -381,6 +381,7 @@ import {
   type DataSourceConfig,
   type MarketCategory
 } from '@/api/config'
+import { isJdyunMode } from '@/utils/config'
 
 // Props
 interface Props {
@@ -430,7 +431,7 @@ const needsApiSecret = computed(() => {
 // 当前选中的数据源信息
 const currentDataSourceInfo = computed(() => {
   if (!formData.value.type) return null
-  return dataSourceTypes.find(ds => ds.value === formData.value.type)
+  return dataSourceTypes.value.find(ds => ds.value === formData.value.type)
 })
 
 const qmtConfigKeys = [
@@ -481,7 +482,7 @@ const handleTypeChange = () => {
 
     // 如果显示名称为空，也自动填充
     if (!formData.value.display_name) {
-      const sourceInfo = dataSourceTypes.find(ds => ds.value === selectedType)
+      const sourceInfo = dataSourceTypes.value.find(ds => ds.value === selectedType)
       if (sourceInfo) {
         formData.value.display_name = sourceInfo.label
       }
@@ -618,12 +619,12 @@ const buildPayload = () => {
 }
 
 /**
- * 数据源类型选项
+ * 数据源类型选项（全量）
  *
  * 注意：这些选项与后端 DataSourceType 枚举保持同步
  * 添加新数据源时，请先在后端 tradingagents/constants/data_sources.py 中注册
  */
-const dataSourceTypes = [
+const allDataSourceTypes = [
   // 中国市场数据源
   {
     label: 'Tushare',
@@ -680,6 +681,22 @@ const dataSourceTypes = [
   },
   { label: '自定义', value: 'custom' }
 ]
+
+/**
+ * 京东云模式下允许的数据源类型
+ */
+const JDYUN_ALLOWED_DATA_SOURCES = ['tushare', 'akshare']
+
+/**
+ * 数据源类型选项（根据模式过滤）
+ * 京东云模式下只显示 tushare 和 akshare
+ */
+const dataSourceTypes = computed(() => {
+  if (isJdyunMode()) {
+    return allDataSourceTypes.filter(ds => JDYUN_ALLOWED_DATA_SOURCES.includes(ds.value))
+  }
+  return allDataSourceTypes
+})
 
 // 表单验证规则
 const rules: FormRules = {

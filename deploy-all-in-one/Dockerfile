@@ -12,7 +12,6 @@
 # 阶段 1：构建运行时镜像（复用基础镜像 + 添加 MongoDB/Redis/Nginx/s6）
 # ==============================================================================
 ARG BASE_BACKEND=hsliup/tradingagents-pro-backend:3-latest
-ARG FRONTEND=hsliup/tradingagents-pro-frontend:3-latest
 ARG MONGO_IMAGE=mongo:4.4
 ARG REDIS_IMAGE=redis:7-alpine
 ARG NGINX_IMAGE=nginx:alpine
@@ -20,7 +19,6 @@ ARG NGINX_IMAGE=nginx:alpine
 FROM ${MONGO_IMAGE} AS mongo-source
 FROM ${REDIS_IMAGE} AS redis-source
 FROM ${NGINX_IMAGE} AS nginx-source
-FROM ${FRONTEND} AS frontend-source
 
 # 运行时基础镜像（复用现成后端镜像，包含所有 Python 依赖）
 FROM ${BASE_BACKEND} AS runtime-base
@@ -109,10 +107,9 @@ RUN groupadd --system --gid 1000 appuser 2>/dev/null || true && \
     echo "用户创建完成"
 
 # ------------------------------------------------------------------------------
-# 复制前端构建产物（从 hsliup/tradingagents-pro-frontend）
+# 复制前端构建产物（从本地 frontend/dist，需先 npm run build）
 # ------------------------------------------------------------------------------
-# 注意：前端镜像的内容在 /usr/share/nginx/html/（直接作为 nginx 静态文件）
-COPY --from=frontend-source /usr/share/nginx/html /app/frontend/dist
+COPY frontend/dist /app/frontend/dist
 
 # 复制应用代码（如果基础镜像不包含最新代码）
 # 基础镜像已经包含代码，这里复制新代码覆盖

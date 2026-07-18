@@ -743,6 +743,7 @@ export const configApi = {
     embedding_model: string
     embedding_dims: number
     tushare_token_configured: boolean
+    akshare_available: boolean
   }> {
     return ApiClient.get('/api/config/jdyun/status').then((response: any) => response.data ?? response)
   }

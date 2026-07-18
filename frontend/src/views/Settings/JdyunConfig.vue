@@ -61,6 +61,11 @@
           <el-tag v-if="status.tushare_token_configured" type="success" size="small">已配置</el-tag>
           <el-tag v-else type="danger" size="small">未配置</el-tag>
         </el-descriptions-item>
+
+        <el-descriptions-item label="AKShare 数据源">
+          <el-tag v-if="status.akshare_available" type="success" size="small">可用（免费开源）</el-tag>
+          <el-tag v-else type="danger" size="small">不可用</el-tag>
+        </el-descriptions-item>
       </el-descriptions>
 
       <div class="config-actions" style="margin-top: 20px;">
@@ -84,6 +89,7 @@ interface JdyunStatus {
   embedding_model: string
   embedding_dims: number
   tushare_token_configured: boolean
+  akshare_available: boolean
 }
 
 const status = ref<JdyunStatus>({
@@ -95,6 +101,7 @@ const status = ref<JdyunStatus>({
   embedding_model: '',
   embedding_dims: 0,
   tushare_token_configured: false,
+  akshare_available: true,
 })
 
 const loading = ref(false)
@@ -103,7 +110,11 @@ const loadStatus = async () => {
   loading.value = true
   try {
     const data = await configApi.getJdyunStatus()
-    status.value = data
+    // 兼容旧后端不返回 akshare_available 的情况
+    status.value = {
+      ...data,
+      akshare_available: data.akshare_available ?? true,
+    }
   } catch (error: any) {
     ElMessage.error('获取京东云配置状态失败: ' + (error?.message || error))
   } finally {

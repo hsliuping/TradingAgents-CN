@@ -23,6 +23,7 @@ export interface WfConfirmResult {
   workflow_id?: string
   blueprint_summary?: string
   creation_report?: WfCreationReport
+  published?: boolean
   error?: string
 }
 

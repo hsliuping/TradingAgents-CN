@@ -51,11 +51,17 @@
 
             <!-- 系统配置菜单 -->
             <template v-else-if="currentSection === 'config'">
-              <!-- 京东云模式：显示系统配置（只读状态页），隐藏配置管理 -->
-              <el-menu-item v-if="isJdyunMode()" index="jdyun-config">
-                <el-icon><Tools /></el-icon>
-                <span>系统配置</span>
-              </el-menu-item>
+              <!-- 京东云模式：显示系统配置（只读状态页）+ 数据源配置 -->
+              <template v-if="isJdyunMode()">
+                <el-menu-item index="jdyun-config">
+                  <el-icon><Tools /></el-icon>
+                  <span>系统配置</span>
+                </el-menu-item>
+                <el-menu-item index="datasource-config">
+                  <el-icon><DataBoard /></el-icon>
+                  <span>数据源配置</span>
+                </el-menu-item>
+              </template>
               <!-- 非京东云模式：显示完整的配置管理 -->
               <el-menu-item v-else index="config">
                 <el-icon><Tools /></el-icon>
@@ -363,6 +369,26 @@
           </div>
         </el-card>
 
+        <!-- 数据源配置（京东云模式） -->
+        <el-card v-if="isJdyunMode()" v-show="activeTab === 'datasource-config'" class="settings-content" shadow="never">
+          <template #header>
+            <h3>数据源配置</h3>
+          </template>
+
+          <div class="config-content">
+            <el-alert
+              title="京东云版数据源"
+              type="info"
+              description="京东云合作版仅支持 Tushare 和 AKShare 数据源。如需修改，请在数据源管理页面操作。"
+              :closable="false"
+              style="margin-bottom: 20px;"
+            />
+            <el-button type="primary" @click="goToDataSourceConfig">
+              管理数据源
+            </el-button>
+          </div>
+        </el-card>
+
         <!-- 使用统计 -->
         <el-card v-show="activeTab === 'usage'" class="settings-content" shadow="never">
           <template #header>
@@ -581,7 +607,8 @@ import {
   Refresh,
   DataAnalysis,
   ChatDotRound,
-  Collection
+  Collection,
+  DataBoard
 } from '@element-plus/icons-vue'
 import { getCapabilityIndexState, rebuildCapabilityIndex, type CapabilityIndexState } from '@/api/capabilityIndex'
 
@@ -738,9 +765,14 @@ watch(() => authStore.user, (newUser) => {
 
 // 方法
 const handleMenuSelect = (index: string) => {
-  // 京东云模式：点击“系统配置”菜单项时跳转到独立的京东云配置页
+  // 京东云模式：点击"系统配置"菜单项时跳转到独立的京东云配置页
   if (index === 'jdyun-config') {
     router.push('/settings/jdyun-config')
+    return
+  }
+  // 京东云模式：点击"数据源配置"菜单项时跳转到配置管理页（数据源标签页）
+  if (index === 'datasource-config') {
+    router.push('/settings/config?tab=datasource')
     return
   }
   activeTab.value = index
@@ -875,6 +907,10 @@ const goToConfigManagement = () => {
 
 const goToJdyunConfig = () => {
   router.push('/settings/jdyun-config')
+}
+
+const goToDataSourceConfig = () => {
+  router.push('/settings/config?tab=datasource')
 }
 
 const goToUsageStatistics = () => {
