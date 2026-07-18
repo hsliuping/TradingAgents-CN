@@ -1,0 +1,1 @@
+import{r as p}from"./index-CrA_uZYV.js";const i={assemble:e=>p.post("/api/v1/prompt-preview/assemble",e),listIndustries:()=>p.get("/api/v1/prompt-preview/industries"),listAgents:()=>p.get("/api/v1/prompt-preview/agents"),getCapabilitySnapshot:()=>p.get("/api/v1/prompt-preview/capability-snapshot")};export{i as p};
