@@ -10,9 +10,9 @@
 
 | 严重程度 | 数量 | 已修复 | 状态 |
 |---------|------|------|------|
-| 🔴 HIGH | 3 | 3 | ✅ 全部修复 |
-| 🟡 MEDIUM | 6 | 4 | ✅ M1-M4 已修复，M5 待评估，M6 已修复 |
-| 🟢 LOW | 4 | 0 | ⏳ 后续优化 |
+| 🔴 HIGH | 4 | 4 | ✅ 全部修复 |
+| 🟡 MEDIUM | 6 | 6 | ✅ 全部修复 |
+| 🟢 LOW | 5 | 0 | ⏳ 后续优化 |
 
 ## 修复记录（2026-07-18）
 
@@ -81,6 +81,15 @@
   - 移除 MongoDB 连接字符串长度输出
   - `setup_logging()` 的调试 print 语句改为环境变量控制（`TRADINGAGENTS_VERBOSE_SETUP=true` 启用）
 - **效果**: 生产环境启动时不再暴露系统内部结构和敏感凭据长度
+
+### ✅ H4 - 前端敏感日志清除
+- **文件**: `frontend/src/api/request.ts`, `frontend/src/stores/auth.ts`, `frontend/src/stores/license.ts`
+- **改动**:
+  - `request.ts`: 移除所有输出 Token 长度、前缀、Authorization 头的 console.log
+  - `request.ts`: 移除请求详情日志（包含 headers）
+  - `auth.ts`: 移除 Token fingerprint 输出，移除 refresh token 长度/前缀日志
+  - `license.ts`: 移除 License 验证详情日志
+- **效果**: 生产环境浏览器控制台不再泄露认证凭据信息
 
 ---
 

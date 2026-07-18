@@ -147,14 +147,7 @@ export const useAuthStore = defineStore('auth', {
       // 设置API请求头
       this.setAuthHeader(token)
 
-      console.log('✅ 认证信息已保存:', {
-        token: token ? '已设置' : '未设置',
-        refreshToken: refreshToken ? '已设置' : '未设置',
-        user: user ? user.username : '未设置',
-        isAuthenticated: this.isAuthenticated,
-        tokenFingerprint: this.maskTokenFingerprint(token),
-        refreshTokenFingerprint: this.maskTokenFingerprint(refreshToken),
-      })
+      console.log('✅ 认证信息已保存')
     },
     
     // 清除认证信息
@@ -285,12 +278,6 @@ export const useAuthStore = defineStore('auth', {
           throw new Error('没有刷新令牌')
         }
 
-        console.log('📝 Refresh token信息:', {
-          length: this.refreshToken.length,
-          prefix: this.refreshToken.substring(0, 10),
-          isValid: this.refreshToken.split('.').length === 3
-        })
-
         // 验证refresh token格式
         if (this.refreshToken.split('.').length !== 3) {
           console.error('❌ Refresh token格式无效')
@@ -298,16 +285,10 @@ export const useAuthStore = defineStore('auth', {
         }
 
         const response = await authApi.refreshToken(this.refreshToken)
-        console.log('📨 刷新响应:', response)
 
         if (response.success) {
           const { access_token, refresh_token } = response.data
-          console.log('✅ Token刷新成功', {
-            oldAccessTokenFingerprint: this.maskTokenFingerprint(this.token),
-            oldRefreshTokenFingerprint: this.maskTokenFingerprint(this.refreshToken),
-            newAccessTokenFingerprint: this.maskTokenFingerprint(access_token),
-            newRefreshTokenFingerprint: this.maskTokenFingerprint(refresh_token),
-          })
+          console.log('✅ Token刷新成功')
           this.setAuthInfo(access_token, refresh_token)
           return true
         } else {
@@ -315,7 +296,7 @@ export const useAuthStore = defineStore('auth', {
           throw new Error(response.message || 'Token刷新失败')
         }
       } catch (error: any) {
-        console.error('❌ Token刷新异常:', error)
+        console.error('❌ Token刷新异常:', error.message)
 
         // 如果是网络错误或服务器错误，不要立即清除认证信息
         if (error.code === 'NETWORK_ERROR' || error.response?.status >= 500) {
