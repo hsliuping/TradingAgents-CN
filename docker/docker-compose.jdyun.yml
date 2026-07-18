@@ -107,7 +107,7 @@ services:
       BCRYPT_ROUNDS: "12"
       # CORS 配置：生产环境必须指定具体前端地址
       # ⚠️ 京东云部署时，请在 .env 中设置 ALLOWED_ORIGINS 为实际访问地址
-      # 示例：ALLOWED_ORIGINS=["http://your-domain.com", "http://your-ip:8082"]
+      # 示例：ALLOWED_ORIGINS=["http://your-domain.com", "http://your-ip:${NGINX_PORT}"]
       # 如果未设置，默认仅允许 localhost（外部访问会失败）
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-[\"http://localhost:3000\", \"http://localhost:8082\"]}"
       # 🔧 京东云合作版核心配置（通过环境变量注入）
@@ -176,7 +176,7 @@ services:
     container_name: tradingagents-jdyun-nginx
     restart: unless-stopped
     ports:
-      - "8082:80"
+      - "${NGINX_PORT:-8082}:80"
     volumes:
       - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
     depends_on:

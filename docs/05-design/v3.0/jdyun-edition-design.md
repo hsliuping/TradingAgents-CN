@@ -819,11 +819,44 @@ Qwen3-Embedding-8B 输出维度为 4096，与现有系统可能使用的其他 E
 cp .env.jdyun.example .env
 # 编辑 .env，填入 OPENAI_API_KEY 和 TUSHARE_TOKEN
 
-# 2. 启动服务
+# 2.（可选）修改端口（默认 8082，避免与 k8s 其他服务冲突）
+# 在 .env 中添加：
+# NGINX_PORT=18082
+
+# 3. 启动服务
 docker-compose -f docker/docker-compose.jdyun.yml up -d
 
-# 3. 访问
-# http://your-server:8082
+# 4. 访问
+# http://your-server:${NGINX_PORT} (默认 http://your-server:8082)
+```
+
+**端口配置说明**（Kubernetes 多服务环境）：
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `NGINX_PORT` | `8082` | Nginx 反向代理对外端口 |
+| `ALLOWED_ORIGINS` | 见下表 | CORS 允许的前端地址，需包含实际访问地址 |
+
+**k8s 环境示例 `.env` 配置**：
+
+```bash
+# 端口配置（避免冲突）
+NGINX_PORT=18082
+
+# CORS 配置（替换为实际访问地址）
+ALLOWED_ORIGINS=["http://your-service.your-namespace.svc.cluster.local:18082", "http://your-domain.com"]
+
+# 安全配置（必须）
+JWT_SECRET=使用 openssl rand -base64 48 生成
+CSRF_SECRET=使用 openssl rand -base64 48 生成
+
+# 京东云配置（必须）
+JDYUN_MODE=true
+OPENAI_API_BASE=https://modelservice.jdcloud.com/v1
+OPENAI_API_KEY=<由京东云提供>
+OPENAI_MODEL=GLM-5
+EMBEDDING_MODEL=Qwen3-Embedding-8B
+TUSHARE_TOKEN=<由用户提供>
 ```
 
 ### 10.3 打包京东云版便携包
