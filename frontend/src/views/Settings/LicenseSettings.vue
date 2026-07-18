@@ -1,5 +1,26 @@
 <template>
   <div class="license-settings-container">
+    <!-- 🔧 京东云模式：显示简化提示，所有功能已开放 -->
+    <el-card v-if="isJdyunMode" class="status-card">
+      <template #header>
+        <div class="card-header">
+          <span>🔧 京东云合作版</span>
+          <el-tag type="primary" size="large">所有功能已开放</el-tag>
+        </div>
+      </template>
+      <el-alert
+        type="success"
+        :closable="false"
+        show-icon
+      >
+        <template #title>
+          京东云合作版无需 License 激活，所有功能默认开放，您可以自由使用全部研究与分析能力。
+        </template>
+      </el-alert>
+    </el-card>
+
+    <!-- 非京东云模式：完整的 License 配置 -->
+    <template v-else>
     <!-- 当前学员状态 -->
     <el-card class="status-card">
       <template #header>
@@ -173,6 +194,7 @@
         </el-col>
       </el-row>
     </el-card>
+    </template>
   </div>
 </template>
 
@@ -184,6 +206,9 @@ import { PRO_FEATURES, useLicenseStore, type ProFeature } from '@/stores/license
 import request, { type ApiResponse } from '@/api/request'
 
 const licenseStore = useLicenseStore()
+
+// 🔧 京东云模式：所有功能开放，无需 License 配置
+const isJdyunMode = import.meta.env.VITE_JDYUN_MODE === 'true'
 
 // 状态
 const tokenInput = ref('')

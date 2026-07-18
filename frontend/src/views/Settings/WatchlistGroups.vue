@@ -1,7 +1,8 @@
 <template>
   <div class="watchlist-groups-container">
-    <!-- 高级学员功能标识 -->
+    <!-- 高级学员功能标识（京东云模式下隐藏） -->
     <el-alert
+      v-if="!isJdyunMode"
       type="success"
       :closable="false"
       show-icon
@@ -277,6 +278,9 @@ import {
 } from '@/api/watchlist-groups'
 import { tagsApi } from '@/api/tags'
 import { favoritesApi } from '@/api/favorites'
+
+// 🔧 京东云模式
+const isJdyunMode = import.meta.env.VITE_JDYUN_MODE === 'true'
 
 const loading = ref(false)
 const groups = ref<WatchlistGroup[]>([])

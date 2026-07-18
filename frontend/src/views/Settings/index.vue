@@ -52,7 +52,7 @@
             <!-- 系统配置菜单 -->
             <template v-else-if="currentSection === 'config'">
               <!-- 京东云模式：显示系统配置（只读状态页），隐藏配置管理 -->
-              <el-menu-item v-if="isJdyunMode" index="jdyun-config">
+              <el-menu-item v-if="isJdyunMode()" index="jdyun-config">
                 <el-icon><Tools /></el-icon>
                 <span>系统配置</span>
               </el-menu-item>
@@ -324,7 +324,7 @@
 
 
         <!-- 配置管理（非京东云模式） -->
-        <el-card v-if="!isJdyunMode" v-show="activeTab === 'config'" class="settings-content" shadow="never">
+        <el-card v-if="!isJdyunMode()" v-show="activeTab === 'config'" class="settings-content" shadow="never">
           <template #header>
             <h3>配置管理</h3>
           </template>
@@ -344,7 +344,7 @@
         </el-card>
 
         <!-- 系统配置（京东云模式：只读状态页） -->
-        <el-card v-if="isJdyunMode" v-show="activeTab === 'jdyun-config'" class="settings-content" shadow="never">
+        <el-card v-if="isJdyunMode()" v-show="activeTab === 'jdyun-config'" class="settings-content" shadow="never">
           <template #header>
             <h3>系统配置</h3>
           </template>
