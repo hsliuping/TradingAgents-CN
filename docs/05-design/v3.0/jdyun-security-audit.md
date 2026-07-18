@@ -11,7 +11,7 @@
 | 严重程度 | 数量 | 已修复 | 状态 |
 |---------|------|------|------|
 | 🔴 HIGH | 3 | 3 | ✅ 全部修复 |
-| 🟡 MEDIUM | 5 | 4 | ✅ M1-M4 已修复，M5 评估中 |
+| 🟡 MEDIUM | 5 | 3 | ✅ M1-M3 已修复，M4 已回退，M5 评估中 |
 | 🟢 LOW | 3 | 0 | ⏳ 后续优化 |
 
 ## 修复记录（2026-07-18）
@@ -58,14 +58,13 @@
   - 27 个 Vue 文件批量替换 `marked()` → `renderMarkdown()`
   - 添加 `dompurify` 和 `@types/dompurify` 依赖
 
-### ✅ M4 - 登录失败速率限制
-- **文件**: `app/core/login_rate_limiter.py`（新增）, `app/routers/auth_db.py`
-- **改动**:
-  - 新增 `LoginRateLimiter` 类：基于 IP+用户名双维度失败计数
-  - 5 次失败 / 5 分钟 → 锁定 15 分钟，返回 429 + Retry-After 头
-  - Redis 优先（多 worker 共享）+ 内存降级（单实例可用）
-  - 登录成功清除失败计数，但不解除已触发的锁定（防止攻击者重置计数）
-  - 集成到 `/api/auth/login` 端点：检查锁定 → 记录失败 → 清除计数
+### ⏪ M4 - 登录速率限制（已回退）
+- **原因**: 京东云版是单用户容器部署，不存在多租户暴力破解场景
+- **风险评估**: 
+  - 用户可能锁死自己的系统（忘记密码 → 多试几次 → 被锁 15 分钟）
+  - 外层防护（京东云安全组 + nginx）是更合适的防御层
+  - 已有的 `RateLimitMiddleware`（每分钟5次）足够防止自动化扫描
+- **回退操作**: 删除 `app/core/login_rate_limiter.py`，恢复 `app/routers/auth_db.py` 原状
 
 ---
 
@@ -350,7 +349,7 @@ app.add_middleware(
 - [x] **M1**: Dockerfile 添加非 root 用户
 - [x] **M2**: MongoDB/Redis 使用 `expose` 替代 `ports`，京东云安全组仅开放 8082
 - [x] **M3**: 集成 DOMPurify 净化 marked() 输出
-- [x] **M4**: 登录端点添加速率限制
+- [⏪] **M4**: ~~登录端点添加速率限制~~（已回退：单用户部署不适用）
 - [ ] **M5**: 确保 M3 修复后再评估 Token 存储方案
 
 ### 🟢 后续优化（LOW）
