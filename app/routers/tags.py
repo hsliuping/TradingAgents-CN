@@ -9,7 +9,7 @@ from app.routers.auth_db import get_current_user
 from app.core.response import ok
 from app.services.tags_service import tags_service
 
-router = APIRouter(prefix="/tags", tags=["标签管理"])
+router = APIRouter(prefix="/tags", tags=["标签管理"], redirect_slashes=False)
 
 
 class TagCreate(BaseModel):
@@ -33,7 +33,7 @@ class TagResponse(BaseModel):
     updated_at: str
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def list_tags(current_user: dict = Depends(get_current_user)):
     try:
         tags = await tags_service.list_tags(current_user["id"])
@@ -42,7 +42,7 @@ async def list_tags(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取标签失败: {e}")
 
 
-@router.post("/", response_model=dict)
+@router.post("", response_model=dict)
 async def create_tag(payload: TagCreate, current_user: dict = Depends(get_current_user)):
     try:
         tag = await tags_service.create_tag(

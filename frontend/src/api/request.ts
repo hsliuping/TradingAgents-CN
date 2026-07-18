@@ -214,6 +214,12 @@ const createAxiosInstance = (): AxiosInstance => {
         if (baseHasApi && urlStartsWithApi) {
           config.url = urlStr.replace(/^\/api(\/)?/, '/$1')
         }
+
+        // 统一去除 /api/* 路径末尾斜杠，避免 FastAPI 默认 307 重定向
+        const finalUrl = String(config.url || '')
+        if (finalUrl.startsWith('/api/') && finalUrl.length > 5) {
+          config.url = finalUrl.replace(/\/+(\?|$)/, '$1')
+        }
       } catch (e) {
         console.warn('端点兼容检查异常', e)
       }

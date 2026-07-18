@@ -17,7 +17,7 @@ from app.core.response import ok
 
 logger = logging.getLogger("webapi")
 
-router = APIRouter(prefix="/favorites", tags=["自选股管理"])
+router = APIRouter(prefix="/favorites", tags=["自选股管理"], redirect_slashes=False)
 
 FAVORITES_SYNC_TASKS_COLLECTION = "favorites_sync_tasks"
 
