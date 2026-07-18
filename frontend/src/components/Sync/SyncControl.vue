@@ -187,14 +187,15 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, RefreshRight, Delete } from '@element-plus/icons-vue'
-import { 
-  getSyncStatus, 
-  runStockBasicsSync, 
+import {
+  getSyncStatus,
+  runStockBasicsSync,
   clearSyncCache,
   getDataSourcesStatus,
-  type SyncStatus, 
-  type DataSourceStatus 
+  type SyncStatus,
+  type DataSourceStatus
 } from '@/api/sync'
+import { isJdyunMode } from '@/utils/config'
 
 // Props
 interface Props {
@@ -240,14 +241,20 @@ const fetchSyncStatus = async () => {
   }
 }
 
+// 京东云版只展示 Tushare 和 AKShare
+const JDYUN_ALLOWED_SOURCES = new Set(['tushare', 'akshare'])
+const isJdyunAllowedSource = (name: string) => JDYUN_ALLOWED_SOURCES.has(name?.toLowerCase())
+
 // 获取数据源状态
 const fetchDataSources = async () => {
   try {
     const response = await getDataSourcesStatus()
     if (response.success) {
       // 过滤掉 local 数据源（本地数据源不参与同步操作）
+      // 京东云版只展示 Tushare 和 AKShare
       availableSources.value = response.data
         .filter(source => source.name !== 'local')
+        .filter(source => !isJdyunMode() || isJdyunAllowedSource(source.name))
         .sort((a, b) => b.priority - a.priority) // 倒序：优先级高的在前
     }
   } catch (err: any) {

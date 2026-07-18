@@ -27,9 +27,9 @@
           />
         </div>
 
-        <div v-else-if="dataSources.length > 0" class="sources-list">
-          <div 
-            v-for="source in dataSources" 
+        <div v-else-if="displayDataSources.length > 0" class="sources-list">
+          <div
+            v-for="source in displayDataSources"
             :key="source.name"
             class="source-item"
             :class="{ 'available': source.available, 'unavailable': !source.available }"
@@ -91,11 +91,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Connection, Refresh, Operation } from '@element-plus/icons-vue'
 import { getDataSourcesStatus, testDataSources, type DataSourceStatus, type DataSourceTestResult } from '@/api/sync'
 import { testApiConnection } from '@/api/request'
+import { isJdyunMode } from '@/utils/config'
 
 // 响应式数据
 const loading = ref(false)
@@ -104,6 +105,17 @@ const error = ref('')
 const dataSources = ref<DataSourceStatus[]>([])
 const testResults = ref<Record<string, DataSourceTestResult>>({})
 const testingSource = ref('')
+
+// 京东云版只展示 Tushare 和 AKShare
+const JDYUN_ALLOWED_SOURCES = new Set(['tushare', 'akshare'])
+const displayDataSources = computed(() => {
+  if (!isJdyunMode()) {
+    return dataSources.value
+  }
+  return dataSources.value.filter(source =>
+    JDYUN_ALLOWED_SOURCES.has(source.name?.toLowerCase())
+  )
+})
 
 // 获取数据源状态
 const fetchDataSourcesStatus = async () => {
