@@ -1,0 +1,18 @@
+#!/command/with-contenv bash
+# mongodb 服务 - 启动 MongoDB 数据库
+# 等待 init 服务完成
+
+cd /
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [mongodb] $1" | tee -a /var/log/mongodb/service.log
+}
+
+log "🚀 启动 MongoDB..."
+
+# 使用 gosu 降权到 mongodb 用户运行
+exec gosu mongodb mongod \
+    --config /etc/mongod.conf \
+    --bind_ip 127.0.0.1 \
+    --port 27017 \
+    --logpath /var/log/mongodb/mongod.log

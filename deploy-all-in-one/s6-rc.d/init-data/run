@@ -1,0 +1,212 @@
+#!/command/with-contenv bash
+# init-data 服务 - 数据库初始化（oneshot）
+# 等待 MongoDB 和 Redis 就绪后执行：
+# 1. 检查是否已初始化
+# 2. 首次启动时导入配置数据 + 创建默认用户
+# 3. 创建标记文件
+
+set -u
+
+INIT_MARKER="/app/runtime/.config_imported"
+LOG_FILE="/app/logs/init-data.log"
+
+log() {
+    local msg="$1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [init-data] $msg" | tee -a "$LOG_FILE"
+}
+
+log "=========================================="
+log "🔧 检查数据库初始化状态"
+log "=========================================="
+
+# ------------------------------------------------------------------------------
+# 1. 等待 MongoDB 就绪
+# ------------------------------------------------------------------------------
+log "⏳ 等待 MongoDB 就绪..."
+MAX_RETRIES=60
+RETRY=0
+MONGO_READY=false
+
+while [ $RETRY -lt $MAX_RETRIES ]; do
+    # 先尝试无认证连接（首次启动或单用户场景）
+    if python3 -c "
+import sys
+from pymongo import MongoClient
+try:
+    # 第一次连接：尝试无认证
+    client = MongoClient('mongodb://${MONGODB_HOST}:${MONGODB_PORT}/', serverSelectionTimeoutMS=2000)
+    client.server_info()
+    client.close()
+    sys.exit(0)
+except Exception as e:
+    sys.exit(1)
+" 2>/dev/null; then
+        MONGO_READY=true
+        log "   MongoDB 可连接（无认证模式）"
+        break
+    fi
+
+    # 第二次连接：尝试认证模式（已创建用户后）
+    if python3 -c "
+import sys
+from pymongo import MongoClient
+try:
+    client = MongoClient(
+        'mongodb://${MONGODB_USERNAME}:${MONGODB_PASSWORD}@${MONGODB_HOST}:${MONGODB_PORT}/admin?authSource=${MONGODB_AUTH_SOURCE}',
+        serverSelectionTimeoutMS=2000
+    )
+    client.server_info()
+    client.close()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+        MONGO_READY=true
+        log "   MongoDB 可连接（认证模式）"
+        break
+    fi
+
+    RETRY=$((RETRY + 1))
+    if [ $((RETRY % 10)) -eq 0 ]; then
+        log "   等待中... ($RETRY/$MAX_RETRIES)"
+    fi
+    sleep 1
+done
+
+if [ "$MONGO_READY" = false ]; then
+    log "❌ MongoDB 连接超时（${MAX_RETRIES}秒）"
+    log "   请检查 MongoDB 服务是否正常"
+    exit 1
+fi
+log "✅ MongoDB 已就绪"
+
+# ------------------------------------------------------------------------------
+# 2. 等待 Redis 就绪（可选）
+# ------------------------------------------------------------------------------
+log "⏳ 等待 Redis 就绪..."
+RETRY=0
+REDIS_READY=false
+
+while [ $RETRY -lt 30 ]; do
+    if python3 -c "
+import sys
+import redis
+try:
+    r = redis.Redis(
+        host='${REDIS_HOST}',
+        port=${REDIS_PORT},
+        password='${REDIS_PASSWORD:-}',
+        socket_timeout=2
+    )
+    r.ping()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+        REDIS_READY=true
+        break
+    fi
+    RETRY=$((RETRY + 1))
+    sleep 1
+done
+
+if [ "$REDIS_READY" = true ]; then
+    log "✅ Redis 已就绪"
+else
+    log "⚠️  Redis 连接超时（继续，Redis 是可选服务）"
+fi
+
+# ------------------------------------------------------------------------------
+# 3. 检查是否已初始化
+# ------------------------------------------------------------------------------
+SHOULD_INIT=true
+INIT_REASON="未找到初始化标记文件"
+
+if [ -f "$INIT_MARKER" ]; then
+    # 检查 admin 用户是否存在（先尝试无认证，再尝试认证）
+    if python3 -c "
+import sys
+from pymongo import MongoClient
+
+def check_user():
+    # 先尝试无认证
+    try:
+        client = MongoClient('mongodb://${MONGODB_HOST}:${MONGODB_PORT}/', serverSelectionTimeoutMS=3000)
+        user = client['${MONGODB_DATABASE}']['users'].find_one({'username': 'admin'}, {'_id': 1})
+        client.close()
+        return user is not None
+    except Exception:
+        pass
+    # 再尝试认证
+    try:
+        client = MongoClient(
+            'mongodb://${MONGODB_USERNAME}:${MONGODB_PASSWORD}@${MONGODB_HOST}:${MONGODB_PORT}/${MONGODB_DATABASE}?authSource=${MONGODB_AUTH_SOURCE}',
+            serverSelectionTimeoutMS=3000
+        )
+        user = client['${MONGODB_DATABASE}']['users'].find_one({'username': 'admin'}, {'_id': 1})
+        client.close()
+        return user is not None
+    except Exception:
+        return False
+
+sys.exit(0 if check_user() else 1)
+" 2>/dev/null; then
+        log "✅ 数据库已初始化（标记 + admin 用户）"
+        SHOULD_INIT=false
+    else
+        log "⚠️  标记文件存在但 admin 用户不存在，重新初始化"
+        rm -f "$INIT_MARKER"
+        INIT_REASON="陈旧标记，已移除并重新执行"
+    fi
+fi
+
+# ------------------------------------------------------------------------------
+# 4. 执行初始化（如果需要）
+# ------------------------------------------------------------------------------
+if [ "$SHOULD_INIT" = true ]; then
+    log ""
+    log "📦 开始初始化数据库..."
+    log "   原因: $INIT_REASON"
+
+    # 查找最新的配置导出文件
+    CONFIG_DIR="/app/install"
+    LATEST_CONFIG=$(find "$CONFIG_DIR" -name "database_export_config_*.json" -type f 2>/dev/null | sort -r | head -n 1)
+
+    cd /app
+
+    if [ -n "$LATEST_CONFIG" ] && [ -f "$LATEST_CONFIG" ]; then
+        log "   使用配置: $LATEST_CONFIG"
+
+        # 执行初始化（以 appuser 运行）
+        if gosu appuser python3 scripts/import_config_and_create_user.py "$LATEST_CONFIG" >> "$LOG_FILE" 2>&1; then
+            log "✅ 数据库初始化完成"
+
+            # 写入标记
+            echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC')" > "$INIT_MARKER"
+            chown appuser:appuser "$INIT_MARKER"
+            log "   标记文件: $INIT_MARKER"
+        else
+            log "⚠️  数据库初始化失败，查看日志: $LOG_FILE"
+            log "   服务将继续启动，你可以稍后手动执行："
+            log "   docker exec -it <container> python3 scripts/import_config_and_create_user.py"
+        fi
+    else
+        log "⚠️  未找到配置文件 (database_export_config_*.json)"
+        log "   仅创建默认用户..."
+
+        if gosu appuser python3 scripts/import_config_and_create_user.py --create-user-only >> "$LOG_FILE" 2>&1; then
+            log "✅ 默认用户已创建"
+            echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC')" > "$INIT_MARKER"
+            chown appuser:appuser "$INIT_MARKER"
+        else
+            log "⚠️  默认用户创建失败"
+        fi
+    fi
+else
+    log "ℹ️  跳过初始化（数据库已有数据）"
+fi
+
+log ""
+log "=========================================="
+log "✅ init-data 完成"
+log "=========================================="
