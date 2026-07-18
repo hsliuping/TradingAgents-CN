@@ -16,6 +16,7 @@
 
 import json
 import sys
+import os
 import hashlib
 from datetime import datetime
 from pathlib import Path
@@ -31,17 +32,19 @@ from bson import ObjectId
 
 
 def load_env_config(script_dir: Path) -> dict:
-    """从 .env 文件加载配置
+    """从环境变量和 .env 文件加载配置（环境变量优先）
 
     Args:
         script_dir: 脚本所在目录
 
     Returns:
         配置字典，包含 mongodb_port 等
-    """
-    # 查找 .env 文件（在项目根目录）
-    env_file = script_dir.parent / '.env'
 
+    优先级：
+        1. 环境变量（单容器/K8s 部署场景）
+        2. .env 文件（传统部署场景）
+    """
+    # 默认配置
     config = {
         'mongodb_port': 27017,  # 默认端口
         'mongodb_host': 'localhost',
@@ -50,6 +53,33 @@ def load_env_config(script_dir: Path) -> dict:
         'mongodb_database': 'tradingagents'
     }
 
+    # ------------------------------------------------------------------------------
+    # 1. 优先从环境变量读取（单容器/K8s 部署场景）
+    #    容器内 MONGODB_HOST=127.0.0.1，单容器能直接连接本机 MongoDB
+    # ------------------------------------------------------------------------------
+    env_overrides = {
+        'MONGODB_HOST': ('mongodb_host', str),
+        'MONGODB_PORT': ('mongodb_port', int),
+        'MONGODB_USERNAME': ('mongodb_username', str),
+        'MONGODB_PASSWORD': ('mongodb_password', str),
+        'MONGODB_DATABASE': ('mongodb_database', str),
+    }
+    env_used = False
+    for env_key, (cfg_key, cfg_type) in env_overrides.items():
+        val = os.environ.get(env_key)
+        if val:
+            config[cfg_key] = cfg_type(val) if cfg_type == int else val
+            env_used = True
+            print(f"💡 环境变量 {env_key} -> {cfg_key}={val if cfg_key != 'mongodb_password' else '***'}")
+
+    if env_used:
+        print(f"   （单容器/K8s 模式，使用环境变量配置）")
+        return config
+
+    # ------------------------------------------------------------------------------
+    # 2. 从 .env 文件读取（传统部署场景，仅在环境变量未设置时生效）
+    # ------------------------------------------------------------------------------
+    env_file = script_dir.parent / '.env'
     if env_file.exists():
         try:
             with open(env_file, 'r', encoding='utf-8') as f:
@@ -74,7 +104,7 @@ def load_env_config(script_dir: Path) -> dict:
             print(f"⚠️  警告: 读取 .env 文件失败: {e}")
             print(f"   使用默认配置")
     else:
-        print(f"⚠️  警告: .env 文件不存在: {env_file}")
+        print(f"⚠️  警告: .env 文件不存在: {env_file}，且未设置环境变量")
         print(f"   使用默认配置")
 
     return config
@@ -279,9 +309,14 @@ def connect_mongodb(use_docker: bool = True, config: dict = None) -> MongoClient
     """连接到 MongoDB
 
     Args:
-        use_docker: True=在 Docker 容器内运行（使用 mongodb 服务名）
+        use_docker: True=在 Docker 容器内运行（默认使用 mongodb 服务名）
                    False=在宿主机运行（使用 localhost）
-        config: 配置字典，包含端口等信息
+        config: 配置字典，包含 mongodb_host/port/username/password/database
+
+    主机选择优先级：
+        1. 环境变量 MONGODB_HOST（已通过 load_env_config 写入 config）
+        2. use_docker=True 时使用 'mongodb' 服务名
+        3. use_docker=False 时使用 localhost
     """
     if config is None:
         config = {
@@ -292,18 +327,36 @@ def connect_mongodb(use_docker: bool = True, config: dict = None) -> MongoClient
             'mongodb_database': 'tradingagents'
         }
 
-    # 构建 MongoDB URI
-    host = 'mongodb' if use_docker else config['mongodb_host']
+    # 主机选择：如果 config['mongodb_host'] 不是 'localhost'（已被环境变量覆盖）
+    # 优先使用 config 中的值（如单容器场景的 127.0.0.1）
+    if config.get('mongodb_host') and config['mongodb_host'] not in ('localhost', '127.0.0.1'):
+        host = config['mongodb_host']
+        env_name = "环境变量指定主机"
+    elif config.get('mongodb_host') == '127.0.0.1':
+        host = '127.0.0.1'
+        env_name = "单容器内连接"
+    else:
+        # 默认情况
+        host = 'mongodb' if use_docker else config['mongodb_host']
+        env_name = "Docker 容器内" if use_docker else "宿主机"
+
     port = config['mongodb_port']
     username = config['mongodb_username']
     password = config['mongodb_password']
     database = config['mongodb_database']
 
-    mongo_uri = f"mongodb://{username}:{password}@{host}:{port}/{database}?authSource=admin"
-    env_name = "Docker 容器内" if use_docker else "宿主机"
+    # URL 编码用户名密码（避免特殊字符问题）
+    from urllib.parse import quote_plus
+    username_enc = quote_plus(username) if username else ''
+    password_enc = quote_plus(password) if password else ''
+
+    if username_enc and password_enc:
+        mongo_uri = f"mongodb://{username_enc}:{password_enc}@{host}:{port}/{database}?authSource=admin"
+    else:
+        mongo_uri = f"mongodb://{host}:{port}/{database}"
 
     print(f"\n🔌 连接到 MongoDB ({env_name})...")
-    print(f"   URI: mongodb://{username}:***@{host}:{port}/{database}?authSource=admin")
+    print(f"   URI: mongodb://{username_enc}:***@{host}:{port}/{database}?authSource=admin" if username_enc else f"   URI: mongodb://{host}:{port}/{database}")
 
     try:
         client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)

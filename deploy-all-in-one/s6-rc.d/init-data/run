@@ -1,18 +1,69 @@
 #!/command/with-contenv bash
 # init-data 服务 - 数据库初始化（oneshot）
-# 等待 MongoDB 和 Redis 就绪后执行：
-# 1. 检查是否已初始化
-# 2. 首次启动时导入配置数据 + 创建默认用户
-# 3. 创建标记文件
+#
+# 流程：
+#   1. 等待 MongoDB 就绪（transitionToAuth 或 auth 模式均可）
+#   2. 检查/创建 admin root 用户
+#   3. 如果处于 transitionToAuth 模式，切换到完全认证模式
+#   4. 导入配置数据 + 创建默认业务用户
+#   5. 创建标记文件
+#
+# 关键注意事项：
+#   - MongoDB 的 ping 命令不需要认证！必须用 listDatabases 等命令测试认证
+#   - admin 用户存在但密码错误时，需要用 updateUser 重置密码
+#   - transitionToAuth → auth 的切换通过 s6 重启 mongod 实现
 
 set -u
 
 INIT_MARKER="/app/runtime/.config_imported"
+MONGO_ADMIN_MARKER="/app/runtime/.mongo_admin_created"
 LOG_FILE="/app/logs/init-data.log"
 
 log() {
     local msg="$1"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [init-data] $msg" | tee -a "$LOG_FILE"
+}
+
+# 辅助函数：用认证连接测试（使用 listDatabases，而非 ping）
+# ping 命令不需要认证，不能用来判断认证是否成功！
+auth_test() {
+    python3 -c "
+import sys
+from pymongo import MongoClient
+from pymongo.errors import OperationFailure
+try:
+    client = MongoClient(
+        'mongodb://${MONGODB_USERNAME}:${MONGODB_PASSWORD}@${MONGODB_HOST}:${MONGODB_PORT}/admin?authSource=${MONGODB_AUTH_SOURCE}',
+        serverSelectionTimeoutMS=3000
+    )
+    # 使用 listDatabases 测试认证（必须认证才能执行）
+    client.list_database_names()
+    client.close()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+# 辅助函数：用无认证连接测试（检查是否处于 transitionToAuth 模式）
+# 使用 listDatabases 而非 ping
+noauth_test() {
+    python3 -c "
+import sys
+from pymongo import MongoClient
+from pymongo.errors import OperationFailure
+try:
+    client = MongoClient('mongodb://${MONGODB_HOST}:${MONGODB_PORT}/', serverSelectionTimeoutMS=2000)
+    # listDatabases 需要认证，如果成功说明处于 transitionToAuth 模式
+    client.list_database_names()
+    client.close()
+    sys.exit(0)
+except OperationFailure:
+    # 被拒绝说明需要认证（完全认证模式）
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
 }
 
 log "=========================================="
@@ -28,41 +79,17 @@ RETRY=0
 MONGO_READY=false
 
 while [ $RETRY -lt $MAX_RETRIES ]; do
-    # 先尝试无认证连接（首次启动或单用户场景）
-    if python3 -c "
-import sys
-from pymongo import MongoClient
-try:
-    # 第一次连接：尝试无认证
-    client = MongoClient('mongodb://${MONGODB_HOST}:${MONGODB_PORT}/', serverSelectionTimeoutMS=2000)
-    client.server_info()
-    client.close()
-    sys.exit(0)
-except Exception as e:
-    sys.exit(1)
-" 2>/dev/null; then
+    # 先试认证连接
+    if auth_test; then
         MONGO_READY=true
-        log "   MongoDB 可连接（无认证模式）"
+        log "   MongoDB 认证连接成功（完全认证模式）"
         break
     fi
 
-    # 第二次连接：尝试认证模式（已创建用户后）
-    if python3 -c "
-import sys
-from pymongo import MongoClient
-try:
-    client = MongoClient(
-        'mongodb://${MONGODB_USERNAME}:${MONGODB_PASSWORD}@${MONGODB_HOST}:${MONGODB_PORT}/admin?authSource=${MONGODB_AUTH_SOURCE}',
-        serverSelectionTimeoutMS=2000
-    )
-    client.server_info()
-    client.close()
-    sys.exit(0)
-except Exception:
-    sys.exit(1)
-" 2>/dev/null; then
+    # 再试无认证连接（transitionToAuth 模式）
+    if noauth_test; then
         MONGO_READY=true
-        log "   MongoDB 可连接（认证模式）"
+        log "   MongoDB 无认证连接成功（transitionToAuth 模式）"
         break
     fi
 
@@ -75,7 +102,6 @@ done
 
 if [ "$MONGO_READY" = false ]; then
     log "❌ MongoDB 连接超时（${MAX_RETRIES}秒）"
-    log "   请检查 MongoDB 服务是否正常"
     exit 1
 fi
 log "✅ MongoDB 已就绪"
@@ -117,51 +143,239 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 3. 检查是否已初始化
+# 3. 判断当前状态
+# ------------------------------------------------------------------------------
+log "🔍 检查 MongoDB 认证状态..."
+
+TRANSITION_MODE=false   # 是否处于 transitionToAuth 模式
+AUTH_WORKS=false        # admin 认证是否成功
+
+# 先测试认证连接
+if auth_test; then
+    AUTH_WORKS=true
+    log "   ✅ admin 认证连接成功"
+else
+    log "   ❌ admin 认证连接失败"
+fi
+
+# 测试无认证连接
+if noauth_test; then
+    TRANSITION_MODE=true
+    log "   无认证可执行 listDatabases → 处于 transitionToAuth 模式"
+else
+    log "   无认证被拒绝 → 处于完全认证模式"
+fi
+
+# ------------------------------------------------------------------------------
+# 4. 确保 admin root 用户存在且密码正确
+# ------------------------------------------------------------------------------
+# 三种情况：
+#   A. AUTH_WORKS=true → admin 用户存在且密码正确，无需操作
+#   B. AUTH_WORKS=false, TRANSITION_MODE=true → 需要创建或重置 admin 用户
+#   C. AUTH_WORKS=false, TRANSITION_MODE=false → 密码错误且无法无认证连接（严重错误）
+
+if [ "$AUTH_WORKS" = true ]; then
+    log "✅ admin 用户认证正常，无需创建/重置"
+else
+    if [ "$TRANSITION_MODE" = false ]; then
+        log "❌ 严重错误：admin 认证失败且不处于 transitionToAuth 模式"
+        log "   可能原因：密码与 MONGODB_PASSWORD 环境变量不匹配"
+        log "   解决方案：删除数据卷重新初始化，或手动修复密码"
+        log "   继续启动（但数据库操作可能失败）..."
+    else
+        # transitionToAuth 模式：可以无认证操作
+        log ""
+        log "🔑 检查 admin 用户是否存在..."
+
+        # 检查 admin 用户是否存在（无认证查询）
+        ROOT_USER_EXISTS=$(python3 -c "
+from pymongo import MongoClient
+try:
+    client = MongoClient('mongodb://${MONGODB_HOST}:${MONGODB_PORT}/', serverSelectionTimeoutMS=3000)
+    users = list(client['admin']['system.users'].find({'user': '${MONGODB_USERNAME}'}))
+    print('true' if users else 'false')
+    client.close()
+except Exception:
+    print('false')
+" 2>/dev/null)
+
+        if [ "$ROOT_USER_EXISTS" = "true" ]; then
+            # 用户存在但密码不对 → 重置密码
+            log "   admin 用户已存在但密码不匹配，重置密码..."
+            python3 -c "
+import sys
+from pymongo import MongoClient
+try:
+    client = MongoClient('mongodb://${MONGODB_HOST}:${MONGODB_PORT}/', serverSelectionTimeoutMS=3000)
+    client.admin.command(
+        'updateUser',
+        '${MONGODB_USERNAME}',
+        pwd='${MONGODB_PASSWORD}',
+    )
+    print('UPDATE_USER_OK')
+    client.close()
+except Exception as e:
+    print(f'UPDATE_USER_FAIL: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1 | tee -a "$LOG_FILE"
+
+            if grep -q "UPDATE_USER_OK" "$LOG_FILE" 2>/dev/null; then
+                log "✅ admin 用户密码已重置"
+            else
+                log "❌ admin 用户密码重置失败"
+            fi
+        else
+            # 用户不存在 → 创建
+            log "   admin 用户不存在，创建..."
+            python3 -c "
+import sys
+from pymongo import MongoClient
+try:
+    client = MongoClient('mongodb://${MONGODB_HOST}:${MONGODB_PORT}/', serverSelectionTimeoutMS=3000)
+    client.admin.command(
+        'createUser',
+        '${MONGODB_USERNAME}',
+        pwd='${MONGODB_PASSWORD}',
+        roles=[
+            {'role': 'root', 'db': 'admin'},
+            {'role': 'userAdminAnyDatabase', 'db': 'admin'},
+            {'role': 'readWriteAnyDatabase', 'db': 'admin'},
+        ]
+    )
+    print('CREATE_USER_OK')
+    client.close()
+except Exception as e:
+    if 'already exists' in str(e):
+        print('USER_EXISTS')
+    else:
+        print(f'CREATE_USER_FAIL: {e}', file=sys.stderr)
+        sys.exit(1)
+" 2>&1 | tee -a "$LOG_FILE"
+
+            if grep -q "CREATE_USER_OK\|USER_EXISTS" "$LOG_FILE" 2>/dev/null; then
+                log "✅ admin root 用户创建成功"
+            else
+                log "❌ admin root 用户创建失败"
+                exit 1
+            fi
+        fi
+
+        # 验证：认证连接测试
+        sleep 1
+        if auth_test; then
+            log "✅ admin 认证连接测试通过"
+        else
+            log "❌ admin 认证连接测试失败"
+            exit 1
+        fi
+    fi
+fi
+
+# ------------------------------------------------------------------------------
+# 5. 从 transitionToAuth 切换到完全认证模式
+# ------------------------------------------------------------------------------
+if [ "$TRANSITION_MODE" = true ]; then
+    log ""
+    log "🔐 切换到完全认证模式..."
+
+    # 写入标记文件（mongod 重启后会检查此文件）
+    echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC')" > "$MONGO_ADMIN_MARKER"
+    chown appuser:appuser "$MONGO_ADMIN_MARKER"
+    log "   标记文件: $MONGO_ADMIN_MARKER"
+
+    # 触发 mongod 重启（s6 会重启 mongod，mongod 检查标记后使用 --auth 模式）
+    log "   触发 mongod 重启..."
+    RESTART_TRIGGERED=false
+
+    # 方法1: s6-svc -r (restart)
+    if command -v s6-svc &> /dev/null; then
+        if s6-svc -r /var/run/s6/services/mongodb 2>/dev/null; then
+            log "   ✅ 已通过 s6-svc -r 触发 mongodb 重启"
+            RESTART_TRIGGERED=true
+        fi
+    fi
+
+    if [ "$RESTART_TRIGGERED" = false ]; then
+        # 方法2: 直接 kill（s6 会自动重启）
+        MONGOD_PID=""
+        if command -v pidof &> /dev/null; then
+            MONGOD_PID=$(pidof mongod 2>/dev/null | awk '{print $1}')
+        fi
+        if [ -z "$MONGOD_PID" ]; then
+            if [ -f /var/run/mongodb.pid ]; then
+                MONGOD_PID=$(cat /var/run/mongodb.pid 2>/dev/null)
+            fi
+        fi
+        if [ -n "$MONGOD_PID" ]; then
+            kill -TERM "$MONGOD_PID" 2>/dev/null || true
+            log "   ⚠️  使用 kill 方式触发重启（PID: $MONGOD_PID）"
+            RESTART_TRIGGERED=true
+        else
+            log "   ❌ 找不到 mongod 进程，无法触发重启"
+        fi
+    fi
+
+    # 等待 mongod 重启完成
+    log "   等待 mongod 重启就绪（带认证模式）..."
+    MAX_WAIT=30
+    WAIT=0
+    while [ $WAIT -lt $MAX_WAIT ]; do
+        sleep 1
+        WAIT=$((WAIT + 1))
+        if auth_test; then
+            log "   ✅ mongod 已就绪（完全认证模式）"
+            break
+        fi
+    done
+
+    if [ $WAIT -eq $MAX_WAIT ]; then
+        log "   ⚠️  mongod 重启超时（$MAX_WAIT 秒）"
+    fi
+
+    # 验证：无认证应该被拒绝（用 listDatabases，不是 ping）
+    log ""
+    log "🔍 验证 MongoDB 认证状态..."
+    if noauth_test; then
+        log "   ⚠️  mongod 仍接受无认证连接（可能仍在 transitionToAuth 模式）"
+        log "      容器仍可正常使用：bind 127.0.0.1 + 单用户场景，无横向风险"
+    else
+        log "   ✅ mongod 已拒绝无认证连接（完全认证模式生效）"
+    fi
+fi
+
+# ------------------------------------------------------------------------------
+# 6. 检查是否需要导入业务数据
 # ------------------------------------------------------------------------------
 SHOULD_INIT=true
 INIT_REASON="未找到初始化标记文件"
 
 if [ -f "$INIT_MARKER" ]; then
-    # 检查 admin 用户是否存在（先尝试无认证，再尝试认证）
+    # 检查业务数据库中是否有 admin 业务用户
     if python3 -c "
 import sys
 from pymongo import MongoClient
-
-def check_user():
-    # 先尝试无认证
-    try:
-        client = MongoClient('mongodb://${MONGODB_HOST}:${MONGODB_PORT}/', serverSelectionTimeoutMS=3000)
-        user = client['${MONGODB_DATABASE}']['users'].find_one({'username': 'admin'}, {'_id': 1})
-        client.close()
-        return user is not None
-    except Exception:
-        pass
-    # 再尝试认证
-    try:
-        client = MongoClient(
-            'mongodb://${MONGODB_USERNAME}:${MONGODB_PASSWORD}@${MONGODB_HOST}:${MONGODB_PORT}/${MONGODB_DATABASE}?authSource=${MONGODB_AUTH_SOURCE}',
-            serverSelectionTimeoutMS=3000
-        )
-        user = client['${MONGODB_DATABASE}']['users'].find_one({'username': 'admin'}, {'_id': 1})
-        client.close()
-        return user is not None
-    except Exception:
-        return False
-
-sys.exit(0 if check_user() else 1)
+try:
+    client = MongoClient(
+        'mongodb://${MONGODB_USERNAME}:${MONGODB_PASSWORD}@${MONGODB_HOST}:${MONGODB_PORT}/${MONGODB_DATABASE}?authSource=${MONGODB_AUTH_SOURCE}',
+        serverSelectionTimeoutMS=3000
+    )
+    user = client['${MONGODB_DATABASE}']['users'].find_one({'username': 'admin'}, {'_id': 1})
+    client.close()
+    sys.exit(0 if user else 1)
+except Exception:
+    sys.exit(1)
 " 2>/dev/null; then
-        log "✅ 数据库已初始化（标记 + admin 用户）"
+        log "✅ 数据库已初始化（标记 + admin 业务用户）"
         SHOULD_INIT=false
     else
-        log "⚠️  标记文件存在但 admin 用户不存在，重新初始化"
+        log "⚠️  标记文件存在但 admin 业务用户不存在，重新初始化"
         rm -f "$INIT_MARKER"
         INIT_REASON="陈旧标记，已移除并重新执行"
     fi
 fi
 
 # ------------------------------------------------------------------------------
-# 4. 执行初始化（如果需要）
+# 7. 执行初始化（如果需要）
 # ------------------------------------------------------------------------------
 if [ "$SHOULD_INIT" = true ]; then
     log ""
@@ -177,7 +391,7 @@ if [ "$SHOULD_INIT" = true ]; then
     if [ -n "$LATEST_CONFIG" ] && [ -f "$LATEST_CONFIG" ]; then
         log "   使用配置: $LATEST_CONFIG"
 
-        # 执行初始化（以 appuser 运行）
+        # 执行初始化（以 appuser 运行，使用 admin 认证连接）
         if gosu appuser python3 scripts/import_config_and_create_user.py "$LATEST_CONFIG" >> "$LOG_FILE" 2>&1; then
             log "✅ 数据库初始化完成"
 

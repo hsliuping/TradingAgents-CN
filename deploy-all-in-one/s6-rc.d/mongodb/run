@@ -1,6 +1,14 @@
 #!/command/with-contenv bash
 # mongodb 服务 - 启动 MongoDB 数据库
-# 等待 init 服务完成
+#
+# 启动模式：
+#   1. 首次启动（无 .mongo_admin_created 标记）：
+#      - 使用 --transitionToAuth（允许无认证连接创建第一个用户）
+#      - init-data 创建 admin 用户后触发 s6 重启
+#   2. 后续启动（有 .mongo_admin_created 标记）：
+#      - 使用 --auth（完全认证模式，所有连接必须认证）
+#
+# 注意：mongod.conf 中不设置 security.authorization，由启动命令控制
 
 cd /
 
@@ -8,11 +16,38 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [mongodb] $1" | tee -a /var/log/mongodb/service.log
 }
 
-log "🚀 启动 MongoDB..."
+# 检查密钥文件
+if [ ! -f /etc/mongodb-keyfile ]; then
+    log "❌ 致命错误：密钥文件 /etc/mongodb-keyfile 不存在"
+    log "   应该是 init 阶段生成的"
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
+# 判断启动模式
+# ------------------------------------------------------------------------------
+INIT_MARKER="/app/runtime/.mongo_admin_created"
+
+if [ -f "$INIT_MARKER" ]; then
+    # 已有 admin 用户 → 完全认证模式
+    log "🚀 启动 MongoDB (完全认证模式 --auth)..."
+    MODE="auth"
+    # mongod.conf 中 security.authorization 已设为 enabled
+    # 不需要额外命令行参数
+    EXTRA_FLAGS=""
+else
+    # 首次启动 → transitionToAuth 模式
+    log "🚀 启动 MongoDB (--transitionToAuth 过渡模式)..."
+    MODE="transition"
+    EXTRA_FLAGS="--transitionToAuth"
+fi
+
+log "   模式: $MODE"
 
 # 使用 gosu 降权到 mongodb 用户运行
 exec gosu mongodb mongod \
     --config /etc/mongod.conf \
     --bind_ip 127.0.0.1 \
     --port 27017 \
-    --logpath /var/log/mongodb/mongod.log
+    --logpath /var/log/mongodb/mongod.log \
+    $EXTRA_FLAGS

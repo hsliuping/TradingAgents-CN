@@ -134,7 +134,29 @@ echo "export CSRF_SECRET='${CSRF_SECRET}'" >> /app/runtime/env.sh
 chmod 644 /app/runtime/env.sh
 
 # ------------------------------------------------------------------------------
-# 5. 显示启动信息
+# 6. 自动生成 MongoDB 集群密钥文件（用于启用 RBAC 认证）
+# ------------------------------------------------------------------------------
+# 密钥文件是 MongoDB 启用 --auth 模式的必要条件
+# 单容器场景下我们仍然需要它（保持与多容器一致的认证模式）
+# 密钥文件持久化到数据卷，保证容器重启后密钥不变
+KEYFILE="/data/db/.mongodb-keyfile"
+if [ ! -f "$KEYFILE" ]; then
+    log "🔐 首次启动，自动生成 MongoDB 集群密钥文件..."
+    # MongoDB 密钥文件要求：base64 编码的 6-1024 字节字符串（推荐 32 字节以上）
+    head -c 32 /dev/urandom | base64 > "$KEYFILE"
+    chmod 600 "$KEYFILE"
+    chown mongodb:mongodb "$KEYFILE" 2>/dev/null || true
+    log "   密钥文件已保存到 $KEYFILE"
+else
+    log "🔐 使用已存在的 MongoDB 密钥文件: $KEYFILE"
+fi
+
+# 创建符号链接（mongod.conf 中配置的路径）
+ln -sf "$KEYFILE" /etc/mongodb-keyfile
+chown -h mongodb:mongodb /etc/mongodb-keyfile 2>/dev/null || true
+
+# ------------------------------------------------------------------------------
+# 7. 显示启动信息
 # ------------------------------------------------------------------------------
 log ""
 log "📋 启动配置："
