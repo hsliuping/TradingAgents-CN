@@ -11,8 +11,8 @@
 | 严重程度 | 数量 | 已修复 | 状态 |
 |---------|------|------|------|
 | 🔴 HIGH | 3 | 3 | ✅ 全部修复 |
-| 🟡 MEDIUM | 5 | 3 | ✅ M1-M3 已修复，M4 已回退，M5 评估中 |
-| 🟢 LOW | 3 | 0 | ⏳ 后续优化 |
+| 🟡 MEDIUM | 6 | 4 | ✅ M1-M4 已修复，M5 待评估，M6 已修复 |
+| 🟢 LOW | 4 | 0 | ⏳ 后续优化 |
 
 ## 修复记录（2026-07-18）
 
@@ -65,6 +65,22 @@
   - 外层防护（京东云安全组 + nginx）是更合适的防御层
   - 已有的 `RateLimitMiddleware`（每分钟5次）足够防止自动化扫描
 - **回退操作**: 删除 `app/core/login_rate_limiter.py`，恢复 `app/routers/auth_db.py` 原状
+
+### ✅ M5 - docker-compose.jdyun.yml 添加 DEBUG=false
+- **文件**: `docker/docker-compose.jdyun.yml`
+- **改动**:
+  - 添加 `DEBUG: "false"` 环境变量，激活生产模式安全检查
+  - 移除 `CORS_ORIGINS: "*"`，改为环境变量引用 `ALLOWED_ORIGINS`
+  - 添加注释说明京东云部署时需要根据实际访问地址设置 ALLOWED_ORIGINS
+- **效果**: TrustedHost 中间件激活、Session cookie HTTPS-only、JWT 密钥黑名单验证退出程序
+
+### ✅ M6 - 日志敏感信息泄露修复
+- **文件**: `app/core/config_bridge.py`, `app/core/logging_config.py`
+- **改动**:
+  - 移除所有 API Key/TUSHARE_TOKEN/FINNHUB_API_KEY 长度输出
+  - 移除 MongoDB 连接字符串长度输出
+  - `setup_logging()` 的调试 print 语句改为环境变量控制（`TRADINGAGENTS_VERBOSE_SETUP=true` 启用）
+- **效果**: 生产环境启动时不再暴露系统内部结构和敏感凭据长度
 
 ---
 

@@ -96,6 +96,8 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
       DOCKER_CONTAINER: "true"
+      # 生产环境标识（禁用安全检查的 DEBUG 宽限）
+      DEBUG: "false"
       # 安全配置（必须在 .env 中设置强随机值，否则启动会失败）
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set in .env, generate with: openssl rand -base64 48}"
       JWT_ALGORITHM: "HS256"
@@ -103,8 +105,11 @@ services:
       REFRESH_TOKEN_EXPIRE_DAYS: "30"
       CSRF_SECRET: "${CSRF_SECRET:?CSRF_SECRET must be set in .env, generate with: openssl rand -base64 48}"
       BCRYPT_ROUNDS: "12"
-      # CORS 配置
-      CORS_ORIGINS: "*"
+      # CORS 配置：生产环境必须指定具体前端地址
+      # ⚠️ 京东云部署时，请在 .env 中设置 ALLOWED_ORIGINS 为实际访问地址
+      # 示例：ALLOWED_ORIGINS=["http://your-domain.com", "http://your-ip:8082"]
+      # 如果未设置，默认仅允许 localhost（外部访问会失败）
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-[\"http://localhost:3000\", \"http://localhost:8082\"]}"
       # 🔧 京东云合作版核心配置（通过环境变量注入）
       JDYUN_MODE: "true"
       OPENAI_API_BASE: "${OPENAI_API_BASE:-https://modelservice.jdcloud.com/v1}"

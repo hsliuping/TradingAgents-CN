@@ -43,7 +43,7 @@ def bridge_config_to_env():
         from tradingagents.config.mongodb_utils import build_mongodb_connection_string
         mongodb_conn_str = build_mongodb_connection_string()
         os.environ["MONGODB_CONNECTION_STRING"] = mongodb_conn_str
-        logger.info(f"  ✓ 桥接 MONGODB_CONNECTION_STRING (长度: {len(mongodb_conn_str)})")
+        logger.info(f"  ✓ 桥接 MONGODB_CONNECTION_STRING")
         bridged_count += 1
 
         # 桥接 MongoDB 数据库名称
@@ -83,12 +83,12 @@ def bridge_config_to_env():
 
                 # 检查环境变量是否已存在且有效（不是占位符）
                 if existing_env_value and not existing_env_value.startswith("your_"):
-                    logger.info(f"  ✓ 使用 .env 文件中的 {env_key} (长度: {len(existing_env_value)})")
+                    logger.info(f"  ✓ 使用 .env 文件中的 {env_key}")
                     bridged_count += 1
                 elif provider.api_key and not provider.api_key.startswith("your_"):
                     # 只有当环境变量不存在或为占位符时，才使用数据库配置
                     os.environ[env_key] = provider.api_key
-                    logger.info(f"  ✓ 使用数据库厂家配置的 {env_key} (长度: {len(provider.api_key)})")
+                    logger.info(f"  ✓ 使用数据库厂家配置的 {env_key}")
                     bridged_count += 1
                 else:
                     logger.debug(f"  ⏭️  {env_key} 未配置有效的 API Key")
@@ -109,13 +109,13 @@ def bridge_config_to_env():
 
                 # 检查环境变量是否已存在且有效（不是占位符）
                 if existing_env_value and not existing_env_value.startswith("your_"):
-                    logger.info(f"  ✓ 使用 .env 文件中的 {env_key} (长度: {len(existing_env_value)})")
+                    logger.info(f"  ✓ 使用 .env 文件中的 {env_key}")
                     bridged_count += 1
                 elif llm_config.enabled and llm_config.api_key:
                     # 只有当环境变量不存在或为占位符时，才使用数据库配置
                     if not llm_config.api_key.startswith("your_"):
                         os.environ[env_key] = llm_config.api_key
-                        logger.info(f"  ✓ 使用 JSON 文件中的 {env_key} (长度: {len(llm_config.api_key)})")
+                        logger.info(f"  ✓ 使用 JSON 文件中的 {env_key}")
                         bridged_count += 1
                     else:
                         logger.warning(f"  ⚠️  {env_key} 在 .env 和 JSON 文件中都是占位符，跳过")
@@ -182,7 +182,7 @@ def bridge_config_to_env():
         if is_jdyun_mode():
             tushare_token = os.getenv('TUSHARE_TOKEN', '')
             if tushare_token:
-                logger.info(f"  ✓ 京东云模式: 使用环境变量中的 TUSHARE_TOKEN (长度: {len(tushare_token)})")
+                logger.info(f"  ✓ 京东云模式: 使用环境变量中的 TUSHARE_TOKEN")
                 bridged_count += 1
             else:
                 logger.warning("  ⚠️  京东云模式: TUSHARE_TOKEN 环境变量未设置")
@@ -199,12 +199,12 @@ def bridge_config_to_env():
                     # 优先使用数据库配置
                     if ds_config.api_key and not ds_config.api_key.startswith("your_"):
                         os.environ['TUSHARE_TOKEN'] = ds_config.api_key
-                        logger.info(f"  ✓ 使用数据库中的 TUSHARE_TOKEN (长度: {len(ds_config.api_key)})")
+                        logger.info(f"  ✓ 使用数据库中的 TUSHARE_TOKEN")
                         if existing_token and existing_token != ds_config.api_key:
                             logger.info(f"  ℹ️  已覆盖 .env 文件中的 TUSHARE_TOKEN")
                     # 降级到 .env 文件配置
                     elif existing_token and not existing_token.startswith("your_"):
-                        logger.info(f"  ✓ 使用 .env 文件中的 TUSHARE_TOKEN (长度: {len(existing_token)})")
+                        logger.info(f"  ✓ 使用 .env 文件中的 TUSHARE_TOKEN")
                         logger.info(f"  ℹ️  数据库中未配置有效的 TUSHARE_TOKEN，使用 .env 降级方案")
                     else:
                         logger.warning(f"  ⚠️  TUSHARE_TOKEN 在数据库和 .env 中都未配置有效值")
@@ -219,12 +219,12 @@ def bridge_config_to_env():
                     # 优先使用数据库配置
                     if ds_config.api_key and not ds_config.api_key.startswith("your_"):
                         os.environ['FINNHUB_API_KEY'] = ds_config.api_key
-                        logger.info(f"  ✓ 使用数据库中的 FINNHUB_API_KEY (长度: {len(ds_config.api_key)})")
+                        logger.info(f"  ✓ 使用数据库中的 FINNHUB_API_KEY")
                         if existing_key and existing_key != ds_config.api_key:
                             logger.info(f"  ℹ️  已覆盖 .env 文件中的 FINNHUB_API_KEY")
                     # 降级到 .env 文件配置
                     elif existing_key and not existing_key.startswith("your_"):
-                        logger.info(f"  ✓ 使用 .env 文件中的 FINNHUB_API_KEY (长度: {len(existing_key)})")
+                        logger.info(f"  ✓ 使用 .env 文件中的 FINNHUB_API_KEY")
                         logger.info(f"  ℹ️  数据库中未配置有效的 FINNHUB_API_KEY，使用 .env 降级方案")
                     else:
                         logger.warning(f"  ⚠️  FINNHUB_API_KEY 在数据库和 .env 中都未配置有效值")
