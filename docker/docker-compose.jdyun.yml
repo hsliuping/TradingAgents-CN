@@ -14,8 +14,10 @@
 services:
   # MongoDB 数据库
   # 🔐 安全：使用 expose 仅暴露给容器内部网络，不映射到宿主机
+  # 📌 版本选择：8.0（2024-10 发布，EOL 2029-10，支持期最长）
+  # ⚠️ 注意：K8s 部署时需确认 Linux 内核版本不是 6.19（不兼容会导致启动崩溃）
   mongodb:
-    image: mongo:4.4
+    image: mongo:8.0
     container_name: tradingagents-jdyun-mongodb
     restart: unless-stopped
     expose:
@@ -30,11 +32,11 @@ services:
     networks:
       - tradingagents-jdyun-network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
 
   # Redis 缓存
   # 🔐 安全：使用 expose 仅暴露给容器内部网络，不映射到宿主机
