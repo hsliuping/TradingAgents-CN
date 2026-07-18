@@ -7,6 +7,7 @@ import AdvancedSampleReport from '@/views/Learning/AdvancedSampleReport.vue'
 import { ElMessage } from 'element-plus'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
+import { isJdyunMode } from '@/utils/config'
 
 // 配置NProgress
 NProgress.configure({
@@ -1061,6 +1062,25 @@ router.beforeEach(async (to, _from, next) => {
   if (authStore.isAuthenticated && to.name === 'Login') {
     next('/dashboard')
     return
+  }
+
+  // 京东云版首次登录引导：未完成引导且访问仪表板时跳转到 /guide
+  if (authStore.isAuthenticated && isJdyunMode()) {
+    const guideCompleted = (() => {
+      try {
+        return localStorage.getItem('jdyun_guide_completed') === 'true'
+      } catch {
+        return false
+      }
+    })()
+
+    // 用户主动点击"查看引导"或已经在 /guide 页面，不拦截
+    const goingToGuide = to.path === '/guide'
+
+    if (!guideCompleted && to.path === '/dashboard' && !goingToGuide) {
+      next('/guide?mode=jdyun')
+      return
+    }
   }
 
   // PRO 功能路由检查

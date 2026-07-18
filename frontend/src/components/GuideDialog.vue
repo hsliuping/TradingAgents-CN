@@ -52,6 +52,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Document } from '@element-plus/icons-vue'
+import { isJdyunMode } from '@/utils/config'
 
 const props = defineProps<{
   modelValue: boolean
@@ -67,8 +68,9 @@ const emit = defineEmits<{
 const router = useRouter()
 const dontShowAgain = ref(false)
 
+// 京东云版不显示弹窗（首次登录由路由守卫直接跳转 /guide）
 const visible = computed({
-  get: () => props.modelValue,
+  get: () => !isJdyunMode() && props.modelValue,
   set: (val) => emit('update:modelValue', val)
 })
 

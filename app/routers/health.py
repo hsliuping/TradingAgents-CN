@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+import os
 import time
 import logging
 from pathlib import Path
@@ -6,6 +7,11 @@ from typing import Dict, Any
 
 router = APIRouter()
 logger = logging.getLogger("webapi")
+
+
+def is_jdyun_mode() -> bool:
+    """判断是否为京东云合作版模式"""
+    return os.getenv("JDYUN_MODE", "false").lower() == "true"
 
 
 def get_version() -> str:
@@ -69,6 +75,36 @@ async def system_readiness():
     }
 
     try:
+        # ── 京东云版特化：环境变量已注入配置，直接视为已就绪 ──
+        if is_jdyun_mode():
+            readiness["datasource_configured"] = True
+            readiness["llm_configured"] = True
+            readiness["enabled_real_sources"] = ["tushare", "akshare"]
+            readiness["enabled_llm_count"] = 1
+            # 仍需检查基础数据同步
+            from app.core.database import get_mongo_db
+            db = get_mongo_db()
+            basics_count = await db["stock_basic_info"].count_documents({})
+            readiness["basics_count"] = basics_count
+            readiness["basics_synced"] = basics_count > 0
+
+            # 京东云版只关心同步状态
+            if not readiness["basics_synced"]:
+                readiness["next_step"] = "sync_data"
+                readiness["next_step_message"] = "请同步股票基础数据"
+                readiness["next_step_redirect"] = "/settings/sync"
+                readiness["next_step_tab"] = ""
+            else:
+                readiness["overall_ready"] = True
+                readiness["next_step"] = "ready"
+                readiness["next_step_message"] = "系统已就绪，可以开始分析"
+                readiness["next_step_redirect"] = "/analysis/single"
+                readiness["next_step_tab"] = ""
+
+            # 京东云版附加标记，前端可识别
+            readiness["jdyun_mode"] = True
+            return readiness
+
         # ── 1. 检查数据源配置 ──
         from app.services.config_service import config_service
         config = await config_service.get_system_config()

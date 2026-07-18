@@ -32,9 +32,170 @@
     </div>
 
 
-    <!-- 🔥 系统就绪度引导卡片（未就绪时显示） -->
+    <!-- ════════ 京东云版专属内容（仅在京东云版下显示） ════════ -->
+    <template v-if="isJdyunMode">
+      <!-- KPI 数据卡片行 -->
+      <KpiCards
+        :recent-tasks="recentAnalyses"
+        @go-paper="goToPaperTrading"
+      />
+
+      <!-- 进行中任务 + 自选股速览（左右布局） -->
+      <el-row :gutter="24" class="jdyun-row">
+        <el-col :xs="24" :lg="12">
+          <RunningTasksCard
+            @view-all="goToTasks"
+            @view-task="viewTask"
+            @start-analysis="quickAnalysis"
+          />
+        </el-col>
+        <el-col :xs="24" :lg="12">
+          <el-card class="favorite-stocks-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <span class="header-title">
+                  <el-icon><Star /></el-icon>
+                  自选股速览
+                </span>
+                <el-button text size="small" @click="goToScreening">
+                  添加 <el-icon><Plus /></el-icon>
+                </el-button>
+              </div>
+            </template>
+            <div v-if="favoriteStocks.length === 0" class="empty-state">
+              <el-icon class="empty-icon"><Star /></el-icon>
+              <p>还没有自选股</p>
+              <span class="empty-tip">添加关注的股票，追踪每日动态</span>
+              <el-button type="primary" size="small" @click="goToScreening">
+                添加自选股
+              </el-button>
+            </div>
+            <div v-else class="stock-list">
+              <div
+                v-for="stock in favoriteStocks.slice(0, 5)"
+                :key="stock.code"
+                class="stock-item"
+                @click="goToStockAnalysis(stock.code)"
+              >
+                <div class="stock-info">
+                  <div class="stock-code">{{ stock.code }}</div>
+                  <div class="stock-name">{{ stock.name || stock.stock_name || '—' }}</div>
+                </div>
+                <div class="stock-price" v-if="stock.current_price">
+                  ¥{{ stock.current_price }}
+                </div>
+                <el-icon class="stock-arrow"><ArrowRight /></el-icon>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 智能助手横幅（可关闭） -->
+      <DismissableBanner
+        title="试试 v3.0 智能助手"
+        description="一句话描述需求，AI 自动完成股票研究、批量分析、复盘等任务"
+        action-text="立即体验"
+        :icon="ChatDotRound"
+        variant="primary"
+        storage-key="jdyun_dashboard_assistant_banner"
+        @action="goToAssistant"
+      />
+
+      <!-- 学习中心横幅（可关闭） -->
+      <DismissableBanner
+        title="AI 股票分析学习中心"
+        description="24 节系统课程，从入门到精通 AI 辅助投资分析"
+        action-text="查看课程"
+        :icon="Reading"
+        variant="info"
+        storage-key="jdyun_dashboard_learning_banner"
+        @action="goToLearning"
+      />
+
+      <!-- 更多功能折叠区（v3.0 核心功能 + 流程配置） -->
+      <CollapsibleSection
+        title="更多功能"
+        badge="展开查看"
+        badge-type="info"
+        storage-key="jdyun_dashboard_more_expanded"
+      >
+        <el-row :gutter="16">
+          <el-col :xs="12" :sm="6" v-for="feature in jdyunMoreFeatures" :key="feature.path">
+            <div class="feature-card" @click="router.push(feature.path)">
+              <el-icon class="feature-icon"><component :is="feature.icon" /></el-icon>
+              <div class="feature-info">
+                <div class="feature-title">{{ feature.title }}</div>
+                <div class="feature-desc">{{ feature.description }}</div>
+              </div>
+            </div>
+          </el-col>
+        </el-row>
+      </CollapsibleSection>
+
+      <!-- 最近分析（京东云版独立显示） -->
+      <el-card class="recent-analyses-card jdyun-recent" header="最近分析" style="margin-top: 24px;">
+        <el-table :data="recentAnalyses" style="width: 100%">
+          <el-table-column prop="stock_code" label="股票代码" width="120" />
+          <el-table-column prop="stock_name" label="股票名称" width="150" />
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="getStatusType(row.status)">
+                {{ getStatusText(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="start_time" label="创建时间" width="180">
+            <template #default="{ row }">
+              {{ formatTime(row.start_time) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作">
+            <template #default="{ row }">
+              <el-button type="text" size="small" @click="viewAnalysis(row)">
+                查看
+              </el-button>
+              <el-button
+                v-if="row.status === 'completed'"
+                type="text"
+                size="small"
+                @click="downloadReport(row)"
+              >
+                下载
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="table-footer">
+          <el-button type="text" @click="goToHistory">
+            查看全部历史 <el-icon><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+      </el-card>
+
+      <!-- 市场快讯（京东云版独立显示） -->
+      <el-card class="market-news-card jdyun-news" style="margin-top: 24px;">
+        <template #header>
+          <span>市场快讯</span>
+        </template>
+        <div v-if="marketNews.length > 0" class="news-list">
+          <div v-for="(news, index) in marketNews.slice(0, 5)" :key="index" class="news-item">
+            <div class="news-title">{{ news.title }}</div>
+            <div class="news-time">{{ formatTime(news.published_at || news.created_at) }}</div>
+          </div>
+        </div>
+        <div v-else class="empty-state">
+          <el-icon class="empty-icon"><InfoFilled /></el-icon>
+          <p>暂无市场快讯</p>
+        </div>
+      </el-card>
+    </template>
+    <!-- ════════ 京东云版专属内容结束 ════════ -->
+
+
+    <!-- 🔥 系统就绪度引导卡片（未就绪时显示，京东云版隐藏） -->
     <el-card
-      v-if="systemReadiness && !systemReadiness.overall_ready && systemReadiness.next_step !== 'error'"
+      v-if="!isJdyunMode && systemReadiness && !systemReadiness.overall_ready && systemReadiness.next_step !== 'error'"
       class="readiness-guide-card"
       shadow="hover"
     >
@@ -73,7 +234,8 @@
       </div>
     </el-card>
 
-    <!-- v3.0 智能助手推荐卡片 -->
+    <!-- v3.0 智能助手推荐卡片（标准版显示） -->
+    <template v-if="!isJdyunMode">
     <el-card class="assistant-highlight-card">
       <div class="learning-highlight">
         <div class="learning-icon assistant-icon">
@@ -130,9 +292,10 @@
         </div>
       </div>
     </el-card>
+    </template>
 
-    <!-- 主要功能区域 -->
-    <el-row :gutter="24" class="main-content">
+    <!-- 主要功能区域（标准版显示，京东云版隐藏） -->
+    <el-row v-if="!isJdyunMode" :gutter="24" class="main-content">
       <!-- 左侧：快速操作 -->
       <el-col :span="16">
         <el-card class="quick-actions-card" header="快速操作">
@@ -512,11 +675,16 @@ import {
   ChatDotRound,
   Filter,
   MagicStick,
-  Connection
+  Connection,
+  Refresh
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { AnalysisTask, AnalysisStatus } from '@/types/analysis'
 import MultiSourceSyncCard from '@/components/Dashboard/MultiSourceSyncCard.vue'
+import KpiCards from '@/components/Dashboard/KpiCards.vue'
+import RunningTasksCard from '@/components/Dashboard/RunningTasksCard.vue'
+import DismissableBanner from '@/components/Dashboard/DismissableBanner.vue'
+import CollapsibleSection from '@/components/Dashboard/CollapsibleSection.vue'
 import GuideDialog from '@/components/GuideDialog.vue'
 import { favoritesApi } from '@/api/favorites'
 import { analysisApi } from '@/api/analysis'
@@ -524,11 +692,26 @@ import { newsApi } from '@/api/news'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
 import { ensureReportExportAccess } from '@/utils/featureAccess'
 import { request } from '@/api/request'
+import { isJdyunMode as checkJdyunMode } from '@/utils/config'
+import { Star, Plus } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const appStore = useAppStore()
 const displayVersion = computed(() => `v${appStore.version}`)
+const isJdyunMode = checkJdyunMode()
+
+// 京东云版"更多功能"折叠区配置
+const jdyunMoreFeatures = ref([
+  { path: '/assistant', title: '智能助手', description: '一句话描述需求，AI 自动完成', icon: ChatDotRound },
+  { path: '/screening', title: '智能选股', description: '多维度筛选符合条件的股票', icon: Search },
+  { path: '/workflow', title: '流程管理', description: '管理工作流和自定义流程', icon: Tools },
+  { path: '/agent-builder', title: 'Agent 工坊', description: '可视化构建专属 Agent', icon: EditPen },
+  { path: '/settings/config', title: '数据源配置', description: '管理 Tushare 和 AKShare', icon: Connection },
+  { path: '/settings/sync', title: '数据同步', description: '同步股票基础和行情数据', icon: Refresh },
+  { path: '/paper-trading', title: '模拟交易', description: 'AI 辅助下的模拟交易账户', icon: PieChart },
+  { path: '/learning', title: '学习中心', description: '24 节 AI 股票分析系统课程', icon: Reading }
+])
 
 // 响应式数据
 const userStats = ref({
@@ -601,6 +784,24 @@ const goToQueue = () => {
 
 const goToHistory = () => {
     router.push('/tasks/unified')
+}
+
+// 京东云版专用方法
+const goToTasks = () => {
+  router.push('/tasks/unified')
+}
+
+const viewTask = (task: any) => {
+  if (task?.task_id) {
+    router.push(`/tasks/unified?task_id=${task.task_id}`)
+  } else {
+    router.push('/tasks/unified')
+  }
+}
+
+const goToStockAnalysis = (code: string) => {
+  if (!code) return
+  router.push({ path: '/analysis/single', query: { code } })
 }
 
 const goToLearning = () => {
@@ -1469,3 +1670,163 @@ onMounted(async () => {
   }
 }
 </style>
+
+// ════════ 京东云版专属样式 ════════
+.jdyun-row {
+  margin-bottom: 24px;
+}
+
+.jdyun-dashboard-content {
+  margin-top: 24px;
+}
+
+.favorite-stocks-card {
+  height: 100%;
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+    }
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 32px 0;
+
+    .empty-icon {
+      font-size: 36px;
+      color: var(--el-color-warning);
+      margin-bottom: 12px;
+    }
+
+    p {
+      color: var(--el-text-color-primary);
+      margin-bottom: 6px;
+    }
+
+    .empty-tip {
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+      margin-bottom: 16px;
+      display: block;
+    }
+  }
+
+  .stock-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .stock-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      border-color: var(--el-color-primary);
+      background-color: var(--el-color-primary-light-9);
+
+      .stock-arrow {
+        transform: translateX(4px);
+        color: var(--el-color-primary);
+      }
+    }
+  }
+
+  .stock-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .stock-code {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+  }
+
+  .stock-name {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    margin-top: 2px;
+  }
+
+  .stock-price {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--el-color-danger);
+  }
+
+  .stock-arrow {
+    color: var(--el-text-color-placeholder);
+    transition: all 0.2s ease;
+  }
+}
+
+.feature-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  height: 100%;
+  background: var(--el-bg-color);
+
+  &:hover {
+    border-color: var(--el-color-primary);
+    background-color: var(--el-color-primary-light-9);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.1);
+  }
+
+  .feature-icon {
+    font-size: 24px;
+    color: var(--el-color-primary);
+    background: var(--el-color-primary-light-9);
+    padding: 8px;
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+
+  .feature-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .feature-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    margin-bottom: 4px;
+  }
+
+  .feature-desc {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.4;
+  }
+}
+
+.jdyun-recent,
+.jdyun-news {
+  :deep(.el-card__body) {
+    padding: 16px 20px;
+  }
+}
