@@ -13,17 +13,18 @@
 
 services:
   # MongoDB 数据库
+  # 🔐 安全：使用 expose 仅暴露给容器内部网络，不映射到宿主机
   mongodb:
     image: mongo:4.4
     container_name: tradingagents-jdyun-mongodb
     restart: unless-stopped
-    ports:
-      - "27019:27017"
+    expose:
+      - "27017"
     volumes:
       - tradingagents_jdyun_mongodb_data:/data/db
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: tradingagents123
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}
       MONGO_INITDB_DATABASE: tradingagents
       TZ: "Asia/Shanghai"
     networks:
@@ -36,21 +37,22 @@ services:
       start_period: 10s
 
   # Redis 缓存
+  # 🔐 安全：使用 expose 仅暴露给容器内部网络，不映射到宿主机
   redis:
     image: redis:7-alpine
     container_name: tradingagents-jdyun-redis
     restart: unless-stopped
-    ports:
-      - "6381:6379"
+    expose:
+      - "6379"
     volumes:
       - tradingagents_jdyun_redis_data:/data
     environment:
       TZ: "Asia/Shanghai"
-    command: redis-server --appendonly yes --requirepass tradingagents123
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     networks:
       - tradingagents-jdyun-network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "tradingagents123", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -83,23 +85,23 @@ services:
       MONGODB_HOST: "mongodb"
       MONGODB_PORT: "27017"
       MONGODB_USERNAME: "admin"
-      MONGODB_PASSWORD: "tradingagents123"
+      MONGODB_PASSWORD: ${MONGO_PASSWORD}
       MONGODB_DATABASE: "tradingagents"
       MONGODB_AUTH_SOURCE: "admin"
-      MONGODB_URL: "mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin"
-      MONGODB_CONNECTION_STRING: "mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin"
+      MONGODB_URL: "mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/tradingagents?authSource=admin"
+      MONGODB_CONNECTION_STRING: "mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/tradingagents?authSource=admin"
       # Redis 配置
       REDIS_HOST: "redis"
       REDIS_PORT: "6379"
-      REDIS_PASSWORD: "tradingagents123"
-      REDIS_URL: "redis://:tradingagents123@redis:6379/0"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
       DOCKER_CONTAINER: "true"
-      # 安全配置
-      JWT_SECRET: "${JWT_SECRET:-jdyun-jwt-secret-key-change-in-production-2024}"
+      # 安全配置（必须在 .env 中设置强随机值，否则启动会失败）
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set in .env, generate with: openssl rand -base64 48}"
       JWT_ALGORITHM: "HS256"
       ACCESS_TOKEN_EXPIRE_MINUTES: "480"
       REFRESH_TOKEN_EXPIRE_DAYS: "30"
-      CSRF_SECRET: "${CSRF_SECRET:-jdyun-csrf-secret-key-change-in-production-2024}"
+      CSRF_SECRET: "${CSRF_SECRET:?CSRF_SECRET must be set in .env, generate with: openssl rand -base64 48}"
       BCRYPT_ROUNDS: "12"
       # CORS 配置
       CORS_ORIGINS: "*"

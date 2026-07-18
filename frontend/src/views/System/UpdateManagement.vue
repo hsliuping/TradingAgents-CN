@@ -211,6 +211,7 @@ import {
   type UpdateInfo,
   type DownloadProgress
 } from '@/api/update'
+import DOMPurify from 'dompurify'
 
 // ── 状态 ──────────────────────────────────────────────
 const loadingVersion = ref(false)
@@ -399,8 +400,9 @@ const formatFileSize = (bytes: number): string => {
 }
 
 const renderMarkdown = (text: string): string => {
+  if (!text) return ''
   // 简单 Markdown 渲染：标题、列表、加粗、代码
-  return text
+  const rawHtml = text
     .replace(/^### (.+)$/gm, '<h5>$1</h5>')
     .replace(/^## (.+)$/gm, '<h4>$1</h4>')
     .replace(/^# (.+)$/gm, '<h3>$1</h3>')
@@ -408,6 +410,8 @@ const renderMarkdown = (text: string): string => {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
     .replace(/\n/g, '<br>')
+  // 🔐 安全：使用 DOMPurify 净化 HTML，防止 XSS
+  return DOMPurify.sanitize(rawHtml) as string
 }
 
 // ── 生命周期 ──────────────────────────────────────────

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <el-dialog
     v-model="visible"
     :title="`复盘详情 - ${report?.trade_info?.code || ''}`"
@@ -223,13 +223,12 @@ import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, Warning, Pointer, Document, Loading, InfoFilled, Clock } from '@element-plus/icons-vue'
 import { reviewApi, type TradeReviewReport } from '@/api/review'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 import SaveAsCaseDialog from './SaveAsCaseDialog.vue'
 
 // 配置 marked 选项
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const props = defineProps<{
   modelValue: boolean
   reviewId: string
@@ -382,7 +381,7 @@ const getTotalPnlPct = () => {
 const renderMarkdown = (content?: string) => {
   if (!content) return ''
   try {
-    return marked.parse(content) as string
+    return safeMarkdown(content)
   } catch (e) {
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
   }

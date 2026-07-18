@@ -59,15 +59,32 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # 复制 Docker 环境配置文件
 COPY docker/.env.docker ./.env
 
+# 🔐 安全：创建非 root 用户运行应用，避免容器内 root 权限泄露
+# 使用固定 UID/GID 1000，便于宿主机目录权限对齐
+# 安装 gosu 用于 entrypoint 中以 root 处理挂载卷权限后切换到 appuser
+RUN apt-get update && apt-get install -y --no-install-recommends gosu && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --system --gid 1000 appuser && \
+    useradd --system --uid 1000 --gid appuser \
+        --home-dir /app --shell /usr/sbin/nologin appuser && \
+    # 将 /app 目录所有权交给 appuser（含 logs/data/runtime/config 子目录）
+    chown -R appuser:appuser /app && \
+    # 确保 entrypoint 脚本可执行
+    chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # 暴露后端端口
 EXPOSE 8000
 
 # Docker 环境标识
-ENV DOCKER_CONTAINER=true
+ENV DOCKER_CONTAINER=true \
+    APP_USER=appuser \
+    APP_UID=1000 \
+    APP_GID=1000
 
 # 使用 Entrypoint 脚本（自动初始化数据库）
+# entrypoint 以 root 启动，chown 挂载卷后用 gosu 切换到 appuser 运行 CMD
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
-# 启动 FastAPI 服务
+# 启动 FastAPI 服务（实际以 appuser 身份运行，由 entrypoint 中的 gosu 切换）
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 

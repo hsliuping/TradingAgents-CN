@@ -442,7 +442,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { TrendCharts, Star, Refresh, Link, Document, Clock, CreditCard, Delete } from '@element-plus/icons-vue'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { stocksApi } from '@/api/stocks'
 import { analysisApi } from '@/api/analysis'
 import { fetchTaskResultWithRetry, hasTaskResultContent, mergeTaskResult } from '@/utils/taskResult'
@@ -1511,7 +1511,7 @@ function getReportContent(reportData: any): string {
 function renderMarkdown(content: string): string {
   if (!content) return '<p>暂无内容</p>'
   try {
-    return marked.parse(content, { async: false }) as string
+    return safeMarkdown(content)
   } catch (e) {
     console.error('Markdown渲染失败:', e)
     return `<pre>${content}</pre>`

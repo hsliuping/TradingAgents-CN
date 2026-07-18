@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="report-detail">
     <!-- 加载状态 -->
     <div v-if="loading" class="loading-container">
@@ -193,7 +193,7 @@ import {
   ArrowDown
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { getMarketByStockCode } from '@/utils/market'
 import type { CurrencyAmount } from '@/api/paper'
 
@@ -236,8 +236,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 
 // 配置 marked 以获得更完整的 Markdown 支持
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 // 响应式数据
 const loading = ref(true)
 const report = ref<ReportDetailData | null>(null)
@@ -1078,7 +1077,7 @@ const prepareMarkdownContent = (content: string) => {
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   try {
-    return marked.parse(prepareMarkdownContent(content)) as string
+    return safeMarkdown(prepareMarkdownContent(content)) as string
   } catch (e) {
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${prepareMarkdownContent(content)}</pre>`
   }

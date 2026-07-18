@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="stock-screening">
     <!-- 页面标题 -->
     <div class="page-header">
@@ -770,7 +770,7 @@ import { ref, computed, reactive, onMounted, onUnmounted, nextTick, watch } from
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, Refresh, TrendCharts, Download, Star, Connection, Warning, User, Delete } from '@element-plus/icons-vue'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 import type { StockInfo } from '@/types/analysis'
 import { screeningApi, type FieldConfigResponse, type FieldInfo, type ScreeningConditionItem, type ScreeningConversationSummary, type ScreeningMessageItem, type ScreeningPreset, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
@@ -780,7 +780,7 @@ import { loadCurrentDataSourceInfo } from '@/utils/dataSource'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
 
 // Markdown 渲染
-marked.setOptions({ breaks: true, gfm: true })
+// marked 配置已由 @/utils/markdown 统一管理
 const renderScreeningMarkdown = (content: string): string => {
   if (!content?.trim()) return ''
   try {
@@ -788,7 +788,7 @@ const renderScreeningMarkdown = (content: string): string => {
     let cleanContent = content
       .replace(/```json\s*\{[\s\S]*?\}\s*```/g, '')
       .replace(/```\s*\{[\s\S]*?\}\s*```/g, '')
-    return marked.parse(cleanContent) as string
+    return renderMarkdown(cleanContent)
   } catch {
     return content
   }

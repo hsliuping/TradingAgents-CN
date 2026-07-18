@@ -2,6 +2,13 @@ version: '3.8'
 
 # TradingAgents-CN v1.0.0-preview Docker Compose配置
 # 支持前后端分离部署
+#
+# 🔐 安全提示：
+#   本编排文件强制要求在 .env 文件中设置以下变量，未设置将无法启动：
+#     - MONGO_PASSWORD   (MongoDB root 密码)
+#     - REDIS_PASSWORD   (Redis 密码)
+#   生成方式: openssl rand -base64 24
+#   可从 docker/.env.docker 复制模板并修改
 
 services:
   # FastAPI 后端服务
@@ -37,8 +44,8 @@ services:
       TRADINGAGENTS_LOG_DIR: "/app/logs"
       TRADINGAGENTS_LOG_FILE: "/app/logs/tradingagents.log"
       # Docker专用数据库配置
-      TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
-      TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
+      TRADINGAGENTS_MONGODB_URL: mongodb://admin:${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}@mongodb:27017/tradingagents?authSource=admin
+      TRADINGAGENTS_REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379
       TRADINGAGENTS_CACHE_TYPE: redis
       # 向量数据库配置
       VECTOR_STORE_BACKEND: "qdrant"
@@ -114,7 +121,7 @@ services:
     ports:
       - "8900:8900"
     environment:
-      MONGO_URI: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
+      MONGO_URI: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/tradingagents?authSource=admin
       MONGO_DB: tradingagents
     depends_on:
       mongodb:
@@ -140,7 +147,7 @@ services:
       - "27017:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: tradingagents123
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}
       MONGO_INITDB_DATABASE: tradingagents
       TZ: "Asia/Shanghai"
     volumes:
@@ -169,7 +176,7 @@ services:
       - "6379:6379"
     environment:
       TZ: "Asia/Shanghai"
-    command: redis-server --appendonly yes --requirepass tradingagents123
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     volumes:
       - redis_data:/data
     networks:
@@ -194,7 +201,7 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - REDIS_HOSTS=local:redis:6379:0:tradingagents123
+      - REDIS_HOSTS=local:redis:6379:0:${REDIS_PASSWORD}
     networks:
       - tradingagents-network
     depends_on:
@@ -218,10 +225,10 @@ services:
       - "8082:8081"
     environment:
       ME_CONFIG_MONGODB_ADMINUSERNAME: admin
-      ME_CONFIG_MONGODB_ADMINPASSWORD: tradingagents123
-      ME_CONFIG_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD}
+      ME_CONFIG_MONGODB_URL: mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/
       ME_CONFIG_BASICAUTH_USERNAME: admin
-      ME_CONFIG_BASICAUTH_PASSWORD: tradingagents123
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_PASSWORD}
     networks:
       - tradingagents-network
     depends_on:

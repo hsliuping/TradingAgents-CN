@@ -8,6 +8,7 @@ import sys
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+import bcrypt
 from pymongo import MongoClient
 from bson import ObjectId
 
@@ -24,6 +25,12 @@ except ImportError:
         return logging.getLogger(name)
 
 logger = get_logger('user_service')
+
+
+# 旧版 SHA-256 哈希前缀，用于识别需要升级的存量密码
+# SHA-256 输出为 64 位十六进制字符串；bcrypt 哈希以 $2 开头
+_LEGACY_SHA256_PREFIX = "sha256:"
+_BCRYPT_PREFIX = "$2"
 
 
 class UserService:
@@ -71,14 +78,47 @@ class UserService:
     
     @staticmethod
     def hash_password(password: str) -> str:
-        """密码哈希"""
-        # 使用 bcrypt 会更安全，但为了兼容性先使用 SHA-256
-        return hashlib.sha256(password.encode()).hexdigest()
-    
+        """密码哈希（使用 bcrypt + 自动加盐）
+
+        返回值以 `$2` 开头，可通过 `bcrypt.checkpw` 验证。
+        兼容旧版 SHA-256 哈希（验证时自动识别并升级）。
+        """
+        # bcrypt 自带盐，相同密码每次哈希结果不同，防止彩虹表攻击
+        # rounds=12 是 OWASP 2023 推荐值（约 250ms / hash）
+        rounds = getattr(settings, "BCRYPT_ROUNDS", 12)
+        salt = bcrypt.gensalt(rounds=rounds)
+        return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+
+    @staticmethod
+    def _hash_legacy_sha256(password: str) -> str:
+        """旧版 SHA-256 哈希（无盐，仅用于验证存量密码）"""
+        return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _is_bcrypt_hash(hashed: str) -> bool:
+        """判断是否为 bcrypt 哈希（以 $2 开头）"""
+        return bool(hashed) and hashed.startswith(_BCRYPT_PREFIX)
+
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """验证密码"""
-        return UserService.hash_password(plain_password) == hashed_password
+        """验证密码
+
+        自动识别 bcrypt 哈希和旧版 SHA-256 哈希：
+        - bcrypt 哈希：使用 bcrypt.checkpw 验证
+        - 旧版 SHA-256 哈希：用 SHA-256 比对（验证成功后调用方应负责升级）
+        """
+        if not hashed_password:
+            return False
+        if UserService._is_bcrypt_hash(hashed_password):
+            try:
+                return bcrypt.checkpw(
+                    plain_password.encode("utf-8"),
+                    hashed_password.encode("utf-8"),
+                )
+            except (ValueError, TypeError):
+                return False
+        # 旧版 SHA-256（无盐）兼容路径
+        return UserService._hash_legacy_sha256(plain_password) == hashed_password
     
     async def create_user(self, user_data: UserCreate) -> Optional[User]:
         """创建用户"""
@@ -158,17 +198,31 @@ class UserService:
 
             logger.info(f"🔍 [authenticate_user] 用户信息: username={user_doc.get('username')}, email={user_doc.get('email')}, is_active={user_doc.get('is_active')}")
 
-            # 验证密码
-            input_password_hash = self.hash_password(password)
-            stored_password_hash = user_doc["hashed_password"]
-            logger.info(f"🔍 [authenticate_user] 密码哈希对比:")
-            logger.info(f"   输入密码哈希: {input_password_hash[:20]}...")
-            logger.info(f"   存储密码哈希: {stored_password_hash[:20]}...")
-            logger.info(f"   哈希匹配: {input_password_hash == stored_password_hash}")
+            # 验证密码（自动识别 bcrypt / 旧版 SHA-256）
+            stored_hash = user_doc.get("hashed_password", "")
+            # ⚠️ 安全：禁止在日志中输出任何密码哈希内容（即使是前缀）
+            logger.info(f"🔍 [authenticate_user] 存储密码哈希类型: {'bcrypt' if self._is_bcrypt_hash(stored_hash) else 'legacy_sha256' if stored_hash else 'empty'}")
 
-            if not self.verify_password(password, user_doc["hashed_password"]):
+            if not self.verify_password(password, stored_hash):
                 logger.warning(f"❌ [authenticate_user] 密码错误: {username}")
                 return None
+
+            # 🔐 旧版 SHA-256 哈希自动升级到 bcrypt（透明升级，用户无感知）
+            if not self._is_bcrypt_hash(stored_hash):
+                try:
+                    new_bcrypt_hash = self.hash_password(password)
+                    self.users_collection.update_one(
+                        {"_id": user_doc["_id"]},
+                        {"$set": {
+                            "hashed_password": new_bcrypt_hash,
+                            "updated_at": datetime.utcnow(),
+                            "password_hash_algo": "bcrypt",
+                        }}
+                    )
+                    logger.info(f"🔐 [authenticate_user] 旧版 SHA-256 密码已自动升级到 bcrypt: {username}")
+                except Exception as upgrade_err:
+                    # 升级失败不影响登录，但需记录告警
+                    logger.warning(f"⚠️ [authenticate_user] 密码哈希升级失败（登录继续）: {username} error={upgrade_err}")
 
             # 检查用户是否激活
             if not user_doc.get("is_active", True):
@@ -183,7 +237,7 @@ class UserService:
 
             logger.info(f"✅ [authenticate_user] 用户认证成功: {username}")
             return User(**user_doc)
-            
+
         except Exception as e:
             logger.error(f"❌ 用户认证失败: {e}")
             return None
@@ -378,11 +432,12 @@ class UserService:
             
             result = self.users_collection.insert_one(admin_doc)
             admin_doc["_id"] = result.inserted_id
-            
+
             logger.info(f"✅ 管理员用户创建成功: {username}")
-            logger.info(f"   密码: {password}")
-            logger.info("   ⚠️  请立即修改默认密码！")
-            
+            # ⚠️ 安全：禁止在日志中输出明文密码；密码已通过环境变量传入，请用户自行记录
+            logger.info("   🔐 密码已使用 bcrypt 加密存储，请妥善保管您设置的管理员密码")
+            logger.info("   ⚠️  建议首次登录后立即修改密码！")
+
             return User(**admin_doc)
             
         except Exception as e:

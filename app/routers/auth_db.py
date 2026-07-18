@@ -15,6 +15,7 @@ from app.services.session_service import get_session_service
 from app.models.user import UserCreate, UserUpdate
 from app.services.operation_log_service import log_operation
 from app.models.operation_log import ActionType
+from app.core.login_rate_limiter import get_login_rate_limiter
 
 # 尝试导入日志管理器
 try:
@@ -197,6 +198,38 @@ async def login(payload: LoginRequest, request: Request):
     logger.info(f"🔐 登录请求 - 用户名: {payload.username}, IP: {ip_address}")
 
     try:
+        # 🛡️ 登录速率限制检查：基于 IP+用户名双维度锁定
+        # 防止暴力破解和账户扫描攻击
+        limiter = get_login_rate_limiter()
+        lockout_info = await limiter.check_lockout(ip_address, payload.username or "")
+        if lockout_info is not None:
+            retry_after, failure_count = lockout_info
+            logger.warning(
+                f"🔒 登录被拒绝(锁定中) - 用户名: {payload.username}, IP: {ip_address}, "
+                f"剩余锁定: {retry_after}秒"
+            )
+            await log_operation(
+                user_id="unknown",
+                username=payload.username or "unknown",
+                action_type=ActionType.USER_LOGIN,
+                action="用户登录",
+                details={
+                    "reason": "account_locked",
+                    "retry_after": retry_after,
+                    "failure_count": failure_count,
+                },
+                success=False,
+                error_message=f"账户已被临时锁定，请 {retry_after} 秒后重试",
+                duration_ms=int((time.time() - start_time) * 1000),
+                ip_address=ip_address,
+                user_agent=user_agent
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"登录失败次数过多，账户已被临时锁定，请 {retry_after} 秒后重试",
+                headers={"Retry-After": str(retry_after)},
+            )
+
         # 验证输入
         if not payload.username or not payload.password:
             logger.warning(f"❌ 登录失败 - 用户名或密码为空")
@@ -223,18 +256,31 @@ async def login(payload: LoginRequest, request: Request):
 
         if not user:
             logger.warning(f"❌ 登录失败 - 用户名或密码错误: {payload.username}")
+            # 🛡️ 记录失败次数，可能触发锁定
+            locked_for = await limiter.record_failure(ip_address, payload.username)
             await log_operation(
                 user_id="unknown",
                 username=payload.username,
                 action_type=ActionType.USER_LOGIN,
                 action="用户登录",
-                details={"reason": "用户名或密码错误"},
+                details={
+                    "reason": "用户名或密码错误",
+                    "locked": locked_for is not None,
+                    "lockout_seconds": locked_for,
+                },
                 success=False,
                 error_message="用户名或密码错误",
                 duration_ms=int((time.time() - start_time) * 1000),
                 ip_address=ip_address,
                 user_agent=user_agent
             )
+            if locked_for is not None:
+                # 已触发锁定，返回 429 让前端显示锁定状态
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"登录失败次数过多，账户已被临时锁定 {locked_for} 秒",
+                    headers={"Retry-After": str(locked_for)},
+                )
             raise HTTPException(status_code=401, detail="用户名或密码错误")
 
         # 方式 1: 设置 Session Cookie（用于 Web 前端）
@@ -284,6 +330,9 @@ async def login(payload: LoginRequest, request: Request):
             ip_address=ip_address,
             user_agent=user_agent
         )
+
+        # 🛡️ 登录成功，清除该 IP+用户名的失败计数
+        await limiter.record_success(ip_address, user.username)
 
         return {
             "success": True,

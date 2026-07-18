@@ -14,10 +14,12 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
+    "@types/dompurify": "^3.0.5",
     "@types/sortablejs": "^1.15.8",
     "@vueuse/core": "^10.7.0",
     "axios": "^1.6.2",
     "dayjs": "^1.11.10",
+    "dompurify": "^3.4.12",
     "echarts": "^5.4.3",
     "element-plus": "^2.4.4",
     "highlight.js": "^11.11.1",

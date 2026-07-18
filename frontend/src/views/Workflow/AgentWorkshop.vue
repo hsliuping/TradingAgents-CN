@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="agent-workshop-page">
     <div class="page-header">
       <div class="page-title-block">
@@ -978,7 +978,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { toolsApi, type ToolMetadata } from '@/api/tools'
 import agentWorkshopApi, {
@@ -1017,8 +1017,7 @@ type NanobotToolEventCard = {
   tone: 'info' | 'success' | 'warning'
 }
 
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const description = ref('')
 const replyMessage = ref('')
 const specFeedbackMessage = ref('')
@@ -1111,7 +1110,7 @@ const getSpecIoText = (item?: AgentSpecIOItem | null) => {
 
 const renderMarkdown = (content: string): string => {
   try {
-    return marked.parse(content || '') as string
+    return safeMarkdown(content || '')
   } catch {
     return String(content || '')
   }

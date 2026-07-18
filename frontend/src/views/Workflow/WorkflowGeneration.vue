@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="wf-gen-page">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -392,15 +392,14 @@ import { ref, nextTick, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowRight, User, Connection, Loading, CircleCheck, MoreFilled, Edit, RefreshRight, Refresh, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { workflowGenerationApi } from '@/api/workflowGeneration'
 import type { WfConfirmResult, WfSessionItem } from '@/api/workflowGeneration'
 
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const renderMarkdown = (content: string): string => {
   if (!content?.trim()) return ''
-  try { return marked.parse(content) as string } catch { return content }
+  try { return safeMarkdown(content) } catch { return content }
 }
 
 const route = useRoute()

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="skill-generation-page">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -539,7 +539,7 @@ import { ref, computed, onMounted, onActivated } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { Plus, Refresh, User, MagicStick, Loading, DocumentCopy } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import hljs from 'highlight.js/lib/core'
 import python from 'highlight.js/lib/languages/python'
 import 'highlight.js/styles/github.min.css'
@@ -548,11 +548,10 @@ import { skillGenerationApi } from '@/api/skillGeneration'
 hljs.registerLanguage('python', python)
 import type { ExternalSkill, TestResult, OptimizeResult, SessionDetail, HistorySection } from '@/api/skillGeneration'
 
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const renderMarkdown = (content: string): string => {
   if (!content?.trim()) return ''
-  try { return marked.parse(content) as string } catch { return content }
+  try { return safeMarkdown(content) } catch { return content }
 }
 
 const formatTime = (t: string): string => {

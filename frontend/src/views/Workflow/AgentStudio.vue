@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="agent-studio-page">
     <header class="topbar">
       <div class="topbar-left">
@@ -833,7 +833,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { useAuthStore } from '@/stores/auth'
 import { isTokenValid } from '@/utils/auth'
 import embeddedNanobotApi, {
@@ -872,8 +872,7 @@ type NanobotStudioPersistedState = {
   threadContext?: EmbeddedNanobotThreadContext | null
 }
 
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const AGENT_STUDIO_SESSION_PREFIX = 'embedded:agent-studio:'
 const NANOBOT_SKILLS = ['nanobot-agent-design']
 const AGENT_STUDIO_STATE_STORAGE_KEY = 'agent-studio:state'
@@ -1109,10 +1108,10 @@ const renderMarkdown = (content: string) => {
     // 如果尾部有表格行但没有分隔行，说明表格刚开始，暂不渲染表格部分
     if (lastTableStart >= 0 && !hasSeparator) {
       const beforeTable = lines.slice(0, lastTableStart).join('\n')
-      const rendered = marked.parse(beforeTable) as string
+      const rendered = safeMarkdown(beforeTable)
       return rendered + `<div class="streaming-table-hint" style="color:var(--el-text-color-placeholder);font-size:12px;margin-top:4px;">正在生成表格...</div>`
     }
-    return marked.parse(text) as string
+    return safeMarkdown(text)
   } catch {
     return String(content || '')
   }

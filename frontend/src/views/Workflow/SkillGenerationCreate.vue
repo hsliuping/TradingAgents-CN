@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="skill-create-page">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -606,7 +606,7 @@ import { ref, nextTick, onMounted, computed, watch, type ComponentPublicInstance
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowDown, User, MagicStick, Loading, CircleCheck, MoreFilled, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { skillGenerationApi } from '@/api/skillGeneration'
 import type {
   BoundaryCheck,
@@ -622,11 +622,10 @@ import type {
   TestResult,
 } from '@/api/skillGeneration'
 
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const renderMarkdown = (content: string): string => {
   if (!content?.trim()) return ''
-  try { return marked.parse(content) as string } catch { return content }
+  try { return safeMarkdown(content) } catch { return content }
 }
 
 const route = useRoute()

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <el-dialog v-model="visible" title="任务结果" width="60%">
     <div v-if="result">
       <h4>建议</h4>
@@ -15,7 +15,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 
 const props = defineProps<{ modelValue: boolean; result: any }>()
 const emit = defineEmits(['update:modelValue','close','view-report'])
@@ -25,7 +25,7 @@ const visible = computed({
   set: (v: boolean) => emit('update:modelValue', v)
 })
 
-marked.setOptions({ breaks: true, gfm: true })
-const renderMarkdown = (s: string) => { try { return marked.parse(s||'') as string } catch { return s } }
+// marked 配置已由 @/utils/markdown 统一管理
+const renderMarkdown = (s: string) => { try { return safeMarkdown(s||'') } catch { return s } }
 </script>
 

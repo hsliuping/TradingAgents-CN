@@ -406,8 +406,20 @@ class Settings(BaseSettings):
         return not self.DEBUG
 
     _DEFAULT_SECRETS = frozenset({
+        # 历史默认值
         "change-me-in-production",
         "change-me-csrf-secret",
+        # .env.example / .env.docker 中的可预测占位符（占位符不是真密钥，禁止直接使用）
+        "your-super-secret-jwt-key-change-in-production",
+        "your-csrf-secret-key-change-in-production",
+        "docker-jwt-secret-key-change-in-production-2024",
+        "docker-csrf-secret-key-change-in-production-2024",
+        # 京东云 docker-compose 中的不安全默认值，必须禁止在生产环境使用
+        "jdyun-jwt-secret-key-change-in-production-2024",
+        "jdyun-csrf-secret-key-change-in-production-2024",
+        # 新增占位符（防止用户直接复制 .env.example 而未修改）
+        "PLEASE_CHANGE_JWT_SECRET_USE_openssl_rand_base64_48",
+        "PLEASE_CHANGE_CSRF_SECRET_USE_openssl_rand_base64_48",
     })
 
     @model_validator(mode="after")

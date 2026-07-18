@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="advanced-lesson-wrapper">
     <!-- 页面头部 -->
     <el-page-header @back="goBack" :content="lessonTitle">
@@ -53,7 +53,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Download, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 import { 
   advancedCourseCategories, 
   getLesson, 
@@ -116,7 +116,7 @@ const loadLesson = async () => {
     }
 
     // 转换为HTML
-    const html = marked.parse(markdown) as string
+    const html = renderMarkdown(markdown)
     lessonContent.value = html
 
     // 提取目录

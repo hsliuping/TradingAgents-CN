@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="queue-management">
     <!-- 页面标题 -->
     <div class="page-header">
@@ -191,14 +191,14 @@ import { analysisApi } from '@/api/analysis'
 import { fetchTaskResultWithRetry } from '@/utils/taskResult'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 
 // 简单 Markdown 渲染，与单股研究保持一致风格
-marked.setOptions({ breaks: true, gfm: true })
+// marked 配置已由 @/utils/markdown 统一管理
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   try {
-    return marked.parse(content) as string
+    return safeMarkdown(content)
   } catch (e) {
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
   }

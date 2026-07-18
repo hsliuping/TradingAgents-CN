@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="general-analysis">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -715,7 +715,7 @@ import {
 } from '@/api/unifiedTasks'
 import { useAuthStore } from '@/stores/auth'
 import { isJdyunMode, JDYUN_CHAT_MODELS } from '@/utils/config'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 
 const router = useRouter()
 
@@ -1254,7 +1254,7 @@ const getReportContent = (field: string) => {
 
 const renderMarkdown = (text: string) => {
   try {
-    return marked.parse(text)
+    return safeMarkdown(text)
   } catch {
     return text
   }

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="single-analysis">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -598,7 +598,7 @@
                   <h4>📊 分析概览</h4>
                   <div class="overview-card">
                     <div class="overview-summary">
-                      <div class="markdown-content" v-html="renderMarkdown(overviewBriefContent)"></div>
+                      <div class="markdown-content" v-html="renderContent(overviewBriefContent)"></div>
                     </div>
 
                     <!-- v2.1.0 结果页以研究简报为主入口，不再在这里重复堆叠另一张决策卡 -->
@@ -843,7 +843,7 @@ import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 import { recommendModels } from '@/api/modelCapabilities'
 import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
@@ -852,11 +852,7 @@ import { isJdyunMode, JDYUN_CHAT_MODELS } from '@/utils/config'
 import type { StockInfo } from '@/types/analysis'
 
 // 配置marked选项
-marked.setOptions({
-  breaks: true,        // 支持换行符转换为<br>
-  gfm: true           // 启用GitHub风格的Markdown
-})
-
+// marked 配置已由 @/utils/markdown 统一管理
 // 市场类型定义
 type MarketType = 'A股' | 'ETF'
 
@@ -2042,11 +2038,11 @@ const prepareMarkdownContent = (content: string) => {
   return preparedText
 }
 
-const renderMarkdown = (content: string) => {
+const renderContent = (content: string) => {
   if (!content) return ''
 
   try {
-    return marked.parse(prepareMarkdownContent(content)) as string
+    return renderMarkdown(prepareMarkdownContent(content))
   } catch {
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${prepareMarkdownContent(content)}</pre>`
   }
@@ -2241,7 +2237,7 @@ const getReportDescription = (field: string, title: string) => {
 // 格式化报告内容
 const formatReportContent = (content: any) => {
   const normalizedContent = getModuleContent(content)
-  return normalizedContent ? renderMarkdown(normalizedContent) : ''
+  return normalizedContent ? renderContent(normalizedContent) : ''
 }
 
 // 下载报告

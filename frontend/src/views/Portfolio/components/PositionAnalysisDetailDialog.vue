@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <el-dialog
     v-model="visible"
     title="分析报告详情"
@@ -126,7 +126,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { type PositionAnalysisResult } from '@/api/portfolio'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 import { getMarketByStockCode } from '@/utils/market'
 
@@ -143,8 +143,7 @@ type PositionSnapshot = {
 }
 
 // 配置marked选项
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const props = defineProps<{
   modelValue: boolean
   report: (PositionAnalysisResult & { position_snapshot?: PositionSnapshot }) | null
@@ -180,7 +179,7 @@ const handleClose = () => emit('update:modelValue', false)
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   try {
-    return marked.parse(content) as string
+    return safeMarkdown(content)
   } catch (e) {
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
   }

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="workflow-execute">
     <!-- 顶部信息 -->
     <div class="execute-header">
@@ -304,7 +304,7 @@ import { ArrowLeft, VideoPlay, CopyDocument } from '@element-plus/icons-vue'
 import { workflowApi, type WorkflowDefinition, type InputFieldConfig } from '@/api/workflow'
 import { configApi, type LLMConfig } from '@/api/config'
 import { analysisApi } from '@/api/analysis'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 import { useAuthStore } from '@/stores/auth'
 import { fetchTaskResultWithRetry } from '@/utils/taskResult'
 
@@ -750,7 +750,7 @@ const getReportField = (fieldName: string): any => {
 const formatReport = (report: any) => {
   const text = extractContent(report)
   if (!text) return ''
-  return marked(text)
+  return renderMarkdown(text)
 }
 
 const copyResult = () => {

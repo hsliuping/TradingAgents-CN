@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="api-guide-container">
     <el-card>
       <template #header>
@@ -39,12 +39,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { Download, Lock } from '@element-plus/icons-vue'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 import { useLicenseStore } from '@/stores/license'
 
 // 配置 marked 选项
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const licenseStore = useLicenseStore()
 const loading = ref(false)
 const markdownContent = ref('')
@@ -72,7 +71,7 @@ const loadContent = async () => {
     }
     
     markdownContent.value = await response.text()
-    renderedContent.value = marked.parse(markdownContent.value) as string
+    renderedContent.value = renderMarkdown(markdownContent.value)
   } catch (error: any) {
     console.error('加载 API 指南失败:', error)
     renderedContent.value = `<div style="color: var(--el-color-danger); padding: 20px;">
