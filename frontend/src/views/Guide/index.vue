@@ -469,7 +469,7 @@ const checkFavorites = async () => {
 // 检查京东云版配置（当前模型名）
 const checkJdyunConfig = async () => {
   try {
-    const resp = await ApiClient.get('/api/jdyun/status')
+    const resp = await ApiClient.get('/api/config/jdyun/status')
     if (resp.success && resp.data) {
       jdyunStatus.value.current_model = resp.data.current_model || resp.data.model || ''
     }
