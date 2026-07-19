@@ -40,7 +40,7 @@
         @go-paper="goToPaperTrading"
       />
 
-      <!-- 进行中任务 + 自选股速览（左右布局） -->
+      <!-- 进行中任务 + 股票关注列表速览（左右布局） -->
       <el-row :gutter="24" class="jdyun-row">
         <el-col :xs="24" :lg="12">
           <RunningTasksCard
@@ -55,7 +55,7 @@
               <div class="card-header">
                 <span class="header-title">
                   <el-icon><Star /></el-icon>
-                  自选股速览
+                  股票关注列表速览
                 </span>
                 <el-button text size="small" @click="goToScreening">
                   添加 <el-icon><Plus /></el-icon>
@@ -64,10 +64,10 @@
             </template>
             <div v-if="favoriteStocks.length === 0" class="empty-state">
               <el-icon class="empty-icon"><Star /></el-icon>
-              <p>还没有自选股</p>
+              <p>还没有股票关注列表</p>
               <span class="empty-tip">添加关注的股票，追踪每日动态</span>
               <el-button type="primary" size="small" @click="goToScreening">
-                添加自选股
+                添加股票关注列表
               </el-button>
             </div>
             <div v-else class="stock-list">
@@ -136,8 +136,16 @@
       <!-- 最近分析（京东云版独立显示） -->
       <el-card class="recent-analyses-card jdyun-recent" header="最近分析" style="margin-top: 24px;">
         <el-table :data="recentAnalyses" style="width: 100%">
-          <el-table-column prop="stock_code" label="股票代码" width="120" />
-          <el-table-column prop="stock_name" label="股票名称" width="150" />
+          <el-table-column prop="symbol" label="股票代码" width="120">
+            <template #default="{ row }">
+              {{ row.symbol || row.code || row.stock_code || '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="股票名称" width="150">
+            <template #default="{ row }">
+              {{ row.stock_name || row.symbol || row.code || '—' }}
+            </template>
+          </el-table-column>
           <el-table-column prop="status" label="状态" width="100">
             <template #default="{ row }">
               <el-tag :type="getStatusType(row.status)">
@@ -145,9 +153,9 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="start_time" label="创建时间" width="180">
+          <el-table-column prop="created_at" label="创建时间" width="180">
             <template #default="{ row }">
-              {{ formatTime(row.start_time) }}
+              {{ formatTime(row.started_at || row.created_at) }}
             </template>
           </el-table-column>
           <el-table-column label="操作">
@@ -544,7 +552,7 @@
         </el-card>
       </el-col>
 
-      <!-- 右侧：自选股和快讯 -->
+      <!-- 右侧：股票关注列表和快讯 -->
       <el-col :span="8">
         <!-- 股票关注列表 -->
         <el-card class="favorites-card">
@@ -558,7 +566,7 @@
           </template>
 
           <div v-if="favoriteStocks.length === 0" class="empty-favorites">
-            <el-empty description="暂无自选股" :image-size="60">
+            <el-empty description="暂无股票关注列表" :image-size="60">
               <el-button type="primary" size="small" @click="goToFavorites">
                 添加到研究列表
               </el-button>
@@ -590,7 +598,7 @@
 
           <div v-if="favoriteStocks.length > 5" class="favorites-footer">
             <el-button type="text" size="small" @click="goToFavorites">
-              查看全部 {{ favoriteStocks.length }} 只自选股
+              查看全部 {{ favoriteStocks.length }} 只股票关注列表
             </el-button>
           </div>
         </el-card>
@@ -676,7 +684,8 @@ import {
   Filter,
   MagicStick,
   Connection,
-  Refresh
+  Refresh,
+  DataAnalysis
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { AnalysisTask, AnalysisStatus } from '@/types/analysis'
@@ -687,7 +696,7 @@ import DismissableBanner from '@/components/Dashboard/DismissableBanner.vue'
 import CollapsibleSection from '@/components/Dashboard/CollapsibleSection.vue'
 import GuideDialog from '@/components/GuideDialog.vue'
 import { favoritesApi } from '@/api/favorites'
-import { analysisApi } from '@/api/analysis'
+import { getTaskList as getUnifiedTaskList } from '@/api/unifiedTasks'
 import { newsApi } from '@/api/news'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
 import { ensureReportExportAccess } from '@/utils/featureAccess'
@@ -706,10 +715,10 @@ const jdyunMoreFeatures = ref([
   { path: '/assistant', title: '智能助手', description: '一句话描述需求，AI 自动完成', icon: ChatDotRound },
   { path: '/screening', title: '智能选股', description: '多维度筛选符合条件的股票', icon: Search },
   { path: '/workflow', title: '流程管理', description: '管理工作流和自定义流程', icon: Tools },
-  { path: '/agent-builder', title: 'Agent 工坊', description: '可视化构建专属 Agent', icon: EditPen },
-  { path: '/settings/config', title: '数据源配置', description: '管理 Tushare 和 AKShare', icon: Connection },
+  { path: '/workflow/agent-workshop', title: 'Agent 工坊', description: '可视化构建专属 Agent', icon: EditPen },
+  { path: '/review', title: '操作复盘', description: '对交易决策进行 AI 复盘分析', icon: DataAnalysis },
   { path: '/settings/sync', title: '数据同步', description: '同步股票基础和行情数据', icon: Refresh },
-  { path: '/paper-trading', title: '模拟交易', description: 'AI 辅助下的模拟交易账户', icon: PieChart },
+  { path: '/paper', title: '模拟交易', description: 'AI 辅助下的模拟交易账户', icon: PieChart },
   { path: '/learning', title: '学习中心', description: '24 节 AI 股票分析系统课程', icon: Reading }
 ])
 
@@ -724,7 +733,7 @@ const userStats = ref({
 
 const recentAnalyses = ref<AnalysisTask[]>([])
 
-// 自选股数据
+// 股票关注列表数据
 const favoriteStocks = ref<any[]>([])
 
 // 市场快讯数据
@@ -801,7 +810,7 @@ const viewTask = (task: any) => {
 
 const goToStockAnalysis = (code: string) => {
   if (!code) return
-  router.push({ path: '/analysis/single', query: { code } })
+  router.push(`/stocks/${code}`)
 }
 
 const goToLearning = () => {
@@ -937,7 +946,20 @@ const formatTime = (time: string) => {
   return formatDateTime(time)
 }
 
-// 自选股相关方法
+// 剥除字符串中的 HTML 标签（如东方财富新闻标题中的 <em></em> 高亮标记）
+// 安全策略：仅做纯文本提取，不渲染 HTML，避免 XSS 风险
+const stripHtmlTags = (text: string): string => {
+  if (!text) return ''
+  // 先把常见 HTML 实体转义符解码（如 &lt; &gt; &amp;）
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/<[^>]+>/g, '') // 剥除所有 HTML 标签
+    .trim()
+}
+
+// 股票关注列表相关方法
 const goToFavorites = () => {
   router.push('/favorites')
 }
@@ -958,6 +980,8 @@ const loadFavoriteStocks = async () => {
     const response = await favoritesApi.list()
     if (response.success && response.data) {
       favoriteStocks.value = response.data.map((item: any) => ({
+        code: item.stock_code || item.code,
+        name: item.stock_name || item.name,
         stock_code: item.stock_code,
         stock_name: item.stock_name,
         current_price: item.current_price || 0,
@@ -965,24 +989,25 @@ const loadFavoriteStocks = async () => {
       }))
     }
   } catch (error) {
-    console.error('加载自选股失败:', error)
+    console.error('加载股票关注列表失败:', error)
   }
 }
 
 const loadRecentAnalyses = async () => {
   try {
-    // 使用任务中心的用户任务接口，不传 limit 让后端返回所有记录
-    const res = await analysisApi.getTaskList({
-      offset: 0,
-      // 不限定状态，展示最近任务；如需仅展示已完成可设为 'completed'
-      status: undefined
+    // 使用新版统一任务中心接口（/api/v2/tasks/list），数据存储在 unified_analysis_tasks 集合
+    // 旧版 analysisApi.getTaskList 读取 analysis_tasks 集合（已废弃，数据为空）
+    const res = await getUnifiedTaskList({
+      // 不传 limit，让后端返回所有记录（unified_tasks.py 中 limit 为 None 时返回全部）
+      // 不传 status，展示所有状态的任务
     })
 
-    // 兼容不同返回结构（ApiResponse 或直接 data）
+    // unifiedTasks API 返回结构：{ success, data: { tasks, total, limit, skip }, message }
+    // 但 ApiClient.get 可能已解包，兼容多种返回结构
     const body: any = (res as any)?.data?.data || (res as any)?.data || res || {}
     const allTasks = body.tasks || []
 
-    // 在前端取最近10条
+    // 在前端取最近10条（接口已按 created_at 降序返回）
     const tasks = allTasks.slice(0, 10)
 
     recentAnalyses.value = tasks
@@ -1008,8 +1033,11 @@ const loadMarketNews = async () => {
     if (response.success && response.data) {
       marketNews.value = response.data.news.map((item: any) => ({
         id: item.id || item.title,
-        title: item.title,
+        // 兜底剥除标题中可能残留的 HTML 标签（如东方财富 <em> 高亮标记）
+        title: stripHtmlTags(item.title || ''),
         time: item.publish_time,
+        published_at: item.publish_time,
+        created_at: item.created_at,
         url: item.url,
         source: item.source
       }))
@@ -1087,7 +1115,7 @@ onMounted(async () => {
   // 🔥 加载系统就绪度（引导卡片）
   await loadSystemReadiness()
   
-  // 加载自选股数据
+  // 加载股票关注列表数据
   await loadFavoriteStocks()
   // 加载最近分析
   await loadRecentAnalyses()
@@ -1669,7 +1697,6 @@ onMounted(async () => {
     }
   }
 }
-</style>
 
 // ════════ 京东云版专属样式 ════════
 .jdyun-row {
@@ -1740,9 +1767,14 @@ onMounted(async () => {
     &:hover {
       border-color: var(--el-color-primary);
       background-color: var(--el-color-primary-light-9);
+      box-shadow: 0 2px 8px rgba(64, 158, 255, 0.12);
 
       .stock-arrow {
         transform: translateX(4px);
+        color: var(--el-color-primary);
+      }
+
+      .stock-code {
         color: var(--el-color-primary);
       }
     }
@@ -1757,12 +1789,21 @@ onMounted(async () => {
     font-size: 14px;
     font-weight: 600;
     color: var(--el-text-color-primary);
+    transition: color 0.2s ease;
   }
 
   .stock-name {
     font-size: 12px;
-    color: var(--el-text-color-secondary);
+    color: var(--el-color-primary);
     margin-top: 2px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+
+    &:hover {
+      text-decoration-style: solid;
+    }
   }
 
   .stock-price {
@@ -1772,7 +1813,7 @@ onMounted(async () => {
   }
 
   .stock-arrow {
-    color: var(--el-text-color-placeholder);
+    color: var(--el-color-primary);
     transition: all 0.2s ease;
   }
 }
@@ -1811,16 +1852,21 @@ onMounted(async () => {
   }
 
   .feature-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--el-text-color-primary);
-    margin-bottom: 4px;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--el-color-primary);
+    margin-bottom: 8px;
+    letter-spacing: 0.3px;
+    padding-bottom: 6px;
+    border-bottom: 1px dashed var(--el-border-color);
+    display: inline-block;
   }
 
   .feature-desc {
     font-size: 12px;
     color: var(--el-text-color-secondary);
-    line-height: 1.4;
+    line-height: 1.5;
+    opacity: 0.85;
   }
 }
 
@@ -1830,3 +1876,4 @@ onMounted(async () => {
     padding: 16px 20px;
   }
 }
+</style>

@@ -177,7 +177,7 @@ const openNews = (news: any) => {
 
 ```typescript
 onMounted(async () => {
-  // 加载自选股数据
+  // 加载股票关注列表数据
   await loadFavoriteStocks()
   // 加载最近分析
   await loadRecentAnalyses()

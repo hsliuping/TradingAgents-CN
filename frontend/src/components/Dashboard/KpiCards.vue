@@ -30,21 +30,22 @@
       </div>
     </el-card>
 
-    <el-card class="kpi-card" shadow="hover">
+    <el-card class="kpi-card kpi-card-clickable" shadow="hover" @click="$emit('go-paper')">
       <div class="kpi-content">
         <div class="kpi-icon profit">
           <el-icon><Wallet /></el-icon>
         </div>
         <div class="kpi-info">
-          <div class="kpi-label">总资产</div>
+          <div class="kpi-label">模拟交易总资产</div>
           <div class="kpi-value" v-if="paperAccount">¥{{ formatMoney(getAmount(paperAccount.equity)) }}</div>
           <div class="kpi-value kpi-placeholder" v-else>—</div>
           <div class="kpi-sub" v-if="paperAccount && hasPnl">
             持仓市值 ¥{{ formatMoney(getAmount(paperAccount.positions_value)) }}
           </div>
-          <div class="kpi-sub" v-else-if="paperAccount">无持仓</div>
-          <div class="kpi-sub kpi-action" v-else @click="$emit('go-paper')">前往开通</div>
+          <div class="kpi-sub kpi-action" v-else-if="paperAccount">查看账户详情 →</div>
+          <div class="kpi-sub kpi-action" v-else>前往开通 →</div>
         </div>
+        <el-icon class="kpi-card-arrow"><ArrowRight /></el-icon>
       </div>
     </el-card>
 
@@ -66,7 +67,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { Calendar, DataAnalysis, Wallet, Coin, Loading } from '@element-plus/icons-vue'
+import { Calendar, DataAnalysis, Wallet, Coin, Loading, ArrowRight } from '@element-plus/icons-vue'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
 import { getUsageStatistics } from '@/api/usage'
 
@@ -92,7 +93,8 @@ const todayStats = computed(() => {
   const todayStart = today.getTime()
 
   const todayTasks = props.recentTasks.filter((t: any) => {
-    const ts = new Date(t.start_time || t.created_at || '').getTime()
+    // unifiedTasks 返回 started_at/created_at（字符串，含时区），兼容旧版 start_time
+    const ts = new Date(t.started_at || t.start_time || t.created_at || '').getTime()
     return ts >= todayStart
   })
 
@@ -114,7 +116,7 @@ const weekStats = computed(() => {
   const weekStartTs = weekStart.getTime()
 
   const weekTasks = props.recentTasks.filter((t: any) => {
-    const ts = new Date(t.start_time || t.created_at || '').getTime()
+    const ts = new Date(t.started_at || t.start_time || t.created_at || '').getTime()
     return ts >= weekStartTs
   })
 
@@ -191,6 +193,43 @@ onMounted(() => {
   :deep(.el-card__body) {
     padding: 18px 20px;
   }
+}
+
+// 可点击的 KPI 卡片（如"模拟交易总资产"，整卡跳转）
+.kpi-card-clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+
+    :deep(.el-card__body) {
+      background-color: var(--el-color-primary-light-9);
+    }
+
+    .kpi-icon.profit {
+      background-color: rgba(230, 162, 60, 0.18);
+    }
+
+    .kpi-card-arrow {
+      transform: translateX(4px);
+      color: var(--el-color-primary);
+      opacity: 1;
+    }
+  }
+}
+
+// 卡片右下角箭头（hover 时显示）
+.kpi-card-arrow {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  font-size: 14px;
+  color: var(--el-text-color-placeholder);
+  opacity: 0.6;
+  transition: all 0.2s ease;
 }
 
 .kpi-content {
