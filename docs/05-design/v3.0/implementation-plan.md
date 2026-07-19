@@ -28,14 +28,14 @@ Phase 3  Gateway（飞书/QQ 接入）       ████████    3 周
 
 ### 1.1 目标
 
-将 `IntelligentAssistantService` 从"数据教练"升级为"全能操作员"，新增 12 个操作工具，使助理能够触发分析、查报告、管定时任务、管自选股。
+将 `IntelligentAssistantService` 从"数据教练"升级为"全能操作员"，新增 12 个操作工具，使助理能够触发分析、查报告、管定时任务、管股票关注列表。
 
 ### 1.2 前置条件
 
 - 现有 `IntelligentAssistantService`（`app/services/intelligent_assistant_service.py`）可正常工作
 - `TaskAnalysisService`（`app/services/task_analysis_service.py`）可正常创建和执行任务
 - 定时分析 CRUD（`app/routers/scheduled_analysis.py`）已实现
-- 自选股分组 CRUD（`app/routers/watchlist_groups.py`）已实现
+- 股票关注列表分组 CRUD（`app/routers/watchlist_groups.py`）已实现
 
 ### 1.3 实施步骤
 
@@ -49,7 +49,7 @@ core/tools/implementations/assistant_ops/
 ├── analysis_trigger.py      # 分析触发类（3 个工具）
 ├── report_query.py          # 报告查询类（3 个工具）
 ├── schedule_manager.py      # 定时任务管理类（3 个工具）
-└── watchlist_manager.py     # 自选股管理类（3 个工具）
+└── watchlist_manager.py     # 股票关注列表管理类（3 个工具）
 ```
 
 每个工具函数遵循现有 ToolRegistry 规范：
@@ -115,7 +115,7 @@ async def trigger_stock_analysis(symbol: str, depth: int = 3, workflow_id: str =
 - CRON 表达式由 LLM 根据用户自然语言生成（如"每天早上9点" → `0 9 * * 1-5`）
 - 注册/取消注册调度器需复用 `_register_scheduled_tasks()` / `_unregister_scheduled_tasks()`
 
-#### Step 1.3.5：实现自选股管理类工具（Week 2, Day 2-3）
+#### Step 1.3.5：实现股票关注列表管理类工具（Week 2, Day 2-3）
 
 | 工具函数 | 内部实现 | 关键逻辑 |
 |---------|---------|---------|
@@ -162,8 +162,8 @@ async def chat(self, user_message, conversation_id=None, user_id=None):
 
 **核心变化**:
 1. 角色定位：从"投资教练"改为"分析助理（操作员）"
-2. 能力描述：新增"触发分析、查报告、管定时任务、管自选股"
-3. 操作确认：创建定时任务、删除自选股等操作前主动确认
+2. 能力描述：新增"触发分析、查报告、管定时任务、管股票关注列表"
+3. 操作确认：创建定时任务、删除股票关注列表等操作前主动确认
 4. 保留原有教练能力：数据教学、分析框架等作为"附加能力"保留
 5. 保留合规原则：不给投资建议
 
@@ -176,7 +176,7 @@ async def chat(self, user_message, conversation_id=None, user_id=None):
 | "上周分析过哪些股票" | 调用 `search_reports(date_range="last_week")` |
 | "设置每天早上9点分析科技股" | 调用 `create_scheduled_analysis` |
 | "把比亚迪加到重点关注分组" | 调用 `add_stock_to_watchlist` |
-| "查看我的自选股分组" | 调用 `list_watchlist_groups` |
+| "查看我的股票关注列表分组" | 调用 `list_watchlist_groups` |
 | "贵州茅台的毛利率是多少" | 仍使用原有数据工具（不受影响） |
 
 ### 1.4 交付物

@@ -24,7 +24,7 @@
    - 任务取消支持
 
 4. **集成点更新**
-   - `favorites_sync_task.py`: 自选股财务数据同步已更新
+   - `favorites_sync_task.py`: 股票关注列表财务数据同步已更新
    - `financial_data.py`: API接口已更新，支持job_id传递
 
 ## 关键特性

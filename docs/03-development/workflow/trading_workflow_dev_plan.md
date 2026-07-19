@@ -28,7 +28,7 @@
 - views/Analysis/SingleAnalysis.vue：结果展示、Markdown 修复完成（挂载“一键生成计划”）。
 - views/Analysis/BatchAnalysis.vue：批量发起分析（支持预填与回跳 Queue）。
 - views/Queue：任务队列（增强完成项的“生成计划”CTA）。
-- views/Favorites：自选股（支持多选→批量分析、状态徽标）。
+- views/Favorites：股票关注列表（支持多选→批量分析、状态徽标）。
 - views/Screening：股票筛选（新增“加入候选篮/自选/批量分析”操作条）。
 
 ## 4. 端到端方案概览
@@ -42,7 +42,7 @@
 - 列增强：最近分析日期/摘要/置信度（缓存/后端）
 - 保存筛选器：可命名与“一键运行”→ 自动加入候选篮并触发批量分析（可选）
 
-### B. Favorites（自选股）
+### B. Favorites（股票关注列表）
 - 新增：分组管理与多选批量分析；“新鲜度”徽标（>7天黄，>14天红）
 - 快捷 CTA：重新分析 | 生成计划 | 移至候选篮
 

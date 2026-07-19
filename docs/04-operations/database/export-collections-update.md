@@ -32,7 +32,7 @@
 - `real_accounts` - 实盘账户
 - `scheduled_analysis_configs` - 定时分析配置
 - `scheduler_metadata` - 调度器元数据
-- `watchlist_groups` - 自选股分组
+- `watchlist_groups` - 股票关注列表分组
 
 **移除集合**（数据库中不存在）:
 - `user_configs` - 用户配置

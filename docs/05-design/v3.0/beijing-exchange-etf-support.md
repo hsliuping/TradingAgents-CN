@@ -39,7 +39,7 @@
 8. 已实现 ETF 工作流专属提示词模板补齐（`etf_workflow_prompt_template_service.py`），覆盖全部 7 个 Agent。
 9. 已实现前端单股分析页面 ETF 入口：市场选择器有「ETF 基金」选项，输入 ETF 代码自动识别并切换。
 10. 已实现报告展示 ETF 适配：`ReportDetail.vue` 支持 ETF 分析师映射和 `isEtfAnalysis` 判断。
-11. 已实现定时分析/自选股 ETF 支持：`watchlist_analysis_task.py` 自动识别 ETF → `ETF_ANALYSIS`。
+11. 已实现定时分析/股票关注列表 ETF 支持：`watchlist_analysis_task.py` 自动识别 ETF → `ETF_ANALYSIS`。
 12. 已实现 `UnifiedStockService` ETF 映射：`collection_map["ETF"]` 指向 `etf_basic_info` / `etf_daily_quotes`。
 13. 已实现行情/基本面/K 线 API 的 ETF 支持：`/api/stocks/{code}/quote`、`/fundamentals`、`/kline`。
 14. 已实现模拟交易 ETF 支持：下单、持仓、价格查询均支持 ETF 代码。
@@ -83,7 +83,7 @@
 | **ETF 提示词模板** | ✅ 已实现 | `etf_workflow_prompt_template_service.py`：覆盖全部 7 个 Agent |
 | **前端 ETF 入口** | ✅ 已实现 | `SingleAnalysis.vue`：市场选择器「ETF 基金」、代码自动识别 |
 | **ETF 报告展示** | ✅ 已实现 | `ReportDetail.vue`：ETF 分析师映射、`isEtfAnalysis` 判断 |
-| **定时分析/自选股 ETF** | ✅ 已实现 | `watchlist_analysis_task.py`：自动识别 ETF → `ETF_ANALYSIS` |
+| **定时分析/股票关注列表 ETF** | ✅ 已实现 | `watchlist_analysis_task.py`：自动识别 ETF → `ETF_ANALYSIS` |
 | **UnifiedStockService** | ✅ 已实现 | `collection_map["ETF"]` 已配置 |
 | **行情/K 线/基本面 API** | ✅ 已实现 | `stocks.py` 各端点均支持 ETF 代码 |
 | **模拟交易 ETF** | ✅ 已实现 | `paper.py` 支持 ETF 下单、持仓、价格查询 |
@@ -306,7 +306,7 @@ ETF 需要的是：
 
 ### 2.6.2 定时分析任务是否需要支持 ETF？
 
-**需要支持**。自选股分组中可能包含 ETF（如 510050、159919），定时任务应按标的类型选择对应工作流。
+**需要支持**。股票关注列表分组中可能包含 ETF（如 510050、159919），定时任务应按标的类型选择对应工作流。
 
 **改造点**：
 

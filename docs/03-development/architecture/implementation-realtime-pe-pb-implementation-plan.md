@@ -23,7 +23,7 @@
 | **分析数据流** | `tradingagents/dataflows/optimized_china_data.py` | 分析报告中的PE/PB | 🔴 高 |
 | **股票详情-基本面** | `app/routers/stocks.py` - `get_fundamentals()` | 详情页基本面快照 | 🔴 高 |
 | **股票筛选** | `app/routers/screening.py` | 筛选结果中的PE/PB | 🔴 高 |
-| **自选股列表** | `app/routers/favorites.py` | 自选股的PE/PB | 🟡 中 |
+| **股票关注列表列表** | `app/routers/favorites.py` | 股票关注列表的PE/PB | 🟡 中 |
 
 ### 前端页面
 
@@ -31,7 +31,7 @@
 |-----|------|---------|--------|
 | **股票详情页** | `frontend/src/views/Stocks/Detail.vue` | 基本面快照显示PE | 🔴 高 |
 | **股票筛选页** | `frontend/src/views/Screening/index.vue` | 筛选条件和结果列表 | 🔴 高 |
-| **自选股页面** | `frontend/src/views/Favorites/index.vue` | 自选股列表（如果显示PE/PB） | 🟡 中 |
+| **股票关注列表页面** | `frontend/src/views/Favorites/index.vue` | 股票关注列表列表（如果显示PE/PB） | 🟡 中 |
 | **分析报告** | 各分析相关页面 | 报告中的估值指标 | 🔴 高 |
 
 ## 实施步骤
