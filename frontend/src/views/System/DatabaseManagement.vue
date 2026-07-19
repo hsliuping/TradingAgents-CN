@@ -724,7 +724,7 @@ const exportData = async () => {
       'scheduler_metadata',         // 调度器元数据
 
       // 其他配置
-      'watchlist_groups',           // 自选股分组
+      'watchlist_groups',           // 股票关注列表分组
 
       // 注意: 不包含 market_quotes 和 stock_basic_info（数据量大，不适合演示系统）
       // 注意: 不包含运行时数据（user_favorites, real_accounts, assistant_threads 等）

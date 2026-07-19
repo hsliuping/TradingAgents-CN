@@ -68,7 +68,7 @@
               <el-icon><Refresh /></el-icon>
               刷新
             </el-button>
-            <!-- 只有有A股自选股时才显示同步实时行情按钮 -->
+            <!-- 只有有A股股票关注列表时才显示同步实时行情按钮 -->
             <el-button
               v-if="hasAStocks"
               type="success"
@@ -98,7 +98,7 @@
       </el-row>
     </el-card>
 
-    <!-- 自选股列表 -->
+    <!-- 股票关注列表列表 -->
     <el-card class="favorites-list-card" shadow="never">
       <el-table
         :data="filteredFavorites"
@@ -212,9 +212,9 @@
 
       <!-- 空状态 -->
       <div v-if="!loading && favorites.length === 0" class="empty-state">
-        <el-empty description="暂无自选股">
+        <el-empty description="暂无股票关注列表">
           <el-button type="primary" @click="showAddDialog">
-            添加第一只自选股
+            添加第一只股票关注列表
           </el-button>
         </el-empty>
       </div>
@@ -282,10 +282,10 @@
         </el-button>
       </template>
     </el-dialog>
-    <!-- 编辑自选股对话框 -->
+    <!-- 编辑股票关注列表对话框 -->
     <el-dialog
       v-model="editDialogVisible"
-      title="编辑自选股"
+      title="编辑股票关注列表"
       width="520px"
     >
       <el-form :model="editForm" ref="editFormRef" label-width="100px">
@@ -696,7 +696,7 @@ const filteredFavorites = computed<FavoriteItem[]>(() => {
   return result
 })
 
-// 判断是否有A股自选股
+// 判断是否有A股股票关注列表
 const hasAStocks = computed(() => {
   return favorites.value.some(item => item.market === 'A股')
 })
@@ -708,8 +708,8 @@ const loadFavorites = async () => {
     const res = await favoritesApi.list()
     favorites.value = ((res as any)?.data || []) as FavoriteItem[]
   } catch (error: any) {
-    console.error('加载自选股失败:', error)
-    ElMessage.error(error.message || '加载自选股失败')
+    console.error('加载股票关注列表失败:', error)
+    ElMessage.error(error.message || '加载股票关注列表失败')
   } finally {
     loading.value = false
   }
@@ -731,7 +731,7 @@ const waitForFavoritesRealtimeTask = async (taskId: string): Promise<FavoritesRe
     await sleep(STOCK_SYNC_POLL_INTERVAL_MS)
   }
 
-  throw new Error('自选股实时行情同步超时，请稍后刷新列表查看结果')
+  throw new Error('股票关注列表实时行情同步超时，请稍后刷新列表查看结果')
 }
 
 const monitorFavoritesRealtimeTask = async (taskId: string) => {
@@ -739,7 +739,7 @@ const monitorFavoritesRealtimeTask = async (taskId: string) => {
     const task = await waitForFavoritesRealtimeTask(taskId)
     if (favoritesViewDisposed) return
 
-    const message = task.result?.message || task.error || task.message || '自选股实时行情同步失败'
+    const message = task.result?.message || task.error || task.message || '股票关注列表实时行情同步失败'
     if (task.status === 'success') {
       ElMessage.success(message)
     } else if (task.status === 'success_with_errors') {
@@ -751,14 +751,14 @@ const monitorFavoritesRealtimeTask = async (taskId: string) => {
     await loadFavorites()
   } catch (error: any) {
     if (!favoritesViewDisposed && error?.message !== '页面已离开，停止等待同步结果') {
-      ElMessage.error(error?.message || '自选股实时行情结果查询失败，请稍后刷新列表查看')
+      ElMessage.error(error?.message || '股票关注列表实时行情结果查询失败，请稍后刷新列表查看')
     }
   }
 }
 
 const syncAllRealtime = async () => {
   if (favorites.value.length === 0) {
-    ElMessage.warning('没有自选股需要同步')
+    ElMessage.warning('没有股票关注列表需要同步')
     return
   }
 
@@ -769,7 +769,7 @@ const syncAllRealtime = async () => {
     const res = await favoritesApi.syncRealtime(realtimeSource)
 
     if ((res as any)?.success) {
-      ElMessage.success('自选股实时行情同步任务已提交，后台执行中')
+      ElMessage.success('股票关注列表实时行情同步任务已提交，后台执行中')
       void monitorFavoritesRealtimeTask(res.data.task_id)
     } else {
       ElMessage.error((res as any)?.message || '同步失败')
@@ -1001,7 +1001,7 @@ const handleUpdateFavorite = async () => {
     editDialogVisible.value = false
     await loadFavorites()
   } catch (error: any) {
-    console.error('更新自选股失败:', error)
+    console.error('更新股票关注列表失败:', error)
     ElMessage.error(error.message || '保存失败')
   } finally {
     editLoading.value = false
@@ -1030,7 +1030,7 @@ const analyzeFavorite = (row: any) => {
 const removeFavorite = async (row: any) => {
   try {
     await ElMessageBox.confirm(
-      `确定要从自选股中移除 ${row.stock_name} 吗？`,
+      `确定要从股票关注列表中移除 ${row.stock_name} 吗？`,
       '确认移除',
       {
         confirmButtonText: '确定',

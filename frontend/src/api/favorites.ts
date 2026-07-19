@@ -90,7 +90,7 @@ export const favoritesApi = {
   tags: () => ApiClient.get<string[]>('/api/favorites/tags'),
 
   /**
-   * 同步自选股实时行情
+   * 同步股票关注列表实时行情
    * @param data_source 数据源（tushare/akshare）
    */
   syncRealtime: (data_source: string = 'tushare') =>

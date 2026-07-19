@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="stock-screening">
     <!-- 页面标题 -->
     <div class="page-header">
@@ -129,7 +129,7 @@
                           <div class="stock-card-reason">{{ s.reason }}</div>
                           <div class="stock-card-actions">
                             <el-button size="small" :type="isFavorited(s.code) ? 'warning' : 'primary'" plain @click="toggleAiFavorite(s)">
-                              {{ isFavorited(s.code) ? '取消自选' : '加入自选' }}
+                              {{ isFavorited(s.code) ? '取消关注' : '加入关注列表' }}
                             </el-button>
                           </div>
                         </el-card>

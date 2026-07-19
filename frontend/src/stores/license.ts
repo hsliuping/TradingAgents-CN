@@ -28,7 +28,7 @@ export interface LicenseInfo {
 export const PRO_FEATURES = [
   'advanced_courses',        // 高级学员课程
   'email_notification',      // 邮件通知
-  'watchlist_groups',        // 自选股分组
+  'watchlist_groups',        // 股票关注列表分组
   'scheduled_analysis',      // 定时分析
   'portfolio_analysis',      // 持仓研究
   'trade_review',            // 操作复盘

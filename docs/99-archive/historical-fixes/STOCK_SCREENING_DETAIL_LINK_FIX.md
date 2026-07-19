@@ -139,7 +139,7 @@ const viewStockDetail = (stock: StockInfo) => {
 
 ## 🔄 其他页面的正确实现
 
-### 1. 自选股页面（Favorites）
+### 1. 股票关注列表页面（Favorites）
 
 **文件**：`frontend/src/views/Favorites/index.vue`
 

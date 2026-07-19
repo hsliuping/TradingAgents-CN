@@ -322,7 +322,7 @@ const formatExpireTime = (dateStr: string): string => {
 const featureLabels: Record<string, string> = {
   advanced_courses: '高级学员课程',
   email_notification: '邮件通知',
-  watchlist_groups: '自选股分组',
+  watchlist_groups: '股票关注列表分组',
   scheduled_analysis: '定时分析',
   portfolio_analysis: '持仓研究',
   trade_review: '操作复盘',
@@ -339,7 +339,7 @@ const featureLabels: Record<string, string> = {
 const proFeatureList = [
   { key: 'advanced_courses', name: '高级学员课程', desc: '解锁 24 节系统课程与高级课程样本', icon: Reading },
   { key: 'email_notification', name: '邮件通知', desc: '研究完成自动发送邮件', icon: Message },
-  { key: 'watchlist_groups', name: '自选股分组', desc: '按策略分组管理自选股', icon: FolderOpened },
+  { key: 'watchlist_groups', name: '股票关注列表分组', desc: '按策略分组管理股票关注列表', icon: FolderOpened },
   { key: 'scheduled_analysis', name: '定时分析', desc: '多时段自动分析', icon: Clock },
   { key: 'batch_analysis', name: '批量分析', desc: '一次提交多只股票进行研究', icon: DocumentChecked },
   { key: 'export_reports', name: '导出报告', desc: '导出研究结果与历史记录', icon: Document },

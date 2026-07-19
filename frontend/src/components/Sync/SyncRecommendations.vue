@@ -634,6 +634,7 @@ import {
   getDataSourcesStatus,
   type DataSourceStatus
 } from '@/api/sync'
+import { isJdyunMode } from '@/utils/config'
 
 // 响应式数据
 const loading = ref(false)
@@ -648,6 +649,11 @@ const progressPollingTimer = ref<NodeJS.Timeout | null>(null)
 const ACTIVE_PROGRESS_STATUSES = new Set<JobProgress['status']>(['running', 'cancelling', 'suspended'])
 const TERMINAL_PROGRESS_STATUSES = new Set<JobProgress['status']>(['success', 'failed', 'cancelled', 'unknown'])
 
+// 京东云版只显示 Tushare / AKShare 数据源任务
+const JDYUN_ALLOWED_SOURCES = new Set(['tushare', 'akshare', 'multi_source'])
+const isJdyunAllowedSource = (sourceName: string) =>
+  JDYUN_ALLOWED_SOURCES.has((sourceName || '').toLowerCase())
+
 // 任务类型关键词映射
 const taskTypeKeywords: Record<string, string[]> = {
   historical: ['历史数据', 'historical'],
@@ -660,8 +666,8 @@ const extractDataSource = (jobId: string | undefined, jobName: string | undefine
   const id = (jobId || '').toLowerCase()
   const name = (jobName || '').toLowerCase()
   
-  // 🔥 特殊处理：自选股数据同步任务使用多数据源（按优先级）
-  if (id === 'favorites_data_sync' || name.includes('自选股') || name.includes('favorites')) {
+  // 🔥 特殊处理：股票关注列表数据同步任务使用多数据源（按优先级）
+  if (id === 'favorites_data_sync' || name.includes('股票关注列表') || name.includes('favorites')) {
     return 'multi_source'  // 多数据源
   }
   
@@ -690,7 +696,17 @@ const extractTaskType = (jobId: string | undefined, jobName: string | undefined)
 const isRelevantTask = (task: JobStatus): boolean => {
   if (!task || !task.id) return false
   const taskType = extractTaskType(task.id, task.name)
-  return taskType !== null && ['historical', 'financial', 'news'].includes(taskType)
+  if (taskType === null || !['historical', 'financial', 'news'].includes(taskType)) {
+    return false
+  }
+  // 京东云版只展示 Tushare / AKShare / 多数据源 任务，过滤掉 BaoStock 等
+  if (isJdyunMode()) {
+    const source = extractDataSource(task.id, task.name)
+    if (!isJdyunAllowedSource(source)) {
+      return false
+    }
+  }
+  return true
 }
 
 // 获取数据源优先级
@@ -773,7 +789,12 @@ const loadDataSources = async () => {
   try {
     const response = await getDataSourcesStatus()
     if (response.success) {
-      dataSources.value = response.data
+      // 京东云版只保留 Tushare / AKShare
+      if (isJdyunMode()) {
+        dataSources.value = response.data.filter(s => isJdyunAllowedSource(s.name))
+      } else {
+        dataSources.value = response.data
+      }
     }
   } catch (err: any) {
     console.error('加载数据源状态失败:', err)
