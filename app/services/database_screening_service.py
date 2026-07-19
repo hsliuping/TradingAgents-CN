@@ -224,8 +224,13 @@ class DatabaseScreeningService:
                 phase1_limit = limit
 
             # 决定使用视图还是 stock_basic_info
+            # ⚠️ 性能修复：禁止使用 stock_screening_view 视图
+            # 该视图通过 $lookup 关联 market_quotes 和 stock_financial_periods，
+            # 即使是 count_documents 也会触发整个聚合管道，导致查询超时（>30s）。
+            # 后续的 _enrich_with_financial_data 和 _enrich_with_quote_data 已经
+            # 用批量 $in 查询实现了相同的数据富集功能，无需走视图。
             if has_real_conditions:
-                collection = db[self.collection_name]
+                collection = db["stock_basic_info"]
                 total_count = await collection.count_documents(query)
             else:
                 collection = db["stock_basic_info"]
@@ -1029,7 +1034,8 @@ class DatabaseScreeningService:
                 return {}
             
             db = get_mongo_db()
-            collection = db[self.collection_name]
+            # ⚠️ 性能修复：使用 stock_basic_info 而非 stock_screening_view（视图会触发 $lookup 聚合，查询极慢）
+            collection = db["stock_basic_info"]
             
             # 使用聚合管道获取统计信息
             pipeline = [
@@ -1285,7 +1291,8 @@ class DatabaseScreeningService:
                 return []
             
             db = get_mongo_db()
-            collection = db[self.collection_name]
+            # ⚠️ 性能修复：使用 stock_basic_info 而非 stock_screening_view（视图会触发 $lookup 聚合，查询极慢）
+            collection = db["stock_basic_info"]
             
             # 获取字段的不重复值
             values = await collection.distinct(db_field)
