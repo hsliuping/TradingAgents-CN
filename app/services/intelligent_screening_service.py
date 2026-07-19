@@ -105,7 +105,7 @@ SCREENING_RESULT_REFERENCE_KEYWORDS = [
     "当前推荐",
     "上一轮",
     "加入自选",
-    "加入自选股",
+    "加入股票关注列表",
     "打标签",
     "分组",
 ]
@@ -1200,7 +1200,7 @@ adjustment_direction: 当intent=adjustment时，指出是放宽(loosen)还是收
                     progress_callback,
                     "status",
                     phase=phase,
-                    message="已进入执行阶段，开始调用筛选与自选股工具",
+                    message="已进入执行阶段，开始调用筛选与股票关注列表工具",
                 )
                 if locked_plan:
                     logger.info("[智能筛选] 使用已批准计划直接执行 result 阶段")
@@ -1482,13 +1482,13 @@ adjustment_direction: 当intent=adjustment时，指出是放宽(loosen)还是收
 - 如果用户强调“高分红”“防御型”，优先考虑 `dividend_yield` 并结合 `debt_to_assets`、`n_cashflow_act`
 - 如果用户强调“财报最新”“只看最新财报”，可通过 `report_period` 增加约束
 
-## 自选股联动规则
+## 股票关注列表联动规则
 
-- 若用户明确要求“筛选完成后加入自选股”或“把上次推荐加入自选股”，可在最终推荐确定后调用 `add_stocks_to_favorites`
+- 若用户明确要求“筛选完成后加入股票关注列表”或“把上次推荐加入股票关注列表”，可在最终推荐确定后调用 `add_stocks_to_favorites`
 - 若用户明确要求“加标签/打标签/标记”（如“打上巴菲特标签”），优先调用 `add_stocks_to_favorites` 并传入 `tags`
 - 若用户明确要求放入某个分类/分组（如“银行”“待分析”），可调用 `add_stock_to_watchlist`，必要时先用 `list_watchlist_groups` 查看现有分类
-- “标签”和“分组”不是同一概念：标签写入自选股的 `tags`，分组写入 watchlist group
-- 未明确提出自选股操作时，不要主动添加
+- “标签”和“分组”不是同一概念：标签写入股票关注列表的 `tags`，分组写入 watchlist group
+- 未明确提出股票关注列表操作时，不要主动添加
 
 ## 你的任务：执行计划说明
 
@@ -1623,7 +1623,7 @@ adjustment_direction: 当intent=adjustment时，指出是放宽(loosen)还是收
 - 若工具结果中已提供 ROA、毛利率、净利率、滚动营收、滚动净利润、经营现金流、权益乘数、速动比率、现金比率，也可一并放入 JSON 字段，便于前端直接展示
 - 若实际筛选或展示口径使用 `pe_ttm` / `pb_mrq`，必须把对应数值写入 `pe` / `pb` 字段，并分别补充 `pe_display_label` / `pb_display_label`，严禁把 `PE(TTM)` 写成 `PE`、把 `PB(MRQ)` 写成 `PB`
 - 如果用户要求调整（如"换个行业""PE 再低点"），直接重新调用工具调整筛选
-- 如果用户明确要求将当前推荐结果加入自选股，可调用 `add_stocks_to_favorites` 一次性添加；若同时要求“打标签/标记”，把标签通过 `tags` 参数一并写入
+- 如果用户明确要求将当前推荐结果加入股票关注列表，可调用 `add_stocks_to_favorites` 一次性添加；若同时要求“打标签/标记”，把标签通过 `tags` 参数一并写入
 - 如果用户明确要求将当前推荐结果放入某个分类/分组，可调用 `add_stock_to_watchlist`，分组不存在时允许自动创建，例如“银行”“待分析”
 - 若用户同时要求“加入自选 + 打标签 + 放入分组”，应先调用 `add_stocks_to_favorites` 写入 tags，再调用 `add_stock_to_watchlist`
 - 不给出具体的买入/卖出建议，只做选股推荐和分析

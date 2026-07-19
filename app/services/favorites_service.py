@@ -1,5 +1,5 @@
 """
-自选股服务
+股票关注列表服务
 """
 
 import logging
@@ -17,7 +17,7 @@ logger = logging.getLogger("webapi")
 
 
 class FavoritesService:
-    """自选股服务类"""
+    """股票关注列表服务类"""
     
     def __init__(self):
         self.db = None
@@ -29,7 +29,7 @@ class FavoritesService:
         return self.db
 
     async def _ensure_tags_exist(self, user_id: str, tags: Optional[List[str]]) -> List[str]:
-        """确保自选股中使用到的标签已同步到 user_tags 集合。"""
+        """确保股票关注列表中使用到的标签已同步到 user_tags 集合。"""
         normalized_tags: List[str] = []
         seen = set()
         for item in tags or []:
@@ -59,7 +59,7 @@ class FavoritesService:
                 except Exception:
                     logger.debug("[FavoritesService] 创建缺失标签失败: %s", tag_name, exc_info=True)
         except Exception:
-            logger.warning("[FavoritesService] 自动补建标签失败，继续保存自选股", exc_info=True)
+            logger.warning("[FavoritesService] 自动补建标签失败，继续保存股票关注列表", exc_info=True)
 
         return normalized_tags
 
@@ -67,7 +67,7 @@ class FavoritesService:
         """
         检查是否是有效的ObjectId格式
         注意：这里只检查格式，不代表数据库中实际存储的是ObjectId类型
-        为了兼容性，我们统一使用 user_favorites 集合存储自选股
+        为了兼容性，我们统一使用 user_favorites 集合存储股票关注列表
         """
         # 强制返回 False，统一使用 user_favorites 集合
         return False
@@ -115,7 +115,7 @@ class FavoritesService:
 
     async def get_user_favorites(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        获取用户自选股列表，并从数据库读取实时行情进行富集（兼容字符串ID与ObjectId）。
+        获取用户股票关注列表列表，并从数据库读取实时行情进行富集（兼容字符串ID与ObjectId）。
         
         注意：
         - 只从数据库（market_quotes、market_quotes_hk、market_quotes_us）读取数据
@@ -127,7 +127,7 @@ class FavoritesService:
         start_time = time.time()
         db = await self._get_db()
 
-        logger.info(f"🔍 [get_user_favorites] 开始查询用户自选股: user_id={user_id}")
+        logger.info(f"🔍 [get_user_favorites] 开始查询用户股票关注列表: user_id={user_id}")
 
         favorites: List[Dict[str, Any]] = []
         if self._is_valid_object_id(user_id):
@@ -137,9 +137,9 @@ class FavoritesService:
             if user is None:
                 user = await db.users.find_one({"_id": user_id})
             favorites = (user or {}).get("favorite_stocks", [])
-            logger.info(f"✅ [get_user_favorites] 从 users 集合获取到 {len(favorites)} 只自选股")
+            logger.info(f"✅ [get_user_favorites] 从 users 集合获取到 {len(favorites)} 只股票关注列表")
         else:
-            # 🔥 严格过滤：只查询当前用户的自选股
+            # 🔥 严格过滤：只查询当前用户的股票关注列表
             # 使用精确匹配，确保只获取当前用户的数据
             doc = await db.user_favorites.find_one({"user_id": {"$eq": user_id}})
             if doc:
@@ -150,9 +150,9 @@ class FavoritesService:
                     favorites = []
                 else:
                     favorites = doc.get("favorites", [])
-                    logger.info(f"✅ [get_user_favorites] 从 user_favorites 集合获取到 {len(favorites)} 只自选股 (user_id={doc_user_id})")
+                    logger.info(f"✅ [get_user_favorites] 从 user_favorites 集合获取到 {len(favorites)} 只股票关注列表 (user_id={doc_user_id})")
             else:
-                logger.warning(f"⚠️ [get_user_favorites] 未找到用户自选股数据: user_id={user_id}")
+                logger.warning(f"⚠️ [get_user_favorites] 未找到用户股票关注列表数据: user_id={user_id}")
                 # 🔥 调试：检查是否有其他用户的文档（仅用于调试）
                 all_docs_count = await db.user_favorites.count_documents({})
                 logger.info(f"🔍 [get_user_favorites] 数据库中共有 {all_docs_count} 个文档")
@@ -323,7 +323,7 @@ class FavoritesService:
 
         # 记录性能日志
         elapsed_time = time.time() - start_time
-        logger.info(f"✅ [get_user_favorites] 查询完成: user_id={user_id}, 返回 {len(items)} 只自选股, 耗时 {elapsed_time:.2f}秒")
+        logger.info(f"✅ [get_user_favorites] 查询完成: user_id={user_id}, 返回 {len(items)} 只股票关注列表, 耗时 {elapsed_time:.2f}秒")
         if elapsed_time > 5:
             logger.warning(f"⚠️ [get_user_favorites] 接口耗时较长: {elapsed_time:.2f}秒，可能存在性能问题")
 
@@ -340,7 +340,7 @@ class FavoritesService:
         alert_price_high: Optional[float] = None,
         alert_price_low: Optional[float] = None
     ) -> bool:
-        """添加股票到自选股（兼容字符串ID与ObjectId）"""
+        """添加股票到股票关注列表（兼容字符串ID与ObjectId）"""
         import logging
         logger = logging.getLogger("webapi")
 
@@ -363,7 +363,7 @@ class FavoritesService:
                 "alert_price_low": alert_price_low
             }
 
-            logger.info(f"🔧 [add_favorite] 自选股数据构建完成: {favorite_stock}")
+            logger.info(f"🔧 [add_favorite] 股票关注列表数据构建完成: {favorite_stock}")
 
             is_oid = self._is_valid_object_id(user_id)
             logger.info(f"🔧 [add_favorite] 用户ID类型检查: is_valid_object_id={is_oid}")
@@ -414,7 +414,7 @@ class FavoritesService:
             raise
 
     async def remove_favorite(self, user_id: str, stock_code: str) -> bool:
-        """从自选股中移除股票（兼容字符串ID与ObjectId）"""
+        """从股票关注列表中移除股票（兼容字符串ID与ObjectId）"""
         db = await self._get_db()
 
         if self._is_valid_object_id(user_id):
@@ -450,7 +450,7 @@ class FavoritesService:
         alert_price_low: Optional[float] = None,
         clear_alert_price_low: bool = False,
     ) -> bool:
-        """更新自选股信息（兼容字符串ID与ObjectId）"""
+        """更新股票关注列表信息（兼容字符串ID与ObjectId）"""
         db = await self._get_db()
 
         # 统一构建更新字段（根据不同集合的字段路径设置前缀）
@@ -497,12 +497,12 @@ class FavoritesService:
             return result.modified_count > 0
 
     async def is_favorite(self, user_id: str, stock_code: str) -> bool:
-        """检查股票是否在自选股中（兼容字符串ID与ObjectId）"""
+        """检查股票是否在股票关注列表中（兼容字符串ID与ObjectId）"""
         import logging
         logger = logging.getLogger("webapi")
 
         try:
-            logger.info(f"🔧 [is_favorite] 检查自选股: user_id={user_id}, stock_code={stock_code}")
+            logger.info(f"🔧 [is_favorite] 检查股票关注列表: user_id={user_id}, stock_code={stock_code}")
 
             db = await self._get_db()
 
@@ -542,7 +542,7 @@ class FavoritesService:
                 logger.info(f"🔧 [is_favorite] 字符串ID查询结果: {result}")
                 return result
         except Exception as e:
-            logger.error(f"❌ [is_favorite] 检查自选股异常: {type(e).__name__}: {str(e)}", exc_info=True)
+            logger.error(f"❌ [is_favorite] 检查股票关注列表异常: {type(e).__name__}: {str(e)}", exc_info=True)
             raise
 
     async def get_user_tags(self, user_id: str) -> List[str]:

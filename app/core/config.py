@@ -248,9 +248,9 @@ class Settings(BaseSettings):
     TUSHARE_REALTIME_QUOTES_HOURLY_ENABLED: bool = Field(default=True, description="启用Tushare实时行情每小时同步（免费用户每小时只能调用一次）")
     TUSHARE_REALTIME_QUOTES_HOURLY_CRON: str = Field(default="31 * * * *", description="实时行情每小时同步CRON表达式（每小时31分执行）")
 
-    # 自选股A股数据同步任务配置
-    FAVORITES_DATA_SYNC_ENABLED: bool = Field(default=True, description="启用自选股A股数据同步")
-    FAVORITES_DATA_SYNC_CRON: str = Field(default="0 19 * * 1-5", description="自选股A股数据同步CRON表达式（交易日晚上7点）")
+    # 股票关注列表A股数据同步任务配置
+    FAVORITES_DATA_SYNC_ENABLED: bool = Field(default=True, description="启用股票关注列表A股数据同步")
+    FAVORITES_DATA_SYNC_CRON: str = Field(default="0 19 * * 1-5", description="股票关注列表A股数据同步CRON表达式（交易日晚上7点）")
 
     # 技术指标物化任务配置
     TECHNICAL_INDICATORS_MATERIALIZATION_ENABLED: bool = Field(default=True, description="启用技术指标物化任务")
@@ -381,8 +381,8 @@ class Settings(BaseSettings):
     NEWS_SYNC_HOURS_BACK: int = Field(default=24)
     NEWS_SYNC_MAX_PER_SOURCE: int = Field(default=50)
 
-    # ===== 自选股定时分析配置 =====
-    WATCHLIST_ANALYSIS_ENABLED: bool = Field(default=False, description="启用自选股定时分析")
+    # ===== 股票关注列表定时分析配置 =====
+    WATCHLIST_ANALYSIS_ENABLED: bool = Field(default=False, description="启用股票关注列表定时分析")
     WATCHLIST_ANALYSIS_CRON: str = Field(default="0 8 * * 1-5", description="定时分析CRON表达式，默认工作日早8点")
 
     # ===== SMTP邮件配置 =====

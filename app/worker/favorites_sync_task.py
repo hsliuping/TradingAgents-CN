@@ -1,5 +1,5 @@
 """
-自选股A股历史数据和财务数据同步任务
+股票关注列表A股历史数据和财务数据同步任务
 
 同步时按项目统一的数据源优先级（get_enabled_data_sources_async）顺序执行。
 """
@@ -30,7 +30,7 @@ def _get_sync_data_sources(enabled_sources: List[str]) -> List[str]:
 
 async def get_all_favorite_a_stocks() -> List[str]:
     """
-    获取所有用户自选股中的A股股票代码列表
+    获取所有用户股票关注列表中的A股股票代码列表
     
     Returns:
         A股股票代码列表（去重）
@@ -38,7 +38,7 @@ async def get_all_favorite_a_stocks() -> List[str]:
     db = get_mongo_db()
     
     try:
-        # 从 user_favorites 集合中获取所有用户的自选股
+        # 从 user_favorites 集合中获取所有用户的股票关注列表
         cursor = db.user_favorites.find({}, {"favorites": 1})
         
         a_stock_codes: Set[str] = set()
@@ -56,12 +56,12 @@ async def get_all_favorite_a_stocks() -> List[str]:
                         a_stock_codes.add(stock_code)
         
         codes_list = sorted(list(a_stock_codes))
-        logger.info(f"📊 获取到 {len(codes_list)} 只A股自选股需要同步")
+        logger.info(f"📊 获取到 {len(codes_list)} 只A股股票关注列表需要同步")
         
         return codes_list
         
     except Exception as e:
-        logger.error(f"❌ 获取自选股A股列表失败: {e}")
+        logger.error(f"❌ 获取股票关注列表A股列表失败: {e}")
         return []
 
 
@@ -93,23 +93,23 @@ def _filter_stock_codes_for_financial_sync(codes: List[str]) -> List[str]:
 
 async def sync_favorites_historical_data():
     """
-    同步自选股中A股的历史数据。
+    同步股票关注列表中A股的历史数据。
     按数据源优先级（get_enabled_data_sources_async）顺序，使用第一个支持指定股票列表的数据源。
     
     Returns:
         同步结果统计
     """
-    logger.info("🔄 开始同步自选股A股历史数据...")
+    logger.info("🔄 开始同步股票关注列表A股历史数据...")
     
     try:
-        # 1. 获取所有自选股中的A股代码
+        # 1. 获取所有股票关注列表中的A股代码
         a_stock_codes = await get_all_favorite_a_stocks()
         
         if not a_stock_codes:
-            logger.info("ℹ️ 没有A股自选股需要同步历史数据")
+            logger.info("ℹ️ 没有A股股票关注列表需要同步历史数据")
             return {
                 "success": True,
-                "message": "没有A股自选股需要同步",
+                "message": "没有A股股票关注列表需要同步",
                 "total_count": 0,
                 "synced_count": 0,
                 "data_source": None
@@ -117,14 +117,14 @@ async def sync_favorites_historical_data():
 
         stock_codes, etf_codes = _split_stock_and_etf_codes(a_stock_codes)
         if etf_codes:
-            logger.info(f"🔀 自选股历史同步识别出 ETF，改走 ETF 专用链路: {len(etf_codes)} 只")
+            logger.info(f"🔀 股票关注列表历史同步识别出 ETF，改走 ETF 专用链路: {len(etf_codes)} 只")
         if not stock_codes:
-            logger.info("ℹ️ 自选股历史同步未包含普通股票，将仅执行 ETF 历史同步")
+            logger.info("ℹ️ 股票关注列表历史同步未包含普通股票，将仅执行 ETF 历史同步")
         
         # 2. 按数据源优先级获取同步数据源列表（排除 local）
         enabled_sources = await get_enabled_data_sources_async("a_shares")
         data_sources = _get_sync_data_sources(enabled_sources)
-        logger.info(f"📊 自选股历史数据同步数据源优先级: {data_sources}")
+        logger.info(f"📊 股票关注列表历史数据同步数据源优先级: {data_sources}")
         
         # 🔥 使用统一线程池服务执行同步任务（避免事件循环冲突）
         from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
@@ -278,7 +278,7 @@ async def sync_favorites_historical_data():
             total_records = stock_records + etf_records
 
             if not used_sources:
-                logger.warning("⚠️ 自选股历史数据同步：所有数据源都失败")
+                logger.warning("⚠️ 股票关注列表历史数据同步：所有数据源都失败")
                 return {
                     "success": False,
                     "message": "所有数据源同步失败",
@@ -290,13 +290,13 @@ async def sync_favorites_historical_data():
                 }
             
             logger.info(
-                f"✅ 自选股A股历史数据同步完成（数据源: {', '.join(used_sources)}）: "
+                f"✅ 股票关注列表A股历史数据同步完成（数据源: {', '.join(used_sources)}）: "
                 f"股票数={len(a_stock_codes)}, 成功={total_success_count}, 记录数={total_records}"
             )
             
             return {
                 "success": True,
-                "message": "自选股A股历史数据同步完成",
+                "message": "股票关注列表A股历史数据同步完成",
                 "total_count": len(a_stock_codes),
                 "synced_count": total_success_count,
                 "total_records": total_records,
@@ -307,7 +307,7 @@ async def sync_favorites_historical_data():
                 "details": all_details  # 🔥 新增：返回所有数据源的详细结果
             }
         else:
-            logger.warning("⚠️ 自选股历史数据同步：无可用数据源（已尝试 tushare/akshare）")
+            logger.warning("⚠️ 股票关注列表历史数据同步：无可用数据源（已尝试 tushare/akshare）")
             return {
                 "success": False,
                 "message": "无可用数据源或全部失败",
@@ -318,7 +318,7 @@ async def sync_favorites_historical_data():
             }
         
     except Exception as e:
-        logger.error(f"❌ 自选股A股历史数据同步失败: {e}", exc_info=True)
+        logger.error(f"❌ 股票关注列表A股历史数据同步失败: {e}", exc_info=True)
         return {
             "success": False,
             "message": f"同步失败: {str(e)}",
@@ -330,23 +330,23 @@ async def sync_favorites_historical_data():
 
 async def sync_favorites_financial_data():
     """
-    同步自选股中A股的财务数据。
+    同步股票关注列表中A股的财务数据。
     按数据源优先级（get_enabled_data_sources_async）顺序同步。
     
     Returns:
         同步结果统计
     """
-    logger.info("💰 开始同步自选股A股财务数据...")
+    logger.info("💰 开始同步股票关注列表A股财务数据...")
     
     try:
-        # 1. 获取所有自选股中的A股代码
+        # 1. 获取所有股票关注列表中的A股代码
         a_stock_codes = await get_all_favorite_a_stocks()
         
         if not a_stock_codes:
-            logger.info("ℹ️ 没有A股自选股需要同步财务数据")
+            logger.info("ℹ️ 没有A股股票关注列表需要同步财务数据")
             return {
                 "success": True,
-                "message": "没有A股自选股需要同步",
+                "message": "没有A股股票关注列表需要同步",
                 "total_count": 0,
                 "synced_count": 0
             }
@@ -356,10 +356,10 @@ async def sync_favorites_financial_data():
         skipped_etf_count = len(a_stock_codes) - len(stock_codes)
 
         if skipped_etf_count > 0:
-            logger.info(f"⏭️ 自选股财务同步已排除 ETF: {skipped_etf_count} 只")
+            logger.info(f"⏭️ 股票关注列表财务同步已排除 ETF: {skipped_etf_count} 只")
 
         if not stock_codes:
-            logger.info("ℹ️ 自选股中仅包含 ETF，无需执行股票财务同步")
+            logger.info("ℹ️ 股票关注列表中仅包含 ETF，无需执行股票财务同步")
             return {
                 "success": True,
                 "message": "仅包含 ETF，已跳过股票财务同步",
@@ -373,7 +373,7 @@ async def sync_favorites_financial_data():
         # 2. 按数据源优先级获取同步数据源列表（排除 local）
         enabled_sources = await get_enabled_data_sources_async("a_shares")
         data_sources = _get_sync_data_sources(enabled_sources)
-        logger.info(f"📊 自选股财务数据同步数据源优先级: {data_sources}")
+        logger.info(f"📊 股票关注列表财务数据同步数据源优先级: {data_sources}")
         
         # 3. 使用财务数据同步服务，按优先级顺序同步
         financial_service = FinancialDataSyncService()
@@ -397,7 +397,7 @@ async def sync_favorites_financial_data():
             total_errors += stats.error_count
         
         logger.info(
-            f"✅ 自选股A股财务数据同步完成: "
+            f"✅ 股票关注列表A股财务数据同步完成: "
             f"股票数={len(stock_codes)}, "
             f"排除ETF={skipped_etf_count}, "
             f"成功同步={total_synced}, "
@@ -406,7 +406,7 @@ async def sync_favorites_financial_data():
         
         return {
             "success": True,
-            "message": "自选股A股财务数据同步完成",
+            "message": "股票关注列表A股财务数据同步完成",
             "total_count": len(stock_codes),
             "synced_count": total_synced,
             "error_count": total_errors,
@@ -420,7 +420,7 @@ async def sync_favorites_financial_data():
         }
         
     except Exception as e:
-        logger.error(f"❌ 自选股A股财务数据同步失败: {e}", exc_info=True)
+        logger.error(f"❌ 股票关注列表A股财务数据同步失败: {e}", exc_info=True)
         return {
             "success": False,
             "message": f"同步失败: {str(e)}",
@@ -432,15 +432,15 @@ async def sync_favorites_financial_data():
 
 async def run_favorites_data_sync():
     """
-    APScheduler任务：同步自选股中A股的历史数据和财务数据
+    APScheduler任务：同步股票关注列表中A股的历史数据和财务数据
     
     这个任务会：
-    1. 获取所有用户自选股中的A股股票代码
+    1. 获取所有用户股票关注列表中的A股股票代码
     2. 同步这些股票的历史数据（增量同步）
     3. 同步这些股票的财务数据（最近20期）
     """
     job_id = "favorites_data_sync"
-    logger.info("🚀 [APScheduler] 开始执行自选股A股数据同步任务")
+    logger.info("🚀 [APScheduler] 开始执行股票关注列表A股数据同步任务")
     
     start_time = datetime.now()
     
@@ -448,7 +448,7 @@ async def run_favorites_data_sync():
         # 导入进度更新函数
         from app.services.scheduler_service import update_job_progress
         
-        # 获取自选股数量（用于进度计算）
+        # 获取股票关注列表数量（用于进度计算）
         a_stock_codes = await get_all_favorite_a_stocks()
         total_stocks = len(a_stock_codes)
         
@@ -457,7 +457,7 @@ async def run_favorites_data_sync():
             await update_job_progress(
                 job_id=job_id,
                 progress=0,
-                message="开始同步自选股A股数据...",
+                message="开始同步股票关注列表A股数据...",
                 total_items=total_stocks if total_stocks > 0 else 1
             )
         except Exception as e:
@@ -538,7 +538,7 @@ async def run_favorites_data_sync():
             pass
         
         logger.info(
-            f"✅ [APScheduler] 自选股A股数据同步任务完成 "
+            f"✅ [APScheduler] 股票关注列表A股数据同步任务完成 "
             f"(耗时: {duration:.2f}秒)\n"
             f"   历史数据: {hist_result.get('synced_count', 0)}/{hist_result.get('total_count', 0)} 只股票\n"
             f"   财务数据: {fin_result.get('synced_count', 0)}/{fin_result.get('total_count', 0)} 只股票"
@@ -552,7 +552,7 @@ async def run_favorites_data_sync():
         }
         
     except Exception as e:
-        logger.error(f"❌ [APScheduler] 自选股A股数据同步任务失败: {e}", exc_info=True)
+        logger.error(f"❌ [APScheduler] 股票关注列表A股数据同步任务失败: {e}", exc_info=True)
         
         # 更新进度：失败
         try:

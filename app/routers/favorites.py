@@ -1,5 +1,5 @@
 """
-自选股管理API路由
+股票关注列表管理API路由
 """
 
 import asyncio
@@ -17,7 +17,7 @@ from app.core.response import ok
 
 logger = logging.getLogger("webapi")
 
-router = APIRouter(prefix="/favorites", tags=["自选股管理"], redirect_slashes=False)
+router = APIRouter(prefix="/favorites", tags=["股票关注列表管理"], redirect_slashes=False)
 
 FAVORITES_SYNC_TASKS_COLLECTION = "favorites_sync_tasks"
 
@@ -32,7 +32,7 @@ async def _create_favorites_sync_task(current_user: dict, payload: Dict[str, Any
         "task_id": uuid4().hex,
         "task_type": "favorites_realtime",
         "status": "pending",
-        "message": "自选股实时行情同步任务已提交",
+        "message": "股票关注列表实时行情同步任务已提交",
         "payload": payload,
         "user_id": current_user["id"],
         "submitted_by": str(current_user.get("username") or current_user.get("id") or "unknown"),
@@ -70,7 +70,7 @@ async def _run_favorites_realtime_sync_task(task_id: str, user_id: str, data_sou
             task_id,
             {
                 "status": "running",
-                "message": "自选股实时行情同步执行中",
+                "message": "股票关注列表实时行情同步执行中",
                 "started_at": _utc_now_iso(),
                 "error": None,
             },
@@ -83,7 +83,7 @@ async def _run_favorites_realtime_sync_task(task_id: str, user_id: str, data_sou
                 "total": 0,
                 "success_count": 0,
                 "failed_count": 0,
-                "message": "没有自选股需要同步",
+                "message": "没有股票关注列表需要同步",
                 "symbols": [],
                 "data_source": data_source,
             }
@@ -146,7 +146,7 @@ async def _run_favorites_realtime_sync_task(task_id: str, user_id: str, data_sou
             },
         )
     except Exception as e:
-        logger.error(f"❌ 自选股实时行情同步任务失败: {e}", exc_info=True)
+        logger.error(f"❌ 股票关注列表实时行情同步任务失败: {e}", exc_info=True)
         await _update_favorites_sync_task(
             task_id,
             {
@@ -171,7 +171,7 @@ class AddFavoriteRequest(BaseModel):
 
 
 class UpdateFavoriteRequest(BaseModel):
-    """更新自选股请求"""
+    """更新股票关注列表请求"""
     tags: Optional[List[str]] = None
     notes: Optional[str] = None
     alert_price_high: Optional[float] = None
@@ -179,7 +179,7 @@ class UpdateFavoriteRequest(BaseModel):
 
 
 class FavoriteStockResponse(BaseModel):
-    """自选股响应"""
+    """股票关注列表响应"""
     stock_code: str
     stock_name: str
     market: str
@@ -198,14 +198,14 @@ class FavoriteStockResponse(BaseModel):
 async def get_favorites(
     current_user: dict = Depends(get_current_user)
 ):
-    """获取用户自选股列表"""
+    """获取用户股票关注列表列表"""
     try:
         favorites = await favorites_service.get_user_favorites(current_user["id"])
         return ok(favorites)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取自选股失败: {str(e)}"
+            detail=f"获取股票关注列表失败: {str(e)}"
         )
 
 
@@ -214,7 +214,7 @@ async def add_favorite(
     request: AddFavoriteRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """添加股票到自选股"""
+    """添加股票到股票关注列表"""
     import logging
     logger = logging.getLogger("webapi")
 
@@ -233,13 +233,13 @@ async def add_favorite(
         logger.info(f"🔍 检查是否已存在: {is_fav}")
 
         if is_fav:
-            logger.warning(f"⚠️ 股票已在自选股中: {stock_code}")
+            logger.warning(f"⚠️ 股票已在股票关注列表中: {stock_code}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="该股票已在自选股中"
+                detail="该股票已在股票关注列表中"
             )
 
-        # 添加到自选股
+        # 添加到股票关注列表
         logger.info(f"➕ 开始添加到研究列表...")
         success = await favorites_service.add_favorite(
             user_id=current_user["id"],
@@ -279,7 +279,7 @@ async def update_favorite(
     request: UpdateFavoriteRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """更新自选股信息"""
+    """更新股票关注列表信息"""
     try:
         success = await favorites_service.update_favorite(
             user_id=current_user["id"],
@@ -295,7 +295,7 @@ async def update_favorite(
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="自选股不存在"
+                detail="股票关注列表不存在"
             )
 
     except HTTPException:
@@ -303,7 +303,7 @@ async def update_favorite(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"更新自选股失败: {str(e)}"
+            detail=f"更新股票关注列表失败: {str(e)}"
         )
 
 
@@ -312,7 +312,7 @@ async def remove_favorite(
     stock_code: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """从自选股中移除股票"""
+    """从股票关注列表中移除股票"""
     try:
         success = await favorites_service.remove_favorite(current_user["id"], stock_code)
 
@@ -321,7 +321,7 @@ async def remove_favorite(
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="自选股不存在"
+                detail="股票关注列表不存在"
             )
 
     except HTTPException:
@@ -329,7 +329,7 @@ async def remove_favorite(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"移除自选股失败: {str(e)}"
+            detail=f"移除股票关注列表失败: {str(e)}"
         )
 
 
@@ -338,14 +338,14 @@ async def check_favorite(
     stock_code: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """检查股票是否在自选股中"""
+    """检查股票是否在股票关注列表中"""
     try:
         is_favorite = await favorites_service.is_favorite(current_user["id"], stock_code)
         return ok({"stock_code": stock_code, "is_favorite": is_favorite})
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"检查自选股状态失败: {str(e)}"
+            detail=f"检查股票关注列表状态失败: {str(e)}"
         )
 
 
@@ -365,7 +365,7 @@ async def get_user_tags(
 
 
 class SyncFavoritesRequest(BaseModel):
-    """同步自选股实时行情请求"""
+    """同步股票关注列表实时行情请求"""
     data_source: str = "tushare"  # tushare/akshare
 
 
@@ -375,12 +375,12 @@ async def sync_favorites_realtime(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    同步自选股实时行情
+    同步股票关注列表实时行情
 
     - **data_source**: 数据源（tushare/akshare）
     """
     try:
-        logger.info(f"📊 提交自选股实时行情同步任务: user_id={current_user['id']}, data_source={request.data_source}")
+        logger.info(f"📊 提交股票关注列表实时行情同步任务: user_id={current_user['id']}, data_source={request.data_source}")
 
         task_doc = await _create_favorites_sync_task(
             current_user,
@@ -394,12 +394,12 @@ async def sync_favorites_realtime(
             )
         )
 
-        return ok(task_doc, "自选股实时行情同步任务已提交")
+        return ok(task_doc, "股票关注列表实时行情同步任务已提交")
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ 同步自选股实时行情失败: {e}", exc_info=True)
+        logger.error(f"❌ 同步股票关注列表实时行情失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"同步失败: {str(e)}"
@@ -411,7 +411,7 @@ async def get_favorites_realtime_sync_task(
     task_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """获取自选股实时行情同步任务状态。"""
+    """获取股票关注列表实时行情同步任务状态。"""
     try:
         task_doc = await _get_favorites_sync_task(task_id, current_user["id"])
         if not task_doc:
@@ -423,7 +423,7 @@ async def get_favorites_realtime_sync_task(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ 获取自选股实时行情同步任务失败: {e}", exc_info=True)
+        logger.error(f"❌ 获取股票关注列表实时行情同步任务失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取同步任务失败: {str(e)}"

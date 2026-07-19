@@ -16,7 +16,7 @@ class ToolCategory(str, Enum):
     TECHNICAL = "technical"     # 技术分析
     CHINA = "china"             # 中国市场数据
     TRADE_REVIEW = "trade_review"  # 交易复盘
-    ASSISTANT_OPS = "assistant_ops"  # 助理操作（分析触发、报告查询、定时任务、自选股管理）
+    ASSISTANT_OPS = "assistant_ops"  # 助理操作（分析触发、报告查询、定时任务、股票关注列表管理）
     SCREENING = "screening"     # 筛选工具（批量筛选、盈利验证）
     UTILITY = "utility"         # 通用工具（Skill 扩展）
     KNOWLEDGE = "knowledge"     # 知识型（Skill 扩展）

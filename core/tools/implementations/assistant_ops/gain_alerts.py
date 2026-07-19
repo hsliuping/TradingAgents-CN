@@ -73,7 +73,7 @@ async def set_stop_gain_alert(
 
         ok = await favorites_service.update_alert_gain_price(user_id, symbol, gain_price)
         if not ok:
-            return f"未找到 {symbol} 的自选股记录，设置止盈提醒失败。"
+            return f"未找到 {symbol} 的股票关注列表记录，设置止盈提醒失败。"
 
         return (
             f"✅ 已设置止盈提醒\n"
@@ -133,7 +133,7 @@ async def list_stop_gain_alerts() -> str:
 @register_tool(
     tool_id="clear_stop_gain_alert",
     name="清除止盈提醒",
-    description="清除指定股票的止盈提醒价格（仅清提醒，不移除自选股）。返回操作结果或未找到配置的提示。",
+    description="清除指定股票的止盈提醒价格（仅清提醒，不移除股票关注列表）。返回操作结果或未找到配置的提示。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -143,7 +143,7 @@ async def list_stop_gain_alerts() -> str:
     tool_role_hint="primary",
     output_shape="text",
     preferred_for=["止盈提醒清除", "止盈价移除", "提醒配置删除", "盈利目标取消"],
-    when_to_use="当用户想清除某只股票的止盈提醒、不再接收该股票的止盈通知时使用（仅清除提醒，不移除自选股）。",
+    when_to_use="当用户想清除某只股票的止盈提醒、不再接收该股票的止盈通知时使用（仅清除提醒，不移除股票关注列表）。",
     returns="返回文本消息，确认止盈提醒已清除或提示未找到相关配置。",
 )
 async def clear_stop_gain_alert(
@@ -157,7 +157,7 @@ async def clear_stop_gain_alert(
         ok = await favorites_service.update_alert_gain_price(user_id, symbol, None)
         if ok:
             return f"✅ 已清除 {symbol} 的止盈提醒。"
-        return f"未找到 {symbol} 的提醒配置，或该股票不在自选股中。"
+        return f"未找到 {symbol} 的提醒配置，或该股票不在股票关注列表中。"
     except Exception as e:
         logger.exception("[clear_stop_gain_alert] 清除止盈提醒失败: %s", e)
         return f"清除止盈提醒失败: {e}"

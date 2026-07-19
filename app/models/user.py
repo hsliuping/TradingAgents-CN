@@ -70,7 +70,7 @@ class UserPreferences(BaseModel):
 
 
 class FavoriteStock(BaseModel):
-    """自选股信息"""
+    """股票关注列表信息"""
     stock_code: str = Field(..., description="股票代码")
     stock_name: str = Field(..., description="股票名称")
     market: str = Field(..., description="市场类型")
@@ -104,8 +104,8 @@ class User(BaseModel):
     successful_analyses: int = 0
     failed_analyses: int = 0
 
-    # 自选股
-    favorite_stocks: List[FavoriteStock] = Field(default_factory=list, description="用户自选股列表")
+    # 股票关注列表
+    favorite_stocks: List[FavoriteStock] = Field(default_factory=list, description="用户股票关注列表列表")
     
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 

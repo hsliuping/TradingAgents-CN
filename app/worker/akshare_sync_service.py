@@ -1815,14 +1815,14 @@ class AKShareSyncService:
 
     async def _get_favorite_stocks(self) -> List[str]:
         """
-        获取有效用户的自选股列表（去重）
+        获取有效用户的股票关注列表列表（去重）
 
-        自选股当前统一存储在 user_favorites 集合。
+        股票关注列表当前统一存储在 user_favorites 集合。
         这里只聚合 users 集合中仍存在的有效用户，避免把历史遗留
         或错误账号的数据带入新闻同步任务。
 
         Returns:
-            自选股代码列表
+            股票关注列表代码列表
         """
         try:
             valid_user_ids = set()
@@ -1846,7 +1846,7 @@ class AKShareSyncService:
                 if not user_id or user_id not in valid_user_ids:
                     skipped_count += 1
                     logger.warning(
-                        "⚠️ 新闻同步跳过无效用户自选股文档: %s",
+                        "⚠️ 新闻同步跳过无效用户股票关注列表文档: %s",
                         user_id or "unknown",
                     )
                     continue
@@ -1857,14 +1857,14 @@ class AKShareSyncService:
                         favorite_codes.add(code)
 
             if skipped_count:
-                logger.info("🗑️ 新闻同步已跳过 %s 条无效用户自选股文档", skipped_count)
+                logger.info("🗑️ 新闻同步已跳过 %s 条无效用户股票关注列表文档", skipped_count)
 
             result = sorted(list(favorite_codes))
-            logger.info("📌 从 %s 个有效用户聚合到 %s 只自选股", len(valid_user_ids), len(result))
+            logger.info("📌 从 %s 个有效用户聚合到 %s 只股票关注列表", len(valid_user_ids), len(result))
             return result
 
         except Exception as e:
-            logger.error(f"❌ 获取自选股列表失败: {e}")
+            logger.error(f"❌ 获取股票关注列表列表失败: {e}")
             return []
 
     async def sync_news_data(
@@ -1881,7 +1881,7 @@ class AKShareSyncService:
             symbols: 股票代码列表，为None时根据favorites_only决定同步范围
             max_news_per_stock: 每只股票最大新闻数量
             force_update: 是否强制更新
-            favorites_only: 是否只同步自选股（默认True）
+            favorites_only: 是否只同步股票关注列表（默认True）
 
         Returns:
             同步结果统计
@@ -1902,9 +1902,9 @@ class AKShareSyncService:
             # 1. 获取股票列表
             if symbols is None:
                 if favorites_only:
-                    # 只同步自选股
+                    # 只同步股票关注列表
                     symbols = await self._get_favorite_stocks()
-                    logger.info(f"📌 只同步自选股，共 {len(symbols)} 只")
+                    logger.info(f"📌 只同步股票关注列表，共 {len(symbols)} 只")
                 else:
                     # 获取所有股票（不限制数据源）
                     # 🔥 使用聚合查询去重，确保每个股票代码只计算一次

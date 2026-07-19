@@ -63,7 +63,7 @@ async def set_stop_loss_alert(
         if pos and pos.get("name"):
             name = pos["name"]
 
-        # 若不存在则自动加入自选股，再写入提醒阈值
+        # 若不存在则自动加入股票关注列表，再写入提醒阈值
         exists = await favorites_service.is_favorite(user_id, symbol)
         if not exists:
             await favorites_service.add_favorite(
@@ -138,7 +138,7 @@ async def list_stop_loss_alerts() -> str:
 @register_tool(
     tool_id="clear_stop_loss_alert",
     name="清除止损提醒",
-    description="清除指定股票的止损提醒价格（仅清提醒，不移除自选股）。返回操作结果或未找到配置的提示。",
+    description="清除指定股票的止损提醒价格（仅清提醒，不移除股票关注列表）。返回操作结果或未找到配置的提示。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -148,7 +148,7 @@ async def list_stop_loss_alerts() -> str:
     tool_role_hint="primary",
     output_shape="text",
     preferred_for=["止损提醒清除", "止损价移除", "提醒配置删除", "风险提醒取消"],
-    when_to_use="当用户想清除某只股票的止损提醒、不再接收该股票的止损通知时使用（仅清除提醒，不移除自选股）。",
+    when_to_use="当用户想清除某只股票的止损提醒、不再接收该股票的止损通知时使用（仅清除提醒，不移除股票关注列表）。",
     returns="返回文本消息，确认止损提醒已清除或提示未找到相关配置。",
 )
 async def clear_stop_loss_alert(
@@ -166,7 +166,7 @@ async def clear_stop_loss_alert(
         )
         if ok:
             return f"✅ 已清除 {symbol} 的止损提醒。"
-        return f"未找到 {symbol} 的提醒配置，或该股票不在自选股中。"
+        return f"未找到 {symbol} 的提醒配置，或该股票不在股票关注列表中。"
     except Exception as e:
         logger.exception("[clear_stop_loss_alert] 清除止损提醒失败: %s", e)
         return f"清除止损提醒失败: {e}"
