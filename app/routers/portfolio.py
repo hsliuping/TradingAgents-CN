@@ -432,15 +432,26 @@ async def import_positions_from_screenshot(
 ):
     """从券商截图识别持仓信息
 
-    上传券商界面的截图（如持仓列表页面），使用 LLM Vision API 解析图片，
+    上传券商界面的截图（如持仓列表页面），使用 VLM（视觉语言模型）解析图片，
     自动提取股票代码、名称、数量、成本价等信息。
     返回识别结果供用户确认，不自动导入。
+
+    注意：需要对话模型支持 Vision 能力（如 Qwen-VL、GPT-4o 等），
+    GLM-5/GLM-5.1 等纯文本模型不支持此功能。
     """
     try:
         import base64
+        import os
         from app.services.model_capability_service import get_model_capability_service
         from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
         from tradingagents.graph.trading_graph import create_llm_by_provider
+
+        # 京东云模式下禁用（GLM-5/5.1 不支持 Vision）
+        if os.getenv("JDYUN_MODE", "").lower() == "true":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="京东云版当前对话模型不支持图片识别功能。请使用文件导入（Excel/CSV）方式批量添加持仓。"
+            )
 
         # 读取图片
         content = await file.read()
@@ -461,6 +472,19 @@ async def import_positions_from_screenshot(
         capability_service = get_model_capability_service()
         chat_model, _ = capability_service._get_default_models()
         model_name = chat_model
+
+        # 检测模型是否支持 Vision（多模态输入）
+        # 已知支持 Vision 的模型：Qwen-VL, Qwen2-VL, GPT-4o, GPT-4V, Claude-3, gemini
+        # 已知不支持 Vision 的模型：GLM-5, GLM-5.1, GLM-5.2, DeepSeek-V4, DeepSeek-V3
+        VISION_UNSUPPORTED_PATTERNS = ["glm-5", "glm-4", "deepseek", "qwen2.5-72b-instruct", "llama"]
+        model_lower = model_name.lower()
+        is_vision_supported = not any(p in model_lower for p in VISION_UNSUPPORTED_PATTERNS)
+
+        if not is_vision_supported:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"当前对话模型 {model_name} 不支持图片识别功能。截图识别需要支持 Vision 的模型（如 Qwen2-VL、GPT-4o 等）。请改用文件导入（Excel/CSV）方式。"
+            )
 
         provider_info = get_provider_and_url_by_model_sync(model_name)
         backend_url = provider_info.get("backend_url")
