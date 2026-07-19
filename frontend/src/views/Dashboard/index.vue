@@ -539,9 +539,15 @@
               v-for="news in marketNews"
               :key="news.id"
               class="news-item"
-              @click="openNewsUrl(news.url)"
             >
-              <div class="news-title">{{ news.title }}</div>
+              <a
+                v-if="news.url"
+                :href="news.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="news-title news-title-link"
+              >{{ news.title }}</a>
+              <div v-else class="news-title">{{ news.title }}</div>
               <div class="news-time">{{ formatTime(news.time) }}</div>
             </div>
           </div>
@@ -905,14 +911,6 @@ const downloadReport = async (analysis: AnalysisTask) => {
   } catch (err) {
     console.error('下载报告出错:', err)
     ElMessage.error('下载失败，请稍后重试')
-  }
-}
-
-const openNewsUrl = (url?: string) => {
-  if (url) {
-    window.open(url, '_blank')
-  } else {
-    ElMessage.info('该新闻暂无详情链接')
   }
 }
 
@@ -1449,7 +1447,6 @@ onMounted(async () => {
     .news-list {
       .news-item {
         padding: 12px 0;
-        cursor: pointer;
         border-bottom: 1px solid var(--el-border-color-lighter);
 
         &:last-child {
@@ -1464,10 +1461,29 @@ onMounted(async () => {
         }
 
         .news-title {
+          display: block;
           font-size: 14px;
           color: var(--el-text-color-primary);
           margin-bottom: 4px;
           line-height: 1.4;
+          word-break: break-all;
+        }
+
+        // 带链接的标题：显示为蓝色链接样式，hover 显示下划线
+        .news-title-link {
+          color: var(--el-color-primary);
+          text-decoration: none;
+          transition: color 0.2s ease;
+          cursor: pointer;
+
+          &:hover {
+            color: var(--el-color-primary-light-3);
+            text-decoration: underline;
+          }
+
+          &:visited {
+            color: var(--el-color-primary);
+          }
         }
 
         .news-time {

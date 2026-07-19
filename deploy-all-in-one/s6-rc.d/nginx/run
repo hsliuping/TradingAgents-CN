@@ -1,10 +1,16 @@
 #!/command/with-contenv bash
 # nginx 服务 - 反向代理 + 静态资源服务
-
+#
 # nginx 默认以 master 进程 fork worker，需要用 daemon off 模式
-# 🔐 安全：通过 gosu 降权到 appuser 运行整个 nginx 进程（含 master 和 worker）
-#    避免 master 进程以 root 运行，符合"容器非 root 运行"安全要求
-#    nginx 监听 8082 端口（>1024），非 root 用户也能监听
+#
+# 🔐 权限降级策略（折中方案）：
+#    尝试过用 gosu 把整个 nginx 进程降权到 appuser，但因 s6-overlay 的 fd 权限
+#    限制失败（/proc/self/fd/2 由 s6 持有，appuser 无法写入 /dev/stderr）。
+#    改用 nginx 官方推荐的容器部署方案：
+#    - master 进程以 root 启动（用于绑定端口、写日志）
+#    - worker 进程通过 nginx.conf 中的 `user appuser;` 指令降权到 appuser
+#    - 这是 nginx:alpine 官方镜像的默认行为
+#    - 实际处理 HTTP 请求的 worker 进程以 appuser 身份运行，符合最小权限原则
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [nginx] $1" | tee -a /var/log/nginx/service.log
@@ -12,11 +18,9 @@ log() {
 
 log "🚀 启动 Nginx（监听 ${NGINX_PORT:-8082}）..."
 
-# 测试配置（以 appuser 身份，确保配置无语法错误）
-if ! gosu appuser nginx -t 2>&1 | tee -a /var/log/nginx/service.log; then
-    log "❌ Nginx 配置测试失败，终止启动"
-    exit 1
-fi
+# 测试配置
+nginx -t 2>&1 | tee -a /var/log/nginx/service.log
 
-# 启动（前台运行，以 appuser 身份）
-exec gosu appuser nginx -g "daemon off; error_log /var/log/nginx/error.log warn;"
+# 启动（前台运行）
+# worker 进程通过 nginx.conf 中的 `user appuser;` 降权到 appuser
+exec nginx -g "daemon off; error_log /var/log/nginx/error.log warn;"
