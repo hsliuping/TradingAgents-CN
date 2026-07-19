@@ -351,13 +351,15 @@ class PortfolioService:
         trade_price: float = None,
         realized_profit: float = None,
         description: str = None,
-        trade_time: datetime = None
+        trade_time: datetime = None,
+        extra_data: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """记录持仓变动
 
         Args:
             trade_time: 交易时间（实际交易发生的时间，由用户手工录入）
                        如果不提供，则使用当前时间
+            extra_data: 额外数据（如手续费明细）
         """
         cost_value_before = quantity_before * cost_price_before
         cost_value_after = quantity_after * cost_price_after
@@ -386,6 +388,10 @@ class PortfolioService:
             "trade_time": trade_time or now_tz(),  # 交易时间，如果不提供则使用当前时间
             "created_at": now_tz()  # 记录创建时间
         }
+
+        # 合并额外数据（如手续费明细）
+        if extra_data:
+            change_doc.update(extra_data)
 
         result = await self.db[self.position_changes_collection].insert_one(change_doc)
         change_doc["_id"] = result.inserted_id
@@ -1290,12 +1296,19 @@ class PortfolioService:
         currency = self._get_currency_by_market(data.market)
         position_cost = data.quantity * effective_cost_price
 
-        # 从资金账户中扣除成本
+        # 🔥 计算买入手续费
+        trade_amount = data.quantity * effective_cost_price
+        market_rules = await self._get_real_market_rules(data.market)
+        commission_info = self._calculate_real_commission(data.market, "buy", trade_amount, market_rules or {})
+        total_commission = commission_info["commission"]
+        total_cost = position_cost + total_commission  # 总支出 = 成交金额 + 手续费
+
+        # 从资金账户中扣除成本+手续费
         account = await self.get_or_create_account(user_id)
         current_cash = account.get("cash", {}).get(currency, 0.0)
 
-        if current_cash < position_cost:
-            raise ValueError(f"可用资金不足。当前可用: {current_cash:.2f} {currency}，需要: {position_cost:.2f} {currency}")
+        if current_cash < total_cost:
+            raise ValueError(f"可用资金不足。当前可用: {current_cash:.2f} {currency}，需要: {total_cost:.2f} {currency}（含手续费 {total_commission:.2f}）")
 
         # 检查是否已有该股票的持仓（同一用户、同一股票代码、同一市场）
         existing_position = await self.db[self.positions_collection].find_one({
@@ -1316,8 +1329,8 @@ class PortfolioService:
             new_total_cost = old_total_cost + position_cost
             new_cost_price = new_total_cost / new_quantity if new_quantity > 0 else 0.0
 
-            # 扣除资金
-            new_cash = current_cash - position_cost
+            # 扣除资金（含手续费）
+            new_cash = current_cash - total_cost
             await self.db[self.accounts_collection].update_one(
                 {"user_id": user_id},
                 {"$set": {f"cash.{currency}": new_cash, "updated_at": now_tz()}}
@@ -1341,7 +1354,10 @@ class PortfolioService:
                 {"$set": update_fields}
             )
 
-            # 记录持仓变动（加仓）
+            # 记录持仓变动（加仓，含手续费明细）
+            change_description = f"加仓: +{data.quantity}股 @ {effective_cost_price:.2f}"
+            if total_commission > 0:
+                change_description += f"（手续费 ¥{total_commission:.2f}）"
             await self.record_position_change(
                 user_id=user_id,
                 change_type=PositionChangeType.BUY,
@@ -1354,18 +1370,19 @@ class PortfolioService:
                 cost_price_before=old_cost_price,
                 quantity_after=new_quantity,
                 cost_price_after=new_cost_price,
-                description=f"加仓: +{data.quantity}股 @ {effective_cost_price:.2f}"
+                description=change_description,
+                extra_data={"commission": commission_info} if total_commission > 0 else None
             )
 
-            logger.info(f"✅ 加仓成功: {user_id} - {data.code}，{old_quantity} → {new_quantity}股，成本价: {old_cost_price:.2f} → {new_cost_price:.2f}，扣除资金: {position_cost:.2f} {currency}")
+            logger.info(f"✅ 加仓成功: {user_id} - {data.code}，{old_quantity} → {new_quantity}股，成本价: {old_cost_price:.2f} → {new_cost_price:.2f}，扣除资金: {total_cost:.2f} {currency}（含手续费 {total_commission:.2f}）")
 
             # 返回更新后的持仓
             updated_position = await self.db[self.positions_collection].find_one({"_id": existing_position["_id"]})
             return await self._enrich_position(updated_position, "real")
 
         # 没有已有持仓，新建持仓记录
-        # 扣除资金
-        new_cash = current_cash - position_cost
+        # 扣除资金（含手续费）
+        new_cash = current_cash - total_cost
         await self.db[self.accounts_collection].update_one(
             {"user_id": user_id},
             {"$set": {f"cash.{currency}": new_cash, "updated_at": now_tz()}}
@@ -1394,7 +1411,10 @@ class PortfolioService:
         result = await self.db[self.positions_collection].insert_one(position_doc)
         position_doc["_id"] = result.inserted_id
 
-        # 记录持仓变动
+        # 记录持仓变动（含手续费明细）
+        change_description = f"新建持仓: {data.notes}" if data.notes else "新建持仓"
+        if total_commission > 0:
+            change_description += f"（手续费 ¥{total_commission:.2f}）"
         await self.record_position_change(
             user_id=user_id,
             change_type=PositionChangeType.BUY,
@@ -1407,11 +1427,12 @@ class PortfolioService:
             cost_price_before=0.0,
             quantity_after=data.quantity,
             cost_price_after=effective_cost_price,
-            description=f"新建持仓: {data.notes}" if data.notes else "新建持仓",
-            trade_time=data.buy_date  # 使用买入日期作为交易时间
+            description=change_description,
+            trade_time=data.buy_date,
+            extra_data={"commission": commission_info} if total_commission > 0 else None
         )
 
-        logger.info(f"✅ 新建持仓成功: {user_id} - {data.code}，扣除资金: {position_cost:.2f} {currency}")
+        logger.info(f"✅ 新建持仓成功: {user_id} - {data.code}，扣除资金: {total_cost:.2f} {currency}（含手续费 {total_commission:.2f}）")
         return await self._enrich_position(position_doc, "real")
 
     async def operate_position(
@@ -1473,16 +1494,22 @@ class PortfolioService:
 
         position_cost = data.quantity * data.price
 
+        # 🔥 计算买入手续费
+        market_rules = await self._get_real_market_rules(data.market)
+        commission_info = self._calculate_real_commission(data.market, "buy", position_cost, market_rules or {})
+        total_commission = commission_info["commission"]
+        total_cost = position_cost + total_commission
+
         # 检查资金
         account = await self.get_or_create_account(user_id)
         current_cash = account.get("cash", {}).get(currency, 0.0)
-        if current_cash < position_cost:
-            raise ValueError(f"可用资金不足。当前: {current_cash:.2f}，需要: {position_cost:.2f}")
+        if current_cash < total_cost:
+            raise ValueError(f"可用资金不足。当前: {current_cash:.2f}，需要: {total_cost:.2f}（含手续费 {total_commission:.2f}）")
 
-        # 扣除资金
+        # 扣除资金（含手续费）
         await self.db[self.accounts_collection].update_one(
             {"user_id": user_id},
-            {"$set": {f"cash.{currency}": current_cash - position_cost, "updated_at": now}}
+            {"$set": {f"cash.{currency}": current_cash - total_cost, "updated_at": now}}
         )
 
         if existing_position:
@@ -1557,14 +1584,22 @@ class PortfolioService:
         if data.quantity > old_qty:
             raise ValueError(f"减仓数量({data.quantity})超过持仓数量({old_qty})")
 
-        # 计算卖出金额，增加到现金
+        # 计算卖出金额
         sell_amount = data.quantity * data.price
+
+        # 🔥 计算卖出手续费
+        market_rules = await self._get_real_market_rules(data.market)
+        commission_info = self._calculate_real_commission(data.market, "sell", sell_amount, market_rules or {})
+        total_commission = commission_info["commission"]
+        net_proceeds = sell_amount - total_commission  # 实际到账 = 卖出金额 - 手续费
+
+        # 增加到现金（扣除手续费后）
         account = await self.get_or_create_account(user_id)
         current_cash = account.get("cash", {}).get(currency, 0.0)
 
         await self.db[self.accounts_collection].update_one(
             {"user_id": user_id},
-            {"$set": {f"cash.{currency}": current_cash + sell_amount, "updated_at": now}}
+            {"$set": {f"cash.{currency}": current_cash + net_proceeds, "updated_at": now}}
         )
 
         new_qty = old_qty - data.quantity
@@ -1578,6 +1613,8 @@ class PortfolioService:
             )
             change_type = PositionChangeType.SELL
             description = f"清仓: -{data.quantity}股 @ {data.price:.2f}"
+            if total_commission > 0:
+                description += f"（手续费 ¥{total_commission:.2f}）"
             new_cost = 0.0
         else:
             # 部分减仓：使用摊薄成本逻辑（与主流交易软件一致）
@@ -1594,10 +1631,12 @@ class PortfolioService:
             )
             change_type = PositionChangeType.REDUCE
             description = f"减仓: -{data.quantity}股 @ {data.price:.2f}，成本 {old_cost:.2f} → {new_cost:.2f}"
+            if total_commission > 0:
+                description += f"（手续费 ¥{total_commission:.2f}）"
 
-        # 计算盈亏
-        profit = (data.price - old_cost) * data.quantity
-        profit_pct = (data.price - old_cost) / old_cost * 100 if old_cost > 0 else 0
+        # 计算盈亏（扣除手续费后的实际盈亏）
+        profit = (data.price - old_cost) * data.quantity - total_commission
+        profit_pct = (profit) / (old_cost * data.quantity) * 100 if old_cost > 0 else 0
 
         await self.record_position_change(
             user_id=user_id, change_type=change_type,
@@ -1609,7 +1648,8 @@ class PortfolioService:
             trade_price=data.price,
             realized_profit=profit,
             description=description,
-            trade_time=data.operation_date  # 使用操作日期作为交易时间
+            trade_time=data.operation_date,
+            extra_data={"commission": commission_info} if total_commission > 0 else None
         )
 
         logger.info(
@@ -1620,6 +1660,8 @@ class PortfolioService:
             "message": "清仓成功" if new_qty == 0 else "减仓成功",
             "new_quantity": new_qty,
             "sell_amount": round(sell_amount, 2),
+            "net_proceeds": round(net_proceeds, 2),
+            "commission": round(total_commission, 2),
             "profit": round(profit, 2),
             "profit_pct": round(profit_pct, 2),
         }
@@ -2146,7 +2188,7 @@ class PortfolioService:
 
             # 6. 调用AI分析（传入资金账户信息）
             start_time = datetime.now()
-            ai_result = await self._call_ai_analysis(portfolio_snapshot, report.industry_distribution)
+            ai_result = await self._call_ai_analysis(portfolio_snapshot, report.industry_distribution, user_id)
             execution_time = (datetime.now() - start_time).total_seconds()
 
             report.ai_analysis = ai_result
@@ -2358,12 +2400,18 @@ class PortfolioService:
     async def _call_ai_analysis(
         self,
         snapshot: PortfolioSnapshot,
-        industry_dist: List[IndustryDistribution]
+        industry_dist: List[IndustryDistribution],
+        user_id: str = None
     ) -> AIAnalysisResult:
         """调用AI进行持仓分析"""
         try:
+            # 查询分红数据
+            dividend_info = {}
+            if user_id:
+                dividend_info = await self._get_dividend_summary(user_id)
+
             # 构建分析提示词
-            prompt = self._build_analysis_prompt(snapshot, industry_dist)
+            prompt = self._build_analysis_prompt(snapshot, industry_dist, dividend_info)
 
             # 从系统配置获取深度分析模型（与个股分析保持一致）
             from app.services.model_capability_service import get_model_capability_service
@@ -2430,12 +2478,141 @@ class PortfolioService:
                 suggestions=["请检查大模型账号、API Key、余额或套餐配置后重试"]
             )
 
+    async def _get_real_market_rules(self, market: str) -> Optional[Dict[str, Any]]:
+        """获取真实持仓的市场规则配置（复用 paper_market_rules 集合）"""
+        try:
+            rules_doc = await self.db["paper_market_rules"].find_one({"market": market})
+            if rules_doc:
+                return rules_doc.get("rules", {})
+        except Exception as e:
+            logger.warning(f"获取市场规则失败: {e}")
+        return None
+
+    def _calculate_real_commission(
+        self, market: str, side: str, amount: float, rules: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """计算真实持仓交易的手续费
+
+        Args:
+            market: 市场（CN/HK/US）
+            side: 买/卖（buy/sell）
+            amount: 成交金额
+            rules: 市场规则配置
+
+        Returns:
+            {
+                "commission": float,        # 总手续费
+                "broker_fee": float,        # 佣金
+                "stamp_duty": float,        # 印花税
+                "transfer_fee": float,      # 过户费
+                "other_fee": float,         # 其他费用（港股/美股）
+            }
+        """
+        result = {
+            "commission": 0.0,
+            "broker_fee": 0.0,
+            "stamp_duty": 0.0,
+            "transfer_fee": 0.0,
+            "other_fee": 0.0,
+        }
+        if not rules or "commission" not in rules:
+            return result
+
+        config = rules["commission"]
+
+        # 佣金
+        comm_rate = config.get("rate", 0.0)
+        comm_min = config.get("min", 0.0)
+        broker_fee = max(amount * comm_rate, comm_min) if comm_rate > 0 else 0.0
+        result["broker_fee"] = round(broker_fee, 2)
+
+        # 印花税（A股仅卖出，港股买卖都收）
+        stamp_duty = 0.0
+        if "stamp_duty_rate" in config:
+            if market == "CN" and side == "sell":
+                stamp_duty = amount * config["stamp_duty_rate"]
+            elif market == "HK":
+                stamp_duty = amount * config["stamp_duty_rate"]
+        result["stamp_duty"] = round(stamp_duty, 2)
+
+        # 过户费（A股）
+        transfer_fee = 0.0
+        if "transfer_fee_rate" in config and market == "CN":
+            transfer_fee = amount * config["transfer_fee_rate"]
+        result["transfer_fee"] = round(transfer_fee, 2)
+
+        # 其他费用（港股）
+        other_fee = 0.0
+        if market == "HK":
+            if "transaction_levy_rate" in config:
+                other_fee += amount * config["transaction_levy_rate"]
+            if "trading_fee_rate" in config:
+                other_fee += amount * config["trading_fee_rate"]
+            if "settlement_fee_rate" in config:
+                other_fee += amount * config["settlement_fee_rate"]
+
+        # SEC费用（美股，仅卖出）
+        if market == "US" and side == "sell" and "sec_fee_rate" in config:
+            other_fee += amount * config["sec_fee_rate"]
+        result["other_fee"] = round(other_fee, 2)
+
+        result["commission"] = round(
+            broker_fee + stamp_duty + transfer_fee + other_fee, 2
+        )
+        return result
+
+    async def _get_dividend_summary(self, user_id: str) -> Dict[str, Any]:
+        """查询用户的分红收益汇总
+
+        Returns:
+            {
+                "total_dividend": float,      # 累计分红总额
+                "dividend_count": int,         # 分红股票数
+                "by_stock": {                  # 按股票汇总
+                    "000001": {"name": "平安银行", "amount": 120.0, "count": 2},
+                    ...
+                }
+            }
+        """
+        result = {"total_dividend": 0.0, "dividend_count": 0, "by_stock": {}}
+        try:
+            # 查询资金账户中的分红记录
+            cursor = self.db[self.transactions_collection].find({
+                "user_id": user_id,
+                "type": "dividend"
+            })
+            total = 0.0
+            by_stock = {}
+            async for txn in cursor:
+                amount = float(txn.get("amount", 0))
+                code = txn.get("code", "")
+                name = txn.get("name", "")
+                if amount <= 0:
+                    continue
+                total += amount
+                if code:
+                    if code not in by_stock:
+                        by_stock[code] = {"name": name, "amount": 0.0, "count": 0}
+                    by_stock[code]["amount"] += amount
+                    by_stock[code]["count"] += 1
+
+            result["total_dividend"] = total
+            result["dividend_count"] = len(by_stock)
+            result["by_stock"] = by_stock
+
+            if total > 0:
+                logger.info(f"💵 查询到用户 {user_id} 累计分红 ¥{total:,.2f}，{len(by_stock)} 只股票")
+        except Exception as e:
+            logger.warning(f"查询分红数据失败: {e}")
+        return result
+
     def _build_analysis_prompt(
         self,
         snapshot: PortfolioSnapshot,
-        industry_dist: List[IndustryDistribution]
+        industry_dist: List[IndustryDistribution],
+        dividend_info: Dict[str, Any] = None
     ) -> str:
-        """构建分析提示词（包含资金账户和个股收益信息）"""
+        """构建分析提示词（包含资金账户、个股收益和分红信息）"""
 
         # 资金账户信息
         account_section = ""
@@ -2513,6 +2690,22 @@ class PortfolioService:
             for d in industry_dist[:5]
         ])
 
+        # 分红收益信息
+        dividend_section = ""
+        if dividend_info and dividend_info.get("total_dividend", 0) > 0:
+            dividend_section = f"""
+## 💵 分红收益
+- 累计分红总额: ¥{dividend_info['total_dividend']:,.2f}
+- 分红股票数: {dividend_info['dividend_count']} 只
+"""
+            stock_dividends = dividend_info.get("by_stock", {})
+            if stock_dividends:
+                dividend_section += "\n| 股票代码 | 股票名称 | 累计分红 | 分红次数 |\n"
+                dividend_section += "|---------|---------|---------|--------|\n"
+                for code, info in sorted(stock_dividends.items(), key=lambda x: x[1]["amount"], reverse=True):
+                    dividend_section += f"| {code} | {info.get('name', '-')} | ¥{info['amount']:,.2f} | {info.get('count', 0)}次 |\n"
+            dividend_section += "\n**注意**：分红收益未计入浮动盈亏，实际总收益 = 浮动盈亏 + 累计分红。\n"
+
         prompt = f"""# 持仓组合分析任务
 
 {account_section}## 📈 持仓概况
@@ -2529,21 +2722,22 @@ class PortfolioService:
 
 ## 🏭 行业分布
 {industry_text}
-
+{dividend_section}
 ## 分析要求
 请基于以上数据，从以下维度进行专业分析（用中文回答）：
 
 1. **持仓健康度评估** (给出0-100分，并说明主要扣分项)
 2. **风险评估** (低/中/高，结合仓位水平和集中度分析)
 3. **资金配置评估** (评估现金/持仓比例是否合理，资金利用效率)
-4. **个股表现分析** (哪些股票表现好/差，是否需要止盈/止损)
-5. **组合优势** (列出2-3点)
-6. **组合劣势** (列出2-3点)
-7. **调仓建议** (列出2-3条具体建议，包括：
+4. **个股表现分析** (哪些股票表现好/差，是否需要止盈/止损；如有分红数据，需结合分红计算真实总收益)
+5. **分红收益分析** (如有分红数据，评估分红对组合收益的贡献，哪些股票分红稳定)
+6. **组合优势** (列出2-3点)
+7. **组合劣势** (列出2-3点)
+8. **调仓建议** (列出2-3条具体建议，包括：
    - 是否需要调整仓位水平
    - 是否需要止盈/止损某些股票
    - 是否需要调整行业配置)
-8. **综合评价** (150字以内的总结)
+9. **综合评价** (150字以内的总结，含分红的总收益)
 
 请直接给出分析结果，不需要JSON格式。"""
 

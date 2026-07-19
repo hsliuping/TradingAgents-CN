@@ -3,10 +3,11 @@
 提供持仓管理和 AI 研究接口
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from typing import Optional, List, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from pydantic import BaseModel, Field
 import logging
+import io
 
 from app.routers.auth_db import get_current_user
 from app.services.portfolio_service import get_portfolio_service
@@ -180,6 +181,422 @@ async def import_positions(
         return ok(data=result, message=f"导入完成: 成功 {result['success_count']}, 失败 {result['failed_count']}")
     except Exception as e:
         logger.error(f"导入持仓失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+class FileImportMapping(BaseModel):
+    """文件列名映射"""
+    code: str = Field("股票代码", description="股票代码列名")
+    name: str = Field("股票名称", description="股票名称列名")
+    quantity: str = Field("持仓数量", description="数量列名")
+    cost_price: str = Field("成本价", description="成本价列名")
+    buy_date: str = Field("买入日期", description="买入日期列名")
+
+
+@router.post("/positions/import/file", response_model=dict)
+async def import_positions_from_file(
+    file: UploadFile = File(...),
+    market: str = Query("CN", description="市场: CN/HK/US"),
+    current_user: dict = Depends(get_current_user)
+):
+    """从 Excel/CSV 文件导入持仓
+
+    支持 .xlsx / .xls / .csv 格式。
+    自动识别常见券商导出格式（同花顺、东方财富、华泰等），
+    也支持自定义列名映射。
+    """
+    try:
+        import pandas as pd
+
+        # 读取文件
+        content = await file.read()
+        filename = file.filename or ""
+
+        if filename.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(content))
+        elif filename.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"不支持的文件格式: {filename}，请上传 .xlsx / .xls / .csv 文件"
+            )
+
+        if df.empty:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="文件内容为空"
+            )
+
+        logger.info(f"📁 文件解析成功: {filename}, {len(df)} 行, 列: {list(df.columns)}")
+
+        # 自动识别列名映射
+        col_map = _auto_detect_columns(df.columns.tolist())
+        logger.info(f"🔍 自动识别列映射: {col_map}")
+
+        # 解析为 PositionCreate 列表
+        positions = []
+        errors = []
+        for idx, row in df.iterrows():
+            try:
+                code = str(row.get(col_map["code"], "")).strip()
+                if not code or code == "nan":
+                    continue
+                # 确保代码为6位
+                code = code.zfill(6)
+
+                quantity = int(float(row.get(col_map["quantity"], 0)))
+                cost_price = float(row.get(col_map["cost_price"], 0))
+
+                if quantity <= 0 or cost_price <= 0:
+                    errors.append({"row": idx + 1, "code": code, "error": "数量或成本价无效"})
+                    continue
+
+                name = str(row.get(col_map["name"], "")).strip()
+                if name == "nan":
+                    name = ""
+
+                buy_date = None
+                if col_map["buy_date"]:
+                    raw_date = row.get(col_map["buy_date"], "")
+                    if raw_date and str(raw_date) != "nan":
+                        try:
+                            from datetime import datetime as dt
+                            if isinstance(raw_date, dt):
+                                buy_date = raw_date
+                            else:
+                                # 尝试多种日期格式
+                                for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y%m%d", "%m/%d/%Y"]:
+                                    try:
+                                        buy_date = dt.strptime(str(raw_date).strip(), fmt)
+                                        break
+                                    except ValueError:
+                                        continue
+                        except Exception:
+                            pass
+
+                pos = PositionCreate(
+                    code=code,
+                    name=name or None,
+                    quantity=quantity,
+                    cost_price=cost_price,
+                    market=market,
+                    buy_date=buy_date,
+                )
+                positions.append(pos)
+            except Exception as e:
+                errors.append({"row": idx + 1, "error": str(e)})
+
+        if not positions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"未能从文件中解析出有效持仓。列映射: {col_map}，解析错误: {errors[:5]}"
+            )
+
+        # 批量导入
+        service = get_portfolio_service()
+        result = await service.import_positions(
+            user_id=current_user["id"],
+            positions=positions,
+            validate_input=True,
+        )
+        result["file_info"] = {
+            "filename": filename,
+            "total_rows": len(df),
+            "parsed_rows": len(positions),
+            "parse_errors": errors[:10],
+            "column_mapping": col_map,
+        }
+
+        return ok(data=result, message=f"导入完成: 成功 {result['success_count']}, 失败 {result['failed_count']}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"文件导入持仓失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+def _auto_detect_columns(columns: List[str]) -> Dict[str, Any]:
+    """自动识别 Excel/CSV 列名到系统字段的映射
+
+    支持同花顺、东方财富、华泰等常见券商导出格式
+    """
+    col_map = {
+        "code": None,
+        "name": None,
+        "quantity": None,
+        "cost_price": None,
+        "buy_date": None,
+    }
+
+    # 股票代码候选列名
+    code_candidates = [
+        "股票代码", "证券代码", "代码", "code", "symbol",
+        "stock_code", "证券号", "证券",
+    ]
+    # 股票名称候选列名
+    name_candidates = [
+        "股票名称", "证券名称", "名称", "name", "证券简称",
+        "stock_name", "证券名",
+    ]
+    # 数量候选列名
+    quantity_candidates = [
+        "持仓数量", "证券数量", "持有数量", "数量", "quantity", "股数",
+        "持仓股数", "可用数量", "持仓", "持仓量",
+    ]
+    # 成本价候选列名
+    cost_price_candidates = [
+        "成本价", "摊薄成本", "持仓成本", "成本", "cost_price",
+        "成本价格", "均价", "买入均价", "买入价格",
+    ]
+    # 买入日期候选列名
+    date_candidates = [
+        "买入日期", "建仓日期", "购入日期", "买入时间",
+        "buy_date", "首次买入日期", "买入日",
+    ]
+
+    def _find_column(candidates: List[str], cols: List[str]) -> Any:
+        for c in candidates:
+            for col in cols:
+                if c in col or col in c:
+                    return col
+        return None
+
+    col_map["code"] = _find_column(code_candidates, columns)
+    col_map["name"] = _find_column(name_candidates, columns)
+    col_map["quantity"] = _find_column(quantity_candidates, columns)
+    col_map["cost_price"] = _find_column(cost_price_candidates, columns)
+    col_map["buy_date"] = _find_column(date_candidates, columns)
+
+    return col_map
+
+
+@router.post("/positions/import/file/preview", response_model=dict)
+async def preview_import_file(
+    file: UploadFile = File(...),
+    market: str = Query("CN", description="市场: CN/HK/US"),
+    current_user: dict = Depends(get_current_user)
+):
+    """预览文件导入：解析文件并返回前10行和列映射结果，不执行导入"""
+    try:
+        import pandas as pd
+
+        content = await file.read()
+        filename = file.filename or ""
+
+        if filename.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(content))
+        elif filename.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(io.BytesIO(content))
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"不支持的文件格式: {filename}"
+            )
+
+        col_map = _auto_detect_columns(df.columns.tolist())
+
+        # 返回预览数据
+        preview_rows = df.head(10).fillna("").to_dict("records")
+
+        return ok(data={
+            "filename": filename,
+            "total_rows": len(df),
+            "columns": list(df.columns),
+            "column_mapping": col_map,
+            "preview": preview_rows,
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"预览文件失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/positions/import/screenshot", response_model=dict)
+async def import_positions_from_screenshot(
+    file: UploadFile = File(...),
+    market: str = Query("CN", description="市场: CN/HK/US"),
+    current_user: dict = Depends(get_current_user)
+):
+    """从券商截图识别持仓信息
+
+    上传券商界面的截图（如持仓列表页面），使用 LLM Vision API 解析图片，
+    自动提取股票代码、名称、数量、成本价等信息。
+    返回识别结果供用户确认，不自动导入。
+    """
+    try:
+        import base64
+        from app.services.model_capability_service import get_model_capability_service
+        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+        from tradingagents.graph.trading_graph import create_llm_by_provider
+
+        # 读取图片
+        content = await file.read()
+        filename = file.filename or ""
+
+        # 检查文件类型
+        if not any(filename.lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".bmp", ".webp"]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"不支持的图片格式: {filename}，请上传 PNG/JPG/BMP/WebP 格式"
+            )
+
+        # Base64 编码
+        img_b64 = base64.b64encode(content).decode("utf-8")
+        mime_type = "image/png" if filename.lower().endswith(".png") else "image/jpeg"
+
+        # 获取对话模型（Vision 能力）
+        capability_service = get_model_capability_service()
+        chat_model, _ = capability_service._get_default_models()
+        model_name = chat_model
+
+        provider_info = get_provider_and_url_by_model_sync(model_name)
+        backend_url = provider_info.get("backend_url")
+        api_key = provider_info.get("api_key")
+        provider_name = provider_info.get("provider", "dashscope")
+
+        if not backend_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="对话模型未配置，无法使用截图识别功能"
+            )
+
+        # 构造 Vision LLM 请求
+        llm = create_llm_by_provider(
+            provider=provider_name,
+            model=model_name,
+            backend_url=backend_url,
+            temperature=0.1,
+            max_tokens=4000,
+        )
+
+        # 构造多模态消息
+        system_prompt = """你是一个专业的券商持仓截图识别助手。请识别这张券商持仓截图，提取每只股票的持仓信息。
+
+请严格按照以下 JSON 格式返回结果，不要包含任何其他文字：
+```json
+[
+  {
+    "code": "000001",
+    "name": "平安银行",
+    "quantity": 1000,
+    "cost_price": 12.34,
+    "buy_date": "2024-01-15"
+  }
+]
+```
+
+注意事项：
+1. 股票代码必须是6位数字
+2. 数量必须是整数（股数）
+3. 成本价保留2位小数
+4. 买入日期格式为 YYYY-MM-DD，如果无法识别则设为 null
+5. 如果某些字段无法识别，设为 null
+6. 只返回 JSON 数组，不要有其他内容"""
+
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=[
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{mime_type};base64,{img_b64}"
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": "请识别这张券商持仓截图中的所有股票持仓信息。"
+                }
+            ])
+        ]
+
+        response = await llm.ainvoke(messages)
+        result_text = response.content if hasattr(response, 'content') else str(response)
+
+        # 解析 JSON 结果
+        import json
+        import re
+
+        # 提取 JSON 数组（可能被包裹在 ```json ... ``` 中）
+        json_match = re.search(r'\[[\s\S]*?\]', result_text)
+        if not json_match:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"LLM 返回的内容无法解析为 JSON: {result_text[:200]}"
+            )
+
+        try:
+            positions_data = json.loads(json_match.group())
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"JSON 解析失败: {e}"
+            )
+
+        # 转换为 PositionCreate 列表
+        positions = []
+        parse_errors = []
+        for idx, item in enumerate(positions_data):
+            try:
+                code = str(item.get("code", "")).zfill(6)
+                quantity = int(item.get("quantity", 0))
+                cost_price = float(item.get("cost_price", 0))
+
+                if not code or quantity <= 0 or cost_price <= 0:
+                    parse_errors.append({"index": idx, "data": item, "error": "必填字段缺失或无效"})
+                    continue
+
+                buy_date = None
+                raw_date = item.get("buy_date")
+                if raw_date and str(raw_date) != "null":
+                    try:
+                        from datetime import datetime as dt
+                        buy_date = dt.strptime(str(raw_date), "%Y-%m-%d")
+                    except ValueError:
+                        pass
+
+                pos = PositionCreate(
+                    code=code,
+                    name=item.get("name") or None,
+                    quantity=quantity,
+                    cost_price=cost_price,
+                    market=market,
+                    buy_date=buy_date,
+                )
+                positions.append(pos)
+            except Exception as e:
+                parse_errors.append({"index": idx, "data": item, "error": str(e)})
+
+        logger.info(f"📸 截图识别完成: 识别 {len(positions_data)} 条，有效 {len(positions)} 条，错误 {len(parse_errors)} 条")
+
+        return ok(data={
+            "filename": filename,
+            "model": model_name,
+            "recognized_count": len(positions_data),
+            "valid_count": len(positions),
+            "positions": [p.model_dump() for p in positions],
+            "parse_errors": parse_errors[:10],
+            "raw_response": result_text[:500],
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"截图识别失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

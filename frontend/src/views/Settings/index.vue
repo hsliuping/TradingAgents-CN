@@ -46,6 +46,10 @@
                 <el-icon><ChatDotRound /></el-icon>
                 <span>助理设置</span>
               </el-menu-item>
+              <el-menu-item index="commission">
+                <el-icon><Coin /></el-icon>
+                <span>交易费率</span>
+              </el-menu-item>
 
             </template>
 
@@ -315,6 +319,123 @@
           </el-form>
         </el-card>
 
+        <!-- 交易费率设置 -->
+        <el-card v-show="activeTab === 'commission'" class="settings-content" shadow="never">
+          <template #header>
+            <h3>交易费率设置</h3>
+          </template>
+
+          <el-alert
+            title="交易费率用于计算持仓的真实成本和盈亏"
+            description="买入时扣除佣金+过户费，卖出时扣除佣金+印花税+过户费。费率配置同时适用于真实持仓和模拟交易。"
+            type="info"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 20px;"
+          />
+
+          <el-tabs v-model="commissionTab">
+            <el-tab-pane label="A股" name="CN">
+              <el-form :model="commissionCN" label-width="120px">
+                <el-form-item label="佣金费率">
+                  <el-input-number
+                    v-model="commissionCN.rate"
+                    :min="0"
+                    :max="1"
+                    :step="0.00001"
+                    :precision="5"
+                    controls-position="right"
+                  />
+                  <span class="setting-description" style="margin-left: 8px;">
+                    {{ commissionCN.rate > 0 ? `万${(commissionCN.rate * 10000).toFixed(1)}` : '免佣金' }}
+                  </span>
+                </el-form-item>
+                <el-form-item label="最低佣金">
+                  <el-input-number v-model="commissionCN.min" :min="0" :step="0.5" :precision="2" controls-position="right" />
+                  <span class="setting-description" style="margin-left: 8px;">元</span>
+                </el-form-item>
+                <el-form-item label="印花税">
+                  <el-input-number
+                    v-model="commissionCN.stampDutyRate"
+                    :min="0"
+                    :max="0.01"
+                    :step="0.0001"
+                    :precision="4"
+                    controls-position="right"
+                  />
+                  <span class="setting-description" style="margin-left: 8px;">
+                    {{ commissionCN.stampDutyRate > 0 ? `千${(commissionCN.stampDutyRate * 1000).toFixed(1)}（仅卖出）` : '无' }}
+                  </span>
+                </el-form-item>
+                <el-form-item label="过户费">
+                  <el-input-number
+                    v-model="commissionCN.transferFeeRate"
+                    :min="0"
+                    :max="0.001"
+                    :step="0.000001"
+                    :precision="6"
+                    controls-position="right"
+                  />
+                  <span class="setting-description" style="margin-left: 8px;">
+                    {{ commissionCN.transferFeeRate > 0 ? `万${(commissionCN.transferFeeRate * 10000).toFixed(2)}` : '无' }}
+                  </span>
+                </el-form-item>
+              </el-form>
+            </el-tab-pane>
+
+            <el-tab-pane label="港股" name="HK">
+              <el-form :model="commissionHK" label-width="120px">
+                <el-form-item label="佣金费率">
+                  <el-input-number v-model="commissionHK.rate" :min="0" :max="1" :step="0.00001" :precision="5" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="最低佣金">
+                  <el-input-number v-model="commissionHK.min" :min="0" :step="0.5" :precision="2" controls-position="right" />
+                  <span class="setting-description" style="margin-left: 8px;">港币</span>
+                </el-form-item>
+                <el-form-item label="印花税">
+                  <el-input-number v-model="commissionHK.stampDutyRate" :min="0" :max="0.01" :step="0.0001" :precision="4" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="交易征费">
+                  <el-input-number v-model="commissionHK.transactionLevyRate" :min="0" :max="0.001" :step="0.000001" :precision="6" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="交易费">
+                  <el-input-number v-model="commissionHK.tradingFeeRate" :min="0" :max="0.001" :step="0.000001" :precision="6" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="结算费">
+                  <el-input-number v-model="commissionHK.settlementFeeRate" :min="0" :max="0.001" :step="0.000001" :precision="6" controls-position="right" />
+                </el-form-item>
+              </el-form>
+            </el-tab-pane>
+
+            <el-tab-pane label="美股" name="US">
+              <el-form :model="commissionUS" label-width="120px">
+                <el-form-item label="佣金费率">
+                  <el-input-number v-model="commissionUS.rate" :min="0" :max="1" :step="0.00001" :precision="5" controls-position="right" />
+                </el-form-item>
+                <el-form-item label="最低佣金">
+                  <el-input-number v-model="commissionUS.min" :min="0" :step="0.5" :precision="2" controls-position="right" />
+                  <span class="setting-description" style="margin-left: 8px;">美元</span>
+                </el-form-item>
+                <el-form-item label="SEC费用">
+                  <el-input-number v-model="commissionUS.secFeeRate" :min="0" :max="0.001" :step="0.0000001" :precision="7" controls-position="right" />
+                  <span class="setting-description" style="margin-left: 8px;">仅卖出</span>
+                </el-form-item>
+              </el-form>
+            </el-tab-pane>
+          </el-tabs>
+
+          <el-form label-width="120px" style="margin-top: 16px;">
+            <el-form-item>
+              <el-button type="primary" @click="saveCommissionSettings" :loading="commissionSaving">
+                保存费率设置
+              </el-button>
+              <el-button @click="loadCommissionSettings">
+                恢复默认
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+
 
 
         <!-- 配置管理 -->
@@ -557,6 +678,7 @@ import {
   Collection
 } from '@element-plus/icons-vue'
 import { getCapabilityIndexState, rebuildCapabilityIndex, type CapabilityIndexState } from '@/api/capabilityIndex'
+import request from '@/api/request'
 
 const router = useRouter()
 const route = useRoute()
@@ -671,6 +793,18 @@ const assistantSettings = ref({
   tone: authStore.user?.preferences?.assistant_settings?.tone || 'professional',
   customInstructions: authStore.user?.preferences?.assistant_settings?.custom_instructions || ''
 })
+
+// 交易费率设置
+const commissionTab = ref('CN')
+const commissionSaving = ref(false)
+
+const defaultCommissionCN = { rate: 0.0003, min: 5.0, stampDutyRate: 0.001, transferFeeRate: 0.00002 }
+const defaultCommissionHK = { rate: 0.0003, min: 3.0, stampDutyRate: 0.0013, transactionLevyRate: 0.00005, tradingFeeRate: 0.00005, settlementFeeRate: 0.00002 }
+const defaultCommissionUS = { rate: 0.0, min: 0.0, secFeeRate: 0.0000278 }
+
+const commissionCN = ref({ ...defaultCommissionCN })
+const commissionHK = ref({ ...defaultCommissionHK })
+const commissionUS = ref({ ...defaultCommissionUS })
 
 
 // 监听用户信息变化，同步更新设置
@@ -831,6 +965,95 @@ const saveAssistantSettings = async () => {
     ElMessage.error('保存助理设置失败')
   }
 }
+
+// 加载交易费率设置
+const loadCommissionSettings = async (useDefaults = false) => {
+  if (useDefaults) {
+    commissionCN.value = { ...defaultCommissionCN }
+    commissionHK.value = { ...defaultCommissionHK }
+    commissionUS.value = { ...defaultCommissionUS }
+    return
+  }
+  try {
+    const { data } = await request.get('/api/paper/market-rules')
+    if (data && Array.isArray(data)) {
+      for (const rule of data) {
+        const c = rule.rules?.commission || {}
+        if (rule.market === 'CN') {
+          commissionCN.value = {
+            rate: c.rate ?? defaultCommissionCN.rate,
+            min: c.min ?? defaultCommissionCN.min,
+            stampDutyRate: c.stamp_duty_rate ?? defaultCommissionCN.stampDutyRate,
+            transferFeeRate: c.transfer_fee_rate ?? defaultCommissionCN.transferFeeRate,
+          }
+        } else if (rule.market === 'HK') {
+          commissionHK.value = {
+            rate: c.rate ?? defaultCommissionHK.rate,
+            min: c.min ?? defaultCommissionHK.min,
+            stampDutyRate: c.stamp_duty_rate ?? defaultCommissionHK.stampDutyRate,
+            transactionLevyRate: c.transaction_levy_rate ?? defaultCommissionHK.transactionLevyRate,
+            tradingFeeRate: c.trading_fee_rate ?? defaultCommissionHK.tradingFeeRate,
+            settlementFeeRate: c.settlement_fee_rate ?? defaultCommissionHK.settlementFeeRate,
+          }
+        } else if (rule.market === 'US') {
+          commissionUS.value = {
+            rate: c.rate ?? defaultCommissionUS.rate,
+            min: c.min ?? defaultCommissionUS.min,
+            secFeeRate: c.sec_fee_rate ?? defaultCommissionUS.secFeeRate,
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('加载费率设置失败，使用默认值:', e)
+  }
+}
+
+// 保存交易费率设置
+const saveCommissionSettings = async () => {
+  commissionSaving.value = true
+  try {
+    const rules = [
+      {
+        market: 'CN',
+        commission: {
+          rate: commissionCN.value.rate,
+          min: commissionCN.value.min,
+          stamp_duty_rate: commissionCN.value.stampDutyRate,
+          transfer_fee_rate: commissionCN.value.transferFeeRate,
+        }
+      },
+      {
+        market: 'HK',
+        commission: {
+          rate: commissionHK.value.rate,
+          min: commissionHK.value.min,
+          stamp_duty_rate: commissionHK.value.stampDutyRate,
+          transaction_levy_rate: commissionHK.value.transactionLevyRate,
+          trading_fee_rate: commissionHK.value.tradingFeeRate,
+          settlement_fee_rate: commissionHK.value.settlementFeeRate,
+        }
+      },
+      {
+        market: 'US',
+        commission: {
+          rate: commissionUS.value.rate,
+          min: commissionUS.value.min,
+          sec_fee_rate: commissionUS.value.secFeeRate,
+        }
+      }
+    ]
+    await request.post('/api/paper/market-rules/commission', { rules })
+    ElMessage.success('交易费率设置已保存')
+  } catch (e) {
+    console.error('保存费率设置失败:', e)
+    ElMessage.error('保存费率设置失败')
+  } finally {
+    commissionSaving.value = false
+  }
+}
+
+// 页面加载时获取费率（在主 onMounted 中调用）
 
 
 // 导航函数
@@ -998,6 +1221,9 @@ onMounted(() => {
 
   // 加载能力索引状态
   loadIndexState()
+
+  // 加载交易费率设置
+  loadCommissionSettings()
 })
 </script>
 
