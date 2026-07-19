@@ -263,8 +263,10 @@ class RealPosition(BaseModel):
     market: str = "CN"                     # 市场: CN/HK/US
     currency: str = "CNY"                  # 货币: CNY/HKD/USD
     quantity: int                          # 持仓数量
-    cost_price: float                      # 成本价（摊薄后，与交易软件一致）
+    cost_price: float                      # 成本价（前复权，用于盈亏计算）
     original_avg_cost: Optional[float] = None  # 原始买入均价（减仓不变，用于投资评估）
+    original_cost_price: Optional[float] = None  # 原始成本价（不复权的实际成交价）
+    price_adjust_type: Optional[str] = None     # 价格复权标注：None=前复权（默认），"none"=原始未复权
     buy_date: Optional[datetime] = None    # 买入日期
     industry: Optional[str] = None         # 所属行业
     notes: Optional[str] = None            # 备注
@@ -286,6 +288,8 @@ class PositionSnapshot(BaseModel):
     quantity: int
     cost_price: float
     original_avg_cost: Optional[float] = None  # 原始买入均价（可选）
+    original_cost_price: Optional[float] = None  # 原始成本价（不复权的实际成交价）
+    price_adjust_type: Optional[str] = None     # 价格复权标注
     current_price: Optional[float] = None
     market_value: Optional[float] = None
     unrealized_pnl: Optional[float] = None
@@ -483,6 +487,8 @@ class PositionResponse(BaseModel):
     quantity: int
     cost_price: float
     original_avg_cost: Optional[float] = None  # 原始买入均价（减仓不变，用于投资评估）
+    original_cost_price: Optional[float] = None  # 原始成本价（不复权的实际成交价）
+    price_adjust_type: Optional[str] = None     # 价格复权标注：None=前复权，"none"=原始未复权
     current_price: Optional[float] = None
     market_value: Optional[float] = None
     unrealized_pnl: Optional[float] = None

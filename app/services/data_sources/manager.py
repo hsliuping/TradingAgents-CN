@@ -371,3 +371,28 @@ class DataSourceManager:
                 logger.error(f"Failed to fetch news from {adapter.name}: {e}")
                 continue
         return None, None
+
+    def get_daily_ohlc_with_fallback(self, code: str, trade_date: str, adj: Optional[str] = None) -> Tuple[Optional[Dict], Optional[str]]:
+        """
+        按优先级尝试获取指定日期的日线 OHLC 数据。
+
+        Args:
+            code: 6位股票代码
+            trade_date: 交易日期，格式 YYYY-MM-DD 或 YYYYMMDD
+            adj: 复权方式，None=不复权，"qfq"=前复权，"hfq"=后复权
+
+        Returns:
+            (ohlc_dict, source_name) 或 (None, None)
+            ohlc_dict: {"date", "open", "high", "low", "close"}
+        """
+        available_adapters = self.get_available_adapters()
+        for adapter in available_adapters:
+            try:
+                logger.info(f"Trying to fetch daily OHLC from {adapter.name} (adj={adj})")
+                ohlc = adapter.get_daily_ohlc(code=code, trade_date=trade_date, adj=adj)
+                if ohlc:
+                    return ohlc, adapter.name
+            except Exception as e:
+                logger.error(f"Failed to fetch daily OHLC from {adapter.name}: {e}")
+                continue
+        return None, None

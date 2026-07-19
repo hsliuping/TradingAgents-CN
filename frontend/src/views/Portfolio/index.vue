@@ -103,8 +103,14 @@
                         </template>
                       </el-table-column>
                       <el-table-column prop="quantity" label="数量" width="80" align="right" />
-                      <el-table-column label="原始成本" width="100" align="right">
-                        <template #default="{ row }">{{ ((row as any).original_avg_cost ?? row.cost_price)?.toFixed(2) }}</template>
+                      <el-table-column label="原始成本" width="110" align="right">
+                        <template #default="{ row }">
+                          <span v-if="(row as any).price_adjust_type === 'none' && (row as any).original_cost_price">
+                            {{ (row as any).original_cost_price?.toFixed(2) }}
+                            <el-tag size="small" type="warning" effect="plain" style="margin-left:2px;font-size:10px">不复权</el-tag>
+                          </span>
+                          <span v-else>{{ ((row as any).original_avg_cost ?? row.cost_price)?.toFixed(2) }}</span>
+                        </template>
                       </el-table-column>
                       <el-table-column label="摊薄成本" width="100" align="right">
                         <template #default="{ row }">{{ row.cost_price?.toFixed(2) }}</template>
@@ -178,8 +184,14 @@
                     </template>
                   </el-table-column>
                   <el-table-column prop="quantity" label="数量" width="80" align="right" />
-                  <el-table-column label="原始成本" width="100" align="right">
-                    <template #default="{ row }">{{ ((row as any).original_avg_cost ?? row.cost_price)?.toFixed(2) }}</template>
+                  <el-table-column label="原始成本" width="110" align="right">
+                    <template #default="{ row }">
+                      <span v-if="(row as any).price_adjust_type === 'none' && (row as any).original_cost_price">
+                        {{ (row as any).original_cost_price?.toFixed(2) }}
+                        <el-tag size="small" type="warning" effect="plain" style="margin-left:2px;font-size:10px">不复权</el-tag>
+                      </span>
+                      <span v-else>{{ ((row as any).original_avg_cost ?? row.cost_price)?.toFixed(2) }}</span>
+                    </template>
                   </el-table-column>
                   <el-table-column label="摊薄成本" width="100" align="right">
                     <template #default="{ row }">{{ row.cost_price?.toFixed(2) }}</template>

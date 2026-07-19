@@ -1207,6 +1207,8 @@ class PortfolioService:
             quantity=quantity,
             cost_price=cost_price,
             original_avg_cost=round(original_avg_cost, 4) if original_avg_cost is not None else None,
+            original_cost_price=position.get("original_cost_price"),
+            price_adjust_type=position.get("price_adjust_type"),
             current_price=current_price,
             market_value=market_value,
             unrealized_pnl=unrealized_pnl,
@@ -1228,6 +1230,7 @@ class PortfolioService:
     ) -> PositionResponse:
         """添加用户持仓（如果已有持仓则自动加仓）"""
         # 手工录入时仍然保留历史数据校验；QMT 快照同步会跳过这层校验，直接按已知持仓写入。
+        adjust_info = None  # 复权转换信息
         if validate_input:
             current_price = await self._get_stock_price(data.code, data.market)
             if not current_price or current_price <= 0:
@@ -1238,12 +1241,36 @@ class PortfolioService:
             # 🔥 必须填写买入日期，并校验成本价是否在该日历史高低价范围内
             if not data.buy_date:
                 raise ValueError("添加持仓时必须填写买入日期，以便校验成本价是否正确。")
-            await self._validate_cost_price_against_historical(
+            adjust_info = await self._validate_cost_price_against_historical(
                 code=data.code,
                 market=data.market,
                 buy_date=data.buy_date,
                 cost_price=data.cost_price
             )
+
+        # ---- 复权价格转换 ----
+        # adjust_info 不为 None 说明用户输入的是不复权价格，需要转为前复权保存
+        original_cost_price = None  # 保存原始不复权价格
+        price_adjust_type = None    # 价格标注
+        effective_cost_price = data.cost_price  # 实际用于计算的成本价（前复权）
+
+        if adjust_info and adjust_info.get("adjust_type") == "none":
+            original_cost_price = data.cost_price  # 保存用户原始输入的不复权价格
+            price_adjust_type = "none"
+            qfq_price = adjust_info.get("qfq_price")
+            if qfq_price is not None and qfq_price > 0:
+                effective_cost_price = qfq_price  # 使用转换后的前复权价格
+                logger.info(
+                    f"🔄 成本价转换：不复权 {data.cost_price:.2f} → 前复权 {qfq_price:.2f}"
+                    f"（复权因子={adjust_info.get('adj_factor', 'N/A')}）"
+                )
+            else:
+                # 无法转换，保留不复权价格（后续盈亏计算可能有小误差）
+                effective_cost_price = data.cost_price
+                logger.warning(
+                    f"⚠️ 无法将不复权价格 {data.cost_price:.2f} 转为前复权，"
+                    f"将以不复权价格保存（盈亏计算可能存在分红导致的误差）"
+                )
 
         # 获取股票名称和行业
         name = data.name
@@ -1259,9 +1286,9 @@ class PortfolioService:
         industry = await self._get_stock_industry(data.code, data.market)
         logger.info(f"📝 [添加持仓] 股票 {data.code} 行业信息: {industry}")
 
-        # 计算持仓成本
+        # 计算持仓成本（使用转换后的前复权价格）
         currency = self._get_currency_by_market(data.market)
-        position_cost = data.quantity * data.cost_price
+        position_cost = data.quantity * effective_cost_price
 
         # 从资金账户中扣除成本
         account = await self.get_or_create_account(user_id)
@@ -1298,15 +1325,20 @@ class PortfolioService:
 
             # 更新持仓记录（加仓时 cost_price 与 original_avg_cost 均为加权均价）
             now = now_tz()
+            update_fields = {
+                "quantity": new_quantity,
+                "cost_price": round(new_cost_price, 4),
+                "original_avg_cost": round(new_cost_price, 4),
+                "updated_at": now,
+                "notes": data.notes if data.notes else existing_position.get("notes")
+            }
+            # 加仓时如有不复权标注，也保存到持仓记录
+            if original_cost_price is not None:
+                update_fields["original_cost_price"] = original_cost_price
+                update_fields["price_adjust_type"] = price_adjust_type
             await self.db[self.positions_collection].update_one(
                 {"_id": existing_position["_id"]},
-                {"$set": {
-                    "quantity": new_quantity,
-                    "cost_price": round(new_cost_price, 4),
-                    "original_avg_cost": round(new_cost_price, 4),
-                    "updated_at": now,
-                    "notes": data.notes if data.notes else existing_position.get("notes")
-                }}
+                {"$set": update_fields}
             )
 
             # 记录持仓变动（加仓）
@@ -1322,7 +1354,7 @@ class PortfolioService:
                 cost_price_before=old_cost_price,
                 quantity_after=new_quantity,
                 cost_price_after=new_cost_price,
-                description=f"加仓: +{data.quantity}股 @ {data.cost_price:.2f}"
+                description=f"加仓: +{data.quantity}股 @ {effective_cost_price:.2f}"
             )
 
             logger.info(f"✅ 加仓成功: {user_id} - {data.code}，{old_quantity} → {new_quantity}股，成本价: {old_cost_price:.2f} → {new_cost_price:.2f}，扣除资金: {position_cost:.2f} {currency}")
@@ -1347,8 +1379,10 @@ class PortfolioService:
             "market": data.market,
             "currency": currency,
             "quantity": data.quantity,
-            "cost_price": data.cost_price,
-            "original_avg_cost": data.cost_price,
+            "cost_price": effective_cost_price,
+            "original_avg_cost": effective_cost_price,
+            "original_cost_price": original_cost_price,
+            "price_adjust_type": price_adjust_type,
             "buy_date": data.buy_date,
             "industry": industry,
             "notes": data.notes,
@@ -1372,7 +1406,7 @@ class PortfolioService:
             quantity_before=0,
             cost_price_before=0.0,
             quantity_after=data.quantity,
-            cost_price_after=data.cost_price,
+            cost_price_after=effective_cost_price,
             description=f"新建持仓: {data.notes}" if data.notes else "新建持仓",
             trade_time=data.buy_date  # 使用买入日期作为交易时间
         )
@@ -2751,13 +2785,32 @@ class PortfolioService:
 
     async def _validate_cost_price_against_historical(
         self, code: str, market: str, buy_date, cost_price: float
-    ) -> None:
+    ) -> Optional[Dict[str, Any]]:
         """
         校验成本价是否在买入日历史数据的最高价和最低价范围内。
-        若用户输入的价格明显错误（如茅台填10元），则拒绝添加。
+
+        校验策略：
+        1. 优先用数据库中的前复权数据校验（大多数情况成本价就是前复权价格）
+        2. 若前复权校验失败，实时调用 API 获取不复权数据兜底校验
+           （用户输入的实际成交价是不复权的，与前复权K线可能不一致）
+        3. 不复权校验通过时，计算复权因子用于将用户价格转为前复权保存
+
+        Args:
+            code: 股票代码
+            market: 市场类型
+            buy_date: 买入日期
+            cost_price: 用户输入的成本价
+
+        Returns:
+            None — 成本价与前复权数据一致，无需转换
+            Dict — 成本价是不复权价格，需要转换：
+                {"adjust_type": "none", "qfq_price": float, "adj_factor": float}
+
+        Raises:
+            ValueError — 成本价明显错误，拒绝添加
         """
         if not buy_date:
-            return
+            return None
         # 格式化买入日期：支持 datetime、date、ISO 字符串
         if hasattr(buy_date, "strftime"):
             buy_date_str = buy_date.strftime("%Y-%m-%d")
@@ -2766,11 +2819,13 @@ class PortfolioService:
             buy_date_str = buy_date[:10] if len(buy_date) >= 10 else buy_date
             buy_date_compact = buy_date_str.replace("-", "") if "-" in buy_date_str else buy_date_str
         else:
-            return  # 无法解析则跳过校验
+            return None  # 无法解析则跳过校验
         code6 = str(code).strip().zfill(6)
         symbol_conds = [{"symbol": code}, {"symbol": code6}, {"code": code}, {"code": code6}]
         date_conds = [{"trade_date": buy_date_str}, {"trade_date": buy_date_compact}]
         normalized_market = "CN" if market == "ETF" else market
+
+        # ---- 第一层：使用数据库中的前复权数据校验 ----
         collection_map = {"CN": "stock_daily_quotes", "HK": "stock_daily_quotes_hk", "US": "stock_daily_quotes_us"}
         coll_name = collection_map.get(normalized_market, "stock_daily_quotes")
         coll = self.db[coll_name]
@@ -2791,30 +2846,146 @@ class PortfolioService:
                 )
                 if doc:
                     break
+
         if not doc:
-            raise ValueError(
-                f"股票 {code} 在 {buy_date_str} 无历史数据，无法校验价格。请先同步该日历史数据，或暂不填写买入日期。"
+            # 数据库无历史数据，尝试 API 不复权兜底
+            return await self._validate_with_unadjusted_api(
+                code6, normalized_market, buy_date_str, cost_price
             )
+
+        # 提取前复权 high/low
         high_val = doc.get("high")
         low_val = doc.get("low")
         if high_val is None or low_val is None:
-            # 若缺少 high/low，用 open/close 作为范围
             open_val = doc.get("open")
             close_val = doc.get("close")
             if open_val is not None and close_val is not None:
                 high_val = max(open_val, close_val)
                 low_val = min(open_val, close_val)
             else:
-                return  # 无法校验则放行
+                return None  # 无法校验则放行
         try:
             high_f = float(high_val)
             low_f = float(low_val)
         except (ValueError, TypeError):
-            return
-        if cost_price < low_f or cost_price > high_f:
+            return None
+
+        # 前复权校验通过 — 用户输入的价格与前复权数据一致
+        if low_f <= cost_price <= high_f:
+            logger.info(f"✅ 成本价 {cost_price:.2f} 通过前复权校验（{buy_date_str}，范围 {low_f:.2f}~{high_f:.2f}）")
+            return None
+
+        # ---- 第二层：前复权校验失败，尝试不复权 API 兜底 ----
+        logger.info(
+            f"⚠️ 成本价 {cost_price:.2f} 未通过前复权校验（{buy_date_str}，范围 {low_f:.2f}~{high_f:.2f}），"
+            f"尝试不复权数据兜底校验..."
+        )
+        return await self._validate_with_unadjusted_api(
+            code6, normalized_market, buy_date_str, cost_price
+        )
+
+    async def _validate_with_unadjusted_api(
+        self, code6: str, market: str, buy_date_str: str, cost_price: float
+    ) -> Optional[Dict[str, Any]]:
+        """
+        通过 API 获取不复权数据进行兜底校验，并计算复权因子用于价格转换。
+
+        场景：用户输入的是不复权（实际成交价），而数据库存的是前复权数据。
+        例如：不复权成交价 14.11，前复权最高价 13.72（因分红/送股导致差异）。
+
+        Returns:
+            None — 不复权校验也失败，拒绝（由调用方抛出 ValueError）
+            Dict — 不复权校验通过，返回转换信息：
+                {"adjust_type": "none", "qfq_price": float, "adj_factor": float}
+        """
+        if market != "CN":
+            # 目前仅支持 A 股的不复权兜底校验
             raise ValueError(
-                f"成本价 {cost_price:.2f} 超出 {buy_date_str} 的波动范围（最低 {low_f:.2f}～最高 {high_f:.2f}），请检查输入是否正确。"
+                f"成本价 {cost_price:.2f} 无法通过校验，非 A 股市场暂不支持不复权兜底校验。"
             )
+
+        try:
+            from app.services.data_sources.manager import DataSourceManager
+            ds_manager = DataSourceManager()
+        except Exception as e:
+            logger.warning(f"无法初始化数据源管理器: {e}")
+            raise ValueError(
+                f"成本价 {cost_price:.2f} 无法通过校验，数据源服务不可用。"
+            )
+
+        # 获取不复权日线数据
+        unadj_ohlc, unadj_source = ds_manager.get_daily_ohlc_with_fallback(
+            code=code6, trade_date=buy_date_str, adj=None
+        )
+        if not unadj_ohlc:
+            raise ValueError(
+                f"成本价 {cost_price:.2f} 无法校验：数据库为前复权数据且 API 无法获取不复权数据。"
+                f"请检查买入日期是否为交易日，或暂不填写买入日期。"
+            )
+
+        unadj_high = unadj_ohlc.get("high")
+        unadj_low = unadj_ohlc.get("low")
+        if unadj_high is None or unadj_low is None:
+            raise ValueError(
+                f"成本价 {cost_price:.2f} 无法校验：API 返回的不复权数据缺少最高/最低价。"
+            )
+
+        try:
+            unadj_high_f = float(unadj_high)
+            unadj_low_f = float(unadj_low)
+        except (ValueError, TypeError):
+            raise ValueError(
+                f"成本价 {cost_price:.2f} 无法校验：API 返回的不复权数据格式异常。"
+            )
+
+        # 不复权校验
+        if cost_price < unadj_low_f or cost_price > unadj_high_f:
+            raise ValueError(
+                f"成本价 {cost_price:.2f} 超出 {buy_date_str} 的波动范围"
+                f"（不复权最低 {unadj_low_f:.2f}～最高 {unadj_high_f:.2f}），请检查输入是否正确。"
+            )
+
+        # ---- 不复权校验通过，计算复权因子 ----
+        # 获取同日的前复权数据，计算转换比例：前复权 / 不复权
+        qfq_ohlc, qfq_source = ds_manager.get_daily_ohlc_with_fallback(
+            code=code6, trade_date=buy_date_str, adj="qfq"
+        )
+        if not qfq_ohlc or qfq_ohlc.get("close") is None or unadj_ohlc.get("close") is None:
+            # 无法获取前复权数据，保留不复权价格，标注类型
+            logger.warning(
+                f"无法获取前复权数据进行转换，成本价 {cost_price:.2f} 将以不复权价格保存"
+            )
+            return {
+                "adjust_type": "none",
+                "qfq_price": None,  # 无法转换
+                "adj_factor": None,
+            }
+
+        # 复权因子 = 前复权收盘价 / 不复权收盘价
+        qfq_close = float(qfq_ohlc["close"])
+        unadj_close = float(unadj_ohlc["close"])
+
+        if unadj_close <= 0:
+            logger.warning(f"不复权收盘价异常（{unadj_close}），无法计算复权因子")
+            return {
+                "adjust_type": "none",
+                "qfq_price": None,
+                "adj_factor": None,
+            }
+
+        adj_factor = qfq_close / unadj_close
+        qfq_price = cost_price * adj_factor
+
+        logger.info(
+            f"✅ 成本价 {cost_price:.2f} 通过不复权校验（{buy_date_str}，范围 {unadj_low_f:.2f}~{unadj_high_f:.2f}），"
+            f"复权因子={adj_factor:.6f}，转为前复权价格={qfq_price:.2f}"
+        )
+
+        return {
+            "adjust_type": "none",  # 原始输入为不复权
+            "qfq_price": round(qfq_price, 4),
+            "adj_factor": round(adj_factor, 6),
+        }
 
     async def _get_stock_name(self, code: str, market: str) -> Optional[str]:
         """获取股票名称（含 ETF 回退）"""
