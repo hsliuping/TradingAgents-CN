@@ -55,6 +55,7 @@ class TaskStatistics(BaseModel):
 async def get_task_list(
     task_type: Optional[AnalysisTaskType] = Query(None, description="任务类型过滤"),
     status: Optional[AnalysisStatus] = Query(None, description="状态过滤"),
+    symbol: Optional[str] = Query(None, description="股票代码过滤（匹配 task_params 中的 symbol/code/stock_code）"),
     limit: Optional[int] = Query(None, description="返回数量（可选，不设置则返回所有）"),
     skip: int = Query(0, ge=0, description="跳过数量"),
     user: dict = Depends(get_current_user)
@@ -82,6 +83,7 @@ async def get_task_list(
             user_id=user_id,
             task_type=task_type,
             status=status,
+            symbol=symbol,
             limit=actual_limit,
             skip=skip
         )
