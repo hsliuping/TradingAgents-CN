@@ -19,6 +19,10 @@ export interface PositionItem {
   cost_price: number
   /** 原始买入均价（减仓不变，用于投资评估）；无则与 cost_price 相同 */
   original_avg_cost?: number | null
+  /** 原始成本价（不复权的实际成交价） */
+  original_cost_price?: number | null
+  /** 价格复权标注：null/undefined=前复权（默认），"none"=原始未复权 */
+  price_adjust_type?: string | null
   current_price?: number
   market_value?: number
   unrealized_pnl?: number

@@ -67,3 +67,58 @@ class DataSourceAdapter(ABC):
     def get_news(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True):
         """获取新闻/公告，返回 [{title, source, time, url, type}]，type in ['news','announcement']"""
         raise NotImplementedError
+
+    def get_daily_ohlc(self, code: str, trade_date: str, adj: Optional[str] = None) -> Optional[Dict]:
+        """
+        获取指定日期的日线 OHLC 数据（可选复权方式）。
+
+        Args:
+            code: 6位股票代码
+            trade_date: 交易日期，格式 YYYY-MM-DD 或 YYYYMMDD
+            adj: 复权方式，None=不复权，"qfq"=前复权，"hfq"=后复权
+
+        Returns:
+            {"date": str, "open": float, "high": float, "low": float, "close": float} 或 None
+        """
+        # 默认实现：通过 get_kline 获取数据，筛选目标日期
+        try:
+            # 标准化目标日期格式为 YYYY-MM-DD
+            target_date = trade_date.replace("-", "") if "-" in trade_date else trade_date
+            if len(target_date) == 8:
+                target_date = f"{target_date[:4]}-{target_date[4:6]}-{target_date[6:8]}"
+
+            # 根据目标日期与今天的距离，动态计算需要的 limit
+            # 每年约 250 个交易日，预留 20% 余量
+            from datetime import datetime
+            try:
+                target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+                days_diff = (datetime.now() - target_dt).days
+                # 至少 30 个交易日，最多 1500 个交易日（约6年）
+                limit = max(30, min(1500, int(days_diff * 250 / 365 * 1.2) + 30))
+            except (ValueError, TypeError):
+                limit = 120  # 默认
+
+            items = self.get_kline(code=code, period="day", limit=limit, adj=adj)
+            if not items:
+                return None
+
+            for item in items:
+                item_date = item.get("time", "")
+                # 标准化 item 日期格式
+                if len(item_date) == 8:
+                    item_date = f"{item_date[:4]}-{item_date[4:6]}-{item_date[6:8]}"
+                elif len(item_date) > 10:
+                    item_date = item_date[:10]  # 截取 YYYY-MM-DD
+
+                if item_date == target_date:
+                    return {
+                        "date": target_date,
+                        "open": item.get("open"),
+                        "high": item.get("high"),
+                        "low": item.get("low"),
+                        "close": item.get("close"),
+                    }
+
+            return None  # 目标日期不在返回数据中
+        except Exception:
+            return None
