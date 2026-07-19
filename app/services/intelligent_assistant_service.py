@@ -106,7 +106,7 @@ def _should_force_tool_retry(user_message: str) -> bool:
     personal_markers = ["我的", "我", "当前", "现在"]
     domain_markers = [
         "交易计划", "投资计划", "计划", "持仓", "仓位", "复盘", "报告", "分析任务", "任务状态",
-        "自选股", "定时分析", "提醒", "schedule", "watchlist", "position", "review", "plan",
+        "股票关注列表", "定时分析", "提醒", "schedule", "watchlist", "position", "review", "plan",
     ]
     query_markers = ["查看", "列出", "查询", "获取", "多少", "有没有", "是什么", "详情", "状态"]
 
@@ -321,7 +321,7 @@ def _build_profile_block(user_profile: Optional[dict]) -> str:
             lines.append(f"- 历史分析：{', '.join(prev)} 等共 {len(recently)} 条")
     watchlist = user_profile.get("watchlist_symbols") or []
     if watchlist:
-        lines.append(f"- 自选股：{', '.join(watchlist[:5])}（共 {len(watchlist)} 只）")
+        lines.append(f"- 股票关注列表：{', '.join(watchlist[:5])}（共 {len(watchlist)} 只）")
     pref = user_profile.get("preference") or {}
     if pref:
         parts = []
@@ -337,6 +337,111 @@ def _build_profile_block(user_profile: Optional[dict]) -> str:
     return "\n".join(lines) + "\n" if len(lines) > 1 else ""
 
 
+# ============================================================
+# 使用问答机器人专用系统提示词（v3.0 新增）
+# ============================================================
+
+USAGE_HELPER_SYSTEM_PROMPT_TEMPLATE = """你是 TradingAgents-CN 平台的**使用问答助手**。
+
+【你的职责】
+- 帮助用户理解和使用本系统
+- 回答系统功能、操作流程、配置等方面的问题
+- 当用户遇到具体问题时，**先调工具查真实状态，再回答**；不要凭记忆或 FAQ 猜答案
+
+【你可以使用的工具】
+1. `get_user_current_state` — 查询用户当前的关注列表股票数、历史任务数、最近任务、定时分析配置数
+2. `get_system_status` — 查询系统模式（标准版/京东云版）、当前默认大模型、数据源启用状态、版本号
+3. `get_user_recent_activity` — 查询用户最近的任务执行记录，包括失败任务的错误信息
+4. `read_user_manual_section` — 按章节名读取用户手册（支持"快速开始"、"安装部署"、"首次配置"、"基础功能"、"模拟交易"、"智能助手"、"License"、"数据源配置"、"定时分析"、"股票关注列表"等关键字）
+
+【使用规则】
+- 当用户问到"为什么 XXX 不显示""怎么没有 XXX 功能""XXX 怎么用"等问题时，**优先调用 get_user_current_state 和 get_system_status 看真实状态**
+- 当用户问到操作流程时，**优先调用 read_user_manual_section 查对应章节**
+- 当用户问到"我的任务去哪了""为什么报错"时，**优先调用 get_user_recent_activity 查最近记录**
+- 查到真实状态后再用一两句话直接回答用户问题，不要堆砌 FAQ 内容
+
+【回答风格】
+- 简洁直接，先给结论再给原因
+- 涉及操作步骤时用编号列表
+- 不要重复用户已知道的内容
+- 不要讲投资/股票分析理论（那是通用助手的职责，不是你的）
+
+【不能做的事】
+- 不调用金融市场数据工具（不查股价、财报、新闻）
+- 不进行股票分析、不调用分析师 Agent
+- 不聊投资策略、不讨论个股
+- 用户问到股票分析相关问题时，礼貌引导用户去"智能助手"页面（侧边栏"智能助手"菜单）
+
+【当前用户上下文】
+{user_context_block}
+
+【FAQ 速查表】
+当用户意图与下面 FAQ 匹配时，仍应优先调工具验证真实状态后再回答。
+{faq_block}
+"""
+
+FAQ_SNIPPETS = """Q: 系统支持哪些大模型?
+A: 火山方舟(豆包)、DeepSeek、智谱 GLM、OpenAI GPT、Claude 等，推荐国内用户用火山方舟或 DeepSeek。京东云版使用平台统一提供的 GLM 系列。
+Q: 数据源 Token 怎么获取?
+A: 标准版: Tushare 在 tushare.pro 注册账号，个人中心获取 Token。积分不足 2000 时系统会自动用免费 AKShare 替代。京东云版: 由平台统一配置 Tushare + AKShare。
+Q: 系统为什么分析很慢?
+A: 单股研究 5-20 分钟，深度越高越慢。批量分析并发受限于 LLM 速率和数据库连接数。京东云版强制单并发。
+Q: 系统支持 Python 几?
+A: Python 3.11.9，推荐用项目自带 env/ 虚拟环境。
+Q: 模拟交易怎么开通?
+A: 仪表板"模拟交易总资产"卡片点击即可跳转模拟交易页面(/paper)，首次进入会自动开通虚拟账户。
+Q: 股票关注列表怎么管理?
+A: 在股票筛选页搜索股票后点击"加入关注列表"，在"股票关注列表"菜单查看和管理。
+Q: 定时分析怎么配置?
+A: 在"定时分析"页面配置时间段、流程类型和分析目标，系统到点自动执行。
+Q: 报告在哪里看?
+A: 单股研究报告在"研究报告"菜单；通用研究在"任务中心"(/tasks/unified)。
+Q: License 怎么激活?
+A: 标准版: 个人设置 → 授权管理，输入 License 密钥。京东云版无需激活，全功能开放。
+Q: 引导流程卡住了怎么办?
+A: 可以跳过引导直接进仪表板，引导页有"进入仪表板"按钮。
+Q: 系统支持哪些市场?
+A: 当前仅支持 A 股市场，港股和美股功能已暂停。
+Q: 怎么重启后端?
+A: 用 start_dev.ps1 脚本(`.\\\\start_dev.ps1 backend 3.0`)，禁止手动 uvicorn。
+Q: 报告内容里有"<em>"这种字符怎么办?
+A: 已修复，强制刷新浏览器(Ctrl+F5)加载最新前端。
+Q: 今日任务/本周分析显示为 0?
+A: 已切换到新版 unified_analysis_tasks 集合，刷新浏览器即可恢复。如仍异常，调用 get_user_current_state 查真实任务数。
+"""
+
+
+def _format_user_context_block(user_context: dict) -> str:
+    """格式化前端传入的用户上下文为提示词段落"""
+    if not user_context:
+        return "- (未提供前端上下文)"
+    lines = []
+    if user_context.get("current_route"):
+        lines.append(f"- 当前所在页面: {user_context['current_route']}")
+    if user_context.get("is_jdyun_mode") is not None:
+        mode = "京东云版" if user_context.get("is_jdyun_mode") else "标准版"
+        lines.append(f"- 运行模式标记: {mode}")
+    if user_context.get("guide_completed") is not None:
+        guide = "已完成" if user_context.get("guide_completed") else "未完成"
+        lines.append(f"- 引导流程: {guide}")
+    errors = user_context.get("recent_console_errors") or []
+    if errors:
+        lines.append(f"- 浏览器最近的报错(最多 3 条):")
+        for err in errors[:3]:
+            err_text = str(err)[:200]
+            lines.append(f"    • {err_text}")
+    return "\n".join(lines) if lines else "- (前端未传递有效上下文)"
+
+
+def _build_usage_helper_prompt(user_context: dict) -> str:
+    """构建使用问答机器人专用系统提示词"""
+    user_context_block = _format_user_context_block(user_context or {})
+    return USAGE_HELPER_SYSTEM_PROMPT_TEMPLATE.format(
+        user_context_block=user_context_block,
+        faq_block=FAQ_SNIPPETS,
+    )
+
+
 def _get_system_prompt(
     knowledge_snippets: str = "",
     assistant_settings: dict = None,
@@ -344,6 +449,8 @@ def _get_system_prompt(
     user_profile: Optional[dict] = None,
     current_topic_title: Optional[str] = None,
     memory_block: str = "",
+    assistant_role: str = "general",
+    user_context: Optional[dict] = None,
 ) -> str:
     """生成包含当前日期的系统提示词
 
@@ -351,7 +458,13 @@ def _get_system_prompt(
         knowledge_snippets: RAG 检索到的动态知识片段（由 FinancialKnowledgeManager 提供）
         assistant_settings: 用户助理个性化设置 {"name", "tone", "custom_instructions"}
         is_im: 是否来自 IM 渠道（QQ Bot 等），为 True 时注入移动端格式规范
+        assistant_role: 助手角色，general=通用分析助理 / usage_helper=使用问答机器人
+        user_context: 前端上下文（仅 usage_helper 模式使用）
     """
+    # 使用问答机器人专用提示词：提前返回，不走通用分析助理流程
+    if assistant_role == "usage_helper":
+        return _build_usage_helper_prompt(user_context or {})
+
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
     trade_date = _get_latest_trade_date()
@@ -414,7 +527,7 @@ def _get_system_prompt(
     else:
         memory_directive = ""
 
-    return f"""你是 TradingAgents-CN 平台的**{assistant_name}（操作员）**，同时具备投资教练能力。你既能帮用户执行操作（触发分析、查报告、管理定时任务、管理自选股），也能教用户投资分析方法。
+    return f"""你是 TradingAgents-CN 平台的**{assistant_name}（操作员）**，同时具备投资教练能力。你既能帮用户执行操作（触发分析、查报告、管理定时任务、管理股票关注列表），也能教用户投资分析方法。
 
 {personalization_block}
 
@@ -427,8 +540,8 @@ def _get_system_prompt(
 - **即时分析**：发起一次新的分析任务（支持单只或批量），由多个 AI 智能体在后台协作数分钟生成完整报告
 - **进度查询**：查询已发起的分析任务执行状态（排队中/运行中/已完成/失败）
 - **报告查阅**：已生成的报告保存在数据库中，随时可读取、解读、搜索历史报告
-- **定时分析**：创建周期性自动分析计划（如每天早9点分析自选股），管理已有的定时分析配置（仅限分析任务，不支持闹钟等无关功能）
-- **股票关注列表管理**：查看股票关注列表（即自选股）、按标签理解用户关注池，并可添加/移除自选股或管理自选股分组
+- **定时分析**：创建周期性自动分析计划（如每天早9点分析股票关注列表），管理已有的定时分析配置（仅限分析任务，不支持闹钟等无关功能）
+- **股票关注列表管理**：查看股票关注列表（即股票关注列表）、按标签理解用户关注池，并可添加/移除股票关注列表或管理股票关注列表分组
 - **数据查询**：直接获取个股行情、财务报表（利润表/资产负债表/现金流）、技术指标（MACD/RSI/布林带等）、新闻资讯等原始数据
 - **单股数据同步**：按股票代码同步单只股票的历史行情和财务数据，必要时补充基础数据，便于后续查询或分析使用最新数据
 - **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含操作建议、目标价位、风险评估）
@@ -471,7 +584,7 @@ def _get_system_prompt(
 **可直接执行（轻量、明确、可重复）**：
 - 数据查询（行情、财务、新闻等）
 - 读取/搜索已有报告
-- 查看自选股列表、查看定时配置列表
+- 查看股票关注列表列表、查看定时配置列表
 - 查看持仓列表、查看持仓分析报告、发起新的持仓分析
 - 查看复盘历史、查看复盘报告详情、发起新的交易复盘
 - 查看投资计划列表、查看当前激活计划
@@ -485,14 +598,14 @@ def _get_system_prompt(
 - **删除/移除操作**：先告知用户将要做什么，得到确认后再执行
 - **复杂多步任务**：先向用户说明你的执行方案，用户确认后再逐步执行
 
-【股票关注列表 / 自选股 / 标签 / 定时分析配置（必须严格区分）】
-- “股票关注列表” 就是“自选股列表”，主数据来源是 `user_favorites`；每只股票可以带 `tags` 标签。
-- `watchlist_groups` 是可选的“自选股分组/组织方式”，不是股票关注列表本体。
+【股票关注列表 / 股票关注列表 / 标签 / 定时分析配置（必须严格区分）】
+- “股票关注列表” 就是“股票关注列表列表”，主数据来源是 `user_favorites`；每只股票可以带 `tags` 标签。
+- `watchlist_groups` 是可选的“股票关注列表分组/组织方式”，不是股票关注列表本体。
 - `scheduled_analysis_configs` 才表示“哪些分组会在什么时间被自动分析”。
-- 用户问“我关注列表里有哪些股票 / 股票关注列表 / 自选股 / 我关注了哪些股票”时，应优先查看股票关注列表（自选股）本身；如果用户提到某个标签，再按标签筛选。
-- 用户问“分组里有哪些股票”时，再查看自选股分组。
+- 用户问“我关注列表里有哪些股票 / 股票关注列表 / 股票关注列表 / 我关注了哪些股票”时，应优先查看股票关注列表（股票关注列表）本身；如果用户提到某个标签，再按标签筛选。
+- 用户问“分组里有哪些股票”时，再查看股票关注列表分组。
 - 用户问“哪些股票会被自动分析 / 定时分析列表 / 自动分析计划 / 定时任务”时，才去查看定时分析配置。
-- 除非工具结果明确显示某个自选股分组已被配置到定时分析中，否则不要擅自把“已关注/已加入自选股”解释成“会自动定时分析”。
+- 除非工具结果明确显示某个股票关注列表分组已被配置到定时分析中，否则不要擅自把“已关注/已加入股票关注列表”解释成“会自动定时分析”。
 
 【教练能力 —— 保留原有教学风格】
 - 教方法，不给答案：带用户走分析流程，而非直接下结论
@@ -533,7 +646,7 @@ def _get_system_prompt(
 - 所有需要 curr_date 或 trade_date 的工具，**必须**传入上述日期
 - 对“截至目前”“最新”“近期是否有变化”“请确认最新口径”“最新公告/持股比例/减持进展”这类问题，优先调用“近期信息搜索”或相关新闻工具，先检索近期公开信息，再回答
 - **板块/行业类问题**优先使用板块级别工具，无需股票代码
-- **操作类请求**（分析、报告、定时、自选股）优先使用 assistant_ops 类工具
+- **操作类请求**（分析、报告、定时、股票关注列表）优先使用 assistant_ops 类工具
 - 如果系统里已经存在合适的完整 Agent，优先考虑直接调用 Agent 完成任务；只有在没有合适 Agent 时，再退回到底层工具组合
 - 对“分析某只股票”“看看持仓”“查一下报告”这类零星查询，直接完成查询或分析，不要为了记录上下文而新建研究主题
 - 对股票筛选/智能筛选类请求，如果筛选工具返回“未找到符合条件的股票”或明确空结果，必须直接告诉用户当前没有符合其条件的标的。
@@ -981,6 +1094,8 @@ class IntelligentAssistantService:
         preferred_models: Optional[Dict[str, Any]] = None,
         prefer_reasoning_model: bool = False,
         user_id: str = "",
+        assistant_role: str = "general",
+        user_context: Optional[dict] = None,
     ):
         self._db = db
         self._llm_client: Optional[UnifiedLLMClient] = None
@@ -990,6 +1105,9 @@ class IntelligentAssistantService:
         self._preferred_model_config_id = _get_preferred_assistant_config_id(preferred_models)
         self._prefer_reasoning_model = prefer_reasoning_model
         self._user_id = user_id  # 用于构造带 user_id 闭包的元工具（如 remember_this）
+        # v3.0 新增：使用问答机器人角色相关字段
+        self._assistant_role = assistant_role or "general"
+        self._user_context = user_context or {}
 
     async def _ensure_client(self) -> bool:
         """确保 LLM 客户端和工具已加载"""
@@ -1015,6 +1133,19 @@ class IntelligentAssistantService:
 
         registry = get_tool_registry()
         all_metadata = registry.list_all()
+
+        # v3.0 新增：使用问答机器人只注册 4 个系统感知工具
+        # 不加载金融市场数据工具、不加载分析师 Agent 工具
+        if self._assistant_role == "usage_helper":
+            allowed_tool_ids = {
+                "get_user_current_state",
+                "get_system_status",
+                "get_user_recent_activity",
+                "read_user_manual_section",
+            }
+            all_metadata = [t for t in all_metadata if t.id in allowed_tool_ids]
+            logger.info(f"[智能助手·使用问答] 仅加载 {len(all_metadata)} 个系统感知工具（已过滤金融市场工具）")
+
         self._openai_tools = tool_metadata_list_to_openai(all_metadata)
 
         self._tool_functions = {}
@@ -1027,7 +1158,8 @@ class IntelligentAssistantService:
 
         # 注入 `remember_this` 元工具：允许用户主动让助手记住偏好
         # 参考：docs/05-design/v3.0/unified-memory-layer-mem0.md §15.5 P0-1
-        if self._user_id:
+        # 使用问答机器人不注入 remember_this（避免污染用户长期记忆）
+        if self._user_id and self._assistant_role != "usage_helper":
             self._openai_tools.append(_build_remember_this_tool_def())
             self._tool_functions[REMEMBER_THIS_TOOL_NAME] = _make_remember_this_callable(
                 self._db, self._user_id,
@@ -1124,6 +1256,8 @@ class IntelligentAssistantService:
                     user_profile=user_profile,
                     current_topic_title=current_topic_title,
                     memory_block=memory_block,
+                    assistant_role=self._assistant_role,
+                    user_context=self._user_context,
                 ),
             ),
         ]
@@ -1301,6 +1435,8 @@ class IntelligentAssistantService:
                     is_im=is_im, user_profile=user_profile,
                     current_topic_title=current_topic_title,
                     memory_block=memory_block,
+                    assistant_role=self._assistant_role,
+                    user_context=self._user_context,
                 ),
             ),
         ]
@@ -2956,11 +3092,15 @@ async def chat_with_assistant(
     quick_model_config_id: Optional[str] = None,
     deep_model: Optional[str] = None,
     deep_model_config_id: Optional[str] = None,
+    assistant_role: str = "general",
+    user_context: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """
     便捷函数：使用智能助手进行对话
     user_id: 用于持久化会话；若提供则对话会后保存
     is_im: 是否来自 IM 渠道（QQ Bot 等），为 True 时注入移动端格式规范
+    assistant_role: 助手角色 general=通用分析助理 / usage_helper=使用问答机器人
+    user_context: 前端上下文（仅 usage_helper 模式使用）
     """
     # 设置用户上下文，供 assistant_ops 工具获取当前用户
     if user_id:
@@ -3035,6 +3175,8 @@ async def chat_with_assistant(
             deep_model_config_id=deep_model_config_id,
         ),
         user_id=user_id or "",
+        assistant_role=assistant_role,
+        user_context=user_context,
     )
     result = await service.chat(
         user_message,
@@ -3079,9 +3221,13 @@ async def stream_chat_with_assistant(
     quick_model_config_id: Optional[str] = None,
     deep_model: Optional[str] = None,
     deep_model_config_id: Optional[str] = None,
+    assistant_role: str = "general",
+    user_context: Optional[dict] = None,
 ) -> AsyncGenerator[str, None]:
     """
     流式便捷函数：使用智能助手进行流式对话，返回 SSE 事件字符串的 async generator。
+    assistant_role: 助手角色 general=通用分析助理 / usage_helper=使用问答机器人
+    user_context: 前端上下文（仅 usage_helper 模式使用）
     """
     def _sse(event: str, data: dict) -> str:
         return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -3150,6 +3296,8 @@ async def stream_chat_with_assistant(
             deep_model_config_id=deep_model_config_id,
         ),
         user_id=user_id or "",
+        assistant_role=assistant_role,
+        user_context=user_context,
     )
 
     collected_reply = ""

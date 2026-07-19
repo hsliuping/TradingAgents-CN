@@ -4,11 +4,22 @@
 
 import { ApiClient, request } from './request'
 
+export interface UserContext {
+  current_route?: string
+  is_jdyun_mode?: boolean
+  guide_completed?: boolean
+  recent_console_errors?: string[]
+}
+
 export interface ChatRequest {
   message: string
   conversation_id?: string
   model?: string
   model_config_id?: string
+  /** 助手角色：general=通用分析助理（默认）/ usage_helper=使用问答机器人 */
+  assistant_role?: 'general' | 'usage_helper'
+  /** 前端上下文（仅 usage_helper 模式使用） */
+  user_context?: UserContext
 }
 
 export interface ChatResponse {
@@ -409,13 +420,16 @@ export const assistantApi = {
     return res as unknown as PlannedAnalysisResponse
   },
 
-  /** 流式对话（SSE）— 快速对话模式使用 */
+  /** 流式对话（SSE）— 快速对话模式使用
+   * extraPayload: 可选的额外请求字段，用于 usage_helper 模式传 assistant_role 和 user_context
+   */
   chatStream(
     message: string,
     conversationId?: string,
     model?: string,
     modelConfigId?: string,
     callbacks?: StreamCallbacks,
+    extraPayload?: Partial<ChatRequest>,
   ): AbortController {
     return createAssistantStream(
       '/api/assistant/chat/stream',
@@ -424,6 +438,7 @@ export const assistantApi = {
         conversation_id: conversationId,
         model,
         model_config_id: modelConfigId,
+        ...extraPayload,
       },
       callbacks,
     )

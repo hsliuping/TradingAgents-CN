@@ -297,6 +297,8 @@ async def assistant_chat(
             conversation_id=request.conversation_id,
             model=deep_model or quick_model,
             model_config_id=deep_model_config_id or quick_model_config_id,
+            assistant_role=request.assistant_role,
+            user_context=request.user_context,
         )
         return ChatResponse(**result)
     except Exception as e:
@@ -333,6 +335,8 @@ async def assistant_chat_stream(
             conversation_id=request.conversation_id,
             model=deep_model or quick_model,
             model_config_id=deep_model_config_id or quick_model_config_id,
+            assistant_role=request.assistant_role,
+            user_context=request.user_context,
         )
         try:
             while True:
