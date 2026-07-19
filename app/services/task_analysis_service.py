@@ -550,6 +550,7 @@ class TaskAnalysisService:
         user_id: PyObjectId,
         task_type: Optional[AnalysisTaskType] = None,
         status: Optional[AnalysisStatus] = None,
+        symbol: Optional[str] = None,
         limit: int = 999999,
         skip: int = 0
     ) -> List[UnifiedAnalysisTask]:
@@ -559,6 +560,7 @@ class TaskAnalysisService:
             user_id: 用户ID
             task_type: 任务类型过滤（可选）
             status: 状态过滤（可选）
+            symbol: 股票代码过滤（可选，匹配 task_params 中的 symbol/code/stock_code）
             limit: 返回数量限制（默认返回所有）
             skip: 跳过数量
 
@@ -566,15 +568,31 @@ class TaskAnalysisService:
             任务列表
         """
         self.logger.info(f"📋 查询用户任务列表 - user_id: {user_id} (类型: {type(user_id)})")
-        self.logger.info(f"📋 查询条件 - task_type: {task_type}, status: {status}, limit: {limit}, skip: {skip}")
+        self.logger.info(f"📋 查询条件 - task_type: {task_type}, status: {status}, symbol: {symbol}, limit: {limit}, skip: {skip}")
 
-        query = {"user_id": user_id}
+        query: Dict[str, Any] = {"user_id": user_id}
 
         if task_type:
             query["task_type"] = task_type
 
         if status:
             query["status"] = status
+
+        if symbol:
+            # 匹配 task_params 中的 symbol / code / stock_code
+            symbol_upper = symbol.upper()
+            symbol_lower = symbol.lower()
+            query["$or"] = [
+                {"task_params.symbol": symbol},
+                {"task_params.symbol": symbol_upper},
+                {"task_params.symbol": symbol_lower},
+                {"task_params.code": symbol},
+                {"task_params.code": symbol_upper},
+                {"task_params.code": symbol_lower},
+                {"task_params.stock_code": symbol},
+                {"task_params.stock_code": symbol_upper},
+                {"task_params.stock_code": symbol_lower},
+            ]
 
         self.logger.info(f"📋 MongoDB查询: {query}")
 

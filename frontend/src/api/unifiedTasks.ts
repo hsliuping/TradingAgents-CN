@@ -110,6 +110,7 @@ export interface TaskStatistics {
 export interface TaskListParams {
   task_type?: TaskType
   status?: TaskStatus
+  symbol?: string
   limit?: number
   skip?: number
 }
