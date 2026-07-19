@@ -2,6 +2,9 @@
 # nginx 服务 - 反向代理 + 静态资源服务
 
 # nginx 默认以 master 进程 fork worker，需要用 daemon off 模式
+# 🔐 安全：通过 gosu 降权到 appuser 运行整个 nginx 进程（含 master 和 worker）
+#    避免 master 进程以 root 运行，符合"容器非 root 运行"安全要求
+#    nginx 监听 8082 端口（>1024），非 root 用户也能监听
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [nginx] $1" | tee -a /var/log/nginx/service.log
@@ -9,8 +12,11 @@ log() {
 
 log "🚀 启动 Nginx（监听 ${NGINX_PORT:-8082}）..."
 
-# 测试配置
-nginx -t 2>&1 | tee -a /var/log/nginx/service.log
+# 测试配置（以 appuser 身份，确保配置无语法错误）
+if ! gosu appuser nginx -t 2>&1 | tee -a /var/log/nginx/service.log; then
+    log "❌ Nginx 配置测试失败，终止启动"
+    exit 1
+fi
 
-# 启动（前台运行）
-exec nginx -g "daemon off; error_log /var/log/nginx/error.log warn;"
+# 启动（前台运行，以 appuser 身份）
+exec gosu appuser nginx -g "daemon off; error_log /var/log/nginx/error.log warn;"
