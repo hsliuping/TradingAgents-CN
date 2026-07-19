@@ -3,7 +3,7 @@
 ## 📋 功能概述
 
 **定时分析配置** 是 TradingAgents-CN Pro 的专业版功能，允许用户配置多个时间段的自动分析任务，每个时间段可以：
-- ✅ 选择不同的自选股分组
+- ✅ 选择不同的股票关注列表分组
 - ✅ 配置不同的分析深度
 - ✅ 使用不同的 LLM 模型
 - ✅ 自定义 CRON 表达式
@@ -18,7 +18,7 @@
 - 可单独启用/禁用某个时间段
 
 ### 2. 分组支持
-- 每个时间段可选择多个自选股分组
+- 每个时间段可选择多个股票关注列表分组
 - 支持不同时段分析不同的股票组合
 - 自动批量分析分组内的所有股票
 
@@ -151,7 +151,7 @@ POST /api/scheduled-analysis/configs/{config_id}/disable
 
 **执行逻辑**: `app/worker/watchlist_analysis_task.py`
 - `run_scheduled_analysis_slot()` - 执行定时分析时间段任务
-- `analyze_user_watchlist_batch()` - 批量分析自选股
+- `analyze_user_watchlist_batch()` - 批量分析股票关注列表
 
 **调度器**: `app/services/scheduler_service.py`
 - APScheduler 集成

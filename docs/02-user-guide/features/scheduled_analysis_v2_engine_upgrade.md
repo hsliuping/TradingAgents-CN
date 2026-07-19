@@ -168,7 +168,7 @@ async def run_single_analysis(tid: str, code: str):
 ### 受影响的功能
 
 1. ✅ 定时分析配置
-2. ✅ 自选股分组分析
+2. ✅ 股票关注列表分组分析
 3. ✅ 测试执行功能
 
 ### 不受影响的功能

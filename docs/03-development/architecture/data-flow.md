@@ -77,7 +77,7 @@ sequenceDiagram
 
 ## 2. 定时跟踪与通知流
 
-这条链路覆盖定时分析、自选股跟踪、分析完成后通知、IM 推送等能力。
+这条链路覆盖定时分析、股票关注列表跟踪、分析完成后通知、IM 推送等能力。
 
 ```mermaid
 sequenceDiagram
@@ -91,7 +91,7 @@ sequenceDiagram
     participant FE as 前端
 
     SCH->>JOB: 按 cron / interval 触发
-    JOB->>MG: 读取用户配置、自选股、账号映射
+    JOB->>MG: 读取用户配置、股票关注列表、账号映射
     JOB->>WF: 执行分析或数据检查
     WF->>MG: 写入任务结果、摘要、状态
     JOB->>NS: 生成站内通知

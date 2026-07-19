@@ -58,7 +58,7 @@ flowchart TB
 | 认证与用户 | `auth_db.py` | 登录、会话、认证相关 |
 | 分析与任务 | `analysis.py`、`queue.py`、`unified_tasks.py` | 单股/批量分析、任务查询、任务中心 |
 | 筛选与股票 | `screening.py`、`intelligent_screening.py`、`stocks.py`、`stock_data.py` | 股票筛选、自然语言筛选、股票详情、股票数据查询 |
-| 自选股与跟踪 | `favorites.py`、`watchlist_groups.py`、`scheduled_analysis.py` | 自选股、分组、定时跟踪配置 |
+| 股票关注列表与跟踪 | `favorites.py`、`watchlist_groups.py`、`scheduled_analysis.py` | 股票关注列表、分组、定时跟踪配置 |
 | 通知与消息 | `notifications.py`、`websocket_notifications.py`、`sse.py`、`internal_messages.py` | 站内通知、实时推送、内部消息 |
 | 交易闭环 | `portfolio.py`、`review.py`、`trading_system.py`、`paper.py` | 持仓、复盘、交易计划、模拟交易 |
 | 配置与运维 | `config.py`、`system_config.py`、`database.py`、`cache.py`、`logs.py`、`operation_logs.py` | 系统配置、数据库、缓存、日志、操作记录 |
@@ -89,7 +89,7 @@ flowchart TB
 | 通知与渠道 | `notifications_service.py`、`channel_notifier.py`、`websocket_manager.py`、`email_service.py` | 通知落库、站内推送、外部消息发送 |
 | 配置与治理 | `config_service.py`、`config_provider.py`、`model_capability_service.py`、`prompt_template_service.py`、`template_history_service.py` | 配置加载、模型能力、提示词模板治理 |
 | 股票与数据查询 | `stock_data_service.py`、`quotes_service.py`、`historical_data_service.py`、`financial_data_service.py`、`news_data_service.py` | 对股票、行情、财务、新闻等读写查询做统一封装 |
-| 业务闭环 | `portfolio_service.py`、`trade_review_service.py`、`trading_system_service.py`、`favorites_service.py` | 持仓、复盘、交易计划、自选股等业务域 |
+| 业务闭环 | `portfolio_service.py`、`trade_review_service.py`、`trading_system_service.py`、`favorites_service.py` | 持仓、复盘、交易计划、股票关注列表等业务域 |
 | 筛选与指标 | `screening_service.py`、`intelligent_screening_service.py`、`technical_indicator_materialization_service.py` | 筛选、自然语言选股、技术指标物化 |
 | 基础资料同步 | `basics_sync_service.py`、`multi_source_basics_sync_service.py`、`official_industry_service.py` | 基础信息同步与标准化 |
 
@@ -114,7 +114,7 @@ flowchart TB
 | 数据源同步 | `tushare_sync_service.py`、`akshare_sync_service.py`、`baostock_sync_service.py`、`us_sync_service.py`、`hk_sync_service.py` | 不同市场与数据源的同步实现 |
 | 初始化任务 | `tushare_init_service.py`、`akshare_init_service.py`、`baostock_init_service.py` | 初次建库和初始化拉取 |
 | 历史与多周期 | `unified_historical_sync_service.py`、`multi_period_sync_service.py` | 历史行情、多周期数据处理 |
-| 专项任务 | `watchlist_analysis_task.py`、`favorites_sync_task.py`、`news_data_sync_service.py` | 自选股跟踪、新闻同步等专项任务 |
+| 专项任务 | `watchlist_analysis_task.py`、`favorites_sync_task.py`、`news_data_sync_service.py` | 股票关注列表跟踪、新闻同步等专项任务 |
 | 分析 worker | `analysis_worker.py`、`worker_app.py`、`__main__.py` | 独立后台任务执行器与启动入口 |
 
 ### 当前 worker 运行模式

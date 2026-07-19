@@ -732,7 +732,7 @@ if (!dateStr.includes('Z') && !dateStr.includes('+') && !dateStr.includes('-')) 
 #### 8.3 历史数据覆盖实时数据
 
 **提交记录**：
-- `c0f185e` - fix: 修复历史数据覆盖实时数据的问题，优化自选股同步策略
+- `c0f185e` - fix: 修复历史数据覆盖实时数据的问题，优化股票关注列表同步策略
 - `440ae8f` - fix: 优化单个股票同步逻辑，避免历史数据覆盖实时行情
 
 **问题描述**：
@@ -1126,7 +1126,7 @@ docker-compose -f docker-compose.hub.nginx.yml ps
 use tradingagents
 print('股票日线数据:', db.stock_daily_quotes.countDocuments())
 print('股票基本信息:', db.stock_basic_info.countDocuments())
-print('自选股:', db.user_favorites.countDocuments())
+print('股票关注列表:', db.user_favorites.countDocuments())
 "
 ```
 
@@ -1137,7 +1137,7 @@ docker exec tradingagents-mongodb mongosh \
     tradingagents --eval "
 print('股票日线数据:', db.stock_daily_quotes.countDocuments());
 print('股票基本信息:', db.stock_basic_info.countDocuments());
-print('自选股:', db.user_favorites.countDocuments());
+print('股票关注列表:', db.user_favorites.countDocuments());
 "
 ```
 
@@ -1166,7 +1166,7 @@ docker-compose -f docker-compose.hub.nginx.yml logs backend | grep "技术指标
 #### 4. 功能测试
 
 - ✅ 股票搜索
-- ✅ 自选股管理
+- ✅ 股票关注列表管理
 - ✅ 市场分析
 - ✅ 基本面分析
 - ✅ 新闻分析

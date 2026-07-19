@@ -294,11 +294,11 @@ if "risk_debate_state" in result:
 
 ---
 
-### 6. 自选股功能修复
+### 6. 股票关注列表功能修复
 
 #### 问题描述
 
-**提交**: `700d923` - fix: 强制使用 user_favorites 集合存储自选股
+**提交**: `700d923` - fix: 强制使用 user_favorites 集合存储股票关注列表
 
 添加到研究列表时返回 500 错误。
 
@@ -311,7 +311,7 @@ if "risk_debate_state" in result:
 
 #### 解决方案
 
-强制使用 `user_favorites` 集合存储自选股：
+强制使用 `user_favorites` 集合存储股票关注列表：
 ```python
 def _is_valid_object_id(self, user_id: str) -> bool:
     """检查 user_id 是否是有效的 ObjectId 格式"""
@@ -459,7 +459,7 @@ def _sanitize_document(self, doc: dict) -> dict:
 
 ### 功能分类
 - **新功能**: 6 项（302.ai 接入、脱敏导出、Token 自动刷新等）
-- **Bug 修复**: 15 项（URL 拼接、WebSocket 连接、自选股等）
+- **Bug 修复**: 15 项（URL 拼接、WebSocket 连接、股票关注列表等）
 - **UI 优化**: 7 项（深色主题、页面头部、按钮对比度等）
 
 ### 代码变更

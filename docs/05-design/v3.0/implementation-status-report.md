@@ -15,7 +15,7 @@
 | 分析触发 3 工具 | implementation-plan §1.3.2 | ✅ 已实现 | `core/tools/implementations/assistant_ops/analysis_trigger.py`：`trigger_stock_analysis`、`trigger_batch_analysis`、`get_analysis_status` |
 | 报告查询 3 工具 | implementation-plan §1.3.3 | ✅ 已实现 | `core/tools/implementations/assistant_ops/report_query.py`：`search_reports`、`get_report_detail`、`get_latest_report` |
 | 定时任务 3 工具 | implementation-plan §1.3.4 | ✅ 已实现 | `core/tools/implementations/assistant_ops/schedule_manager.py`：`list_scheduled_configs`、`create_scheduled_analysis`、`toggle_scheduled_config` |
-| 自选股 3 工具 | implementation-plan §1.3.5 | ✅ 已实现 | `core/tools/implementations/assistant_ops/watchlist_manager.py`：`list_watchlist_groups`、`add_stock_to_watchlist`、`remove_stock_from_watchlist` |
+| 股票关注列表 3 工具 | implementation-plan §1.3.5 | ✅ 已实现 | `core/tools/implementations/assistant_ops/watchlist_manager.py`：`list_watchlist_groups`、`add_stock_to_watchlist`、`remove_stock_from_watchlist` |
 | 用户上下文 contextvars | implementation-plan §1.3.6 | ✅ 已实现 | `core/tools/context.py`：`set_current_user_id`、`get_current_user_id`、`require_current_user_id`；chat 入口设置见 `intelligent_assistant_service.chat` 与 `chat_with_assistant()` |
 | 系统提示词「操作员」模式 | implementation-plan §1.3.7 | ✅ 已实现 | `app/services/intelligent_assistant_service.py`：`_get_system_prompt()` 含操作能力与确认原则 |
 | 持仓分析 2 工具（v3.0） | intelligent-assistant §3.2 | ✅ 已实现 | `core/tools/implementations/assistant_ops/position_analysis.py`：`list_positions`、`get_position_analysis` |
@@ -208,7 +208,7 @@
 | ETF 提示词模板 | beijing-exchange-etf-support §2.5.5 | ✅ 已实现 | `app/services/etf_workflow_prompt_template_service.py`：ETF 工作流专属提示词模板补齐，覆盖 etf_analyst_v2、market_analyst_v2、news_analyst_v2、research_manager_v2、trader_v2、safe_analyst_v2、risk_manager_v2 |
 | ETF 前端入口 | beijing-exchange-etf-support §2.6.1 | ✅ 已实现 | `frontend/src/views/Analysis/SingleAnalysis.vue`：市场选择器已有「ETF 基金」选项，输入 ETF 代码自动识别并切换，ETF 固定分析师（etf/market/news），报告 Tab 支持 ETF 展示 |
 | ETF 报告展示 | beijing-exchange-etf-support §2.6.1 | ✅ 已实现 | `frontend/src/views/Reports/ReportDetail.vue`：`etf_analyst`/`etf_analyst_v2` 映射为「ETF 分析师」，`isEtfAnalysis` 判断逻辑，ETF 报告页显示”ETF代码” |
-| ETF 定时分析/自选股 | beijing-exchange-etf-support §2.6.2 | ✅ 已实现 | `app/worker/watchlist_analysis_task.py`：`identify_security_type()` 识别 ETF → `ETF_ANALYSIS`；`app/services/thread_worker.py`：任务重建时 ETF 自动推断 |
+| ETF 定时分析/股票关注列表 | beijing-exchange-etf-support §2.6.2 | ✅ 已实现 | `app/worker/watchlist_analysis_task.py`：`identify_security_type()` 识别 ETF → `ETF_ANALYSIS`；`app/services/thread_worker.py`：任务重建时 ETF 自动推断 |
 | UnifiedStockService ETF 映射 | beijing-exchange-etf-support §2.4.4 | ✅ 已实现 | `app/services/unified_stock_service.py`：`collection_map[“ETF”]` 已配置 `etf_basic_info` / `etf_daily_quotes` |
 | ETF 行情/基本面/K线 API | beijing-exchange-etf-support §2.4.4 | ✅ 已实现 | `app/routers/stocks.py`：`/api/stocks/{code}/quote`、`/fundamentals`、`/kline` 均支持 ETF 代码，查询 `etf_basic_info` / `etf_daily_quotes` |
 | 模拟交易 ETF 支持 | — | ✅ 已实现 | `app/routers/paper.py`：ETF 下单、持仓、价格查询均支持 ETF 代码 |
@@ -216,7 +216,7 @@
 | `local_data` ETF 支持 | beijing-exchange-etf-support §2.2 | ❌ 未实现 | `core/tools/external/local_data.py`：尚未增加 `get_etf_basic_info`、`get_etf_daily_quotes` 等 ETF 函数 |
 | 北交所 ETF | beijing-exchange-etf-support §2.1 | ⚠️ 部分 | Tushare `exchange` 需扩展 `BSE`，`symbol_utils` 需增加 `.BJ` 支持 |
 
-**小结**: ETF 已从”基础工作流雏形”升级为完整的产品能力：独立存储、同步服务、分析工具、ETF 分析师、提示词模板、前端入口、报告展示、定时分析/自选股集成、行情/K 线/基本面 API 均已实现。当前仅 `local_data.py` ETF 函数和北交所 ETF 适配尚未完成。
+**小结**: ETF 已从”基础工作流雏形”升级为完整的产品能力：独立存储、同步服务、分析工具、ETF 分析师、提示词模板、前端入口、报告展示、定时分析/股票关注列表集成、行情/K 线/基本面 API 均已实现。当前仅 `local_data.py` ETF 函数和北交所 ETF 适配尚未完成。
 
 ---
 
@@ -233,7 +233,7 @@
 | Agent 工坊 | 规格澄清、能力快照、缺口分析、tooling plan、版本构建、Prompt 审阅、调试、评估、迭代、发布 | ✅ 已实现 | 发布审批、灰度策略、生产反馈回流尚未完成 |
 | Skill 生成系统 | 需求分析→代码→验证→沙箱→评估→迭代→入库 | ✅ 已实现 | — |
 | 数据架构 | 存储与降级链 | ✅ 已实现 | MCP 数据源类与审计扩展为部分/规划 |
-| QMT 与 ETF | QMT 配置桥接、5 类同步任务、历史/财务入库、QMT 分析模式、ETF 数据同步、ETF 工作流、ETF 工具、ETF 分析师、ETF 提示词模板、ETF 前端入口、ETF 报告展示、ETF 定时分析/自选股集成、ETF 行情/基本面/K线 API | ✅ 已实现 | 仅 `local_data.py` ETF 函数和北交所 ETF 适配尚未完成 |
+| QMT 与 ETF | QMT 配置桥接、5 类同步任务、历史/财务入库、QMT 分析模式、ETF 数据同步、ETF 工作流、ETF 工具、ETF 分析师、ETF 提示词模板、ETF 前端入口、ETF 报告展示、ETF 定时分析/股票关注列表集成、ETF 行情/基本面/K线 API | ✅ 已实现 | 仅 `local_data.py` ETF 函数和北交所 ETF 适配尚未完成 |
 | 分层提示词 | 行业画像注入（简化方案），37 个行业配置，运行时自动注入 | ✅ 已实现 | 原五层方案已简化，Prompt 预览/策略管理/设计助手已实现但未接入运行时 |
 
 **总体结论**：v3.0 设计中的**分析助理升级、MCP Server 六工具与认证、Gateway 框架与 QQ、通知、AI 工作流架构师、Agent 工坊、Skill 生成、QMT 数据同步/分析模式、ETF 全链路能力、北交所支持、行业画像注入**均已在代码中实现；**Agent 工坊当前主要缺口在审批、灰度和生产反馈闭环**；**飞书/钉钉适配器**仍属后续扩展；**MCP 数据源/审计的完整落地**可按文档后续补全。

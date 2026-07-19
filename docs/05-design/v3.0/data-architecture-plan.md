@@ -56,7 +56,7 @@
 | **用户** | `users` | ~10 | 用户账户 |
 | | `user_favorites` | ~50 | 用户收藏 |
 | | `user_tags` | ~20 | 用户标签 |
-| | `watchlist_groups` | ~10 | 自选股分组 |
+| | `watchlist_groups` | ~10 | 股票关注列表分组 |
 | **调度** | `scheduled_analysis_configs` | ~10 | 定时分析配置 |
 | | `scheduler_metadata` | ~5 | 调度器元数据 |
 

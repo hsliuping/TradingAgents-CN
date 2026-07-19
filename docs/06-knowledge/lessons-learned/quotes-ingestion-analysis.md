@@ -339,7 +339,7 @@ export const stocksApi = {
 }
 ```
 
-### 2. 自选股列表行情
+### 2. 股票关注列表列表行情
 
 **API 接口**：`GET /api/favorites`
 
@@ -549,7 +549,7 @@ db.market_quotes.createIndex({ "updated_at": 1 })
 
 **使用场景**：
 - 前端股票行情展示
-- 自选股列表行情
+- 股票关注列表列表行情
 - AI 分析报告
 - 实时行情 API
 

@@ -70,7 +70,7 @@ TradingAgents-CN Pro 使用 MongoDB 作为主数据库，共有 **70+ 个集合*
 | `user_sessions` | 用户会话 | `session_id`, `user_id`, `expires_at` |
 | `user_favorites` | 用户收藏 | `user_id`, `symbol`, `created_at` |
 | `user_tags` | 用户标签 | `user_id`, `tag_name`, `symbols[]` |
-| `watchlist_groups` | 自选股分组 | `user_id`, `group_name`, `symbols[]` |
+| `watchlist_groups` | 股票关注列表分组 | `user_id`, `group_name`, `symbols[]` |
 
 ### 4. 股票数据集合
 
@@ -214,7 +214,7 @@ db.market_quotes.createIndex({ "updated_at": -1 })
 
 **使用场景**:
 - ✅ 股票列表页面（显示最新价格）
-- ✅ 自选股监控（实时涨跌）
+- ✅ 股票关注列表监控（实时涨跌）
 - ✅ 股票详情页快照（当前价格）
 - ✅ 实时排行榜（涨幅榜、跌幅榜）
 - ✅ 交易决策（当前价格判断）
@@ -300,7 +300,7 @@ db.stock_daily_quotes.createIndex({ "trade_date": -1 })
 | **主键字段** | `code` (唯一) | `symbol` + `trade_date` + `data_source` + `period` |
 | **数据量** | ~5000条 | 数百万条 |
 | **数据时效性** | 最新（延迟<1分钟） | 历史（T+1） |
-| **典型用例** | 股票列表、自选股、实时监控 | K线图、技术分析、回测 |
+| **典型用例** | 股票列表、股票关注列表、实时监控 | K线图、技术分析、回测 |
 
 **记忆口诀**:
 - **market_quotes** = **Market** (市场) + **Quotes** (报价) = **实时行情**
