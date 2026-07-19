@@ -16,6 +16,9 @@ class ChatRequest(BaseModel):
     deep_model: Optional[str] = Field(None, description="兼容旧版：深度分析模式使用的模型")
     quick_model_config_id: Optional[str] = Field(None, description="兼容旧版：快速对话模式模型配置 ID")
     deep_model_config_id: Optional[str] = Field(None, description="兼容旧版：深度分析模式模型配置 ID")
+    # 使用问答机器人字段（v3.0 新增）
+    assistant_role: str = Field("general", description="助手角色：general=通用分析助理（默认）/ usage_helper=使用问答机器人")
+    user_context: Optional[Dict[str, Any]] = Field(None, description="前端上下文（当前路由/模式标记等），仅 usage_helper 模式使用")
 
 
 class ChatResponse(BaseModel):

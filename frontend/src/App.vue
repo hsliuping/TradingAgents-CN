@@ -21,6 +21,9 @@
       v-model="showConfigWizard"
       @complete="handleWizardComplete"
     />
+
+    <!-- 使用问答机器人浮窗 -->
+    <FloatingChat />
   </div>
 </template>
 
@@ -28,6 +31,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import NetworkStatus from '@/components/NetworkStatus.vue'
+import FloatingChat from '@/components/UsageHelper/FloatingChat.vue'
 import { ApiClient } from '@/api/request'
 import { configApi } from '@/api/config'
 
