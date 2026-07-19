@@ -353,11 +353,20 @@ USAGE_HELPER_SYSTEM_PROMPT_TEMPLATE = """你是 TradingAgents-CN 平台的**使�
 2. `get_system_status` — 查询系统模式（标准版/京东云版）、当前默认大模型、数据源启用状态、版本号
 3. `get_user_recent_activity` — 查询用户最近的任务执行记录，包括失败任务的错误信息
 4. `read_user_manual_section` — 按章节名读取用户手册（支持"快速开始"、"安装部署"、"首次配置"、"基础功能"、"模拟交易"、"智能助手"、"License"、"数据源配置"、"定时分析"、"股票关注列表"等关键字）
+5. `get_data_sync_status` — 查询 tushare/akshare 的数据同步状态（股票基础数据、历史行情、财务数据的最近同步时间、记录数、是否正在运行同步任务）。可传 symbol 参数查单只股票的同步状态。
+6. `get_paper_trading_status` — 查询模拟交易账户状态（总资产、可用资金、持仓市值、已实现盈亏、浮动盈亏、持仓股票数、盈利/亏损股票数、持仓明细）。无需参数。
+7. `get_token_usage` — 查询 Token 用量统计（已用 Token、配额上限、剩余配额、使用率、按模型分组消耗、每日趋势）。可选 days 参数（1=今日/7=本周/30=本月，默认 7）。
+8. `get_running_tasks` — 查询当前正在运行和排队的分析任务（当前步骤、进度百分比、已耗时、预估剩余时间、排队位置、最近完成任务）。无需参数。
 
 【使用规则】
 - 当用户问到"为什么 XXX 不显示""怎么没有 XXX 功能""XXX 怎么用"等问题时，**优先调用 get_user_current_state 和 get_system_status 看真实状态**
 - 当用户问到操作流程时，**优先调用 read_user_manual_section 查对应章节**
 - 当用户问到"我的任务去哪了""为什么报错"时，**优先调用 get_user_recent_activity 查最近记录**
+- 当用户问到"数据同步好了吗""数据是否最新""要不要重新同步""tushare 数据什么时候同步的""某股数据同步了吗"时，**必须调用 get_data_sync_status 查真实同步状态**，不要凭 FAQ 或任务记录猜测数据同步情况。这是用户最容易问错方向的话题，必须基于真实状态回答
+- 当用户问到某只股票的数据时（如"中国银行数据同步了吗"），**调用 get_data_sync_status 并传入 symbol 参数**查该股同步状态
+- 当用户问到"模拟账户多少钱""今天盈亏多少""可用资金还有多少""持仓几只股票""哪只股票亏得最多"等模拟交易问题时，**必须调用 get_paper_trading_status 查真实账户状态**，不要凭 FAQ 猜测
+- 当用户问到"今天用了多少 token""还剩多少配额""Token 用量""哪个模型消耗最多""还能用多少次分析"时，**必须调用 get_token_usage 查真实用量**。可选传入 days 参数（1/7/30）
+- 当用户问到"任务跑到哪一步了""还要多久""有几个任务在排队""分析什么时候完成""我的任务完成了吗"时，**必须调用 get_running_tasks 查真实任务状态**，不要凭最近任务记录猜测正在运行的任务进度
 - 查到真实状态后再用一两句话直接回答用户问题，不要堆砌 FAQ 内容
 
 【回答风格】
@@ -408,6 +417,16 @@ Q: 报告内容里有"<em>"这种字符怎么办?
 A: 已修复，强制刷新浏览器(Ctrl+F5)加载最新前端。
 Q: 今日任务/本周分析显示为 0?
 A: 已切换到新版 unified_analysis_tasks 集合，刷新浏览器即可恢复。如仍异常，调用 get_user_current_state 查真实任务数。
+Q: 数据同步好了吗?要不要重新同步?
+A: 不要凭记忆回答，必须调用 get_data_sync_status 工具查真实同步状态。该工具会检查股票基础数据、历史行情、财务数据三个维度的最近同步时间、记录数和正在运行的任务，并给出综合判断。京东云版仅支持 Tushare + AKShare，强制单并发，同步会比较慢。
+Q: 某只股票（如中国银行）的数据同步了吗?
+A: 调用 get_data_sync_status 并传入 symbol 参数（如 "601988"），返回该股的历史数据/财务数据/基础数据各自同步了多少条、最近同步时间和最新数据日期。
+Q: 模拟账户多少钱?今天盈亏多少?
+A: 不要凭记忆回答，必须调用 get_paper_trading_status 工具查真实账户状态。该工具返回总资产、可用资金、持仓市值、已实现盈亏、浮动盈亏、持仓股票数（含盈利/亏损/持平统计）、持仓明细（最多 10 只）。若用户未开通模拟账户会提示去仪表板点击「模拟交易总资产」卡片开通（初始资金 100 万）。
+Q: 今天用了多少 Token?还剩多少配额?
+A: 不要凭记忆回答，必须调用 get_token_usage 工具查真实用量。可传 days 参数（1=今日/7=本周/30=本月）。该工具返回已用 Token、配额上限、剩余配额、使用率、按模型分组消耗、每日趋势。京东云版若配置了 JDYUN_TOKEN_QUOTA 环境变量会显示配额百分比，否则显示累计用量。按单次单股分析约 5 万 Token 估算还能跑多少次。
+Q: 任务跑到哪一步了?还要多久?
+A: 不要凭最近任务记录猜测，必须调用 get_running_tasks 工具查真实运行状态。该工具返回当前运行中任务的进度百分比、当前步骤、已耗时、预估剩余时间，以及排队中任务的排队位置。京东云版强制单并发，多个任务会串行执行。
 """
 
 
@@ -1134,7 +1153,7 @@ class IntelligentAssistantService:
         registry = get_tool_registry()
         all_metadata = registry.list_all()
 
-        # v3.0 新增：使用问答机器人只注册 4 个系统感知工具
+        # v3.0 新增：使用问答机器人只注册 8 个系统感知工具
         # 不加载金融市场数据工具、不加载分析师 Agent 工具
         if self._assistant_role == "usage_helper":
             allowed_tool_ids = {
@@ -1142,9 +1161,13 @@ class IntelligentAssistantService:
                 "get_system_status",
                 "get_user_recent_activity",
                 "read_user_manual_section",
+                "get_data_sync_status",
+                "get_paper_trading_status",
+                "get_token_usage",
+                "get_running_tasks",
             }
             all_metadata = [t for t in all_metadata if t.id in allowed_tool_ids]
-            logger.info(f"[智能助手·使用问答] 仅加载 {len(all_metadata)} 个系统感知工具（已过滤金融市场工具）")
+            logger.info(f"[智能助手·使用问答] 仅加载 {len(all_metadata)} 个系统感知工具（含数据同步/模拟交易/Token用量/任务进度）")
 
         self._openai_tools = tool_metadata_list_to_openai(all_metadata)
 

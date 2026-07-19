@@ -18,6 +18,7 @@
       direction="rtl"
       size="440px"
       :with-header="true"
+      :append-to-body="true"
       class="usage-helper-drawer"
       :before-close="handleClose"
     >
@@ -557,6 +558,8 @@ watch(visible, (v) => {
 <style lang="scss">
 /* 京东云版浮窗抽屉全局样式（非 scoped，调整 el-drawer 内部样式） */
 .usage-helper-drawer {
+  pointer-events: auto;
+
   .el-drawer__header {
     margin-bottom: 0;
     padding: 16px 20px;

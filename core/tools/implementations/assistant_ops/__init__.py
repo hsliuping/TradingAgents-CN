@@ -28,3 +28,7 @@ from core.tools.implementations.assistant_ops import user_state  # noqa: F401
 from core.tools.implementations.assistant_ops import system_status  # noqa: F401
 from core.tools.implementations.assistant_ops import user_activity  # noqa: F401
 from core.tools.implementations.assistant_ops import manual_reader  # noqa: F401
+from core.tools.implementations.assistant_ops import data_sync_status  # noqa: F401
+from core.tools.implementations.assistant_ops import paper_trading_status  # noqa: F401
+from core.tools.implementations.assistant_ops import token_usage  # noqa: F401
+from core.tools.implementations.assistant_ops import running_tasks  # noqa: F401
