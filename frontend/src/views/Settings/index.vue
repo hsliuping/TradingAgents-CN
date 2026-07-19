@@ -441,7 +441,7 @@
               <el-button type="primary" @click="saveCommissionSettings" :loading="commissionSaving">
                 保存费率设置
               </el-button>
-              <el-button @click="loadCommissionSettings">
+              <el-button @click="() => loadCommissionSettings(true)">
                 恢复默认
               </el-button>
             </el-form-item>
