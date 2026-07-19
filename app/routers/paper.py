@@ -966,3 +966,46 @@ async def reset_account(
     
     logger.info(f"✅ 账户已重置: user_id={user_id}, initial_cash={initial_cash}")
     return ok({"message": "账户已重置", "cash": acc.get("cash", {})})
+
+
+# ==================== 市场规则配置 API ====================
+
+@router.get("/market-rules")
+async def get_market_rules():
+    """获取所有市场的交易规则配置"""
+    db = get_mongo_db()
+    rules = await db["paper_market_rules"].find({}, {"_id": 0}).to_list(None)
+    if not rules:
+        # 如果没有配置，返回默认值
+        from scripts.init_paper_trading_market_rules import MARKET_RULES
+        return ok(MARKET_RULES)
+    return ok(rules)
+
+
+class CommissionUpdateRequest(BaseModel):
+    rules: List[Dict[str, Any]] = Field(..., description="各市场的佣金配置")
+
+
+@router.post("/market-rules/commission")
+async def update_market_rules_commission(req: CommissionUpdateRequest):
+    """更新各市场的佣金配置"""
+    db = get_mongo_db()
+    updated = 0
+    for item in req.rules:
+        market = item.get("market")
+        commission = item.get("commission", {})
+        if not market:
+            continue
+        # 只更新 commission 部分，保留其他规则
+        result = await db["paper_market_rules"].update_one(
+            {"market": market},
+            {"$set": {f"rules.commission.{k}": v for k, v in commission.items()}}
+        )
+        if result.modified_count > 0:
+            updated += 1
+        elif result.matched_count == 0:
+            # 市场规则不存在，创建基础记录
+            logger.warning(f"市场 {market} 规则不存在，跳过佣金配置更新")
+
+    logger.info(f"✅ 更新佣金配置: {updated} 个市场")
+    return ok({"message": f"已更新 {updated} 个市场的佣金配置", "updated": updated})
