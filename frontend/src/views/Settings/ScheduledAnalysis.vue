@@ -373,7 +373,7 @@
                         link
                         type="danger"
                         size="small"
-                        @click="removeCustomParam(index, pIdx)"
+                        @click="removeCustomParam(index as number, pIdx as number)"
                       >
                         <el-icon><Delete /></el-icon>
                       </el-button>
