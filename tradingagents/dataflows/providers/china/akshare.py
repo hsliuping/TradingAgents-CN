@@ -206,8 +206,8 @@ class AKShareProvider(BaseStockDataProvider):
                         "sort": "default",
                         "pageIndex": 1,
                         "pageSize": limit,
-                        "preTag": "<em>",
-                        "postTag": "</em>"
+                        "preTag": "",
+                        "postTag": ""
                     }
                 }
             }

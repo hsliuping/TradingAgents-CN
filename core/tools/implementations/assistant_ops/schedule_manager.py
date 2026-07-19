@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 @register_tool(
     tool_id="list_scheduled_configs",
     name="查看定时分析配置",
-    description="列出用户已创建的所有定时分析配置，显示名称、CRON 时间段、启用/禁用状态。注意：定时分析配置不同于股票关注列表（自选股）和自选股分组；前者决定自动分析任务，后者只是股票池或组织方式。",
+    description="列出用户已创建的所有定时分析配置，显示名称、CRON 时间段、启用/禁用状态。注意：定时分析配置不同于股票关注列表（股票关注列表）和股票关注列表分组；前者决定自动分析任务，后者只是股票池或组织方式。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -65,7 +65,7 @@ async def list_scheduled_configs() -> str:
 @register_tool(
     tool_id="create_scheduled_analysis",
     name="创建定时分析",
-    description="创建一个定时自动分析计划：指定名称、CRON 时间表达式和要分析的自选股分组，系统将按计划自动触发分析。注意：只有被配置到这里的分组才会进入定时分析。",
+    description="创建一个定时自动分析计划：指定名称、CRON 时间表达式和要分析的股票关注列表分组，系统将按计划自动触发分析。注意：只有被配置到这里的分组才会进入定时分析。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -75,13 +75,13 @@ async def list_scheduled_configs() -> str:
     tool_role_hint="primary",
     output_shape="text",
     preferred_for=["创建定时分析", "设置自动分析", "定时任务创建", "CRON计划配置"],
-    when_to_use="当用户想新建一个定时自动分析计划、指定 CRON 时间和自选股分组时使用。",
+    when_to_use="当用户想新建一个定时自动分析计划、指定 CRON 时间和股票关注列表分组时使用。",
     returns="返回文本消息，包含新建配置的名称、配置ID、时间段、分析深度和启用状态。",
 )
 async def create_scheduled_analysis(
     name: Annotated[str, "配置名称，如「每日早盘分析」"],
     cron_expression: Annotated[str, "CRON表达式，如 0 9 * * 1-5 表示工作日早9点"],
-    group_ids: Annotated[str, "自选股分组ID列表，逗号分隔"],
+    group_ids: Annotated[str, "股票关注列表分组ID列表，逗号分隔"],
     slot_name: Annotated[str, "时间段名称，如「开盘前」"] = "默认时段",
     depth: Annotated[int, "分析深度 1-5，默认3"] = 3,
 ) -> str:
@@ -99,7 +99,7 @@ async def create_scheduled_analysis(
 
     gid_list = [g.strip() for g in group_ids.split(",") if g.strip()]
     if not gid_list:
-        return "❌ 请提供至少一个自选股分组ID。可以先用「查看自选股分组」获取分组列表。"
+        return "❌ 请提供至少一个股票关注列表分组ID。可以先用「查看股票关注列表分组」获取分组列表。"
 
     config_doc = {
         "user_id": user_id,

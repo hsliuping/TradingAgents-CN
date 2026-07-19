@@ -140,7 +140,7 @@ def require_feature(feature: str):
 PRO_FEATURES = [
     "advanced_courses",       # 高级学员课程
     "email_notification",      # 邮件通知
-    "watchlist_groups",        # 自选股分组
+    "watchlist_groups",        # 股票关注列表分组
     "scheduled_analysis",      # 定时分析
     "batch_analysis",          # 批量分析
     "export_reports",          # 导出报告

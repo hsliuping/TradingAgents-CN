@@ -377,7 +377,7 @@ class UnifiedLLMClient:
 
         if tool_name == "add_stocks_to_favorites":
             summary: Dict[str, Any] = {}
-            added_match = re.search(r"已添加\s*(\d+)\s*只股票到自选股", content)
+            added_match = re.search(r"已添加\s*(\d+)\s*只股票到股票关注列表", content)
             existed_match = re.search(r"已存在\s*(\d+)\s*只", content)
             failed_match = re.search(r"失败\s*(\d+)\s*只", content)
             if added_match:

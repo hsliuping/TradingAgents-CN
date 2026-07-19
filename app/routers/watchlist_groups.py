@@ -101,7 +101,7 @@ async def create_group(
     group_doc["id"] = str(result.inserted_id)
     group_doc.pop("_id", None)
     
-    logger.info(f"✅ 创建自选股分组: {group_data.name} (用户: {user_id})")
+    logger.info(f"✅ 创建股票关注列表分组: {group_data.name} (用户: {user_id})")
     return ok({"group": group_doc, "message": "分组创建成功"})
 
 
@@ -165,7 +165,7 @@ async def update_group(
         {"$set": update_data}
     )
     
-    logger.info(f"✅ 更新自选股分组: {group_id} (用户: {user_id})")
+    logger.info(f"✅ 更新股票关注列表分组: {group_id} (用户: {user_id})")
     return ok({"message": "分组更新成功"})
 
 
@@ -188,7 +188,7 @@ async def delete_group(group_id: str, user: dict = Depends(get_current_user)):
     if result.deleted_count == 0:
         return fail("分组不存在")
     
-    logger.info(f"✅ 删除自选股分组: {group_id} (用户: {user_id})")
+    logger.info(f"✅ 删除股票关注列表分组: {group_id} (用户: {user_id})")
     return ok({"message": "分组删除成功"})
 
 

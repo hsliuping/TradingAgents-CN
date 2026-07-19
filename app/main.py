@@ -786,20 +786,20 @@ async def lifespan(app: FastAPI):
                 f"强制回溯窗口为 {settings.ETF_SYNC_DAYS} 天"
             )
 
-        # 自选股A股数据同步任务配置
-        logger.info("🔄 配置自选股A股数据同步任务...")
+        # 股票关注列表A股数据同步任务配置
+        logger.info("🔄 配置股票关注列表A股数据同步任务...")
         
         scheduler.add_job(
             run_favorites_data_sync,
             CronTrigger.from_crontab(settings.FAVORITES_DATA_SYNC_CRON, timezone=settings.TIMEZONE),
             id="favorites_data_sync",
-            name="自选股A股数据同步（历史数据+财务数据）"
+            name="股票关注列表A股数据同步（历史数据+财务数据）"
         )
         if not settings.FAVORITES_DATA_SYNC_ENABLED:
             scheduler.pause_job("favorites_data_sync")
-            logger.info(f"⏸️ 自选股A股数据同步已添加但暂停: {settings.FAVORITES_DATA_SYNC_CRON}")
+            logger.info(f"⏸️ 股票关注列表A股数据同步已添加但暂停: {settings.FAVORITES_DATA_SYNC_CRON}")
         else:
-            logger.info(f"⭐ 自选股A股数据同步已配置: {settings.FAVORITES_DATA_SYNC_CRON} (历史数据+财务数据)")
+            logger.info(f"⭐ 股票关注列表A股数据同步已配置: {settings.FAVORITES_DATA_SYNC_CRON} (历史数据+财务数据)")
 
         # 新闻数据同步任务配置（使用AKShare同步所有股票新闻）
         logger.info("🔄 配置新闻数据同步任务...")
@@ -807,20 +807,20 @@ async def lifespan(app: FastAPI):
         from app.worker.akshare_sync_service import get_akshare_sync_service
 
         async def run_news_sync():
-            """运行新闻同步任务 - 使用AKShare同步自选股新闻"""
+            """运行新闻同步任务 - 使用AKShare同步股票关注列表新闻"""
             try:
-                logger.info("📰 开始新闻数据同步（AKShare - 仅自选股）...")
+                logger.info("📰 开始新闻数据同步（AKShare - 仅股票关注列表）...")
                 service = await get_akshare_sync_service()
                 # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
                 service._current_job_id = "news_sync"
                 result = await service.sync_news_data(
-                    symbols=None,  # None + favorites_only=True 表示只同步自选股
+                    symbols=None,  # None + favorites_only=True 表示只同步股票关注列表
                     max_news_per_stock=settings.NEWS_SYNC_MAX_PER_SOURCE,
-                    favorites_only=True  # 只同步自选股
+                    favorites_only=True  # 只同步股票关注列表
                 )
                 logger.info(
                     f"✅ 新闻同步完成: "
-                    f"处理{result['total_processed']}只自选股, "
+                    f"处理{result['total_processed']}只股票关注列表, "
                     f"成功{result['success_count']}只, "
                     f"失败{result['error_count']}只, "
                     f"新闻总数{result['news_count']}条, "
@@ -838,27 +838,27 @@ async def lifespan(app: FastAPI):
             run_news_sync,
             CronTrigger.from_crontab(settings.NEWS_SYNC_CRON, timezone=settings.TIMEZONE),
             id="news_sync",
-            name="新闻数据同步（AKShare - 仅自选股）"
+            name="新闻数据同步（AKShare - 仅股票关注列表）"
         )
         if not settings.NEWS_SYNC_ENABLED:
             scheduler.pause_job("news_sync")
             logger.info(f"⏸️ 新闻数据同步已添加但暂停: {settings.NEWS_SYNC_CRON}")
         else:
-            logger.info(f"📰 新闻数据同步已配置（仅自选股）: {settings.NEWS_SYNC_CRON}")
+            logger.info(f"📰 新闻数据同步已配置（仅股票关注列表）: {settings.NEWS_SYNC_CRON}")
 
-        # ==================== 自选股定时分析配置 ====================
+        # ==================== 股票关注列表定时分析配置 ====================
         from app.worker.watchlist_analysis_task import run_watchlist_analysis
         scheduler.add_job(
             run_watchlist_analysis,
             CronTrigger.from_crontab(settings.WATCHLIST_ANALYSIS_CRON, timezone=settings.TIMEZONE),
             id="watchlist_analysis",
-            name="自选股定时分析"
+            name="股票关注列表定时分析"
         )
         if not settings.WATCHLIST_ANALYSIS_ENABLED:
             scheduler.pause_job("watchlist_analysis")
-            logger.info(f"⏸️ 自选股定时分析已添加但暂停: {settings.WATCHLIST_ANALYSIS_CRON}")
+            logger.info(f"⏸️ 股票关注列表定时分析已添加但暂停: {settings.WATCHLIST_ANALYSIS_CRON}")
         else:
-            logger.info(f"📊 自选股定时分析已配置: {settings.WATCHLIST_ANALYSIS_CRON}")
+            logger.info(f"📊 股票关注列表定时分析已配置: {settings.WATCHLIST_ANALYSIS_CRON}")
 
         # ==================== 交易日历缓存刷新任务 ====================
         # 每日 18:30 刷新一次：Tushare daily_basic 数据一般在收盘后（15:00）
@@ -1221,7 +1221,7 @@ app.include_router(template_history_router.router, tags=["template-history"])
 app.include_router(advanced_courses_router.router, tags=["advanced-courses"])
 app.include_router(embedded_nanobot_router.router, tags=["embedded-nanobot"])
 
-# 自选股分组管理路由
+# 股票关注列表分组管理路由
 from app.routers import watchlist_groups as watchlist_groups_router
 app.include_router(watchlist_groups_router.router, tags=["watchlist-groups"])
 

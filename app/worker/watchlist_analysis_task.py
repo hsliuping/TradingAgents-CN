@@ -1,7 +1,7 @@
 """
-自选股定时分析任务
+股票关注列表定时分析任务
 
-定时分析用户自选股列表中的股票，复用现有的分析服务。
+定时分析用户股票关注列表列表中的股票，复用现有的分析服务。
 """
 
 import asyncio
@@ -164,9 +164,9 @@ async def _send_scheduled_completion_email_when_ready(
 
 
 async def get_watchlist_stocks() -> List[Dict[str, Any]]:
-    """获取所有有效用户的自选股列表
+    """获取所有有效用户的股票关注列表列表
 
-    只返回在 users 集合中存在的用户的自选股，过滤掉历史遗留的垃圾数据。
+    只返回在 users 集合中存在的用户的股票关注列表，过滤掉历史遗留的垃圾数据。
 
     Returns:
         包含 user_id 和 stocks 的字典列表
@@ -184,7 +184,7 @@ async def get_watchlist_stocks() -> List[Dict[str, Any]]:
 
     logger.info(f"📊 数据库中共有 {len(valid_user_ids)} 个有效用户")
 
-    # 第二步：从 user_favorites 集合查询有自选股的记录
+    # 第二步：从 user_favorites 集合查询有股票关注列表的记录
     cursor = db.user_favorites.find(
         {"favorites": {"$exists": True, "$ne": []}}
     )
@@ -198,12 +198,12 @@ async def get_watchlist_stocks() -> List[Dict[str, Any]]:
 
         # 检查该 user_id 是否在有效用户列表中
         if user_id not in valid_user_ids:
-            logger.warning(f"⚠️ 跳过无效用户的自选股: {user_id} (用户不存在于 users 集合)")
+            logger.warning(f"⚠️ 跳过无效用户的股票关注列表: {user_id} (用户不存在于 users 集合)")
             skipped_count += 1
             continue
 
         if favorites:
-            logger.info(f"📋 找到有效用户 {user_id} 的 {len(favorites)} 只自选股")
+            logger.info(f"📋 找到有效用户 {user_id} 的 {len(favorites)} 只股票关注列表")
             result.append({
                 "user_id": user_id,
                 "stocks": favorites
@@ -213,9 +213,9 @@ async def get_watchlist_stocks() -> List[Dict[str, Any]]:
         logger.info(f"🗑️ 已跳过 {skipped_count} 条历史遗留的垃圾数据")
 
     if not result:
-        logger.info("📭 没有找到任何有效用户的自选股数据")
+        logger.info("📭 没有找到任何有效用户的股票关注列表数据")
     else:
-        logger.info(f"✅ 共找到 {len(result)} 个有效用户有自选股")
+        logger.info(f"✅ 共找到 {len(result)} 个有效用户有股票关注列表")
 
     return result
 
@@ -229,7 +229,7 @@ async def analyze_user_watchlist_batch(
     deep_analysis_model: str = "qwen-max"
 ) -> Dict[str, Any]:
     """
-    批量分析用户的自选股（并发执行）- 使用 v2.0 引擎
+    批量分析用户的股票关注列表（并发执行）- 使用 v2.0 引擎
 
     参考批量分析API的实现方式：
     1. 先为所有股票创建任务（使用 v2.0 统一任务引擎）
@@ -237,7 +237,7 @@ async def analyze_user_watchlist_batch(
 
     Args:
         user_id: 用户ID
-        stocks: 自选股列表
+        stocks: 股票关注列表列表
         analysis_date: 分析日期
         analysis_depth: 分析深度 (1-5)
         quick_analysis_model: 快速分析模型
@@ -417,17 +417,17 @@ async def send_completion_notification(
     if has_detailed_results:
         if success > 0:
             severity = "success" if failed == 0 else "warning"
-            title = "自选股定时分析完成"
+            title = "股票关注列表定时分析完成"
             content = f"已完成 {success}/{total} 只股票的分析"
             if failed > 0:
                 content += f"，{failed} 只分析失败"
         else:
             severity = "error"
-            title = "自选股定时分析失败"
+            title = "股票关注列表定时分析失败"
             content = f"全部 {total} 只股票分析失败"
     else:
         severity = "info" if success > 0 else "error"
-        title = "自选股定时分析已启动"
+        title = "股票关注列表定时分析已启动"
         content = f"已提交 {success}/{total} 只股票的分析任务"
         if failed > 0:
             content += f"，{failed} 只提交失败"
@@ -485,7 +485,7 @@ async def send_completion_notification(
             email_type=EmailType.SCHEDULED_ANALYSIS,  # 🔥 修复：使用枚举而不是字符串
             template_name="scheduled_report",
             template_data={
-                "task_name": "自选股定时分析",
+                "task_name": "股票关注列表定时分析",
                 "analysis_date": analysis_time,
                 "total_count": total,
                 "success_count": success,
@@ -506,15 +506,15 @@ async def send_completion_notification(
 
 async def run_watchlist_analysis():
     """
-    定时分析自选股任务 - 主入口
+    定时分析股票关注列表任务 - 主入口
 
     由 APScheduler 定时触发调用。
-    遍历所有有自选股的用户，为每个用户分析其自选股。
+    遍历所有有股票关注列表的用户，为每个用户分析其股票关注列表。
     """
     global _is_running
 
     if _is_running:
-        logger.warning("⚠️ 自选股定时分析任务正在运行中，跳过本次执行")
+        logger.warning("⚠️ 股票关注列表定时分析任务正在运行中，跳过本次执行")
         return
 
     _is_running = True
@@ -522,7 +522,7 @@ async def run_watchlist_analysis():
     analysis_date = start_time.strftime("%Y-%m-%d")
 
     logger.info("=" * 60)
-    logger.info("🚀 开始执行自选股定时分析任务")
+    logger.info("🚀 开始执行股票关注列表定时分析任务")
     logger.info(f"   分析日期: {analysis_date}")
     logger.info("=" * 60)
 
@@ -538,14 +538,14 @@ async def run_watchlist_analysis():
         
         logger.info(f"📋 系统默认模型配置: 快速={default_quick_model}, 深度={default_deep_model}")
         
-        # 获取所有用户的自选股列表
+        # 获取所有用户的股票关注列表列表
         watchlist_data = await get_watchlist_stocks()
 
         if not watchlist_data:
-            logger.info("📭 没有找到任何用户的自选股，任务结束")
+            logger.info("📭 没有找到任何用户的股票关注列表，任务结束")
             return
 
-        logger.info(f"📊 共 {len(watchlist_data)} 个用户有自选股")
+        logger.info(f"📊 共 {len(watchlist_data)} 个用户有股票关注列表")
 
         # 遍历每个用户
         for user_idx, user_data in enumerate(watchlist_data, 1):
@@ -604,7 +604,7 @@ async def run_watchlist_analysis():
         elapsed = (datetime.now() - start_time).total_seconds()
 
         logger.info("=" * 60)
-        logger.info("✅ 自选股定时分析任务全部完成")
+        logger.info("✅ 股票关注列表定时分析任务全部完成")
         logger.info(f"   用户数: {len(watchlist_data)}")
         logger.info(f"   总分析股票数: {total_stocks}")
         logger.info(f"   总成功: {total_success}, 总失败: {total_failed}")
@@ -612,7 +612,7 @@ async def run_watchlist_analysis():
         logger.info("=" * 60)
 
     except Exception as e:
-        logger.error(f"❌ 自选股定时分析任务执行失败: {e}", exc_info=True)
+        logger.error(f"❌ 股票关注列表定时分析任务执行失败: {e}", exc_info=True)
     finally:
         _is_running = False
 

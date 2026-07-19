@@ -61,7 +61,7 @@ def test_select_phase_history_keeps_latest_result_when_user_references_current_s
         {"role": "assistant", "phase": "result", "content": "当前推荐的 5 只股票"},
     ]
 
-    selected = service._select_phase_history(history, "result", "把这5只加入自选股")
+    selected = service._select_phase_history(history, "result", "把这5只加入股票关注列表")
 
     assert selected == history
 

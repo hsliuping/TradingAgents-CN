@@ -11,7 +11,7 @@ import { login, waitForLoadingDone, waitForTableLoaded, selectStock } from './ut
  * - 技术指标筛选（均线/成交量）
  * - 行业板块筛选
  * - 筛选结果排序与保存
- * - 自选股管理（添加/分组/批量操作）
+ * - 股票关注列表管理（添加/分组/批量操作）
  */
 test.describe('智能选股 - 基本面筛选', () => {
   test.beforeEach(async ({ page }) => {
@@ -120,7 +120,7 @@ test.describe('智能选股 - 技术指标筛选', () => {
   })
 })
 
-test.describe('自选股管理', () => {
+test.describe('股票关注列表管理', () => {
   test.beforeEach(async ({ page }) => {
     await login(page)
   })
@@ -148,7 +148,7 @@ test.describe('自选股管理', () => {
     }
   })
 
-  test('自选股列表加载', async ({ page }) => {
+  test('股票关注列表列表加载', async ({ page }) => {
     await page.goto('/favorites')
     await waitForLoadingDone(page)
 
@@ -156,7 +156,7 @@ test.describe('自选股管理', () => {
     await expect(favoritesTable).toBeVisible({ timeout: 10000 })
   })
 
-  test('自选股分组管理', async ({ page }) => {
+  test('股票关注列表分组管理', async ({ page }) => {
     await page.goto('/favorites')
     await waitForLoadingDone(page)
 
@@ -167,7 +167,7 @@ test.describe('自选股管理', () => {
     }
   })
 
-  test('从自选股发起分析', async ({ page }) => {
+  test('从股票关注列表发起分析', async ({ page }) => {
     await page.goto('/favorites')
     await waitForLoadingDone(page)
 

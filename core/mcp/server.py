@@ -213,7 +213,7 @@ async def get_report(
 async def chat_with_assistant(message: str, ctx: Context = None) -> str:
     """
     与 TradingAgents 分析助理自由对话。
-    助理具备数据查询、分析触发、报告查看、自选股管理等操作能力。
+    助理具备数据查询、分析触发、报告查看、股票关注列表管理等操作能力。
 
     Args:
         message: 你的问题或指令，如 "帮我分析600519"、"最近有哪些分析报告"、"茅台基本面怎么样"

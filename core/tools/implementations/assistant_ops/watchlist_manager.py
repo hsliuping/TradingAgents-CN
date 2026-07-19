@@ -1,7 +1,7 @@
 """
-自选股管理类工具
+股票关注列表管理类工具
 
-提供自选股分组的查询、添加股票和移除股票功能。
+提供股票关注列表分组的查询、添加股票和移除股票功能。
 用户身份通过 core.tools.context 获取。
 """
 
@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 @tool
 @register_tool(
     tool_id="list_watchlist_groups",
-    name="查看自选股分组",
-    description="列出用户的自选股分组，显示分组名称、股票数量和股票代码预览。注意：这是分组视图，不等于完整的股票关注列表本体，也不等于定时分析配置。",
+    name="查看股票关注列表分组",
+    description="列出用户的股票关注列表分组，显示分组名称、股票数量和股票代码预览。注意：这是分组视图，不等于完整的股票关注列表本体，也不等于定时分析配置。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -29,12 +29,12 @@ logger = logging.getLogger(__name__)
     capability_tags=["watchlist", "group", "list", "query", "assistant_ops", "stock_group", "watchlist_group", "stock_watchlist", "portfolio_group", "self_selected", "watchlist_query"],
     tool_role_hint="primary",
     output_shape="text",
-    preferred_for=["查看自选股分组", "自选股列表", "分组查询", "股票池查看"],
-    when_to_use="当用户想查看自己的自选股分组列表、了解每个分组包含哪些股票时使用。",
-    returns="返回文本格式的自选股分组列表，每条含分组ID、名称、股票数量和股票代码预览。",
+    preferred_for=["查看股票关注列表分组", "股票关注列表列表", "分组查询", "股票池查看"],
+    when_to_use="当用户想查看自己的股票关注列表分组列表、了解每个分组包含哪些股票时使用。",
+    returns="返回文本格式的股票关注列表分组列表，每条含分组ID、名称、股票数量和股票代码预览。",
 )
 async def list_watchlist_groups() -> str:
-    """列出当前用户的自选股分组及每组股票数量。"""
+    """列出当前用户的股票关注列表分组及每组股票数量。"""
     from app.core.database import get_mongo_db
 
     user_id = require_current_user_id()
@@ -54,11 +54,11 @@ async def list_watchlist_groups() -> str:
         groups.append(f"  {active} [{gid[:8]}] {name}（{len(stocks)}只）: {preview}")
 
     if not groups:
-        return "📂 暂无自选股分组。你可以让我帮你创建一个。\n\n提示：分组只是组织方式；若要查看完整股票关注列表，请使用“查看股票关注列表”。"
+        return "📂 暂无股票关注列表分组。你可以让我帮你创建一个。\n\n提示：分组只是组织方式；若要查看完整股票关注列表，请使用“查看股票关注列表”。"
     return (
-        f"📂 共 {len(groups)} 个自选股分组：\n"
+        f"📂 共 {len(groups)} 个股票关注列表分组：\n"
         + "\n".join(groups)
-        + "\n\n说明：以上是你的自选股分组视图，不等于完整股票关注列表，也不等于定时分析配置。"
+        + "\n\n说明：以上是你的股票关注列表分组视图，不等于完整股票关注列表，也不等于定时分析配置。"
         + "若要查看完整关注股票，请调用“查看股票关注列表”；若要查看自动分析计划，请调用“查看定时分析配置”。"
     )
 
@@ -66,8 +66,8 @@ async def list_watchlist_groups() -> str:
 @tool
 @register_tool(
     tool_id="add_stock_to_watchlist",
-    name="添加股票到自选股分组",
-    description="将一只或多只股票添加到指定名称的自选股分组。分组不存在时自动创建新分组。注意：这只是分组管理，不代表会自动进入定时分析。",
+    name="添加股票到股票关注列表分组",
+    description="将一只或多只股票添加到指定名称的股票关注列表分组。分组不存在时自动创建新分组。注意：这只是分组管理，不代表会自动进入定时分析。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -76,15 +76,15 @@ async def list_watchlist_groups() -> str:
     capability_tags=["watchlist", "group", "add", "stock", "assistant_ops", "stock_add", "watchlist_add", "portfolio_management", "self_selected", "stock_code", "watchlist_management"],
     tool_role_hint="primary",
     output_shape="text",
-    preferred_for=["添加自选股", "加入股票分组", "自选股管理", "新建股票分组"],
-    when_to_use="当用户想把一只或多只股票添加到自选股分组、或需要新建分组并加入股票时使用。",
+    preferred_for=["添加股票关注列表", "加入股票分组", "股票关注列表管理", "新建股票分组"],
+    when_to_use="当用户想把一只或多只股票添加到股票关注列表分组、或需要新建分组并加入股票时使用。",
     returns="返回文本消息，提示新增股票数量、分组当前股票总数；新建分组时返回分组创建结果。",
 )
 async def add_stock_to_watchlist(
-    group_name: Annotated[str, "自选股分组名称，如「科技股」"],
+    group_name: Annotated[str, "股票关注列表分组名称，如「科技股」"],
     symbols: Annotated[str, "要添加的股票代码，逗号分隔，如 000001,600519"],
 ) -> str:
-    """将一只或多只股票添加到指定名称的自选股分组。分组不存在时自动创建。"""
+    """将一只或多只股票添加到指定名称的股票关注列表分组。分组不存在时自动创建。"""
     from app.core.database import get_mongo_db
     from app.utils.timezone import now_tz
 
@@ -147,8 +147,8 @@ async def add_stock_to_watchlist(
 @tool
 @register_tool(
     tool_id="remove_stock_from_watchlist",
-    name="从自选股分组移除股票",
-    description="从指定名称的自选股分组中移除一只或多只股票。不会删除分组本身，也不会影响已有定时分析配置。",
+    name="从股票关注列表分组移除股票",
+    description="从指定名称的股票关注列表分组中移除一只或多只股票。不会删除分组本身，也不会影响已有定时分析配置。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -157,15 +157,15 @@ async def add_stock_to_watchlist(
     capability_tags=["watchlist", "group", "remove", "stock", "assistant_ops", "stock_remove", "watchlist_remove", "portfolio_management", "self_selected", "stock_delete", "watchlist_management"],
     tool_role_hint="primary",
     output_shape="text",
-    preferred_for=["移除自选股", "删除股票分组中的股票", "自选股管理", "清理股票池"],
-    when_to_use="当用户想从自选股分组中移除一只或多只股票、清理不再关注的股票时使用。",
+    preferred_for=["移除股票关注列表", "删除股票分组中的股票", "股票关注列表管理", "清理股票池"],
+    when_to_use="当用户想从股票关注列表分组中移除一只或多只股票、清理不再关注的股票时使用。",
     returns="返回文本消息，提示移除股票数量和分组剩余股票数量。",
 )
 async def remove_stock_from_watchlist(
-    group_name: Annotated[str, "自选股分组名称"],
+    group_name: Annotated[str, "股票关注列表分组名称"],
     symbols: Annotated[str, "要移除的股票代码，逗号分隔"],
 ) -> str:
-    """从指定名称的自选股分组中移除一只或多只股票。"""
+    """从指定名称的股票关注列表分组中移除一只或多只股票。"""
     from app.core.database import get_mongo_db
     from app.utils.timezone import now_tz
 
@@ -178,7 +178,7 @@ async def remove_stock_from_watchlist(
 
     group = await db.watchlist_groups.find_one({"user_id": user_id, "name": group_name})
     if not group:
-        return f"❌ 未找到分组「{group_name}」。可以用「查看自选股分组」查看现有分组。"
+        return f"❌ 未找到分组「{group_name}」。可以用「查看股票关注列表分组」查看现有分组。"
 
     current = set(group.get("stock_codes", []))
     to_remove = set(symbol_list) & current

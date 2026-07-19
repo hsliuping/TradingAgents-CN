@@ -108,7 +108,7 @@ def test_5_system_prompt():
     prompt = _get_system_prompt()
     assert "操作员" in prompt or "操作能力" in prompt or "触发分析" in prompt, "提示词缺少操作员角色"
     assert "trigger_stock_analysis" in prompt, "提示词缺少工具名引用"
-    assert "自选股" in prompt, "提示词缺少自选股管理说明"
+    assert "股票关注列表" in prompt, "提示词缺少股票关注列表管理说明"
     print(f"  提示词长度: {len(prompt)} 字符")
     print("  ✅ 系统提示词包含操作员角色和工具说明")
 

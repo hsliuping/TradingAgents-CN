@@ -77,7 +77,7 @@ COLLECTIONS = [
     # 定时任务
     "scheduled_analysis_configs",
     "scheduler_metadata",
-    # 自选股
+    # 股票关注列表
     "watchlist_groups",
 ]
 

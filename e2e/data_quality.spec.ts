@@ -99,7 +99,7 @@ test.describe('数据源配置', () => {
     await expect(page).toHaveURL(/\/settings/)
   })
 
-  test('自选股分组配置', async ({ page }) => {
+  test('股票关注列表分组配置', async ({ page }) => {
     await page.goto('/settings/watchlist-groups')
     await waitForLoadingDone(page)
 
