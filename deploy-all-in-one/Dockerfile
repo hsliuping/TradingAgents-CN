@@ -12,7 +12,7 @@
 # 阶段 1：构建运行时镜像（复用基础镜像 + 添加 MongoDB/Redis/Nginx/s6）
 # ==============================================================================
 ARG BASE_BACKEND=hsliup/tradingagents-pro-backend:3-latest
-ARG MONGO_IMAGE=mongo:4.4
+ARG MONGO_IMAGE=mongo:7.0
 ARG REDIS_IMAGE=redis:7-alpine
 ARG NGINX_IMAGE=nginx:alpine
 
@@ -35,15 +35,20 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1
 
 # ------------------------------------------------------------------------------
-# 提取 MongoDB 二进制（从 mongo:4.4 镜像）
+# 提取 MongoDB 二进制（从 mongo:8.0 镜像）
+# MongoDB 8.0 使用 mongosh（替代旧版 mongo shell）
 # ------------------------------------------------------------------------------
 COPY --from=mongo-source /usr/bin/mongod /usr/local/bin/mongod
 
 # ------------------------------------------------------------------------------
-# 提取 MongoDB 依赖的 libssl1.1 库（Debian 12 已移除，MongoDB 4.4 需要）
+# 提取 MongoDB 依赖的共享库
+# MongoDB 4.4 需要 libssl.so.1.1 + libcrypto.so.1.1（OpenSSL 1.1，Debian 12 已移除）
+# MongoDB 8.0 使用 OpenSSL 3.x，基础镜像 Debian 12 自带，无需额外复制
+# 如果需要兼容 4.4，取消下面两行注释：
+# COPY --from=mongo-source /usr/lib/x86_64-linux-gnu/libssl.so.1.1 /usr/lib/x86_64-linux-gnu/libssl.so.1.1
+# COPY --from=mongo-source /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1 /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1
 # ------------------------------------------------------------------------------
-COPY --from=mongo-source /usr/lib/x86_64-linux-gnu/libssl.so.1.1 /usr/lib/x86_64-linux-gnu/libssl.so.1.1
-COPY --from=mongo-source /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1 /usr/lib/x86_64-linux-gnu/libcrypto.so.1.1
+RUN ldconfig 2>/dev/null || true
 
 # ------------------------------------------------------------------------------
 # 提取 Redis 二进制（从 redis:7-alpine 镜像）
