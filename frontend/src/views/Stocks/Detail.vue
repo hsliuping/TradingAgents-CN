@@ -193,6 +193,139 @@
           </div>
         </el-card>
 
+        <!-- 持仓分析摘要：仅在该股有持仓分析记录时显示 -->
+        <el-card v-if="positionSummary.has" shadow="hover" class="position-analysis-card">
+          <template #header>
+            <div class="card-hd">
+              <div class="card-hd-title">
+                <el-icon><PieChart /></el-icon>
+                <span>持仓分析摘要</span>
+                <el-tag size="small" type="info" effect="plain" class="card-hd-tag">
+                  {{ formatAnalysisTime(positionSummary.completedAt) }}
+                </el-tag>
+              </div>
+              <div class="card-hd-actions">
+                <el-button text size="small" @click="goToPositionAnalysis">
+                  <el-icon><Plus /></el-icon> 重新分析
+                </el-button>
+                <el-button text size="small" @click="viewPositionTaskDetail">
+                  <el-icon><View /></el-icon> 查看详情
+                </el-button>
+              </div>
+            </div>
+          </template>
+          <div class="position-summary">
+            <!-- 持仓快照 -->
+            <div v-if="positionSummary.snapshot" class="snapshot-grid">
+              <div class="snap-item">
+                <span class="snap-label">成本价</span>
+                <b class="snap-value">¥{{ fmtPrice(positionSummary.snapshot.cost_price) }}</b>
+              </div>
+              <div class="snap-item">
+                <span class="snap-label">现价</span>
+                <b class="snap-value">¥{{ fmtPrice(positionSummary.snapshot.current_price) }}</b>
+              </div>
+              <div class="snap-item">
+                <span class="snap-label">持仓</span>
+                <b class="snap-value">{{ positionSummary.snapshot.quantity }} 股</b>
+              </div>
+              <div class="snap-item">
+                <span class="snap-label">浮动盈亏</span>
+                <b class="snap-value" :class="pnlClass(positionSummary.snapshot.unrealized_pnl)">
+                  {{ formatPnl(positionSummary.snapshot.unrealized_pnl, positionSummary.snapshot.unrealized_pnl_pct) }}
+                </b>
+              </div>
+              <div class="snap-item">
+                <span class="snap-label">持仓天数</span>
+                <b class="snap-value">{{ positionSummary.snapshot.holding_days || '-' }} 天</b>
+              </div>
+              <div class="snap-item">
+                <span class="snap-label">仓位占比</span>
+                <b class="snap-value">{{ formatPercent(positionSummary.snapshot.position_pct) }}</b>
+              </div>
+            </div>
+
+            <!-- AI 建议 -->
+            <div class="ai-advice">
+              <div class="advice-row">
+                <span class="advice-label">AI 建议</span>
+                <el-tag :type="actionTagType(positionSummary.action)" effect="dark" size="small">
+                  {{ actionLabel(positionSummary.action) }}
+                </el-tag>
+                <span class="advice-confidence">信心度 {{ positionSummary.confidence || '-' }}%</span>
+              </div>
+              <div v-if="positionSummary.conclusion" class="advice-conclusion">
+                <el-icon class="advice-icon"><InfoFilled /></el-icon>
+                <span>{{ positionSummary.conclusion }}</span>
+              </div>
+              <div v-if="positionSummary.keyPoints?.length" class="advice-keypoints">
+                <div class="keypoints-title">⚠ 关键风险点</div>
+                <ul class="keypoints-list">
+                  <li v-for="(point, idx) in positionSummary.keyPoints.slice(0, 3)" :key="idx">{{ point }}</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </el-card>
+
+        <!-- 交易复盘摘要：仅在该股有复盘记录时显示 -->
+        <el-card v-if="reviewSummary.has" shadow="hover" class="trade-review-card">
+          <template #header>
+            <div class="card-hd">
+              <div class="card-hd-title">
+                <el-icon><TrendCharts /></el-icon>
+                <span>交易复盘摘要</span>
+                <el-tag size="small" type="info" effect="plain" class="card-hd-tag">
+                  {{ formatAnalysisTime(reviewSummary.completedAt) }}
+                </el-tag>
+              </div>
+              <div class="card-hd-actions">
+                <el-button text size="small" @click="goToTradeReview">
+                  <el-icon><Plus /></el-icon> 重新复盘
+                </el-button>
+                <el-button text size="small" @click="viewReviewTaskDetail">
+                  <el-icon><View /></el-icon> 查看详情
+                </el-button>
+              </div>
+            </div>
+          </template>
+          <div class="review-summary">
+            <!-- 复盘评分 -->
+            <div class="review-meta">
+              <div class="meta-item">
+                <span class="meta-label">风险等级</span>
+                <el-tag :type="riskLevelTagType(reviewSummary.riskLevel)" effect="plain" size="small">
+                  {{ reviewSummary.riskLevel || '-' }}
+                </el-tag>
+              </div>
+              <div class="meta-item">
+                <span class="meta-label">信心度</span>
+                <b class="meta-value">{{ formatConfidenceScore(reviewSummary.confidenceScore) }}</b>
+              </div>
+              <div class="meta-item">
+                <span class="meta-label">交易次数</span>
+                <b class="meta-value">{{ reviewSummary.tradeCount || '-' }} 次</b>
+              </div>
+            </div>
+            <!-- 复盘结论 -->
+            <div v-if="reviewSummary.summary" class="review-conclusion">
+              <div class="conclusion-title">
+                <el-icon><Document /></el-icon>
+                <span>复盘结论</span>
+              </div>
+              <div class="conclusion-text markdown-body" v-html="renderMarkdown(reviewSummary.summary)"></div>
+            </div>
+            <!-- 建议 -->
+            <div v-if="reviewSummary.recommendation" class="review-recommendation">
+              <div class="conclusion-title">
+                <el-icon><Opportunity /></el-icon>
+                <span>操作建议</span>
+              </div>
+              <div class="conclusion-text markdown-body" v-html="renderMarkdown(reviewSummary.recommendation)"></div>
+            </div>
+          </div>
+        </el-card>
+
         <!-- 新闻与公告：位于详细分析结果下方 -->
         <el-card shadow="hover" class="news-card">
           <template #header>
@@ -442,6 +575,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { TrendCharts, Star, Refresh, Link, Document, Clock, CreditCard, Delete } from '@element-plus/icons-vue'
+import { PieChart, Plus, View, InfoFilled, Opportunity } from '@element-plus/icons-vue'
 import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { stocksApi } from '@/api/stocks'
 import { analysisApi } from '@/api/analysis'
@@ -466,6 +600,7 @@ import type { StockInfo } from '@/types/analysis'
 import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
 import { loadManualSyncSourceState, type ManualSyncDataSource } from '@/utils/dataSource'
 import { getReportName } from '@/utils/reportPresentation'
+import { getTaskList, getTaskDetail, TaskType, TaskStatus } from '@/api/unifiedTasks'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -1071,7 +1206,9 @@ onMounted(async () => {
     fetchNews(),
     checkFavorite(),
     fetchLatestAnalysis(),  // 获取最新的历史分析报告
-    fetchSyncStatus()  // 获取同步状态
+    fetchSyncStatus(),  // 获取同步状态
+    fetchPositionAnalysisSummary(),  // 获取持仓分析摘要
+    fetchTradeReviewSummary()  // 获取交易复盘摘要
   ])
   // 每30秒刷新一次报价
   timer = setInterval(fetchQuote, 30000)
@@ -1346,6 +1483,290 @@ async function fetchLatestAnalysis() {
   } catch (e) {
     console.warn('⚠️ 获取历史分析报告失败:', e)
   }
+}
+
+// ============================================================================
+// 持仓分析摘要 & 交易复盘摘要
+// 在详情页展示与当前股票相关的最新持仓分析和交易复盘结论
+// 数据来源：/api/v2/tasks/list（按 task_type 过滤）+ /api/v2/tasks/{task_id}（拿 result）
+// ============================================================================
+
+interface PositionSnapshot {
+  cost_price?: number
+  current_price?: number
+  quantity?: number
+  unrealized_pnl?: number
+  unrealized_pnl_pct?: number
+  holding_days?: number
+  position_pct?: number
+}
+
+interface PositionSummaryState {
+  has: boolean
+  taskId: string
+  completedAt: string
+  snapshot: PositionSnapshot | null
+  action: string  // hold/buy/sell/reduce
+  confidence: number | null
+  conclusion: string
+  keyPoints: string[]
+}
+
+interface ReviewSummaryState {
+  has: boolean
+  taskId: string
+  completedAt: string
+  riskLevel: string
+  confidenceScore: number | null
+  summary: string
+  recommendation: string
+  tradeCount: number | null
+}
+
+const positionSummary = reactive<PositionSummaryState>({
+  has: false,
+  taskId: '',
+  completedAt: '',
+  snapshot: null,
+  action: '',
+  confidence: null,
+  conclusion: '',
+  keyPoints: []
+})
+
+const reviewSummary = reactive<ReviewSummaryState>({
+  has: false,
+  taskId: '',
+  completedAt: '',
+  riskLevel: '',
+  confidenceScore: null,
+  summary: '',
+  recommendation: '',
+  tradeCount: null
+})
+
+// 判断任务是否属于当前股票（task_params 中的 symbol/code/stock_code 任一匹配）
+function taskMatchesCurrentStock(task: any): boolean {
+  const targetCode = symbol.value  // 6位代码（已去掉后缀）
+  const targetCodeUpper = code.value  // 完整代码（可能含后缀如 SH）
+  const params = task?.task_params || task?.params || {}
+  const candidates = [
+    params.symbol,
+    params.code,
+    params.stock_code,
+    params.symbol_code
+  ].filter(Boolean).map((v: any) => String(v).toUpperCase())
+  return candidates.some(c => c === targetCode.toUpperCase() || c === targetCodeUpper.toUpperCase() || c.startsWith(targetCode.toUpperCase()))
+}
+
+async function fetchPositionAnalysisSummary() {
+  try {
+    const resp: any = await getTaskList({
+      task_type: TaskType.POSITION_ANALYSIS,
+      status: TaskStatus.COMPLETED,
+      limit: 50
+    })
+    const tasks = resp?.data?.tasks || resp?.tasks || []
+    // 过滤出与当前股票相关的任务，并按完成时间倒序
+    const matched = tasks
+      .filter((t: any) => taskMatchesCurrentStock(t))
+      .sort((a: any, b: any) => {
+        const ta = new Date(a.completed_at || a.created_at).getTime()
+        const tb = new Date(b.completed_at || b.created_at).getTime()
+        return tb - ta
+      })
+
+    if (matched.length === 0) {
+      positionSummary.has = false
+      return
+    }
+
+    const latest = matched[0]
+    positionSummary.taskId = latest.task_id
+    positionSummary.completedAt = latest.completed_at || latest.created_at
+
+    // 拉取任务详情拿 result
+    try {
+      const detail: any = await getTaskDetail(latest.task_id)
+      const result = detail?.data?.result || detail?.result || {}
+      const snapshot = result?.position_snapshot || null
+      const ai = result?.ai_analysis || {}
+      const userView = ai?.user_view || {}
+
+      positionSummary.snapshot = snapshot ? {
+        cost_price: snapshot.cost_price,
+        current_price: snapshot.current_price,
+        quantity: snapshot.quantity,
+        unrealized_pnl: snapshot.unrealized_pnl,
+        unrealized_pnl_pct: snapshot.unrealized_pnl_pct,
+        holding_days: snapshot.holding_days,
+        position_pct: snapshot.position_pct
+      } : null
+      positionSummary.action = ai.action || ''
+      positionSummary.confidence = typeof ai.confidence === 'number' ? ai.confidence : null
+      positionSummary.conclusion = userView.conclusion || ai.action_reason || ''
+      positionSummary.keyPoints = Array.isArray(userView.key_points) ? userView.key_points : []
+    } catch (e) {
+      console.warn('⚠️ 获取持仓分析详情失败:', e)
+    }
+
+    positionSummary.has = true
+  } catch (e) {
+    console.warn('⚠️ 获取持仓分析摘要失败:', e)
+    positionSummary.has = false
+  }
+}
+
+async function fetchTradeReviewSummary() {
+  try {
+    const resp: any = await getTaskList({
+      task_type: TaskType.TRADE_REVIEW,
+      status: TaskStatus.COMPLETED,
+      limit: 50
+    })
+    const tasks = resp?.data?.tasks || resp?.tasks || []
+    const matched = tasks
+      .filter((t: any) => taskMatchesCurrentStock(t))
+      .sort((a: any, b: any) => {
+        const ta = new Date(a.completed_at || a.created_at).getTime()
+        const tb = new Date(b.completed_at || b.created_at).getTime()
+        return tb - ta
+      })
+
+    if (matched.length === 0) {
+      reviewSummary.has = false
+      return
+    }
+
+    const latest = matched[0]
+    reviewSummary.taskId = latest.task_id
+    reviewSummary.completedAt = latest.completed_at || latest.created_at
+
+    try {
+      const detail: any = await getTaskDetail(latest.task_id)
+      const result = detail?.data?.result || detail?.result || {}
+      reviewSummary.riskLevel = result?.risk_level || ''
+      reviewSummary.confidenceScore = typeof result?.confidence_score === 'number' ? result.confidence_score : null
+      reviewSummary.summary = result?.summary || ''
+      reviewSummary.recommendation = result?.recommendation || ''
+      // 交易次数从 detailed_analysis.trade_info.trades 提取
+      const trades = result?.detailed_analysis?.trade_info?.trades
+      reviewSummary.tradeCount = Array.isArray(trades) ? trades.length : null
+    } catch (e) {
+      console.warn('⚠️ 获取交易复盘详情失败:', e)
+    }
+
+    reviewSummary.has = true
+  } catch (e) {
+    console.warn('⚠️ 获取交易复盘摘要失败:', e)
+    reviewSummary.has = false
+  }
+}
+
+// 跳转到持仓分析页面（通过 query 预填股票代码）
+function goToPositionAnalysis() {
+  router.push({
+    path: '/portfolio',
+    query: {
+      symbol: symbol.value,
+      code: code.value
+    }
+  })
+}
+
+// 跳转到交易复盘页面
+function goToTradeReview() {
+  router.push({
+    path: '/review',
+    query: {
+      symbol: symbol.value,
+      code: code.value
+    }
+  })
+}
+
+// 查看持仓分析任务详情（跳转到任务中心）
+function viewPositionTaskDetail() {
+  if (positionSummary.taskId) {
+    router.push({ path: '/tasks/unified', query: { task_id: positionSummary.taskId } })
+  }
+}
+
+function viewReviewTaskDetail() {
+  if (reviewSummary.taskId) {
+    router.push({ path: '/tasks/unified', query: { task_id: reviewSummary.taskId } })
+  }
+}
+
+// 持仓分析相关格式化函数
+function formatPnl(pnl: any, pct: any): string {
+  const n = Number(pnl)
+  const p = Number(pct)
+  if (!Number.isFinite(n)) return '-'
+  const sign = n > 0 ? '+' : ''
+  const pnlStr = `${sign}¥${n.toFixed(2)}`
+  if (Number.isFinite(p)) {
+    return `${pnlStr} (${sign}${p.toFixed(2)}%)`
+  }
+  return pnlStr
+}
+
+function pnlClass(pnl: any): string {
+  const n = Number(pnl)
+  if (!Number.isFinite(n) || n === 0) return ''
+  return n > 0 ? 'pnl-positive' : 'pnl-negative'
+}
+
+function actionLabel(action: string): string {
+  const map: Record<string, string> = {
+    hold: '持有观望',
+    buy: '加仓',
+    sell: '清仓',
+    reduce: '减仓',
+    add: '加仓',
+    wait: '观望',
+    stop_loss: '止损'
+  }
+  return map[action?.toLowerCase()] || action || '-'
+}
+
+function actionTagType(action: string): 'success' | 'warning' | 'danger' | 'info' | 'primary' {
+  switch (action?.toLowerCase()) {
+    case 'buy':
+    case 'add':
+      return 'success'
+    case 'sell':
+      return 'danger'
+    case 'reduce':
+    case 'stop_loss':
+      return 'warning'
+    case 'hold':
+      return 'primary'
+    default:
+      return 'info'
+  }
+}
+
+function riskLevelTagType(level: string): 'success' | 'warning' | 'danger' | 'info' {
+  const l = (level || '').toLowerCase()
+  if (l.includes('低')) return 'success'
+  if (l.includes('中')) return 'warning'
+  if (l.includes('高')) return 'danger'
+  return 'info'
+}
+
+function formatConfidenceScore(score: any): string {
+  const n = Number(score)
+  if (!Number.isFinite(n)) return '-'
+  // 兼容 0-1 和 0-100 两种格式
+  const pct = n <= 1 ? n * 100 : n
+  return `${pct.toFixed(0)}%`
+}
+
+function formatPercent(v: any): string {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '-'
+  return `${n.toFixed(2)}%`
 }
 
 // 格式化
@@ -1913,6 +2334,230 @@ function exportReport() {
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+// ============================================================================
+// 持仓分析摘要卡片
+// ============================================================================
+.position-analysis-card {
+  margin-top: 16px;
+  border-left: 3px solid var(--el-color-primary);
+
+  .card-hd {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .card-hd-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+  }
+
+  .card-hd-tag {
+    margin-left: 4px;
+    font-weight: normal;
+  }
+
+  .card-hd-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  .position-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .snapshot-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    padding: 12px;
+    background: var(--el-fill-color-lighter);
+    border-radius: 6px;
+  }
+
+  .snap-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .snap-label {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+  }
+
+  .snap-value {
+    font-size: 15px;
+    color: var(--el-text-color-primary);
+  }
+
+  .pnl-positive {
+    color: var(--el-color-success);
+  }
+
+  .pnl-negative {
+    color: var(--el-color-danger);
+  }
+
+  .ai-advice {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .advice-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+  }
+
+  .advice-label {
+    color: var(--el-text-color-secondary);
+  }
+
+  .advice-confidence {
+    color: var(--el-text-color-secondary);
+    font-size: 13px;
+  }
+
+  .advice-conclusion {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 10px 12px;
+    background: var(--el-color-primary-light-9);
+    border-left: 3px solid var(--el-color-primary);
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--el-text-color-primary);
+  }
+
+  .advice-icon {
+    color: var(--el-color-primary);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .advice-keypoints {
+    padding: 10px 12px;
+    background: var(--el-color-warning-light-9);
+    border-left: 3px solid var(--el-color-warning);
+    border-radius: 4px;
+  }
+
+  .keypoints-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--el-color-warning-dark);
+    margin-bottom: 6px;
+  }
+
+  .keypoints-list {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--el-text-color-regular);
+  }
+}
+
+// ============================================================================
+// 交易复盘摘要卡片
+// ============================================================================
+.trade-review-card {
+  margin-top: 16px;
+  border-left: 3px solid var(--el-color-success);
+
+  .card-hd {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .card-hd-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+  }
+
+  .card-hd-tag {
+    margin-left: 4px;
+    font-weight: normal;
+  }
+
+  .card-hd-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  .review-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .review-meta {
+    display: flex;
+    gap: 24px;
+    padding: 10px 12px;
+    background: var(--el-fill-color-lighter);
+    border-radius: 6px;
+  }
+
+  .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+  }
+
+  .meta-label {
+    color: var(--el-text-color-secondary);
+  }
+
+  .meta-value {
+    color: var(--el-text-color-primary);
+  }
+
+  .review-conclusion,
+  .review-recommendation {
+    padding: 10px 12px;
+    background: var(--el-fill-color-lighter);
+    border-radius: 6px;
+  }
+
+  .review-recommendation {
+    background: var(--el-color-success-light-9);
+  }
+
+  .conclusion-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--el-text-color-secondary);
+    margin-bottom: 6px;
+  }
+
+  .conclusion-text {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--el-text-color-primary);
+  }
 }
 </style>
 
