@@ -663,7 +663,7 @@ const syncDialogTitle = computed(() => `同步${securityName.value}数据`)
 const syncButtonText = computed(() => isEtf.value ? '同步ETF数据' : '同步数据')
 const favoriteButtonText = computed(() => {
   if (isEtf.value) return isFav.value ? '已关注ETF' : '关注ETF'
-  return isFav.value ? '已自选' : '加自选'
+  return isFav.value ? '已自选' : '加入关注列表'
 })
 const quickFavoriteButtonText = computed(() => {
   if (isEtf.value) return isFav.value ? '取消ETF关注' : '加入ETF关注'

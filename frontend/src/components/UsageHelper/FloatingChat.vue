@@ -161,7 +161,7 @@ const MAX_ERRORS = 3
 
 const quickQuestions = [
   '今日任务为什么是 0?',
-  '怎么加自选股?',
+  '怎么加入关注列表?',
   'License 怎么激活?',
   '我能在哪里看研究报告?',
   '怎么配置定时分析?',
