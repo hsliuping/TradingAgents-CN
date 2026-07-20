@@ -1,8 +1,20 @@
 <template>
   <div class="history-positions-table">
     <el-table :data="items" v-loading="loading" stripe>
-      <el-table-column prop="code" label="股票代码" width="100" />
-      <el-table-column prop="name" label="股票名称" width="120" />
+      <el-table-column prop="code" label="股票代码" width="100">
+        <template #default="{ row }">
+          <el-link type="primary" :href="`/stocks/${row.code}`" class="stock-link">
+            {{ row.code }}
+          </el-link>
+        </template>
+      </el-table-column>
+      <el-table-column prop="name" label="股票名称" width="120">
+        <template #default="{ row }">
+          <el-link type="primary" :href="`/stocks/${row.code}`" class="stock-link">
+            {{ row.name }}
+          </el-link>
+        </template>
+      </el-table-column>
       <el-table-column prop="market" label="市场" width="70">
         <template #default="{ row }">
           <el-tag size="small" :type="getMarketType(row.market)">{{ row.market }}</el-tag>
@@ -107,6 +119,15 @@ const handleStartReview = (item: HistoryPositionItem) => {
 .history-positions-table {
   .positive { color: #f56c6c; }  // 中国习惯：红色表示盈利（正数）
   .negative { color: #67c23a; }  // 中国习惯：绿色表示亏损（负数）
+
+  .stock-link {
+    font-weight: 500;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
 }
 </style>
 
