@@ -166,6 +166,26 @@ export function formatDate(dateStr: string | number | null | undefined): string 
 }
 
 /**
+ * 将 Date 对象或日期字符串格式化为本地时区的 "YYYY-MM-DD" 字符串
+ *
+ * ⚠️ 替代 `new Date(d).toISOString().split('T')[0]`：
+ * 后者会把本地时间转成 UTC，东八区用户选的 5月12日 00:00 会被错误地格式化为 "2026-05-11"。
+ * 本函数使用本地时区字段值，保证日期与用户选择一致。
+ *
+ * @param date - Date 对象、日期字符串或时间戳
+ * @returns "YYYY-MM-DD" 格式字符串，输入无效时返回空字符串
+ */
+export function formatLocalDate(date: Date | string | number | null | undefined): string {
+  if (!date) return ''
+  const d = date instanceof Date ? date : new Date(date)
+  if (isNaN(d.getTime())) return ''
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/**
  * 仅格式化时间部分（不含日期）
  * @param dateStr - 时间字符串或时间戳
  * @returns 格式化后的时间字符串
