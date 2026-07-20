@@ -517,9 +517,19 @@ class UnifiedAnalysisEngine:
         # 将 AgentContext 添加到工作流输入
         workflow_inputs["context"] = agent_context
 
-        # 参数映射：将 symbol 映射为 ticker（工作流引擎使用 ticker）
-        if "symbol" in workflow_inputs and "ticker" not in workflow_inputs:
-            workflow_inputs["ticker"] = workflow_inputs["symbol"]
+        # 参数映射：将 symbol/code/stock_code 映射为 ticker（工作流引擎使用 ticker）
+        # ⚠️ 不同 service 用的字段名不一致：
+        #   - stock_analysis 用 symbol
+        #   - trade_review 用 code
+        #   - portfolio_analysis 用 stock_code
+        # 统一映射到 ticker，避免 agents 报 "Missing required parameters: ticker"
+        if "ticker" not in workflow_inputs or not workflow_inputs.get("ticker"):
+            for key in ("symbol", "code", "stock_code"):
+                val = workflow_inputs.get(key)
+                if val:
+                    workflow_inputs["ticker"] = val
+                    self.logger.debug(f"📋 参数映射: {key} → ticker = {val}")
+                    break
 
         # 🆕 读取工作流的 input_config，根据字段定义补充缺失参数
         try:

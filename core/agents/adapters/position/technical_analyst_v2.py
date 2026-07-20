@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, List
 
 from ...researcher import ResearcherAgent
-from ...config import AgentMetadata, AgentCategory, LicenseTier
+from ...config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ...registry import register_agent
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,14 @@ class TechnicalAnalystV2(ResearcherAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=["get_stock_market_data_unified"],  # 🔧 修复：当没有缓存时需要调用工具获取市场数据
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="position_info", type="object", description="持仓信息详情", required=False),
+            AgentInput(name="market_data", type="object", description="市场行情数据", required=False),
+        ],
+        outputs=[
+            AgentOutput(name="technical_analysis", type="string", description="技术面分析结果"),
+        ],
         growth_role="extractor",
         growth_outputs=["technical_analysis"],
         memory_scope_hint="object_tracking",

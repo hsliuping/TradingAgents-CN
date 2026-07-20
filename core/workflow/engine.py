@@ -153,6 +153,10 @@ def _prepare_workflow_runtime_inputs(
         runtime_context["growth_memory_recall"] = prepared_inputs["growth_memory_recall"]
 
     ticker = prepared_inputs.get("ticker") or prepared_inputs.get("symbol") or prepared_inputs.get("stock_symbol") or prepared_inputs.get("company_of_interest")
+    # 🔍 调试日志：排查 ticker 丢失问题
+    import logging as _logging
+    _logger = _logging.getLogger("core.workflow.engine")
+    _logger.info(f"🔍 [_prepare_workflow_runtime_inputs] ticker 映射: ticker={prepared_inputs.get('ticker')}, symbol={prepared_inputs.get('symbol')}, stock_symbol={prepared_inputs.get('stock_symbol')}, company_of_interest={prepared_inputs.get('company_of_interest')}, 最终ticker={ticker}")
     if ticker:
         prepared_inputs.setdefault("ticker", ticker)
         prepared_inputs.setdefault("stock_symbol", ticker)

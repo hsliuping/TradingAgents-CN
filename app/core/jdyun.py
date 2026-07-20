@@ -27,7 +27,9 @@ JDYUN_CHAT_MODELS = [
 JDYUN_DEFAULT_EMBEDDING_MODEL = "Qwen3-Embedding-8B"
 
 # Qwen3-Embedding-8B 输出维度
-JDYUN_EMBEDDING_DIMS = 4096
+# 🔥 京东云本地模型只支持 [64, 128, 256, 512, 768, 1024, 1536, 2048] 维度
+# 为确保兼容性，统一使用 1024 维
+JDYUN_EMBEDDING_DIMS = 1024
 
 # 京东云 Provider 名称
 JDYUN_PROVIDER_NAME = "jdyun"

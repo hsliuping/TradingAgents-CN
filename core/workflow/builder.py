@@ -1882,7 +1882,12 @@ class WorkflowBuilder:
                     },
                 }
 
+            import time as _time
+            _agent_start = _time.time()
+            logger.info(f"[节点执行] ⏳ {node_id} ({node_label}) - 调用 agent_callable...")
             raw_result = agent_callable(agent_state)
+            _agent_elapsed = _time.time() - _agent_start
+            logger.info(f"[节点执行] ⏱️ {node_id} ({node_label}) - agent_callable 执行完成, 耗时: {_agent_elapsed:.1f}s")
             result = raw_result if isinstance(raw_result, dict) else {
                 (output_field or f"{agent_id}_report"): raw_result
             }

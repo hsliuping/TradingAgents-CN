@@ -6,6 +6,7 @@ import json
 from datetime import date
 from typing import Dict, Any, Tuple, List, Optional
 import time
+import threading
 
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
@@ -37,7 +38,64 @@ from .propagation import Propagator
 from .reflection import Reflector
 from .signal_processing import SignalProcessor
 from app.utils.api_key_utils import truncate_api_key
-from app.core.jdyun import get_llm_max_retries
+from app.core.jdyun import get_llm_max_retries, is_jdyun_mode
+
+# ============================================================================
+# 京东云 LLM 调用串行化（避免并行 Agent 同时调用触发 429 限流）
+# ============================================================================
+_jdyun_llm_semaphore = threading.Semaphore(1)
+
+# JDYun 429 重试间隔（秒）：逐次翻倍，从 3s 开始
+_JYDUN_RETRY_DELAYS = [3, 6, 12]
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """判断是否为 429 限流错误"""
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if status == 429:
+        return True
+    msg = str(exc).lower()
+    return "429" in msg or "rate limit" in msg or "too many requests" in msg
+
+
+class _JDYunRateLimitedLLM:
+    """JDYun 模式下的 LLM 代理：
+    1. 信号量确保同一时间只有一个 LLM 调用在飞行
+    2. 429 限流时用较长的间隔重试（3s/6s/12s）
+    """
+
+    def __init__(self, _llm):
+        self.__llm = _llm
+
+    def invoke(self, messages, *args, **kwargs):
+        last_error = None
+        for attempt in range(1 + len(_JYDUN_RETRY_DELAYS)):
+            logger.debug(f"⏳ [JDYun限流] 等待 LLM 调用许可...")
+            acquired = _jdyun_llm_semaphore.acquire(timeout=300)
+            if not acquired:
+                raise RuntimeError("[JDYun限流] 获取 LLM 调用许可超时（300s），可能存在死锁")
+            try:
+                logger.debug(f"✅ [JDYun限流] 获取 LLM 调用许可，开始调用 (attempt {attempt+1})")
+                return self.__llm.invoke(messages, *args, **kwargs)
+            except Exception as exc:
+                last_error = exc
+                if _is_rate_limit_error(exc) and attempt < len(_JYDUN_RETRY_DELAYS):
+                    delay = _JYDUN_RETRY_DELAYS[attempt]
+                    logger.warning(
+                        f"⚠️ [JDYun限流] 遇到 429 限流，{delay}s 后重试 "
+                        f"(第 {attempt+1}/{len(_JYDUN_RETRY_DELAYS)} 次)"
+                    )
+                    time.sleep(delay)
+                else:
+                    raise
+            finally:
+                _jdyun_llm_semaphore.release()
+                logger.debug(f"🔓 [JDYun限流] 释放 LLM 调用许可")
+
+        raise last_error
+
+    def __getattr__(self, name):
+        return getattr(self.__llm, name)
 
 
 def _normalize_provider_qualified_model(provider: str, model: str) -> tuple[str, str]:
@@ -207,16 +265,23 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         else:
             logger.info(f"🔑 [{provider.capitalize()}] 最终使用的 API Key: None（将使用环境变量）")
 
-        return ChatOpenAI(
+        # JDYun 模式：底层只保留 1 次快速重试（应对瞬时网络抖动），
+        # 429 限流由 _JDYunRateLimitedLLM 用长间隔处理
+        _max_retries = 1 if provider.lower() == "jdyun" else get_llm_max_retries()
+        llm = ChatOpenAI(
             model=model,
             base_url=backend_url,
             api_key=api_key,
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
-            max_retries=get_llm_max_retries(),
+            max_retries=_max_retries,
             **_extra
         )
+        if provider.lower() == "jdyun":
+            logger.info(f"🔒 [JDYun限流] 启用 LLM 调用串行化（避免并行 Agent 触发 429）")
+            return _JDYunRateLimitedLLM(llm)
+        return llm
 
     elif provider.lower() in ["volcengine", "volcengine_coding"]:
         # 🔧 火山方舟：使用专用适配器，支持 reasoning_effort

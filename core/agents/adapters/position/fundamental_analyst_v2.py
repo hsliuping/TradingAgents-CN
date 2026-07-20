@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, List
 
 from ...researcher import ResearcherAgent
-from ...config import AgentMetadata, AgentCategory, LicenseTier
+from ...config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ...registry import register_agent
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,14 @@ class FundamentalAnalystV2(ResearcherAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=[],  # 不需要工具
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="position_info", type="object", description="持仓信息详情", required=False),
+            AgentInput(name="stock_analysis_report", type="object", description="股票分析报告", required=False),
+        ],
+        outputs=[
+            AgentOutput(name="fundamental_analysis", type="string", description="基本面分析结果"),
+        ],
         growth_role="extractor",
         growth_outputs=["fundamental_analysis"],
         memory_scope_hint="object_tracking",
