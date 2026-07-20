@@ -138,6 +138,7 @@
           :page-size="historyPageSize"
           @view="viewReviewDetail"
           @save-case="saveAsCase"
+          @delete="deleteReview"
           @page-change="handleHistoryPageChange"
         />
       </el-tab-pane>
@@ -293,6 +294,7 @@
             :page="positionReviewPage"
             :page-size="positionReviewPageSize"
             @view="viewPositionReviewDetail"
+            @delete="deleteReview"
             @page-change="handlePositionReviewPageChange"
           />
         </el-tab-pane>
@@ -414,7 +416,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { ElMessage, type TabPaneName } from 'element-plus'
+import { ElMessage, ElMessageBox, type TabPaneName } from 'element-plus'
 import { TrendCharts, Refresh, Search, RefreshRight, Goods, Wallet } from '@element-plus/icons-vue'
 import { reviewApi, type ReviewListItem, type TradingStatistics, type ReviewableStock, type ReviewType, type PeriodicReviewListItem } from '@/api/review'
 import { portfolioApi } from '@/api/portfolio'
@@ -772,6 +774,24 @@ const deleteCase = async (reviewId: string) => {
     }
   } catch (e: any) {
     ElMessage.error(e.message || '删除失败')
+  }
+}
+
+const deleteReview = async (reviewId: string) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这条复盘记录吗？此操作不可恢复。', '确认删除', {
+      type: 'warning'
+    })
+    const res = await reviewApi.deleteReview(reviewId)
+    if (res.success) {
+      ElMessage.success('复盘记录已删除')
+      loadReviewHistory()
+      loadPositionReviewHistory()
+    }
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e.message || '删除失败')
+    }
   }
 }
 

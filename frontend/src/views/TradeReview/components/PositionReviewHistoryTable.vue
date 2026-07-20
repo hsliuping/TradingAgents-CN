@@ -1,18 +1,18 @@
 <template>
   <div class="position-review-history-table">
     <el-table :data="items" v-loading="loading" stripe>
-      <el-table-column prop="code" label="股票代码" width="100" />
-      <el-table-column prop="name" label="股票名称" width="120" />
-      <el-table-column prop="review_type" label="复盘类型" width="100">
+      <el-table-column prop="code" label="股票代码" width="100">
         <template #default="{ row }">
-          <el-tag size="small">{{ getReviewTypeLabel(row.review_type) }}</el-tag>
+          <el-link type="primary" :href="`/stocks/${row.code}`" class="stock-link">
+            {{ row.code }}
+          </el-link>
         </template>
       </el-table-column>
-      <el-table-column prop="score" label="评分" width="80" align="center">
+      <el-table-column prop="name" label="股票名称" width="120">
         <template #default="{ row }">
-          <el-tag :type="getScoreType(row.score)" size="small">
-            {{ row.score || '-' }}
-          </el-tag>
+          <el-link type="primary" :href="`/stocks/${row.code}`" class="stock-link">
+            {{ row.name }}
+          </el-link>
         </template>
       </el-table-column>
       <el-table-column prop="summary" label="复盘摘要" min-width="200" show-overflow-tooltip />
@@ -21,10 +21,13 @@
           {{ formatDateTime(row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
+      <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <el-button type="primary" link size="small" @click="handleView(row.id)">
             查看详情
+          </el-button>
+          <el-button type="danger" link size="small" @click="handleDelete(row.id)">
+            删除
           </el-button>
         </template>
       </el-table-column>
@@ -45,14 +48,10 @@
 </template>
 
 <script setup lang="ts">
-type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
-
 interface PositionReviewItem {
   id: string
   code: string
   name: string
-  review_type: string
-  score: number
   created_at: string
   summary: string
 }
@@ -67,23 +66,9 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'view', reviewId: string): void
+  (e: 'delete', reviewId: string): void
   (e: 'page-change', page: number): void
 }>()
-
-const getReviewTypeLabel = (type: string) => {
-  const map: Record<string, string> = {
-    current: '当前持仓',
-    history: '历史持仓',
-    complete: '完整交易'
-  }
-  return map[type] || type
-}
-
-const getScoreType = (score: number): TagType => {
-  if (score >= 80) return 'success'
-  if (score >= 60) return 'warning'
-  return 'danger'
-}
 
 const formatDateTime = (dateStr?: string) => {
   if (!dateStr) return '-'
@@ -101,6 +86,10 @@ const handleView = (reviewId: string) => {
   emit('view', reviewId)
 }
 
+const handleDelete = (reviewId: string) => {
+  emit('delete', reviewId)
+}
+
 const handlePageChange = (page: number) => {
   emit('page-change', page)
 }
@@ -112,6 +101,14 @@ const handlePageChange = (page: number) => {
     margin-top: 16px;
     justify-content: flex-end;
   }
+
+  .stock-link {
+    font-weight: 500;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
 }
 </style>
-

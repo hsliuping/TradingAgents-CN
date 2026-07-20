@@ -330,6 +330,11 @@ export const reviewApi = {
     return ApiClient.delete<{ message: string }>(`/api/review/case/${reviewId}`, { showLoading: true })
   },
 
+  /** 删除复盘记录 */
+  async deleteReview(reviewId: string) {
+    return ApiClient.delete<{ message: string }>(`/api/review/trade/${reviewId}`, { showLoading: true })
+  },
+
   /** 获取交易统计 */
   async getTradingStatistics(startDate?: string, endDate?: string) {
     return ApiClient.get<TradingStatistics>('/api/review/statistics', {
@@ -398,6 +403,23 @@ export const reviewApi = {
   /** 获取阶段性复盘详情 */
   async getPeriodicReviewDetail(reviewId: string) {
     return ApiClient.get<PeriodicReviewReport>(`/api/review/periodic/${reviewId}`)
+  },
+
+  /** 按股票代码获取复盘摘要（用于股票详情页） */
+  async getTradeReviewSummary(code: string) {
+    return ApiClient.get<ReviewSummary>(`/api/review/summary`, { code })
   }
+}
+
+/** 复盘摘要类型（股票详情页使用） */
+interface ReviewSummary {
+  has: boolean
+  task_id?: string
+  completed_at?: string
+  summary?: string
+  recommendation?: string
+  risk_level?: string
+  confidence_score?: number | null
+  trade_count?: number | null
 }
 

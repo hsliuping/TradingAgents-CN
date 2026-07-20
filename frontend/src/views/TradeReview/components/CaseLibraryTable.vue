@@ -5,10 +5,18 @@
     <el-table v-else :data="items" v-loading="loading" stripe>
       <el-table-column prop="code" label="股票代码" width="100">
         <template #default="{ row }">
-          <span class="code-link" @click="$emit('view', row.review_id)">{{ row.code }}</span>
+          <el-link type="primary" :href="`/stocks/${row.code}`" class="stock-link">
+            {{ row.code }}
+          </el-link>
         </template>
       </el-table-column>
-      <el-table-column prop="name" label="名称" width="120" />
+      <el-table-column prop="name" label="股票名称" width="120">
+        <template #default="{ row }">
+          <el-link type="primary" :href="`/stocks/${row.code}`" class="stock-link">
+            {{ row.name }}
+          </el-link>
+        </template>
+      </el-table-column>
       <el-table-column prop="realized_pnl" label="实现盈亏" width="120" align="right">
         <template #default="{ row }">
           <span :class="row.realized_pnl >= 0 ? 'positive' : 'negative'">
@@ -97,10 +105,13 @@ const handlePageChange = (page: number) => {
 
 <style scoped lang="scss">
 .case-library-table {
-  .code-link {
-    color: var(--el-color-primary);
-    cursor: pointer;
-    &:hover { text-decoration: underline; }
+  .stock-link {
+    font-weight: 500;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
   }
   
   .positive { color: #f56c6c; }  // 中国习惯：红色表示盈利（正数）
