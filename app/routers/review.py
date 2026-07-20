@@ -191,6 +191,27 @@ async def get_review_detail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== 复盘摘要（供股票详情页使用） ====================
+
+@router.get("/summary", response_model=Dict[str, Any])
+async def get_review_summary(
+    code: str = Query(..., description="股票代码（如 601919）"),
+    current_user: dict = Depends(get_current_user)
+):
+    """按股票代码获取最新复盘摘要（用于股票详情页展示）"""
+    try:
+        logger.info(f"[review.py] get_review_summary 被调用: code={code}, user_id={current_user.get('id')}")
+        service = get_trade_review_service()
+        result = await service.get_review_summary_by_stock(
+            user_id=current_user["id"],
+            stock_code=code
+        )
+        return ok(result or {"has": False})
+    except Exception as e:
+        logger.error(f"获取复盘摘要失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== 案例库 ====================
 
 @router.post("/case", response_model=Dict[str, Any])
@@ -261,6 +282,28 @@ async def delete_case(
         raise
     except Exception as e:
         logger.error(f"删除案例失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/trade/{review_id}", response_model=Dict[str, Any])
+async def delete_review(
+    review_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """删除复盘记录"""
+    try:
+        service = get_trade_review_service()
+        success = await service.delete_review(
+            user_id=current_user["id"],
+            review_id=review_id
+        )
+        if not success:
+            raise HTTPException(status_code=404, detail="复盘记录不存在")
+        return ok({"message": "复盘记录已删除"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除复盘记录失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
