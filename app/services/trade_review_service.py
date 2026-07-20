@@ -7,10 +7,10 @@ import os
 import uuid
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 from bson import ObjectId
 
-from app.core.database import get_mongo_db
+from app.core.database import get_mongo_db, get_database
 
 # ==================== 特性开关 ====================
 # 是否使用模板系统生成提示词（默认关闭，保持向后兼容）
@@ -146,6 +146,22 @@ async def _store_trade_pattern_memory(
             logger.warning(f"[trade_review] trade_pattern 写入失败: {result.error}")
     except Exception as e:
         logger.warning(f"[trade_review] trade_pattern 写入异常: {e}", exc_info=True)
+
+
+def _derive_risk_level(score) -> str:
+    """根据综合评分推导风险等级"""
+    if score is None:
+        return ""
+    if score >= 80:
+        return "低风险"
+    elif score >= 60:
+        return "中低风险"
+    elif score >= 40:
+        return "中风险"
+    elif score >= 20:
+        return "中高风险"
+    else:
+        return "高风险"
 
 
 class TradeReviewService:
@@ -288,7 +304,8 @@ class TradeReviewService:
     async def create_trade_review(
         self,
         user_id: str,
-        request: CreateTradeReviewRequest
+        request: CreateTradeReviewRequest,
+        progress_callback: Optional[Callable] = None  # 🔥 新增参数
     ) -> TradeReviewResponse:
         """创建交易复盘"""
         review_id = str(uuid.uuid4())
@@ -356,7 +373,8 @@ class TradeReviewService:
                 market_snapshot,
                 user_id=user_id,
                 trading_system=trading_system,
-                use_workflow=request.use_workflow
+                use_workflow=request.use_workflow,
+                progress_callback=progress_callback  # 🔥 传递进度回调
             )
             ai_review = self._sanitize_trade_review_result(ai_review)
             
@@ -1122,7 +1140,8 @@ class TradeReviewService:
         market_snapshot: MarketSnapshot,
         user_id: Optional[str] = None,
         trading_system: Optional[Dict[str, Any]] = None,
-        use_workflow: Optional[bool] = None
+        use_workflow: Optional[bool] = None,
+        progress_callback: Optional[Callable] = None  # 🔥 新增参数
     ) -> AITradeReview:
         """调用AI进行交易复盘分析
 
@@ -1143,7 +1162,8 @@ class TradeReviewService:
             try:
                 logger.info(f"🔄 [交易复盘] 使用工作流引擎进行多维度分析 (v2.0)")
                 return await self._call_workflow_trade_review(
-                    trade_info, market_snapshot, user_id, trading_system
+                    trade_info, market_snapshot, user_id, trading_system,
+                    progress_callback=progress_callback  # 🔥 传递进度回调
                 )
             except Exception as e:
                 import traceback
@@ -1751,6 +1771,103 @@ class TradeReviewService:
             "page_size": page_size
         }
 
+    async def get_review_summary_by_stock(
+        self,
+        user_id: str,
+        stock_code: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        按股票代码获取最新复盘摘要（供股票详情页使用）
+        """
+        try:
+            from app.models.user import PyObjectId
+            db = get_database()
+            user_oid = PyObjectId(user_id)
+
+            # 查询 unified_analysis_tasks
+            query_filter = {
+                "user_id": user_oid,
+                "task_type": "trade_review",
+                "status": "completed",
+                "$or": [
+                    {"task_params.stock_code": stock_code},
+                    {"task_params.symbol": stock_code},
+                    {"task_params.code": stock_code},
+                ]
+            }
+            logger.info(f"[复盘摘要] DEBUG: user_id={user_id}, user_oid={user_oid}, stock_code={stock_code}")
+            logger.info(f"[复盘摘要] DEBUG: query={query_filter}")
+            
+            task = await db.unified_analysis_tasks.find_one(query_filter, sort=[("completed_at", -1)])
+
+            if not task:
+                count = await db.unified_analysis_tasks.count_documents({"task_type": "trade_review", "status": "completed"})
+                logger.warning(f"[复盘摘要] 未找到! completed_tasks总数={count}")
+                sample = await db.unified_analysis_tasks.find_one({"task_type": "trade_review", "status": "completed"})
+                if sample:
+                    logger.warning(f"[复盘摘要] 样本: user_id={sample.get('user_id')}, stock_code={sample.get('task_params', {}).get('stock_code')}")
+                return None
+
+            result = task.get("result", {})
+            task_params = task.get("task_params", {})
+
+            # 兼容多种结果格式
+            # v2: result.review_summary 是 dict
+            # v1: result.ai_review 是 dict（当前主流格式）
+            # 旧v1: result 顶层有 summary/recommendation 等字段
+            is_v2 = bool(result and isinstance(result.get("review_summary"), dict))
+            raw_ai = result.get("ai_review")
+            ai_review = raw_ai if isinstance(raw_ai, dict) else {}
+            logger.info(f"[复盘摘要] DEBUG: result keys={list(result.keys())[:10]}, "
+                       f"is_v2={is_v2}, has_ai_review={bool(ai_review)}, "
+                       f"ai_review_type={type(raw_ai).__name__}")
+
+            summary = {}
+            if is_v2:
+                rs = result["review_summary"]
+                summary = {
+                    "has": True,
+                    "task_id": task["task_id"],
+                    "completed_at": task.get("completed_at", task.get("created_at")),
+                    "summary": rs.get("summary", ""),
+                    "recommendation": rs.get("lessons", ""),
+                    "risk_level": rs.get("rating", rs.get("risk_level", "")),
+                    "confidence_score": None,
+                    "trade_count": len(result.get("trade_info", {}).get("trades", [])) if result.get("trade_info") else None
+                }
+            elif ai_review:
+                # v1 格式：数据在 result.ai_review 中
+                suggestions = ai_review.get("suggestions", [])
+                suggestion_text = "\n".join([f"- {s}" for s in suggestions]) if suggestions else ""
+                trade_info = result.get("trade_info", {})
+                summary = {
+                    "has": True,
+                    "task_id": task["task_id"],
+                    "completed_at": task.get("completed_at", task.get("created_at")),
+                    "summary": ai_review.get("summary", ""),
+                    "recommendation": suggestion_text,
+                    "risk_level": _derive_risk_level(ai_review.get("overall_score")),
+                    "confidence_score": ai_review.get("overall_score"),
+                    "trade_count": len(trade_info.get("trades", [])) if trade_info else None
+                }
+            else:
+                summary = {
+                    "has": True,
+                    "task_id": task["task_id"],
+                    "completed_at": task.get("completed_at", task.get("created_at")),
+                    "summary": result.get("summary", ""),
+                    "recommendation": result.get("recommendation", ""),
+                    "risk_level": result.get("risk_level", ""),
+                    "confidence_score": result.get("confidence_score"),
+                    "trade_count": len(result.get("detailed_analysis", {}).get("trade_info", {}).get("trades", [])) if result.get("detailed_analysis") else None
+                }
+
+            return summary
+
+        except Exception as e:
+            logger.warning(f"[复盘摘要] 查询失败: {e}")
+            return None
+
     async def get_review_detail(
         self,
         user_id: str,
@@ -2025,7 +2142,11 @@ class TradeReviewService:
             "is_case_study": True
         }
         if source:
-            query["source"] = source
+            if source == "position":
+                # 持仓操作复盘包含实盘交易(real)和持仓操作(position)
+                query["source"] = {"$in": ["position", "real"]}
+            else:
+                query["source"] = source
 
         cursor = self.db[self.trade_reviews_collection].find(query).sort("created_at", -1).skip(skip).limit(page_size)
 
@@ -2107,6 +2228,17 @@ class TradeReviewService:
             {"$set": {"is_case_study": False}}
         )
         return result.modified_count > 0
+
+    async def delete_review(
+        self,
+        user_id: str,
+        review_id: str
+    ) -> bool:
+        """删除复盘记录"""
+        result = await self.db[self.trade_reviews_collection].delete_one(
+            {"user_id": user_id, "review_id": review_id}
+        )
+        return result.deleted_count > 0
 
     # ==================== 交易统计 ====================
 
@@ -2960,7 +3092,8 @@ class TradeReviewService:
         trade_info: TradeInfo,
         market_snapshot: MarketSnapshot,
         user_id: Optional[str] = None,
-        trading_system: Optional[Dict[str, Any]] = None
+        trading_system: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Callable] = None  # 🔥 新增参数
     ) -> AITradeReview:
         """使用工作流引擎进行多维度交易复盘分析
 
@@ -3019,7 +3152,9 @@ class TradeReviewService:
 
         # 3. 准备工作流输入
         # 🆕 添加 user_id 和 trade_ids，供 Agent 通过工具获取完整数据
+        # ⚠️ 参数映射：Agent 期望 ticker 字段，必须从 code 映射，否则报 "Missing required parameters: ticker"
         inputs = {
+            "ticker": trade_info.code,  # 🔥 关键：Agent 统一使用 ticker，从 code 映射
             "user_id": user_id,  # 用户ID，供工具使用
             "trade_ids": [str(t.trade_id) for t in trade_info.trades] if trade_info.trades else [],  # 交易ID列表
             "trade_info": {
@@ -3156,13 +3291,41 @@ class TradeReviewService:
             agent_info = f" (agent: {node.agent_id})" if node.agent_id else ""
             logger.info(f"   📍 节点: {node.id} [{node.type}]{agent_info}")
 
-        def progress_callback(progress, message, **kwargs):
+        import asyncio
+        # 🔥 保存主事件循环的引用（在调用 asyncio.to_thread 之前）
+        main_loop = asyncio.get_running_loop()
+
+        def workflow_progress_callback(progress, message, **kwargs):
+            """包装的进度回调：打印日志并调用外部进度回调"""
             step_name = kwargs.get("step_name", "")
             step_info = f" [{step_name}]" if step_name else ""
             logger.info(f"📊 [工作流复盘] 进度: {progress:.1f}%{step_info} - {message}")
 
+            # 🔥 调用外部进度回调（保存进度到数据库）
+            if progress_callback:
+                try:
+                    if asyncio.iscoroutinefunction(progress_callback):
+                        # 如果是异步回调，需要在主事件循环中运行
+                        future = asyncio.run_coroutine_threadsafe(
+                            progress_callback(progress, message, **kwargs),
+                            main_loop
+                        )
+                        # 等待回调完成（最多5秒）
+                        try:
+                            future.result(timeout=5)
+                        except Exception as callback_error:
+                            logger.warning(f"⚠️ 进度回调执行异常: {callback_error}")
+                    else:
+                        # 同步回调可以直接调用
+                        progress_callback(progress, message, **kwargs)
+                except Exception as e:
+                    logger.warning(f"⚠️ 进度回调调用失败: {e}")
+
         logger.info(f"🚀 [工作流复盘] 开始执行工作流...")
-        result = engine.execute(inputs=inputs, progress_callback=progress_callback)
+        logger.error(f"🔍 [工作流复盘] inputs keys: {list(inputs.keys())}, ticker={inputs.get('ticker')}, trade_info存在={('trade_info' in inputs)}, trade_info_code={inputs.get('trade_info', {}).get('code') if isinstance(inputs.get('trade_info'), dict) else 'N/A'}")
+        # 🔥 关键修复：使用 asyncio.to_thread 在独立线程中执行同步工作流
+        # 避免阻塞 uvicorn 事件循环（单股分析也是这么做的）
+        result = await asyncio.to_thread(engine.execute, inputs=inputs, progress_callback=workflow_progress_callback)
 
         logger.info(f"✅ [工作流复盘] 工作流执行完成")
         logger.info(f"📋 [工作流复盘] 输出字段: {list(result.keys())}")
