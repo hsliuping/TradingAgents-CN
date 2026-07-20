@@ -3,7 +3,8 @@
 """
 
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, Query, HTTPException
 
@@ -13,7 +14,75 @@ from app.services.usage_statistics_service import usage_statistics_service
 
 logger = logging.getLogger("app.routers.usage_statistics")
 
-router = APIRouter(prefix="/api/usage", tags=["使用统计"])
+router = APIRouter(prefix="/api/usage", tags=["使用统计"], redirect_slashes=False)
+
+
+# ============================================================================
+# /api/usage/stats - KPI 友好的简洁统计端点（v3.0 京东云仪表板用）
+# 返回 {used_tokens, quota_tokens, percentage, period_days, reset_at}
+# quota_tokens 来源:
+#   1. 京东云模式: 环境变量 JDYUN_TOKEN_QUOTA（可选，默认 0 表示不限额）
+#   2. 标准版: License 高级功能配额（如未配置则为 0）
+# 当 quota_tokens = 0 时不显示配额百分比，仅展示累计用量
+# ============================================================================
+
+def _resolve_token_quota() -> int:
+    """解析当前用户的 Token 配额上限（0 表示不限额）"""
+    # 京东云模式：从环境变量读取
+    if os.getenv("JDYUN_MODE", "").strip().lower() in ("true", "1", "yes"):
+        return int(os.getenv("JDYUN_TOKEN_QUOTA", "0"))
+    # 标准版：默认不限额，可由 License 模块扩展
+    return 0
+
+
+@router.get("/stats", summary="获取 KPI 用量统计")
+async def get_usage_stats(
+    days: int = Query(7, ge=1, le=365, description="统计天数（默认近 7 天）"),
+    current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    获取 KPI 友好的简洁用量统计
+
+    用于仪表板"API 用量"卡片，返回已用 Token / 配额 / 百分比。
+    与 /api/usage/statistics 区别：
+    - statistics 返回多维详细统计（by_provider/by_model/by_date）
+    - stats 返回单值 KPI（used_tokens/quota_tokens/percentage）
+
+    quota_tokens 来源：
+    - 京东云模式：环境变量 JDYUN_TOKEN_QUOTA（默认 0 表示不限额）
+    - 标准版：默认不限额，可由 License 模块扩展
+
+    当 quota_tokens = 0 时，percentage = 0，前端仅展示累计用量不显示进度条。
+    """
+    try:
+        # 复用现有 service 拿详细统计
+        stats = await usage_statistics_service.get_usage_statistics(days=days)
+
+        used_tokens = stats.total_input_tokens + stats.total_output_tokens
+        quota_tokens = _resolve_token_quota()
+        percentage = round((used_tokens / quota_tokens) * 100, 2) if quota_tokens > 0 else 0.0
+
+        # 配额重置时间：当前周期结束时间（days 天后）
+        reset_at = (datetime.utcnow() + timedelta(days=days)).isoformat() + "Z"
+
+        return {
+            "success": True,
+            "message": "获取用量统计成功",
+            "data": {
+                "used_tokens": used_tokens,
+                "quota_tokens": quota_tokens,
+                "percentage": percentage,
+                "period_days": days,
+                "reset_at": reset_at,
+                "input_tokens": stats.total_input_tokens,
+                "output_tokens": stats.total_output_tokens,
+                "total_requests": stats.total_requests,
+                "currency_breakdown": stats.cost_by_currency,
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取 KPI 用量统计失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/records", summary="获取使用记录")
