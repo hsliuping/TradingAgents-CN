@@ -62,6 +62,7 @@ import { Loading } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PositionCreatePayload } from '@/api/portfolio'
 import { stocksApi } from '@/api/stocks'
 import { getMarketByStockCode } from '@/utils/market'
+import { formatLocalDate } from '@/utils/datetime'
 
 const props = defineProps<{
   visible: boolean
@@ -253,7 +254,7 @@ const handleSubmit = async () => {
       market: normalizeSubmitMarket(form.value.market),
       quantity: form.value.quantity,
       cost_price: form.value.cost_price,
-      buy_date: form.value.buy_date ? new Date(form.value.buy_date).toISOString().split('T')[0] : undefined,
+      buy_date: form.value.buy_date ? formatLocalDate(form.value.buy_date) : undefined,
       notes: form.value.notes || undefined
     }
     

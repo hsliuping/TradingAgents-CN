@@ -3006,7 +3006,13 @@ class PortfolioService:
         if not buy_date:
             return None
         # 格式化买入日期：支持 datetime、date、ISO 字符串
+        # ⚠️ 时区修正：前端通过 toISOString() 发送 UTC 字符串（如 "2026-05-11T16:00:00.000Z"），
+        # Pydantic 解析为 aware datetime。直接 strftime 会用 UTC 字段值，导致东八区用户
+        # 选的 5月12日 被格式化为 "2026-05-11"。必须先转成本地时区再格式化。
         if hasattr(buy_date, "strftime"):
+            if getattr(buy_date, "tzinfo", None) is not None:
+                # aware datetime：转到本地时区（服务器 TZ，通常为 Asia/Shanghai）
+                buy_date = buy_date.astimezone()
             buy_date_str = buy_date.strftime("%Y-%m-%d")
             buy_date_compact = buy_date.strftime("%Y%m%d")
         elif isinstance(buy_date, str):
@@ -3065,8 +3071,18 @@ class PortfolioService:
             return None
 
         # 前复权校验通过 — 用户输入的价格与前复权数据一致
-        if low_f <= cost_price <= high_f:
-            logger.info(f"✅ 成本价 {cost_price:.2f} 通过前复权校验（{buy_date_str}，范围 {low_f:.2f}~{high_f:.2f}）")
+        # ⚠️ 容差策略：用户从券商 app 复制的"成本价"通常包含佣金/过户费等交易成本，
+        # 不是纯成交价。按 2% 容差放宽上下限，覆盖手续费和滑点影响。
+        #   买入成本价 = 成交价 + 佣金 + 过户费（约 0.05%~0.5%）
+        #   2% 容差远大于实际手续费比例，既能容错又不会放过明显错误。
+        tolerance = 0.02
+        high_with_tol = high_f * (1 + tolerance)
+        low_with_tol = low_f * (1 - tolerance)
+        if low_with_tol <= cost_price <= high_with_tol:
+            logger.info(
+                f"✅ 成本价 {cost_price:.2f} 通过前复权校验（{buy_date_str}，"
+                f"原始范围 {low_f:.2f}~{high_f:.2f}，含 2% 容差 {low_with_tol:.2f}~{high_with_tol:.2f}）"
+            )
             return None
 
         # ---- 第二层：前复权校验失败，尝试不复权 API 兜底 ----
@@ -3133,10 +3149,17 @@ class PortfolioService:
             )
 
         # 不复权校验
-        if cost_price < unadj_low_f or cost_price > unadj_high_f:
+        # ⚠️ 同前复权校验，按 2% 容差放宽上下限，覆盖券商 app 成本价含手续费的情况
+        tolerance = 0.02
+        unadj_high_with_tol = unadj_high_f * (1 + tolerance)
+        unadj_low_with_tol = unadj_low_f * (1 - tolerance)
+        if cost_price < unadj_low_with_tol or cost_price > unadj_high_with_tol:
             raise ValueError(
                 f"成本价 {cost_price:.2f} 超出 {buy_date_str} 的波动范围"
-                f"（不复权最低 {unadj_low_f:.2f}～最高 {unadj_high_f:.2f}），请检查输入是否正确。"
+                f"（不复权最低 {unadj_low_f:.2f}～最高 {unadj_high_f:.2f}，"
+                f"含 2% 手续费容差 {unadj_low_with_tol:.2f}~{unadj_high_with_tol:.2f}）。"
+                f"券商 app 显示的成本价通常包含佣金/过户费（约 0.05%~0.5%），"
+                f"建议改用纯成交价录入。"
             )
 
         # ---- 不复权校验通过，计算复权因子 ----

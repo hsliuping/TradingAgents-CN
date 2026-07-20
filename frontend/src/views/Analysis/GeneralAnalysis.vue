@@ -1,4 +1,4 @@
-﻿<template>
+﻿﻿<template>
   <div class="general-analysis">
     <!-- 页面头部 -->
     <div class="page-header">
