@@ -32,9 +32,178 @@
     </div>
 
 
-    <!-- 🔥 系统就绪度引导卡片（未就绪时显示） -->
+    <!-- ════════ 京东云版专属内容（仅在京东云版下显示） ════════ -->
+    <template v-if="isJdyunMode">
+      <!-- KPI 数据卡片行 -->
+      <KpiCards
+        :recent-tasks="recentAnalyses"
+        @go-paper="goToPaperTrading"
+      />
+
+      <!-- 进行中任务 + 股票关注列表速览（左右布局） -->
+      <el-row :gutter="24" class="jdyun-row">
+        <el-col :xs="24" :lg="12">
+          <RunningTasksCard
+            @view-all="goToTasks"
+            @view-task="viewTask"
+            @start-analysis="quickAnalysis"
+          />
+        </el-col>
+        <el-col :xs="24" :lg="12">
+          <el-card class="favorite-stocks-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <span class="header-title">
+                  <el-icon><Star /></el-icon>
+                  股票关注列表速览
+                </span>
+                <el-button text size="small" @click="goToScreening">
+                  添加 <el-icon><Plus /></el-icon>
+                </el-button>
+              </div>
+            </template>
+            <div v-if="favoriteStocks.length === 0" class="empty-state">
+              <el-icon class="empty-icon"><Star /></el-icon>
+              <p>还没有股票关注列表</p>
+              <span class="empty-tip">添加关注的股票，追踪每日动态</span>
+              <el-button type="primary" size="small" @click="goToScreening">
+                添加股票关注列表
+              </el-button>
+            </div>
+            <div v-else class="stock-list">
+              <div
+                v-for="stock in favoriteStocks.slice(0, 5)"
+                :key="stock.code"
+                class="stock-item"
+                @click="goToStockAnalysis(stock.code)"
+              >
+                <div class="stock-info">
+                  <div class="stock-code">{{ stock.code }}</div>
+                  <div class="stock-name">{{ stock.name || stock.stock_name || '—' }}</div>
+                </div>
+                <div class="stock-price" v-if="stock.current_price">
+                  ¥{{ stock.current_price }}
+                </div>
+                <el-icon class="stock-arrow"><ArrowRight /></el-icon>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 智能助手横幅（可关闭） -->
+      <DismissableBanner
+        title="试试 v3.0 智能助手"
+        description="一句话描述需求，AI 自动完成股票研究、批量分析、复盘等任务"
+        action-text="立即体验"
+        :icon="ChatDotRound"
+        variant="primary"
+        storage-key="jdyun_dashboard_assistant_banner"
+        @action="goToAssistant"
+      />
+
+      <!-- 学习中心横幅（可关闭） -->
+      <DismissableBanner
+        title="AI 股票分析学习中心"
+        description="24 节系统课程，从入门到精通 AI 辅助投资分析"
+        action-text="查看课程"
+        :icon="Reading"
+        variant="info"
+        storage-key="jdyun_dashboard_learning_banner"
+        @action="goToLearning"
+      />
+
+      <!-- 更多功能折叠区（v3.0 核心功能 + 流程配置） -->
+      <CollapsibleSection
+        title="更多功能"
+        badge="展开查看"
+        badge-type="info"
+        storage-key="jdyun_dashboard_more_expanded"
+      >
+        <el-row :gutter="16">
+          <el-col :xs="12" :sm="6" v-for="feature in jdyunMoreFeatures" :key="feature.path">
+            <div class="feature-card" @click="router.push(feature.path)">
+              <el-icon class="feature-icon"><component :is="feature.icon" /></el-icon>
+              <div class="feature-info">
+                <div class="feature-title">{{ feature.title }}</div>
+                <div class="feature-desc">{{ feature.description }}</div>
+              </div>
+            </div>
+          </el-col>
+        </el-row>
+      </CollapsibleSection>
+
+      <!-- 最近分析（京东云版独立显示） -->
+      <el-card class="recent-analyses-card jdyun-recent" header="最近分析" style="margin-top: 24px;">
+        <el-table :data="recentAnalyses" style="width: 100%">
+          <el-table-column prop="symbol" label="股票代码" width="120">
+            <template #default="{ row }">
+              {{ row.symbol || row.code || row.stock_code || '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="股票名称" width="150">
+            <template #default="{ row }">
+              {{ row.stock_name || row.symbol || row.code || '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="getStatusType(row.status)">
+                {{ getStatusText(row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="创建时间" width="180">
+            <template #default="{ row }">
+              {{ formatTime(row.started_at || row.created_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作">
+            <template #default="{ row }">
+              <el-button type="text" size="small" @click="viewAnalysis(row)">
+                查看
+              </el-button>
+              <el-button
+                v-if="row.status === 'completed'"
+                type="text"
+                size="small"
+                @click="downloadReport(row)"
+              >
+                下载
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="table-footer">
+          <el-button type="text" @click="goToHistory">
+            查看全部历史 <el-icon><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+      </el-card>
+
+      <!-- 市场快讯（京东云版独立显示） -->
+      <el-card class="market-news-card jdyun-news" style="margin-top: 24px;">
+        <template #header>
+          <span>市场快讯</span>
+        </template>
+        <div v-if="marketNews.length > 0" class="news-list">
+          <div v-for="(news, index) in marketNews.slice(0, 5)" :key="index" class="news-item">
+            <div class="news-title">{{ news.title }}</div>
+            <div class="news-time">{{ formatTime(news.published_at || news.created_at) }}</div>
+          </div>
+        </div>
+        <div v-else class="empty-state">
+          <el-icon class="empty-icon"><InfoFilled /></el-icon>
+          <p>暂无市场快讯</p>
+        </div>
+      </el-card>
+    </template>
+    <!-- ════════ 京东云版专属内容结束 ════════ -->
+
+
+    <!-- 🔥 系统就绪度引导卡片（未就绪时显示，京东云版隐藏） -->
     <el-card
-      v-if="systemReadiness && !systemReadiness.overall_ready && systemReadiness.next_step !== 'error'"
+      v-if="!isJdyunMode && systemReadiness && !systemReadiness.overall_ready && systemReadiness.next_step !== 'error'"
       class="readiness-guide-card"
       shadow="hover"
     >
@@ -73,7 +242,8 @@
       </div>
     </el-card>
 
-    <!-- v3.0 智能助手推荐卡片 -->
+    <!-- v3.0 智能助手推荐卡片（标准版显示） -->
+    <template v-if="!isJdyunMode">
     <el-card class="assistant-highlight-card">
       <div class="learning-highlight">
         <div class="learning-icon assistant-icon">
@@ -130,9 +300,10 @@
         </div>
       </div>
     </el-card>
+    </template>
 
-    <!-- 主要功能区域 -->
-    <el-row :gutter="24" class="main-content">
+    <!-- 主要功能区域（标准版显示，京东云版隐藏） -->
+    <el-row v-if="!isJdyunMode" :gutter="24" class="main-content">
       <!-- 左侧：快速操作 -->
       <el-col :span="16">
         <el-card class="quick-actions-card" header="快速操作">
@@ -368,9 +539,15 @@
               v-for="news in marketNews"
               :key="news.id"
               class="news-item"
-              @click="openNewsUrl(news.url)"
             >
-              <div class="news-title">{{ news.title }}</div>
+              <a
+                v-if="news.url"
+                :href="news.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="news-title news-title-link"
+              >{{ news.title }}</a>
+              <div v-else class="news-title">{{ news.title }}</div>
               <div class="news-time">{{ formatTime(news.time) }}</div>
             </div>
           </div>
@@ -381,7 +558,7 @@
         </el-card>
       </el-col>
 
-      <!-- 右侧：自选股和快讯 -->
+      <!-- 右侧：股票关注列表和快讯 -->
       <el-col :span="8">
         <!-- 股票关注列表 -->
         <el-card class="favorites-card">
@@ -395,7 +572,7 @@
           </template>
 
           <div v-if="favoriteStocks.length === 0" class="empty-favorites">
-            <el-empty description="暂无自选股" :image-size="60">
+            <el-empty description="暂无股票关注列表" :image-size="60">
               <el-button type="primary" size="small" @click="goToFavorites">
                 添加到研究列表
               </el-button>
@@ -427,7 +604,7 @@
 
           <div v-if="favoriteStocks.length > 5" class="favorites-footer">
             <el-button type="text" size="small" @click="goToFavorites">
-              查看全部 {{ favoriteStocks.length }} 只自选股
+              查看全部 {{ favoriteStocks.length }} 只股票关注列表
             </el-button>
           </div>
         </el-card>
@@ -512,23 +689,44 @@ import {
   ChatDotRound,
   Filter,
   MagicStick,
-  Connection
+  Connection,
+  Refresh,
+  DataAnalysis
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { AnalysisTask, AnalysisStatus } from '@/types/analysis'
 import MultiSourceSyncCard from '@/components/Dashboard/MultiSourceSyncCard.vue'
+import KpiCards from '@/components/Dashboard/KpiCards.vue'
+import RunningTasksCard from '@/components/Dashboard/RunningTasksCard.vue'
+import DismissableBanner from '@/components/Dashboard/DismissableBanner.vue'
+import CollapsibleSection from '@/components/Dashboard/CollapsibleSection.vue'
 import GuideDialog from '@/components/GuideDialog.vue'
 import { favoritesApi } from '@/api/favorites'
-import { analysisApi } from '@/api/analysis'
+import { getTaskList as getUnifiedTaskList } from '@/api/unifiedTasks'
 import { newsApi } from '@/api/news'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
 import { ensureReportExportAccess } from '@/utils/featureAccess'
 import { request } from '@/api/request'
+import { isJdyunMode as checkJdyunMode } from '@/utils/config'
+import { Star, Plus } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const appStore = useAppStore()
 const displayVersion = computed(() => `v${appStore.version}`)
+const isJdyunMode = checkJdyunMode()
+
+// 京东云版"更多功能"折叠区配置
+const jdyunMoreFeatures = ref([
+  { path: '/assistant', title: '智能助手', description: '一句话描述需求，AI 自动完成', icon: ChatDotRound },
+  { path: '/screening', title: '智能选股', description: '多维度筛选符合条件的股票', icon: Search },
+  { path: '/workflow', title: '流程管理', description: '管理工作流和自定义流程', icon: Tools },
+  { path: '/workflow/agent-workshop', title: 'Agent 工坊', description: '可视化构建专属 Agent', icon: EditPen },
+  { path: '/review', title: '操作复盘', description: '对交易决策进行 AI 复盘分析', icon: DataAnalysis },
+  { path: '/settings/sync', title: '数据同步', description: '同步股票基础和行情数据', icon: Refresh },
+  { path: '/paper', title: '模拟交易', description: 'AI 辅助下的模拟交易账户', icon: PieChart },
+  { path: '/learning', title: '学习中心', description: '24 节 AI 股票分析系统课程', icon: Reading }
+])
 
 // 响应式数据
 const userStats = ref({
@@ -541,7 +739,7 @@ const userStats = ref({
 
 const recentAnalyses = ref<AnalysisTask[]>([])
 
-// 自选股数据
+// 股票关注列表数据
 const favoriteStocks = ref<any[]>([])
 
 // 市场快讯数据
@@ -601,6 +799,24 @@ const goToQueue = () => {
 
 const goToHistory = () => {
     router.push('/tasks/unified')
+}
+
+// 京东云版专用方法
+const goToTasks = () => {
+  router.push('/tasks/unified')
+}
+
+const viewTask = (task: any) => {
+  if (task?.task_id) {
+    router.push(`/tasks/unified?task_id=${task.task_id}`)
+  } else {
+    router.push('/tasks/unified')
+  }
+}
+
+const goToStockAnalysis = (code: string) => {
+  if (!code) return
+  router.push(`/stocks/${code}`)
 }
 
 const goToLearning = () => {
@@ -698,14 +914,6 @@ const downloadReport = async (analysis: AnalysisTask) => {
   }
 }
 
-const openNewsUrl = (url?: string) => {
-  if (url) {
-    window.open(url, '_blank')
-  } else {
-    ElMessage.info('该新闻暂无详情链接')
-  }
-}
-
 const getStatusType = (status: string | AnalysisStatus): 'success' | 'info' | 'warning' | 'danger' => {
   const statusMap: Record<string, 'success' | 'info' | 'warning' | 'danger'> = {
     pending: 'info',
@@ -736,7 +944,20 @@ const formatTime = (time: string) => {
   return formatDateTime(time)
 }
 
-// 自选股相关方法
+// 剥除字符串中的 HTML 标签（如东方财富新闻标题中的 <em></em> 高亮标记）
+// 安全策略：仅做纯文本提取，不渲染 HTML，避免 XSS 风险
+const stripHtmlTags = (text: string): string => {
+  if (!text) return ''
+  // 先把常见 HTML 实体转义符解码（如 &lt; &gt; &amp;）
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/<[^>]+>/g, '') // 剥除所有 HTML 标签
+    .trim()
+}
+
+// 股票关注列表相关方法
 const goToFavorites = () => {
   router.push('/favorites')
 }
@@ -757,6 +978,8 @@ const loadFavoriteStocks = async () => {
     const response = await favoritesApi.list()
     if (response.success && response.data) {
       favoriteStocks.value = response.data.map((item: any) => ({
+        code: item.stock_code || item.code,
+        name: item.stock_name || item.name,
         stock_code: item.stock_code,
         stock_name: item.stock_name,
         current_price: item.current_price || 0,
@@ -764,24 +987,25 @@ const loadFavoriteStocks = async () => {
       }))
     }
   } catch (error) {
-    console.error('加载自选股失败:', error)
+    console.error('加载股票关注列表失败:', error)
   }
 }
 
 const loadRecentAnalyses = async () => {
   try {
-    // 使用任务中心的用户任务接口，不传 limit 让后端返回所有记录
-    const res = await analysisApi.getTaskList({
-      offset: 0,
-      // 不限定状态，展示最近任务；如需仅展示已完成可设为 'completed'
-      status: undefined
+    // 使用新版统一任务中心接口（/api/v2/tasks/list），数据存储在 unified_analysis_tasks 集合
+    // 旧版 analysisApi.getTaskList 读取 analysis_tasks 集合（已废弃，数据为空）
+    const res = await getUnifiedTaskList({
+      // 不传 limit，让后端返回所有记录（unified_tasks.py 中 limit 为 None 时返回全部）
+      // 不传 status，展示所有状态的任务
     })
 
-    // 兼容不同返回结构（ApiResponse 或直接 data）
+    // unifiedTasks API 返回结构：{ success, data: { tasks, total, limit, skip }, message }
+    // 但 ApiClient.get 可能已解包，兼容多种返回结构
     const body: any = (res as any)?.data?.data || (res as any)?.data || res || {}
     const allTasks = body.tasks || []
 
-    // 在前端取最近10条
+    // 在前端取最近10条（接口已按 created_at 降序返回）
     const tasks = allTasks.slice(0, 10)
 
     recentAnalyses.value = tasks
@@ -807,8 +1031,11 @@ const loadMarketNews = async () => {
     if (response.success && response.data) {
       marketNews.value = response.data.news.map((item: any) => ({
         id: item.id || item.title,
-        title: item.title,
+        // 兜底剥除标题中可能残留的 HTML 标签（如东方财富 <em> 高亮标记）
+        title: stripHtmlTags(item.title || ''),
         time: item.publish_time,
+        published_at: item.publish_time,
+        created_at: item.created_at,
         url: item.url,
         source: item.source
       }))
@@ -886,7 +1113,7 @@ onMounted(async () => {
   // 🔥 加载系统就绪度（引导卡片）
   await loadSystemReadiness()
   
-  // 加载自选股数据
+  // 加载股票关注列表数据
   await loadFavoriteStocks()
   // 加载最近分析
   await loadRecentAnalyses()
@@ -1220,7 +1447,6 @@ onMounted(async () => {
     .news-list {
       .news-item {
         padding: 12px 0;
-        cursor: pointer;
         border-bottom: 1px solid var(--el-border-color-lighter);
 
         &:last-child {
@@ -1235,10 +1461,29 @@ onMounted(async () => {
         }
 
         .news-title {
+          display: block;
           font-size: 14px;
           color: var(--el-text-color-primary);
           margin-bottom: 4px;
           line-height: 1.4;
+          word-break: break-all;
+        }
+
+        // 带链接的标题：显示为蓝色链接样式，hover 显示下划线
+        .news-title-link {
+          color: var(--el-color-primary);
+          text-decoration: none;
+          transition: color 0.2s ease;
+          cursor: pointer;
+
+          &:hover {
+            color: var(--el-color-primary-light-3);
+            text-decoration: underline;
+          }
+
+          &:visited {
+            color: var(--el-color-primary);
+          }
         }
 
         .news-time {
@@ -1466,6 +1711,185 @@ onMounted(async () => {
         margin-bottom: 24px;
       }
     }
+  }
+}
+
+// ════════ 京东云版专属样式 ════════
+.jdyun-row {
+  margin-bottom: 24px;
+}
+
+.jdyun-dashboard-content {
+  margin-top: 24px;
+}
+
+.favorite-stocks-card {
+  height: 100%;
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+    }
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 32px 0;
+
+    .empty-icon {
+      font-size: 36px;
+      color: var(--el-color-warning);
+      margin-bottom: 12px;
+    }
+
+    p {
+      color: var(--el-text-color-primary);
+      margin-bottom: 6px;
+    }
+
+    .empty-tip {
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+      margin-bottom: 16px;
+      display: block;
+    }
+  }
+
+  .stock-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .stock-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      border-color: var(--el-color-primary);
+      background-color: var(--el-color-primary-light-9);
+      box-shadow: 0 2px 8px rgba(64, 158, 255, 0.12);
+
+      .stock-arrow {
+        transform: translateX(4px);
+        color: var(--el-color-primary);
+      }
+
+      .stock-code {
+        color: var(--el-color-primary);
+      }
+    }
+  }
+
+  .stock-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .stock-code {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    transition: color 0.2s ease;
+  }
+
+  .stock-name {
+    font-size: 12px;
+    color: var(--el-color-primary);
+    margin-top: 2px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+
+    &:hover {
+      text-decoration-style: solid;
+    }
+  }
+
+  .stock-price {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--el-color-danger);
+  }
+
+  .stock-arrow {
+    color: var(--el-color-primary);
+    transition: all 0.2s ease;
+  }
+}
+
+.feature-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  height: 100%;
+  background: var(--el-bg-color);
+
+  &:hover {
+    border-color: var(--el-color-primary);
+    background-color: var(--el-color-primary-light-9);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(64, 158, 255, 0.1);
+  }
+
+  .feature-icon {
+    font-size: 24px;
+    color: var(--el-color-primary);
+    background: var(--el-color-primary-light-9);
+    padding: 8px;
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+
+  .feature-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .feature-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--el-color-primary);
+    margin-bottom: 8px;
+    letter-spacing: 0.3px;
+    padding-bottom: 6px;
+    border-bottom: 1px dashed var(--el-border-color);
+    display: inline-block;
+  }
+
+  .feature-desc {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.5;
+    opacity: 0.85;
+  }
+}
+
+.jdyun-recent,
+.jdyun-news {
+  :deep(.el-card__body) {
+    padding: 16px 20px;
   }
 }
 </style>
