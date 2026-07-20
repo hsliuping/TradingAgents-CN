@@ -125,6 +125,45 @@ class LogExportService:
         else:
             return "other"
 
+
+    def _resolve_safe_path(self, filename: str) -> Path:
+        """
+        安全地解析日志目录下的文件路径，防止路径穿越攻击 (CWE-22)。
+
+        - 拒绝包含路径分隔符或 ``..`` 的文件名
+        - 解析后的绝对路径必须位于 ``self.log_dir`` 之内
+
+        Args:
+            filename: 请求的日志文件名（不能包含目录部分）
+
+        Returns:
+            解析后的安全 :class:`Path` 对象
+
+        Raises:
+            ValueError: 文件名非法或试图逃逸日志目录
+        """
+        if not filename or filename in ("", ".", ".."):
+            raise ValueError(f"非法的日志文件名: {filename!r}")
+        # 拒绝任何包含路径分隔符/驱动器/父目录引用的输入
+        if (
+            "/" in filename
+            or "\\" in filename
+            or "\x00" in filename
+            or filename.startswith("..")
+            or ".." in Path(filename).parts
+            or Path(filename).is_absolute()
+            or Path(filename).name != filename
+        ):
+            raise ValueError(f"非法的日志文件名: {filename!r}")
+
+        base = self.log_dir.resolve()
+        candidate = (self.log_dir / filename).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError:
+            raise ValueError(f"文件名逃逸出日志目录: {filename!r}")
+        return candidate
+
     def read_log_file(
         self,
         filename: str,
@@ -148,8 +187,12 @@ class LogExportService:
         Returns:
             日志内容和统计信息
         """
-        file_path = self.log_dir / filename
-        
+        try:
+            file_path = self._resolve_safe_path(filename)
+        except ValueError as e:
+            logger.warning(f"⚠️ [read_log_file] 拒绝非法文件名: {filename!r} ({e})")
+            raise
+
         if not file_path.exists():
             raise FileNotFoundError(f"日志文件不存在: {filename}")
         
@@ -238,7 +281,15 @@ class LogExportService:
         try:
             # 确定要导出的文件
             if filenames:
-                files_to_export = [self.log_dir / f for f in filenames if (self.log_dir / f).exists()]
+                files_to_export = []
+                for f in filenames:
+                    try:
+                        candidate = self._resolve_safe_path(f)
+                    except ValueError as e:
+                        logger.warning(f"⚠️ [export_logs] 拒绝非法文件名: {f!r} ({e})")
+                        continue
+                    if candidate.exists():
+                        files_to_export.append(candidate)
             else:
                 files_to_export = list(self.log_dir.glob("*.log*"))
             
