@@ -96,9 +96,18 @@ class ResearcherAgent(BaseAgent):
         """
         logger.info(f"开始执行研究员Agent: {self.agent_id}")
 
+        import time as _time_exec
+        _exec_start = _time_exec.time()
         try:
             # 1. 提取输入参数（兼容多种参数名）
             ticker = state.get("ticker") or state.get("company_of_interest")
+
+            # 🔍 调试日志：排查 ticker 丢失问题
+            logger.error(
+                f"🔍 [{self.agent_id}] state keys: {list(state.keys())[:20]}, "
+                f"ticker={state.get('ticker')}, company_of_interest={state.get('company_of_interest')}, "
+                f"trade_info存在={('trade_info' in state)}, code={state.get('trade_info', {}).get('code') if isinstance(state.get('trade_info'), dict) else 'N/A'}"
+            )
 
             # 🆕 支持交易复盘场景：从 trade_info 中提取 code
             if not ticker and "trade_info" in state:
@@ -120,7 +129,10 @@ class ResearcherAgent(BaseAgent):
                 analysis_date = datetime.now().strftime("%Y-%m-%d")
 
             if not ticker:
+                logger.error(f"❌ [{self.agent_id}] ticker 未找到！state 全部 keys: {list(state.keys())}")
                 raise ValueError("Missing required parameters: ticker")
+            
+            logger.info(f"✅ [{self.agent_id}] ticker 解析成功: {ticker}")
             
             # 2. 收集所需的报告
             reports = self._collect_reports(state)
@@ -167,7 +179,17 @@ class ResearcherAgent(BaseAgent):
             logger.info(f"用户提示词: {user_prompt}")
             
             if self._llm:
-                response = self._llm.invoke(messages)
+                import time
+                _llm_start = time.time()
+                logger.info(f"⏳ [{self.agent_id}] 开始调用 LLM (timeout={getattr(self._llm, 'timeout', '?')}, max_retries={getattr(self._llm, 'max_retries', '?')})...")
+                try:
+                    response = self._llm.invoke(messages)
+                    _llm_elapsed = time.time() - _llm_start
+                    logger.info(f"✅ [{self.agent_id}] LLM 调用完成, 耗时: {_llm_elapsed:.1f}s, 响应长度: {len(response.content) if response.content else 0}")
+                except Exception as _llm_err:
+                    _llm_elapsed = time.time() - _llm_start
+                    logger.error(f"❌ [{self.agent_id}] LLM 调用失败, 耗时: {_llm_elapsed:.1f}s, 错误: {_llm_err}", exc_info=True)
+                    raise
                 report = self._parse_response(response.content)
             else:
                 raise ValueError("LLM not initialized")
@@ -188,11 +210,11 @@ class ResearcherAgent(BaseAgent):
                 result = self._update_debate_state(state, report, result)
                 logger.info(f"[辩论模式] {self.agent_id} 更新辩论状态")
 
-            logger.info(f"研究员Agent {self.agent_id} 执行成功")
+            logger.info(f"研究员Agent {self.agent_id} 执行成功 (总耗时: {_time_exec.time() - _exec_start:.1f}s)")
             return result
 
         except Exception as e:
-            logger.error(f"研究员Agent {self.agent_id} 执行失败: {e}", exc_info=True)
+            logger.error(f"研究员Agent {self.agent_id} 执行失败 (总耗时: {_time_exec.time() - _exec_start:.1f}s): {e}", exc_info=True)
             # 返回错误状态（只返回新增的字段）
             output_key = self.output_field or f"{self.researcher_type}_report"
             return {

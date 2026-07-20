@@ -131,6 +131,13 @@ class ManagerAgent(BaseAgent):
             # 1. 提取输入参数（兼容多种参数名）
             ticker = state.get("ticker") or state.get("company_of_interest")
 
+            # 🔍 调试日志：排查 ticker 丢失问题
+            logger.error(
+                f"🔍 [{self.agent_id}] state keys: {list(state.keys())[:20]}, "
+                f"ticker={state.get('ticker')}, company_of_interest={state.get('company_of_interest')}, "
+                f"trade_info存在={('trade_info' in state)}, code={state.get('trade_info', {}).get('code') if isinstance(state.get('trade_info'), dict) else 'N/A'}"
+            )
+
             # 🆕 支持交易复盘场景：从 trade_info 中提取 code
             if not ticker and "trade_info" in state:
                 trade_info = state.get("trade_info", {})

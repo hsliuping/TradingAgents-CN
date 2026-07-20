@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, List
 
 from ...manager import ManagerAgent
-from ...config import AgentMetadata, AgentCategory, LicenseTier
+from ...config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ...registry import register_agent
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,20 @@ class ReviewManagerV2(ManagerAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=[],
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="trade_records", type="string", description="交易记录"),
+            AgentInput(name="trade_info", type="object", description="交易信息详情", required=False),
+            AgentInput(name="market_data", type="object", description="市场行情数据", required=False),
+            AgentInput(name="benchmark_data", type="object", description="基准数据", required=False),
+            AgentInput(name="timing_analysis", type="string", description="时机分析结果", required=False),
+            AgentInput(name="position_analysis", type="string", description="仓位分析结果", required=False),
+            AgentInput(name="emotion_analysis", type="string", description="情绪分析结果", required=False),
+            AgentInput(name="attribution_analysis", type="string", description="归因分析结果", required=False),
+        ],
+        outputs=[
+            AgentOutput(name="review_summary", type="string", description="复盘总结报告"),
+        ],
         growth_role="optimizer",
         growth_outputs=["review_summary"],
         memory_scope_hint="research_asset",

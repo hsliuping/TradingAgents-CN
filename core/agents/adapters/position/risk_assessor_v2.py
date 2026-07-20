@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, List
 
 from ...researcher import ResearcherAgent
-from ...config import AgentMetadata, AgentCategory, LicenseTier
+from ...config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ...registry import register_agent
 from app.utils.compliance import sanitize_position_text_block, sanitize_text_block
 
@@ -71,6 +71,15 @@ class RiskAssessorV2(ResearcherAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=[],  # 不需要工具
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="position_info", type="object", description="持仓信息详情", required=False),
+            AgentInput(name="capital_info", type="object", description="资金信息", required=False),
+            AgentInput(name="market_data", type="object", description="市场行情数据", required=False),
+        ],
+        outputs=[
+            AgentOutput(name="risk_analysis", type="string", description="风险评估结果"),
+        ],
         growth_role="extractor",
         growth_outputs=["risk_analysis"],
         memory_scope_hint="pattern",

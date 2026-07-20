@@ -9,7 +9,7 @@ import re
 from typing import Dict, Any, List
 
 from ...manager import ManagerAgent
-from ...config import AgentMetadata, AgentCategory, LicenseTier
+from ...config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ...registry import register_agent
 from app.utils.compliance import sanitize_position_text_block, sanitize_text_block
 
@@ -97,6 +97,16 @@ class ActionAdvisorV2(ManagerAgent):
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         default_tools=[],  # 不需要工具
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="position_info", type="object", description="持仓信息详情", required=False),
+            AgentInput(name="technical_analysis", type="string", description="技术面分析结果", required=False),
+            AgentInput(name="fundamental_analysis", type="string", description="基本面分析结果", required=False),
+            AgentInput(name="risk_analysis", type="string", description="风险评估结果", required=False),
+        ],
+        outputs=[
+            AgentOutput(name="action_advice", type="string", description="持仓操作建议"),
+        ],
         growth_role="optimizer",
         growth_outputs=["action_advice"],
         memory_scope_hint="research_asset",

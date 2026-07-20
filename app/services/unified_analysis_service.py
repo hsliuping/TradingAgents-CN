@@ -1662,6 +1662,46 @@ class UnifiedAnalysisService:
             )
             logger.info(f"✅ [交易复盘服务] 任务状态已更新为 PROCESSING")
 
+            # 🔥 创建包装的进度回调：保存进度到数据库和内存
+            from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
+            memory_manager = get_memory_state_manager()
+
+            async def wrapped_progress_callback(progress: int, message: str, **kwargs):
+                """包装的进度回调：更新任务进度并保存到数据库和内存"""
+                step_name = kwargs.get("step_name", "")
+
+                # 更新内存状态管理器
+                await memory_manager.update_task_status(
+                    task_id=task_id,
+                    status=TaskStatus.RUNNING,
+                    progress=progress,
+                    message=message,
+                    current_step=step_name or message,
+                    current_step_name=step_name,
+                    current_step_description=message
+                )
+
+                # 更新数据库中的任务进度
+                from app.core.database import get_mongo_db
+                db = get_mongo_db()
+                await db.unified_analysis_tasks.update_one(
+                    {"task_id": task_id},
+                    {"$set": {
+                        "progress": progress,
+                        "current_step": step_name or message,
+                        "message": message
+                    }}
+                )
+
+                logger.info(f"📊 [交易复盘] 进度已保存: {progress}% - {step_name} - {message}")
+
+                # 调用原始回调（如果有）
+                if progress_callback:
+                    if asyncio.iscoroutinefunction(progress_callback):
+                        await progress_callback(progress, message, **kwargs)
+                    else:
+                        progress_callback(progress, message, **kwargs)
+
             # 调用现有的复盘服务
             logger.info(f"🔄 [交易复盘服务] 获取 TradeReviewService 实例...")
             from app.services.trade_review_service import get_trade_review_service
@@ -1675,7 +1715,8 @@ class UnifiedAnalysisService:
 
             report = await trade_review_service.create_trade_review(
                 user_id=user_id,
-                request=request
+                request=request,
+                progress_callback=wrapped_progress_callback  # 🔥 传递进度回调
             )
             logger.info(f"✅ [交易复盘服务] TradeReviewService.create_trade_review() 执行成功")
             logger.info(f"   📋 review_id: {report.review_id}")

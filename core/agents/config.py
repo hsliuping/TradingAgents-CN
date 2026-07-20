@@ -1281,7 +1281,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         license_tier=LicenseTier.FREE,
         default_tools=[],
         inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="trade_records", type="string", description="交易记录"),
+            AgentInput(name="trade_info", type="dict", description="交易信息详情", required=False),
+            AgentInput(name="market_data", type="dict", description="市场行情数据", required=False),
+            AgentInput(name="benchmark_data", type="dict", description="基准数据", required=False),
         ],
         outputs=[
             AgentOutput(name="timing_analysis", type="string", description="时机分析结果"),
@@ -1302,7 +1306,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         license_tier=LicenseTier.FREE,
         default_tools=[],
         inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="trade_records", type="string", description="交易记录"),
+            AgentInput(name="trade_info", type="dict", description="交易信息详情", required=False),
+            AgentInput(name="market_data", type="dict", description="市场行情数据", required=False),
+            AgentInput(name="benchmark_data", type="dict", description="基准数据", required=False),
         ],
         outputs=[
             AgentOutput(name="position_analysis", type="string", description="仓位分析结果"),
@@ -1323,7 +1331,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         license_tier=LicenseTier.FREE,
         default_tools=[],
         inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="trade_records", type="string", description="交易记录"),
+            AgentInput(name="trade_info", type="dict", description="交易信息详情", required=False),
+            AgentInput(name="market_data", type="dict", description="市场行情数据", required=False),
+            AgentInput(name="benchmark_data", type="dict", description="基准数据", required=False),
         ],
         outputs=[
             AgentOutput(name="emotion_analysis", type="string", description="情绪分析结果"),
@@ -1344,7 +1356,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         license_tier=LicenseTier.FREE,
         default_tools=[],
         inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="trade_records", type="string", description="交易记录"),
+            AgentInput(name="trade_info", type="dict", description="交易信息详情", required=False),
+            AgentInput(name="market_data", type="dict", description="市场行情数据", required=False),
+            AgentInput(name="benchmark_data", type="dict", description="基准数据", required=False),
         ],
         outputs=[
             AgentOutput(name="attribution_analysis", type="string", description="归因分析结果"),
@@ -1365,7 +1381,11 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         license_tier=LicenseTier.FREE,
         default_tools=[],
         inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="trade_records", type="string", description="交易记录"),
+            AgentInput(name="trade_info", type="dict", description="交易信息详情", required=False),
+            AgentInput(name="market_data", type="dict", description="市场行情数据", required=False),
+            AgentInput(name="benchmark_data", type="dict", description="基准数据", required=False),
             AgentInput(name="timing_analysis", type="string", description="时机分析结果", required=False),
             AgentInput(name="position_analysis", type="string", description="仓位分析结果", required=False),
             AgentInput(name="emotion_analysis", type="string", description="情绪分析结果", required=False),

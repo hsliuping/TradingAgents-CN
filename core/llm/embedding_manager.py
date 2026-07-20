@@ -522,11 +522,13 @@ class EmbeddingManager:
             )
 
             # 🔥 统一使用 1024 维，如果模型支持 dimensions 参数，直接指定
-            # OpenAI text-embedding-3 系列和 zhipu embedding-3 支持 dimensions 参数
+            # OpenAI text-embedding-3 系列、zhipu embedding-3、京东云 Qwen3-Embedding 支持 dimensions 参数
             model_name = provider['model']
             supports_dimensions = (
                 'embedding-3' in model_name.lower() or  # zhipu embedding-3
-                'text-embedding-3' in model_name.lower()  # OpenAI text-embedding-3
+                'text-embedding-3' in model_name.lower() or  # OpenAI text-embedding-3
+                'qwen3-embedding' in model_name.lower() or  # 京东云 Qwen3-Embedding
+                'embedding' in model_name.lower() and 'jdyun' in provider.get('name', '').lower()  # 京东云其他 Embedding 模型
             )
             
             if supports_dimensions:
