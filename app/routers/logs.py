@@ -210,15 +210,20 @@ async def delete_log_file(
         logger.warning(f"🗑️ 用户 {current_user['username']} 删除日志文件: {filename}")
         
         service = get_log_export_service()
-        file_path = service.log_dir / filename
-        
-        if not file_path.exists():
-            raise HTTPException(status_code=404, detail="日志文件不存在")
-        
+
         # 安全检查：只允许删除 .log 文件
         if not filename.endswith('.log') and not '.log.' in filename:
             raise HTTPException(status_code=400, detail="只能删除日志文件")
-        
+
+        # 防止路径穿越 (CWE-22)：文件名必须位于日志目录内，且不能包含目录分隔符
+        try:
+            file_path = service._resolve_safe_path(filename)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="非法的日志文件名")
+
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="日志文件不存在")
+
         file_path.unlink()
         
         return {
