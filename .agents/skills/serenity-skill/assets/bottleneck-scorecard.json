@@ -1,0 +1,38 @@
+{
+  "ticker": "EXAMPLE",
+  "company": "Example Co",
+  "market": "US/HK/A-share/Taiwan/Japan/Korea/Europe",
+  "notes": "Replace ratings with 0-5 scores. 0 = absent, 5 = very strong.",
+  "factors": {
+    "demand_inflection": 0,
+    "architecture_coupling": 0,
+    "chokepoint_severity": 0,
+    "supplier_concentration": 0,
+    "expansion_difficulty": 0,
+    "evidence_quality": 0,
+    "valuation_disconnect": 0,
+    "catalyst_timing": 0
+  },
+  "penalties": {
+    "dilution_financing": 0,
+    "governance": 0,
+    "geopolitics": 0,
+    "liquidity": 0,
+    "hype_risk": 0,
+    "accounting_quality": 0,
+    "cyclicality": 0,
+    "alternative_design_risk": 0
+  },
+  "evidence": [
+    {
+      "claim": "",
+      "source": "",
+      "strength": "primary/media/analysis/social/rumor"
+    }
+  ],
+  "what_could_weaken_view": [
+    "",
+    "",
+    ""
+  ]
+}
