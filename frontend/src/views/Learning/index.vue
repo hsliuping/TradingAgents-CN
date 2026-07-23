@@ -92,7 +92,7 @@
       <div class="section-header">
         <div class="header-content">
           <h2>🎓 从散户到系统交易者：AI赋能的可进化投资法</h2>
-          <el-tag v-if="!isJdyunMode" type="warning" size="large">高级学员</el-tag>
+          <el-tag type="warning" size="large">高级学员</el-tag>
         </div>
         <p class="section-subtitle">完整的投资系统构建课程，24节精心设计的课程，涵盖从基础概念到实战应用的完整投资闭环</p>
       </div>
@@ -158,9 +158,6 @@ import { advancedCourseCategories } from '@/config/advancedCourses'
 
 const router = useRouter()
 const licenseStore = useLicenseStore()
-
-// 🔧 京东云模式
-const isJdyunMode = import.meta.env.VITE_JDYUN_MODE === 'true'
 
 // 检查是否是高级学员
 const isPro = computed(() => licenseStore.isPro)

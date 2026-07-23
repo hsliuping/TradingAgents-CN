@@ -1,8 +1,7 @@
 <template>
   <div class="email-notification-page">
-    <!-- 高级学员功能标识（京东云模式下隐藏） -->
+    <!-- 高级功能标识 -->
     <el-alert
-      v-if="!isJdyunMode"
       type="success"
       :closable="false"
       show-icon
@@ -237,9 +236,6 @@ import {
 } from '@/api/email'
 
 const authStore = useAuthStore()
-
-// 🔧 京东云模式
-const isJdyunMode = import.meta.env.VITE_JDYUN_MODE === 'true'
 
 // SMTP 表单引用
 const smtpFormRef = ref<FormInstance>()

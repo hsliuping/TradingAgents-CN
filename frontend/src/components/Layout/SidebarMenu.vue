@@ -73,13 +73,13 @@
         <el-tag type="primary" size="small" style="margin-left: 4px; transform: scale(0.85);">迭代</el-tag>
       </el-menu-item>
       <el-menu-item index="/workflow/skills">
-        Skill 中心
-        <el-tag v-if="!isJdyunMode()" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/mcp-servers">
-        MCP 服务器
-        <el-tag v-if="!isJdyunMode()" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
+          Skill 中心
+          <el-tag v-if="isAdvancedMenuItem('/workflow/skills')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/workflow/mcp-servers">
+          MCP 服务器
+          <el-tag v-if="isAdvancedMenuItem('/workflow/mcp-servers')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        </el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/tasks/unified">
@@ -139,7 +139,7 @@
         </el-menu-item>
         <el-menu-item index="/settings/channel-configs">
           渠道推送
-          <el-tag v-if="!isJdyunMode()" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/channel-configs')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/watchlist-groups">
           定时分析分组
@@ -174,11 +174,11 @@
         </el-menu-item>
         <el-menu-item index="/settings/prompt-policies">
           注入策略管理
-          <el-tag v-if="!isJdyunMode()" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/prompt-policies')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/prompt-design">
           Prompt 设计助手
-          <el-tag v-if="!isJdyunMode()" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/prompt-design')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/analysis-profiles">
           行业/个股配置
@@ -198,7 +198,7 @@
         <el-menu-item index="/settings/social-media">社媒消息管理</el-menu-item>
         <el-menu-item index="/settings/data-import">
           数据导入管理
-          <el-tag v-if="!isJdyunMode()" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/data-import')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/usage">使用统计</el-menu-item>
         <el-menu-item index="/settings/update">系统更新</el-menu-item>
@@ -246,16 +246,20 @@ const advancedMenuItems = new Set([
   '/workflow',
   '/workflow/tools',
   '/workflow/agents',
+  '/workflow/skills',
+  '/workflow/mcp-servers',
   '/settings/templates',
   '/settings/email',
+  '/settings/channel-configs',
   '/settings/watchlist-groups',
   '/settings/scheduled-analysis',
+  '/settings/prompt-policies',
+  '/settings/prompt-design',
   '/settings/data-import'
 ])
 
 const isAdvancedMenuItem = (index: string) => {
-  // 🔧 京东云模式：所有功能开放，不显示"高级"标签
-  if (isJdyunMode()) return false
+  // 所有模式统一显示"高级"标签，京东云模式下功能同样可用（不收费、不认证）
   return advancedMenuItems.has(index)
 }
 
