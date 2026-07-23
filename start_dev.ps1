@@ -8,16 +8,18 @@
 #   .\start_dev.ps1 all 3.0             # 启动 v3.0 全部服务
 #   .\start_dev.ps1 status              # 查看各版本端口配置
 #
-# 京东云合作版模式:
-#   .\start_dev.ps1 backend 3.0 --jdyun  # 以京东云模式启动后端
-#   .\start_dev.ps1 frontend 3.0 --jdyun # 以京东云模式启动前端（加载 .env.jdyun）
-#   .\start_dev.ps1 all 3.0 --jdyun      # 以京东云模式启动全部服务
+# 京东云合作版（独立容器、独立端口、独立数据卷，与 v3.0 完全隔离）:
+#   .\start_dev.ps1 docker jdyun        # 启动 jdyun 的 MongoDB(27022)+Redis(6383)
+#   .\start_dev.ps1 backend jdyun       # 以京东云模式启动后端（自动设置 JDYUN_MODE=true）
+#   .\start_dev.ps1 frontend jdyun      # 以京东云模式启动前端（自动 --mode jdyun）
+#   .\start_dev.ps1 all jdyun           # 以京东云模式启动全部服务
 #
 # 京东云模式说明:
 #   - 后端: 设置 JDYUN_MODE=true，启用京东云短路逻辑和API端点保护
 #   - 前端: 使用 --mode jdyun 启动 Vite，加载 frontend/.env.jdyun
 #   - 配置: 京东云相关参数(OPENAI_API_BASE/KEY/MODEL、TUSHARE_TOKEN等)从 .env 读取
 #   - 用户无需在界面配置大模型和数据源，全部通过环境变量注入
+#   - 独立 Docker 项目名 ta-jdyun，数据卷与 v3.0(ta-v3) 完全隔离
 
 [CmdletBinding()]
 param(
@@ -25,18 +27,19 @@ param(
     [ValidateSet("docker", "backend", "frontend", "all", "status", $null)]
     [string]$Command,
     [Parameter(Position=1)]
-    [ValidateSet("2.0", "2.1", "3.0", $null)]
+    [ValidateSet("2.0", "2.1", "3.0", "jdyun", $null)]
     [string]$Version,
     [int]$BackendPort = 0,
     [switch]$Jdyun,
     [switch]$Help
 )
 
-# 版本端口映射
+# 版本端口映射（jdyun 使用独立端口和数据卷，与 v3.0 完全隔离）
 $VersionConfig = @{
     "2.0" = @{ Project="ta-v201"; MongoDB=27017; Redis=6379; Backend=8000; Frontend=3000 }
     "2.1" = @{ Project="ta-v210"; MongoDB=27018; Redis=6380; Backend=8001; Frontend=3001 }
     "3.0" = @{ Project="ta-v3";   MongoDB=27019; Redis=6381; Backend=8002; Frontend=3002 }
+    "jdyun" = @{ Project="ta-jdyun"; MongoDB=27022; Redis=6383; Backend=8003; Frontend=3003 }
 }
 
 if ($Help -or -not $Command) {
@@ -45,7 +48,7 @@ if ($Help -or -not $Command) {
     Write-Host "============================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Usage:" -ForegroundColor Yellow
-    Write-Host "  .\start_dev.ps1 <command> [version] [--jdyun]"
+    Write-Host "  .\start_dev.ps1 <command> [version]"
     Write-Host ""
     Write-Host "Commands:" -ForegroundColor Yellow
     Write-Host "  docker <version>     启动 MongoDB + Redis（Docker）"
@@ -54,20 +57,25 @@ if ($Help -or -not $Command) {
     Write-Host "  all <version>        启动全部服务"
     Write-Host "  status               查看各版本端口配置"
     Write-Host ""
-    Write-Host "Options:" -ForegroundColor Yellow
-    Write-Host "  --jdyun              京东云合作版模式（隐藏配置管理，使用环境变量注入配置）"
+    Write-Host "Versions:" -ForegroundColor Yellow
+    Write-Host "  2.0    v2.0.1 开发环境"
+    Write-Host "  2.1    v2.1.0 开发环境"
+    Write-Host "  3.0    v3.0 开发环境（主线）"
+    Write-Host "  jdyun  京东云合作版（独立容器/端口/数据卷，自动启用 JDYUN_MODE）"
     Write-Host ""
     Write-Host "Examples:" -ForegroundColor Yellow
     Write-Host "  .\start_dev.ps1 docker 3.0            # 终端1: MongoDB+Redis"
     Write-Host "  .\start_dev.ps1 backend 3.0           # 终端2: 后端 http://localhost:8002"
     Write-Host "  .\start_dev.ps1 frontend 3.0          # 终端3: 前端 http://localhost:3002"
-    Write-Host "  .\start_dev.ps1 backend 3.0 --jdyun   # 京东云模式启动后端"
-    Write-Host "  .\start_dev.ps1 frontend 3.0 --jdyun  # 京东云模式启动前端"
+    Write-Host "  .\start_dev.ps1 docker jdyun          # 京东云: MongoDB(27022)+Redis(6383)"
+    Write-Host "  .\start_dev.ps1 backend jdyun         # 京东云后端 http://localhost:8003"
+    Write-Host "  .\start_dev.ps1 frontend jdyun        # 京东云前端 http://localhost:3003"
     Write-Host ""
     Write-Host "Version Ports:" -ForegroundColor Yellow
-    Write-Host "  2.0: MongoDB=27017 Redis=6379 Backend=8000 Frontend=3000"
-    Write-Host "  2.1: MongoDB=27018 Redis=6380 Backend=8001 Frontend=3001"
-    Write-Host "  3.0: MongoDB=27019 Redis=6381 Backend=8002 Frontend=3002"
+    Write-Host "  2.0:   MongoDB=27017 Redis=6379 Backend=8000 Frontend=3000"
+    Write-Host "  2.1:   MongoDB=27018 Redis=6380 Backend=8001 Frontend=3001"
+    Write-Host "  3.0:   MongoDB=27019 Redis=6381 Backend=8002 Frontend=3002"
+    Write-Host "  jdyun: MongoDB=27022 Redis=6383 Backend=8003 Frontend=3003"
     Write-Host ""
     exit 0
 }
@@ -91,6 +99,12 @@ if ($Version) {
     $DockerProject = "ta-debug"
 }
 
+# 版本 jdyun 自动启用京东云模式（无需额外传 --jdyun 开关）
+# --jdyun 开关仍保留向后兼容（如 start_dev.ps1 backend 3.0 --jdyun）
+if ($Version -eq "jdyun") {
+    $Jdyun = $true
+}
+
 # ==========================================
 # status 子命令
 # ==========================================
@@ -100,9 +114,10 @@ if ($Command -eq "status") {
     Write-Host "  开发环境端口配置" -ForegroundColor Cyan
     Write-Host "=========================================" -ForegroundColor Cyan
     Write-Host ""
-    foreach ($v in @("2.0", "2.1", "3.0")) {
+    foreach ($v in @("2.0", "2.1", "3.0", "jdyun")) {
         $c = $VersionConfig[$v]
-        Write-Host "  v$($v):" -ForegroundColor White
+        $label = if ($v -eq "jdyun") { "jdyun (京东云)" } else { "v$($v)" }
+        Write-Host "  ${label}:" -ForegroundColor White
         Write-Host "    MongoDB:  $($c.MongoDB)" -ForegroundColor Gray
         Write-Host "    Redis:    $($c.Redis)" -ForegroundColor Gray
         Write-Host "    Backend:  $($c.Backend)  -> http://127.0.0.1:$($c.Backend)" -ForegroundColor Gray
@@ -111,15 +126,10 @@ if ($Command -eq "status") {
     }
 
     Write-Host "Docker 容器:" -ForegroundColor Yellow
-    docker ps --filter "name=ta-v" --format "  {{.Names}}`t{{.Ports}}`t{{.Status}}" 2>$null
+    docker ps --filter "name=ta-" --format "  {{.Names}}`t{{.Ports}}`t{{.Status}}" 2>$null
     if (-not $?) {
         Write-Host "  (Docker 未运行或无相关容器)" -ForegroundColor Gray
     }
-    Write-Host ""
-    Write-Host "京东云合作版模式:" -ForegroundColor Magenta
-    Write-Host "  启动方式: .\start_dev.ps1 <command> 3.0 --jdyun" -ForegroundColor Gray
-    Write-Host "  示例:     .\start_dev.ps1 backend 3.0 --jdyun" -ForegroundColor Gray
-    Write-Host "            .\start_dev.ps1 frontend 3.0 --jdyun" -ForegroundColor Gray
     Write-Host ""
     exit 0
 }
@@ -141,7 +151,10 @@ if ($Command -eq "docker" -or $Command -eq "all") {
 
     $env:MONGODB_PORT = "$MongoDBPort"
     $env:REDIS_PORT = "$RedisPort"
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     docker-compose -p $DockerProject -f $composeFile up -d 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+    $ErrorActionPreference = $prevEAP
 
     Start-Sleep -Seconds 3
     $running = docker-compose -p $DockerProject -f $composeFile ps -q 2>$null
@@ -180,6 +193,7 @@ if ($Command -eq "backend" -or $Command -eq "all") {
         Write-Host "  - 配置管理界面已隐藏，配置通过环境变量注入" -ForegroundColor Gray
         Write-Host "  - 大模型/数据源 API 端点已设为只读" -ForegroundColor Gray
         Write-Host "  - 请确保 .env 中已配置 OPENAI_API_BASE / OPENAI_API_KEY / OPENAI_MODEL / TUSHARE_TOKEN" -ForegroundColor Gray
+        Write-Host "  - MongoDB: localhost:$MongoDBPort  Redis: localhost:$RedisPort" -ForegroundColor Gray
         Write-Host ""
     }
 
@@ -259,12 +273,6 @@ if ($Command -eq "frontend" -or $Command -eq "all") {
         if ($Jdyun -and -not (Test-Path $jdyunEnvFile)) {
             Write-Host "[WARN] frontend\.env.jdyun not found, VITE_JDYUN_MODE will not be set" -ForegroundColor Yellow
             Write-Host "  Please create it with: VITE_JDYUN_MODE=true" -ForegroundColor Gray
-        }
-
-        # 京东云模式启动参数：使用 --mode jdyun 加载 .env.jdyun
-        $viteModeArgs = @()
-        if ($Jdyun) {
-            $viteModeArgs = @("--", "--mode", "jdyun")
         }
 
         Write-Host ""
