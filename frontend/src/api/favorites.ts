@@ -56,13 +56,13 @@ export const favoritesApi = {
   /**
    * 获取收藏列表
    */
-  list: () => ApiClient.get<FavoriteItem[]>('/api/favorites/'),
+  list: () => ApiClient.get<FavoriteItem[]>('/api/favorites'),
 
   /**
    * 添加收藏
    * @param payload 收藏信息（需包含 symbol 或 stock_code）
    */
-  add: (payload: AddFavoriteReq) => ApiClient.post<{ message: string; symbol?: string; stock_code?: string }>('/api/favorites/', payload),
+  add: (payload: AddFavoriteReq) => ApiClient.post<{ message: string; symbol?: string; stock_code?: string }>('/api/favorites', payload),
 
   /**
    * 更新收藏

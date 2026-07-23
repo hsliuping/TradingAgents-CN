@@ -24,10 +24,10 @@ export interface UpdateTagDto {
 
 export const tagsApi = {
   async list(): Promise<ApiResponse<TagItem[]>> {
-    return await ApiClient.get<TagItem[]>('/api/tags/')
+    return await ApiClient.get<TagItem[]>('/api/tags')
   },
   async create(payload: CreateTagDto): Promise<ApiResponse<TagItem>> {
-    return await ApiClient.post<TagItem>('/api/tags/', payload)
+    return await ApiClient.post<TagItem>('/api/tags', payload)
   },
   async update(id: string, payload: UpdateTagDto): Promise<ApiResponse<{ id: string }>> {
     return await ApiClient.put<{ id: string }>(`/api/tags/${id}`, payload)
