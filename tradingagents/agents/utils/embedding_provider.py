@@ -103,7 +103,12 @@ class EmbeddingProviderManager:
     def _fetch_providers_from_db(self) -> List[EmbeddingProviderConfig]:
         """从数据库获取支持 embedding 的提供者"""
         providers = []
-        
+
+        # 优先检查专用 Embedding 环境变量（EMBEDDING_API_KEY + EMBEDDING_API_BASE + EMBEDDING_MODEL）
+        dedicated = self._get_dedicated_embedding_provider()
+        if dedicated:
+            providers.append(dedicated)
+
         try:
             # 尝试从 MongoDB 获取
             from pymongo import MongoClient
@@ -159,9 +164,46 @@ class EmbeddingProviderManager:
         logger.info(f"📋 [EmbeddingProviderManager] 可用的 embedding 提供者: {[p.name for p in providers]}")
         return providers
 
+    def _get_dedicated_embedding_provider(self) -> Optional[EmbeddingProviderConfig]:
+        """检查专用 Embedding 环境变量（EMBEDDING_API_KEY + EMBEDDING_API_BASE + EMBEDDING_MODEL）
+        
+        如果设置了 EMBEDDING_API_KEY，则返回一个专用的 embedding 提供者配置。
+        EMBEDDING_API_BASE 和 EMBEDDING_MODEL 留空时回退到 OPENAI_API_BASE / OPENAI_API_KEY。
+        """
+        # 优先取 EMBEDDING_API_KEY，留空则回退到 OPENAI_API_KEY
+        api_key = os.getenv("EMBEDDING_API_KEY", "").strip()
+        if not api_key:
+            api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key or api_key.startswith("your_"):
+            return None
+
+        base_url = os.getenv("EMBEDDING_API_BASE", "").strip()
+        if not base_url:
+            base_url = os.getenv("OPENAI_API_BASE", "").strip()
+
+        model = os.getenv("EMBEDDING_MODEL", "").strip()
+        if not model:
+            model = "Qwen3-Embedding-8B"
+
+        logger.info(f"✅ 使用专用 Embedding 配置: base={base_url[:30]}, model={model}")
+        return EmbeddingProviderConfig(
+            name="embedding_dedicated",
+            display_name="Embedding (Dedicated)",
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            is_active=True,
+            priority=0  # 最高优先级
+        )
+
     def _get_providers_from_env(self) -> List[EmbeddingProviderConfig]:
         """从环境变量获取 embedding 提供者配置"""
         providers = []
+
+        # 优先检查专用 Embedding 环境变量
+        dedicated = self._get_dedicated_embedding_provider()
+        if dedicated:
+            providers.append(dedicated)
 
         # 检查各个厂商的环境变量
         env_mappings = [

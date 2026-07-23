@@ -118,6 +118,8 @@ services:
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
       OPENAI_MODEL: "${OPENAI_MODEL:-GLM-5}"
       EMBEDDING_MODEL: "${EMBEDDING_MODEL:-Qwen3-Embedding-8B}"
+      EMBEDDING_API_BASE: "${EMBEDDING_API_BASE:-https://modelservice.jdcloud.com/v1}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY}"
       # 数据源配置（仅 Tushare）
       TUSHARE_TOKEN: "${TUSHARE_TOKEN}"
       TUSHARE_ENABLED: "true"

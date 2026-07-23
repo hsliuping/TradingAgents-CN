@@ -62,6 +62,18 @@ def get_jdyun_embedding_model() -> str:
     return model if model else JDYUN_DEFAULT_EMBEDDING_MODEL
 
 
+def get_jdyun_embedding_api_base() -> str:
+    """获取 Embedding 服务地址（留空则使用对话模型服务地址）"""
+    base = os.getenv("EMBEDDING_API_BASE", "").strip()
+    return base if base else get_jdyun_api_base()
+
+
+def get_jdyun_embedding_api_key() -> str:
+    """获取 Embedding API Key（留空则使用对话模型 API Key）"""
+    key = os.getenv("EMBEDDING_API_KEY", "").strip()
+    return key if key else get_jdyun_api_key()
+
+
 def get_jdyun_tushare_token() -> str:
     """获取 Tushare Token"""
     return os.getenv("TUSHARE_TOKEN", "").strip()
