@@ -738,7 +738,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { TrendCharts, Star, Refresh, Link, Document, Clock, CreditCard, Delete, Loading } from '@element-plus/icons-vue'
 import { PieChart, Plus, View, InfoFilled, Opportunity, CircleCheck, Warning, Pointer } from '@element-plus/icons-vue'
-import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
+import { renderMarkdown } from '@/utils/markdown'
 import { stocksApi } from '@/api/stocks'
 import { ApiClient } from '@/api/request'
 import {
@@ -766,8 +766,6 @@ import { portfolioApi } from '@/api/portfolio'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
-
-console.log('[Detail.vue] reviewApi 加载检查:', typeof reviewApi, typeof reviewApi?.getTradeReviewSummary)
 
 const route = useRoute()
 const router = useRouter()
@@ -829,11 +827,11 @@ const syncDialogTitle = computed(() => `同步${securityName.value}数据`)
 const syncButtonText = computed(() => isEtf.value ? '同步ETF数据' : '同步数据')
 const favoriteButtonText = computed(() => {
   if (isEtf.value) return isFav.value ? '已关注ETF' : '关注ETF'
-  return isFav.value ? '已自选' : '加入关注列表'
+  return isFav.value ? '已关注' : '加入关注列表'
 })
 const quickFavoriteButtonText = computed(() => {
   if (isEtf.value) return isFav.value ? '取消ETF关注' : '加入ETF关注'
-  return isFav.value ? '移出自选' : '股票关注列表'
+  return isFav.value ? '移出关注' : '加入关注列表'
 })
 const analyzeButtonText = computed(() => isEtf.value ? '发起ETF分析' : '发起分析')
 const quickActionTitle = computed(() => isEtf.value ? 'ETF快捷操作' : '快捷操作')
@@ -1353,7 +1351,7 @@ async function checkFavorite() {
     const d: any = (res as any)?.data || {}
     isFav.value = !!d.is_favorite
   } catch (e) {
-    console.warn('检查自选失败', e)
+    console.warn('检查关注失败', e)
   }
 }
 onMounted(async () => {
@@ -1564,15 +1562,15 @@ async function onToggleFavorite() {
       }
       await favoritesApi.add(payload)
       isFav.value = true
-      ElMessage.success('已股票关注列表')
+      ElMessage.success('已加入关注列表')
     } else {
       await favoritesApi.remove(code.value)
       isFav.value = false
-      ElMessage.success('已移出自选')
+      ElMessage.success('已移出关注')
     }
   } catch (e: any) {
-    console.error('自选操作失败', e)
-    ElMessage.error(e?.message || '自选操作失败')
+    console.error('关注操作失败', e)
+    ElMessage.error(e?.message || '关注操作失败')
   }
 }
 
@@ -1583,8 +1581,6 @@ function goPaperTrading() {
 // 获取最新的历史分析报告
 async function fetchLatestAnalysis() {
   try {
-    console.log('🔍 [fetchLatestAnalysis] 开始获取历史分析报告, symbol:', symbol.value)
-
     const resp = await getTaskList({
       task_type: TaskType.STOCK_ANALYSIS,
       status: TaskStatus.COMPLETED,
@@ -1592,36 +1588,27 @@ async function fetchLatestAnalysis() {
       limit: 1
     })
 
-    console.log('🔍 [fetchLatestAnalysis] unifiedTasks API 响应:', resp)
-
     const tasks = resp?.data?.tasks || []
-    console.log('🔍 [fetchLatestAnalysis] tasks:', tasks)
-    console.log('🔍 [fetchLatestAnalysis] tasks.length:', tasks?.length)
 
     if (tasks && tasks.length > 0) {
       const latestTask = tasks[0]
-      console.log('✅ [fetchLatestAnalysis] 找到任务:', latestTask)
 
       // 保存任务信息
       lastTaskInfo.value = latestTask
 
       // 通过 task_id 获取完整结果
       if (latestTask.task_id) {
-        console.log('🔍 [fetchLatestAnalysis] 通过 task_id 获取结果:', latestTask.task_id)
         try {
           const detailResp = await getTaskDetail(latestTask.task_id)
           const result = detailResp?.data?.result
           if (result) {
             lastAnalysis.value = result
             analysisStatus.value = 'completed'
-            console.log('✅ 通过 task_id 加载分析报告成功:', lastAnalysis.value)
           }
         } catch (e) {
           console.warn('⚠️ 获取任务结果失败:', e)
         }
       }
-    } else {
-      console.log('ℹ️ 该股票暂无历史分析报告')
     }
   } catch (e) {
     console.warn('⚠️ 获取历史分析报告失败:', e)
@@ -1783,11 +1770,8 @@ async function fetchPositionAnalysisSummary() {
 async function fetchTradeReviewSummary() {
   try {
     const resp: any = await reviewApi.getTradeReviewSummary(code.value)
-    console.log('[复盘摘要] 原始响应:', JSON.stringify(resp))
     const data = resp?.data || {}
-    console.log('[复盘摘要] 解析后data:', JSON.stringify(data))
     if (!data.has) {
-      console.log('[复盘摘要] has=false, 不显示卡片')
       reviewSummary.has = false
       return
     }
@@ -2051,24 +2035,6 @@ function actionTagType(action: string): 'success' | 'warning' | 'danger' | 'info
   }
 }
 
-// @ts-ignore - reserved for future use
-function riskLevelTagType(level: string): 'success' | 'warning' | 'danger' | 'info' {
-  const l = (level || '').toLowerCase()
-  if (l.includes('低')) return 'success'
-  if (l.includes('中')) return 'warning'
-  if (l.includes('高')) return 'danger'
-  return 'info'
-}
-
-// @ts-ignore - reserved for future use
-function formatConfidenceScore(score: any): string {
-  const n = Number(score)
-  if (!Number.isFinite(n)) return '-'
-  // 兼容 0-1 和 0-100 两种格式
-  const pct = n <= 1 ? n * 100 : n
-  return `${pct.toFixed(0)}%`
-}
-
 function formatPercent(v: any): string {
   const n = Number(v)
   if (!Number.isFinite(n)) return '-'
@@ -2230,19 +2196,8 @@ function getReportContent(reportData: any): string {
       return reportData.judge_decision
     }
   }
-  
-  return String(reportData)
-}
 
-// 渲染Markdown
-function renderMarkdown(content: string): string {
-  if (!content) return '<p>暂无内容</p>'
-  try {
-    return safeMarkdown(content)
-  } catch (e) {
-    console.error('Markdown渲染失败:', e)
-    return `<pre>${content}</pre>`
-  }
+  return String(reportData)
 }
 
 // 打开指定报告
@@ -2388,11 +2343,6 @@ function exportReport() {
 .news-item .title:hover .ext { color: var(--el-color-primary); }
 .news-item .right { color: var(--el-text-color-secondary); font-size: 12px; white-space: nowrap; margin-left: 8px; }
 .news-item .meta { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; }
-
-.sentiment { font-size: 12px; }
-.sentiment.pos { color: #ef4444; }
-.sentiment.neu { color: #64748b; }
-.sentiment.neg { color: #10b981; }
 
 .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .fact { display: flex; flex-direction: column; font-size: 12px; }
