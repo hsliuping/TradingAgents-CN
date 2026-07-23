@@ -456,7 +456,9 @@ class Settings(BaseSettings):
         return self
 
     # Ignore any extra environment variables present in .env or process env
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # 支持通过 DOTENV_FILE 环境变量指定不同的 .env 文件（如京东云模式用 .env.jdyun）
+    _env_file = os.getenv("DOTENV_FILE", ".env")
+    model_config = SettingsConfigDict(env_file=_env_file, env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()
 

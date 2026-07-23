@@ -22,7 +22,10 @@ OpenHarness/
 .env.*.local
 .env.db
 .env.mongodb*
+.env.jdyun
+!.env.jdyun.example
 frontend/.env*
+!frontend/.env.jdyun.example
 
 # 前端依赖与构建产物
 node_modules/

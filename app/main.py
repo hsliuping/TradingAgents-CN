@@ -128,17 +128,21 @@ async def _print_config_summary(logger):
         # .env 文件路径信息
         import os
         from pathlib import Path
-        
+
         current_dir = Path.cwd()
         logger.info(f"📁 Current working directory: {current_dir}")
-        
+
+        # 支持通过 DOTENV_FILE 环境变量指定不同的 .env 文件（如京东云模式用 .env.jdyun）
+        env_filename = os.getenv("DOTENV_FILE", ".env")
+        logger.info(f"📄 Environment file: {env_filename}")
+
         # 检查可能的 .env 文件位置
         env_files_to_check = [
-            current_dir / ".env",
-            current_dir / "app" / ".env",
-            Path(__file__).parent.parent / ".env",  # 项目根目录
+            current_dir / env_filename,
+            current_dir / "app" / env_filename,
+            Path(__file__).parent.parent / env_filename,  # 项目根目录
         ]
-        
+
         logger.info("🔍 Checking .env file locations:")
         env_file_found = False
         for env_file in env_files_to_check:

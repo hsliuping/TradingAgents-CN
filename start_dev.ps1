@@ -185,14 +185,16 @@ if ($Command -eq "backend" -or $Command -eq "all") {
         $env:REDIS_PORT = "$RedisPort"
     }
 
-    # 京东云模式：设置 JDYUN_MODE=true 开关
-    # 其余京东云参数(OPENAI_API_BASE/KEY/MODEL、EMBEDDING_MODEL、TUSHARE_TOKEN)由 .env 提供
+    # 京东云模式：设置 JDYUN_MODE=true 开关和 DOTENV_FILE=.env.jdyun
+    # 京东云参数(OPENAI_API_BASE/KEY/MODEL、EMBEDDING_MODEL、TUSHARE_TOKEN)由 .env.jdyun 提供
     if ($Jdyun) {
         $env:JDYUN_MODE = "true"
+        $env:DOTENV_FILE = ".env.jdyun"
         Write-Host "[Jdyun] 京东云合作版模式已启用" -ForegroundColor Magenta
         Write-Host "  - 配置管理界面已隐藏，配置通过环境变量注入" -ForegroundColor Gray
         Write-Host "  - 大模型/数据源 API 端点已设为只读" -ForegroundColor Gray
-        Write-Host "  - 请确保 .env 中已配置 OPENAI_API_BASE / OPENAI_API_KEY / OPENAI_MODEL / TUSHARE_TOKEN" -ForegroundColor Gray
+        Write-Host "  - 环境文件: .env.jdyun（后端自动加载）" -ForegroundColor Gray
+        Write-Host "  - 请确保 .env.jdyun 中已配置 OPENAI_API_BASE / OPENAI_API_KEY / OPENAI_MODEL / TUSHARE_TOKEN" -ForegroundColor Gray
         Write-Host "  - MongoDB: localhost:$MongoDBPort  Redis: localhost:$RedisPort" -ForegroundColor Gray
         Write-Host ""
     }
@@ -250,7 +252,10 @@ if ($Command -eq "backend" -or $Command -eq "all") {
         $env:PYTHONUNBUFFERED = "1"
         if ($mongoDBPort) { $env:MONGODB_PORT = $mongoDBPort }
         if ($redisPort) { $env:REDIS_PORT = $redisPort }
-        if ($jdyunMode) { $env:JDYUN_MODE = "true" }
+        if ($jdyunMode) {
+            $env:JDYUN_MODE = "true"
+            $env:DOTENV_FILE = ".env.jdyun"
+        }
         & $pythonExe -m uvicorn app.main:app --host 127.0.0.1 --port $backendPort --log-level info
     } -ArgumentList $pythonExe, $BackendPort, $root, $(if ($Version) { "$MongoDBPort" } else { "" }), $(if ($Version) { "$RedisPort" } else { "" }), $([bool]$Jdyun)
 
