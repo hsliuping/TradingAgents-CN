@@ -167,23 +167,6 @@ const createAxiosInstance = (): AxiosInstance => {
         if (token) {
           config.headers = config.headers || {}
           config.headers.Authorization = `Bearer ${token}`
-          console.log('🔐 已设置Authorization头:', {
-            url: config.url,
-            hasToken: !!token,
-            tokenLength: token?.length || 0,
-            tokenPrefix: token?.substring(0, 20) || 'None',
-            authHeader: config.headers.Authorization?.substring(0, 30) || 'None',
-            tokenFingerprint: maskTokenFingerprint(token),
-            authStoreTokenFingerprint: maskTokenFingerprint(authStore.token),
-            localStorageTokenFingerprint: maskTokenFingerprint(localStorage.getItem('auth-token')),
-          })
-        } else {
-          console.log('⚠️ 未设置Authorization头:', {
-            skipAuth: config.skipAuth,
-            hasToken: !!authStore.token,
-            localStored: !!localStorage.getItem('auth-token'),
-            url: config.url
-          })
         }
 
         // 添加 App Token 头（用于许可证验证）
@@ -218,9 +201,8 @@ const createAxiosInstance = (): AxiosInstance => {
               delete (config.params as any).code
               delete (config.params as any).stock_code
             }
-            console.warn('🔧 已自动重写遗留端点为 /api/stocks/{code}/quote', { code: codeStr })
           } else {
-            console.error('❌ 误用端点: /api/stocks/quote 缺少 code。请改用 /api/stocks/{code}/quote', { stack: new Error().stack })
+            console.error('❌ 误用端点: /api/stocks/quote 缺少 code')
             return Promise.reject(new Error('前端误用端点：缺少 code，请改用 /api/stocks/{code}/quote'))
           }
         }
@@ -242,15 +224,6 @@ const createAxiosInstance = (): AxiosInstance => {
         console.warn('端点兼容检查异常', e)
       }
 
-      console.log(`🚀 API请求: ${config.method?.toUpperCase()} ${config.url}`, {
-        baseURL: config.baseURL,
-        fullURL: `${config.baseURL}${config.url}`,
-        params: config.params,
-        data: config.data,
-        headers: config.headers,
-        timeout: config.timeout
-      })
-
       return config
     },
     (error) => {
@@ -270,8 +243,6 @@ const createAxiosInstance = (): AxiosInstance => {
       if (config.showLoading) {
         appStore.setLoading(false)
       }
-
-      console.log(`✅ API响应: ${response.status} ${response.config.url}`, response.data)
 
       // 检查业务状态码
       const data = response.data as ApiResponse
@@ -309,16 +280,6 @@ const createAxiosInstance = (): AxiosInstance => {
         appStore.setLoading(false)
       }
 
-      console.error(`❌ API错误: ${error.response?.status} ${error.config?.url}`, {
-        error: error,
-        message: error.message,
-        code: error.code,
-        response: error.response,
-        request: error.request,
-        config: error.config,
-        stack: error.stack
-      })
-
       // 处理HTTP状态码错误
       if (error.response) {
         const { status, data } = error.response
@@ -329,7 +290,6 @@ const createAxiosInstance = (): AxiosInstance => {
             if (config?.url?.includes('/auth/refresh')) {
               console.error('❌ Refresh token请求失败')
               if (config?.skipAuthError) {
-                console.log('⏭️ refresh 请求 401，且 skipAuthError=true，跳过自动登录跳转')
                 ;(error as any).__skipGlobalAuthRedirect = true
                 break
               }
@@ -342,27 +302,9 @@ const createAxiosInstance = (): AxiosInstance => {
               try {
                 console.log('🔄 401错误，尝试刷新token...')
                 config._retry = true
-                const failedAuthHeader = typeof config?.headers?.Authorization === 'string'
-                  ? config.headers.Authorization
-                  : typeof config?.headers?.authorization === 'string'
-                    ? config.headers.authorization
-                    : ''
-                console.log('🔍 401原始请求认证信息:', {
-                  url: config?.url,
-                  retryFlag: config?._retry,
-                  authHeaderFingerprint: failedAuthHeader.startsWith('Bearer ')
-                    ? maskTokenFingerprint(failedAuthHeader.slice(7))
-                    : failedAuthHeader || 'none',
-                  authStoreTokenFingerprint: maskTokenFingerprint(authStore.token),
-                  localStorageTokenFingerprint: maskTokenFingerprint(localStorage.getItem('auth-token')),
-                  refreshTokenFingerprint: maskTokenFingerprint(authStore.refreshToken),
-                })
                 const success = await ensureSingleFlightTokenRefresh(authStore)
                 if (success) {
-                  console.log('✅ Token刷新成功，重试原请求', {
-                    url: config?.url,
-                    refreshedTokenFingerprint: maskTokenFingerprint(authStore.token || localStorage.getItem('auth-token')),
-                  })
+                  console.log('✅ Token刷新成功，重试原请求')
                   // 重新发送原请求
                   return instance.request(config)
                 } else {
@@ -375,7 +317,6 @@ const createAxiosInstance = (): AxiosInstance => {
 
             // 如果请求标记为跳过认证错误处理（如局部可降级接口），不要自动登出/跳转。
             if (config?.skipAuthError) {
-              console.log('⏭️ 401 最终仍失败，但 skipAuthError=true，跳过自动登录跳转')
               ;(error as any).__skipGlobalAuthRedirect = true
               break
             }
@@ -579,29 +520,14 @@ const request = createAxiosInstance()
 // 测试API连接
 export const testApiConnection = async (): Promise<boolean> => {
   try {
-    console.log('🔍 [API_TEST] 开始测试API连接')
-    console.log('🔍 [API_TEST] 基础URL:', import.meta.env.VITE_API_BASE_URL || '使用代理')
-    console.log('🔍 [API_TEST] 代理目标:', 'http://localhost:8000 (根据vite.config.ts)')
-
     const response = await request.get('/api/health', {
       timeout: 5000,
       skipErrorHandler: true
     } as any)
 
-    console.log('🔍 [API_TEST] 健康检查成功:', response.data)
     return true
   } catch (error: any) {
-    console.error('🔍 [API_TEST] 健康检查失败:', error)
-
-    if (error.code === 'ECONNABORTED') {
-      console.error('🔍 [API_TEST] 连接超时 - 后端服务可能未启动')
-    } else if (error.message === 'Network Error' || error.message.includes('Failed to fetch')) {
-      console.error('🔍 [API_TEST] 网络错误 - 后端服务可能未在 http://localhost:8000 运行')
-    } else if (error.response?.status === 404) {
-      console.error('🔍 [API_TEST] 404错误 - /api/health 端点不存在')
-    } else {
-      console.error('🔍 [API_TEST] 其他错误:', error.message)
-    }
+    console.error('❌ API连接测试失败:', error.code || error.message)
 
     return false
   }

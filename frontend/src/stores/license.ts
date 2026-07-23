@@ -147,7 +147,6 @@ export const useLicenseStore = defineStore('license', () => {
     error.value = null
 
     try {
-      console.log('🔄 License Store: 开始验证许可证...', { force })
       // 调用 /status 接口获取授权状态，force=true 时强制刷新（跳过后端缓存）
       // 注意：设备ID由后端基于硬件信息自动生成，前端不需要传递
       const response: any = await request.get('/api/license/status', {
@@ -156,7 +155,6 @@ export const useLicenseStore = defineStore('license', () => {
           ...(authServer ? { auth_server: authServer } : {})
         }
       })
-      console.log('📋 License Store: 收到响应', response)
 
       if (response.success && response.data) {
         // 如果用户没有配置 token
@@ -173,7 +171,6 @@ export const useLicenseStore = defineStore('license', () => {
           // 清除本地存储的 token
           appToken.value = null
           localStorage.removeItem('app-token')
-          console.log('📋 License Store: 用户未配置 token，使用免费版')
         } else {
           licenseInfo.value = {
             email: response.data.email || '',
@@ -188,22 +185,15 @@ export const useLicenseStore = defineStore('license', () => {
             pro_expire_at: response.data.pro_expire_at,
             offline_mode: response.data.offline_mode || false
           }
-          console.log('✅ License Store: 许可证验证成功', {
-            plan: licenseInfo.value.plan,
-            is_valid: licenseInfo.value.is_valid,
-            isPro: isPro.value
-          })
         }
         lastVerifiedAt.value = new Date()
         return licenseInfo.value.is_valid
       } else {
         error.value = response.message || '获取授权状态失败'
-        console.error('❌ License Store: 验证失败', error.value)
         return false
       }
     } catch (e: any) {
       error.value = e.message || '网络错误'
-      console.error('❌ License Store: 网络错误', e)
       // 网络错误时保持之前的状态
       return licenseInfo.value?.is_valid || false
     } finally {
