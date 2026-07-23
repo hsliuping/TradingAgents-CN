@@ -520,7 +520,7 @@ const request = createAxiosInstance()
 // 测试API连接
 export const testApiConnection = async (): Promise<boolean> => {
   try {
-    const response = await request.get('/api/health', {
+    await request.get('/api/health', {
       timeout: 5000,
       skipErrorHandler: true
     } as any)
