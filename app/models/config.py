@@ -28,6 +28,7 @@ class ModelProvider(str, Enum):
     SILICONFLOW = "siliconflow"
     OPENROUTER = "openrouter"
     CUSTOM_OPENAI = "custom_openai"
+    ATLASCLOUD = "atlascloud"
     QIANFAN = "qianfan"
     LOCAL = "local"
 

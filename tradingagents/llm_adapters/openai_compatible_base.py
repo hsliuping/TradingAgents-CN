@@ -394,6 +394,48 @@ class ChatZhipuOpenAI(OpenAICompatibleBase):
         return max(1, len(text) // 2)
 
 
+class ChatAtlasCloudOpenAI(OpenAICompatibleBase):
+    """Atlas Cloud OpenAI兼容适配器"""
+
+    def __init__(
+        self,
+        model: str = "qwen/qwen3.5-flash",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        if api_key is None:
+            api_key = os.getenv("ATLASCLOUD_API_KEY") or os.getenv("ATLAS_CLOUD_API_KEY")
+
+        if not api_key:
+            raise ValueError(
+                "Atlas Cloud API密钥未找到。请在 Web 界面配置 API Key "
+                "或设置 ATLASCLOUD_API_KEY / ATLAS_CLOUD_API_KEY 环境变量。"
+            )
+
+        if base_url is None:
+            base_url = (
+                os.getenv("ATLASCLOUD_API_BASE")
+                or os.getenv("ATLASCLOUD_BASE_URL")
+                or os.getenv("ATLAS_CLOUD_API_BASE")
+                or os.getenv("ATLAS_CLOUD_BASE_URL")
+                or "https://api.atlascloud.ai/v1"
+            )
+
+        super().__init__(
+            provider_name="atlascloud",
+            model=model,
+            api_key_env_var="ATLASCLOUD_API_KEY",
+            base_url=base_url.rstrip("/"),
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+
+
 class ChatCustomOpenAI(OpenAICompatibleBase):
     """自定义OpenAI端点适配器（代理/聚合平台）"""
 
@@ -470,6 +512,15 @@ OPENAI_COMPATIBLE_PROVIDERS = {
             "glm-4": {"context_length": 128000, "supports_function_calling": True},
             "glm-4-plus": {"context_length": 128000, "supports_function_calling": True},
             "glm-3-turbo": {"context_length": 128000, "supports_function_calling": True}
+        }
+    },
+    "atlascloud": {
+        "adapter_class": ChatAtlasCloudOpenAI,
+        "base_url": "https://api.atlascloud.ai/v1",
+        "api_key_env": "ATLASCLOUD_API_KEY",
+        "models": {
+            "qwen/qwen3.5-flash": {"supports_function_calling": True},
+            "deepseek-ai/deepseek-v4-pro": {"supports_function_calling": True}
         }
     },
     "custom_openai": {

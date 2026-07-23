@@ -75,6 +75,17 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Custom model ID", "custom"),
         ],
     },
+    "atlascloud": {
+        "quick": [
+            ("Qwen3.5 Flash - Atlas Cloud", "qwen/qwen3.5-flash"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("DeepSeek V4 Pro - Atlas Cloud", "deepseek-ai/deepseek-v4-pro"),
+            ("Qwen3.5 Flash - Atlas Cloud", "qwen/qwen3.5-flash"),
+            ("Custom model ID", "custom"),
+        ],
+    },
     "openrouter": {
         "quick": [
             ("Custom model ID", "custom"),

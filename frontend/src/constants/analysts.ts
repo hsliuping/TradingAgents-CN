@@ -88,6 +88,10 @@ export const MODEL_TO_PROVIDER_MAP: Record<string, string> = {
   'qwen-plus-latest': 'dashscope',
   'qwen-max-longcontext': 'dashscope',
 
+  // Atlas Cloud
+  'qwen/qwen3.5-flash': 'atlascloud',
+  'deepseek-ai/deepseek-v4-pro': 'atlascloud',
+
   // OpenAI
   'gpt-3.5-turbo': 'openai',
   'gpt-4': 'openai',
