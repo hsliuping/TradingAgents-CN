@@ -1,4 +1,4 @@
-﻿﻿﻿﻿Unicode true
+﻿﻿﻿﻿﻿﻿Unicode true
 ManifestDPIAware true
 ; ============================================================================
 ; TradingAgentsCN Windows Installer (NSIS 3.x)
