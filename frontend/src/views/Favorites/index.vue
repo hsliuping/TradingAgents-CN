@@ -424,7 +424,7 @@
           <el-radio-group v-model="batchSyncForm.dataSource">
             <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
             <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
-            <el-radio label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
+            <el-radio v-if="!isJdyunMode()" label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="batchSyncForm.syncTypes.includes('historical')">
@@ -476,7 +476,7 @@
           <el-radio-group v-model="singleSyncForm.dataSource">
             <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
             <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
-            <el-radio label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
+            <el-radio v-if="!isJdyunMode()" label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="singleSyncForm.syncTypes.includes('historical')">
@@ -502,6 +502,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
+import { isJdyunMode } from '@/utils/config'
 import {
   Star,
   Search,
@@ -765,7 +766,7 @@ const syncAllRealtime = async () => {
   syncRealtimeLoading.value = true
   try {
     const preferredSource = await loadPreferredAvailableSyncSource()
-    const realtimeSource = preferredSource || (availableSyncSources.value.qmt ? 'qmt' : availableSyncSources.value.akshare ? 'akshare' : 'tushare')
+    const realtimeSource = preferredSource || (!isJdyunMode() && availableSyncSources.value.qmt ? 'qmt' : availableSyncSources.value.akshare ? 'akshare' : 'tushare')
     const res = await favoritesApi.syncRealtime(realtimeSource)
 
     if ((res as any)?.success) {

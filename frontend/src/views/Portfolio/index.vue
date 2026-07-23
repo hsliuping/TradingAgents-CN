@@ -8,7 +8,7 @@
       </div>
       <div class="actions">
         <el-button :icon="Refresh" text size="small" @click="refreshData">刷新</el-button>
-        <el-button v-if="activeTab === 'real'" type="success" plain :loading="qmtSyncing" @click="syncPositionsFromQmt">QMT同步</el-button>
+        <el-button v-if="activeTab === 'real' && !isJdyunMode()" type="success" plain :loading="qmtSyncing" @click="syncPositionsFromQmt">QMT同步</el-button>
         <el-button v-if="activeTab === 'real'" type="primary" :icon="Plus" @click="showAddDialog = true">添加持仓</el-button>
         <el-button v-if="activeTab === 'real'" type="info" :icon="List" @click="showChangesDialog = true">变动记录</el-button>
         <el-button v-if="activeTab === 'real'" type="warning" :icon="Clock" @click="showHistoryDialog = true">历史持仓</el-button>
@@ -515,6 +515,7 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { isJdyunMode } from '@/utils/config'
 import { Refresh, Plus, PieChart, List, Clock, ArrowDown } from '@element-plus/icons-vue'
 import type { TabPaneName } from 'element-plus'
 import { portfolioApi, type PositionItem, type PortfolioStats, type PortfolioAnalysisReport, type QMTPositionSyncPreview } from '@/api/portfolio'

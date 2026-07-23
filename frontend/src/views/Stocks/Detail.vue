@@ -711,7 +711,7 @@
           <el-radio-group v-model="syncForm.dataSource">
             <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
             <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
-            <el-radio label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
+            <el-radio v-if="!isJdyunMode()" label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="syncForm.syncTypes.includes('historical')">
@@ -736,6 +736,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { isJdyunMode } from '@/utils/config'
 import { TrendCharts, Star, Refresh, Link, Document, Clock, CreditCard, Delete, Loading } from '@element-plus/icons-vue'
 import { PieChart, Plus, View, InfoFilled, Opportunity, CircleCheck, Warning, Pointer } from '@element-plus/icons-vue'
 import { renderMarkdown } from '@/utils/markdown'
@@ -960,7 +961,7 @@ async function loadPreferredSyncDataSource() {
       return
     }
 
-    if (availableSyncSources.qmt) {
+    if (!isJdyunMode() && availableSyncSources.qmt) {
       syncForm.dataSource = 'qmt'
     } else if (availableSyncSources.akshare) {
       syncForm.dataSource = 'akshare'
