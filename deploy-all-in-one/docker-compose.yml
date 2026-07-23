@@ -1,0 +1,55 @@
+# TradingAgents-CN Pro 京东云部署 docker-compose
+#
+# 使用方法:
+# 1. 复制 .env.example 为 .env 并填写必填项
+# 2. docker-compose up -d
+# 3. 访问 http://your-server:8082
+#
+# 镜像来源: 京东云容器镜像仓库
+# agentengine-tradingagent-cn-north-1.jcr.service.jdcloud.com/tradingagent:3.0.0-jdyun
+
+services:
+  tradingagents:
+    image: agentengine-tradingagent-cn-north-1.jcr.service.jdcloud.com/tradingagent:3.0.0-jdyun
+    container_name: tradingagents-jdyun
+    hostname: tradingagents
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8082}:8082"
+    volumes:
+      - ta-data:/data/db
+      - ta-redis:/var/lib/redis
+      - ta-runtime:/app/runtime
+      - ta-logs:/app/logs
+    environment:
+      TZ: "Asia/Shanghai"
+      MONGODB_PASSWORD: "${MONGODB_PASSWORD:?MONGODB_PASSWORD must be set in .env}"
+      # 京东云合作版核心配置
+      JDYUN_MODE: "true"
+      OPENAI_API_BASE: "${OPENAI_API_BASE:-https://modelservice.jdcloud.com/v1}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:?OPENAI_API_KEY must be set in .env}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-GLM-5}"
+      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-Qwen3-Embedding-8B}"
+      EMBEDDING_API_BASE: "${EMBEDDING_API_BASE:-https://modelservice.jdcloud.com/v1}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY}"
+      # 数据源
+      TUSHARE_TOKEN: "${TUSHARE_TOKEN}"
+      # 安全配置（生产环境必须修改）
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set in .env, generate with: openssl rand -base64 48}"
+      CSRF_SECRET: "${CSRF_SECRET:?CSRF_SECRET must be set in .env, generate with: openssl rand -base64 48}"
+      # LLM 限速配置（应对京东云 API 限速，默认值已优化）
+      JDYUN_LLM_MAX_RETRIES: "${JDYUN_LLM_MAX_RETRIES:-8}"
+      JDYUN_LLM_MAX_RPM: "${JDYUN_LLM_MAX_RPM:-30}"
+      JDYUN_BATCH_MAX_CONCURRENT: "${JDYUN_BATCH_MAX_CONCURRENT:-1}"
+      JDYUN_WORKER_MAX_CONCURRENT: "${JDYUN_WORKER_MAX_CONCURRENT:-1}"
+      JDYUN_STOCK_INTERVAL_SECONDS: "${JDYUN_STOCK_INTERVAL_SECONDS:-10}"
+
+volumes:
+  ta-data:
+    driver: local
+  ta-redis:
+    driver: local
+  ta-runtime:
+    driver: local
+  ta-logs:
+    driver: local
