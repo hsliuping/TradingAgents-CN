@@ -395,8 +395,8 @@ class EmbeddingManager:
         try:
             if provider_name == "dashscope":
                 return self._call_dashscope(provider, text)
-            elif provider_name in ["openai", "deepseek", "zhipu", "ollama", "localai"]:
-                # 🔥 OpenAI 兼容的 API（包括智谱AI、DeepSeek、本地模型等）
+            elif provider_name in ["openai", "deepseek", "zhipu", "ollama", "localai", "jdyun"]:
+                # 🔥 OpenAI 兼容的 API（包括智谱AI、DeepSeek、京东云、本地模型等）
                 # 智谱AI 使用 OpenAI 兼容的 API，base_url: https://open.bigmodel.cn/api/paas/v4
                 return self._call_openai_compatible(provider, text)
             elif provider_name == "google":

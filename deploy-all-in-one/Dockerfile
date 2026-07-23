@@ -124,6 +124,7 @@ COPY tradingagents /app/tradingagents
 COPY config /app/config
 COPY scripts /app/scripts
 COPY install /app/install
+COPY migrations /app/migrations
 
 # ------------------------------------------------------------------------------
 # 复制 s6-overlay 服务定义和配置文件

@@ -2051,6 +2051,7 @@ function actionTagType(action: string): 'success' | 'warning' | 'danger' | 'info
   }
 }
 
+// @ts-ignore - reserved for future use
 function riskLevelTagType(level: string): 'success' | 'warning' | 'danger' | 'info' {
   const l = (level || '').toLowerCase()
   if (l.includes('低')) return 'success'
@@ -2059,6 +2060,7 @@ function riskLevelTagType(level: string): 'success' | 'warning' | 'danger' | 'in
   return 'info'
 }
 
+// @ts-ignore - reserved for future use
 function formatConfidenceScore(score: any): string {
   const n = Number(score)
   if (!Number.isFinite(n)) return '-'
