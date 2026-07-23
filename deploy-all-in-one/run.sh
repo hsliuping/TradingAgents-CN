@@ -250,6 +250,8 @@ action_start() {
             -e OPENAI_API_KEY="${OPENAI_API_KEY:-}"
             -e OPENAI_MODEL="${OPENAI_MODEL:-GLM-5.1}"
             -e EMBEDDING_MODEL="${EMBEDDING_MODEL:-Qwen3-Embedding-8B}"
+            -e EMBEDDING_API_BASE="${EMBEDDING_API_BASE:-https://modelservice.jdcloud.com/v1}"
+            -e EMBEDDING_API_KEY="${EMBEDDING_API_KEY:-}"
             -e TUSHARE_TOKEN="${TUSHARE_TOKEN:-}"
         )
     fi
