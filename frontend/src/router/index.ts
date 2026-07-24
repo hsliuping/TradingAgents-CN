@@ -997,6 +997,15 @@ router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
   const appStore = useAppStore()
 
+  // 等待认证初始化完成，避免初始化期间跳转出现竞态
+  if (!authStore.authInitialized) {
+    try {
+      await authStore.checkAuthStatus()
+    } catch {
+      // 初始化失败时继续走原有判断逻辑
+    }
+  }
+
   // 设置页面标题
   const title = to.meta.title as string
   if (title) {
@@ -1109,29 +1118,6 @@ router.onError((error) => {
   console.error('路由错误:', error)
   NProgress.done()
   ElMessage.error('页面加载失败，请重试')
-})
-
-// 路由守卫：检查高级课程权限
-router.beforeEach((to, _from, next) => {
-  // 检查是否需要高级学员权限
-  if (to.meta.requiresPro) {
-    // 动态导入License Store（避免循环依赖）
-    import('@/stores/license').then(({ useLicenseStore }) => {
-      const licenseStore = useLicenseStore()
-      if (!licenseStore.isPro) {
-        ElMessage.warning('此功能需要高级学员权限，请先认证')
-        next('/settings/license')
-        return
-      }
-      next()
-    }).catch(() => {
-      // 如果导入失败，允许访问（开发环境可能未配置）
-      console.warn('License store导入失败，允许访问')
-      next()
-    })
-  } else {
-    next()
-  }
 })
 
 export default router

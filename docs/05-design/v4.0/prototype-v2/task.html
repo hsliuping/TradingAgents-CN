@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>任务 #4823 · 招商银行 Q1 财报深度分析 · TradingAgents v4.0</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus@2.4.4/dist/index.css" />
+  <link rel="stylesheet" href="./assets/theme.css?v=4" />
+</head>
+<body>
+  <div id="app">
+    <app-shell
+      active="tasks"
+      :page-title="taskDetail.title"
+      :breadcrumb="[{label:'任务中心', href:'#'}]"
+    >
+      <!-- 任务头 -->
+      <el-card shadow="never" body-style="padding: 24px;">
+        <div class="flex-between" style="align-items: flex-start;">
+          <div>
+            <div class="flex-row gap-3 mb-2">
+              <el-tag :type="taskDetail.statusType" effect="light" size="default">{{ taskDetail.status }}</el-tag>
+              <el-tag effect="plain" size="default">{{ taskDetail.kind }}</el-tag>
+              <span class="text-sm muted">任务 {{ taskDisplayId(taskDetail.id) }}</span>
+            </div>
+            <h1 style="margin: 0 0 8px; font-size: 22px; font-weight: 600;">
+              {{ taskDetail.title }}
+            </h1>
+            <div class="text-sm muted">
+              绑定对象：<a :href="taskDetail.objectHref">{{ taskDetail.objectName }} ({{ taskDetail.objectCode }})</a> ·
+              使用工作流 <a href="#">「{{ taskDetail.workflow }}」</a> ·
+              发起人 <b>{{ taskDetail.requester }}</b>
+            </div>
+          </div>
+          <div style="text-align: right; font-variant-numeric: tabular-nums;">
+            <div class="kv-grid" style="grid-template-columns: repeat(3, max-content); gap: 24px;">
+              <div class="kv-item">
+                <div class="kv-label">发起时间</div>
+                <div class="kv-value">{{ taskDetail.createdAt }}</div>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">耗时</div>
+                <div class="kv-value">{{ taskDetail.elapsed }}</div>
+              </div>
+              <div class="kv-item">
+                <div class="kv-label">完成于</div>
+                <div class="kv-value">{{ taskDetail.finishedAt }}</div>
+              </div>
+            </div>
+            <div class="flex-row gap-2" style="margin-top: 16px; justify-content: flex-end;">
+              <el-button plain size="default" @click="rerunTask"><el-icon><RefreshRight /></el-icon>&nbsp;重跑</el-button>
+              <el-button plain size="default" @click="exportTask"><el-icon><Download /></el-icon>&nbsp;导出</el-button>
+              <el-button text size="default"><el-icon><MoreFilled /></el-icon></el-button>
+            </div>
+          </div>
+        </div>
+      </el-card>
+
+      <!-- 阶段进度 -->
+      <div class="task-stages" style="margin-top: 24px;">
+        <div v-for="s in stages" :key="s.name" class="stage" :class="s.cls">
+          <div class="stage-dot">
+            <el-icon v-if="s.cls === 'is-done'"><Check /></el-icon>
+            <span v-else>{{ s.idx }}</span>
+          </div>
+          <div class="stage-name">{{ s.name }}</div>
+          <div class="stage-meta">{{ s.meta }}</div>
+        </div>
+      </div>
+
+      <!-- 主体：左 中间结果 + 右 元数据/沉淀 -->
+      <el-row :gutter="24" style="margin-top: 24px;">
+        <el-col :span="16">
+          <el-tabs v-model="activeTab">
+            <el-tab-pane label="分析结论" name="result">
+              <article class="result-doc">
+                <h3>一、核心结论</h3>
+                <p>
+                  {{ taskDetail.objectName }} 的「{{ taskDetail.kind }}」已完成。系统已根据对象事实层、历史观点、任务上下文生成一版可沉淀结果，
+                  当前处于<b>等待你确认</b>的阶段。
+                  <template v-if="taskDetail.prompt && taskDetail.prompt !== '未填写额外焦点问题'">
+                    本次焦点问题是“{{ taskDetail.prompt }}”。
+                  </template>
+                  <template v-if="taskDetail.linkedTrade">
+                    这次任务关联了操作记录 <b>{{ taskDetail.linkedTrade.op }} · {{ taskDetail.linkedTrade.date }}</b>，适合直接沉淀为观点、规则或提醒。
+                  </template>
+                </p>
+
+                <blockquote>
+                  注意：以下三条结论是 AI 推导的<strong>系统观点</strong>，不是事实，需要你判断是否纳入「我的观点」或升级为规则。
+                </blockquote>
+
+                <h3>二、三条可沉淀结论</h3>
+
+                <template v-for="d in deposits" :key="d.id">
+                  <h4>结论 {{ d.idx }} · {{ d.title }}</h4>
+                  <p>{{ d.body }}</p>
+                </template>
+
+                <h3>三、关键数据快照</h3>
+                <ul>
+                  <li>任务类型：{{ taskDetail.kind }}</li>
+                  <li>对象：{{ taskDetail.objectName }} ({{ taskDetail.objectCode }})</li>
+                  <li>工作流：{{ taskDetail.workflow }}</li>
+                  <li>模型：{{ taskDetail.model }}</li>
+                  <li>待确认沉淀：{{ pendingDepositCount }} 条</li>
+                  <li v-if="taskDetail.linkedTrade">关联操作：{{ taskDetail.linkedTrade.op }} · {{ taskDetail.linkedTrade.date }}</li>
+                </ul>
+
+                <div class="doc-source">
+                  任务 {{ taskDisplayId(taskDetail.id) }} · 模型 {{ taskDetail.model }} · 工作流 {{ taskDetail.workflow }} ·
+                  本页为高保真原型，沉淀确认后会回写到对象页
+                </div>
+              </article>
+            </el-tab-pane>
+
+            <el-tab-pane label="执行日志" name="log">
+              <el-card shadow="never">
+                <div v-for="(l, i) in logs" :key="i"
+                     :style="{ padding: '6px 0', borderBottom: i < logs.length - 1 ? '1px solid var(--border-light)' : 'none', display: 'flex', gap: '16px', fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace', fontSize: '13px' }">
+                  <span class="muted tnum" style="flex: 0 0 80px;">{{ l.time }}</span>
+                  <el-tag :type="l.tagType" size="small" effect="plain" style="flex: 0 0 auto;">{{ l.stage }}</el-tag>
+                  <span style="flex: 1;">{{ l.msg }}</span>
+                </div>
+              </el-card>
+            </el-tab-pane>
+
+            <el-tab-pane label="输入与参数" name="input">
+              <el-card shadow="never">
+                <el-descriptions :column="2" border>
+                  <el-descriptions-item label="工作流">{{ taskDetail.workflow }}</el-descriptions-item>
+                  <el-descriptions-item label="主模型">{{ taskDetail.model }}</el-descriptions-item>
+                  <el-descriptions-item label="数据源优先级">QMT &gt; Tushare &gt; AKShare</el-descriptions-item>
+                  <el-descriptions-item label="使用 Skill">对象事实读取、历史观点归并、沉淀建议生成</el-descriptions-item>
+                  <el-descriptions-item label="对象">{{ taskDetail.objectName }} ({{ taskDetail.objectCode }})</el-descriptions-item>
+                  <el-descriptions-item label="报告期">按任务类型自动选择</el-descriptions-item>
+                  <el-descriptions-item label="对比基准" :span="2">关联对象、对象资料与同类历史任务（原型演示）</el-descriptions-item>
+                  <el-descriptions-item label="自定义提示词" :span="2" >
+                    {{ taskDetail.prompt }}
+                  </el-descriptions-item>
+                </el-descriptions>
+              </el-card>
+            </el-tab-pane>
+          </el-tabs>
+        </el-col>
+
+        <el-col :span="8">
+          <!-- 沉淀对话框 -->
+          <el-card shadow="never" class="is-hoverable" style="border-color: var(--el-color-primary-light-5);">
+            <template #header>
+              <div class="card-header-row">
+                <span class="title" style="color: var(--el-color-primary);">
+                  <el-icon><Reading /></el-icon>&nbsp;沉淀这次分析
+                </span>
+                <el-tag :type="pendingDepositCount ? 'warning' : 'success'" size="small" effect="light">{{ pendingDepositCount }} 条待确认</el-tag>
+              </div>
+            </template>
+            <p class="text-sm muted" style="margin: 0 0 16px; line-height: 1.6;">
+              系统从这次分析中识别出 3 条可沉淀内容。确认前不会写入研究库，确认后将带上完整溯源（任务 ID + 时间 + 数据口径）。
+            </p>
+            <div v-for="d in deposits" :key="d.id"
+                 style="padding: 12px; border: 1px solid var(--border-light); border-radius: 8px; margin-bottom: 10px;">
+              <div class="flex-row gap-2 mb-2">
+                <el-tag :type="d.tagType" size="small" effect="light">{{ d.kind }}</el-tag>
+                <span class="text-xs muted">来源：本次任务结论 {{ d.idx }}</span>
+                <span v-if="d.status === 'confirmed'" class="text-xs" style="color: var(--el-color-success);">· 已确认</span>
+                <span v-else-if="d.status === 'skipped'" class="text-xs muted">· 已跳过</span>
+              </div>
+              <div class="fw-500 mb-2">{{ d.title }}</div>
+              <div class="text-sm muted" style="line-height: 1.5;">{{ d.body }}</div>
+              <div class="flex-row gap-2 mt-3">
+                <el-button type="primary" size="small" :disabled="d.status === 'confirmed'" @click="confirmDeposit(d)">确认</el-button>
+                <el-button size="small" plain :disabled="d.status === 'confirmed'" @click="openDepositDialog(d)">修改</el-button>
+                <el-button size="small" text :disabled="d.status === 'confirmed' || d.status === 'skipped'" @click="skipDeposit(d)">跳过</el-button>
+              </div>
+            </div>
+            <el-divider style="margin: 16px 0;" />
+            <el-button plain style="width: 100%;" @click="openDepositDialog()">
+              <el-icon><EditPen /></el-icon>&nbsp;再加一条手动沉淀
+            </el-button>
+          </el-card>
+
+          <!-- 任务元数据 -->
+          <el-card shadow="never" style="margin-top: 16px;">
+            <template #header><span class="title">任务元数据</span></template>
+            <div class="kv-grid" style="grid-template-columns: 1fr 1fr;">
+              <div class="kv-item"><div class="kv-label">任务 ID</div><div class="kv-value tnum">{{ taskDisplayId(taskDetail.id) }}</div></div>
+              <div class="kv-item"><div class="kv-label">类型</div><div class="kv-value">{{ taskDetail.kind }}</div></div>
+              <div class="kv-item"><div class="kv-label">Token 用量</div><div class="kv-value tnum">132.4k in / 18.6k out</div></div>
+              <div class="kv-item"><div class="kv-label">预估成本</div><div class="kv-value tnum">¥0.84</div></div>
+              <div class="kv-item"><div class="kv-label">缓存命中</div><div class="kv-value">财务表 ✓ · 行业对标 ✗</div></div>
+              <div class="kv-item"><div class="kv-label">通知</div><div class="kv-value">已发送 邮件 + 飞书</div></div>
+            </div>
+          </el-card>
+
+          <!-- 关联资源 -->
+          <el-card shadow="never" style="margin-top: 16px;">
+            <template #header><span class="title">关联资源</span></template>
+            <div class="flex-row gap-2 mb-3">
+              <el-icon class="muted"><Link /></el-icon>
+              <a :href="taskDetail.objectHref">{{ taskDetail.objectName }} ({{ taskDetail.objectCode }})</a>
+            </div>
+            <div class="flex-row gap-2 mb-3">
+              <el-icon class="muted"><Document /></el-icon>
+              <a href="#">{{ taskDetail.objectName }} 相关资料包</a>
+            </div>
+            <div class="flex-row gap-2 mb-3">
+              <el-icon class="muted"><MagicStick /></el-icon>
+              <a href="#">工作流：{{ taskDetail.workflow }}</a>
+            </div>
+            <div class="flex-row gap-2">
+              <el-icon class="muted"><Reading /></el-icon>
+              <a href="./library.html?object=600036.SH">同对象历史报告与研究资产</a>
+            </div>
+          </el-card>
+
+          <!-- 任务类型导航 -->
+          <el-card shadow="never" style="margin-top: 16px;">
+            <template #header>
+              <div class="card-header-row">
+                <span class="title">任务类型</span>
+                <el-tag size="small" effect="plain">6 类</el-tag>
+              </div>
+            </template>
+            <div class="text-xs muted" style="margin-bottom: 10px; line-height: 1.6;">
+              当前是「深度分析」类型。系统支持以下任务类型：
+            </div>
+            <div v-for="k in taskKinds" :key="k.name"
+                 :style="{ padding: '10px 0', borderTop: '1px solid var(--border-light)' }"
+                 class="flex-between">
+              <div>
+                <div class="flex-row gap-2 mb-1">
+                  <el-tag size="small" :type="k.tagType" effect="light">{{ k.name }}</el-tag>
+                  <span v-if="k.current" class="text-xs" style="color: var(--el-color-primary);">· 当前</span>
+                </div>
+                <div class="text-xs muted">{{ k.desc }}</div>
+                <div class="text-xs muted" style="margin-top: 2px;">最近一次：{{ k.recent }}</div>
+              </div>
+              <el-button size="small" link>查看 →</el-button>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+    </app-shell>
+
+    <el-dialog v-model="showDepositDialog" :title="depositForm.id ? '修改沉淀项' : '新增手动沉淀'" width="520px" :close-on-click-modal="false">
+      <el-form :model="depositForm" label-width="80px">
+        <el-form-item label="类型" required>
+          <el-select v-model="depositForm.kind" style="width: 100%;">
+            <el-option label="规则草稿" value="规则草稿" />
+            <el-option label="观点草稿" value="观点草稿" />
+            <el-option label="提醒" value="提醒" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="标题" required>
+          <el-input v-model="depositForm.title" placeholder="沉淀标题" />
+        </el-form-item>
+        <el-form-item label="正文" required>
+          <el-input v-model="depositForm.body" type="textarea" :rows="4" placeholder="这条沉淀为什么值得保留，后续准备如何使用？" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showDepositDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveDepositDraft">保存</el-button>
+      </template>
+    </el-dialog>
+  </div>
+
+  <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/element-plus@2.4.4/dist/index.full.min.js"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+  <script src="./assets/shared.js?v=7"></script>
+  <script>
+    const PROTOTYPE_KEYS = {
+      objectState: 'ta.v4.prototype.object.600036',
+      tasks: 'ta.v4.prototype.tasks',
+    };
+
+    function readPrototypeJson(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function writePrototypeJson(key, value) {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+
+    function nowStamp() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    }
+
+    const { createApp } = Vue;
+    const app = createApp({
+      data() {
+        return {
+          activeTab: "result",
+          taskDetail: {
+            id: 'T-4823',
+            title: '招商银行 Q1 财报深度分析',
+            status: '完成 · 待沉淀',
+            statusType: 'warning',
+            kind: '深度分析',
+            objectName: '招商银行',
+            objectCode: '600036.SH',
+            objectHref: './object-detail.html',
+            workflow: '财报深度分析 v3',
+            requester: '你',
+            createdAt: '09:30:24',
+            elapsed: '48 分 12 秒',
+            finishedAt: '10:18:36',
+            model: 'GPT-4o',
+            prompt: '重点关注资产质量边际变化与净息差趋势，结论需明确给出是否值得纳入硬规则的建议。',
+            linkedTrade: null,
+          },
+          stages: [
+            { idx: 1, name: "数据收集", meta: "用时 03:12", cls: "is-done" },
+            { idx: 2, name: "数据校验", meta: "用时 01:48", cls: "is-done" },
+            { idx: 3, name: "AI 分析",   meta: "用时 36:24", cls: "is-done" },
+            { idx: 4, name: "结论生成", meta: "用时 06:48", cls: "is-done" },
+            { idx: 5, name: "等待沉淀", meta: "由你决定",  cls: "is-active" },
+          ],
+          logs: [
+            { time: "09:30:24", stage: "数据收集", tagType: "primary", msg: "拉取招行 2026Q1 报表 (Tushare 命中缓存)" },
+            { time: "09:31:08", stage: "数据收集", tagType: "primary", msg: "拉取关联对象财务（兴业、平安、工行）" },
+            { time: "09:33:36", stage: "数据校验", tagType: "info", msg: "口径校验通过（采用合并报表 / 期末值）" },
+            { time: "09:35:24", stage: "AI 分析",  tagType: "warning", msg: "调用 Skill「财报抽取 v2」抽取关键科目" },
+            { time: "09:48:02", stage: "AI 分析",  tagType: "warning", msg: "调用 Skill「行业对标 v1」生成对比表" },
+            { time: "10:11:42", stage: "AI 分析",  tagType: "warning", msg: "GPT-4o 完成结构化分析（chunk 14/14）" },
+            { time: "10:11:48", stage: "结论生成", tagType: "success", msg: "识别出 3 条可沉淀结论" },
+            { time: "10:18:36", stage: "结论生成", tagType: "success", msg: "任务完成，等待用户沉淀" },
+          ],
+          deposits: [
+            { id: 1, idx: 1, kind: "规则草稿", tagType: "success",
+              title: "核心一级资本充足率不低于 9%",
+              body: "持有股份行类对象时，连续两个季度低于 9% 触发减仓信号。" },
+            { id: 2, idx: 2, kind: "观点草稿", tagType: "warning",
+              title: "招行净息差二季度有边际改善空间",
+              body: "若存款挂牌利率下调落地，二季度净息差或环比改善 1-2bp，但幅度可能小于一致预期。" },
+            { id: 3, idx: 3, kind: "提醒", tagType: "primary",
+              title: "信用卡资产质量季度跟踪",
+              body: "为该对象设置季度提醒：跟踪信用卡不良生成率与关注类贷款变化。" },
+          ],
+          taskKinds: [
+            { name: "深度分析", tagType: "primary", current: true,
+              desc: "对个股 / ETF / 主题做系统性分析，输出结论与可沉淀草稿",
+              recent: "招行 Q1 深度分析（本任务）" },
+            { name: "横向对比", tagType: "warning", current: false,
+              desc: "把多个对象放在同一框架下评估，常用于决策前选股",
+              recent: "宁德 vs 比亚迪 横向对比 · 进行中" },
+            { name: "复盘", tagType: "info", current: false,
+              desc: "回看一次决策或阶段：假设是否兑现、教训是否可沉淀为规则",
+              recent: "光伏中报抢跑判断 · 等待假设回顾" },
+            { name: "交易计划制定", tagType: "success", current: false,
+              desc: "围绕一个对象或组合，编辑 5 条件计划（开/加/减/止损/止盈）",
+              recent: "稳健成长组合 · 卫星仓 +15% 减半计划" },
+            { name: "方法论研究", tagType: "danger", current: false,
+              desc: "用方法工坊的模板对一个对象做结构化评估（巴菲特/费雪/段永平 ...）",
+              recent: "招行 · 巴菲特护城河 5 维评分" },
+            { name: "事件追踪", tagType: "info", current: false,
+              desc: "围绕一个外部事件（财报、政策、暴跌）做即时跟踪与提醒",
+              recent: "AI 算力链 · 4/28 事件追踪" },
+          ],
+          showDepositDialog: false,
+          depositForm: { id: null, kind: '观点草稿', title: '', body: '' },
+        };
+      },
+      computed: {
+        pendingDepositCount() {
+          return this.deposits.filter((item) => item.status !== 'confirmed' && item.status !== 'skipped').length;
+        },
+      },
+      mounted() {
+        this.loadTaskFromStorage();
+      },
+      methods: {
+        taskDisplayId(taskId) {
+          return taskId && taskId.startsWith('T-') ? `#${taskId.slice(2)}` : taskId;
+        },
+        rerunTask() {
+          ElementPlus.ElMessage.info(`已把 ${this.taskDetail.title} 放回队列顶部（原型演示）`);
+        },
+        exportTask() {
+          ElementPlus.ElMessage.success(`正在导出 ${this.taskDetail.title} 的报告 PDF（原型演示）`);
+        },
+        loadTaskFromStorage() {
+          const taskId = new URLSearchParams(window.location.search).get('taskId');
+          const tasks = readPrototypeJson(PROTOTYPE_KEYS.tasks, []);
+          const task = taskId ? tasks.find((item) => item.id === taskId) : null;
+          if (task) {
+            this.taskDetail = { ...this.taskDetail, ...task };
+            if (Array.isArray(task.stages)) this.stages = task.stages;
+            if (Array.isArray(task.logs)) this.logs = task.logs;
+            if (Array.isArray(task.deposits)) this.deposits = task.deposits;
+          }
+          this.taskKinds.forEach((kind) => {
+            kind.current = kind.name === this.taskDetail.kind;
+            if (kind.current) kind.recent = `${this.taskDetail.title}（当前）`;
+          });
+          this.refreshTaskStageState();
+          this.persistCurrentTask();
+          document.title = `任务 ${this.taskDisplayId(this.taskDetail.id)} · ${this.taskDetail.title} · TradingAgents v4.0`;
+        },
+        refreshTaskStageState() {
+          const done = this.pendingDepositCount === 0;
+          if (this.stages[4]) {
+            this.stages[4].cls = done ? 'is-done' : 'is-active';
+            this.stages[4].meta = done ? '已完成沉淀' : `${this.pendingDepositCount} 条待确认`;
+          }
+          this.taskDetail.status = done ? '已沉淀' : '完成 · 待沉淀';
+          this.taskDetail.statusType = done ? 'success' : 'warning';
+        },
+        persistCurrentTask() {
+          const tasks = readPrototypeJson(PROTOTYPE_KEYS.tasks, []);
+          const payload = {
+            ...this.taskDetail,
+            stages: this.stages,
+            logs: this.logs,
+            deposits: this.deposits,
+          };
+          const idx = tasks.findIndex((item) => item.id === this.taskDetail.id);
+          if (idx >= 0) tasks.splice(idx, 1, payload);
+          else tasks.unshift(payload);
+          writePrototypeJson(PROTOTYPE_KEYS.tasks, tasks);
+
+          const objectState = readPrototypeJson(PROTOTYPE_KEYS.objectState, null);
+          if (objectState && Array.isArray(objectState.objectTasks)) {
+            const objectTask = objectState.objectTasks.find((item) => item.id === this.taskDetail.id);
+            if (objectTask) {
+              objectTask.status = this.taskDetail.status;
+              objectTask.statusType = this.taskDetail.statusType;
+              objectTask.meta = `${this.taskDetail.createdAt} 发起 · ${this.taskDetail.elapsed}`;
+              objectTask.href = `./task.html?taskId=${this.taskDetail.id}`;
+              writePrototypeJson(PROTOTYPE_KEYS.objectState, objectState);
+            }
+          }
+        },
+        applyDepositToObjectState(deposit) {
+          const state = readPrototypeJson(PROTOTYPE_KEYS.objectState, {
+            objectTasks: [], myOpinions: [], myRules: [], myReminders: [], myPlans: [], myReviews: [], tradeLog: [],
+          });
+          const marker = { sourceTaskId: this.taskDetail.id, sourceDepositId: deposit.id };
+          const taskRef = this.taskDisplayId(this.taskDetail.id);
+          if (deposit.kind === '规则草稿') {
+            const exists = state.myRules.some((item) => item.sourceTaskId === marker.sourceTaskId && item.sourceDepositId === marker.sourceDepositId);
+            if (!exists) {
+              state.myRules.unshift({
+                id: Date.now(),
+                name: deposit.title,
+                condition: deposit.body,
+                hit: false,
+                taskRef,
+                ...marker,
+              });
+            }
+          } else if (deposit.kind === '观点草稿') {
+            const exists = state.myOpinions.some((item) => item.sourceTaskId === marker.sourceTaskId && item.sourceDepositId === marker.sourceDepositId);
+            if (!exists) {
+              state.myOpinions.unshift({
+                id: Date.now(),
+                title: deposit.title,
+                body: deposit.body,
+                time: nowStamp(),
+                taskRef,
+                stance: '中性',
+                confidence: '中',
+                horizon: '中期',
+                ...marker,
+              });
+            }
+          } else if (deposit.kind === '提醒') {
+            const exists = state.myReminders.some((item) => item.sourceTaskId === marker.sourceTaskId && item.sourceDepositId === marker.sourceDepositId);
+            if (!exists) {
+              state.myReminders.unshift({
+                id: Date.now(),
+                title: deposit.title,
+                note: deposit.body,
+                cadence: deposit.title.includes('季度') ? '季度提醒' : '提醒',
+                taskRef,
+                ...marker,
+              });
+            }
+          }
+          writePrototypeJson(PROTOTYPE_KEYS.objectState, state);
+        },
+        confirmDeposit(deposit) {
+          if (deposit.status === 'confirmed') return;
+          this.applyDepositToObjectState(deposit);
+          deposit.status = 'confirmed';
+          deposit.processedAt = nowStamp();
+          this.refreshTaskStageState();
+          this.persistCurrentTask();
+          ElementPlus.ElMessage.success('已确认并回写到对象页');
+        },
+        skipDeposit(deposit) {
+          deposit.status = 'skipped';
+          deposit.processedAt = nowStamp();
+          this.refreshTaskStageState();
+          this.persistCurrentTask();
+          ElementPlus.ElMessage.info('已跳过这条沉淀');
+        },
+        openDepositDialog(deposit) {
+          if (deposit) {
+            this.depositForm = { id: deposit.id, kind: deposit.kind, title: deposit.title, body: deposit.body };
+          } else {
+            this.depositForm = { id: null, kind: '观点草稿', title: '', body: '' };
+          }
+          this.showDepositDialog = true;
+        },
+        saveDepositDraft() {
+          if (!this.depositForm.title || !this.depositForm.body) {
+            ElementPlus.ElMessage.warning('请填写沉淀标题和正文');
+            return;
+          }
+          const tagTypeMap = { '规则草稿': 'success', '观点草稿': 'warning', '提醒': 'primary' };
+          if (this.depositForm.id) {
+            const deposit = this.deposits.find((item) => item.id === this.depositForm.id);
+            if (deposit) {
+              deposit.kind = this.depositForm.kind;
+              deposit.tagType = tagTypeMap[this.depositForm.kind] || 'info';
+              deposit.title = this.depositForm.title;
+              deposit.body = this.depositForm.body;
+              if (deposit.status === 'skipped') deposit.status = 'pending';
+            }
+          } else {
+            this.deposits.unshift({
+              id: Date.now(),
+              idx: 0,
+              kind: this.depositForm.kind,
+              tagType: tagTypeMap[this.depositForm.kind] || 'info',
+              title: this.depositForm.title,
+              body: this.depositForm.body,
+              status: 'pending',
+            });
+          }
+          this.deposits.forEach((item, index) => { item.idx = index + 1; });
+          this.showDepositDialog = false;
+          this.refreshTaskStageState();
+          this.persistCurrentTask();
+          ElementPlus.ElMessage.success('沉淀项已保存');
+        },
+      },
+    });
+    app.use(ElementPlus);
+    for (const [k, v] of Object.entries(ElementPlusIconsVue)) app.component(k, v);
+    registerPrototypeComponents(app);
+    app.mount("#app");
+  </script>
+</body>
+</html>

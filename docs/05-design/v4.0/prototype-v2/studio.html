@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>方法工坊 · TradingAgents v4.0</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus@2.4.4/dist/index.css" />
+  <link rel="stylesheet" href="./assets/theme.css?v=4" />
+  <style>
+    .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .tpl-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .tpl-card { background: #fff; border: 1px solid var(--border-light); border-radius: 8px; padding: 18px; transition: box-shadow .15s; }
+    .tpl-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+    .tpl-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+    .tpl-name { font-size: 16px; font-weight: 600; }
+    .tpl-source { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+    .tpl-desc { font-size: 13px; line-height: 1.7; color: var(--text-regular); margin-bottom: 12px; }
+    .tpl-steps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .tpl-step { background: var(--bg-2); padding: 4px 10px; border-radius: 14px; font-size: 12px; color: var(--text-secondary); }
+    .tpl-meta { display: flex; gap: 18px; padding: 10px 0; border-top: 1px solid var(--border-light); border-bottom: 1px solid var(--border-light); margin-bottom: 12px; }
+    .tpl-meta-item { font-size: 12px; }
+    .tpl-meta-item .lbl { color: var(--text-tertiary); }
+    .tpl-meta-item .val { font-weight: 500; color: var(--text-primary); display: block; margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <app-shell active="studio" page-title="方法工坊" :breadcrumb="[{label:'方法与系统'},{label:'方法工坊'}]">
+      <div style="margin-bottom: 16px;">
+        <el-alert type="info" :closable="false" show-icon>
+          <template #title>
+            <span class="fw-500">「用」是这里的关键。</span>
+            <span class="muted">方法工坊把方法论封装成可执行的研究模板：选模板 → 选研究对象 → 一键发起任务。要先理解方法论原理，请前往
+              <a href="./learning.html">学习中心</a>。</span>
+          </template>
+        </el-alert>
+      </div>
+
+      <div class="filter-bar">
+        <el-radio-group v-model="filter">
+          <el-radio-button label="all">全部 ({{ templates.length }})</el-radio-button>
+          <el-radio-button label="value">价值投资</el-radio-button>
+          <el-radio-button label="growth">成长投资</el-radio-button>
+          <el-radio-button label="cycle">周期/宏观</el-radio-button>
+          <el-radio-button label="event">事件驱动</el-radio-button>
+          <el-radio-button label="mine">我的模板</el-radio-button>
+        </el-radio-group>
+        <div style="flex: 1;"></div>
+        <el-button type="primary" plain>
+          <el-icon><Plus /></el-icon>&nbsp;新建模板
+        </el-button>
+      </div>
+
+      <div class="tpl-grid">
+        <div v-for="t in filtered" :key="t.id" class="tpl-card">
+          <div class="tpl-head">
+            <div>
+              <div class="tpl-name">{{ t.name }}</div>
+              <div class="tpl-source">基于：{{ t.source }} · 适配 {{ t.scope }}</div>
+            </div>
+            <el-tag size="small" :type="t.tagType" effect="light">{{ t.tag }}</el-tag>
+          </div>
+          <div class="tpl-desc">{{ t.desc }}</div>
+          <div class="tpl-steps">
+            <span v-for="s in t.steps" :key="s" class="tpl-step">{{ s }}</span>
+          </div>
+          <div class="tpl-meta">
+            <div class="tpl-meta-item"><span class="lbl">使用</span><span class="val">{{ t.usage }} 次</span></div>
+            <div class="tpl-meta-item"><span class="lbl">平均耗时</span><span class="val">{{ t.duration }}</span></div>
+            <div class="tpl-meta-item"><span class="lbl">输出</span><span class="val">{{ t.output }}</span></div>
+            <div class="tpl-meta-item"><span class="lbl">最近一次</span><span class="val">{{ t.lastUsed }}</span></div>
+          </div>
+          <div class="flex-between">
+            <div class="flex-row gap-2">
+              <el-button size="small" type="primary">
+                <el-icon><Operation /></el-icon>&nbsp;发起研究
+              </el-button>
+              <el-button size="small" plain>查看模板</el-button>
+            </div>
+            <div class="flex-row gap-2">
+              <el-button size="small" link>克隆为我的</el-button>
+              <el-button size="small" link>调试</el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title" style="margin-top: 32px;">
+        <h2>最近发起的研究</h2>
+        <span class="section-meta">由模板生成的任务，进入任务中心继续推进</span>
+      </div>
+      <el-card shadow="never">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>任务</th>
+              <th>使用模板</th>
+              <th>研究对象</th>
+              <th>发起时间</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in recentRuns" :key="r.id">
+              <td>{{ r.task }}</td>
+              <td>{{ r.tpl }}</td>
+              <td>{{ r.target }}</td>
+              <td class="tnum">{{ r.time }}</td>
+              <td><el-tag size="small" :type="r.statusType" effect="light">{{ r.status }}</el-tag></td>
+              <td><a href="./task.html" class="text-sm">查看 →</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </el-card>
+    </app-shell>
+    <assistant-drawer />
+  </div>
+
+  <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/element-plus@2.4.4/dist/index.full.min.js"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+  <script src="./assets/shared.js?v=7"></script>
+  <script>
+    const { createApp } = Vue;
+    const templates = [
+      { id: 1, category: "value", name: "巴菲特护城河 5 维评分",
+        source: "巴菲特 · 经济护城河", scope: "个股 / 上市公司",
+        tag: "价值投资", tagType: "primary",
+        desc: "对一家公司的护城河做结构化评分：品牌 / 转换成本 / 网络效应 / 规模 / 监管牌照五个维度，每项 0~5 分并附理由；输出综合评级与持有建议。",
+        steps: ["拉取财务/治理事实", "5 维度逐一打分", "对比同行", "AI 生成结论稿", "用户审核归档"],
+        usage: 28, duration: "约 25 分钟", output: "护城河评分卡 + 1500 字结论", lastUsed: "今天 11:08" },
+      { id: 2, category: "growth", name: "费雪 15 问深度访谈",
+        source: "费雪 · 15 个问题", scope: "个股 · 成长型企业",
+        tag: "成长投资", tagType: "warning",
+        desc: "把费雪的 15 个问题作为研究框架，逐题查阅财报/新闻/调研记录并给出回答；问题之间设定依赖关系，回答不完整时会阻塞下一步。",
+        steps: ["市场潜力(Q1-Q4)", "研发与销售(Q5-Q9)", "财务控制(Q10-Q12)", "管理层质量(Q13-Q15)", "汇总报告"],
+        usage: 22, duration: "约 45 分钟", output: "15 题答卷 + 综合判断", lastUsed: "昨天 16:42" },
+      { id: 3, category: "value", name: "格雷厄姆安全边际计算器",
+        source: "格雷厄姆 · 安全边际", scope: "个股 · 成熟企业",
+        tag: "价值投资", tagType: "primary",
+        desc: "用 5~10 年平均盈利、PB、净流动资产计算保守内在价值，输出当前价相对内在价值的折价幅度，并提示是否满足格雷厄姆的多重防御标准。",
+        steps: ["数据校核", "保守盈利估算", "PB / NCAV 计算", "折价计算", "防御性 checklist"],
+        usage: 19, duration: "约 12 分钟", output: "安全边际报告 + 是否买入建议", lastUsed: "2 天前" },
+      { id: 4, category: "value", name: "段永平 5 问商业模式判别",
+        source: "段永平 · 商业模式与本分", scope: "个股 / 商业模式",
+        tag: "实战派", tagType: "success",
+        desc: "用段永平 5 个核心问题判断生意本身好不好：10 年后还在吗、客户为什么选你、对手为什么打不进来、管理层是否本分、现金流是否真实。",
+        steps: ["业务长期判断", "客户黏性分析", "竞争壁垒拆解", "管理层尽调", "现金流校验"],
+        usage: 17, duration: "约 30 分钟", output: "5 问答卷 + Stop Doing 建议", lastUsed: "3 天前" },
+      { id: 5, category: "cycle", name: "邓普顿逆向情绪扫描",
+        source: "邓普顿 · 逆向投资", scope: "市场 / 行业 / 国家",
+        tag: "全球宏观", tagType: "info",
+        desc: "扫描指定标的池的情绪极值（成交量、ETF 折价、机构持仓、新闻情绪等），定位被极度悲观的资产；并给出全球同类资产对比。",
+        steps: ["情绪指标拉取", "极值识别", "全球对比", "基本面校验", "买点建议"],
+        usage: 11, duration: "约 18 分钟", output: "情绪热力图 + 候选清单", lastUsed: "5 天前" },
+      { id: 6, category: "event", name: "财报后 24 小时复盘",
+        source: "事件驱动 · 内置模板", scope: "个股 · 财报披露",
+        tag: "事件驱动", tagType: "danger",
+        desc: "财报披露 24 小时内，对照你之前的预期与假设，自动比对实际值并提示偏差，输出复盘草稿用于后续事件复盘任务。",
+        steps: ["拉取披露数据", "对照预期假设", "偏差识别", "假设回顾", "复盘草稿"],
+        usage: 14, duration: "约 8 分钟", output: "复盘草稿 (供编辑)", lastUsed: "今天 09:30" },
+      { id: 7, category: "growth", name: "Pat Dorsey · 5 类护城河识别",
+        source: "Pat Dorsey 《巴菲特的护城河》", scope: "个股",
+        tag: "成长投资", tagType: "warning",
+        desc: "Dorsey 在巴菲特原框架上拓展为 5 类（无形资产 / 转换成本 / 网络 / 成本优势 / 有效规模），并给出每类的反例陷阱清单。",
+        steps: ["分类识别", "反例清单核验", "侵蚀风险评估", "评分汇总", "结论稿"],
+        usage: 9, duration: "约 22 分钟", output: "5 类识别报告", lastUsed: "上周" },
+      { id: 8, category: "mine", name: "我的：高股息底仓筛选 v3",
+        source: "用户自建模板", scope: "组合 · 底仓筛选",
+        tag: "我的模板", tagType: "info",
+        desc: "你自定义的底仓筛选模板：股息率 ≥ 4.5% + 连续 5 年分红 + 核心一级资本 ≥ 9%（银行）+ 经营性现金流为正。已用于 3 次组合再平衡。",
+        steps: ["筛选池", "硬条件过滤", "软条件评分", "去重", "推荐输出"],
+        usage: 6, duration: "约 5 分钟", output: "候选标的清单", lastUsed: "2026-04-20" },
+    ];
+    const recentRuns = [
+      { id: 1, task: "招商银行 · 巴菲特护城河 5 维评分", tpl: "巴菲特护城河 5 维评分", target: "招商银行 600036.SH", time: "今天 11:08", status: "进行中", statusType: "warning" },
+      { id: 2, task: "贵州茅台 · 段永平 5 问", tpl: "段永平 5 问商业模式判别", target: "贵州茅台 600519.SH", time: "今天 09:30", status: "已完成", statusType: "success" },
+      { id: 3, task: "光伏 ETF · 邓普顿情绪扫描", tpl: "邓普顿逆向情绪扫描", target: "光伏 ETF 515790.SH", time: "昨天 16:42", status: "已完成", statusType: "success" },
+      { id: 4, task: "中际旭创 · 费雪 15 问", tpl: "费雪 15 问深度访谈", target: "中际旭创 300308.SZ", time: "2 天前", status: "已暂停", statusType: "info" },
+    ];
+
+    const app = createApp({
+      data() { return { templates, recentRuns, filter: "all" }; },
+      computed: {
+        filtered() { return this.filter === "all" ? this.templates : this.templates.filter(t => t.category === this.filter); },
+      },
+    });
+    app.use(ElementPlus);
+    for (const [k, v] of Object.entries(ElementPlusIconsVue)) app.component(k, v);
+    registerPrototypeComponents(app);
+    app.mount("#app");
+  </script>
+  <style>
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .data-table thead th { text-align: left; font-weight: 500; color: var(--text-secondary); font-size: 12px; padding: 10px 12px; background: var(--bg-2); border-bottom: 1px solid var(--border-light); }
+    .data-table tbody td { padding: 12px; border-bottom: 1px solid var(--border-light); }
+    .data-table tbody tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover { background: var(--bg-2); }
+    .data-table .tnum { font-variant-numeric: tabular-nums; }
+  </style>
+</body>
+</html>

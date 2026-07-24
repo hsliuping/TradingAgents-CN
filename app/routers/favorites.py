@@ -194,7 +194,7 @@ class FavoriteStockResponse(BaseModel):
     volume: Optional[int] = None
 
 
-@router.get("/", response_model=dict)
+@router.get("", response_model=dict)
 async def get_favorites(
     current_user: dict = Depends(get_current_user)
 ):
@@ -209,7 +209,7 @@ async def get_favorites(
         )
 
 
-@router.post("/", response_model=dict)
+@router.post("", response_model=dict)
 async def add_favorite(
     request: AddFavoriteRequest,
     current_user: dict = Depends(get_current_user)

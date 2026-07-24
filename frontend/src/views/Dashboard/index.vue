@@ -491,8 +491,8 @@
         <!-- 最近分析 -->
         <el-card class="recent-analyses-card" header="最近分析" style="margin-top: 24px;">
           <el-table :data="recentAnalyses" style="width: 100%">
-            <el-table-column prop="stock_code" label="股票代码" width="120" />
-            <el-table-column prop="stock_name" label="股票名称" width="150" />
+            <el-table-column prop="symbol" label="股票代码" width="120" />
+            <el-table-column prop="market" label="市场" width="100" />
             <el-table-column prop="status" label="状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="getStatusType(row.status)">

@@ -52,6 +52,7 @@
                 <li>其他支持的大语言模型提供商</li>
               </ul>
               <p class="step-tip">💡 提示：国内用户推荐优先使用火山方舟或DeepSeek，访问速度更快，使用更稳定</p>
+              </template>
             </div>
           </template>
         </el-step>

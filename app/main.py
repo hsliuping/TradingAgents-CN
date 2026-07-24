@@ -352,45 +352,52 @@ async def lifespan(app: FastAPI):
         logger.warning("⚠️  TradingAgents 将使用 .env 文件中的配置")
 
     # 启动期同步能力索引：工具元数据变更后，重启即可增量写入向量库。
-    try:
-        from app.core.database import get_mongo_db
-        from app.services.capability_index_service import CapabilityIndexService
+    # 改为后台异步任务，避免 Embedding 模型加载阻塞项目启动
+    async def _sync_capability_index_background():
+        """后台异步同步能力索引，不阻塞启动"""
+        try:
+            from app.core.database import get_mongo_db
+            from app.services.capability_index_service import CapabilityIndexService
 
-        result = await CapabilityIndexService(get_mongo_db()).ensure_index()
-        logger.info(
-            "✅ 能力索引同步完成: %s %d/%d backend=%s",
-            result.sync_mode,
-            result.indexed_documents,
-            result.total_documents,
-            result.vector_backend,
-        )
+            result = await CapabilityIndexService(get_mongo_db()).ensure_index()
+            logger.info(
+                "✅ 能力索引同步完成: %s %d/%d backend=%s",
+                result.sync_mode,
+                result.indexed_documents,
+                result.total_documents,
+                result.vector_backend,
+            )
 
-        # 索引跳过时，向所有管理员发送系统通知
-        if result.sync_mode.startswith("skipped_"):
-            try:
-                from app.services.user_service import UserService
-                from app.services.notifications_service import get_notifications_service
-                from app.models.notification import NotificationCreate
+            # 索引跳过时，向所有管理员发送系统通知
+            if result.sync_mode.startswith("skipped_"):
+                try:
+                    from app.services.user_service import UserService
+                    from app.services.notifications_service import get_notifications_service
+                    from app.models.notification import NotificationCreate
 
-                user_svc = UserService()
-                users = await user_svc.list_users(limit=100)
-                notif_svc = get_notifications_service()
+                    user_svc = UserService()
+                    users = await user_svc.list_users(limit=100)
+                    notif_svc = get_notifications_service()
 
-                skip_reason = "Embedding API 不可用" if "embedding" in result.sync_mode else "未配置 Embedding"
-                for u in users:
-                    await notif_svc.create_and_publish(NotificationCreate(
-                        user_id=u.id,
-                        type="system",
-                        title="能力索引未构建",
-                        content=f"系统启动时能力索引构建被跳过（{skip_reason}）。请先在系统设置中配置有效的 Embedding API Key，然后在「系统设置 → 工具能力索引」中手动重建索引。",
-                        source="capability_index",
-                        severity="warning",
-                    ))
-                logger.info("📢 已向 %d 位用户发送能力索引跳过通知", len(users))
-            except Exception as ne:
-                logger.warning(f"⚠️ 发送能力索引通知失败: {ne}")
-    except Exception as e:
-        logger.error(f"❌ 能力索引同步失败: {e}", exc_info=True)
+                    skip_reason = "Embedding API 不可用" if "embedding" in result.sync_mode else "未配置 Embedding"
+                    for u in users:
+                        await notif_svc.create_and_publish(NotificationCreate(
+                            user_id=u.id,
+                            type="system",
+                            title="能力索引未构建",
+                            content=f"系统启动时能力索引构建被跳过（{skip_reason}）。请先在系统设置中配置有效的 Embedding API Key，然后在「系统设置 -> 工具能力索引」中手动重建索引。",
+                            source="capability_index",
+                            severity="warning",
+                        ))
+                    logger.info("📢 已向 %d 位用户发送能力索引跳过通知", len(users))
+                except Exception as ne:
+                    logger.warning(f"⚠️ 发送能力索引通知失败: {ne}")
+        except Exception as e:
+            logger.error(f"❌ 能力索引同步失败: {e}", exc_info=True)
+
+    # 创建后台任务，不阻塞启动
+    asyncio.create_task(_sync_capability_index_background())
+    logger.info("📋 能力索引同步已在后台启动")
 
     # 启动期同步系统默认提示词模板：将代码中的 fallback 提示词写入数据库统一管理
     try:

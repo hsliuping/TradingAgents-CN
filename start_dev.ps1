@@ -176,6 +176,10 @@ if ($Command -eq "backend" -or $Command -eq "all") {
     $env:PYTHONUTF8 = "1"
     $env:PYTHONUNBUFFERED = "1"
 
+    # HuggingFace 模型缓存目录（项目内，便于统一管理）
+    $env:HF_HOME = Join-Path $root "data\models\huggingface"
+    $env:HF_HUB_OFFLINE = "1"  # 离线模式，不联网验证模型文件
+
     Write-Host ""
     Write-Host "[Backend] Starting FastAPI + Uvicorn..." -ForegroundColor Yellow
     Write-Host "  Python: $pythonExe ($(& $pythonExe --version 2>&1))" -ForegroundColor Gray
@@ -201,6 +205,8 @@ if ($Command -eq "backend" -or $Command -eq "all") {
         $env:PYTHONIOENCODING = "utf-8"
         $env:PYTHONUTF8 = "1"
         $env:PYTHONUNBUFFERED = "1"
+        $env:HF_HOME = Join-Path $root "data\models\huggingface"
+        $env:HF_HUB_OFFLINE = "1"
         if ($mongoDBPort) { $env:MONGODB_PORT = $mongoDBPort }
         if ($redisPort) { $env:REDIS_PORT = $redisPort }
         & $pythonExe -m uvicorn app.main:app --host 127.0.0.1 --port $backendPort --log-level info

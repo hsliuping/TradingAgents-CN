@@ -1,0 +1,1732 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>招商银行 · 研究对象 · TradingAgents v4.0</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus@2.4.4/dist/index.css" />
+  <link rel="stylesheet" href="./assets/theme.css?v=4" />
+  <style>
+    /* K 线区 */
+    .kline-card .kline-toolbar { display: flex; gap: 8px; align-items: center; }
+    .kline-card .price-summary { display: flex; gap: 24px; align-items: baseline; margin-bottom: 12px; }
+    .kline-card .price-summary .ps-num { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .kline-card .price-summary .ps-num.up { color: var(--stock-up); }
+    .kline-card .price-summary .ps-num.down { color: var(--stock-down); }
+    .kline-card .ps-meta { display: flex; gap: 16px; font-size: 12px; color: var(--text-tertiary); }
+    .kline-card .ps-meta b { color: var(--text-primary); font-weight: 500; }
+    .kline-chart { width: 100%; height: 360px; }
+
+    /* 新闻区 */
+    .news-list .news-item { padding: 14px 0; border-top: 1px solid var(--border-light); }
+    .news-list .news-item:first-child { border-top: none; padding-top: 0; }
+    .news-list .news-title { font-size: 14px; font-weight: 500; color: var(--text-primary); line-height: 1.5; margin-bottom: 6px; display: block; }
+    .news-list .news-title:hover { color: var(--el-color-primary); }
+    .news-list .news-meta { display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--text-tertiary); flex-wrap: wrap; }
+    .news-list .news-summary { font-size: 13px; color: var(--text-regular); line-height: 1.6; margin-top: 6px; }
+    .sentiment-pos { color: var(--stock-up); }
+    .sentiment-neu { color: var(--text-tertiary); }
+    .sentiment-neg { color: #B88230; }
+
+    /* 我的资料 - 上传入口卡片 */
+    .upload-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+    .upload-card {
+      background: #fff; border: 1px dashed var(--border-base); border-radius: 8px;
+      padding: 24px 20px; text-align: center; cursor: pointer; transition: all 0.15s;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+    }
+    .upload-card:hover { border-color: var(--el-color-primary); background: var(--el-color-primary-light-9); }
+    .upload-card .uc-icon {
+      width: 48px; height: 48px; border-radius: 50%;
+      background: var(--el-color-primary-light-9); color: var(--el-color-primary);
+      display: flex; align-items: center; justify-content: center; font-size: 22px;
+    }
+    .upload-card .uc-title { font-size: 15px; font-weight: 600; color: var(--text-primary); margin-top: 4px; }
+    .upload-card .uc-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+    .upload-card .uc-formats { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+
+    /* 资料列表 */
+    .material-table .mat-icon {
+      width: 32px; height: 32px; border-radius: 6px; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;
+    }
+    .material-table .mat-icon.is-doc { background: #ECF5FF; color: #409EFF; }
+    .material-table .mat-icon.is-img { background: #FEF0E7; color: #E6A23C; }
+    .material-table .mat-icon.is-url { background: #F0EBFE; color: #6B48E3; }
+    .material-table .mat-icon.is-note { background: #F0F9F0; color: #67C23A; }
+    .material-name { display: flex; align-items: center; gap: 10px; }
+    .material-name .mn-text { font-size: 14px; font-weight: 500; color: var(--text-primary); line-height: 1.4; }
+    .material-name .mn-meta { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+
+    /* 简洁数据表（事实层财务/业务） */
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .data-table thead th {
+      text-align: left; font-weight: 500; color: var(--text-secondary); font-size: 12px;
+      padding: 10px 12px; background: var(--bg-2); border-bottom: 1px solid var(--border-light);
+    }
+    .data-table thead th.num { text-align: right; }
+    .data-table tbody td {
+      padding: 12px; border-bottom: 1px solid var(--border-light); color: var(--text-primary);
+    }
+    .data-table tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .data-table tbody tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover { background: var(--bg-2); }
+    .data-table .seg-name { font-weight: 500; }
+    .data-table .seg-note { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <app-shell
+      active="objects"
+      page-title="招商银行"
+      :breadcrumb="[{label:'研究对象', href:'./object.html'}]"
+    >
+      <!-- 对象头 -->
+      <div class="obj-header">
+        <div class="obj-mark">600036</div>
+        <div style="flex: 1; min-width: 0;">
+          <div class="obj-title-row">
+            <h1>招商银行</h1>
+            <span class="obj-code">600036.SH · A 股 · 银行</span>
+          </div>
+          <div class="muted text-sm">
+            上次更新：12:36 · 纳入研究自 2025-08-12 · 由你手动加入 ·
+            <a href="./library.html?object=600036.SH">在研究库查看相关资产 →</a>
+          </div>
+          <div class="obj-tags">
+            <span class="tag-soft tag-primary">银行核心持仓</span>
+            <span class="tag-soft">高股息</span>
+            <span class="tag-soft">零售银行龙头</span>
+            <span class="tag-soft">规则命中：业绩稳定 v3</span>
+          </div>
+          <div class="obj-actions">
+            <el-button type="primary" @click="newAnalysis()">
+              <el-icon><Operation /></el-icon>&nbsp;发起分析
+            </el-button>
+            <el-button plain @click="showTradeDialog = true">
+              <el-icon><Tickets /></el-icon>&nbsp;记录操作
+            </el-button>
+            <el-button plain @click="showOpinionDialog = true"><el-icon><EditPen /></el-icon>&nbsp;记录观点</el-button>
+            <el-button plain @click="showLibraryDialog = true"><el-icon><Reading /></el-icon>&nbsp;加入研究库</el-button>
+            <el-button plain @click="showPlanDialog = true"><el-icon><Calendar /></el-icon>&nbsp;创建计划</el-button>
+            <el-dropdown trigger="click" @command="handleMoreCmd">
+              <el-button text><el-icon><MoreFilled /></el-icon></el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="remind"><el-icon><Bell /></el-icon>&nbsp;设置价格提醒</el-dropdown-item>
+                  <el-dropdown-item command="export"><el-icon><Download /></el-icon>&nbsp;导出研究报告</el-dropdown-item>
+                  <el-dropdown-item command="share"><el-icon><Share /></el-icon>&nbsp;分享给小伙伴</el-dropdown-item>
+                  <el-dropdown-item command="remove" :divided="true" style="color: var(--el-color-danger);"><el-icon><Delete /></el-icon>&nbsp;从研究库移除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
+        </div>
+        <div class="obj-price up">
+          <div class="price-num">¥38.42</div>
+          <div class="text-sm" style="color: var(--stock-up); font-variant-numeric: tabular-nums;">
+            +0.62 (+1.64%)
+          </div>
+          <div class="price-meta">最新收盘：2026-04-28 · 数据来源 QMT</div>
+        </div>
+      </div>
+
+      <!-- Tab 体系 -->
+      <el-tabs v-model="activeTab" class="obj-tabs" lazy>
+
+        <!-- ======== 概览 ======== -->
+        <el-tab-pane label="概览" name="overview">
+          <div class="section-title">
+            <h2>关键指标</h2>
+            <span class="section-meta">事实层 · 来源 Tushare/财报</span>
+          </div>
+          <div class="stat-grid">
+            <div class="stat-card">
+              <div class="stat-label"><el-icon><DataLine /></el-icon>核心一级资本充足率</div>
+              <div class="stat-value">14.86%</div>
+              <div class="stat-delta up">较上季 +0.12pct · 高于规则线 9%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label"><el-icon><TrendCharts /></el-icon>ROE (TTM)</div>
+              <div class="stat-value">15.42%</div>
+              <div class="stat-delta up">高于行业 12.3%</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label"><el-icon><Histogram /></el-icon>PE-TTM</div>
+              <div class="stat-value">6.84</div>
+              <div class="stat-delta down">5 年分位 32% · 中性偏低</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label"><el-icon><Money /></el-icon>股息率 (TTM)</div>
+              <div class="stat-value">5.21%</div>
+              <div class="stat-delta up">高于沪深 300 平均</div>
+            </div>
+          </div>
+
+          <!-- K 线区 -->
+          <el-card shadow="never" class="kline-card" style="margin-top: 24px;">
+            <template #header>
+              <div class="card-header-row">
+                <span class="title">价格走势（K 线）</span>
+                <div class="kline-toolbar">
+                  <el-radio-group v-model="klineFreq" size="small" @change="updateKline">
+                    <el-radio-button label="day">日</el-radio-button>
+                    <el-radio-button label="week">周</el-radio-button>
+                    <el-radio-button label="month">月</el-radio-button>
+                  </el-radio-group>
+                  <el-radio-group v-model="klineRange" size="small" @change="updateKline">
+                    <el-radio-button label="3m">3 月</el-radio-button>
+                    <el-radio-button label="6m">6 月</el-radio-button>
+                    <el-radio-button label="1y">1 年</el-radio-button>
+                    <el-radio-button label="3y">3 年</el-radio-button>
+                  </el-radio-group>
+                  <span class="text-xs muted">数据源 QMT</span>
+                </div>
+              </div>
+            </template>
+            <div class="price-summary">
+              <div>
+                <div class="ps-num up">¥38.42</div>
+                <div class="text-xs muted">最新收盘</div>
+              </div>
+              <div class="ps-meta">
+                <span>涨跌 <b style="color: var(--stock-up);">+0.62 (+1.64%)</b></span>
+                <span>今开 <b>37.85</b></span>
+                <span>最高 <b>38.62</b></span>
+                <span>最低 <b>37.70</b></span>
+                <span>成交量 <b>1.42 亿股</b></span>
+                <span>换手率 <b>0.58%</b></span>
+              </div>
+            </div>
+            <div ref="klineChart" class="kline-chart"></div>
+            <div class="source-line"><el-icon><Link /></el-icon>事实层 · 收盘价与成交量来自 QMT · 有 15 分钟延迟</div>
+          </el-card>
+
+          <el-row :gutter="24" style="margin-top: 24px;">
+            <el-col :span="14">
+              <el-card shadow="never">
+                <template #header>
+                  <div class="card-header-row">
+                    <span class="title">最近变化（事实）</span>
+                    <a href="#" class="text-sm" @click.prevent="activeTab='timeline'">完整时间线 →</a>
+                  </div>
+                </template>
+                <el-timeline>
+                  <el-timeline-item
+                    v-for="e in timelineSummary"
+                    :key="e.id"
+                    :timestamp="e.time"
+                    :type="e.type"
+                    placement="top"
+                  >
+                    <div class="fw-500 mb-2">
+                      <el-tag :type="e.kindType" size="small" effect="plain" style="margin-right:8px;">
+                        {{ e.kind }}
+                      </el-tag>
+                      {{ e.title }}
+                    </div>
+                    <div class="text-sm muted">{{ e.detail }}</div>
+                    <div class="source-line"><el-icon><Link /></el-icon>{{ e.source }}</div>
+                  </el-timeline-item>
+                </el-timeline>
+              </el-card>
+            </el-col>
+
+            <el-col :span="10">
+              <el-card shadow="never">
+                <template #header>
+                  <div class="card-header-row">
+                    <span class="title">该对象的最近任务</span>
+                    <span class="text-xs muted">共 {{ objectTasks.length }} 条</span>
+                  </div>
+                </template>
+                <div v-for="(t, i) in objectTasks" :key="t.id"
+                     :style="{ padding: '12px 0', borderTop: i ? '1px solid var(--border-light)' : 'none' }">
+                  <div class="flex-between mb-2">
+                    <a :href="t.href" class="fw-500">{{ t.name }}</a>
+                    <el-tag :type="t.statusType" size="small" effect="light">{{ t.status }}</el-tag>
+                  </div>
+                  <div class="text-xs muted">{{ t.meta }}</div>
+                </div>
+              </el-card>
+
+              <el-card shadow="never" style="margin-top: 16px;">
+                <template #header>
+                  <div class="card-header-row">
+                    <span class="title">我的研究（针对此对象）</span>
+                    <a href="#" class="text-sm" @click.prevent="activeTab='mine'">查看全部 →</a>
+                  </div>
+                </template>
+                <div v-for="(m, i) in myResearchPreview" :key="m.id"
+                     :style="{ padding: '10px 0', borderTop: i ? '1px solid var(--border-light)' : 'none' }">
+                  <div class="flex-row gap-2 mb-2">
+                    <el-tag :type="m.tagType" size="small" effect="light">{{ m.kind }}</el-tag>
+                    <span class="text-xs muted">{{ m.time }}</span>
+                  </div>
+                  <div class="text-sm fw-500">{{ m.title }}</div>
+                </div>
+              </el-card>
+            </el-col>
+          </el-row>
+
+          <!-- 新闻区 -->
+          <el-row :gutter="24" style="margin-top: 24px;">
+            <el-col :span="14">
+              <el-card shadow="never">
+                <template #header>
+                  <div class="card-header-row">
+                    <span class="title">相关新闻</span>
+                    <div class="flex-row gap-3">
+                      <el-radio-group v-model="newsFilter" size="small">
+                        <el-radio-button label="all">全部</el-radio-button>
+                        <el-radio-button label="company">公司</el-radio-button>
+                        <el-radio-button label="industry">行业</el-radio-button>
+                        <el-radio-button label="macro">宏观</el-radio-button>
+                      </el-radio-group>
+                      <a href="#" class="text-sm">查看全部 →</a>
+                    </div>
+                  </div>
+                </template>
+                <div class="news-list">
+                  <div v-for="n in filteredNews" :key="n.id" class="news-item">
+                    <a :href="n.href" class="news-title" target="_blank">{{ n.title }}</a>
+                    <div class="text-sm" style="color: var(--text-regular); line-height: 1.6; margin: 4px 0;">{{ n.summary }}</div>
+                    <div class="news-meta">
+                      <span><el-icon><Link /></el-icon>&nbsp;{{ n.source }}</span>
+                      <span>{{ n.time }}</span>
+                      <el-tag :type="n.kindType" size="small" effect="plain">{{ n.kind }}</el-tag>
+                      <span :class="'sentiment-' + n.sentiment">
+                        <el-icon><component :is="n.sentiment === 'pos' ? 'CaretTop' : (n.sentiment === 'neg' ? 'CaretBottom' : 'Minus')" /></el-icon>
+                        {{ n.sentimentLabel }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </el-card>
+            </el-col>
+            <el-col :span="10">
+              <el-card shadow="never">
+                <template #header>
+                  <div class="card-header-row">
+                    <span class="title">资金与持仓迹象</span>
+                    <span class="text-xs muted">事实层 · 最近 5 交易日</span>
+                  </div>
+                </template>
+                <div v-for="(f, i) in flowSignals" :key="f.label"
+                     :style="{ padding: '10px 0', borderTop: i ? '1px solid var(--border-light)' : 'none' }">
+                  <div class="flex-between mb-1">
+                    <span class="text-sm">{{ f.label }}</span>
+                    <span class="tnum fw-500" :class="f.dir">{{ f.value }}</span>
+                  </div>
+                  <div class="text-xs muted">{{ f.detail }}</div>
+                </div>
+                <div class="source-line"><el-icon><Link /></el-icon>QMT + 交易所数据</div>
+              </el-card>
+            </el-col>
+          </el-row>
+        </el-tab-pane>
+
+        <el-tab-pane label="事实层" name="facts">
+          <!-- 1. 基本信息 -->
+          <div class="section-title">
+            <h2>公司画像 · 基本信息</h2>
+            <span class="section-meta">来源：Tushare stock_basic + 招行 2025 年报</span>
+          </div>
+          <el-card shadow="never">
+            <div class="kv-grid">
+              <div class="kv-item"><div class="kv-label">股票代码</div><div class="kv-value tnum">600036.SH</div></div>
+              <div class="kv-item"><div class="kv-label">公司全称</div><div class="kv-value">招商银行股份有限公司</div></div>
+              <div class="kv-item"><div class="kv-label">英文名称</div><div class="kv-value">China Merchants Bank</div></div>
+              <div class="kv-item"><div class="kv-label">交易市场</div><div class="kv-value">上交所主板 · 同步 H 股 (3968.HK)</div></div>
+              <div class="kv-item"><div class="kv-label">A 股上市</div><div class="kv-value">2002-04-09</div></div>
+              <div class="kv-item"><div class="kv-label">H 股上市</div><div class="kv-value">2006-09-22</div></div>
+              <div class="kv-item"><div class="kv-label">所属行业</div><div class="kv-value">货币金融服务 / 银行 · 股份行</div></div>
+              <div class="kv-item"><div class="kv-label">申万二级</div><div class="kv-value">股份制银行 II</div></div>
+              <div class="kv-item"><div class="kv-label">注册资本</div><div class="kv-value tnum">252.20 亿元</div></div>
+              <div class="kv-item"><div class="kv-label">注册地</div><div class="kv-value">广东省深圳市</div></div>
+              <div class="kv-item"><div class="kv-label">总部地址</div><div class="kv-value">深圳市福田区深南大道 7088 号</div></div>
+              <div class="kv-item"><div class="kv-label">员工总数</div><div class="kv-value tnum">11.78 万人</div></div>
+            </div>
+            <div class="source-line"><el-icon><Link /></el-icon>截至 2026-04-28 · Tushare stock_basic + namechange</div>
+          </el-card>
+
+          <!-- 2. 股东与治理 -->
+          <div class="section-title">
+            <h2>股东与治理</h2>
+            <span class="section-meta">来源：top10_holders + 公司章程</span>
+          </div>
+          <el-card shadow="never">
+            <div class="kv-grid">
+              <div class="kv-item"><div class="kv-label">实际控制人</div><div class="kv-value">招商局集团有限公司</div></div>
+              <div class="kv-item"><div class="kv-label">控股股东</div><div class="kv-value">招商局轮船 (持股 13.04%)</div></div>
+              <div class="kv-item"><div class="kv-label">国资属性</div><div class="kv-value"><el-tag size="small" type="warning" effect="light">中央国企</el-tag></div></div>
+              <div class="kv-item"><div class="kv-label">前 10 大股东合计</div><div class="kv-value tnum">68.42%</div></div>
+              <div class="kv-item"><div class="kv-label">机构持股比例</div><div class="kv-value tnum">31.5%</div></div>
+              <div class="kv-item"><div class="kv-label">沪股通持股</div><div class="kv-value tnum">5.82% (北向资金)</div></div>
+              <div class="kv-item"><div class="kv-label">董事长</div><div class="kv-value">缪建民</div></div>
+              <div class="kv-item"><div class="kv-label">行长</div><div class="kv-value">王良</div></div>
+            </div>
+            <div class="source-line"><el-icon><Link /></el-icon>口径：2025 年报披露 · 北向数据来自港交所 CCASS · 截至上周五</div>
+          </el-card>
+
+          <!-- 3. 市值与估值 -->
+          <div class="section-title">
+            <h2>市值与估值</h2>
+            <span class="section-meta">派生事实 · 收盘价 × 股本 + Tushare daily_basic</span>
+          </div>
+          <el-card shadow="never">
+            <div class="kv-grid">
+              <div class="kv-item"><div class="kv-label">总市值 (A+H)</div><div class="kv-value tnum">¥9,684 亿</div></div>
+              <div class="kv-item"><div class="kv-label">A 股市值</div><div class="kv-value tnum">¥7,920 亿</div></div>
+              <div class="kv-item"><div class="kv-label">H 股市值</div><div class="kv-value tnum">¥1,764 亿</div></div>
+              <div class="kv-item"><div class="kv-label">总股本</div><div class="kv-value tnum">252.20 亿股</div></div>
+              <div class="kv-item"><div class="kv-label">A 股流通股本</div><div class="kv-value tnum">206.30 亿股</div></div>
+              <div class="kv-item"><div class="kv-label">H 股股本</div><div class="kv-value tnum">45.90 亿股</div></div>
+              <div class="kv-item"><div class="kv-label">PE (TTM)</div><div class="kv-value tnum">6.42 ×</div></div>
+              <div class="kv-item"><div class="kv-label">PB (LF)</div><div class="kv-value tnum">0.96 ×</div></div>
+              <div class="kv-item"><div class="kv-label">股息率 (TTM)</div><div class="kv-value tnum stock-up">5.18%</div></div>
+              <div class="kv-item"><div class="kv-label">A/H 折溢价</div><div class="kv-value tnum">+18.4% (A 溢价)</div></div>
+              <div class="kv-item"><div class="kv-label">52 周区间</div><div class="kv-value tnum">¥30.86 ~ ¥41.20</div></div>
+              <div class="kv-item"><div class="kv-label">近 60 日均成交</div><div class="kv-value tnum">¥18.6 亿</div></div>
+            </div>
+            <div class="source-line"><el-icon><Link /></el-icon>截至 2026-04-28 收盘 · Tushare daily_basic + 港交所 HKEx</div>
+          </el-card>
+
+          <!-- 4. 主营业务结构 -->
+          <div class="section-title">
+            <h2>主营业务结构</h2>
+            <span class="section-meta">来源：2025 年报附注 · 营业收入按业务板块拆分</span>
+          </div>
+          <el-card shadow="never">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>业务板块</th>
+                  <th class="num">营收(亿)</th>
+                  <th class="num">占比</th>
+                  <th class="num">同比</th>
+                  <th class="num">税前利润率</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="b in businessLines" :key="b.segment">
+                  <td>
+                    <div class="seg-name">{{ b.segment }}</div>
+                    <div class="seg-note">{{ b.note }}</div>
+                  </td>
+                  <td class="num">{{ b.revenue }}</td>
+                  <td class="num">{{ b.share }}</td>
+                  <td class="num" :class="b.yoy.startsWith('-') ? 'stock-down' : 'stock-up'">{{ b.yoy }}</td>
+                  <td class="num">{{ b.margin }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="source-line"><el-icon><Link /></el-icon>2025 年报第 5.2 节 · 不含内部抵销</div>
+          </el-card>
+
+          <!-- 5. 近 4 季度核心财务 -->
+          <div class="section-title">
+            <h2>近 4 季度核心财务</h2>
+            <span class="section-meta">派生事实 · 由系统按公开报表口径计算</span>
+          </div>
+          <el-card shadow="never">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>报告期</th>
+                  <th class="num">营收(亿)</th>
+                  <th class="num">归母净利(亿)</th>
+                  <th class="num">营收同比</th>
+                  <th class="num">净利同比</th>
+                  <th class="num">ROE</th>
+                  <th class="num">净息差</th>
+                  <th class="num">不良率</th>
+                  <th class="num">核充率</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="f in financials" :key="f.period">
+                  <td class="seg-name">{{ f.period }}</td>
+                  <td class="num">{{ f.revenue }}</td>
+                  <td class="num">{{ f.netProfit }}</td>
+                  <td class="num" :class="f.revYoy.startsWith('-') ? 'stock-down' : 'stock-up'">{{ f.revYoy }}</td>
+                  <td class="num" :class="f.netYoy.startsWith('-') ? 'stock-down' : 'stock-up'">{{ f.netYoy }}</td>
+                  <td class="num">{{ f.roe }}</td>
+                  <td class="num">{{ f.nim }}</td>
+                  <td class="num">{{ f.npl }}</td>
+                  <td class="num">{{ f.car }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="source-line"><el-icon><Link /></el-icon>来源：招行公告 · 计算口径：年化 / 期末 · 核充率=核心一级资本充足率</div>
+          </el-card>
+        </el-tab-pane>
+
+        <!-- ======== 概念关系 ======== -->
+        <el-tab-pane label="概念关系" name="concept">
+          <div class="section-title">
+            <h2>所属概念与主题</h2>
+            <span class="section-meta">关系层 · 标注来源强度，不作为事实使用</span>
+          </div>
+          <el-card shadow="never">
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <el-tooltip
+                v-for="c in concepts" :key="c.name"
+                :content="'来源：' + c.source + ' · 强度：' + c.strength"
+                placement="top"
+              >
+                <span class="tag-soft" :class="c.strong ? 'tag-primary' : ''" style="padding: 6px 12px;">
+                  {{ c.name }}
+                </span>
+              </el-tooltip>
+            </div>
+            <div class="source-line">
+              <el-icon><Link /></el-icon>
+              共 {{ concepts.length }} 项关系 · 强标记 = 多源确认 · 弱标记 = 单源待复核
+            </div>
+          </el-card>
+
+          <div class="section-title"><h2>关联对象</h2></div>
+          <el-row :gutter="16">
+            <el-col v-for="r in relatedObjects" :key="r.code" :span="8">
+              <el-card shadow="never" class="is-hoverable" body-style="cursor: pointer;">
+                <div class="flex-between mb-3">
+                  <div>
+                    <div class="fw-600">{{ r.name }}</div>
+                    <div class="text-xs muted tnum">{{ r.code }}</div>
+                  </div>
+                  <span class="tag-soft tag-primary">{{ r.relation }}</span>
+                </div>
+                <div class="text-sm muted">{{ r.note }}</div>
+              </el-card>
+            </el-col>
+          </el-row>
+        </el-tab-pane>
+
+        <!-- ======== 系统观点 ======== -->
+        <el-tab-pane label="系统观点" name="ai-views">
+          <div class="section-title">
+            <h2>AI 推导观点</h2>
+            <span class="section-meta">观点层 · 不是事实 · 需用户自行判断</span>
+          </div>
+          <el-card v-for="v in aiViews" :key="v.id" shadow="never" style="margin-bottom: 16px;">
+            <div class="flex-between mb-3">
+              <div class="flex-row gap-2">
+                <el-tag :type="v.tagType" size="small" effect="light">{{ v.stance }}</el-tag>
+                <span class="fw-600">{{ v.title }}</span>
+              </div>
+              <div class="text-xs muted">
+                置信度 {{ v.confidence }} · {{ v.time }}
+              </div>
+            </div>
+            <p class="text-sm" style="line-height: 1.7; color: var(--text-regular);">{{ v.body }}</p>
+            <div class="source-line">
+              <el-icon><Link /></el-icon>
+              依据：{{ v.evidence }} · 由任务 {{ v.taskId }} 产出
+            </div>
+          </el-card>
+        </el-tab-pane>
+
+        <!-- ======== 方法论评估 ======== -->
+        <el-tab-pane label="方法论评估" name="methodology">
+          <div class="section-title">
+            <h2>用经典方法论评估此对象</h2>
+            <span class="section-meta">观点层 · 每一种方法论都是一套问题清单，结果只是参考</span>
+          </div>
+          <el-row :gutter="16">
+            <el-col :span="12" v-for="m in methodologies" :key="m.id">
+              <el-card shadow="never" style="margin-bottom: 16px;">
+                <div class="flex-between mb-3">
+                  <div class="fw-600">{{ m.name }}</div>
+                  <el-tag size="small" :type="m.statusType" effect="light">{{ m.status }}</el-tag>
+                </div>
+                <div class="text-sm muted mb-2" style="line-height: 1.6;">{{ m.summary }}</div>
+                <div v-for="d in m.dims" :key="d.label" class="flex-between text-sm" style="padding: 6px 0;">
+                  <span>{{ d.label }}</span>
+                  <span class="tnum" :class="d.cls">{{ d.score }}</span>
+                </div>
+                <div class="source-line">
+                  <el-icon><Link /></el-icon>{{ m.lastEval }} · 关联任务 {{ m.taskRef || '尚未发起' }}
+                </div>
+                <div style="margin-top: 8px;">
+                  <el-button size="small" type="primary" plain>用此方法发起研究</el-button>
+                  <el-button size="small" plain>查看完整问题清单</el-button>
+                </div>
+              </el-card>
+            </el-col>
+          </el-row>
+          <div class="text-sm muted" style="margin-top: 4px;">
+            想看更多方法论？前往 <a href="./learning.html">学习中心</a> 浏览方法论库，或在 <a href="./studio.html">方法工坊</a> 里把方法论变成可执行模板。
+          </div>
+        </el-tab-pane>
+
+        <!-- ======== 我的研究 ======== -->
+        <el-tab-pane label="我的研究" name="mine">
+          <div class="section-title">
+            <h2>我对此对象的判断</h2>
+            <span class="section-meta">用户层 · 你自己沉淀的内容</span>
+          </div>
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-card shadow="never">
+                <template #header><span class="fw-600">我的观点</span></template>
+                <div v-for="(m, i) in myOpinions" :key="m.id"
+                     :style="{ padding: '12px 0', borderTop: i ? '1px solid var(--border-light)' : 'none' }">
+                  <div class="flex-row gap-2 mb-2" v-if="m.stance || m.confidence || m.horizon">
+                    <el-tag v-if="m.stance" size="small" :type="m.stance === '看多' ? 'danger' : (m.stance === '看空' ? 'info' : 'warning')" effect="light">{{ m.stance }}</el-tag>
+                    <el-tag v-if="m.confidence" size="small" effect="plain">{{ m.confidence }}置信</el-tag>
+                    <span v-if="m.horizon" class="text-xs muted">{{ m.horizon }}</span>
+                  </div>
+                  <div class="fw-500 mb-2">{{ m.title }}</div>
+                  <div class="text-sm muted">{{ m.body }}</div>
+                  <div class="source-line">
+                    形成于 {{ m.time }} · 关联任务 {{ m.taskRef || '无' }}
+                  </div>
+                </div>
+              </el-card>
+            </el-col>
+            <el-col :span="12">
+              <el-card shadow="never">
+                <template #header>
+                  <span class="fw-600">我的交易计划</span>
+                  <span class="text-xs muted" style="margin-left: 8px;">5 个条件 · 命中即提示</span>
+                </template>
+                <div v-for="(p, i) in myPlans" :key="p.kind"
+                     :style="{ padding: '10px 0', borderTop: i ? '1px solid var(--border-light)' : 'none' }">
+                  <div class="flex-between mb-2">
+                    <div class="flex-row gap-2">
+                      <el-tag size="small" :type="p.kindType" effect="light">{{ p.kindLabel }}</el-tag>
+                      <span class="fw-500 text-sm">{{ p.name }}</span>
+                    </div>
+                    <el-tag size="small" :type="p.hit ? 'success' : 'info'" effect="light">
+                      {{ p.hit ? '当前命中' : '未触发' }}
+                    </el-tag>
+                  </div>
+                  <div class="text-sm muted">{{ p.condition }}</div>
+                  <div class="text-xs muted" style="margin-top: 4px;">动作：{{ p.action }}</div>
+                </div>
+                <div style="margin-top: 12px;">
+                  <el-button size="small" type="primary" plain>编辑交易计划</el-button>
+                </div>
+              </el-card>
+            </el-col>
+          </el-row>
+
+          <el-row :gutter="16" style="margin-top: 16px;">
+            <el-col :span="12">
+              <el-card shadow="never">
+                <template #header><span class="fw-600">我的规则</span></template>
+                <div v-if="!myRules.length" class="text-sm muted">暂无规则，去任务页确认一条「规则草稿」即可沉淀到这里。</div>
+                <div v-for="(rule, i) in myRules" :key="rule.id"
+                     :style="{ padding: '12px 0', borderTop: i ? '1px solid var(--border-light)' : 'none' }">
+                  <div class="flex-between mb-2">
+                    <span class="fw-500 text-sm">{{ rule.name }}</span>
+                    <el-tag size="small" :type="rule.hit ? 'success' : 'info'" effect="light">{{ rule.hit ? '当前命中' : '待监控' }}</el-tag>
+                  </div>
+                  <div class="text-sm muted">{{ rule.condition }}</div>
+                  <div v-if="rule.taskRef" class="source-line">来源任务 {{ rule.taskRef }}</div>
+                </div>
+              </el-card>
+            </el-col>
+            <el-col :span="12">
+              <el-card shadow="never">
+                <template #header><span class="fw-600">我的提醒</span></template>
+                <div v-if="!myReminders.length" class="text-sm muted">暂无提醒，任务页确认一条「提醒」后会出现在这里。</div>
+                <div v-for="(reminder, i) in myReminders" :key="reminder.id"
+                     :style="{ padding: '12px 0', borderTop: i ? '1px solid var(--border-light)' : 'none' }">
+                  <div class="flex-between mb-2">
+                    <span class="fw-500 text-sm">{{ reminder.title }}</span>
+                    <el-tag size="small" type="primary" effect="light">{{ reminder.cadence || '待执行' }}</el-tag>
+                  </div>
+                  <div class="text-sm muted">{{ reminder.note }}</div>
+                  <div v-if="reminder.taskRef" class="source-line">来源任务 {{ reminder.taskRef }}</div>
+                </div>
+              </el-card>
+            </el-col>
+          </el-row>
+
+          <div class="section-title" style="margin-top: 24px;">
+            <h2>交易操作记录</h2>
+            <span class="section-meta">用户层 · 每笔建仓/加仓/减仓/止损/止盈均在此留痕，可关联分析任务</span>
+            <el-button size="small" type="primary" plain style="margin-left: auto;" @click="showTradeDialog = true">
+              <el-icon><Plus /></el-icon>&nbsp;记录新操作
+            </el-button>
+          </div>
+          <el-card shadow="never">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>日期</th>
+                  <th>操作</th>
+                  <th class="num">成交价</th>
+                  <th class="num">数量(股)</th>
+                  <th class="num">操作后持仓</th>
+                  <th>触发依据</th>
+                  <th>关联分析</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="t in tradeLog" :key="t.id">
+                  <td class="tnum muted">{{ t.date }}</td>
+                  <td>
+                    <el-tag size="small" :type="t.opType" effect="light">{{ t.op }}</el-tag>
+                    <div class="text-xs muted" style="margin-top: 4px;">{{ t.dir }}</div>
+                  </td>
+                  <td class="num">{{ t.price || '—' }}</td>
+                  <td class="num">{{ t.qty || '—' }}</td>
+                  <td class="num fw-500">{{ t.holding }}</td>
+                  <td>
+                    <div class="text-sm">{{ t.basis }}</div>
+                    <div v-if="t.note" class="text-xs muted" style="margin-top: 2px;">{{ t.note }}</div>
+                  </td>
+                  <td>
+                    <a v-if="t.taskRef" :href="t.taskHref || './task.html'" class="text-sm">{{ t.taskRef }}</a>
+                    <span v-else class="text-xs muted">—</span>
+                  </td>
+                  <td>
+                    <el-button size="small" link type="primary" @click="newAnalysis({ tradeId: t.id, tradeOp: t.op, tradeDate: t.date })">发起分析</el-button>
+                    <el-button size="small" link>复盘</el-button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </el-card>
+
+          <div class="section-title">
+            <h2>我的复盘记录</h2>
+            <span class="section-meta">用户层 · 每次决策回头看，是规则优化的源头</span>
+          </div>
+          <el-card shadow="never">
+            <div v-for="(r, i) in myReviews" :key="r.id"
+                 :style="{ padding: '14px 0', borderTop: i ? '1px solid var(--border-light)' : 'none' }">
+              <div class="flex-between mb-2">
+                <div class="flex-row gap-2">
+                  <el-tag size="small"
+                          :type="r.verdict === '兑现' ? 'success' : (r.verdict === '部分兑现' ? 'warning' : 'danger')"
+                          effect="light">{{ r.verdict }}</el-tag>
+                  <span class="fw-500">{{ r.title }}</span>
+                </div>
+                <span class="text-xs muted">{{ r.time }} · {{ r.kind }}</span>
+              </div>
+              <div class="text-sm muted" style="line-height: 1.6;">{{ r.conclusion }}</div>
+              <div class="source-line">
+                <el-icon><Link /></el-icon>关联任务 {{ r.taskRef }} · 沉淀规则 {{ r.ruleRef || '未沉淀' }}
+              </div>
+            </div>
+            <div style="margin-top: 12px;">
+              <el-button size="small" type="primary" plain>
+                <el-icon><Plus /></el-icon>&nbsp;发起新复盘
+              </el-button>
+            </div>
+          </el-card>
+
+          <div class="section-title"><h2>历史报告</h2></div>
+          <el-card shadow="never">
+            <div v-for="(rep, i) in reports" :key="rep.id"
+                 class="flex-between"
+                 :style="{ padding: '12px 0', borderTop: i ? '1px solid var(--border-light)' : 'none' }">
+              <div>
+                <div class="fw-500 mb-2">{{ rep.title }}</div>
+                <div class="text-xs muted">{{ rep.kind }} · {{ rep.time }} · {{ rep.length }}</div>
+              </div>
+              <el-button size="small" plain>查看</el-button>
+            </div>
+          </el-card>
+        </el-tab-pane>
+
+        <!-- ======== 我的资料 ======== -->
+        <el-tab-pane label="我的资料" name="materials">
+          <div class="section-title">
+            <h2>手动收集的原始资料</h2>
+            <span class="section-meta">原始资料层 · 不会自动进入研究库，需你确认后才会被引用</span>
+          </div>
+
+          <!-- 三个上传入口 -->
+          <div class="upload-grid">
+            <div class="upload-card" @click="triggerUpload('doc')">
+              <div class="uc-icon"><el-icon><Document /></el-icon></div>
+              <div class="uc-title">文档导入</div>
+              <div class="uc-desc">拖拽或点击上传<br/>研报 / 公告原文 / 调研纪要 / 你的笔记</div>
+              <div class="uc-formats">支持 PDF · DOCX · XLSX · MD · TXT</div>
+            </div>
+            <div class="upload-card" @click="triggerUpload('img')">
+              <div class="uc-icon"><el-icon><Picture /></el-icon></div>
+              <div class="uc-title">图片上传</div>
+              <div class="uc-desc">截图 / 扫描件 / 手画资料<br/>系统尝试 OCR 提取文本</div>
+              <div class="uc-formats">支持 PNG · JPG · WEBP · PDF 扫描</div>
+            </div>
+            <div class="upload-card" @click="triggerUpload('url')">
+              <div class="uc-icon"><el-icon><Link /></el-icon></div>
+              <div class="uc-title">URL 抓取</div>
+              <div class="uc-desc">粘贴网页链接<br/>系统抓取正文 + 保留原奁97</div>
+              <div class="uc-formats">东方财富 · 雪球 · 财联社 · 公众号 · 任意网页</div>
+            </div>
+          </div>
+
+          <el-card shadow="never">
+            <template #header>
+              <div class="card-header-row">
+                <span class="title">资料库（仅本对象）</span>
+                <div class="flex-row gap-2">
+                  <el-input v-model="matSearch" size="default" placeholder="搜索资料标题 / 备注" style="width: 220px;" clearable>
+                    <template #prefix><el-icon><Search /></el-icon></template>
+                  </el-input>
+                  <el-select v-model="matFilterType" size="default" placeholder="类型" clearable style="width: 120px;">
+                    <el-option label="文档" value="doc" />
+                    <el-option label="图片" value="img" />
+                    <el-option label="网页" value="url" />
+                    <el-option label="笔记" value="note" />
+                  </el-select>
+                </div>
+              </div>
+            </template>
+            <el-table :data="filteredMaterials" class="material-table" stripe empty-text="还没有上传资料·点击上方三个入口加入">
+              <el-table-column label="名称" min-width="320">
+                <template #default="{ row }">
+                  <div class="material-name">
+                    <div class="mat-icon" :class="'is-' + row.type">
+                      <el-icon><component :is="matTypeIcon(row.type)" /></el-icon>
+                    </div>
+                    <div>
+                      <div class="mn-text">{{ row.title }}</div>
+                      <div class="mn-meta">{{ row.note }}</div>
+                    </div>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="类型" width="90">
+                <template #default="{ row }">
+                  <el-tag size="small" effect="light" :type="matTypeTag(row.type)">{{ matTypeLabel(row.type) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="来源" min-width="180">
+                <template #default="{ row }">
+                  <span class="text-sm">{{ row.source }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="大小" width="90" align="right">
+                <template #default="{ row }"><span class="tnum text-sm muted">{{ row.size }}</span></template>
+              </el-table-column>
+              <el-table-column label="上传时间" width="140">
+                <template #default="{ row }"><span class="text-sm muted">{{ row.uploadedAt }}</span></template>
+              </el-table-column>
+              <el-table-column label="状态" width="110">
+                <template #default="{ row }">
+                  <el-tag v-if="row.processed" type="success" size="small" effect="light">已提取</el-tag>
+                  <el-tag v-else type="warning" size="small" effect="light">处理中</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="180" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" size="small">查看</el-button>
+                  <el-button link size="small">沉淀为卡片</el-button>
+                  <el-button link size="small" type="danger">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div class="source-line">
+              <el-icon><InfoFilled /></el-icon>
+              所有资料均按「原始资料 → 研究卡片 → 观点、规则」三层结构组织。点击「沉淀为卡片」会调用助手提取要点，生成草稿后需你确认。
+            </div>
+          </el-card>
+        </el-tab-pane>
+
+        <!-- ======== 时间线 ======== -->
+        <el-tab-pane label="完整时间线" name="timeline">
+          <div class="section-title">
+            <h2>过去 60 天的变化</h2>
+            <span class="section-meta">含公告、财务、评级、价格异动</span>
+          </div>
+          <el-card shadow="never">
+            <el-timeline>
+              <el-timeline-item
+                v-for="e in fullTimeline"
+                :key="e.id"
+                :timestamp="e.time"
+                :type="e.type"
+                placement="top"
+              >
+                <div class="fw-500 mb-2">
+                  <el-tag :type="e.kindType" size="small" effect="plain" style="margin-right:8px;">{{ e.kind }}</el-tag>
+                  {{ e.title }}
+                </div>
+                <div class="text-sm muted">{{ e.detail }}</div>
+                <div class="source-line"><el-icon><Link /></el-icon>{{ e.source }}</div>
+              </el-timeline-item>
+            </el-timeline>
+          </el-card>
+        </el-tab-pane>
+      </el-tabs>
+    </app-shell>
+
+    <!-- ======== 录入操作弹窗 ======== -->
+    <el-dialog v-model="showTradeDialog" title="记录交易操作" width="520px" :close-on-click-modal="false">
+      <el-form :model="tradeForm" label-width="80px" size="default">
+        <el-form-item label="操作类型" required>
+          <el-radio-group v-model="tradeForm.tradeType">
+            <el-radio-button label="建仓">建仓</el-radio-button>
+            <el-radio-button label="加仓">加仓</el-radio-button>
+            <el-radio-button label="减仓">减仓</el-radio-button>
+            <el-radio-button label="止损">止损</el-radio-button>
+            <el-radio-button label="止盈">止盈</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="成交日期" required>
+              <el-input v-model="tradeForm.tradeDate" placeholder="2026-04-28" style="width: 100%;" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="成交价(¥)">
+              <el-input-number v-model="tradeForm.price" :precision="2" :step="0.1" :min="0" style="width: 100%;" placeholder="如 38.42" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="数量(股)">
+              <el-input-number v-model="tradeForm.qty" :step="100" :min="0" style="width: 100%;" placeholder="如 2000" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="操作后持仓">
+              <el-input-number v-model="tradeForm.holdingAfter" :step="100" :min="0" style="width: 100%;" placeholder="如 10000" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="触发依据">
+          <el-select v-model="tradeForm.basis" placeholder="选择关联计划条件（可不选）" style="width: 100%;" clearable>
+            <el-option v-for="p in myPlans" :key="p.kind" :label="p.kindLabel + '：' + p.name" :value="p.kind" />
+            <el-option label="自定义 / 手动填写" value="custom" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="tradeForm.basis === 'custom'" label=" ">
+          <el-input v-model="tradeForm.basisCustom" placeholder="描述触发这次操作的具体原因" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="tradeForm.note" type="textarea" :rows="3"
+            placeholder="记录当时的想法：为什么这个时点？对估值/催化剂/风险的判断？（可留白）" />
+        </el-form-item>
+        <el-form-item label=" ">
+          <el-checkbox v-model="tradeForm.launchAnalysis">保存后立即发起一次关联分析任务</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showTradeDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitTrade">保存操作记录</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ======== 记录观点 ======== -->
+    <el-dialog v-model="showOpinionDialog" title="记录我的观点 · 招商银行" width="520px" :close-on-click-modal="false">
+      <el-form :model="opinionForm" label-width="80px" size="default">
+        <el-form-item label="方向" required>
+          <el-radio-group v-model="opinionForm.stance" class="stance-group">
+            <el-radio-button label="看多" style="--el-button-active-color:#F56C6C; --el-button-active-border-color:#F56C6C;">看多</el-radio-button>
+            <el-radio-button label="中性">中性</el-radio-button>
+            <el-radio-button label="看空" style="--el-button-active-color:#909399; --el-button-active-border-color:#909399;">看空</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="标题" required>
+          <el-input v-model="opinionForm.title" placeholder="一句话概括你的观点，如「招行零售护城河在股份行内仍属最宽」" />
+        </el-form-item>
+        <el-form-item label="正文">
+          <el-input v-model="opinionForm.body" type="textarea" :rows="4"
+            placeholder="由于…，我认为…·主要风险在…·仰仰兼指…" />
+        </el-form-item>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="置信度">
+              <el-radio-group v-model="opinionForm.confidence">
+                <el-radio label="低">低</el-radio>
+                <el-radio label="中">中</el-radio>
+                <el-radio label="高">高</el-radio>
+              </el-radio-group>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="时效性">
+              <el-select v-model="opinionForm.horizon" style="width: 100%;">
+                <el-option label="短期（1–3 个月）" value="short" />
+                <el-option label="中期（6–12 个月）" value="mid" />
+                <el-option label="长期（1 年以上）" value="long" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+      <template #footer>
+        <el-button @click="showOpinionDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitOpinion">保存观点</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ======== 加入研究库 ======== -->
+    <el-dialog v-model="showLibraryDialog" title="加入研究库" width="460px">
+      <p class="text-sm muted" style="margin-bottom: 16px;">选择要将「招商银行」加入的研究库（可多选）</p>
+      <div style="display:flex; flex-direction:column; gap: 10px;">
+        <div v-for="g in libraryGroups" :key="g.id"
+             style="display:flex; align-items:center; justify-content:space-between;
+                    border:1px solid var(--border-light); border-radius:var(--radius-md);
+                    padding: 10px 14px; cursor:pointer;"
+             :style="g.joined ? 'background:var(--el-color-primary-light-9); border-color:var(--el-color-primary-light-5);' : ''"
+             @click="g.joined = !g.joined">
+          <div>
+            <div class="text-sm fw-500">{{ g.name }}</div>
+            <div class="text-xs muted" style="margin-top: 2px;">{{ g.desc }}</div>
+          </div>
+          <el-icon v-if="g.joined" style="color:var(--el-color-primary); font-size:18px;"><Check /></el-icon>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showLibraryDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitLibrary">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ======== 创建计划条件 ======== -->
+    <el-dialog v-model="showPlanDialog" title="新建交易计划条件 · 招商银行" width="520px" :close-on-click-modal="false">
+      <p class="text-sm muted" style="margin-bottom: 14px;">每个对象最多保存 5 条计划；已有建仓/加仓/减仓/止损/止盈各一条，新增将替换对应类型。</p>
+      <el-form :model="planForm" label-width="80px" size="default">
+        <el-form-item label="计划类型" required>
+          <el-radio-group v-model="planForm.kind">
+            <el-radio-button label="open">建仓</el-radio-button>
+            <el-radio-button label="addon">加仓</el-radio-button>
+            <el-radio-button label="trim">减仓</el-radio-button>
+            <el-radio-button label="stop">止损</el-radio-button>
+            <el-radio-button label="profit">止盈</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="计划名称" required>
+          <el-input v-model="planForm.name" placeholder="如「回撤 10% 且业绩未变差时加仓」" />
+        </el-form-item>
+        <el-form-item label="触发条件" required>
+          <el-input v-model="planForm.condition" placeholder="可量化的触发条件，如「PE-TTM 5年分位 < 20%」" />
+        </el-form-item>
+        <el-form-item label="执行动作">
+          <el-input v-model="planForm.action" placeholder="触发后要做什么，如「加仓至持仓权重 10%」" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showPlanDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitPlan">保存计划</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ======== 发起分析向导 ======== -->
+    <el-dialog v-model="showAnalysisDialog" title="发起分析任务 · 招商银行" width="580px" :close-on-click-modal="false">
+      <div class="analysis-kind-grid">
+        <div v-for="k in analysisKinds" :key="k.name"
+             class="analysis-kind-card"
+             :class="{ active: analysisForm.kind === k.name }"
+             @click="analysisForm.kind = k.name">
+          <el-tag size="small" :type="k.tagType" effect="plain" style="margin-bottom: 6px;">{{ k.name }}</el-tag>
+          <div class="text-xs muted">{{ k.desc }}</div>
+          <div class="kind-eta">⏱ {{ k.eta }}</div>
+        </div>
+      </div>
+      <el-form :model="analysisForm" label-width="80px" size="default" style="margin-top: 20px;">
+        <el-form-item label="研究对象">
+          <el-input value="招商银行 (600036.SH)" disabled />
+        </el-form-item>
+        <el-form-item label="焦点问题">
+          <el-input v-model="analysisForm.note" type="textarea" :rows="3"
+            placeholder="可选：描述你最想聚焦的问题，如「净息差拐点与零售 AUM 增速之间的关系」" />
+        </el-form-item>
+        <el-form-item label="优先级">
+          <el-radio-group v-model="analysisForm.priority">
+            <el-radio label="normal">普通</el-radio>
+            <el-radio label="urgent">紧急 · 插队执行</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="analysisCtx" label=" ">
+          <el-checkbox v-model="analysisForm.linkTrade">
+            关联操作记录：{{ analysisCtx.tradeOp }} · {{ analysisCtx.tradeDate }}
+          </el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+          <span class="text-xs muted">任务创建后可在 <a href="./task.html" style="color:var(--el-color-primary);">任务中心</a> 查看进度</span>
+          <div>
+            <el-button @click="showAnalysisDialog = false">取消</el-button>
+            <el-button type="primary" @click="submitAnalysis">
+              <el-icon><Promotion /></el-icon>&nbsp;立即发起
+            </el-button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
+  </div>
+
+  <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/element-plus@2.4.4/dist/index.full.min.js"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+  <script src="https://unpkg.com/echarts@5.4.3/dist/echarts.min.js"></script>
+  <script src="./assets/shared.js?v=7"></script>
+  <script>
+    const PROTOTYPE_KEYS = {
+      objectState: 'ta.v4.prototype.object.600036',
+      tasks: 'ta.v4.prototype.tasks',
+      collections: 'ta.v4.prototype.library.collections',
+    };
+
+    function readPrototypeJson(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function writePrototypeJson(key, value) {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+
+    function nowStamp() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    }
+
+    function defaultLibraryCollections() {
+      return [
+        { id: 1, name: '稳健成长组合', desc: '核心仓位池，放已经验证过基本面和持有逻辑的对象。', members: [{ objectCode: '600036.SH', objectName: '招商银行' }] },
+        { id: 2, name: '大金融板块观察池', desc: '银行、保险、券商相关对象的统一专题架。', members: [] },
+        { id: 3, name: '高股息策略池', desc: '股息率稳定、回撤可控、适合中长期配置的对象。', members: [] },
+        { id: 4, name: '防御性核心仓位', desc: '波动相对可控、可长期跟踪的核心底仓对象。', members: [{ objectCode: '600036.SH', objectName: '招商银行' }] },
+        { id: 5, name: '监控列表（未建仓）', desc: '先跟踪、不急着交易的候选对象池。', members: [] },
+      ];
+    }
+
+    const { createApp } = Vue;
+    const app = createApp({
+      data() {
+        return {
+          activeTab: "overview",
+          klineFreq: "day",
+          klineRange: "3m",
+          klineChartInst: null,
+          newsFilter: "all",
+          matSearch: "",
+          matFilterType: "",
+          news: [
+            { id: 1, kind: "公司", kindType: "primary", source: "招行官方", time: "2026-04-28 09:30",
+              title: "招商银行披露 2026 年一季报：归母净利同比 +5.2%",
+              summary: "Q1 营收 932 亿，同比 +2.1%；归母净利 380 亿，同比 +5.2%；不良率 0.95% 环比持平，拨备覆盖率 411%。",
+              sentiment: "pos", sentimentLabel: "正面", scope: "company", href: "#" },
+            { id: 2, kind: "研报", kindType: "success", source: "中金公司", time: "2026-04-22",
+              title: "中金：招行零售 AUM 增速仅次于平安银行，上调目标价至 44 元",
+              summary: "维持「跑赢行业」评级，认为零售业务韧性与资产质量稳定为主要支撑，估值处于中性偏低区间。",
+              sentiment: "pos", sentimentLabel: "正面", scope: "company", href: "#" },
+            { id: 3, kind: "行业", kindType: "warning", source: "财联社", time: "2026-04-25 16:42",
+              title: "央行：适时下调存款挂牌利率，预计二季度落地",
+              summary: "多家股份行预计跟进，对净息差边际改善必要但不充分，中期弹性取决于贷款重定价节奏。",
+              sentiment: "neu", sentimentLabel: "中性", scope: "industry", href: "#" },
+            { id: 4, kind: "宏观", kindType: "info", source: "新华社", time: "2026-04-24",
+              title: "一季度 GDP 同比 +5.3%，金融业增加值增速趋稳",
+              summary: "金融业增加值同比 +4.8%，低于去年同期，主要受净息差拖累；企业中长期贷款增速依然低迫。",
+              sentiment: "neu", sentimentLabel: "中性", scope: "macro", href: "#" },
+            { id: 5, kind: "公司", kindType: "primary", source: "雪球", time: "2026-04-18",
+              title: "招行 2026Q1 机构调研记录：零售转型扎实推进",
+              summary: "23 家机构参与，涵盖零售 AUM 增速、净息差展望、不良前瞻指标。",
+              sentiment: "pos", sentimentLabel: "正面", scope: "company", href: "#" },
+            { id: 6, kind: "公司", kindType: "info", source: "上交所", time: "2026-04-08",
+              title: "招商银行 2025 年度分红方案：每 10 股派 19.7 元（含税）",
+              summary: "分红率 35.1%，对应当前股价股息率约 5.13%，继续位于股份行靠前。",
+              sentiment: "pos", sentimentLabel: "正面", scope: "company", href: "#" },
+          ],
+          flowSignals: [
+            { label: "主力资金净流入", value: "+¥2.4 亿", dir: "up", detail: "连续 3 日净流入" },
+            { label: "北向资金持股", value: "¥1,283 亿", dir: "up", detail: "本周增持 +0.18 亿股" },
+            { label: "两融余额", value: "¥48.2 亿", dir: "", detail: "近 5 日均值，无明显变化" },
+            { label: "公募重仓占比", value: "3.84%", dir: "up", detail: "2026Q1 较上期 +0.12pct" },
+            { label: "鹿头重仓数量", value: "86 只", dir: "", detail: "入选鹿头重仓股池" },
+          ],
+          materials: [
+            { id: 1, type: "doc", title: "招商银行 2025 年度报告完整版.pdf",
+              note: "官方报告·已标注重点段落 12 处",
+              source: "你于 2026-04-09 从年报页面下载",
+              size: "3.2 MB", uploadedAt: "2026-04-09", processed: true },
+            { id: 2, type: "url", title: "《如何看招行 Q1 业绩》- 中金一手调研纪要",
+              note: "粘贴链接后由系统抓取·保留原页快照",
+              source: "https://xueqiu.com/8513489472/...",
+              size: "68 KB", uploadedAt: "2026-04-22", processed: true },
+            { id: 3, type: "img", title: "招行零售 AUM 同比增速走势图.png",
+              note: "跳雷装修从东方财富截取·OCR 已提取数据点",
+              source: "你于 2026-04-15 上传",
+              size: "412 KB", uploadedAt: "2026-04-15", processed: true },
+            { id: 4, type: "doc", title: "平安银行 vs 招行 零售 AUM 对比.xlsx",
+              note: "你自己整理的表格·8 列 6 行",
+              source: "你于 2026-03-12 上传",
+              size: "24 KB", uploadedAt: "2026-03-12", processed: true },
+            { id: 5, type: "url", title: "财联社：央行适时下调存款挂牌利率",
+              note: "行业背景资料·未从原文提取要点",
+              source: "https://www.cls.cn/detail/123456",
+              size: "42 KB", uploadedAt: "2026-04-25", processed: false },
+            { id: 6, type: "note", title: "我的调研纪要：4 月22 日招行电会",
+              note: "手动记录·重点记录净息差展望与信用卡逾期趋势",
+              source: "你于 2026-04-22 手输创建",
+              size: "—", uploadedAt: "2026-04-22", processed: true },
+          ],
+          timelineSummary: [
+            { id: 1, time: "2026-04-28 09:30", type: "primary", kind: "财报", kindType: "primary",
+              title: "2026 年一季报披露：归母净利同比 +5.2%",
+              detail: "营收 932 亿（+2.1%），归母净利 380 亿（+5.2%），核心一级资本充足率 14.86%。",
+              source: "招行公告 · 上交所披露" },
+            { id: 2, time: "2026-04-22", type: "success", kind: "评级", kindType: "success",
+              title: "中金维持「跑赢行业」评级",
+              detail: "目标价 42.0 元 → 44.0 元，理由：零售业务韧性、资产质量稳定。",
+              source: "中金研究报告" },
+            { id: 3, time: "2026-04-15", type: "warning", kind: "异动", kindType: "warning",
+              title: "单日成交额放大至日均 2.3 倍",
+              detail: "盘中触及 39.10 元后回落，可能与板块轮动相关。",
+              source: "QMT 行情 + 系统检测" },
+            { id: 4, time: "2026-04-08", type: "info", kind: "公告", kindType: "info",
+              title: "2025 年度分红方案：每 10 股派 19.7 元（含税）",
+              detail: "分红率 35.1%，对应当前股价股息率约 5.13%。",
+              source: "招行公告" },
+          ],
+          objectTasks: [
+            { id: "T-4823", name: "Q1 财报深度分析", status: "完成 · 待沉淀", statusType: "warning",
+              meta: "今天 09:30 发起 · 已完成", href: "./task.html?taskId=T-4823" },
+            { id: "T-4690", name: "2025 年报全文解读", status: "已沉淀", statusType: "success",
+              meta: "2026-04-09 发起", href: "#" },
+            { id: "T-4521", name: "零售银行业务对比分析", status: "已沉淀", statusType: "success",
+              meta: "2026-03-12 发起", href: "#" },
+          ],
+          myResearchPreview: [
+            { id: 1, kind: "我的观点", tagType: "warning", time: "2026-04-09",
+              title: "招行的零售护城河仍然有效，但增量需关注信用卡周期" },
+            { id: 2, kind: "研究卡片", tagType: "primary", time: "2026-03-12",
+              title: "招行 vs 兴业 零售客户 AUM 对比框架" },
+            { id: 3, kind: "我的规则", tagType: "success", time: "2026-02-20",
+              title: "银行股配置：核心一级资本充足率底线 ≥ 9%" },
+          ],
+          financials: [
+            { period: "2026Q1", revenue: "932", netProfit: "380", revYoy: "+5.78%", netYoy: "+7.95%", roe: "15.42%", nim: "2.04%", npl: "0.95%", car: "14.86%" },
+            { period: "2025Q4", revenue: "928", netProfit: "352", revYoy: "+5.34%", netYoy: "+4.14%", roe: "15.21%", nim: "2.01%", npl: "0.96%", car: "14.74%" },
+            { period: "2025Q3", revenue: "894", netProfit: "346", revYoy: "+3.92%", netYoy: "+3.58%", roe: "15.05%", nim: "1.98%", npl: "0.94%", car: "14.50%" },
+            { period: "2025Q2", revenue: "881", netProfit: "338", revYoy: "+2.10%", netYoy: "+2.43%", roe: "14.85%", nim: "1.95%", npl: "0.95%", car: "14.32%" },
+          ],
+          businessLines: [
+            { segment: "零售金融", revenue: "1,892", share: "52.6%", yoy: "+6.4%", margin: "42.1%", note: "信用卡 + 财富管理 + 私人银行 · 零售客户 1.95 亿户" },
+            { segment: "批发金融 (对公)", revenue: "1,124", share: "31.2%", yoy: "+3.8%", margin: "38.5%", note: "公司贷款 + 现金管理 + 投行 · 战略客户增长 12%" },
+            { segment: "金融市场", revenue: "428", share: "11.9%", yoy: "+8.2%", margin: "55.3%", note: "债券投资 + 同业 + 票据 · 受益利率下行" },
+            { segment: "其他业务", revenue: "152", share: "4.3%", yoy: "-1.2%", margin: "20.4%", note: "金融科技输出 + 子公司贡献" },
+          ],
+          concepts: [
+            { name: "银行 · 股份行", source: "Tushare 行业分类", strength: "强", strong: true },
+            { name: "高股息", source: "派生事实 + 多源", strength: "强", strong: true },
+            { name: "零售银行龙头", source: "市场共识 + 公司年报", strength: "中", strong: false },
+            { name: "金融科技", source: "概念股池 · 单源", strength: "弱", strong: false },
+            { name: "MSCI 中国 A50", source: "MSCI 官方", strength: "强", strong: true },
+            { name: "央企改革", source: "概念股池 · 单源", strength: "弱", strong: false },
+          ],
+          relatedObjects: [
+            { name: "兴业银行", code: "601166.SH", relation: "同业可比", note: "另一家零售为主的股份行；常作 ROE 与零售 AUM 对比锚。" },
+            { name: "平安银行", code: "000001.SZ", relation: "同业可比", note: "近年零售转型节奏与招行有差异，可作互补研究。" },
+            { name: "工商银行", code: "601398.SH", relation: "行业基准", note: "国有大行基准，用于估值与分红率比较。" },
+          ],
+          aiViews: [
+            { id: 1, stance: "中性偏正面", tagType: "primary",
+              title: "Q1 业绩符合预期，资产质量未显著恶化",
+              body: "营收增速 2.1% 略低于市场一致预期 3.5%，但归母净利 +5.2% 超预期，主因拨备反哺；不良率 0.95% 环比持平，关注类贷款余额下降，资产质量在行业内仍属稳健。",
+              evidence: "招行 2026Q1 公告 + 行业可比数据",
+              confidence: "中（83%）",
+              time: "10:14",
+              taskId: "#4823" },
+            { id: 2, stance: "需观察", tagType: "warning",
+              title: "净息差仍处于低位，二季度边际改善需要存款成本下行",
+              body: "Q1 净息差 1.92%，环比 -2bp，主要受贷款重定价影响。若二季度存款挂牌利率下调落地，净息差有边际改善空间，但幅度可能小于市场预期。",
+              evidence: "近 6 季净息差趋势 + 央行政策预期",
+              confidence: "中低（68%）",
+              time: "10:16",
+              taskId: "#4823" },
+          ],
+          myOpinions: [
+            { id: 1, title: "招行的零售护城河仍然有效",
+              body: "高净值客户黏性 + 财富管理 AUM 增速仍领先股份行，但需警惕信用卡资产质量在年轻群体上的边际变化。",
+              time: "2026-04-09 14:22",
+              taskRef: "#4690 年报解读" },
+            { id: 2, title: "短期估值修复空间有限",
+              body: "PE 已修复至 5 年 32% 分位，再向上需要看到净息差拐点确认。",
+              time: "2026-04-15",
+              taskRef: null },
+          ],
+          myRules: [
+            { id: 1, name: "核心一级资本充足率底线 ≥ 9%", hit: true,
+              condition: "当前 14.86% · 远高于规则线", taskRef: "#4690" },
+            { id: 2, name: "PE-TTM 5 年分位 < 20% 时加仓", hit: false,
+              condition: "当前 32% · 不触发", taskRef: null },
+          ],
+          myReminders: [],
+          myPlans: [
+            { kind: "open", kindLabel: "开仓", kindType: "primary", name: "PE-TTM 5 年分位 < 20% 时建仓",
+              condition: "当前 32% · 不触发", action: "建仓 5%，分两次完成", hit: false },
+            { kind: "addon", kindLabel: "加仓", kindType: "primary", name: "回撤 10% 且业绩未变差",
+              condition: "当前回撤 -3.2% · 不触发", action: "加仓 3%", hit: false },
+            { kind: "trim", kindLabel: "减仓", kindType: "warning", name: "权重超过 18%",
+              condition: "当前 16.8% · 接近触发", action: "减至 15%", hit: false },
+            { kind: "stop", kindLabel: "止损", kindType: "danger", name: "核心一级资本充足率跌破 9%",
+              condition: "当前 14.86% · 远高于规则线", action: "立即清仓", hit: false },
+            { kind: "profit", kindLabel: "止盈", kindType: "success", name: "PE-TTM 5 年分位 > 80% 时部分止盈",
+              condition: "当前 32% · 不触发", action: "减半仓位", hit: false },
+          ],
+          showOpinionDialog: false,
+          opinionForm: { stance: '看多', title: '', body: '', confidence: '中', horizon: 'mid' },
+          showLibraryDialog: false,
+          libraryGroups: [
+            { id: 1, name: '稳健成长组合', desc: '核心仓位池，放已经验证过基本面和持有逻辑的对象。', joined: true },
+            { id: 2, name: '大金融板块观察池', desc: '包含银行、证券、保险等主要金融对象。', joined: false },
+            { id: 3, name: '高股息策略池', desc: '年化股息率 > 4% 且平滑分红历史 5 年以上', joined: false },
+            { id: 4, name: '防御性核心仓位', desc: '波动相对可控、适合长期持有的核心底仓。', joined: true },
+            { id: 5, name: '监控列表（未建仓）', desc: '正在跟踪、还未建仓的候选对象', joined: false },
+          ],
+          showPlanDialog: false,
+          planForm: { kind: 'addon', name: '', condition: '', action: '' },
+          showAnalysisDialog: false,
+          analysisCtx: null,
+          analysisForm: { kind: '深度分析', note: '', priority: 'normal', linkTrade: false },
+          analysisKinds: [
+            { name: '深度分析',    tagType: 'primary', eta: '约 8–15 分钟', desc: '系统性分析个股/ETF/主题，输出结论与可沉淀草稿' },
+            { name: '横向对比',    tagType: 'warning', eta: '约 5–10 分钟', desc: '多对象同框架评估，常用于决策前比较选股' },
+            { name: '复盘',        tagType: 'info',    eta: '约 3–6 分钟',  desc: '回看一次决策：假设是否兑现、教训是否可沉淀为规则' },
+            { name: '交易计划制定', tagType: 'success', eta: '约 4–8 分钟',  desc: '编辑 5 条件计划（建/加/减/止损/止盈），形成可触发规则' },
+            { name: '方法论研究',  tagType: 'danger',  eta: '约 6–12 分钟', desc: '用方法工坊模板做结构化评估（巴菲特/费雪/段永平…）' },
+            { name: '事件追踪',    tagType: 'info',    eta: '约 2–5 分钟',  desc: '围绕财报/政策/暴跌做即时跟踪与笔记沉淀' },
+          ],
+          showTradeDialog: false,
+          tradeForm: {
+            tradeType: '加仓', tradeDate: '2026-04-28',
+            price: null, qty: null, holdingAfter: null,
+            basis: '', basisCustom: '', note: '', launchAnalysis: false,
+          },
+          tradeLog: [
+            { id: 1, date: "2025-08-12", op: "建仓", opType: "primary", dir: "买入",
+              price: "¥32.10", qty: "4,000", holding: "4,000 股",
+              basis: "PE-TTM 5 年分位 18% 达到建仓计划触发线",
+              note: "分两批入场，首批 4000 股", taskRef: "T-3120", taskHref: "./task.html" },
+            { id: 2, date: "2025-10-15", op: "加仓", opType: "primary", dir: "买入",
+              price: "¥30.80", qty: "2,000", holding: "6,000 股",
+              basis: "回撤 -11.2% 触发「回撤 10% 且业绩未变差」加仓规则",
+              note: "三季报资产质量确认稳健，按计划执行", taskRef: "T-3412", taskHref: "./task.html" },
+            { id: 3, date: "2026-02-12", op: "加仓", opType: "primary", dir: "买入",
+              price: "¥33.40", qty: "2,000", holding: "8,000 股",
+              basis: "年报业绩稳定 + 股息率回到 5% 以上",
+              note: "权重提升至 16.8%，逼近 18% 减仓线，不再继续加", taskRef: "T-4521", taskHref: "./task.html" },
+            { id: 4, date: "2026-04-28", op: "持有观察", opType: "info", dir: "无交易",
+              price: null, qty: null, holding: "8,000 股",
+              basis: "Q1 业绩符合预期；当前权重 16.8% 接近 18% 减仓线，未触发",
+              note: "等待净息差拐点确认后再决策", taskRef: "T-4823", taskHref: "./task.html?taskId=T-4823" },
+          ],
+          myReviews: [
+            { id: 1, verdict: "兑现", title: "2025 年报后的「业绩稳定」假设回顾",
+              time: "2026-04-15", kind: "事件复盘",
+              conclusion: "假设：招行业绩稳定 + 核心资本充足 → 兑现。归母净利同比 +5.2%，资本充足率 14.86%。继续维持「业绩稳定 v3」规则命中。",
+              taskRef: "T-4690", ruleRef: "业绩稳定 v3" },
+            { id: 2, verdict: "部分兑现", title: "2025-08 加仓时点判断",
+              time: "2026-01-08", kind: "月度复盘",
+              conclusion: "加仓时点的「PE 分位 < 25%」假设部分兑现：实际进入区间但只持续 3 周，加仓节奏偏慢。下次需把 PE 分位窗口从 5 年改为 3 年以提升敏感度。",
+              taskRef: "T-4012", ruleRef: "—" },
+            { id: 3, verdict: "未兑现", title: "2024-09 净息差拐点抢跑",
+              time: "2024-12-10", kind: "事件复盘",
+              conclusion: "假设：Q3 净息差见底 → 未兑现，息差继续下行 6bp。教训：行业层面息差判断不应只看单家，需结合 LPR 与负债成本同步观察。",
+              taskRef: "T-2810", ruleRef: "净息差判断 v2" },
+          ],
+          methodologies: [
+            { id: 1, name: "巴菲特 · 经济护城河",
+              status: "评估完成", statusType: "success",
+              summary: "5 个维度的护城河评分，重点看品牌、网络效应、转换成本、规模、监管。",
+              dims: [
+                { label: "品牌/客户黏性", score: "4 / 5", cls: "stock-up" },
+                { label: "转换成本", score: "5 / 5", cls: "stock-up" },
+                { label: "网络效应", score: "3 / 5", cls: "" },
+                { label: "成本优势(规模)", score: "4 / 5", cls: "stock-up" },
+                { label: "监管/牌照壁垒", score: "5 / 5", cls: "stock-up" },
+              ],
+              lastEval: "2026-04-15 评估", taskRef: "T-4690" },
+            { id: 2, name: "费雪 · 15 个问题清单",
+              status: "进行中 12/15", statusType: "warning",
+              summary: "费雪 1958 经典 15 问，聚焦企业是否具备长期增长潜力与诚实管理层。",
+              dims: [
+                { label: "是否有足够潜力支撑长期增长", score: "已答", cls: "stock-up" },
+                { label: "管理层是否有持续创新", score: "已答", cls: "stock-up" },
+                { label: "研发投入是否高效", score: "未答", cls: "stock-down" },
+                { label: "管理层是否坦诚面对困难", score: "已答", cls: "stock-up" },
+                { label: "其余 11 题", score: "9 已答 / 2 未答", cls: "" },
+              ],
+              lastEval: "2026-04-02 起草", taskRef: "T-4612" },
+            { id: 3, name: "格雷厄姆 · 安全边际",
+              status: "评估完成", statusType: "success",
+              summary: "保守估值 vs 当前价的差距，强调下行保护多于上行想象。",
+              dims: [
+                { label: "PB-NAV 折价", score: "+8%", cls: "stock-up" },
+                { label: "PE 与盈利收益率", score: "PE 6.2 / EY 16.1%", cls: "stock-up" },
+                { label: "股息率", score: "5.8%", cls: "stock-up" },
+                { label: "财务稳健度", score: "稳健", cls: "stock-up" },
+                { label: "安全边际综合", score: "中等偏高", cls: "stock-up" },
+              ],
+              lastEval: "2026-03-28 评估", taskRef: "T-4533" },
+            { id: 4, name: "段永平 · 商业模式",
+              status: "待评估", statusType: "info",
+              summary: "用 5 个核心问题判断生意本身好不好，再谈估值与时机。",
+              dims: [
+                { label: "10 年后还在吗", score: "—", cls: "" },
+                { label: "客户为什么选你", score: "—", cls: "" },
+                { label: "竞争对手为什么打不进来", score: "—", cls: "" },
+                { label: "管理层是否本分", score: "—", cls: "" },
+                { label: "现金流是否真实", score: "—", cls: "" },
+              ],
+              lastEval: "尚未开始", taskRef: null },
+          ],
+          reports: [
+            { id: 1, kind: "深度分析", title: "招商银行 2026Q1 财报深度分析", time: "2026-04-28", length: "约 4,200 字" },
+            { id: 2, kind: "全文解读", title: "招商银行 2025 年报解读", time: "2026-04-09", length: "约 6,800 字" },
+            { id: 3, kind: "对比分析", title: "招行 vs 兴业 零售业务对比", time: "2026-03-12", length: "约 3,500 字" },
+          ],
+          fullTimeline: [
+            { id: 1, time: "2026-04-28 09:30", type: "primary", kind: "财报", kindType: "primary",
+              title: "2026 年一季报披露：归母净利同比 +5.2%",
+              detail: "营收 932 亿（+2.1%），归母净利 380 亿（+5.2%），核心一级资本充足率 14.86%。",
+              source: "招行公告 · 上交所披露" },
+            { id: 2, time: "2026-04-22", type: "success", kind: "评级", kindType: "success",
+              title: "中金维持「跑赢行业」评级",
+              detail: "目标价 42.0 → 44.0 元。",
+              source: "中金研究报告" },
+            { id: 3, time: "2026-04-18", type: "info", kind: "调研", kindType: "info",
+              title: "招行接受 23 家机构调研",
+              detail: "讨论焦点：零售 AUM 增速、净息差展望、不良前瞻指标。",
+              source: "深交所互动平台" },
+            { id: 4, time: "2026-04-15", type: "warning", kind: "异动", kindType: "warning",
+              title: "单日成交额放大至日均 2.3 倍",
+              detail: "盘中触及 39.10 元后回落。",
+              source: "QMT 行情 + 系统检测" },
+            { id: 5, time: "2026-04-08", type: "info", kind: "公告", kindType: "info",
+              title: "2025 年度分红方案：每 10 股派 19.7 元（含税）",
+              detail: "分红率 35.1%。",
+              source: "招行公告" },
+            { id: 6, time: "2026-03-25", type: "info", kind: "公告", kindType: "info",
+              title: "董事会换届完成",
+              detail: "新任董事长 X 先生履职。",
+              source: "招行公告" },
+          ],
+        };
+      },
+      computed: {
+        filteredNews() {
+          if (this.newsFilter === "all") return this.news;
+          return this.news.filter(n => n.scope === this.newsFilter);
+        },
+        filteredMaterials() {
+          const kw = this.matSearch.trim().toLowerCase();
+          return this.materials.filter(m => {
+            if (this.matFilterType && m.type !== this.matFilterType) return false;
+            if (kw && !(m.title.toLowerCase().includes(kw) || (m.note || "").toLowerCase().includes(kw))) return false;
+            return true;
+          });
+        },
+      },
+      mounted() {
+        this.hydrateObjectState();
+        this.$nextTick(() => this.initKline());
+        window.addEventListener("resize", this.handleResize);
+      },
+      beforeUnmount() {
+        window.removeEventListener("resize", this.handleResize);
+        if (this.klineChartInst) this.klineChartInst.dispose();
+      },
+      methods: {
+        hydrateObjectState() {
+          const saved = readPrototypeJson(PROTOTYPE_KEYS.objectState, null);
+          if (!saved) return;
+          ["objectTasks", "myOpinions", "myRules", "myReminders", "myPlans", "myReviews", "tradeLog"].forEach((key) => {
+            if (Array.isArray(saved[key])) this[key] = saved[key];
+          });
+        },
+        persistObjectState() {
+          writePrototypeJson(PROTOTYPE_KEYS.objectState, {
+            objectTasks: this.objectTasks,
+            myOpinions: this.myOpinions,
+            myRules: this.myRules,
+            myReminders: this.myReminders,
+            myPlans: this.myPlans,
+            myReviews: this.myReviews,
+            tradeLog: this.tradeLog,
+          });
+        },
+        buildPrototypeTask(ctx) {
+          const taskId = `T-${String(Date.now()).slice(-5)}`;
+          const title = `${ctx.objectName} · ${ctx.kind}`;
+          const deposits = [
+            { id: 1, idx: 1, kind: "规则草稿", tagType: "success", status: "pending",
+              title: `${ctx.objectName} 持有硬约束需要继续保留`,
+              body: "结合最新财报与行业比较，核心资本、资产质量或估值约束应继续作为决策底线。" },
+            { id: 2, idx: 2, kind: "观点草稿", tagType: "warning", status: "pending",
+              title: `${ctx.objectName}${ctx.linkedTrade ? '本次交易' : ''}后的关键判断`,
+              body: ctx.note || "建议把本次分析的主判断沉淀成一条可复用观点，后续用于复盘对照。" },
+            { id: 3, idx: 3, kind: "提醒", tagType: "primary", status: "pending",
+              title: `${ctx.objectName} 下一次关键信号跟踪`,
+              body: ctx.linkedTrade ? "跟踪这次操作对应的触发条件是否继续成立，避免只记录交易不回看触发逻辑。" : "为该对象补一条后续观察提醒，确保观点能被周期性验证。" },
+          ];
+          return {
+            id: taskId,
+            kind: ctx.kind,
+            title,
+            pageTitle: title,
+            status: "完成 · 待沉淀",
+            statusType: "warning",
+            objectName: ctx.objectName,
+            objectCode: ctx.objectCode,
+            objectHref: "./object-detail.html",
+            workflow: `${ctx.kind}工作流 · 原型版`,
+            requester: "你",
+            createdAt: nowStamp(),
+            finishedAt: nowStamp(),
+            elapsed: ctx.priority === 'urgent' ? '06 分 20 秒' : '12 分 40 秒',
+            model: "GPT-5.4",
+            prompt: ctx.note || "未填写额外焦点问题",
+            linkedTrade: ctx.linkedTrade ? ctx.linkedTrade : null,
+            logs: [
+              { time: nowStamp().slice(-5), stage: "数据收集", tagType: "primary", msg: `载入 ${ctx.objectName} 的对象资料、历史观点与相关任务` },
+              { time: nowStamp().slice(-5), stage: "数据校验", tagType: "info", msg: `应用 ${ctx.kind} 所需的字段与口径检查` },
+              { time: nowStamp().slice(-5), stage: "AI 分析", tagType: "warning", msg: `根据焦点问题生成 ${ctx.kind} 结构化结论` },
+              { time: nowStamp().slice(-5), stage: "结论生成", tagType: "success", msg: `输出 3 条可沉淀结果，等待你确认` },
+            ],
+            deposits,
+            stages: [
+              { idx: 1, name: "数据收集", meta: "已完成", cls: "is-done" },
+              { idx: 2, name: "数据校验", meta: "已完成", cls: "is-done" },
+              { idx: 3, name: "AI 分析", meta: "已完成", cls: "is-done" },
+              { idx: 4, name: "结论生成", meta: "已完成", cls: "is-done" },
+              { idx: 5, name: "等待沉淀", meta: "由你决定", cls: "is-active" },
+            ],
+          };
+        },
+        submitOpinion() {
+          if (!this.opinionForm.title) {
+            ElementPlus.ElMessage.warning('请填写观点标题');
+            return;
+          }
+          const horizonLabel = { short: '短期', mid: '中期', long: '长期' }[this.opinionForm.horizon];
+          this.myOpinions.unshift({
+            id: Date.now(),
+            title: this.opinionForm.title,
+            body: this.opinionForm.body || '—',
+            time: '2026-04-29 ' + new Date().toTimeString().slice(0,5),
+            stance: this.opinionForm.stance,
+            confidence: this.opinionForm.confidence,
+            horizon: horizonLabel,
+            taskRef: null,
+          });
+          ElementPlus.ElMessage.success('观点已保存');
+          this.showOpinionDialog = false;
+          this.persistObjectState();
+          Object.assign(this.opinionForm, { stance: '看多', title: '', body: '', confidence: '中', horizon: 'mid' });
+        },
+        submitLibrary() {
+          const joined = this.libraryGroups.filter(g => g.joined).map(g => g.name);
+          const groups = readPrototypeJson(PROTOTYPE_KEYS.collections, defaultLibraryCollections());
+          const joinedIds = new Set(this.libraryGroups.filter(g => g.joined).map(g => g.id));
+          groups.forEach((group) => {
+            group.members = Array.isArray(group.members) ? group.members.filter((member) => member.objectCode !== '600036.SH') : [];
+            if (joinedIds.has(group.id)) {
+              group.members.unshift({ objectCode: '600036.SH', objectName: '招商银行' });
+            }
+          });
+          writePrototypeJson(PROTOTYPE_KEYS.collections, groups);
+          ElementPlus.ElMessage.success(`已加入：${joined.join('、')}`);
+          this.showLibraryDialog = false;
+        },
+        submitPlan() {
+          if (!this.planForm.name || !this.planForm.condition) {
+            ElementPlus.ElMessage.warning('请填写计划名称和触发条件');
+            return;
+          }
+          const kindLabel = { open: '建仓', addon: '加仓', trim: '减仓', stop: '止损', profit: '止盈' };
+          const kindType  = { open: 'primary', addon: 'primary', trim: 'warning', stop: 'danger', profit: 'success' };
+          const idx = this.myPlans.findIndex(p => p.kind === this.planForm.kind);
+          const entry = {
+            kind: this.planForm.kind,
+            kindLabel: kindLabel[this.planForm.kind],
+            kindType: kindType[this.planForm.kind],
+            name: this.planForm.name,
+            condition: this.planForm.condition + ' · 待评估',
+            action: this.planForm.action || '—',
+            hit: false,
+          };
+          if (idx >= 0) this.myPlans.splice(idx, 1, entry);
+          else this.myPlans.push(entry);
+          ElementPlus.ElMessage.success(`「${entry.kindLabel}」计划已保存`);
+          this.showPlanDialog = false;
+          this.persistObjectState();
+          Object.assign(this.planForm, { kind: 'addon', name: '', condition: '', action: '' });
+        },
+        handleMoreCmd(cmd) {
+          if (cmd === 'remove') {
+            const groups = readPrototypeJson(PROTOTYPE_KEYS.collections, defaultLibraryCollections());
+            groups.forEach((group) => {
+              group.members = Array.isArray(group.members) ? group.members.filter((member) => member.objectCode !== '600036.SH') : [];
+            });
+            writePrototypeJson(PROTOTYPE_KEYS.collections, groups);
+            this.libraryGroups = this.libraryGroups.map((group) => ({ ...group, joined: false }));
+            ElementPlus.ElMessage({ type: 'warning', message: '已从研究库专题架中移除该对象' });
+            return;
+          }
+          const msgs = {
+            remind: '请输入订阅价格区间（功能连接后端后开放）',
+            export: '正在打包研究报告，PDF 将发送至注册邮箱（演示）',
+            share: '分享链接已复制到剪贴板（演示）',
+          };
+          ElementPlus.ElMessage({ type: 'info', message: msgs[cmd] || cmd });
+        },
+        newAnalysis(ctx) {
+          this.analysisCtx = ctx || null;
+          this.analysisForm = {
+            kind: '深度分析',
+            note: ctx ? `关联操作记录：${ctx.tradeOp}（${ctx.tradeDate}）` : '',
+            priority: 'normal',
+            linkTrade: !!ctx,
+          };
+          this.showAnalysisDialog = true;
+        },
+        submitAnalysis() {
+          const linkedTrade = this.analysisForm.linkTrade && this.analysisCtx
+            ? { id: this.analysisCtx.tradeId || null, op: this.analysisCtx.tradeOp, date: this.analysisCtx.tradeDate }
+            : null;
+          const task = this.buildPrototypeTask({
+            kind: this.analysisForm.kind,
+            note: this.analysisForm.note,
+            priority: this.analysisForm.priority,
+            linkedTrade,
+            objectName: '招商银行',
+            objectCode: '600036.SH',
+          });
+          const tasks = readPrototypeJson(PROTOTYPE_KEYS.tasks, []);
+          tasks.unshift(task);
+          writePrototypeJson(PROTOTYPE_KEYS.tasks, tasks);
+          this.objectTasks.unshift({
+            id: task.id,
+            name: task.title,
+            status: task.status,
+            statusType: task.statusType,
+            meta: `${task.createdAt} 发起 · ${task.elapsed}`,
+            href: `./task.html?taskId=${task.id}`,
+          });
+          if (linkedTrade && linkedTrade.id) {
+            const trade = this.tradeLog.find((item) => item.id === linkedTrade.id);
+            if (trade) {
+              trade.taskRef = task.id;
+              trade.taskHref = `./task.html?taskId=${task.id}`;
+            }
+          }
+          this.persistObjectState();
+          this.showAnalysisDialog = false;
+          window.location.href = `./task.html?taskId=${task.id}`;
+        },
+        submitTrade() {
+          const f = this.tradeForm;
+          if (!f.tradeType || !f.tradeDate) {
+            ElementPlus.ElMessage.warning("请填写操作类型和日期");
+            return;
+          }
+          const opColorMap = { 建仓: 'primary', 加仓: 'primary', 减仓: 'warning', 止损: 'danger', 止盈: 'success' };
+          const dir = ['建仓','加仓'].includes(f.tradeType) ? '买入' : '卖出';
+          const basisText = f.basis === 'custom' ? f.basisCustom
+            : (this.myPlans.find(p => p.kind === f.basis)?.name || '手动录入');
+          const tradeId = Date.now();
+          this.tradeLog.unshift({
+            id: tradeId, date: f.tradeDate,
+            op: f.tradeType, opType: opColorMap[f.tradeType] || 'info', dir,
+            price: f.price ? `¥${f.price}` : null,
+            qty: f.qty ? f.qty.toLocaleString() : null,
+            holding: f.holdingAfter ? `${f.holdingAfter.toLocaleString()} 股` : '—',
+            basis: basisText || '手动录入', note: f.note, taskRef: null, taskHref: null,
+          });
+          ElementPlus.ElMessage.success("操作记录已保存");
+          this.persistObjectState();
+          if (f.launchAnalysis) this.newAnalysis({ tradeId, tradeOp: f.tradeType, tradeDate: f.tradeDate });
+          this.showTradeDialog = false;
+          Object.assign(this.tradeForm, { tradeType: '加仓', tradeDate: '2026-04-28', price: null, qty: null, holdingAfter: null, basis: '', basisCustom: '', note: '', launchAnalysis: false });
+        },
+        triggerUpload(kind) {
+          const map = { doc: "文档导入", img: "图片上传", url: "URL 抓取" };
+          ElementPlus.ElMessage.info(`当前为原型·${map[kind]}上传会在接入后端后动作`);
+        },
+        matTypeIcon(t) { return ({ doc: "Document", img: "Picture", url: "Link", note: "EditPen" })[t] || "Document"; },
+        matTypeLabel(t) { return ({ doc: "文档", img: "图片", url: "网页", note: "笔记" })[t] || t; },
+        matTypeTag(t) { return ({ doc: "primary", img: "warning", url: "", note: "success" })[t] || ""; },
+        handleResize() { if (this.klineChartInst) this.klineChartInst.resize(); },
+        genKlineData() {
+          // 生成伪随机 K 线数据
+          const rangeMap = { "3m": 60, "6m": 120, "1y": 240, "3y": 720 };
+          const freqDivisor = { day: 1, week: 5, month: 22 }[this.klineFreq] || 1;
+          const points = Math.max(20, Math.floor(rangeMap[this.klineRange] / freqDivisor));
+          const dates = [], values = [], volumes = [];
+          let close = 32 + Math.random() * 2;
+          const today = new Date("2026-04-28");
+          for (let i = points - 1; i >= 0; i--) {
+            const d = new Date(today);
+            d.setDate(today.getDate() - i * freqDivisor);
+            const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+            const open = close + (Math.random() - 0.5) * 0.6;
+            const drift = (Math.random() - 0.45) * 0.8 + (i < points / 2 ? 0.05 : 0);
+            close = open + drift;
+            const high = Math.max(open, close) + Math.random() * 0.4;
+            const low = Math.min(open, close) - Math.random() * 0.4;
+            const volume = Math.floor(80000 + Math.random() * 100000);
+            dates.push(dateStr);
+            values.push([+open.toFixed(2), +close.toFixed(2), +low.toFixed(2), +high.toFixed(2)]);
+            volumes.push({ value: volume, itemStyle: { color: close >= open ? "#F56C6C" : "#909399", opacity: 0.6 } });
+          }
+          return { dates, values, volumes };
+        },
+        initKline() {
+          if (!this.$refs.klineChart) return;
+          this.klineChartInst = echarts.init(this.$refs.klineChart);
+          this.updateKline();
+        },
+        updateKline() {
+          if (!this.klineChartInst) return;
+          const { dates, values, volumes } = this.genKlineData();
+          const upColor = "#F56C6C";
+          const downColor = "#909399";
+          this.klineChartInst.setOption({
+            animation: false,
+            grid: [
+              { left: 50, right: 20, top: 12, height: "62%" },
+              { left: 50, right: 20, top: "76%", height: "16%" },
+            ],
+            xAxis: [
+              { type: "category", data: dates, axisLine: { lineStyle: { color: "#DCDFE6" } }, axisLabel: { color: "#909399", fontSize: 11 } },
+              { type: "category", gridIndex: 1, data: dates, axisLine: { lineStyle: { color: "#DCDFE6" } }, axisLabel: { show: false }, axisTick: { show: false } },
+            ],
+            yAxis: [
+              { scale: true, splitLine: { lineStyle: { color: "#F2F3F5" } }, axisLabel: { color: "#909399", fontSize: 11 }, axisLine: { show: false }, axisTick: { show: false } },
+              { gridIndex: 1, splitNumber: 2, axisLabel: { color: "#909399", fontSize: 10 }, axisLine: { show: false }, axisTick: { show: false }, splitLine: { show: false } },
+            ],
+            tooltip: { trigger: "axis", axisPointer: { type: "cross" }, backgroundColor: "rgba(255,255,255,0.95)", borderColor: "#E4E7ED", textStyle: { color: "#303133" } },
+            series: [
+              {
+                type: "candlestick", name: "K线", data: values,
+                itemStyle: { color: upColor, color0: downColor, borderColor: upColor, borderColor0: downColor },
+              },
+              {
+                name: "成交量", type: "bar", xAxisIndex: 1, yAxisIndex: 1,
+                data: volumes,
+              },
+            ],
+          }, true);
+        },
+      },
+    });
+    app.use(ElementPlus);
+    for (const [k, v] of Object.entries(ElementPlusIconsVue)) app.component(k, v);
+    registerPrototypeComponents(app);
+    app.mount("#app");
+  </script>
+</body>
+</html>
