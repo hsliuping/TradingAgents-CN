@@ -1,0 +1,1534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>股票详情 - 重新设计 v2</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --primary: #6b5ce7;
+      --primary-light: #8b5cf6;
+      --primary-bg: #f5f3ff;
+      --info: #3b82f6;
+      --info-bg: #eff6ff;
+      --warning: #f59e0b;
+      --warning-bg: #fffbeb;
+      --danger: #ef4444;
+      --danger-bg: #fef2f2;
+      --neutral: #64748b;
+      --text-primary: #1e293b;
+      --text-secondary: #64748b;
+      --text-tertiary: #94a3b8;
+      --bg-page: #f8fafc;
+      --bg-card: #ffffff;
+      --border: #e2e8f0;
+      --border-light: #f1f5f9;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+      --shadow-primary: 0 8px 24px rgba(107, 92, 231, 0.25);
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: var(--bg-page);
+      color: var(--text-primary);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+    /* ════════ 顶部：股票概览 + 操作入口 ════════ */
+    .stock-header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 20px;
+      margin-bottom: 16px;
+      align-items: start;
+    }
+    .stock-card {
+      background: var(--bg-card);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: var(--shadow-sm);
+      border: 1px solid var(--border-light);
+    }
+    .stock-name-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stock-code { font-size: 24px; font-weight: 700; }
+    .stock-name { font-size: 18px; color: var(--text-secondary); }
+    .market-tag {
+      padding: 2px 8px;
+      background: var(--info-bg);
+      color: var(--info);
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .price-row {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+    .current-price { font-size: 32px; font-weight: 700; color: var(--danger); }
+    .price-change { font-size: 16px; color: var(--danger); font-weight: 600; }
+    .price-meta { font-size: 12px; color: var(--text-tertiary); }
+    .quick-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-light);
+    }
+    .quick-metric-item .label { font-size: 11px; color: var(--text-tertiary); margin-bottom: 2px; }
+    .quick-metric-item .value { font-size: 14px; font-weight: 600; }
+
+    /* 操作入口 */
+    .action-entry {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      width: 480px;
+    }
+    .action-btn {
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      text-align: left;
+    }
+    .action-btn:hover {
+      border-color: var(--primary);
+      background: var(--primary-bg);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-sm);
+    }
+    .action-btn-primary {
+      background: linear-gradient(135deg, #6b5ce7 0%, #8b5cf6 100%);
+      color: #fff;
+      border: none;
+    }
+    .action-btn-primary:hover {
+      opacity: 0.9;
+      background: linear-gradient(135deg, #6b5ce7 0%, #8b5cf6 100%);
+    }
+    .action-btn .icon { font-size: 18px; }
+    .action-btn .title { font-size: 13px; font-weight: 700; }
+    .action-btn .desc { font-size: 11px; color: var(--text-tertiary); }
+    .action-btn-primary .desc { color: rgba(255,255,255,0.8); }
+
+    /* ════════ 智能助手主入口（紧接顶部，突出显示） ════════ */
+    .assistant-hero {
+      background: linear-gradient(135deg, #6b5ce7 0%, #8b5cf6 50%, #a855f7 100%);
+      border-radius: 12px;
+      padding: 20px;
+      color: #fff;
+      position: relative;
+      overflow: hidden;
+      box-shadow: var(--shadow-primary);
+      margin-bottom: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      align-items: center;
+    }
+    .assistant-hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -10%;
+      width: 50%;
+      height: 200%;
+      background: radial-gradient(circle, rgba(255,255,255,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .assistant-hero-left { position: relative; z-index: 1; }
+    .assistant-hero-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .assistant-avatar {
+      width: 44px;
+      height: 44px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      backdrop-filter: blur(10px);
+    }
+    .assistant-hero-title { font-size: 18px; font-weight: 700; }
+    .assistant-hero-subtitle { font-size: 12px; color: rgba(255,255,255,0.85); margin-top: 2px; }
+    .assistant-hero-prompt {
+      font-size: 13px;
+      color: rgba(255,255,255,0.95);
+      line-height: 1.6;
+    }
+    .assistant-hero-prompt strong {
+      background: rgba(255,255,255,0.2);
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+    .assistant-quick-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      position: relative;
+      z-index: 1;
+    }
+    .assistant-quick-btn {
+      padding: 12px 14px;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      backdrop-filter: blur(10px);
+    }
+    .assistant-quick-btn:hover {
+      background: rgba(255,255,255,0.25);
+      transform: translateY(-1px);
+    }
+
+    /* ════════ 研究路径 ════════ */
+    .research-flow {
+      background: var(--bg-card);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow-sm);
+      border: 1px solid var(--border-light);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      transition: box-shadow 0.3s;
+    }
+    .research-flow.stuck {
+      border-radius: 0 0 12px 12px;
+      box-shadow: var(--shadow-md);
+    }
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: 15px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title .badge {
+      padding: 2px 8px;
+      background: var(--primary-bg);
+      color: var(--primary);
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .flow-steps {
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
+    .flow-step {
+      flex: 1;
+      min-width: 120px;
+      padding: 10px;
+      border-radius: 8px;
+      background: var(--bg-page);
+      border: 1px solid var(--border-light);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .flow-step:hover { border-color: var(--primary); background: var(--primary-bg); }
+    .flow-step.active { border-color: var(--primary); background: var(--primary-bg); }
+    .flow-step-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .flow-step-num {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--border);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .flow-step.active .flow-step-num { background: var(--primary); }
+    .flow-step.done .flow-step-num { background: var(--info); }
+    .flow-step-status { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+    .status-done { background: #dbeafe; color: var(--info); }
+    .status-active { background: var(--primary-bg); color: var(--primary); }
+    .status-pending { background: #f1f5f9; color: var(--text-tertiary); }
+    .flow-step-title { font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+    .flow-step-desc { font-size: 10px; color: var(--text-secondary); }
+    .flow-arrow { flex-shrink: 0; width: 20px; text-align: center; color: var(--text-tertiary); font-size: 16px; }
+
+    /* ════════ 通用卡片 ════════ */
+    .card {
+      background: var(--bg-card);
+      border-radius: 12px;
+      box-shadow: var(--shadow-sm);
+      border: 1px solid var(--border-light);
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border-light);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .card-body { padding: 16px 20px; }
+
+    /* ════════ K线 + 指标 ════════ */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    #kline-chart { width: 100%; height: 400px; }
+    .kline-info {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--text-tertiary);
+      display: flex;
+      justify-content: space-between;
+    }
+    .period-tabs { display: flex; gap: 4px; }
+    .period-tab {
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--text-secondary);
+      border: 1px solid transparent;
+    }
+    .period-tab.active { background: var(--primary); color: #fff; }
+    .period-tab:not(.active):hover { background: var(--primary-bg); color: var(--primary); }
+
+    /* K线图例 */
+    .kline-legend {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+    .kline-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .kline-legend-dot {
+      width: 8px;
+      height: 2px;
+      border-radius: 1px;
+    }
+    .kline-legend-dot.ma5 { background: #f59e0b; }
+    .kline-legend-dot.ma20 { background: #8b5cf6; }
+    .kline-legend-dot.vol { background: #e2e8f0; }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .metric-card {
+      padding: 10px;
+      border-radius: 8px;
+      background: var(--bg-page);
+      border: 1px solid var(--border-light);
+    }
+    .metric-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .metric-name { font-size: 12px; color: var(--text-secondary); font-weight: 600; }
+    .metric-status { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+    .status-good { background: var(--info-bg); color: var(--info); }
+    .status-mid { background: var(--warning-bg); color: var(--warning); }
+    .status-bad { background: var(--danger-bg); color: var(--danger); }
+    .metric-values { display: flex; gap: 12px; }
+    .metric-value-item { flex: 1; }
+    .metric-value-label { font-size: 10px; color: var(--text-tertiary); }
+    .metric-value-number { font-size: 15px; font-weight: 700; margin-top: 2px; }
+    .metric-value-number .trend { font-size: 11px; margin-left: 4px; font-weight: 500; }
+    .trend-up { color: var(--info); }
+    .trend-down { color: var(--danger); }
+    .trend-flat { color: var(--text-tertiary); }
+    .metric-industry {
+      font-size: 10px;
+      color: var(--text-tertiary);
+      margin-top: 4px;
+      border-top: 1px dashed var(--border-light);
+      padding-top: 4px;
+    }
+    .metric-industry .highlight { font-weight: 600; color: var(--text-secondary); }
+    .metric-bar { height: 3px; background: var(--border-light); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+    .metric-bar-fill { height: 100%; border-radius: 2px; }
+
+    /* ════════ 单股分析结果 ════════ */
+    .analysis-result-card { margin-bottom: 16px; }
+    .analysis-result-summary {
+      padding: 14px;
+      background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+      border-radius: 8px;
+      border-left: 3px solid var(--primary);
+      margin-bottom: 14px;
+    }
+    .analysis-result-summary .label {
+      font-size: 11px;
+      color: var(--primary);
+      font-weight: 700;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .analysis-result-summary .conclusion {
+      font-size: 14px;
+      color: var(--text-primary);
+      line-height: 1.7;
+    }
+    .analysis-meta {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+      padding: 10px 14px;
+      background: var(--bg-page);
+      border-radius: 8px;
+    }
+    .analysis-meta-item .label { font-size: 11px; color: var(--text-tertiary); }
+    .analysis-meta-item .value { font-size: 13px; font-weight: 600; }
+    .analysis-sections { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .analysis-section {
+      padding: 12px;
+      background: var(--bg-page);
+      border-radius: 8px;
+      border-left: 3px solid var(--info);
+    }
+    .analysis-section.warning { border-left-color: var(--warning); }
+    .analysis-section.danger { border-left-color: var(--danger); }
+    .analysis-section-title {
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .analysis-section-content {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+    .disclaimer {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: #f1f5f9;
+      border-radius: 6px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+
+    /* 折叠展开 */
+    .collapse-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--primary);
+      cursor: pointer;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: background 0.2s;
+      margin-left: 8px;
+      border: none;
+      background: none;
+    }
+    .collapse-toggle:hover { background: var(--primary-bg); }
+    .collapse-toggle .arrow { transition: transform 0.2s; font-size: 10px; }
+    .collapse-toggle.collapsed .arrow { transform: rotate(-90deg); }
+    .collapsible { overflow: hidden; transition: max-height 0.4s ease; }
+    .collapsible.collapsed { max-height: 0 !important; }
+
+    /* 回到顶部 */
+    .back-to-top {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      font-size: 18px;
+      box-shadow: 0 4px 12px rgba(107, 92, 231, 0.35);
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .back-to-top.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    .back-to-top:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(107, 92, 231, 0.45); }
+
+    /* ════════ 标签页（持仓/复盘合并） ════════ */
+    .tabs-card { margin-bottom: 16px; }
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border-light);
+    }
+    .tab {
+      padding: 12px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .tab:hover { color: var(--primary); }
+    .tab.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+    .tab .tab-badge {
+      padding: 1px 6px;
+      background: var(--border-light);
+      border-radius: 3px;
+      font-size: 10px;
+      color: var(--text-tertiary);
+    }
+    .tab.active .tab-badge { background: var(--primary-bg); color: var(--primary); }
+    .tab-content { display: none; padding: 16px 20px; }
+    .tab-content.active { display: block; }
+
+    /* 历史记录按钮 */
+    .history-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-card);
+      color: var(--text-secondary);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .history-btn:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+      background: var(--primary-bg);
+    }
+    .history-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      background: var(--primary);
+      color: #fff;
+      border-radius: 8px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .history-btn:hover .history-count {
+      background: var(--primary-light);
+    }
+
+    .summary-row {
+      display: flex;
+      gap: 16px;
+      padding: 12px;
+      background: var(--bg-page);
+      border-radius: 8px;
+      margin-bottom: 14px;
+    }
+    .summary-item { flex: 1; text-align: center; }
+    .summary-item .label { font-size: 11px; color: var(--text-tertiary); margin-bottom: 4px; }
+    .summary-item .value { font-size: 16px; font-weight: 700; }
+    .summary-item .value.danger { color: var(--danger); }
+    .summary-item .value.info { color: var(--info); }
+
+    .sub-section { margin-bottom: 14px; }
+    .sub-section:last-child { margin-bottom: 0; }
+    .sub-section-title {
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .sub-section-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.8;
+    }
+    .sub-section-content {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+      padding: 10px 12px;
+      background: var(--bg-page);
+      border-radius: 6px;
+      border-left: 3px solid var(--primary);
+    }
+
+    /* ════════ 智能助手对话区 ════════ */
+    .assistant-chat-section {
+      background: var(--bg-card);
+      border-radius: 12px;
+      box-shadow: var(--shadow-sm);
+      border: 1px solid var(--border-light);
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .assistant-chat-header {
+      padding: 14px 20px;
+      background: linear-gradient(135deg, #6b5ce7 0%, #8b5cf6 100%);
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .assistant-chat-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .chat-messages {
+      max-height: 360px;
+      overflow-y: auto;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .chat-message {
+      display: flex;
+      gap: 10px;
+      max-width: 85%;
+    }
+    .chat-message.user {
+      flex-direction: row-reverse;
+      align-self: flex-end;
+    }
+    .chat-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: #fff;
+    }
+    .chat-message.bot .chat-avatar { background: linear-gradient(135deg, #6b5ce7 0%, #8b5cf6 100%); }
+    .chat-message.user .chat-avatar { background: var(--info); }
+    .chat-bubble {
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .chat-message.bot .chat-bubble {
+      background: var(--bg-page);
+      color: var(--text-primary);
+      border-bottom-left-radius: 4px;
+    }
+    .chat-message.user .chat-bubble {
+      background: var(--primary);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .chat-input-area {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      padding: 12px 20px;
+      border-top: 1px solid var(--border-light);
+    }
+    .chat-input {
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      resize: none;
+      outline: none;
+      max-height: 80px;
+      min-height: 40px;
+      font-family: inherit;
+    }
+    .chat-input:focus { border-color: var(--primary); }
+    .chat-send-btn {
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      background: linear-gradient(135deg, #6b5ce7 0%, #8b5cf6 100%);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .chat-send-btn:hover { opacity: 0.9; }
+
+    /* ════════ 基本面 + 新闻 ════════ */
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .snapshot-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    .snapshot-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border-light);
+      font-size: 13px;
+    }
+    .snapshot-label { color: var(--text-secondary); }
+    .snapshot-value { font-weight: 600; }
+
+    .news-list { display: flex; flex-direction: column; gap: 10px; }
+    .news-item {
+      padding: 10px;
+      background: var(--bg-page);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .news-item:hover { background: var(--primary-bg); }
+    .news-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .news-title {
+      font-size: 13px;
+      font-weight: 600;
+      flex: 1;
+    }
+    .news-tag {
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-right: 8px;
+    }
+    .tag-news { background: var(--info-bg); color: var(--info); }
+    .tag-announcement { background: var(--warning-bg); color: var(--warning); }
+    .news-time { font-size: 11px; color: var(--text-tertiary); }
+    .news-source { font-size: 11px; color: var(--text-tertiary); }
+
+    @media (max-width: 1024px) {
+      .stock-header, .main-grid, .bottom-grid, .assistant-hero, .analysis-sections {
+        grid-template-columns: 1fr;
+      }
+      .action-entry { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- ════════ 1. 顶部：股票概览 + 操作入口 ════════ -->
+    <div class="stock-header">
+      <div class="stock-card">
+        <div class="stock-name-row">
+          <span class="stock-code">300750</span>
+          <span class="stock-name">宁德时代</span>
+          <span class="market-tag">创业板</span>
+        </div>
+        <div class="price-row">
+          <span class="current-price">383.01</span>
+          <span class="price-change">-11.99 (-3.03%)</span>
+          <span class="price-meta">2026-07-24 15:00 收盘</span>
+        </div>
+        <div class="quick-metrics">
+          <div class="quick-metric-item"><div class="label">今开</div><div class="value">394.00</div></div>
+          <div class="quick-metric-item"><div class="label">最高</div><div class="value">396.80</div></div>
+          <div class="quick-metric-item"><div class="label">最低</div><div class="value">381.50</div></div>
+          <div class="quick-metric-item"><div class="label">成交量</div><div class="value">18.6万手</div></div>
+        </div>
+      </div>
+
+      <!-- 操作入口 -->
+      <div class="action-entry">
+        <button class="action-btn action-btn-primary" onclick="alert('发起单股研究')">
+          <span class="icon">🔬</span>
+          <span class="title">发起研究</span>
+          <span class="desc">AI 多智能体深度分析</span>
+        </button>
+        <button class="action-btn" onclick="alert('查看持仓')">
+          <span class="icon">💼</span>
+          <span class="title">持仓分析</span>
+          <span class="desc">查看持仓研究详情</span>
+        </button>
+        <button class="action-btn" onclick="alert('同步数据')">
+          <span class="icon">🔄</span>
+          <span class="title">同步数据</span>
+          <span class="desc">更新行情/财务数据</span>
+        </button>
+        <button class="action-btn" onclick="alert('模拟交易')">
+          <span class="icon">📊</span>
+          <span class="title">模拟交易</span>
+          <span class="desc">进入模拟交易系统</span>
+        </button>
+        <button class="action-btn" onclick="alert('加入自选')">
+          <span class="icon">⭐</span>
+          <span class="title">加入自选</span>
+          <span class="desc">添加到关注列表</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ════════ 2. 智能助手主入口（紧接顶部，突出显示） ════════ -->
+    <div class="assistant-hero">
+      <div class="assistant-hero-left">
+        <div class="assistant-hero-header">
+          <div class="assistant-avatar">🤖</div>
+          <div>
+            <div class="assistant-hero-title">智能研究助手</div>
+            <div class="assistant-hero-subtitle">正在解读：300750 宁德时代 · 已加载全部研究数据</div>
+          </div>
+        </div>
+        <div class="assistant-hero-prompt">
+          我已整合该股票的 <strong>单股分析</strong>、<strong>持仓分析</strong>、<strong>交易复盘</strong>、<strong>基本面</strong> 和 <strong>K线走势</strong>，可以为你全景解读。点击右侧任一问题开始研究：
+        </div>
+      </div>
+      <div class="assistant-quick-grid">
+        <button class="assistant-quick-btn" onclick="scrollToChat('帮我全景分析这只股票，从分析结果、持仓、复盘整体怎么看？')">
+          <span>🔗</span> 全景解读
+        </button>
+        <button class="assistant-quick-btn" onclick="scrollToChat('最近一次单股分析的核心结论是什么？')">
+          <span>📋</span> 分析结论
+        </button>
+        <button class="assistant-quick-btn" onclick="scrollToChat('结合我的持仓和复盘，下一步重点跟踪什么？')">
+          <span>💼</span> 持仓视角
+        </button>
+        <button class="assistant-quick-btn" onclick="scrollToChat('当前估值和基本面是否匹配？有哪些风险？')">
+          <span>⚠️</span> 风险评估
+        </button>
+      </div>
+    </div>
+
+    <!-- ════════ 3. 研究路径 ════════ -->
+    <div class="research-flow">
+      <div class="section-header">
+        <div class="section-title">研究路径 <span class="badge">5 步</span></div>
+      </div>
+      <div class="flow-steps">
+        <div class="flow-step done" onclick="document.getElementById('kline-section').scrollIntoView({behavior:'smooth'})">
+          <div class="flow-step-header"><div class="flow-step-num">1</div><span class="flow-step-status status-done">已完成</span></div>
+          <div class="flow-step-title">行情走势</div>
+          <div class="flow-step-desc">K线 + 核心指标</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step done" onclick="document.getElementById('analysis-result-section').scrollIntoView({behavior:'smooth'})">
+          <div class="flow-step-header"><div class="flow-step-num">2</div><span class="flow-step-status status-done">已完成</span></div>
+          <div class="flow-step-title">单股分析</div>
+          <div class="flow-step-desc">AI 研究报告</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step done" onclick="document.getElementById('position-review-section').scrollIntoView({behavior:'smooth'})">
+          <div class="flow-step-header"><div class="flow-step-num">3</div><span class="flow-step-status status-done">已完成</span></div>
+          <div class="flow-step-title">持仓与复盘</div>
+          <div class="flow-step-desc">持仓状态 + 交易回顾</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step done" onclick="document.getElementById('bottom-section').scrollIntoView({behavior:'smooth'})">
+          <div class="flow-step-header"><div class="flow-step-num">4</div><span class="flow-step-status status-done">已完成</span></div>
+          <div class="flow-step-title">基本面</div>
+          <div class="flow-step-desc">财务数据 + 新闻</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step active" onclick="scrollToChat()">
+          <div class="flow-step-header"><div class="flow-step-num">5</div><span class="flow-step-status status-active">进行中</span></div>
+          <div class="flow-step-title">智能助手解读</div>
+          <div class="flow-step-desc">全景涵盖以上所有模块</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ 4. K线 + 指标卡片 ════════ -->
+    <div class="main-grid" id="kline-section">
+      <div class="card">
+        <div class="card-header">
+          <div class="section-title">行情走势</div>
+          <div class="period-tabs">
+            <div class="period-tab active" onclick="updateKline('day', this)">日K</div>
+            <div class="period-tab" onclick="updateKline('week', this)">周K</div>
+            <div class="period-tab" onclick="updateKline('month', this)">月K</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div id="kline-chart"></div>
+          <div class="kline-legend">
+            <div class="kline-legend-item"><span class="kline-legend-dot ma5"></span> MA5</div>
+            <div class="kline-legend-item"><span class="kline-legend-dot ma20"></span> MA20</div>
+            <div class="kline-legend-item"><span class="kline-legend-dot vol"></span> 成交量</div>
+            <span style="margin-left:auto">数据源：mongodb · 最近：2026-07-24</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><div class="section-title">核心指标</div></div>
+        <div class="card-body">
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-card-header"><span class="metric-name">估值</span><span class="metric-status status-mid">中性</span></div>
+              <div class="metric-values">
+                <div class="metric-value-item"><div class="metric-value-label">PE(TTM)</div><div class="metric-value-number">22.44</div></div>
+                <div class="metric-value-item"><div class="metric-value-label">PB</div><div class="metric-value-number">4.96</div></div>
+              </div>
+              <div class="metric-bar"><div class="metric-bar-fill" style="width:60%;background:var(--warning)"></div></div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-card-header"><span class="metric-name">盈利能力</span></div>
+              <div class="metric-values">
+                <div class="metric-value-item"><div class="metric-value-label">ROE</div><div class="metric-value-number">5.97%</div></div>
+                <div class="metric-value-item"><div class="metric-value-label">毛利率</div><div class="metric-value-number">22.12%</div></div>
+              </div>
+              <div class="metric-bar"><div class="metric-bar-fill" style="width:75%;background:var(--info)"></div></div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-card-header"><span class="metric-name">财务健康</span></div>
+              <div class="metric-values">
+                <div class="metric-value-item"><div class="metric-value-label">负债率</div><div class="metric-value-number">62.32%</div></div>
+                <div class="metric-value-item"><div class="metric-value-label">流动比率</div><div class="metric-value-number">1.60</div></div>
+              </div>
+              <div class="metric-bar"><div class="metric-bar-fill" style="width:50%;background:var(--warning)"></div></div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-card-header"><span class="metric-name">经营规模</span></div>
+              <div class="metric-values">
+                <div class="metric-value-item"><div class="metric-value-label">营收</div><div class="metric-value-number">203.51亿</div></div>
+                <div class="metric-value-item"><div class="metric-value-label">净利润</div><div class="metric-value-number">42.28亿</div></div>
+              </div>
+              <div class="metric-bar"><div class="metric-bar-fill" style="width:70%;background:var(--info)"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ 5. 单股分析结果 ════════ -->
+    <div class="card analysis-result-card" id="analysis-result-section">
+      <div class="card-header">
+        <div class="section-title">📋 单股分析结果 <span class="badge">深度研究</span></div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:12px;color:var(--text-tertiary)">2026-07-22 完成 · 研究深度：4级</span>
+          <button class="history-btn" onclick="alert('查看单股分析历史记录（共 5 次）')">📜 历史记录 <span class="history-count">5</span></button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="analysis-result-summary">
+          <div class="label">研究结论</div>
+          <div class="conclusion">
+            宁德时代作为全球动力电池龙头，受益于电动车渗透率提升和储能市场爆发，长期成长逻辑清晰。当前估值处于历史中枢，短期受原材料价格波动及市场竞争加剧影响，股价有所回调。后续研究应重点关注二季度产能利用率、原材料价格走势及海外市场订单变化。
+          </div>
+        </div>
+
+        <div class="analysis-meta">
+          <div class="analysis-meta-item"><div class="label">研究团队</div><div class="value">市场+基本面+新闻+社交</div></div>
+          <div class="analysis-meta-item"><div class="label">分析时长</div><div class="value">12分38秒</div></div>
+          <div class="analysis-meta-item"><div class="label">信心度</div><div class="value" style="color:var(--primary)">中等偏上</div></div>
+          <div class="analysis-meta-item"><div class="label">数据截止</div><div class="value">2026-07-22</div></div>
+          <button class="collapse-toggle" onclick="toggleCollapse('analysis-detail', this)">展开详情 <span class="arrow">▼</span></button>
+        </div>
+
+        <div class="collapsible" id="analysis-detail" style="max-height:0">
+        <div class="analysis-sections">
+          <div class="analysis-section">
+            <div class="analysis-section-title"><span>📈</span> 市场面分析</div>
+            <div class="analysis-section-content">
+              股价近期从 420 元回落至 380 元附近，短期处于调整通道。成交量有所萎缩，显示市场情绪偏谨慎。技术面看，370 元附近存在支撑，400 元附近存在压力。
+            </div>
+          </div>
+          <div class="analysis-section">
+            <div class="analysis-section-title"><span>💰</span> 基本面分析</div>
+            <div class="analysis-section-content">
+              一季度营收同比增长 12%，归母净利润增长 18%。动力电池全球市占率继续领先，储能业务增速较快。毛利率 22.12%，ROE 5.97%，盈利能力较强。
+            </div>
+          </div>
+          <div class="analysis-section warning">
+            <div class="analysis-section-title"><span>📰</span> 新闻面分析</div>
+            <div class="analysis-section-content">
+              近期新闻以利好为主：与海外车企签署长期供货协议、半年度业绩预告归母净利润同比增长 20%-30%、装机量市占率继续稳居全球第一。
+            </div>
+          </div>
+          <div class="analysis-section danger">
+            <div class="analysis-section-title"><span>⚠️</span> 风险因素</div>
+            <div class="analysis-section-content">
+              主要风险：原材料价格反弹压缩毛利率、海外贸易政策变化、二线电池厂价格战加剧、新能源车销量增速放缓导致需求预期下修。
+            </div>
+          </div>
+        </div>
+        </div>
+
+        <div class="disclaimer">
+          本分析由 AI 多智能体系统基于公开信息生成，仅供研究参考，不构成任何交易建议。
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ 6. 持仓分析 + 交易复盘（标签页切换） ════════ -->
+    <div class="card tabs-card" id="position-review-section">
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab('position', this)">
+          💼 持仓分析 <span class="tab-badge">浮亏 3.03%</span>
+        </div>
+        <div class="tab" onclick="switchTab('review', this)">
+          📈 交易复盘 <span class="tab-badge">+12.5%</span>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;padding-right:8px">
+          <button class="history-btn" onclick="alert('查看持仓分析历史记录（共 3 次）')" id="position-history-btn">📜 持仓历史 <span class="history-count">3</span></button>
+          <button class="history-btn" onclick="alert('查看交易复盘历史记录（共 2 次）')" id="review-history-btn" style="display:none">📜 复盘历史 <span class="history-count">2</span></button>
+        </div>
+      </div>
+
+      <!-- 持仓分析 -->
+      <div class="tab-content active" id="tab-position">
+        <div class="summary-row">
+          <div class="summary-item"><div class="label">成本价</div><div class="value">¥395.00</div></div>
+          <div class="summary-item"><div class="label">现价</div><div class="value">¥383.01</div></div>
+          <div class="summary-item"><div class="label">浮动盈亏</div><div class="value danger">-¥3,036 (-3.03%)</div></div>
+          <div class="summary-item"><div class="label">持有天数</div><div class="value">25 天</div></div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-section-title"><span>★</span> 当前状态</div>
+          <ul class="sub-section-list">
+            <li>持有25天浮亏3.03%，尚未经历财报验证</li>
+            <li>持仓处于浮亏但基本面尚未恶化的状态</li>
+          </ul>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-section-title">
+            <span>●</span> 核心依据
+            <button class="collapse-toggle collapsed" onclick="toggleCollapse('pos-core', this)"><span class="arrow">▼</span></button>
+          </div>
+          <div class="collapsible collapsed" id="pos-core" style="max-height:200px">
+          <ul class="sub-section-list">
+            <li>全球动力电池装机量市占率继续保持领先</li>
+            <li>二季度营收增速预计维持在15%-20%区间</li>
+            <li>储能业务订单增速加快，成为第二增长曲线</li>
+          </ul>
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-section-title">
+            <span>👁</span> 后续观察点
+            <button class="collapse-toggle collapsed" onclick="toggleCollapse('pos-follow', this)"><span class="arrow">▼</span></button>
+          </div>
+          <div class="collapsible collapsed" id="pos-follow" style="max-height:200px">
+          <ul class="sub-section-list">
+            <li>公司是否在近期公告中明确下半年产能利用率目标</li>
+            <li>最新月度装机量数据是否连续两月环比改善</li>
+          </ul>
+          </div>
+        </div>
+
+        <div class="disclaimer">
+          本分析基于公开信息和持仓数据生成，仅供研究参考，不构成任何交易建议。
+        </div>
+      </div>
+
+      <!-- 交易复盘 -->
+      <div class="tab-content" id="tab-review">
+        <div class="summary-row">
+          <div class="summary-item"><div class="label">交易次数</div><div class="value">3 次</div></div>
+          <div class="summary-item"><div class="label">总收益率</div><div class="value info">+12.5%</div></div>
+          <div class="summary-item"><div class="label">持仓天数</div><div class="value">45 天</div></div>
+          <div class="summary-item"><div class="label">胜率</div><div class="value">66.7%</div></div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-section-title"><span>📝</span> 复盘结论</div>
+          <div class="sub-section-content">
+            本阶段交易整体把握了宁德时代一季度业绩超预期的主线，但在 4 月中旬市场回调时过早止盈，错失了后续一段涨幅。买入时点选择较好，基本面对判断支撑充分；卖出时受短期波动影响较大，对中期逻辑的坚持不足。
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-section-title">
+            <span>✅</span> 做得好的 / <span>⚠️</span> 暴露的问题
+            <button class="collapse-toggle collapsed" onclick="toggleCollapse('rev-problems', this)"><span class="arrow">▼</span></button>
+          </div>
+          <div class="collapsible collapsed" id="rev-problems" style="max-height:200px">
+          <ul class="sub-section-list">
+            <li><strong>好的：</strong>买入前充分验证了业绩预告和装机量数据，仓位控制合理</li>
+            <li><strong>问题：</strong>对中期产业趋势信心不足，卖出决策缺乏负面信息支撑</li>
+          </ul>
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-section-title">
+            <span>🎯</span> 后续改进重点
+            <button class="collapse-toggle collapsed" onclick="toggleCollapse('rev-improve', this)"><span class="arrow">▼</span></button>
+          </div>
+          <div class="collapsible collapsed" id="rev-improve" style="max-height:200px">
+          <ul class="sub-section-list">
+            <li>建立买入/卖出决策清单，明确核心假设和推翻条件</li>
+            <li>区分短期波动和中期逻辑变化，减少情绪化交易</li>
+          </ul>
+          </div>
+        </div>
+
+        <div class="disclaimer">
+          本复盘基于历史交易记录生成，用于回顾决策过程，不构成对未来交易的建议。
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ 7. 智能助手对话区 ════════ -->
+    <div class="assistant-chat-section" id="assistant-chat">
+      <div class="assistant-chat-header">
+        <div class="assistant-chat-title">
+          <span>🤖</span>
+          <span>智能研究助手 · 全景解读</span>
+        </div>
+        <span style="font-size:12px;color:rgba(255,255,255,0.85)">已加载：分析 · 持仓 · 复盘 · 基本面</span>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-message bot">
+          <div class="chat-avatar">🤖</div>
+          <div class="chat-bubble">
+            你好！我已经读取了 <strong>300750 宁德时代</strong> 的全部研究数据：<br>
+            • 单股分析结果（市场+基本面+新闻+风险）<br>
+            • 持仓分析（成本 395.00，浮亏 3.03%）<br>
+            • 交易复盘（3 次交易，总收益 +12.5%）<br>
+            • 基本面数据（PE 22.44，ROE 5.97%）<br><br>
+            你可以问我任何关于这只股票的问题，我会结合以上数据为你全景解读。
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <textarea id="chat-input" class="chat-input" rows="1" placeholder="输入问题，例如：结合分析和持仓，我下一步应该重点跟踪什么？"></textarea>
+        <button class="chat-send-btn" onclick="sendChatMessage()">发送</button>
+      </div>
+    </div>
+
+    <!-- ════════ 8. 基本面 + 新闻 ════════ -->
+    <div class="bottom-grid" id="bottom-section">
+      <div class="card">
+        <div class="card-header"><div class="section-title">基本面数据</div></div>
+        <div class="card-body">
+          <div class="snapshot-grid">
+            <div class="snapshot-item"><span class="snapshot-label">行业</span><span class="snapshot-value">电气设备</span></div>
+            <div class="snapshot-item"><span class="snapshot-label">板块</span><span class="snapshot-value">创业板</span></div>
+            <div class="snapshot-item"><span class="snapshot-label">总市值</span><span class="snapshot-value">1.77万亿</span></div>
+            <div class="snapshot-item"><span class="snapshot-label">PE(TTM)</span><span class="snapshot-value">22.44</span></div>
+            <div class="snapshot-item"><span class="snapshot-label">PB(市净率)</span><span class="snapshot-value">4.96</span></div>
+            <div class="snapshot-item"><span class="snapshot-label">ROE</span><span class="snapshot-value">5.97%</span></div>
+            <div class="snapshot-item"><span class="snapshot-label">负债率</span><span class="snapshot-value">62.32%</span></div>
+            <div class="snapshot-item"><span class="snapshot-label">股息率</span><span class="snapshot-value">2.08%</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><div class="section-title">近期新闻与公告</div></div>
+        <div class="card-body">
+          <div class="news-list">
+            <div class="news-item">
+              <div class="news-header">
+                <div class="news-title"><span class="news-tag tag-news">新闻</span>宁德时代与某海外车企签署长期供货协议</div>
+                <div class="news-time">07-23</div>
+              </div>
+              <div class="news-source">证券时报 · 14:22</div>
+            </div>
+            <div class="news-item">
+              <div class="news-header">
+                <div class="news-title"><span class="news-tag tag-announcement">公告</span>2026年半年度业绩预告：归母净利润同比增长 20%-30%</div>
+                <div class="news-time">07-22</div>
+              </div>
+              <div class="news-source">公司公告 · 18:00</div>
+            </div>
+            <div class="news-item">
+              <div class="news-header">
+                <div class="news-title"><span class="news-tag tag-news">新闻</span>动力电池装机量数据公布，宁德时代市占率继续稳居全球第一</div>
+                <div class="news-time">07-20</div>
+              </div>
+              <div class="news-source">第一财经 · 09:15</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 回到顶部 -->
+  <button class="back-to-top" id="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+
+  <script>
+    // ════════ K线图（含 MA5/MA20 + 成交量） ════════
+    const kChart = echarts.init(document.getElementById('kline-chart'));
+
+    function calcMA(data, period) {
+      const result = [];
+      for (let i = 0; i < data.length; i++) {
+        if (i < period - 1) { result.push('-'); continue; }
+        let sum = 0;
+        for (let j = 0; j < period; j++) { sum += parseFloat(data[i - j][1]); }
+        result.push((sum / period).toFixed(2));
+      }
+      return result;
+    }
+
+    function genKlineData(period) {
+      const days = period === 'day' ? 60 : period === 'week' ? 30 : 24;
+      const startPrice = 420;
+      const data = [];
+      const category = [];
+      const baseDate = new Date('2026-07-24');
+      for (let i = 0; i < days; i++) {
+        const date = new Date(baseDate);
+        date.setDate(date.getDate() - (days - i) * (period === 'day' ? 1 : period === 'week' ? 7 : 30));
+        category.push((date.getMonth()+1) + '-' + date.getDate());
+        const open = startPrice + (Math.random() - 0.5) * 20 + i * 0.3;
+        const close = open + (Math.random() - 0.5) * 15;
+        const low = Math.min(open, close) - Math.random() * 10;
+        const high = Math.max(open, close) + Math.random() * 10;
+        const vol = Math.floor(80000 + Math.random() * 120000);
+        data.push([open.toFixed(2), close.toFixed(2), low.toFixed(2), high.toFixed(2), vol]);
+      }
+      if (data.length > 0) {
+        data[data.length-1] = ['394.00', '383.01', '381.50', '396.80', 95400];
+      }
+      return { category, data };
+    }
+
+    function getKlineOption(period) {
+      const d = genKlineData(period);
+      const ma5 = calcMA(d.data, 5);
+      const ma20 = calcMA(d.data, 20);
+      const volumes = d.data.map(function(item) { return item[4]; });
+
+      return {
+        grid: [
+          { left: 50, right: 20, top: 20, height: '60%' },
+          { left: 50, right: 20, top: '72%', height: '18%' }
+        ],
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: { type: 'cross' },
+          formatter: function(params) {
+            const p = params[0];
+            if (!p) return '';
+            return p.name + '<br/>开：' + p.data[1] + ' 收：' + p.data[2] + '<br/>低：' + p.data[3] + ' 高：' + p.data[4] + '<br/>成交量：' + (p.data[5]||0).toLocaleString() + '手';
+          }
+        },
+        xAxis: [
+          {
+            type: 'category',
+            data: d.category,
+            boundaryGap: true,
+            axisLine: { lineStyle: { color: '#94a3b8' } },
+            axisLabel: { color: '#64748b', fontSize: 11 },
+            gridIndex: 0
+          },
+          {
+            type: 'category',
+            data: d.category,
+            boundaryGap: true,
+            axisLine: { lineStyle: { color: '#94a3b8' } },
+            axisLabel: { show: false },
+            gridIndex: 1
+          }
+        ],
+        yAxis: [
+          {
+            scale: true,
+            type: 'value',
+            gridIndex: 0,
+            axisLine: { lineStyle: { color: '#94a3b8' } },
+            splitLine: { lineStyle: { color: '#f1f5f9' } },
+            axisLabel: { color: '#64748b', fontSize: 11 }
+          },
+          {
+            scale: true,
+            type: 'value',
+            gridIndex: 1,
+            axisLine: { show: false },
+            axisTick: { show: false },
+            splitLine: { show: false },
+            axisLabel: { color: '#94a3b8', fontSize: 10, formatter: function(v) { return (v/10000).toFixed(0) + '万'; } }
+          }
+        ],
+        dataZoom: [
+          { type: 'inside', xAxisIndex: [0,1], start: 60, end: 100 },
+          { type: 'slider', xAxisIndex: [0,1], start: 60, end: 100, height: 14, bottom: 4 }
+        ],
+        series: [
+          {
+            type: 'candlestick',
+            name: 'K线',
+            xAxisIndex: 0,
+            yAxisIndex: 0,
+            data: d.data,
+            itemStyle: {
+              color: '#ef4444',
+              color0: '#94a3b8',
+              borderColor: '#ef4444',
+              borderColor0: '#94a3b8'
+            }
+          },
+          {
+            type: 'line',
+            name: 'MA5',
+            xAxisIndex: 0,
+            yAxisIndex: 0,
+            data: ma5,
+            smooth: true,
+            lineStyle: { color: '#f59e0b', width: 1.5 },
+            symbol: 'none'
+          },
+          {
+            type: 'line',
+            name: 'MA20',
+            xAxisIndex: 0,
+            yAxisIndex: 0,
+            data: ma20,
+            smooth: true,
+            lineStyle: { color: '#8b5cf6', width: 1.5 },
+            symbol: 'none'
+          },
+          {
+            type: 'bar',
+            name: '成交量',
+            xAxisIndex: 1,
+            yAxisIndex: 1,
+            data: volumes,
+            itemStyle: {
+              color: function(params) {
+                const item = d.data[params.dataIndex];
+                return parseFloat(item[1]) >= parseFloat(item[0]) ? '#ef4444' : '#94a3b8';
+              }
+            }
+          }
+        ]
+      };
+    }
+
+    function updateKline(period, el) {
+      document.querySelectorAll('.period-tab').forEach(function(t) { t.classList.remove('active'); });
+      el.classList.add('active');
+      kChart.setOption(getKlineOption(period), true);
+    }
+
+    kChart.setOption(getKlineOption('day'));
+    window.addEventListener('resize', function() { kChart.resize(); });
+
+    // 标签页切换
+    function switchTab(name, el) {
+      document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+      el.classList.add('active');
+      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+      document.getElementById('tab-' + name).classList.add('active');
+      // 切换历史记录按钮
+      var posBtn = document.getElementById('position-history-btn');
+      var revBtn = document.getElementById('review-history-btn');
+      if (name === 'position') {
+        posBtn.style.display = '';
+        revBtn.style.display = 'none';
+      } else {
+        posBtn.style.display = 'none';
+        revBtn.style.display = '';
+      }
+    }
+
+    // 智能助手对话
+    function scrollToChat(question) {
+      document.getElementById('assistant-chat').scrollIntoView({ behavior: 'smooth' });
+      if (question) {
+        setTimeout(function() { sendChatMessage(question); }, 600);
+      }
+    }
+
+    function addChatMessage(text, type) {
+      var messages = document.getElementById('chat-messages');
+      var div = document.createElement('div');
+      div.className = 'chat-message ' + type;
+      var avatar = type === 'bot' ? '🤖' : '我';
+      div.innerHTML = '<div class="chat-avatar">' + avatar + '</div><div class="chat-bubble">' + text + '</div>';
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function sendChatMessage(text) {
+      var input = document.getElementById('chat-input');
+      var message = text || input.value;
+      if (!message || !message.trim()) return;
+
+      addChatMessage(message, 'user');
+      if (!text) input.value = '';
+
+      setTimeout(function() {
+        var reply = '';
+        if (message.indexOf('全景') >= 0 || message.indexOf('整体') >= 0) {
+          reply = '我来为你全景解读 <strong>300750 宁德时代</strong>：<br><br>' +
+            '<strong>1. 单股分析</strong>：AI 研究结论为长期成长逻辑清晰，短期受原材料价格波动影响回调，信心度中等偏上。<br><br>' +
+            '<strong>2. 持仓状态</strong>：成本 395 元，浮亏 3.03%，持有 25 天。基本面尚未恶化，但价格未反映经营实质改善。<br><br>' +
+            '<strong>3. 交易复盘</strong>：上次交易总收益 +12.5%，但存在"对中期逻辑信心不足"的问题。本次持仓需避免重蹈覆辙。<br><br>' +
+            '<strong>4. 基本面</strong>：PE 22.44 处于合理中枢，ROE 5.97%，营收增速 +12%、利润增速 +18%。<br><br>' +
+            '<strong>综合判断</strong>：当前处于"基本面稳健 + 短期价格回调"阶段。后续重点跟踪二季度财报和产能利用率，避免情绪化决策。<br><br>' +
+            '<em style="color:#94a3b8;font-size:12px">以上分析仅供研究参考，不构成任何交易建议。</em>';
+        } else if (message.indexOf('分析') >= 0 && message.indexOf('结论') >= 0) {
+          reply = '最近一次单股分析（2026-07-22，深度4级）的核心结论：<br><br>' +
+            '<strong>研究判断</strong>：长期成长逻辑清晰，短期受原材料价格波动及市场竞争加剧影响回调。当前估值处于历史中枢。<br><br>' +
+            '<strong>市场面</strong>：370 元附近有支撑，400 元附近有压力，成交量萎缩显示情绪偏谨慎。<br><br>' +
+            '<strong>基本面</strong>：一季度营收 +12%、净利润 +18%，市占率继续领先。<br><br>' +
+            '<strong>风险</strong>：原材料价格反弹、海外贸易政策、二线厂价格战。<br><br>' +
+            '<em style="color:#94a3b8;font-size:12px">以上分析仅供研究参考，不构成任何交易建议。</em>';
+        } else if (message.indexOf('持仓') >= 0 || message.indexOf('跟踪') >= 0) {
+          reply = '结合你的持仓（成本 395，浮亏 3.03%）和上次复盘的教训，建议重点跟踪：<br><br>' +
+            '<strong>短期</strong>：二季度业绩预告落地情况、370 元价格支撑。<br>' +
+            '<strong>中期</strong>：产能利用率目标、海外大单签约进度。<br>' +
+            '<strong>风险信号</strong>：原材料价格反弹、海外贸易政策变化。<br><br>' +
+            '<strong>提示：</strong>从上次复盘看，你容易在短期波动时情绪化操作。建议问自己——当前是否有新的负面信息出现？如果没有，避免重复上次的情绪化操作。<br><br>' +
+            '<em style="color:#94a3b8;font-size:12px">以上分析仅供研究参考，不构成任何交易建议。</em>';
+        } else if (message.indexOf('风险') >= 0 || message.indexOf('估值') >= 0) {
+          reply = '当前估值与基本面匹配度分析：<br><br>' +
+            '<strong>估值</strong>：PE 22.44（近5年60%分位），PB 4.96（高于行业中位数），处于合理中枢偏上。<br><br>' +
+            '<strong>基本面支撑</strong>：营收 +12%、利润 +18%，ROE 5.97%，但需二季度增速验证。<br><br>' +
+            '<strong>主要风险</strong>：原材料价格反弹、海外贸易政策、价格战、需求预期下修。<br><br>' +
+            '<em style="color:#94a3b8;font-size:12px">以上分析仅供研究参考，不构成任何交易建议。</em>';
+        } else {
+          reply = '收到。基于已加载的 <strong>300750 宁德时代</strong> 研究数据，我可以从单股分析、持仓、复盘、基本面等角度解读。请尝试上方的快捷问题，或直接提问。<br><br>' +
+            '<em style="color:#94a3b8;font-size:12px">以上分析仅供研究参考，不构成任何交易建议。</em>';
+        }
+        addChatMessage(reply, 'bot');
+      }, 800);
+    }
+
+    document.getElementById('chat-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+
+    // ════════ 折叠展开 ════════
+    function toggleCollapse(id, btn) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      var isCollapsed = el.classList.contains('collapsed');
+      if (isCollapsed) {
+        el.classList.remove('collapsed');
+        el.style.maxHeight = el.scrollHeight + 'px';
+        btn.classList.remove('collapsed');
+        btn.childNodes[0].textContent = btn.childNodes[0].textContent === '展开详情' ? '收起详情' : '收起';
+      } else {
+        el.classList.add('collapsed');
+        el.style.maxHeight = '0';
+        btn.classList.add('collapsed');
+        btn.childNodes[0].textContent = btn.childNodes[0].textContent === '收起详情' ? '展开详情' : '展开';
+      }
+    }
+
+    // ════════ 研究路径：滚动时高亮当前步骤 ════════
+    (function() {
+      var flowSteps = document.querySelectorAll('.flow-step');
+      var sectionIds = ['kline-section', 'analysis-result-section', 'position-review-section', 'bottom-section', 'assistant-chat'];
+      var flowEl = document.querySelector('.research-flow');
+      var backToTop = document.getElementById('back-to-top');
+
+      window.addEventListener('scroll', function() {
+        var scrollY = window.scrollY;
+        var currentIndex = 0;
+
+        // 高亮当前步骤
+        for (var i = sectionIds.length - 1; i >= 0; i--) {
+          var el = document.getElementById(sectionIds[i]);
+          if (el && el.getBoundingClientRect().top <= 200) {
+            currentIndex = i;
+            break;
+          }
+        }
+
+        flowSteps.forEach(function(step, idx) {
+          step.classList.remove('active');
+          if (idx === currentIndex) step.classList.add('active');
+        });
+
+        // 研究路径 sticky 阴影
+        if (flowEl) {
+          flowEl.classList.toggle('stuck', scrollY > 10);
+        }
+
+        // 回到顶部按钮
+        if (backToTop) {
+          backToTop.classList.toggle('visible', scrollY > 600);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
