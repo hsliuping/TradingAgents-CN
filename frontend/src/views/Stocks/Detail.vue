@@ -1589,9 +1589,10 @@ function exportReport() {
   // 生成Markdown格式的完整报告
   let fullReport = `# ${code.value} 股票分析报告\n\n`
 
-  // 格式化分析时间用于报告
-  const reportTime = lastTaskInfo.value?.end_time
-    ? new Date(lastTaskInfo.value.end_time).toLocaleString('zh-CN', {
+  // 格式化分析时间用于报告（兼容 completed_at / created_at / end_time）
+  const reportTimeSrc = lastTaskInfo.value?.completed_at || lastTaskInfo.value?.created_at || lastTaskInfo.value?.end_time
+  const reportTime = reportTimeSrc
+    ? new Date(reportTimeSrc).toLocaleString('zh-CN', {
         timeZone: 'Asia/Shanghai',
         year: 'numeric',
         month: '2-digit',

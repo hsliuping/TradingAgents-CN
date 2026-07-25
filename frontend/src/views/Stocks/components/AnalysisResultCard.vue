@@ -7,8 +7,8 @@
         <span class="badge">深度研究</span>
       </div>
       <div class="header-right">
-        <span v-if="lastTaskInfo?.end_time" class="header-meta">
-          {{ formatAnalysisTime(lastTaskInfo.end_time) }} 完成
+        <span v-if="analysisTime" class="header-meta">
+          {{ formatAnalysisTime(analysisTime) }} 完成
         </span>
         <button class="history-btn" @click="$emit('viewHistory')">
           📜 历史记录
@@ -43,12 +43,23 @@
         <div class="analysis-meta">
           <div class="analysis-meta-item">
             <div class="label">分析时间</div>
-            <div class="value">{{ formatAnalysisTime(lastTaskInfo?.end_time) }}</div>
+            <div class="value">
+              {{ formatAnalysisTime(analysisTime) }}
+              <span v-if="relativeTimeText" class="relative-time">{{ relativeTimeText }}</span>
+            </div>
           </div>
           <div class="analysis-meta-item" v-if="reportKeys.length">
             <div class="label">报告数</div>
             <div class="value">{{ reportKeys.length }}</div>
           </div>
+          <!-- 数据过期提示：超过 1 天显示重新分析按钮 -->
+          <button
+            v-if="shouldShowReanalyzeBtn"
+            class="reanalyze-btn"
+            @click="$emit('analyze')"
+          >
+            🔄 数据已过期，重新分析
+          </button>
           <button
             v-if="hasDetailContent"
             class="collapse-toggle"
@@ -152,6 +163,40 @@ const detailReportKeys = computed(() => {
 })
 
 const hasDetailContent = computed(() => detailReportKeys.value.length > 0)
+
+// 统一获取分析时间（兼容 completed_at / created_at / end_time 多种字段名）
+const analysisTime = computed<string | null>(() => {
+  const t = props.lastTaskInfo
+  if (!t) return null
+  return t.completed_at || t.created_at || t.end_time || null
+})
+
+// 距今时长（天数，小数）
+const daysSinceAnalysis = computed<number | null>(() => {
+  const t = analysisTime.value
+  if (!t) return null
+  const d = new Date(t)
+  if (isNaN(d.getTime())) return null
+  return (Date.now() - d.getTime()) / (1000 * 60 * 60 * 24)
+})
+
+// 相对时间文本（如 "3小时前"、"2天前"）
+const relativeTimeText = computed<string>(() => {
+  const days = daysSinceAnalysis.value
+  if (days === null) return ''
+  if (days < 0) return '' // 时间在未来，不显示
+  if (days < 1 / 24) return '刚刚'
+  if (days < 1) return `${Math.floor(days * 24)}小时前`
+  if (days < 30) return `${Math.floor(days)}天前`
+  if (days < 365) return `${Math.floor(days / 30)}个月前`
+  return `${Math.floor(days / 365)}年前`
+})
+
+// 是否显示"重新分析"按钮（报告超过 1 天视为数据过期）
+const shouldShowReanalyzeBtn = computed(() => {
+  const days = daysSinceAnalysis.value
+  return days !== null && days > 1
+})
 
 function formatAnalysisTime(dateStr: any): string {
   if (!dateStr) return '-'
@@ -342,6 +387,40 @@ function getSectionIcon(key: string): string {
   font-size: 13px;
   font-weight: 600;
   color: #1e293b;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.relative-time {
+  font-size: 11px;
+  font-weight: 500;
+  color: #f59e0b;
+  background: #fef3c7;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.reanalyze-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.reanalyze-btn:hover {
+  background: #f59e0b;
+  color: #fff;
 }
 
 .collapse-toggle {
