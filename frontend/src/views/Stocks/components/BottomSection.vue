@@ -238,6 +238,10 @@ function formatNewsTime(dateStr: string | null | undefined): string {
   margin-bottom: 16px;
 }
 
+.news-card {
+  grid-column: 1 / -1;
+}
+
 .card {
   background: var(--el-bg-color, #fff);
   border-radius: 12px;

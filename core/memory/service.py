@@ -145,7 +145,7 @@ class MemoryService:
                 return True
             except Exception as e:
                 self._init_error = str(e)
-                logger.warning("[MemoryService] mem0 初始化失败（已降级）: %s", e)
+                logger.warning("[MemoryService] mem0 初始化失败（已降级）: %s", e, exc_info=True)
                 return False
 
     # ------------------------------------------------------------------

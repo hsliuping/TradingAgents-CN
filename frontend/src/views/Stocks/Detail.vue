@@ -296,6 +296,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading, CircleCheck, Warning, Pointer } from '@element-plus/icons-vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { stocksApi } from '@/api/stocks'
+import { assistantApi, type AssistantThreadItem } from '@/api/assistant'
 import { ApiClient } from '@/api/request'
 import {
   stockSyncApi,
@@ -912,6 +913,10 @@ onMounted(async () => {
   ])
   // 每30秒刷新一次报价
   timer = setInterval(fetchQuote, 30000)
+
+  // 初始化股票主题（依赖上面的报告数据，放在 Promise.all 之后）
+  // 异步执行不阻塞页面渲染；失败时降级为默认主题
+  void initStockAssistantThread()
 })
 onUnmounted(() => {
   stockDetailDisposed = true
@@ -1697,6 +1702,11 @@ const assistantLoading = ref(false)
 const assistantInitialPrompt = ref('')
 const assistantChatRef = ref<any>(null)
 
+// 股票主题（thread）状态
+const stockAssistantThreadId = ref<string>('')
+const stockAssistantThreadReady = ref(false)
+const stockAssistantStreamController = ref<AbortController | null>(null)
+
 // 已加载模块（用于助手头部展示）
 const assistantLoadedModules = computed(() => {
   const mods: string[] = []
@@ -1720,86 +1730,262 @@ function handleAssistantHeroAsk(prompt: string) {
   assistantInitialPrompt.value = prompt
 }
 
-// 处理助手发送问题（来自 AssistantChat）
-async function handleAssistantAsk(prompt: string) {
-  // 构建上下文摘要
-  const contextParts: string[] = []
-  contextParts.push(`股票：${code.value} ${stockName.value || ''}`)
-  if (quote.price && Number.isFinite(quote.price)) {
-    contextParts.push(`现价：${quote.price.toFixed(2)}（${quote.changePercent >= 0 ? '+' : ''}${quote.changePercent.toFixed(2)}%）`)
-  }
-  if (lastAnalysis.value) {
-    const conclusion = oneSentenceConclusion.value
-    if (conclusion && conclusion !== '-') {
-      contextParts.push(`单股分析结论：${conclusion}`)
-    }
-  }
-  if (positionSummary.has && positionSummary.snapshot) {
-    const s = positionSummary.snapshot
-    contextParts.push(`持仓：成本${s.cost_price?.toFixed(2)}，现价${s.current_price?.toFixed(2)}，浮盈${(s.unrealized_pnl_pct ?? 0).toFixed(2)}%`)
-  }
-  if (reviewSummary.has) {
-    contextParts.push(`复盘：${reviewSummary.summary || '已生成'}`)
-  }
+// ════════ 股票主题初始化（对接现有智能助手模块） ════════
 
-  assistantLoading.value = true
+const STALE_THRESHOLD_HOURS = 24
+
+// 单股分析报告可用模块目录（用于注入 stock_scope，供 LLM 按需调工具获取完整内容）
+// 与后端 core/tools/implementations/assistant_ops/report_query.py 的 _ANALYST_LABELS 保持一致
+const STOCK_REPORT_MODULES = [
+  { key: 'market_report', title: '市场技术分析', desc: 'K线形态、技术指标、支撑压力位' },
+  { key: 'fundamentals_report', title: '基本面研究', desc: '财务数据、估值、行业地位' },
+  { key: 'news_report', title: '新闻研究', desc: '近期公告、行业新闻、事件驱动' },
+  { key: 'sentiment_report', title: '情绪分析', desc: '社交媒体舆情、机构观点' },
+  { key: 'trader_investment_plan', title: '研究整合意见', desc: '多空辩论结论 + 操作观点' },
+  { key: 'research_team_decision', title: '研究团队结论', desc: '多空研究员辩论后的团队决策' },
+  { key: 'risk_management_decision', title: '风险治理结论', desc: '风险边界 + 仓位建议' },
+  { key: 'final_trade_decision', title: '综合研究结论', desc: '最终研究观点汇总' },
+]
+
+/** 初始化股票主题：创建/获取主题 + 加载历史消息 + 自动关联报告 */
+async function initStockAssistantThread() {
+  if (!code.value) return
   try {
-    // 调用后端聊天接口（如已存在），否则给出基于上下文的引导回复
-    const { stocksApi } = await import('@/api/stocks')
-    const resp: any = await (stocksApi as any).chat?.({
-      symbol: code.value,
-      message: prompt,
-      context: contextParts.join('\n'),
-    }).catch(() => null)
+    const title = `股票研究 · ${code.value} ${stockName.value || ''}`.trim()
+    const thread = await assistantApi.createThread(title)
+    stockAssistantThreadId.value = thread.thread_id
 
-    if (resp?.data?.answer) {
-      assistantMessages.value.push({ role: 'bot', content: resp.data.answer })
-    } else {
-      // 后端无聊天接口时，给出引导性回复
-      const fallback = buildAssistantFallback(prompt, contextParts)
-      assistantMessages.value.push({ role: 'bot', content: fallback })
+    // 加载历史消息（若之前已有对话）
+    const historyRes = await assistantApi.getThreadMessages(thread.thread_id)
+    const hasHistory = !!(historyRes.messages && historyRes.messages.length > 0)
+    if (hasHistory) {
+      assistantMessages.value = historyRes.messages.map(m => ({
+        role: m.role === 'user' ? 'user' as const : 'bot' as const,
+        content: m.content,
+      }))
+    }
+
+    // 自动关联报告（不阻塞主流程）
+    void autoLinkReports(thread)
+    stockAssistantThreadReady.value = true
+
+    // 仅当首次进入（无历史消息）时，检查报告时效性并主动提醒用户
+    if (!hasHistory) {
+      checkStaleReportsAndRemind()
     }
   } catch (e) {
-    console.warn('助手回复失败', e)
-    assistantMessages.value.push({
-      role: 'bot',
-      content: '抱歉，我暂时无法回答这个问题。请稍后重试，或在下方"研究路径"中查看对应模块的详细数据。',
-    })
-  } finally {
-    assistantLoading.value = false
+    console.warn('初始化股票助手主题失败', e)
+    // 失败时降级：仍然允许用户发消息，conversation_id 为空走默认主题
   }
 }
 
-// 后端无聊天接口时的引导性回复
-function buildAssistantFallback(prompt: string, context: string[]): string {
-  const hasAnalysis = context.some(c => c.includes('单股分析结论'))
-  const hasPosition = context.some(c => c.includes('持仓'))
-  const hasReview = context.some(c => c.includes('复盘'))
+/** 检查报告时效性，若有过期报告则主动推一条 bot 消息提醒用户重新分析 */
+function checkStaleReportsAndRemind() {
+  const scope = buildStockScopeContext()
+  const staleItems: string[] = []
 
-  if (prompt.includes('全景') || prompt.includes('整体')) {
-    let reply = '基于已加载的研究数据，这是全景解读：\n\n'
-    if (hasAnalysis) reply += '📊 **单股分析**：请参考上方"单股分析结果"卡片的核心结论。\n'
-    if (hasPosition) reply += '💼 **持仓视角**：请参考"持仓分析"标签页的浮动盈亏与研究结论。\n'
-    if (hasReview) reply += '📈 **交易复盘**：请参考"交易复盘"标签页的复盘结论与研究观察。\n'
-    reply += '\n你可以针对具体模块追问细节，我会引导你查看对应数据。'
-    return reply
+  const stockReport = scope.reports?.stock_report
+  if (stockReport?.is_stale) {
+    staleItems.push(`单股分析报告（${stockReport.completed_at || '未知时间'} 生成，已过期约 ${stockReport.stale_hours} 小时）`)
   }
-  if (prompt.includes('风险')) {
-    return '关于风险，建议重点关注：\n1. 上方"单股分析结果"中的**风险因素**模块\n2. "持仓分析"标签页的**关键风险点**\n3. "核心指标"卡片的估值与财务健康状态\n\n如需更详细的风险拆解，可在单股分析中重新生成报告。'
+
+  const positionReport = scope.reports?.position_report
+  if (positionReport?.is_stale) {
+    staleItems.push(`持仓分析报告（${positionReport.completed_at || '未知时间'} 生成，已过期约 ${positionReport.stale_hours} 小时）`)
   }
-  if (prompt.includes('持仓') || prompt.includes('下一步')) {
-    if (hasPosition) {
-      return '结合你的持仓数据，建议关注：\n1. "持仓分析"标签页的研究结论与关键风险点\n2. 浮盈亏比例与持有天数\n3. 结合"交易复盘"的历史经验进行回顾'
+
+  const reviewData = scope.review_summary
+  if (reviewData?.is_stale) {
+    staleItems.push(`交易复盘报告（${reviewData.completed_at || '未知时间'} 生成，已过期约 ${reviewData.stale_hours} 小时）`)
+  }
+
+  if (staleItems.length === 0) return
+
+  const reminder = [
+    `⚠️ 检测到以下报告已过期（超过 ${STALE_THRESHOLD_HOURS} 小时），我不会基于旧报告给出结论：`,
+    '',
+    ...staleItems.map(s => `• ${s}`),
+    '',
+    '如果你希望我基于最新数据解读，请点击对应模块的「重新分析」按钮；或在下方回复「重新分析」，我会引导你发起。'
+  ].join('\n')
+
+  assistantMessages.value.push({ role: 'bot', content: reminder })
+}
+
+/** 自动关联单股分析报告、持仓分析报告、交易复盘报告到主题 */
+async function autoLinkReports(thread: AssistantThreadItem) {
+  const threadId = thread.thread_id
+  const existingKeys = new Set(
+    (thread.report_refs || []).map(r => `${r.ref_type}:${r.report_key}`),
+  )
+
+  // 关联单股分析报告
+  if (lastTaskInfo.value?.task_id) {
+    const key = `stock_report:${lastTaskInfo.value.task_id}`
+    if (!existingKeys.has(key)) {
+      try {
+        await assistantApi.attachThreadReport(threadId, 'stock_report', lastTaskInfo.value.task_id)
+      } catch (e) {
+        console.warn('关联单股分析报告失败', e)
+      }
     }
-    return '当前暂无持仓数据。如需研究这只股票，可先通过"发起研究"生成单股分析，再结合分析结论决定是否建仓。'
   }
-  if (prompt.includes('分析') || prompt.includes('结论')) {
-    if (hasAnalysis) {
-      return '最新的单股分析结论已展示在上方"单股分析结果"卡片。你可以点击"展开详情"查看市场面、基本面、新闻面、风险因素的完整拆解。'
+
+  // 关联持仓分析报告（需要先搜索 candidates 拿到 analysis_id）
+  if (positionSummary.has) {
+    try {
+      const candidates = await assistantApi.getThreadReportCandidates(
+        threadId,
+        'position_report',
+        code.value,
+        5,
+      )
+      const matched = candidates.items.find(
+        item => (item.symbol || '').toUpperCase() === code.value.toUpperCase(),
+      )
+      if (matched) {
+        const key = `position_report:${matched.report_key}`
+        if (!existingKeys.has(key)) {
+          await assistantApi.attachThreadReport(threadId, 'position_report', matched.report_key)
+        }
+      }
+    } catch (e) {
+      console.warn('关联持仓分析报告失败', e)
     }
-    return '当前暂无单股分析结果。请点击页面右上角"发起研究"按钮生成分析报告。'
   }
-  return `我已读取以下数据：\n${context.map(c => `- ${c}`).join('\n')}\n\n你可以针对行情、分析、持仓、复盘任一维度追问，我会引导你查看对应模块。`
+
+  // 关联交易复盘报告（task_id 即 review_id，直接用 task_id 作为 report_key）
+  if (reviewSummary.has && reviewSummary.taskId) {
+    const key = `review_report:${reviewSummary.taskId}`
+    if (!existingKeys.has(key)) {
+      try {
+        await assistantApi.attachThreadReport(threadId, 'review_report', reviewSummary.taskId)
+      } catch (e) {
+        console.warn('关联交易复盘报告失败', e)
+      }
+    }
+  }
+}
+
+/** 构建股票上下文（通过 user_context.stock_scope 注入到后端 system prompt） */
+function buildStockScopeContext() {
+  const now = Date.now()
+  const parseTime = (s: string) => (s ? new Date(s).getTime() : 0)
+  const calcStale = (ts: number) => {
+    if (!ts) return { is_stale: false }
+    const hours = Math.round((now - ts) / 3_600_000)
+    return { is_stale: hours > STALE_THRESHOLD_HOURS, stale_hours: hours }
+  }
+
+  const scope: Record<string, any> = {
+    code: code.value,
+    stock_name: stockName.value,
+    thread_id: stockAssistantThreadId.value,
+    reports: {},
+  }
+
+  if (lastTaskInfo.value?.task_id) {
+    const ts = parseTime(lastTaskInfo.value.completed_at || lastTaskInfo.value.created_at || '')
+    // 注入报告目录而非截断摘要正文，LLM 通过 get_report_detail(task_id, module_key) 按需获取完整内容
+    const existingKeys = Object.keys(lastAnalysis.value?.reports || {})
+    scope.reports.stock_report = {
+      task_id: lastTaskInfo.value.task_id,
+      completed_at: lastTaskInfo.value.completed_at || lastTaskInfo.value.created_at || '',
+      ...calcStale(ts),
+      available_modules: STOCK_REPORT_MODULES,
+      existing_modules: existingKeys,
+    }
+  }
+
+  if (positionSummary.has && positionSummary.taskId) {
+    const ts = parseTime(positionSummary.completedAt)
+    // 持仓报告不注入正文，LLM 通过 get_position_analysis(code, market) 获取完整内容
+    scope.reports.position_report = {
+      analysis_id: positionSummary.taskId,
+      completed_at: positionSummary.completedAt,
+      ...calcStale(ts),
+    }
+  }
+
+  if (reviewSummary.has) {
+    const ts = parseTime(reviewSummary.completedAt)
+    // 复盘报告不注入正文，LLM 通过 get_trade_review_detail(review_id) 获取完整内容
+    // 注意：后端 task_id 即 review_id（见 trade_review_service.py:1908 注释）
+    scope.review_summary = {
+      task_id: reviewSummary.taskId,
+      review_id: reviewSummary.taskId,  // task_id 即 review_id
+      completed_at: reviewSummary.completedAt,
+      ...calcStale(ts),
+      trade_count: reviewSummary.tradeCount ?? undefined,
+    }
+  }
+
+  if (Number.isFinite(quote.price)) {
+    scope.current_quote = {
+      price: quote.price,
+      change_percent: quote.changePercent,
+    }
+  }
+
+  return scope
+}
+
+// 处理助手发送问题（流式 LLM 对话，对接现有智能助手模块）
+async function handleAssistantAsk(prompt: string) {
+  if (!prompt.trim() || assistantLoading.value) return
+
+  const conversationId = stockAssistantThreadId.value || undefined
+  const stockScope = buildStockScopeContext()
+
+  assistantLoading.value = true
+
+  // 占位一条空的 bot 消息，用于流式追加
+  const botMsgIdx = assistantMessages.value.push({ role: 'bot', content: '' }) - 1
+  let firstTokenReceived = false
+
+  stockAssistantStreamController.value = assistantApi.chatStream(
+    prompt,
+    conversationId,
+    undefined, // model，使用系统默认
+    undefined, // model_config_id
+    {
+      onToken(content: string) {
+        if (!firstTokenReceived) firstTokenReceived = true
+        assistantMessages.value[botMsgIdx].content += content
+      },
+      onDone(data) {
+        assistantLoading.value = false
+        stockAssistantStreamController.value = null
+        // 若服务端返回了 conversation_id（首次创建主题），更新本地
+        if (data.conversation_id && !stockAssistantThreadId.value) {
+          stockAssistantThreadId.value = data.conversation_id
+        }
+        // 若回复为空（罕见），给一个友好提示
+        if (!assistantMessages.value[botMsgIdx].content.trim()) {
+          assistantMessages.value[botMsgIdx].content =
+            '抱歉，我暂时无法回答这个问题。请稍后重试。'
+        }
+      },
+      onError(msg: string) {
+        assistantLoading.value = false
+        stockAssistantStreamController.value = null
+        if (!firstTokenReceived) {
+          assistantMessages.value[botMsgIdx].content =
+            `抱歉，处理您的请求时出错：${msg}\n\n你可以稍后重试，或前往「智能助手」主页面继续对话。`
+        } else {
+          assistantMessages.value[botMsgIdx].content +=
+            `\n\n---\n⚠️ 响应中断：${msg}`
+        }
+      },
+    },
+    {
+      // extraPayload: 通过 user_context 注入股票上下文
+      assistant_role: 'general',
+      user_context: {
+        stock_scope: stockScope,
+      },
+    },
+  )
 }
 
 // 历史记录导航

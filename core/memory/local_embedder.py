@@ -42,6 +42,54 @@ def _get_model(model_name: str):
 class _EmbeddingHandler(BaseHTTPRequestHandler):
     """Ollama /api/embeddings 兼容处理器"""
 
+    def do_GET(self):
+        """支持 Ollama 标准 GET 接口（/api/tags），用于健康检查和服务发现。
+
+        mem0/Ollama 客户端在初始化时会 GET /api/tags 检测服务可用性，
+        若不实现则 BaseHTTPRequestHandler 默认返回 501，导致 mem0 初始化失败。
+        """
+        if self.path in ("/api/tags", "/v1/models", "/api/version"):
+            # 返回已加载的模型列表，兼容 Ollama 客户端探测
+            try:
+                from datetime import datetime, timezone
+                model_name = _DEFAULT_MODEL
+                resp = {
+                    "models": [
+                        {
+                            "name": model_name,
+                            "model": model_name,
+                            "modified_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000000Z"),
+                            "size": 0,
+                            "digest": "sha256:local",
+                            "details": {
+                                "format": "gguf",
+                                "family": "embedding",
+                                "families": ["embedding"],
+                                "parameter_size": "0.6B",
+                                "quantization_level": "Q4_0",
+                            },
+                        }
+                    ],
+                    "version": "local-embedder",
+                }
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(resp).encode("utf-8"))
+            except Exception as e:
+                logger.warning("本地 Embedding GET 响应失败: %s", e)
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+            return
+
+        # 其他 GET 路径返回 404（而不是 501）
+        self.send_response(404)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"error": "not found"}).encode("utf-8"))
+
     def do_POST(self):
         if self.path != "/api/embeddings":
             self.send_response(404)

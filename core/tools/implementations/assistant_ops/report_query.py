@@ -5,6 +5,7 @@
 查询范围限定为当前用户的报告。
 """
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Annotated, Optional
@@ -123,23 +124,24 @@ async def search_reports(
 @register_tool(
     tool_id="get_report_detail",
     name="查看报告详情",
-    description="根据任务ID获取一份分析报告的完整正文内容，返回格式化的 Markdown 报告。",
+    description="根据任务ID获取分析报告内容。支持两种模式：1) 不传 module_key 返回顶层摘要（投资建议、关键要点、摘要）；2) 传 module_key 返回指定子模块的完整正文内容（如 market_report/fundamentals_report/news_report/sentiment_report/trader_investment_plan/research_team_decision/risk_management_decision/final_trade_decision 等）。推荐根据用户问题按需获取指定模块，避免一次拉取过多内容。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
     timeout_tier="light",
     data_source_handling="local_only",
-    capability_tags=["report_query", "analysis_report", "detail", "query", "assistant_ops", "report_detail", "report_content", "full_report", "markdown_report"],
+    capability_tags=["report_query", "analysis_report", "detail", "query", "assistant_ops", "report_detail", "report_content", "full_report", "markdown_report", "report_module"],
     tool_role_hint="primary",
     output_shape="report",
-    preferred_for=["report_detail_viewing", "full_report_reading", "report_content_retrieval", "analysis_report_detail"],
-    returns="返回格式化 Markdown 报告，包含投资建议、置信度、风险等级、关键要点和摘要。",
-    when_to_use="当用户想查看某份分析报告的完整正文内容时使用，需提供任务ID。",
+    preferred_for=["report_detail_viewing", "full_report_reading", "report_content_retrieval", "analysis_report_detail", "report_module_reading"],
+    returns="返回格式化 Markdown 报告。不传 module_key 时返回顶层摘要；传 module_key 时返回指定模块完整正文。",
+    when_to_use="当用户想查看分析报告内容时使用。简单问题（如整体结论）不传 module_key；具体维度问题（如技术面/基本面/新闻）传对应 module_key 获取完整内容。",
 )
 async def get_report_detail(
     task_id: Annotated[str, "分析任务ID"],
+    module_key: Annotated[Optional[str], "指定子模块key获取完整正文。可选值：market_report(市场技术分析)/fundamentals_report(基本面研究)/news_report(新闻研究)/sentiment_report(情绪分析)/trader_investment_plan(研究整合意见)/research_team_decision(研究团队结论)/risk_management_decision(风险治理结论)/final_trade_decision(综合研究结论)/index_report(大盘环境)/sector_report(行业板块)。不传则返回顶层摘要"] = None,
 ) -> str:
-    """获取指定分析任务的完整报告，格式化为 Markdown。"""
+    """获取指定分析任务的报告内容。传 module_key 返回该模块完整正文，不传返回顶层摘要。"""
     try:
         from app.core.database import get_mongo_db
         from app.services.task_analysis_service import get_task_analysis_service
@@ -157,6 +159,32 @@ async def get_report_detail(
 
         r = task.result
         sym = task.task_params.get("symbol", "未知")
+
+        # ── 模块模式：返回指定子模块完整正文 ──
+        if module_key:
+            module_key_clean = module_key.strip()
+            reports_dict = r.get("reports") or {}
+            if not isinstance(reports_dict, dict) or not reports_dict:
+                return f"⚠️ 任务 {task_id} 的报告中未找到任何子模块数据。"
+            content = reports_dict.get(module_key_clean)
+            if not content or (isinstance(content, str) and not content.strip()):
+                available = ", ".join(reports_dict.keys())
+                return (
+                    f"⚠️ 未找到模块 `{module_key_clean}`。\n"
+                    f"该报告包含以下可用模块：{available}\n"
+                    f"请从上述模块中选择一个重新调用。"
+                )
+            label = _ANALYST_LABELS.get(module_key_clean, module_key_clean)
+            # 兼容 content 为字典的情况（如 final_trade_decision 可能是结构化数据）
+            if isinstance(content, dict):
+                content_text = content.get("content") or content.get("report") or content.get("text") or content.get("markdown") or ""
+                if not content_text:
+                    content_text = json.dumps(content, ensure_ascii=False, indent=2)
+            else:
+                content_text = str(content)
+            return f"# {label}\n\n{content_text}"
+
+        # ── 顶层摘要模式：返回报告整体摘要 ──
         lines = [f"# 📈 {sym} 分析报告"]
         if r.get("recommendation"):
             lines.append(f"\n## 投资建议\n{r['recommendation']}")
@@ -169,6 +197,17 @@ async def get_report_detail(
             lines.append("\n## 关键要点\n" + "\n".join(f"- {kp}" for kp in kps))
         if r.get("summary"):
             lines.append(f"\n## 摘要\n{r['summary']}")
+
+        # 列出可用子模块，引导 LLM 按需获取完整内容
+        reports_dict = r.get("reports") or {}
+        if isinstance(reports_dict, dict) and reports_dict:
+            available_lines = []
+            for k in reports_dict.keys():
+                label = _ANALYST_LABELS.get(k, k)
+                available_lines.append(f"  • {k}（{label}）")
+            lines.append("\n## 可用子模块")
+            lines.append("如需查看某个模块的完整内容，再次调用本工具并传入 module_key 参数：")
+            lines.extend(available_lines)
 
         db = get_mongo_db()
         await attach_report_ref_to_thread(
@@ -197,18 +236,37 @@ async def get_report_detail(
 
 
 # ── 各分析师角色中文标签 ──
+# 涵盖单股分析报告 reports 字典中可能出现的所有子模块
 _ANALYST_LABELS = {
-    "final_trade_decision":   "最终交易决策",
-    "research_team_decision": "研究团队决策",
-    "risk_management_decision": "风险管理决策",
-    "bull_researcher":        "多头研究员",
-    "bear_researcher":        "空头研究员",
-    "fundamentals_report":    "基本面分析师",
-    "market_report":          "市场分析师",
-    "news_report":            "新闻分析师",
-    "sentiment_report":       "情绪/社交分析师",
+    # 核心决策类
+    "final_trade_decision":   "综合研究结论",
+    "research_team_decision": "研究团队结论",
+    "risk_management_decision": "风险治理结论",
+    "trader_investment_plan": "研究整合意见",
     "investment_plan":        "投资计划",
-    "trader_investment_plan": "交易员计划",
+    # 研究员辩论类
+    "bull_researcher":        "乐观情景论证",
+    "bear_researcher":        "审慎情景论证",
+    "neutral_analyst":        "基准情景评估",
+    "risky_analyst":          "高弹性情景评估",
+    "safe_analyst":           "防御情景评估",
+    # 个股分析模块
+    "fundamentals_report":    "基本面研究",
+    "market_report":          "市场技术分析",
+    "news_report":            "新闻研究",
+    "sentiment_report":       "情绪分析",
+    "chip_report":            "筹码分布分析",
+    # 宏观分析模块
+    "index_report":           "大盘环境研究",
+    "sector_report":          "行业板块研究",
+    # 持仓分析模块（部分报告可能复用）
+    "company_overview":       "公司概况",
+    "financial_analysis":     "财务分析",
+    "technical_analysis":     "技术分析",
+    "market_analysis":        "市场分析",
+    "risk_analysis":          "风险分析",
+    "valuation_analysis":     "估值分析",
+    "investment_recommendation": "研究结论摘要",
 }
 # 按重要性排序，优先展示核心决策
 _REPORT_PRIORITY = [

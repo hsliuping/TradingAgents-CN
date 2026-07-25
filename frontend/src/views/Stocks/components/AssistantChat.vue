@@ -1,11 +1,18 @@
 <template>
   <div class="assistant-chat-section" id="assistant-chat" ref="chatSectionRef">
     <div class="assistant-chat-header">
-      <div class="assistant-chat-title">
-        <span>🤖</span>
-        <span>智能研究助手 · 全景解读</span>
+      <div class="header-top-row">
+        <div class="assistant-chat-title">
+          <span>🤖</span>
+          <span>智能研究助手 · 全景解读</span>
+        </div>
+        <span class="header-meta">{{ loadedSummary }}</span>
       </div>
-      <span class="header-meta">{{ loadedSummary }}</span>
+      <div class="header-topic-bar">
+        <span class="topic-pin">📌</span>
+        <span class="topic-text">当前主题限定于：<strong>{{ code }} {{ stockName || '-' }}</strong></span>
+        <span class="topic-hint">超出此股票的问题将引导你前往主页面</span>
+      </div>
     </div>
     <div class="chat-messages" ref="messagesRef">
       <div v-if="!messages.length" class="chat-empty">
@@ -132,9 +139,12 @@ defineExpose({ fillPrompt, scrollToBottom })
 }
 
 .assistant-chat-header {
-  padding: 14px 20px;
+  padding: 12px 20px;
   background: linear-gradient(135deg, #6b5ce7 0%, #8b5cf6 100%);
   color: #fff;
+}
+
+.header-top-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -151,6 +161,36 @@ defineExpose({ fillPrompt, scrollToBottom })
 .header-meta {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.85);
+}
+
+.header-topic-bar {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.topic-pin {
+  font-size: 13px;
+}
+
+.topic-text {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.topic-text strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+.topic-hint {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  margin-left: auto;
 }
 
 .chat-messages {

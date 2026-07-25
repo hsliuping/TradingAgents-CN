@@ -122,8 +122,33 @@
 
         <!-- 实盘/模拟持仓信息 -->
         <div v-if="positionData.real.has || positionData.paper.has" class="position-info">
-          <div v-if="positionData.real.has" class="position-section">
-            <div class="position-section-title">
+          <!-- 二级标签：实盘 / 模拟（仅同时存在两个类型时显示） -->
+          <div
+            v-if="positionData.real.has && positionData.paper.has"
+            class="position-type-tabs"
+          >
+            <div
+              class="position-type-tab"
+              :class="{ active: activePositionTab === 'real' }"
+              @click="activePositionTab = 'real'"
+            >
+              <el-tag type="danger" size="small">实盘</el-tag>
+            </div>
+            <div
+              class="position-type-tab"
+              :class="{ active: activePositionTab === 'paper' }"
+              @click="activePositionTab = 'paper'"
+            >
+              <el-tag type="warning" size="small">模拟</el-tag>
+            </div>
+          </div>
+
+          <!-- 实盘持仓 -->
+          <div
+            v-if="positionData.real.has && activePositionTab === 'real'"
+            class="position-section"
+          >
+            <div v-if="!(positionData.real.has && positionData.paper.has)" class="position-section-title">
               <el-tag type="danger" size="small">实盘</el-tag>
             </div>
             <div class="position-grid">
@@ -139,8 +164,13 @@
               </div>
             </div>
           </div>
-          <div v-if="positionData.paper.has" class="position-section">
-            <div class="position-section-title">
+
+          <!-- 模拟持仓 -->
+          <div
+            v-if="positionData.paper.has && activePositionTab === 'paper'"
+            class="position-section"
+          >
+            <div v-if="!(positionData.real.has && positionData.paper.has)" class="position-section-title">
               <el-tag type="warning" size="small">模拟</el-tag>
             </div>
             <div class="position-grid">
@@ -321,6 +351,9 @@ defineEmits<{
 }>()
 
 const activeTab = ref<'position' | 'review'>('position')
+
+// 持仓分析内部二级标签：实盘 / 模拟（默认优先显示实盘）
+const activePositionTab = ref<'real' | 'paper'>('real')
 
 const positionBadgeText = computed(() => {
   const snap = props.positionSummary.snapshot
@@ -686,6 +719,34 @@ function formatAnalysisTime(dateStr: any): string {
 
 .position-info {
   margin-top: 14px;
+}
+
+.position-type-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.position-type-tab {
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.2s;
+  opacity: 0.7;
+}
+
+.position-type-tab:hover {
+  background: #f1f5f9;
+  opacity: 0.9;
+}
+
+.position-type-tab.active {
+  background: #f5f3ff;
+  border-color: #6b5ce7;
+  opacity: 1;
+  box-shadow: 0 1px 2px rgba(107, 92, 231, 0.1);
 }
 
 .position-section {
