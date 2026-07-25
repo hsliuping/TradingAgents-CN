@@ -39,17 +39,11 @@
           <div class="conclusion markdown-body" v-html="renderMarkdown(oneSentenceConclusion)"></div>
         </div>
 
-        <!-- 分析元信息 -->
+        <!-- 分析元信息（合规：不展示信心度，仅保留研究性元数据） -->
         <div class="analysis-meta">
           <div class="analysis-meta-item">
             <div class="label">分析时间</div>
             <div class="value">{{ formatAnalysisTime(lastTaskInfo?.end_time) }}</div>
-          </div>
-          <div class="analysis-meta-item">
-            <div class="label">信心度</div>
-            <div class="value" style="color: var(--el-color-primary)">
-              {{ fmtConf(lastAnalysis?.confidence_score ?? lastAnalysis?.overall_score) }}
-            </div>
           </div>
           <div class="analysis-meta-item" v-if="reportKeys.length">
             <div class="label">报告数</div>
@@ -170,14 +164,7 @@ function formatAnalysisTime(dateStr: any): string {
   }
 }
 
-function fmtConf(v: any) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '-'
-  // 0-100 的整数
-  if (n <= 100) return Math.round(n) + '%'
-  // 0-1 的小数
-  return Math.round(n * 100) + '%'
-}
+// fmtConf 已移除：合规要求不展示信心度/操作建议
 
 function formatReportName(key: string): string {
   return getReportName(key) || key

@@ -1529,12 +1529,7 @@ function formatPct(pct: any): string {
   return `${sign}${(n * 100).toFixed(2)}%`
 }
 
-function fmtConf(v: any) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '-'
-  const pct = n <= 1 ? n * 100 : n
-  return `${Math.round(pct)}%`
-}
+// fmtConf 已移除：合规要求不展示信心度
 
 // 格式化报告名称
 function formatReportName(key: string): string {
@@ -1608,8 +1603,7 @@ function exportReport() {
     : lastAnalysis.value?.analysis_date
 
   fullReport += `**分析时间**: ${reportTime}\n`
-  fullReport += `**投资建议**: ${lastAnalysis.value.recommendation}\n`
-  fullReport += `**信心度**: ${fmtConf(lastAnalysis.value.confidence_score)}\n\n`
+  fullReport += `**研究观察**: ${lastAnalysis.value.recommendation}\n\n`
   fullReport += `---\n\n`
 
   for (const [key, content] of Object.entries(lastAnalysis.value.reports)) {
@@ -1784,8 +1778,8 @@ function buildAssistantFallback(prompt: string, context: string[]): string {
   if (prompt.includes('全景') || prompt.includes('整体')) {
     let reply = '基于已加载的研究数据，这是全景解读：\n\n'
     if (hasAnalysis) reply += '📊 **单股分析**：请参考上方"单股分析结果"卡片的核心结论。\n'
-    if (hasPosition) reply += '💼 **持仓视角**：请参考"持仓分析"标签页的浮动盈亏与 AI 建议。\n'
-    if (hasReview) reply += '📈 **交易复盘**：请参考"交易复盘"标签页的复盘结论与改进建议。\n'
+    if (hasPosition) reply += '💼 **持仓视角**：请参考"持仓分析"标签页的浮动盈亏与研究结论。\n'
+    if (hasReview) reply += '📈 **交易复盘**：请参考"交易复盘"标签页的复盘结论与研究观察。\n'
     reply += '\n你可以针对具体模块追问细节，我会引导你查看对应数据。'
     return reply
   }
@@ -1794,7 +1788,7 @@ function buildAssistantFallback(prompt: string, context: string[]): string {
   }
   if (prompt.includes('持仓') || prompt.includes('下一步')) {
     if (hasPosition) {
-      return '结合你的持仓数据，建议：\n1. 查看"持仓分析"标签页的 AI 建议（持有/加仓/减仓）\n2. 关注浮盈亏比例与持有天数\n3. 结合"交易复盘"的历史经验判断'
+      return '结合你的持仓数据，建议关注：\n1. "持仓分析"标签页的研究结论与关键风险点\n2. 浮盈亏比例与持有天数\n3. 结合"交易复盘"的历史经验进行回顾'
     }
     return '当前暂无持仓数据。如需研究这只股票，可先通过"发起研究"生成单股分析，再结合分析结论决定是否建仓。'
   }
@@ -2172,8 +2166,7 @@ function handlePeriodChange(p: string) {
   color: var(--el-text-color-secondary);
 }
 
-.analysis-meta .analysis-time,
-.analysis-meta .confidence {
+.analysis-meta .analysis-time {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2181,52 +2174,6 @@ function handlePeriodChange(p: string) {
 
 .analysis-meta .el-icon {
   font-size: 14px;
-}
-
-/* 投资建议盒子 - 重点突出 */
-.recommendation-box {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 12px;
-  padding: 20px 24px;
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.25);
-  transition: all 0.3s ease;
-  margin: 16px 0;
-}
-
-.recommendation-box:hover {
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.35);
-  transform: translateY(-2px);
-}
-
-.recommendation-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-  color: rgba(255, 255, 255, 0.95);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.recommendation-header .icon {
-  font-size: 20px;
-}
-
-.recommendation-content {
-  background: rgba(255, 255, 255, 0.98);
-  border-radius: 8px;
-  padding: 16px 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.recommendation-text {
-  color: #1f2937;
-  font-size: 15px;
-  line-height: 1.8;
-  font-weight: 500;
-  word-wrap: break-word;
-  word-break: break-word;
-  white-space: pre-wrap;
 }
 
 /* 同步状态提示 */
@@ -2341,11 +2288,6 @@ function handlePeriodChange(p: string) {
 
   .advice-label {
     color: var(--el-text-color-secondary);
-  }
-
-  .advice-confidence {
-    color: var(--el-text-color-secondary);
-    font-size: 13px;
   }
 
   .advice-conclusion {

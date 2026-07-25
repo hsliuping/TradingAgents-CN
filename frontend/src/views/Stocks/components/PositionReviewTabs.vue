@@ -94,20 +94,9 @@
           </div>
         </div>
 
-        <!-- AI 建议 -->
-        <div v-if="positionSummary.action || positionSummary.conclusion" class="ai-advice">
-          <div class="advice-row">
-            <span class="advice-label">AI 建议</span>
-            <el-tag :type="actionTagType(positionSummary.action)" effect="dark" size="small">
-              {{ actionLabel(positionSummary.action) }}
-            </el-tag>
-            <span v-if="positionSummary.confidence" class="advice-confidence">
-              信心度 {{ positionSummary.confidence }}%
-            </span>
-            <span v-if="positionSummary.completedAt" class="advice-time">
-              · {{ formatAnalysisTime(positionSummary.completedAt) }}
-            </span>
-          </div>
+        <!-- 研究结论（合规：不展示操作建议/信心度，仅保留研究性结论） -->
+        <div v-if="positionSummary.conclusion || positionSummary.keyPoints?.length" class="ai-advice">
+          <div class="advice-label">研究结论</div>
           <div v-if="positionSummary.conclusion" class="advice-conclusion">
             <el-icon class="advice-icon"><InfoFilled /></el-icon>
             <span>{{ positionSummary.conclusion }}</span>
@@ -117,6 +106,9 @@
             <ul class="keypoints-list">
               <li v-for="(point, idx) in positionSummary.keyPoints.slice(0, 3)" :key="idx">{{ point }}</li>
             </ul>
+          </div>
+          <div v-if="positionSummary.completedAt" class="advice-time">
+            分析时间：{{ formatAnalysisTime(positionSummary.completedAt) }}
           </div>
         </div>
 
@@ -191,10 +183,6 @@
             <div class="label">风险等级</div>
             <div class="value">{{ reviewSummary.riskLevel }}</div>
           </div>
-          <div class="summary-item" v-if="reviewSummary.confidenceScore !== null">
-            <div class="label">信心度</div>
-            <div class="value">{{ reviewSummary.confidenceScore }}%</div>
-          </div>
           <div class="summary-item">
             <div class="label">完成时间</div>
             <div class="value">{{ formatAnalysisTime(reviewSummary.completedAt) }}</div>
@@ -210,11 +198,11 @@
           <div class="sub-section-content markdown-body" v-html="renderMarkdown(reviewSummary.summary)"></div>
         </div>
 
-        <!-- 操作建议 -->
+        <!-- 研究观察（合规：原"操作建议"改为研究性表述） -->
         <div v-if="reviewSummary.recommendation" class="sub-section">
           <div class="sub-section-title">
             <el-icon><Opportunity /></el-icon>
-            <span>操作建议</span>
+            <span>研究观察</span>
           </div>
           <div class="sub-section-content markdown-body" v-html="renderMarkdown(reviewSummary.recommendation)"></div>
         </div>
@@ -360,28 +348,6 @@ function pnlClass(v: any) {
   const n = Number(v)
   if (!Number.isFinite(n) || n === 0) return ''
   return n > 0 ? 'positive' : 'negative'
-}
-
-function actionTagType(action: string): any {
-  const map: Record<string, string> = {
-    buy: 'success',
-    add: 'success',
-    sell: 'warning',
-    reduce: 'warning',
-    hold: 'info',
-  }
-  return (map[action] || 'info') as any
-}
-
-function actionLabel(action: string): string {
-  const map: Record<string, string> = {
-    buy: '建议买入',
-    add: '建议加仓',
-    sell: '建议卖出',
-    reduce: '建议减仓',
-    hold: '建议持有',
-  }
-  return map[action] || (action || '建议持有')
 }
 
 function formatAnalysisTime(dateStr: any): string {
@@ -562,24 +528,17 @@ function formatAnalysisTime(dateStr: any): string {
   border-left: 3px solid #6b5ce7;
 }
 
-.advice-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
 .advice-label {
   font-size: 12px;
   font-weight: 700;
   color: #1e293b;
+  margin-bottom: 6px;
 }
 
-.advice-confidence,
 .advice-time {
   font-size: 11px;
   color: #64748b;
+  margin-top: 8px;
 }
 
 .advice-conclusion {
@@ -588,7 +547,7 @@ function formatAnalysisTime(dateStr: any): string {
   font-size: 13px;
   color: #1e293b;
   line-height: 1.6;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .advice-icon {
