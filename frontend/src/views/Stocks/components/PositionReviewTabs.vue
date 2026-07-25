@@ -109,6 +109,14 @@
           </div>
           <div v-if="positionSummary.completedAt" class="advice-time">
             分析时间：{{ formatAnalysisTime(positionSummary.completedAt) }}
+            <span v-if="positionRelativeTime" class="relative-time">{{ positionRelativeTime }}</span>
+            <button
+              v-if="positionStale"
+              class="stale-btn"
+              @click="$emit('goPositionAnalysis')"
+            >
+              🔄 数据已过期，重新分析
+            </button>
           </div>
         </div>
 
@@ -185,8 +193,19 @@
           </div>
           <div class="summary-item">
             <div class="label">完成时间</div>
-            <div class="value">{{ formatAnalysisTime(reviewSummary.completedAt) }}</div>
+            <div class="value">
+              {{ formatAnalysisTime(reviewSummary.completedAt) }}
+              <span v-if="reviewRelativeTime" class="relative-time">{{ reviewRelativeTime }}</span>
+            </div>
           </div>
+        </div>
+
+        <!-- 数据过期提示：超过 1 天显示重新复盘按钮 -->
+        <div v-if="reviewStale" class="stale-banner">
+          <span>⚠ 本次复盘距今较久，市场环境可能已变化</span>
+          <button class="stale-btn" @click="$emit('goTradeReview')">
+            🔄 重新复盘
+          </button>
         </div>
 
         <!-- 复盘结论 -->
@@ -324,6 +343,40 @@ const reviewBadgeText = computed(() => {
 })
 
 const reviewBadgeClass = computed(() => 'badge-info')
+
+// ════════ 数据新鲜度判断 ════════
+
+/** 将时间字符串转为距今天数（小数），无效返回 null */
+function daysSince(dateStr: string | null | undefined): number | null {
+  if (!dateStr) return null
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return null
+  return (Date.now() - d.getTime()) / (1000 * 60 * 60 * 24)
+}
+
+/** 天数转相对时间文本 */
+function daysToRelative(days: number | null): string {
+  if (days === null || days < 0) return ''
+  if (days < 1 / 24) return '刚刚'
+  if (days < 1) return `${Math.floor(days * 24)}小时前`
+  if (days < 30) return `${Math.floor(days)}天前`
+  if (days < 365) return `${Math.floor(days / 30)}个月前`
+  return `${Math.floor(days / 365)}年前`
+}
+
+// 持仓分析数据新鲜度
+const positionRelativeTime = computed(() => daysToRelative(daysSince(props.positionSummary.completedAt)))
+const positionStale = computed(() => {
+  const d = daysSince(props.positionSummary.completedAt)
+  return d !== null && d > 1
+})
+
+// 交易复盘数据新鲜度
+const reviewRelativeTime = computed(() => daysToRelative(daysSince(props.reviewSummary.completedAt)))
+const reviewStale = computed(() => {
+  const d = daysSince(props.reviewSummary.completedAt)
+  return d !== null && d > 1
+})
 
 function fmtPrice(v: any) {
   const n = Number(v)
@@ -510,6 +563,10 @@ function formatAnalysisTime(dateStr: any): string {
   font-size: 16px;
   font-weight: 700;
   color: #1e293b;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
 .summary-item .value.positive {
@@ -539,6 +596,56 @@ function formatAnalysisTime(dateStr: any): string {
   font-size: 11px;
   color: #64748b;
   margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.relative-time {
+  font-size: 11px;
+  font-weight: 500;
+  color: #f59e0b;
+  background: #fef3c7;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.stale-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #b45309;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.stale-btn:hover {
+  background: #f59e0b;
+  color: #fff;
+}
+
+.stale-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #92400e;
+  flex-wrap: wrap;
 }
 
 .advice-conclusion {
