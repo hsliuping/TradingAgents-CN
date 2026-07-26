@@ -1007,14 +1007,71 @@ const getModuleDisplayName = (moduleName: string) => {
   return normalizeModuleDisplayName(undefined, moduleName)
 }
 
+/**
+ * 将风险治理 JSON 对象渲染为可读的 Markdown 文本。
+ * 字段与后端 risk_assessment / risk_management_decision 结构保持一致。
+ */
+const formatRiskAssessment = (value: any): string | null => {
+  if (!value || typeof value !== 'object') return null
+  const riskLevel = value.risk_level || value.riskLevel
+  const riskScore = value.risk_score ?? value.riskScore
+  const reasoning = value.reasoning || value.conclusion || value.summary
+  const keyRisks = value.key_risks || value.keyRisks || value.risks
+  const riskControl = value.risk_control || value.riskControl || value.control
+
+  if (riskLevel === undefined && riskScore === undefined && !reasoning && !riskControl) {
+    return null
+  }
+
+  const parts: string[] = []
+  if (riskLevel !== undefined) {
+    parts.push(`**风险等级**：${riskLevel}`)
+  }
+  if (riskScore !== undefined) {
+    const score = typeof riskScore === 'number' ? riskScore.toFixed(2) : riskScore
+    parts.push(`**风险评分**：${score}`)
+  }
+  if (reasoning) {
+    parts.push(`**评估结论**：${reasoning}`)
+  }
+  if (Array.isArray(keyRisks) && keyRisks.length > 0) {
+    parts.push(`**核心风险**：`)
+    keyRisks.forEach((risk: any) => {
+      if (risk) parts.push(`- ${String(risk).trim()}`)
+    })
+  }
+  if (riskControl) {
+    parts.push(`**风控建议**：${riskControl}`)
+  }
+
+  return parts.join('\n\n')
+}
+
 const extractStructuredText = (value: any): string | null => {
   if (!value) return null
 
   if (typeof value === 'string') {
-    return value.trim() ? value : null
+    const trimmed = value.trim()
+    if (!trimmed) return null
+
+    // 如果是风险治理 JSON 字符串，先解析再格式化为可读文本
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        const riskText = formatRiskAssessment(parsed)
+        if (riskText) return riskText
+      } catch {
+        // 不是合法 JSON，按普通文本返回
+      }
+    }
+    return trimmed
   }
 
   if (typeof value === 'object') {
+    // 风险治理结构化对象直接渲染为可读文本
+    const riskText = formatRiskAssessment(value)
+    if (riskText) return riskText
+
     for (const key of ['content', 'markdown', 'text', 'message', 'report', 'judge_decision']) {
       const item = value[key]
       if (typeof item === 'string' && item.trim()) {
