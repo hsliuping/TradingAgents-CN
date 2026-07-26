@@ -282,7 +282,7 @@ const handleConfirm = async (item: SkillReviewItem) => {
       if (idx >= 0) {
         reviews.value[idx] = { ...reviews.value[idx], is_expired: true }
       }
-    } else if (result.status === 'binding_failed' || result.binding_result?.error) {
+    } else if (result.status === 'binding_failed') {
       const errorMsg = result.binding_result?.error || result.error || '未知错误'
       ElMessage.error(`绑定失败：${errorMsg}`)
       const idx = reviews.value.findIndex(r => r.review_id === item.review_id)
