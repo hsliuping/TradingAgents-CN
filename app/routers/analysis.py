@@ -291,6 +291,10 @@ async def get_task_result(
                     "updated_at": mongo_result.get("updated_at"),
                     "status": mongo_result.get("status", "completed"),
                     "decision": mongo_result.get("decision", {}),
+                    "snapshot_id": mongo_result.get("snapshot_id"),
+                    "data_quality_status": mongo_result.get("data_quality_status"),
+                    "legacy_analysis": bool(mongo_result.get("legacy_analysis", True)),
+                    "automated_execution_allowed": False,
                     "source": "mongodb"  # 标记数据来源
                 }
 
@@ -335,6 +339,10 @@ async def get_task_result(
                         "updated_at": tasks_doc.get("completed_at"),
                         "status": r.get("status", "completed"),
                         "decision": r.get("decision", {}),
+                        "snapshot_id": r.get("snapshot_id"),
+                        "data_quality_status": r.get("data_quality_status"),
+                        "legacy_analysis": bool(r.get("legacy_analysis", True)),
+                        "automated_execution_allowed": False,
                         "source": "analysis_tasks"  # 数据来源标记
                     }
 
@@ -659,7 +667,19 @@ async def get_task_result(
             "detailed_analysis": safe_dict(result_data.get("detailed_analysis")),
             "state": safe_dict(result_data.get("state")),
             # 🔥 关键修复：添加decision字段！
-            "decision": safe_dict(result_data.get("decision"))
+            "decision": safe_dict(result_data.get("decision")),
+            "snapshot_id": (
+                safe_string(result_data.get("snapshot_id"))
+                if result_data.get("snapshot_id")
+                else None
+            ),
+            "data_quality_status": (
+                safe_string(result_data.get("data_quality_status"))
+                if result_data.get("data_quality_status")
+                else None
+            ),
+            "legacy_analysis": bool(result_data.get("legacy_analysis", True)),
+            "automated_execution_allowed": False,
         }
 
         # 特别处理reports字段 - 确保每个报告都是有效字符串

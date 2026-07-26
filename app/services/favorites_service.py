@@ -23,6 +23,65 @@ class FavoritesService:
             self.db = get_mongo_db()
         return self.db
 
+    async def _sync_candidate_source(
+        self,
+        *,
+        user_id: str,
+        stock_code: str,
+        market: str,
+        stock_name: str | None = None,
+        added: bool,
+    ) -> None:
+        """Best-effort PR-003 hook; favorite writes remain authoritative."""
+
+        import logging
+
+        sync_logger = logging.getLogger("webapi")
+        service = None
+        try:
+            from app.services.alphaguard.candidate_pool_service import (
+                get_candidate_pool_service,
+            )
+            from tradingagents.alphaguard.candidate_schemas import CandidateSource
+
+            service = get_candidate_pool_service()
+            if added:
+                await service.upsert_source(
+                    user_id=user_id,
+                    symbol=stock_code,
+                    market=market,
+                    source=CandidateSource.USER_SELECTED,
+                    name=stock_name,
+                    reason="favorite added",
+                )
+            else:
+                await service.remove_source(
+                    user_id=user_id,
+                    symbol=stock_code,
+                    market=market,
+                    source=CandidateSource.USER_SELECTED,
+                    reason="favorite removed",
+                )
+        except Exception as exc:
+            sync_logger.error(
+                "AlphaGuard favorite sync failed without rolling back favorite: "
+                "user_id=%s symbol=%s error_type=%s",
+                user_id,
+                stock_code,
+                exc.__class__.__name__,
+                exc_info=True,
+            )
+            if service is not None:
+                await service.record_sync_failure(
+                    user_id=user_id,
+                    symbol=stock_code,
+                    market=market,
+                    reason=(
+                        "favorite candidate sync failed: "
+                        f"{exc.__class__.__name__}: {str(exc)[:300]}"
+                    ),
+                )
+
     def _is_valid_object_id(self, user_id: str) -> bool:
         """
         检查是否是有效的ObjectId格式
@@ -214,6 +273,14 @@ class FavoritesService:
 
                 success = result.matched_count > 0
                 logger.info(f"🔧 [add_favorite] 返回结果: {success}")
+                if success:
+                    await self._sync_candidate_source(
+                        user_id=user_id,
+                        stock_code=stock_code,
+                        market=market,
+                        stock_name=stock_name,
+                        added=True,
+                    )
                 return success
             else:
                 logger.info(f"🔧 [add_favorite] 使用字符串ID方式添加到 user_favorites 集合")
@@ -228,6 +295,13 @@ class FavoritesService:
                 )
                 logger.info(f"🔧 [add_favorite] 更新结果: matched_count={result.matched_count}, modified_count={result.modified_count}, upserted_id={result.upserted_id}")
                 logger.info(f"🔧 [add_favorite] 返回结果: True")
+                await self._sync_candidate_source(
+                    user_id=user_id,
+                    stock_code=stock_code,
+                    market=market,
+                    stock_name=stock_name,
+                    added=True,
+                )
                 return True
         except Exception as e:
             logger.error(f"❌ [add_favorite] 添加自选股异常: {type(e).__name__}: {str(e)}", exc_info=True)
@@ -236,8 +310,17 @@ class FavoritesService:
     async def remove_favorite(self, user_id: str, stock_code: str) -> bool:
         """从自选股中移除股票（兼容字符串ID与ObjectId）"""
         db = await self._get_db()
+        favorite_market = "CN"
 
         if self._is_valid_object_id(user_id):
+            user = await db.users.find_one(
+                {"_id": ObjectId(user_id)},
+                {"favorite_stocks": 1},
+            )
+            for favorite in (user or {}).get("favorite_stocks", []):
+                if favorite.get("stock_code") == stock_code:
+                    favorite_market = favorite.get("market", "CN")
+                    break
             # 先尝试使用 ObjectId 查询
             result = await db.users.update_one(
                 {"_id": ObjectId(user_id)},
@@ -249,8 +332,16 @@ class FavoritesService:
                     {"_id": user_id},
                     {"$pull": {"favorite_stocks": {"stock_code": stock_code}}}
                 )
-            return result.modified_count > 0
+            success = result.modified_count > 0
         else:
+            document = await db.user_favorites.find_one(
+                {"user_id": user_id},
+                {"favorites": 1},
+            )
+            for favorite in (document or {}).get("favorites", []):
+                if favorite.get("stock_code") == stock_code:
+                    favorite_market = favorite.get("market", "CN")
+                    break
             result = await db.user_favorites.update_one(
                 {"user_id": user_id},
                 {
@@ -258,7 +349,16 @@ class FavoritesService:
                     "$set": {"updated_at": datetime.utcnow()}
                 }
             )
-            return result.modified_count > 0
+            success = result.modified_count > 0
+
+        if success:
+            await self._sync_candidate_source(
+                user_id=user_id,
+                stock_code=stock_code,
+                market=favorite_market,
+                added=False,
+            )
+        return success
 
     async def update_favorite(
         self,

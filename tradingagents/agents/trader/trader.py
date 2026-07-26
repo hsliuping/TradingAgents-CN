@@ -28,9 +28,14 @@ NORMAL_TRADE_PROMPT_VERSION = "normal_trade_plan_v1"
 LEGACY_QUANT_PROPOSAL_ID = "legacy-quant:none"
 
 
-def _legacy_snapshot_id(state: dict[str, Any]) -> str:
-    """PR-002 compatibility ID until PR-003 introduces EvidenceSnapshot."""
+def _decision_snapshot_id(state: dict[str, Any]) -> str:
+    """Use a verified snapshot or an explicitly marked legacy identifier."""
 
+    snapshot_id = state.get("snapshot_id")
+    if snapshot_id:
+        return str(snapshot_id)
+    if state.get("legacy_analysis") is False:
+        raise ValueError("non-legacy analysis requires snapshot_id")
     analysis_id = state.get("analysis_id")
     if not analysis_id:
         company = state.get("company_of_interest", "unknown")
@@ -48,7 +53,7 @@ def _failure_plan(
 ) -> NormalTradePlan:
     return NormalTradePlan(
         plan_id=str(uuid4()),
-        snapshot_id=_legacy_snapshot_id(state),
+        snapshot_id=_decision_snapshot_id(state),
         quant_proposal_id=LEGACY_QUANT_PROPOSAL_ID,
         status=status,
         action="NONE",
@@ -95,7 +100,7 @@ def _render_plan(plan: NormalTradePlan) -> str:
         f"- 动作：{plan.action}",
         f"- 置信度：{plan.confidence:.2f}",
         f"- 计划编号：{plan.plan_id}",
-        f"- 兼容快照编号：{plan.snapshot_id}",
+        f"- 快照编号：{plan.snapshot_id}",
         f"- 结论：{plan.thesis}",
     ]
     if plan.target_price is not None:
@@ -142,7 +147,16 @@ def create_trader(llm, memory, config: dict[str, Any] | None = None):
                     exc.__class__.__name__,
                 )
 
-        snapshot_id = _legacy_snapshot_id(state)
+        snapshot_id = _decision_snapshot_id(state)
+        snapshot_origin_instruction = (
+            f"snapshot_id 必须是 {snapshot_id}，它是已经过完整性、用户、"
+            "标的、市场和 DataQuality 校验的 PR-003 EvidenceSnapshot。"
+            if state.get("snapshot_id")
+            else (
+                f"snapshot_id 必须是 {snapshot_id}；这是明确标记的旧人工分析"
+                "兼容来源，不允许自动执行。"
+            )
+        )
         schema_json = model_output_schema_json(NormalTradePlan)
         messages = [
             {
@@ -160,8 +174,8 @@ Prompt 名称与固定版本：{NORMAL_TRADE_PROMPT_NAME}@{NORMAL_TRADE_PROMPT_V
 - 只有可执行逻辑完整时才使用 PROPOSE_TRADE + BUY/SELL/REDUCE。
 - target_price 可以为 null。缺失时不得推算、猜测或改变 action。
 - 不得生成 model_meta；运行时会注入真实供应商、模型、Prompt、时延与输出哈希。
-- snapshot_id 必须是 {snapshot_id}，这是 PR-002 的显式兼容占位；PR-003 后才会替换为真实证据快照。
-- quant_proposal_id 必须是 {LEGACY_QUANT_PROPOSAL_ID}，不得用空字符串掩盖 PR-003 尚未实施。
+- {snapshot_origin_instruction}
+- quant_proposal_id 必须是 {LEGACY_QUANT_PROPOSAL_ID}，不得用空字符串掩盖 PR-004 尚未实施。
 - PROPOSE_TRADE 若暂时不能给出 valid_until，必须填写 valid_until_compatibility_reason。
 - BUY 若策略确实不需要 entry_zone，必须填写 entry_zone_not_required_reason。
 - 任何错误、空白或缺字段都不得用 HOLD 掩盖。

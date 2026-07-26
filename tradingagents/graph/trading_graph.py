@@ -686,7 +686,16 @@ class TradingAgentsGraph:
             ),
         }
 
-    def propagate(self, company_name, trade_date, progress_callback=None, task_id=None):
+    def propagate(
+        self,
+        company_name,
+        trade_date,
+        progress_callback=None,
+        task_id=None,
+        snapshot_id=None,
+        data_quality_status=None,
+        market=None,
+    ):
         """Run the trading agents graph for a company on a specific date.
 
         Args:
@@ -694,6 +703,9 @@ class TradingAgentsGraph:
             trade_date: Date for analysis
             progress_callback: Optional callback function for progress updates
             task_id: Optional task ID for tracking performance data
+            snapshot_id: Verified PR-003 EvidenceSnapshot ID, when present.
+            data_quality_status: PASS/WARN from that verified snapshot.
+            market: Normalized CN/HK/US snapshot market.
         """
 
         # 添加详细的接收日志
@@ -711,6 +723,9 @@ class TradingAgentsGraph:
             company_name,
             trade_date,
             analysis_id=str(task_id) if task_id else None,
+            snapshot_id=snapshot_id,
+            data_quality_status=data_quality_status,
+            market=market,
         )
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的company_of_interest: '{init_agent_state.get('company_of_interest', 'NOT_FOUND')}'")
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的trade_date: '{init_agent_state.get('trade_date', 'NOT_FOUND')}'")
@@ -877,6 +892,10 @@ class TradingAgentsGraph:
         )
         if final_state.get("decision_error"):
             decision["decision_error"] = final_state["decision_error"]
+        decision["snapshot_id"] = final_state.get("snapshot_id")
+        decision["data_quality_status"] = final_state.get("data_quality_status")
+        decision["legacy_analysis"] = bool(final_state.get("legacy_analysis"))
+        decision["automated_execution_allowed"] = False
         decision['model_info'] = model_info
 
         # Return decision and processed signal
@@ -1193,6 +1212,11 @@ class TradingAgentsGraph:
             "decision_error": final_state.get("decision_error"),
             "normal_model_meta": final_state.get("normal_model_meta"),
             "top_model_meta": final_state.get("top_model_meta"),
+            "snapshot_id": final_state.get("snapshot_id"),
+            "data_quality_status": final_state.get("data_quality_status"),
+            "market": final_state.get("market"),
+            "legacy_analysis": bool(final_state.get("legacy_analysis")),
+            "automated_execution_allowed": False,
         }
 
         # Save to file

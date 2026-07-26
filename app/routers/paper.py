@@ -21,6 +21,63 @@ INITIAL_CASH_BY_MARKET = {
 }
 
 
+async def _sync_alphaguard_position_candidate(
+    *,
+    user_id: str,
+    code: str,
+    market: str,
+    quantity: int,
+) -> None:
+    """Best-effort post-trade hook; it never changes or rolls back the fill."""
+
+    service = None
+    account_id = f"manual-paper:{user_id}"
+    try:
+        from app.services.alphaguard.candidate_pool_service import (
+            get_candidate_pool_service,
+        )
+        from tradingagents.alphaguard.candidate_schemas import CandidateSource
+
+        service = get_candidate_pool_service()
+        if quantity > 0:
+            await service.upsert_source(
+                user_id=user_id,
+                symbol=code,
+                market=market,
+                source=CandidateSource.POSITION_REQUIRED,
+                held_account_id=account_id,
+                reason="manual paper position changed",
+            )
+        else:
+            await service.remove_source(
+                user_id=user_id,
+                symbol=code,
+                market=market,
+                source=CandidateSource.POSITION_REQUIRED,
+                held_account_id=account_id,
+                reason="manual paper position closed",
+            )
+    except Exception as exc:
+        logger.error(
+            "AlphaGuard paper-position sync failed after completed fill: "
+            "user_id=%s symbol=%s error_type=%s",
+            user_id,
+            code,
+            exc.__class__.__name__,
+            exc_info=True,
+        )
+        if service is not None:
+            await service.record_sync_failure(
+                user_id=user_id,
+                symbol=code,
+                market=market,
+                reason=(
+                    "paper position candidate sync failed after fill: "
+                    f"{exc.__class__.__name__}: {str(exc)[:300]}"
+                ),
+            )
+
+
 class PlaceOrderRequest(BaseModel):
     code: str = Field(..., description="股票代码（支持A股/港股/美股）")
     side: Literal["buy", "sell"]
@@ -389,6 +446,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
 
     now_iso = datetime.utcnow().isoformat()
     realized_pnl_delta = 0.0
+    final_position_quantity = 0
 
     # 8. 执行买卖逻辑
     if side == "buy":
@@ -415,6 +473,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
 
         # 更新/创建持仓：加权平均成本
         if not pos:
+            final_position_quantity = qty
             new_pos = {
                 "user_id": current_user["id"],
                 "code": normalized_code,
@@ -431,6 +490,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
             old_qty = int(pos.get("quantity", 0))
             old_cost = float(pos.get("avg_cost", 0.0))
             new_qty = old_qty + qty
+            final_position_quantity = new_qty
             new_avg = round((old_cost * old_qty + price * qty) / new_qty, 4) if new_qty > 0 else price
 
             # A股T+1：新买入的不可用
@@ -461,6 +521,7 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
         old_qty = int(pos.get("quantity", 0))
         avg_cost = float(pos.get("avg_cost", 0.0))
         new_qty = old_qty - qty
+        final_position_quantity = new_qty
         pnl = round((price - avg_cost) * qty, 2)
         realized_pnl_delta = pnl
 
@@ -527,6 +588,16 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
         trade_doc["analysis_id"] = analysis_id
     await db["paper_trades"].insert_one(trade_doc)
 
+    # PR-003 hook runs only after account, position, order, and trade writes.
+    # Failure is audited and repaired by reconciliation; the legal manual fill
+    # is never rolled back or recalculated.
+    await _sync_alphaguard_position_candidate(
+        user_id=current_user["id"],
+        code=normalized_code,
+        market=market,
+        quantity=final_position_quantity,
+    )
+
     return ok({"order": {k: v for k, v in order_doc.items() if k != "_id"}})
 
 
@@ -582,4 +653,16 @@ async def reset_account(confirm: bool = Query(False), current_user: dict = Depen
     await db["paper_trades"].delete_many({"user_id": current_user["id"]})
     # 重新创建账户
     acc = await _get_or_create_account(current_user["id"])
+    try:
+        from app.services.alphaguard.candidate_pool_service import (
+            get_candidate_pool_service,
+        )
+
+        await get_candidate_pool_service().reconcile_user(current_user["id"])
+    except Exception:
+        logger.error(
+            "AlphaGuard reconciliation failed after paper reset; "
+            "paper reset remains committed",
+            exc_info=True,
+        )
     return ok({"message": "账户已重置", "cash": acc.get("cash", {})})

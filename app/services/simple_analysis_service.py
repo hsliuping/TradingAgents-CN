@@ -757,6 +757,72 @@ class SimpleAnalysisService:
 
         return trading_graph
 
+    async def _prepare_snapshot_context(
+        self,
+        user_id: str,
+        request: SingleAnalysisRequest,
+    ) -> Dict[str, Any]:
+        """Verify PR-003 snapshot input or mark the old API path explicitly."""
+
+        stock_code = request.get_symbol()
+        if not request.snapshot_id:
+            return {
+                "snapshot_id": None,
+                "data_quality_status": None,
+                "legacy_analysis": True,
+                "automated_execution_allowed": False,
+                "market": None,
+                "symbol": stock_code,
+            }
+
+        from app.services.alphaguard.evidence_snapshot_service import (
+            SnapshotValidationError,
+            get_evidence_snapshot_service,
+        )
+
+        service = get_evidence_snapshot_service()
+        stored = await service.get(request.snapshot_id, str(user_id))
+        if stored is None:
+            raise SnapshotValidationError(
+                "snapshot_id does not exist for the authenticated user"
+            )
+        requested_market = (
+            request.parameters.market_type
+            if request.parameters is not None
+            else stored.market
+        )
+        context = await service.validate_for_analysis(
+            snapshot_id=request.snapshot_id,
+            user_id=str(user_id),
+            symbol=stock_code,
+            market=requested_market,
+        )
+        if (
+            request.parameters is not None
+            and request.parameters.analysis_date is not None
+        ):
+            requested_date = request.parameters.analysis_date
+            if isinstance(requested_date, datetime):
+                requested_date = requested_date.date().isoformat()
+            else:
+                requested_date = str(requested_date)[:10]
+            if requested_date != context["trade_date"]:
+                raise SnapshotValidationError(
+                    "analysis_date does not match EvidenceSnapshot.trade_date"
+                )
+
+        parameters = request.parameters or AnalysisParameters()
+        parameters.market_type = {
+            "CN": "A股",
+            "HK": "港股",
+            "US": "美股",
+        }[context["market"]]
+        parameters.analysis_date = datetime.fromisoformat(context["trade_date"])
+        request.parameters = parameters
+        request.symbol = context["symbol"]
+        request.stock_code = context["symbol"]
+        return context
+
     async def create_analysis_task(
         self,
         user_id: str,
@@ -771,6 +837,8 @@ class SimpleAnalysisService:
             stock_code = request.get_symbol()
             if not stock_code:
                 raise ValueError("股票代码不能为空")
+            snapshot_context = await self._prepare_snapshot_context(user_id, request)
+            stock_code = request.get_symbol()
 
             logger.info(f"📝 创建分析任务: {task_id} - {stock_code}")
             logger.info(f"🔍 内存管理器实例ID: {id(self.memory_manager)}")
@@ -809,6 +877,10 @@ class SimpleAnalysisService:
                         "stock_name": name,
                         "status": "pending",
                         "progress": 0,
+                        "snapshot_id": snapshot_context["snapshot_id"],
+                        "data_quality_status": snapshot_context["data_quality_status"],
+                        "legacy_analysis": snapshot_context["legacy_analysis"],
+                        "automated_execution_allowed": False,
                         "created_at": datetime.utcnow(),
                     }},
                     upsert=True
@@ -829,6 +901,10 @@ class SimpleAnalysisService:
             return {
                 "task_id": task_id,
                 "status": "pending",
+                "snapshot_id": snapshot_context["snapshot_id"],
+                "data_quality_status": snapshot_context["data_quality_status"],
+                "legacy_analysis": snapshot_context["legacy_analysis"],
+                "automated_execution_allowed": False,
                 "message": "任务已创建，等待执行"
             }
 
@@ -858,6 +934,8 @@ class SimpleAnalysisService:
         progress_tracker = None
         try:
             logger.info(f"🚀 开始后台执行分析任务: {task_id}")
+            snapshot_context = await self._prepare_snapshot_context(user_id, request)
+            stock_code = request.get_symbol()
 
             # 🔍 验证股票代码是否存在
             logger.info(f"🔍 开始验证股票代码: {stock_code}")
@@ -989,7 +1067,13 @@ class SimpleAnalysisService:
             await self._update_task_status(task_id, AnalysisStatus.PROCESSING, 20)
 
             # 执行实际的分析
-            result = await self._execute_analysis_sync(task_id, user_id, request, progress_tracker)
+            result = await self._execute_analysis_sync(
+                task_id,
+                user_id,
+                request,
+                progress_tracker,
+                snapshot_context,
+            )
 
             # 标记进度跟踪器完成（在线程中执行）
             await asyncio.to_thread(progress_tracker.mark_completed)
@@ -1095,7 +1179,8 @@ class SimpleAnalysisService:
         task_id: str,
         user_id: str,
         request: SingleAnalysisRequest,
-        progress_tracker: Optional[RedisProgressTracker] = None
+        progress_tracker: Optional[RedisProgressTracker] = None,
+        snapshot_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """同步执行分析（在共享线程池中运行）"""
         # 🔧 使用共享线程池，支持多个任务并发执行
@@ -1108,7 +1193,8 @@ class SimpleAnalysisService:
             task_id,
             user_id,
             request,
-            progress_tracker
+            progress_tracker,
+            snapshot_context,
         )
         logger.info(f"✅ [线程池] 分析任务执行完成: {task_id}")
         return result
@@ -1118,10 +1204,18 @@ class SimpleAnalysisService:
         task_id: str,
         user_id: str,
         request: SingleAnalysisRequest,
-        progress_tracker: Optional[RedisProgressTracker] = None
+        progress_tracker: Optional[RedisProgressTracker] = None,
+        snapshot_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """同步执行分析的具体实现"""
         try:
+            snapshot_context = snapshot_context or {
+                "snapshot_id": None,
+                "data_quality_status": None,
+                "legacy_analysis": True,
+                "automated_execution_allowed": False,
+                "market": None,
+            }
             # 在线程中重新初始化日志系统
             from tradingagents.utils.logging_init import init_logging, get_logger
             init_logging()
@@ -1543,7 +1637,10 @@ class SimpleAnalysisService:
                 request.stock_code,
                 analysis_date,
                 progress_callback=graph_progress_callback,
-                task_id=task_id
+                task_id=task_id,
+                snapshot_id=snapshot_context.get("snapshot_id"),
+                data_quality_status=snapshot_context.get("data_quality_status"),
+                market=snapshot_context.get("market"),
             )
 
             logger.info(f"✅ trading_graph.propagate 执行完成")
@@ -1860,6 +1957,10 @@ class SimpleAnalysisService:
                 "decision_error": state.get("decision_error") if isinstance(state, dict) else None,
                 "normal_model_meta": state.get("normal_model_meta") if isinstance(state, dict) else None,
                 "top_model_meta": state.get("top_model_meta") if isinstance(state, dict) else None,
+                "snapshot_id": state.get("snapshot_id") if isinstance(state, dict) else None,
+                "data_quality_status": state.get("data_quality_status") if isinstance(state, dict) else None,
+                "legacy_analysis": bool(state.get("legacy_analysis", True)) if isinstance(state, dict) else True,
+                "automated_execution_allowed": False,
                 "execution_time": execution_time,
                 "tokens_used": decision.get("tokens_used", 0) if isinstance(decision, dict) else 0,
                 "state": state,
@@ -2677,6 +2778,10 @@ class SimpleAnalysisService:
                 "decision_error": result.get("decision_error"),
                 "normal_model_meta": result.get("normal_model_meta"),
                 "top_model_meta": result.get("top_model_meta"),
+                "snapshot_id": result.get("snapshot_id"),
+                "data_quality_status": result.get("data_quality_status"),
+                "legacy_analysis": bool(result.get("legacy_analysis", True)),
+                "automated_execution_allowed": False,
 
                 # 元数据
                 "created_at": timestamp,
@@ -2720,6 +2825,10 @@ class SimpleAnalysisService:
                         "decision_error": result.get("decision_error"),
                         "normal_model_meta": result.get("normal_model_meta"),
                         "top_model_meta": result.get("top_model_meta"),
+                        "snapshot_id": result.get("snapshot_id"),
+                        "data_quality_status": result.get("data_quality_status"),
+                        "legacy_analysis": bool(result.get("legacy_analysis", True)),
+                        "automated_execution_allowed": False,
                         "execution_time": result.get("execution_time", 0),
                         "tokens_used": result.get("tokens_used", 0),
                         "reports": reports,  # 包含提取的报告内容

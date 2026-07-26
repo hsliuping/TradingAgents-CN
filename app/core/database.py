@@ -362,6 +362,16 @@ async def create_database_indexes(db):
         await market_quotes.create_index([("amount", -1)])
         await market_quotes.create_index([("updated_at", -1)])
 
+        # AlphaGuard PR-003 uses a separate create-only index plan. It never
+        # drops or changes the existing paper/favorites/analysis indexes.
+        from app.services.alphaguard.index_service import ensure_alphaguard_indexes
+
+        alphaguard_actions = await ensure_alphaguard_indexes(db)
+        logger.info(
+            "✅ AlphaGuard数据库索引已就绪: %s",
+            ", ".join(alphaguard_actions),
+        )
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:

@@ -67,6 +67,10 @@ class AnalysisResult(BaseModel):
     execution_time: float = 0.0
     error_message: Optional[str] = None
     model_info: Optional[str] = None  # 🔥 添加模型信息字段
+    snapshot_id: Optional[str] = None
+    data_quality_status: Optional[str] = None
+    legacy_analysis: bool = True
+    automated_execution_allowed: bool = False
 
 
 class AnalysisTask(BaseModel):
@@ -155,6 +159,13 @@ class SingleAnalysisRequest(BaseModel):
     """单股分析请求"""
     symbol: Optional[str] = Field(None, description="6位股票代码")
     stock_code: Optional[str] = Field(None, description="股票代码(已废弃,使用symbol)")
+    snapshot_id: Optional[str] = Field(
+        None,
+        description=(
+            "AlphaGuard EvidenceSnapshot ID. Omission keeps the old analysis "
+            "path and marks it non-automatable."
+        ),
+    )
     parameters: Optional[AnalysisParameters] = None
 
     def get_symbol(self) -> str:

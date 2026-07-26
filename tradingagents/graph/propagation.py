@@ -24,17 +24,46 @@ class Propagator:
         company_name: str,
         trade_date: str,
         analysis_id: str | None = None,
+        snapshot_id: str | None = None,
+        data_quality_status: str | None = None,
+        market: str | None = None,
     ) -> Dict[str, Any]:
         """Create the initial state for the agent graph."""
         from langchain_core.messages import HumanMessage
 
+        if snapshot_id:
+            if data_quality_status not in {"PASS", "WARN"}:
+                raise ValueError(
+                    "snapshot-backed analysis requires DataQuality PASS or WARN"
+                )
+            legacy_analysis = False
+        else:
+            if data_quality_status is not None:
+                raise ValueError(
+                    "data_quality_status cannot be supplied without snapshot_id"
+                )
+            legacy_analysis = True
+
         # 🔥 修复：创建明确的分析请求消息，而不是只传递股票代码
         # 这样可以确保所有LLM（包括DeepSeek）都能理解任务
-        analysis_request = f"请对股票 {company_name} 进行全面分析，交易日期为 {trade_date}。"
+        snapshot_context = (
+            f"，证据快照为 {snapshot_id}，数据质量为 {data_quality_status}"
+            if snapshot_id
+            else "；这是没有 EvidenceSnapshot 的旧人工分析兼容路径"
+        )
+        analysis_request = (
+            f"请对股票 {company_name} 进行全面分析，交易日期为 {trade_date}"
+            f"{snapshot_context}。"
+        )
 
         return {
             "messages": [HumanMessage(content=analysis_request)],
             "analysis_id": analysis_id or f"{company_name}:{trade_date}",
+            "snapshot_id": snapshot_id,
+            "data_quality_status": data_quality_status,
+            "market": market,
+            "legacy_analysis": legacy_analysis,
+            "automated_execution_allowed": False,
             "company_of_interest": company_name,
             "trade_date": str(trade_date),
             "investment_debate_state": InvestDebateState(

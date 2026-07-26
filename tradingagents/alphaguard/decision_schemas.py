@@ -140,8 +140,8 @@ class NormalTradePlan(AlphaGuardSchema):
 
     model_meta: ModelExecutionMeta
 
-    # PR-003 has not established a real EvidenceSnapshot/QuantProposal yet.
-    # These explicit explanations are preferable to silently inventing values.
+    # PR-003 can now provide a real EvidenceSnapshot. QuantTradeProposal and
+    # its time-horizon context remain explicit compatibility gaps until PR-004.
     entry_zone_not_required_reason: str | None = None
     valid_until_compatibility_reason: str | None = None
 

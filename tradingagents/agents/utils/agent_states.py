@@ -52,6 +52,19 @@ class RiskDebateState(TypedDict):
 
 class AgentState(MessagesState):
     analysis_id: Annotated[str, "Analysis/task identifier used for PR-002 traceability"]
+    snapshot_id: Annotated[
+        Optional[str], "Verified PR-003 EvidenceSnapshot identifier"
+    ]
+    data_quality_status: Annotated[
+        Optional[str], "PASS/WARN for snapshot-backed analysis"
+    ]
+    market: Annotated[Optional[str], "Normalized CN/HK/US market"]
+    legacy_analysis: Annotated[
+        bool, "True only for an old analysis path without EvidenceSnapshot"
+    ]
+    automated_execution_allowed: Annotated[
+        bool, "Always false through PR-003 because no order path exists"
+    ]
     company_of_interest: Annotated[str, "Company that we are interested in trading"]
     trade_date: Annotated[str, "What date we are trading at"]
 

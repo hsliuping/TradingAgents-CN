@@ -153,7 +153,10 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
             review = _failure_review(
                 status="INVALID_OUTPUT",
                 plan_id="unavailable-plan",
-                snapshot_id=f"legacy-analysis:{state.get('analysis_id') or 'unknown'}",
+                snapshot_id=(
+                    state.get("snapshot_id")
+                    or f"legacy-analysis:{state.get('analysis_id') or 'unknown'}"
+                ),
                 model_meta=meta,
                 reason=message,
             )
