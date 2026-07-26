@@ -162,6 +162,19 @@ class ResearcherAgent(BaseAgent):
                 historical_context = self._get_memory_context(ticker, reports) if self.memory else None
                 logger.info(f"[单次分析模式] {self.agent_id} 使用向量缓存")
 
+            # v3.5.0 项1 闭环：检查质量门禁标记，低质量报告在 prompt 中提示
+            # 让研究员感知哪些分析师报告质量存疑，从而降低结论权重
+            quality_flags = state.get("quality_flags") or []
+            if quality_flags:
+                quality_hint = self._build_quality_hint(quality_flags)
+                if quality_hint:
+                    historical_context = (
+                        quality_hint + "\n" + (historical_context or "")
+                    ).strip()
+                    logger.info(
+                        f"[Researcher] 检测到 {len(quality_flags)} 条质量标记，已注入质量提示"
+                    )
+
             # 4. 构建提示词
             # 传递 state 参数（子类可以从 state 中提取变量如 company_name, ticker 等）
             system_prompt = self._build_system_prompt(self.stance, state)
@@ -197,7 +210,8 @@ class ResearcherAgent(BaseAgent):
             # 6. 保存到记忆系统（如果有）
             if self.memory:
                 # 🔥 v2.0: 辩论模式下也保存到向量缓存，以便后续使用
-                self._save_to_memory(ticker, report)
+                # v3.5.0 项3：同时触发反思提炼，把报告提炼为结构化教训
+                self._save_to_memory(ticker, report, state=state)
                 if is_debate_mode:
                     logger.info(f"[辩论模式] {self.agent_id} 已保存到向量缓存")
 
@@ -240,8 +254,49 @@ class ResearcherAgent(BaseAgent):
         for report_key in required_reports:
             if report_key in state:
                 reports[report_key] = state[report_key]
-        
+
         return reports
+
+    def _build_quality_hint(self, quality_flags: List[Dict[str, Any]]) -> str:
+        """构建质量提示文本（v3.5.0 项1 闭环）。
+
+        将分析师报告的质量门禁标记转化为 prompt 提示，
+        让研究员感知哪些分析师报告质量存疑，从而降低结论权重。
+
+        Args:
+            quality_flags: 质量标记列表，每项包含 agent_id/severity/reason
+
+        Returns:
+            质量提示文本，或空字符串
+        """
+        if not quality_flags:
+            return ""
+
+        hints: List[str] = []
+        for flag in quality_flags:
+            if not isinstance(flag, dict):
+                continue
+            agent_id = flag.get("agent_id", "未知分析师")
+            severity = flag.get("severity", "")
+            reason = flag.get("reason", "")
+            retried = flag.get("retried", False)
+
+            if severity == "critical":
+                retry_note = "（已重试仍失败）" if retried else ""
+                hints.append(
+                    f"⚠️ {agent_id} 报告质量不合格{retry_note}：{reason}。"
+                    f"请谨慎参考该分析师的结论，建议以其他分析师报告为主。"
+                )
+            elif severity == "warning":
+                hints.append(
+                    f"⚠️ {agent_id} 报告质量存疑：{reason}。"
+                    f"建议降低该结论的参考权重。"
+                )
+
+        if not hints:
+            return ""
+
+        return "【质量提示】\n" + "\n".join(hints)
     
     def _get_historical_context(self, ticker: str) -> Optional[str]:
         """
@@ -264,13 +319,14 @@ class ResearcherAgent(BaseAgent):
             logger.warning(f"获取历史上下文失败: {e}")
             return None
 
-    def _save_to_memory(self, ticker: str, report: Dict[str, Any]) -> None:
+    def _save_to_memory(self, ticker: str, report: Dict[str, Any], state: Optional[Dict[str, Any]] = None) -> None:
         """
         保存到记忆系统
 
         Args:
             ticker: 股票代码
             report: 研究报告
+            state: 工作流状态（用于提取 user_id 等上下文，v3.5.0 项3 反思节点需要）
         """
         if not self.memory:
             return
@@ -302,8 +358,248 @@ class ResearcherAgent(BaseAgent):
             if success:
                 logger.info(f"✅ 保存到记忆系统: {ticker}, stance={self.stance}")
 
+            # v3.5.0 项3：研究员报告反思提炼
+            # 在原文写入后追加结构化教训节点，把报告提炼为 4 维度经验
+            # 写入 ANALYSIS_INSIGHT scope，memory_kind=analysis_lesson
+            # 失败时 helper 内部已降级，不阻塞主流程
+            self._reflect_on_analysis(ticker, report, content, state=state)
+
         except Exception as e:
             logger.warning(f"保存到记忆系统失败: {e}")
+
+    def _reflect_on_analysis(
+        self,
+        ticker: str,
+        report: Dict[str, Any],
+        original_content: str,
+        state: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """研究员报告反思提炼（v3.5.0 项3）。
+
+        把本次分析报告提炼为结构化教训（reasoning/improvement/summary/query），
+        写入 ANALYSIS_INSIGHT scope，memory_kind=analysis_lesson。
+
+        下次同股票分析时，_get_memory_context 可优先召回结构化教训而非原文。
+
+        降级策略：
+        - LLM 超时/返回非 JSON → fallback 写入原文（reflection_success=False）
+        - mem0 不可用 → 跳过
+        - 任何异常 → 不阻塞主流程
+        """
+        try:
+            from core.agents.reflection_helper import run_reflection_sync
+            from core.agents.reflection_prompts import (
+                ANALYSIS_REFLECTION_SYSTEM_PROMPT,
+                build_analysis_reflection_user_prompt,
+            )
+            from core.memory.models import MemoryScope
+
+            # 提取报告内容用于反思
+            if isinstance(report, dict):
+                stance = report.get("stance", self.stance)
+            else:
+                stance = self.stance
+
+            analysis_date = ""
+            if state:
+                analysis_date = state.get("analysis_date") or state.get("trade_date") or ""
+            if not analysis_date:
+                try:
+                    from datetime import datetime
+                    analysis_date = datetime.now().strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+
+            user_prompt = build_analysis_reflection_user_prompt(
+                ticker=ticker,
+                report=report,
+                analysis_date=analysis_date,
+            )
+            if not user_prompt.strip():
+                return
+
+            # 获取 db 句柄（用于 MemoryService）
+            db = self._get_db_handle(state=state)
+            if db is None:
+                logger.debug("[Researcher] 反思跳过：未获取到 db 句柄")
+                return
+
+            user_id = self._get_user_id(state=state) or "default_user"
+
+            success = run_reflection_sync(
+                db=db,
+                user_id=user_id,
+                agent_id=self.agent_id,
+                scope=MemoryScope.ANALYSIS_INSIGHT,
+                memory_kind="analysis_lesson",
+                system_prompt=ANALYSIS_REFLECTION_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                fallback_content=original_content,
+                fallback_metadata={
+                    "symbol": str(ticker).upper(),
+                    "stance": stance,
+                    "agent_id": self.agent_id,
+                    "analysis_date": analysis_date,
+                    "source": "researcher_reflection",
+                },
+            )
+            if success:
+                logger.info(
+                    f"[Researcher] 已写入 analysis_lesson 教训: ticker={ticker} stance={stance}"
+                )
+        except Exception as e:
+            logger.warning(f"[Researcher] analysis_lesson 反思异常: {e}", exc_info=True)
+
+    def _reflect_on_debate(
+        self,
+        ticker: str,
+        debate_history: str,
+        conclusion: str,
+        debate_type: str,
+        state: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """辩论反思提炼（v3.6.0 项8）。
+
+        在多空辩论 / 风险辩论达到最大轮数后触发，把辩论历史和最终裁决
+        提炼为结构化教训（reasoning/improvement/summary/query），写入
+        AGENT_EXPERIENCE scope，memory_kind=debate_lesson。
+
+        下次同股票分析时，_get_memory_context 可召回辩论教训，
+        让辩论从"对抗"升级为"积累"。
+
+        降级策略：
+        - LLM 超时/返回非 JSON → fallback 写入辩论历史摘要（reflection_success=False）
+        - mem0 不可用 → 跳过
+        - 任何异常 → 不阻塞主流程
+        """
+        try:
+            from core.agents.reflection_helper import run_reflection_sync
+            from core.agents.reflection_prompts import (
+                DEBATE_REFLECTION_SYSTEM_PROMPT,
+                build_debate_reflection_user_prompt,
+            )
+            from core.memory.models import MemoryScope
+
+            if not debate_history.strip() and not conclusion.strip():
+                return
+
+            user_prompt = build_debate_reflection_user_prompt(
+                ticker=ticker,
+                debate_history=debate_history,
+                conclusion=conclusion,
+                debate_type=debate_type,
+            )
+            if not user_prompt.strip():
+                return
+
+            db = self._get_db_handle(state=state)
+            if db is None:
+                logger.debug("[Researcher] 辩论反思跳过：未获取到 db 句柄")
+                return
+
+            user_id = self._get_user_id(state=state) or "default_user"
+
+            # fallback 内容：取辩论历史末尾 + 结论（避免空字符串作为 fallback）
+            fallback_parts = [f"辩论反思 {ticker} ({debate_type})"]
+            if debate_history:
+                # 仅保留末尾 800 字，避免 fallback 过长
+                fallback_parts.append(debate_history[-800:])
+            if conclusion:
+                fallback_parts.append(f"最终裁决: {conclusion[:300]}")
+            fallback_content = "\n\n".join(fallback_parts)
+
+            success = run_reflection_sync(
+                db=db,
+                user_id=user_id,
+                agent_id=self.agent_id,
+                scope=MemoryScope.AGENT_EXPERIENCE,
+                memory_kind="debate_lesson",
+                system_prompt=DEBATE_REFLECTION_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                fallback_content=fallback_content,
+                fallback_metadata={
+                    "symbol": str(ticker).upper() if ticker else "",
+                    "stance": self.stance or "",
+                    "agent_id": self.agent_id,
+                    "debate_type": debate_type,
+                    "source": "debate_reflection",
+                },
+            )
+            if success:
+                logger.info(
+                    f"[Researcher] 已写入 debate_lesson 教训: ticker={ticker} type={debate_type}"
+                )
+        except Exception as e:
+            logger.warning(f"[Researcher] debate_lesson 反思异常: {e}", exc_info=True)
+
+    def _get_db_handle(self, state: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+        """获取 MongoDB 数据库句柄（用于 MemoryService）。
+
+        ResearcherAgent 可能在不同上下文中被调用（工作流引擎、独立调用等），
+        尝试从多个来源获取 db 句柄。
+        """
+        # 1. 从 state 获取（工作流引擎注入）
+        if state and isinstance(state, dict):
+            db = state.get("_db") or state.get("db")
+            if db is not None:
+                return db
+
+        # 2. 从 self._db 获取（如果存在）
+        if hasattr(self, "_db") and self._db is not None:
+            return self._db
+
+        # 3. 从 self.config.prompt_variables 获取（Pydantic 模型）
+        try:
+            if hasattr(self, "config") and self.config is not None:
+                prompt_vars = getattr(self.config, "prompt_variables", None) or {}
+                if isinstance(prompt_vars, dict):
+                    db = prompt_vars.get("db") or prompt_vars.get("database")
+                    if db is not None:
+                        return db
+        except Exception:
+            pass
+
+        # 4. 从全局 get_mongo_db 获取
+        try:
+            from app.core.database import get_mongo_db_sync
+            return get_mongo_db_sync()
+        except Exception:
+            pass
+
+        # 5. 尝试从 settings 直接构造
+        try:
+            from pymongo import MongoClient
+            from app.core.config import settings
+            client = MongoClient(settings.MONGO_URI)
+            return client[settings.MONGO_DB]
+        except Exception as e:
+            logger.debug(f"[Researcher] 获取 db 句柄失败: {e}")
+            return None
+
+    def _get_user_id(self, state: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """获取当前用户 ID（用于 mem0 元数据）。"""
+        # 1. 从 state 获取
+        if state and isinstance(state, dict):
+            user_id = state.get("user_id") or state.get("userId")
+            if user_id:
+                return str(user_id)
+
+        # 2. 从 self._user_id 获取
+        if hasattr(self, "_user_id") and self._user_id:
+            return str(self._user_id)
+
+        # 3. 从 self.config.prompt_variables 获取
+        try:
+            if hasattr(self, "config") and self.config is not None:
+                prompt_vars = getattr(self.config, "prompt_variables", None) or {}
+                if isinstance(prompt_vars, dict):
+                    user_id = prompt_vars.get("user_id")
+                    if user_id:
+                        return str(user_id)
+        except Exception:
+            pass
+
+        return None
 
     @abstractmethod
     def _build_system_prompt(self, stance: str, state: Dict[str, Any] = None) -> str:
@@ -542,7 +838,34 @@ class ResearcherAgent(BaseAgent):
                 if similarity > 0.7:
                     memory_str += f"[相似度: {similarity:.2f}] {content}\n\n"
 
-            if memory_str:
+            # v3.5.0 闭环 L2/L3：优先召回 mem0 中的反思教训
+            # 反思教训通过 reflection_helper.run_reflection 写入 mem0，
+            # 这里通过 recall_lessons_sync 召回并注入 prompt，形成完整闭环。
+            lessons_str = ""
+            try:
+                from core.agents.reflection_helper import recall_lessons_sync
+                db = self._get_db_handle()
+                if db is not None:
+                    user_id = self._get_user_id() or "default_user"
+                    lessons_str = recall_lessons_sync(
+                        db=db,
+                        user_id=user_id,
+                        query=curr_situation,
+                        agent_id=self.agent_id,
+                        limit=3,
+                        max_chars=1500,
+                    )
+                    if lessons_str:
+                        logger.info(f"🧠 从 mem0 召回反思教训（闭环 L2/L3）")
+            except Exception as lessons_exc:
+                logger.debug(f"[Researcher] 召回反思教训失败（不阻塞）: {lessons_exc}")
+
+            # 教训放在前面（优先参考），原文放在后面
+            if lessons_str and memory_str:
+                return f"\n{lessons_str}\n【历史经验】\n{memory_str}"
+            elif lessons_str:
+                return f"\n{lessons_str}"
+            elif memory_str:
                 logger.info(f"🧠 从记忆系统检索到 {len(past_memories)} 条相关经验")
                 return f"\n【历史经验】\n{memory_str}"
 

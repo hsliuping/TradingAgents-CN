@@ -29,6 +29,143 @@ from .models import (
     NodeType,
     EdgeType,
 )
+
+
+# ============================================================
+# v3.6.0 项8：辩论反思触发器（模块级函数）
+# ============================================================
+
+def _trigger_debate_reflection(
+    *,
+    state: Dict[str, Any],
+    result: Dict[str, Any],
+    debate_state_field: str,
+    debate_type: str,
+    agent_id: str,
+    node_id: str,
+) -> None:
+    """辩论结束后触发反思提炼。
+
+    在 research_manager / risk_manager 节点执行后调用，从 state 和 result
+    中提取辩论历史与裁决，调用 run_reflection_sync 提炼为结构化 debate_lesson，
+    写入 AGENT_EXPERIENCE scope（memory_kind=debate_lesson）。
+
+    降级策略：
+    - 辩论历史为空 → 跳过
+    - LLM 超时/返回非 JSON → fallback 写入辩论历史摘要
+    - mem0 不可用 → 跳过
+    - 任何异常 → 不阻塞主流程（caller 已 try/except）
+    """
+    try:
+        # 合并 state 和 result（管理者返回的 result 包含更新后的 debate_state）
+        merged = dict(state or {})
+        if isinstance(result, dict):
+            merged.update(result)
+
+        debate_state = merged.get(debate_state_field) or {}
+        if not isinstance(debate_state, dict):
+            return
+
+        debate_history = str(debate_state.get("history", "") or "").strip()
+        # judge_decision 可能存在于 debate_state 或顶层字段（如 investment_plan / final_trade_decision）
+        conclusion = str(debate_state.get("judge_decision", "") or "").strip()
+        if not conclusion:
+            # 兜底：从 result 中取管理者输出
+            if debate_state_field == "risk_debate_state":
+                conclusion = str(merged.get("final_trade_decision", "") or "").strip()
+            else:
+                conclusion = str(merged.get("investment_plan", "") or "").strip()
+
+        if not debate_history and not conclusion:
+            logger.debug("[辩论反思] 跳过：辩论历史和裁决均为空 node=%s", node_id)
+            return
+
+        # 提取 ticker（兼容多种字段名）
+        ticker = (
+            merged.get("ticker")
+            or merged.get("symbol")
+            or merged.get("stock_code")
+            or merged.get("code")
+            or ""
+        )
+        ticker = str(ticker).strip() if ticker else ""
+
+        # 提取 user_id（用于 mem0 元数据）
+        user_id = str(merged.get("user_id") or merged.get("userId") or "default_user")
+
+        # 获取 db 句柄
+        db = merged.get("_db") or merged.get("db")
+        if db is None:
+            try:
+                from app.core.database import get_mongo_db_sync
+                db = get_mongo_db_sync()
+            except Exception as exc:
+                logger.debug("[辩论反思] 获取 db 句柄失败: %s", exc)
+                return
+        if db is None:
+            return
+
+        # 构造 fallback 内容
+        fallback_parts = [f"辩论反思 {ticker} ({debate_type})"]
+        if debate_history:
+            # 仅保留末尾 800 字，避免 fallback 过长
+            fallback_parts.append(debate_history[-800:])
+        if conclusion:
+            fallback_parts.append(f"最终裁决: {conclusion[:300]}")
+        fallback_content = "\n\n".join(fallback_parts)
+
+        from core.agents.reflection_helper import run_reflection_sync
+        from core.agents.reflection_prompts import (
+            DEBATE_REFLECTION_SYSTEM_PROMPT,
+            build_debate_reflection_user_prompt,
+        )
+        from core.memory.models import MemoryScope
+
+        user_prompt = build_debate_reflection_user_prompt(
+            ticker=ticker,
+            debate_history=debate_history,
+            conclusion=conclusion,
+            debate_type=debate_type,
+        )
+        if not user_prompt.strip():
+            return
+
+        success = run_reflection_sync(
+            db=db,
+            user_id=user_id,
+            agent_id=agent_id,
+            scope=MemoryScope.AGENT_EXPERIENCE,
+            memory_kind="debate_lesson",
+            system_prompt=DEBATE_REFLECTION_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            fallback_content=fallback_content,
+            fallback_metadata={
+                "symbol": str(ticker).upper() if ticker else "",
+                "debate_type": debate_type,
+                "agent_id": agent_id,
+                "node_id": node_id,
+                "source": "debate_reflection",
+            },
+        )
+        if success:
+            logger.info(
+                "[辩论反思] 已写入 debate_lesson 教训: ticker=%s type=%s node=%s",
+                ticker, debate_type, node_id,
+            )
+    except Exception as exc:
+        logger.warning("[辩论反思] 异常: %s", exc, exc_info=True)
+
+
+# v3.6.0 项8 fix：管理者 agent_id 前缀匹配，覆盖 v2 变体
+_MANAGER_AGENT_PREFIXES = ("research_manager", "risk_manager")
+
+
+def _is_manager_agent(agent_id: str) -> bool:
+    """判断 agent_id 是否属于管理者节点（含 v2 变体）。"""
+    agent_id = str(agent_id or "").strip()
+    return any(agent_id.startswith(prefix) for prefix in _MANAGER_AGENT_PREFIXES)
+
+
 from ..agents import AgentRegistry, AgentFactory, AgentConfig
 from ..collaboration_runtime import (
     InvocationArtifactRef,
@@ -900,6 +1037,17 @@ class WorkflowBuilder:
             if node.id in participant_debate_keys:
                 debate_key = participant_debate_keys[node.id]
                 node_func = self._create_debate_participant_wrapper(node, debate_key)
+            elif _is_manager_agent(node.agent_id):
+                # v3.6.0 项8：管理者节点（research_manager / risk_manager 及其 v2 变体）
+                # 在管理者产出裁决后触发辩论反思，把辩论历史+裁决提炼为
+                # 结构化 debate_lesson 教训，写入 AGENT_EXPERIENCE scope。
+                debate_state_field = (
+                    "risk_debate_state" if node.agent_id.startswith("risk_manager")
+                    else "investment_debate_state"
+                )
+                node_func = self._create_manager_with_debate_reflection(
+                    node, debate_state_field=debate_state_field
+                )
             else:
                 node_func = self._create_node_function(node)
 
@@ -1257,6 +1405,10 @@ class WorkflowBuilder:
             # 🆕 工具调用摘要（各分析师的工具调用记录，供下游 Agent 引用）
             # key: analyst_type 或 agent_id，value: Markdown 格式的摘要文本
             tool_call_summaries: Annotated[dict, merge_dict]
+
+            # 🆕 v3.5.0 质量门禁标记（各分析师报告的质量检查结果，供下游和监控引用）
+            # 每个元素是 {agent_id, analyst_type, ticker, reason, severity, retried} 字典
+            quality_flags: Annotated[list, keep_latest_list]
 
             # 研究结果
             bull_report: Annotated[str, keep_non_empty]
@@ -2173,6 +2325,51 @@ class WorkflowBuilder:
             result = original_func(state)
             # 返回增量 1（会被 operator.add 累加到当前值）
             result[debate_key] = 1
+            return result
+
+        return wrapped
+
+    def _create_manager_with_debate_reflection(
+        self,
+        node: NodeDefinition,
+        debate_state_field: str,
+    ) -> Callable:
+        """为管理者节点（research_manager / risk_manager）包装执行函数。
+
+        v3.6.0 项8：管理者产出裁决后，触发辩论反思节点，把辩论历史+裁决
+        提炼为结构化 debate_lesson 教训，写入 AGENT_EXPERIENCE scope。
+
+        反思在独立线程中执行（run_reflection_sync 内部处理 sync→async），
+        失败时 helper 内部降级，不阻塞主工作流。
+        """
+        original_func = self._create_agent_node(node)
+        node_id = node.id
+        agent_id = node.agent_id or node_id
+        debate_type = (
+            "risk_debate_state" if debate_state_field == "risk_debate_state"
+            else "investment_debate_state"
+        )
+
+        def wrapped(state):
+            # 1. 先执行管理者原始逻辑（产出 judge_decision / final_trade_decision 等）
+            result = original_func(state)
+
+            # 2. 触发辩论反思（失败不影响主流程）
+            try:
+                _trigger_debate_reflection(
+                    state=state,
+                    result=result,
+                    debate_state_field=debate_state_field,
+                    debate_type=debate_type,
+                    agent_id=agent_id,
+                    node_id=node_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[辩论反思] 触发失败 node=%s agent=%s: %s",
+                    node_id, agent_id, exc,
+                )
+
             return result
 
         return wrapped
