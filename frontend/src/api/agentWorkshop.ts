@@ -947,6 +947,7 @@ export const agentWorkshopApi = {
     status: string
     binding_result?: Record<string, any>
     message?: string
+    error?: string
   }> => {
     const res = await request.post<ApiOk<{
       review_id: string
@@ -954,6 +955,7 @@ export const agentWorkshopApi = {
       status: string
       binding_result?: Record<string, any>
       message?: string
+      error?: string
     }>>(`${BASE}/skill-review/${sessionId}/${toolId}/confirm`, payload || {})
     return (res as any).data
   },
