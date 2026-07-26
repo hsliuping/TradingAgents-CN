@@ -24,6 +24,7 @@ export interface WfConfirmResult {
   blueprint_summary?: string
   creation_report?: WfCreationReport
   error?: string
+  published?: boolean
 }
 
 /** 工作流结构信息 */
