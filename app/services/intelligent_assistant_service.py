@@ -31,7 +31,7 @@ ASSISTANT_REPORT_INBOX_TITLE = "报告收纳"
 from core.tools import get_tool_registry, tool_metadata_list_to_openai
 from core.tools.context import set_current_assistant_thread_id, set_current_user_id
 from core.llm import UnifiedLLMClient
-from core.llm.models import LLMConfig, LLMProvider, Message, MessageRole
+from core.llm.models import LLMConfig, LLMProvider, Message, MessageRole, ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -1337,6 +1337,49 @@ class IntelligentAssistantService:
         logger.info(f"[智能助手] 已加载 {len(self._openai_tools)} 个工具")
         return True
 
+    def _build_tool_interceptor(self, conversation_id: str):
+        """构建 HITL 工具拦截器（v3.6.0：提取为类方法，供 chat/chat_stream 共用）。
+
+        对关键操作（触发分析/删除配置等）先保存 pending 到 MongoDB，
+        让用户确认后再执行，避免 LLM 在流式/非流式路径下绕过确认直接执行。
+        """
+        async def _intercept(tool_call) -> Optional[Any]:
+            from core.hitl.assistant_hitl import (
+                is_critical_tool,
+                save_pending_critical_action,
+                build_pending_confirmation_reply,
+            )
+
+            tool_id = tool_call.name
+            if not is_critical_tool(tool_id):
+                return None
+
+            pending_id = await save_pending_critical_action(
+                self._db,
+                user_id=self._user_id or "default",
+                conversation_id=conversation_id or "default",
+                tool_id=tool_id,
+                tool_arguments=tool_call.arguments,
+            )
+            if not pending_id:
+                # 保存失败时降级为直接执行
+                return None
+
+            confirmation_msg = build_pending_confirmation_reply(
+                tool_id=tool_id,
+                tool_arguments=tool_call.arguments,
+                pending_id=pending_id,
+            )
+            # 返回 ToolResult（兼容统一 LLM 客户端）
+            from core.llm.unified_client import ToolResult
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_id,
+                content=confirmation_msg,
+                is_error=False,
+            )
+        return _intercept
+
     async def chat(
         self,
         user_message: str,
@@ -1362,6 +1405,33 @@ class IntelligentAssistantService:
             {"reply": str, "tools_used": List[str], "data_refs": Optional[List]}
         """
         resolved_user_message = _rewrite_number_selection_reply(user_message, history_messages)
+
+        # v3.5.0 项4：智能助手 HITL —— 检查用户是否在确认/拒绝待确认操作
+        # 如果用户消息是确认/拒绝意图，且有 pending 操作，直接执行/丢弃，不进入 LLM 循环
+        try:
+            from core.hitl.assistant_hitl import try_resolve_pending_action
+            resolution = await try_resolve_pending_action(
+                self._db,
+                user_id=self._user_id or "default",
+                conversation_id=conversation_id or "default",
+                user_message=resolved_user_message,
+            )
+            if resolution:
+                if resolution.get("type") == "confirmed":
+                    result_text = resolution.get("result", "") or "操作已执行完成"
+                    return {
+                        "reply": f"✅ 已确认执行：{result_text}",
+                        "tools_used": [resolution.get("tool_id", "")],
+                        "data_refs": None,
+                    }
+                elif resolution.get("type") == "rejected":
+                    return {
+                        "reply": resolution.get("message", "已取消操作"),
+                        "tools_used": [],
+                        "data_refs": None,
+                    }
+        except Exception as e:
+            logger.warning(f"[智能助手] HITL 检查失败（降级为正常对话）: {e}")
 
         # 前置检查：不支持的品种类型
         from app.services.planned_analysis_service import _check_unsupported_asset
@@ -1455,6 +1525,9 @@ class IntelligentAssistantService:
 
         async def _do_chat():
             nonlocal tools_used
+
+            tool_interceptor = self._build_tool_interceptor(conversation_id or "default")
+
             resp = await self._llm_client.achat(
                 messages,
                 tools=self._openai_tools,
@@ -1462,6 +1535,7 @@ class IntelligentAssistantService:
                 max_tool_rounds=8,
                 tools_used=tools_used,
                 dry_run=False,
+                tool_interceptor=tool_interceptor,
             )
             await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
 
@@ -1489,6 +1563,7 @@ class IntelligentAssistantService:
                         tools_used=tools_used,
                         dry_run=False,
                         tool_choice="required",
+                        tool_interceptor=tool_interceptor,
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
                 except Exception as retry_err:
@@ -1500,6 +1575,7 @@ class IntelligentAssistantService:
                         max_tool_rounds=8,
                         tools_used=tools_used,
                         dry_run=False,
+                        tool_interceptor=tool_interceptor,
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
 
@@ -1561,6 +1637,28 @@ class IntelligentAssistantService:
         resolved_user_message = _rewrite_number_selection_reply(user_message, history_messages)
 
         logger.info("[智能助手·流式] chat_stream 开始，user_message=%r", resolved_user_message[:50])
+
+        # v3.5.0 项4：智能助手 HITL —— 流式版本同样检查待确认操作
+        try:
+            from core.hitl.assistant_hitl import try_resolve_pending_action
+            resolution = await try_resolve_pending_action(
+                self._db,
+                user_id=self._user_id or "default",
+                conversation_id=conversation_id or "default",
+                user_message=resolved_user_message,
+            )
+            if resolution:
+                if resolution.get("type") == "confirmed":
+                    result_text = resolution.get("result", "") or "操作已执行完成"
+                    yield _sse("token", {"content": f"✅ 已确认执行：{result_text}"})
+                    yield _sse("done", {"tools_used": [resolution.get("tool_id", "")]})
+                    return
+                elif resolution.get("type") == "rejected":
+                    yield _sse("token", {"content": resolution.get("message", "已取消操作")})
+                    yield _sse("done", {"tools_used": []})
+                    return
+        except Exception as e:
+            logger.warning(f"[智能助手·流式] HITL 检查失败（降级为正常对话）: {e}")
 
         from app.services.planned_analysis_service import _check_unsupported_asset
         unsupported_msg = _check_unsupported_asset(resolved_user_message)
@@ -1625,6 +1723,7 @@ class IntelligentAssistantService:
 
         async def _do_chat():
             nonlocal tools_used
+            tool_interceptor = self._build_tool_interceptor(conversation_id or "default")
             resp = await self._llm_client.achat(
                 messages,
                 tools=self._openai_tools,
@@ -1633,6 +1732,7 @@ class IntelligentAssistantService:
                 tools_used=tools_used,
                 dry_run=False,
                 progress_callback=_progress,
+                tool_interceptor=tool_interceptor,
             )
             await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
             if not tools_used and _should_force_tool_retry(resolved_user_message):
@@ -1657,6 +1757,7 @@ class IntelligentAssistantService:
                         dry_run=False,
                         progress_callback=_progress,
                         tool_choice="required",
+                        tool_interceptor=tool_interceptor,
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
                 except Exception:
@@ -1668,6 +1769,7 @@ class IntelligentAssistantService:
                         tools_used=tools_used,
                         dry_run=False,
                         progress_callback=_progress,
+                        tool_interceptor=tool_interceptor,
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
             return resp.content
