@@ -887,6 +887,50 @@ async def lifespan(app: FastAPI):
         )
         logger.info("🗓️ 交易日历缓存刷新任务已配置（每日 18:30 执行）")
 
+        # v3.5.0 项4 / v3.6.0 项6：HITL 待确认操作过期清理（每 30 分钟执行一次）
+        async def _expire_stale_hitl_operations():
+            try:
+                from app.core.database import get_mongo_db
+                from core.hitl.checkpoint_store import HITLCheckpointService
+                db = get_mongo_db()
+                if db is not None:
+                    svc = HITLCheckpointService(db)
+                    cleaned = await svc.expire_stale()
+                    if cleaned:
+                        logger.info(f"[HITL·定时] 已清理 {cleaned} 条过期待确认操作")
+            except Exception as _e:
+                logger.warning(f"[HITL·定时] 过期清理失败: {_e}")
+
+        scheduler.add_job(
+            _expire_stale_hitl_operations,
+            IntervalTrigger(minutes=30, timezone=settings.TIMEZONE),
+            id="hitl_expire_stale",
+            name="HITL 待确认操作过期清理（每30分钟）"
+        )
+        logger.info("🔄 HITL 待确认操作过期清理已配置（每 30 分钟）")
+
+        # v3.6.0：Skill 审核过期清理（每 30 分钟执行一次）
+        async def _expire_stale_skill_reviews():
+            try:
+                from app.core.database import get_mongo_db
+                from app.services.skill_review_service import SkillReviewService
+                db = get_mongo_db()
+                if db is not None:
+                    svc = SkillReviewService(db=db)
+                    cleaned = await svc.expire_stale_reviews()
+                    if cleaned:
+                        logger.info(f"[SkillReview·定时] 已过期 {cleaned} 条待审核 Skill 记录")
+            except Exception as _e:
+                logger.warning(f"[SkillReview·定时] 过期清理失败: {_e}")
+
+        scheduler.add_job(
+            _expire_stale_skill_reviews,
+            IntervalTrigger(minutes=30, timezone=settings.TIMEZONE),
+            id="skill_review_expire_stale",
+            name="Skill 审核过期清理（每30分钟）"
+        )
+        logger.info("🔄 Skill 审核过期清理已配置（每 30 分钟）")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
@@ -1272,10 +1316,14 @@ register_router_with_log(app, unified_tasks_router.router, "统一任务中心�
 # MCP 路由
 from app.routers import mcp as mcp_router
 from app.routers import capability_index as capability_index_router
+from app.routers import quality_metrics as quality_metrics_router
 app.include_router(mcp_router.router)
 
 # 能力索引路由
 app.include_router(capability_index_router.router, prefix="/api", tags=["capability-index"])
+
+# 报告质量指标路由（v3.6.0 项5）
+app.include_router(quality_metrics_router.router)
 
 # 路由注册完成，打印总结
 logger.info("=" * 70)
