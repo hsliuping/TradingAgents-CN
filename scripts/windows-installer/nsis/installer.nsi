@@ -1,3 +1,5 @@
+﻿﻿﻿﻿Unicode true
+ManifestDPIAware true
 ; ============================================================================
 ; TradingAgentsCN Windows Installer (NSIS 3.x)
 ; 特性：
@@ -8,9 +10,6 @@
 ;   5. VC++ Runtime DLL 直接复制（不安装 VC Redist，更稳定）
 ;   6. 简化安装模式：全新安装 / 升级安装
 ; ============================================================================
-
-; NSIS 3.x: 显式声明脚本文件为 UTF-8 编码（无 BOM 时必需）
-Unicode true
 
 !include "MUI2.nsh"
 !include "nsDialogs.nsh"
