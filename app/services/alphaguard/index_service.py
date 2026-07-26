@@ -1,4 +1,4 @@
-"""MongoDB index initialization for AlphaGuard PR-003."""
+"""Create-only MongoDB index initialization for AlphaGuard PR-003/PR-004."""
 
 from __future__ import annotations
 

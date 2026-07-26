@@ -1,0 +1,23 @@
+regime_version: market-regime-v1
+schema_version: market-regime-config-v1
+benchmark_symbol: "000300"
+required_benchmark_sessions: 61
+minimum_breadth_records: 1
+thresholds:
+  extreme_volatility: 0.45
+  breadth_collapse: -0.45
+  trend_breadth: 0.10
+  strong_diffusion: 0.55
+  weak_breadth: -0.10
+exposure:
+  TREND_UP: 0.80
+  RANGE_STRONG: 0.60
+  RANGE_WEAK: 0.30
+  TREND_DOWN: 0.10
+  EXTREME_RISK: 0.00
+allowed_strategies:
+  TREND_UP: [SWING_TREND_PULLBACK_V1, POSITION_EXIT_V1]
+  RANGE_STRONG: [SWING_TREND_PULLBACK_V1, POSITION_EXIT_V1]
+  RANGE_WEAK: [POSITION_EXIT_V1]
+  TREND_DOWN: [POSITION_EXIT_V1]
+  EXTREME_RISK: [POSITION_EXIT_V1]

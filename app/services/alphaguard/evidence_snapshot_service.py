@@ -104,6 +104,22 @@ class EvidenceSnapshotService:
         payload: dict[str, Any],
     ) -> EvidenceSnapshot:
         data = dict(payload)
+        if data.get("factor_version_set") or data.get("strategy_version"):
+            from .factor_registry import FactorRegistry
+            from .strategy_registry import STRATEGY_SET_VERSION, StrategyRegistry
+
+            expected_factors = await FactorRegistry(self.db).get_version_set(
+                require_registered=True
+            )
+            if data.get("factor_version_set") != expected_factors:
+                raise ValueError(
+                    "factor_version_set must match the registered factor-set-v1"
+                )
+            if data.get("strategy_version") != STRATEGY_SET_VERSION:
+                raise ValueError(
+                    f"strategy_version must be {STRATEGY_SET_VERSION}"
+                )
+            await StrategyRegistry(self.db).require_strategy_set()
         market, symbol = normalize_instrument(data["symbol"], data["market"])
         trade_date = data["trade_date"]
         if isinstance(trade_date, str):
@@ -142,9 +158,10 @@ class EvidenceSnapshotService:
             "market_context_id": data.get("market_context_id"),
             "data_quality": report.model_dump(mode="python"),
             "raw_refs": data["raw_refs"],
-            # PR-004 placeholders are deliberately truthful and non-produced.
-            "factor_version_set": {},
-            "strategy_version": None,
+            # Version selection is immutable and hashed before any PR-004
+            # calculation. Empty/None remains a truthful legacy research mode.
+            "factor_version_set": data.get("factor_version_set", {}),
+            "strategy_version": data.get("strategy_version"),
             "normal_model_version": data.get("normal_model_version"),
             "top_model_version": data.get("top_model_version"),
             "prompt_versions": data.get("prompt_versions", {}),

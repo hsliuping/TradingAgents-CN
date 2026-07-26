@@ -15,6 +15,7 @@ from tradingagents.alphaguard.instruments import normalize_instrument
 
 _REFERENCE_COLLECTIONS = {
     "market_quotes": "market_quotes",
+    "stock_daily_quotes": "stock_daily_quotes",
     "stock_daily_data": "stock_daily_data",
     "stock_historical_data": "stock_historical_data",
     "historical_data": "historical_data",
@@ -25,6 +26,13 @@ _REFERENCE_COLLECTIONS = {
     "stock_announcements": "stock_announcements",
     "paper_account": "paper_accounts",
     "paper_accounts": "paper_accounts",
+    "paper_position": "paper_positions",
+    "paper_positions": "paper_positions",
+    "benchmark_daily": "stock_daily_quotes",
+    "index_daily": "stock_daily_quotes",
+    "market_context": "ag_market_contexts",
+    "market_breadth": "ag_market_contexts",
+    "trading_calendar": "trading_calendar",
     "sync_status": "sync_status",
 }
 
@@ -39,6 +47,9 @@ _IDENTITY_FIELDS = (
     "account_id",
     "job",
     "data_type",
+    "ref_id",
+    "calendar_id",
+    "context_id",
 )
 _DATE_FIELDS = (
     "trade_date",
@@ -126,10 +137,25 @@ class DataQualityGate:
                 if ObjectId.is_valid(identifier):
                     clauses.append({"_id": ObjectId(identifier)})
                 clauses.append({"_id": identifier})
-                document = await db[collection_name].find_one({"$or": clauses})
-                if document is None:
+                candidates = await db[collection_name].find(
+                    {"$or": clauses}
+                ).to_list(length=None)
+                if len(parts) >= 3:
+                    reference_date = _as_datetime(":".join(parts[2:]))
+                    if reference_date is not None:
+                        candidates = [
+                            document
+                            for document in candidates
+                            if (
+                                (document_date := _document_datetime(document))
+                                is not None
+                                and document_date.date() == reference_date.date()
+                            )
+                        ]
+                if len(candidates) != 1:
                     invalid.append(reference)
                     continue
+                document = candidates[0]
                 cleaned = dict(document)
                 cleaned["_reference"] = reference
                 if len(parts) >= 3:

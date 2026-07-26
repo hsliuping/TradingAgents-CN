@@ -2,20 +2,22 @@
 
 ## 当前状态
 
-- 更新时间：2026-07-26 15:06:30 CST（Asia/Shanghai）
-- 当前阶段：PR-003 Candidate Pool & EvidenceSnapshot
+- 更新时间：2026-07-26 16:52 CST（Asia/Shanghai）
+- 当前阶段：PR-004 Factor, Regime & Strategy Engine
 - 阶段状态：实现完成，验证完成
 - PR-001 检查点提交：`5c6ae8f`
 - PR-001 检查点标签：`alphaguard-pr001-baseline`
 - PR-002 检查点提交：`09567a1`
 - PR-002 检查点标签：`alphaguard-pr002-structured-decision`
-- 后续阶段：PR-004 及以后均未开始
+- PR-003 检查点提交：`21e9792`
+- PR-003 检查点标签：`alphaguard-pr003-candidate-evidence`
+- 后续阶段：PR-005 及以后均未开始
 - 固定安全模式：`system_mode=SIM_AUTONOMOUS`
 - 实盘开关：`live_trading_enabled=false`
-- 数据迁移：仅提供 favorites dry-run/显式执行脚本；本次未迁移用户数据
-- 数据库迁移/新集合：新增 4 个独立 AlphaGuard 集合及 create-only 索引
-- MongoDB 文档变化：分析记录增加可选快照追踪字段；旧集合未迁移或删除
-- 公开 API：新增 `/api/alphaguard`；普通分析请求仅增加可选 `snapshot_id`
+- 数据迁移：未迁移用户、候选、快照、模拟持仓或交易数据
+- 数据库迁移/新集合：新增 7 个 PR-004 独立集合及 create-only 索引
+- MongoDB 文档变化：写入 21 个因子定义、2 个策略定义和 23 条注册审计事件
+- 公开 API：新增 7 个认证量化查询/受控计算端点；未增加结果上传或订单 API
 
 ## 基线来源
 
@@ -866,3 +868,403 @@ alphaguard-pr002-structured-decision
 PR-003 到此停止。进入 PR-004 前必须由人工另行授权、先提交或备份当前 PR-003
 工作区，并再次完整读取主计划和本状态文件。当前不得开始因子、市场状态、策略、
 QuantTradeProposal、一致性裁决、硬风控或任何订单链。
+
+---
+
+## PR-004：Factor, Regime & Strategy Engine
+
+### 完成结论和安全边界
+
+PR-004 已完成。正式确定性研究链为：
+
+```text
+EvidenceSnapshot
+  -> immutable_hash / 版本锁校验
+  -> SnapshotDataResolver
+  -> FactorRegistry / FactorEngine
+  -> FactorEvidenceBundle
+  -> MarketRegimeEngine
+  -> StrategyRegistry / StrategyEngine
+  -> QuantTradeProposal
+  -> append-only MongoDB 保存和认证查询
+```
+
+链路终止于不可自动执行的 `QuantTradeProposal`。全部提案强制
+`automated_execution_allowed=false`。没有调用 LLM，没有进入 Trader、Risk Judge、
+NormalTradePlan、TopReviewDecision，没有创建 OrderIntent、paper order、trade 或
+持仓变更。PR-001 的 `SIM_AUTONOMOUS + live_trading_enabled=false` 不变量保持不变。
+
+### 实际修改文件
+
+新增：
+
+```text
+app/models/alphaguard/__init__.py
+app/models/alphaguard/quant_collections.py
+app/schemas/alphaguard/__init__.py
+app/schemas/alphaguard/quant.py
+app/routers/alphaguard_quant.py
+app/services/alphaguard/factor_aggregation.py
+app/services/alphaguard/factor_engine.py
+app/services/alphaguard/factor_registry.py
+app/services/alphaguard/market_regime_engine.py
+app/services/alphaguard/quant_audit_service.py
+app/services/alphaguard/quant_config.py
+app/services/alphaguard/quant_research_pipeline.py
+app/services/alphaguard/snapshot_data_resolver.py
+app/services/alphaguard/strategy_engine.py
+app/services/alphaguard/strategy_registry.py
+config/alphaguard/factors/factor_set_v1.yaml
+config/alphaguard/regimes/market_regime_v1.yaml
+config/alphaguard/strategies/swing_trend_pullback_v1.yaml
+config/alphaguard/strategies/position_exit_v1.yaml
+scripts/seed_alphaguard_factor_definitions.py
+scripts/seed_alphaguard_strategy_definitions.py
+tests/unit/alphaguard/test_factor_engine_pr004.py
+tests/unit/alphaguard/test_quant_pipeline_pr004.py
+tests/unit/alphaguard/test_quant_schemas_pr004.py
+tests/unit/alphaguard/test_regime_strategy_pr004.py
+tests/unit/alphaguard/test_snapshot_resolver_pr004.py
+```
+
+最小修改：
+
+```text
+app/core/database.py
+app/main.py
+app/routers/alphaguard.py
+app/services/alphaguard/data_quality_gate.py
+app/services/alphaguard/evidence_snapshot_service.py
+app/services/alphaguard/index_service.py
+scripts/init_alphaguard_indexes.py
+tradingagents/alphaguard/evidence_schemas.py
+tradingagents/alphaguard/mongo_indexes.py
+docs/refactor/CODEX_EXECUTION_STATUS.md
+```
+
+没有修改 Trader、Risk Manager、AgentState、SignalProcessor、paper 交易实现或前端。
+
+### SnapshotDataResolver 与无未来数据保证
+
+`SnapshotDataResolver`：
+
+- 先读取并验证既有 `EvidenceSnapshot.immutable_hash`；
+- 正式量化计算要求快照同时具备非空 `factor_version_set` 和
+  `strategy_version`；
+- 旧 PR-003 空版本快照默认拒绝，只有内部显式
+  `allow_legacy_unversioned=true` 才能兼容研究；公开计算 API 不暴露该开关；
+- 只逐条解析 `raw_refs`，不按 symbol 查询“最新”记录；
+- 引用不唯一、找不到或哈希不一致时 fail-closed；
+- 行情、指数和市场上下文限制在 `trade_date/price_cutoff_at`；
+- 财务同时要求 `report_period <= trade_date` 以及
+  `ann_date/f_ann_date/publish_date <= announcement_cutoff_at`，没有披露时间即排除；
+- 新闻和公告分别服从 `news_cutoff_at`、`announcement_cutoff_at`；
+- 持仓记录必须属于快照用户且不晚于价格截止；
+- 未来交易日可以作为已提前公开的日历事实，但日历自身的
+  `as_of/published_at` 必须不晚于快照截止；
+- 不调用外部数据源，不用未来记录，不用更新后的非引用记录补缺。
+
+DataQuality 引用前缀扩展到实际存在的 `stock_daily_quotes`、
+`stock_financial_data`、`stock_news`、`paper_positions`，以及显式
+`index_daily/market_context/trading_calendar` 引用。历史记录若用 symbol 和日期定位，
+同日仍有多条候选时视为歧义并拒绝，推荐正式引用使用 ObjectId 或唯一 `ref_id`。
+
+### 因子注册表、版本和定义
+
+- 因子集合版本：`factor-set-v1`；
+- 21 个因子版本均为 `1.0.0`；
+- 公式实现版本：`factor-engine-v1`；
+- `FactorDefinition` 保存 group、公式说明、依赖、窗口、缺失策略、归一化方法、
+  参数、`code_hash`、`parameter_hash`、状态、创建时间和 Schema 版本；
+- `(factor_id, factor_version)` 创建后不可覆盖；相同内容重复注册返回已有定义，
+  同身份不同内容写审计并抛出完整性冲突；
+- 公式或参数变化必须使用新版本。
+
+正式因子如下：
+
+| 因子 | 公式/数据依赖 |
+| --- | --- |
+| `close_vs_ma20_v1` | `close / MA20 - 1`；20 个快照行情 close |
+| `close_vs_ma60_v1` | `close / MA60 - 1`；60 个 close |
+| `ma20_vs_ma60_v1` | `MA20 / MA60 - 1`；60 个 close |
+| `ma20_slope_5d_v1` | `MA20(t) / MA20(t-5) - 1`；25 个 close |
+| `momentum_20d_v1` | `close(t) / close(t-20) - 1`；21 个 close |
+| `momentum_60d_v1` | `close(t) / close(t-60) - 1`；61 个 close |
+| `relative_strength_hs300_20d_v1` | 股票 20 日收益减沪深300同期收益；对齐日期 |
+| `volume_confirmation_20d_v1` | 当日 volume / 前20日 volume 中位数 |
+| `revenue_yoy_v1` | 最新已披露 revenue / 上年同报告期 - 1 |
+| `adjusted_net_profit_yoy_v1` | 明确扣非利润字段 / 上年同报告期 - 1；不拿普通净利润代替 |
+| `roe_v1` | 最新已披露标准 ROE |
+| `operating_cashflow_to_profit_v1` | `n_cashflow_act / net_income`；近零分母拒绝 |
+| `pe_ttm_percentile_3y_v1` | 自身正 PE 最多 756 期历史分位；至少60个有效样本 |
+| `pb_percentile_3y_v1` | 自身正 PB 最多 756 期历史分位；至少60个有效样本 |
+| `dividend_yield_v1` | 快照行情中的 `dv_ttm/dv_ratio/dividend_yield` |
+| `atr14_pct_v1` | 14 期 True Range 均值 / close；需要15期 OHLC |
+| `volatility20_annualized_v1` | 20 日日收益样本标准差 × `sqrt(250)` |
+| `average_amount20_v1` | 20 日 amount 算术平均 |
+| `turnover20_v1` | 20 日 turnover_rate 算术平均 |
+| `short_term_excess_return5_v1` | 股票 5 日收益减沪深300同期收益；风险归一化取绝对幅度 |
+| `event_risk_v1` | 结构化 severity/risk_level 优先，后接 `event-risk-rules-v1` 固定关键词 |
+
+行业强度组保留为正式分组，但当前没有可靠快照行业强度时序输入，因此不伪造可选
+增强因子，覆盖率为 0、得分为 null。
+
+### FactorResult、缺失值、归一化与聚合
+
+`FactorResult` 保存唯一 result_id、因子/代码/参数版本、证券身份、交易日、snapshot、
+raw/score/direction/confidence/missing_reason、精确引用、输入哈希及计算时间。
+`normalized_score` 只能是 0～100 或 null，confidence 只能是 0～1。
+
+缺失数据统一为：
+
+```text
+raw_value = null
+normalized_score = null
+direction = UNKNOWN
+confidence = 0
+missing_reason = 明确依赖说明
+```
+
+缺失财务不解释为 0，未抓到新闻不解释为无风险，市场数据不足不解释为震荡。归一化
+只使用版本 YAML 的固定上下界、单调线性、对数线性、自身历史分位或绝对风险映射，
+不使用候选池排名、未来全样本、动态权重或 LLM。
+
+`FactorEvidenceBundle` 保存各组有效/总因子数、coverage、等权权重、缺失因子和得分。
+默认覆盖率阈值为 0.60；低于阈值时组分为 null。趋势/动量/质量/估值/流动性越高越
+强或越有吸引力；波动风险和事件风险越高风险越大。
+
+### MarketContext 与 MarketRegimeEngine
+
+市场状态只接受快照显式引用的宽基指数历史和 `ag_market_contexts` 公共市场记录。
+输入指标包括指数相对 MA20/MA60、MA20 五日斜率、20 日年化波动率、上涨/下跌家数
+计算的宽度、行业扩散度、成交额比、新高/新低比和结构化极端风险标志。没有用单只
+股票代替市场。
+
+版本 `market-regime-v1` 只产生五种状态：
+
+- `EXTREME_RISK`：阻断标志，或高波动与宽度崩溃同时成立；
+- `TREND_UP`：指数在 MA20/MA60 上方、斜率正、宽度和行业扩散度达到阈值；
+- `TREND_DOWN`：指数在 MA60 下方、斜率负且宽度弱；
+- `RANGE_STRONG`：中期结构未破坏且宽度非负，但不满足完整上升趋势；
+- `RANGE_WEAK`：其余偏弱但未达到下降/极端风险。
+
+缺少必需指标返回 `INSUFFICIENT_DATA + regime=null`；非法负家数或越界行业扩散度
+返回 `INVALID_INPUT + regime=null`。两者都禁止新持仓、不允许开仓策略，但保留
+`POSITION_EXIT_V1`。各状态的允许策略和最大总敞口来自 YAML，不在 Prompt 中。
+
+当前实际 MongoDB 没有指数、市场宽度或交易日历业务记录，因此真实快照在补齐明确
+raw refs 前会按设计得到数据不足，而不是一个虚构市场状态。
+
+### 策略注册表和两套 Champion
+
+策略集合版本为 `strategy-set-v1`，公式实现为 `strategy-engine-v1`；两套策略版本均
+为 `1.0.0`，状态均为 `CHAMPION`。`StrategyDefinition` 保存适用市场/状态、因子依赖、
+必需分组、参数、代码和参数哈希、父版本及晋升时间。同版本不可覆盖；PR-004 没有
+Challenger 或自动晋升工作流。
+
+`SWING_TREND_PULLBACK_V1`：
+
+- 仅 CN，且只在 `TREND_UP/RANGE_STRONG` 和 `allow_new_positions=true` 时运行；
+- 检查趋势、动量、沪深300相对强弱、流动性、波动风险、事件风险；
+- 回调必须位于固定的 20 日高点回撤区间且接近 MA20，中期趋势仍在 MA60 上方；
+- 输出 TRIGGERED/BUY、WATCH/WAIT、REJECTED/HOLD 或
+  INSUFFICIENT_DATA/WAIT；
+- 触发时提供确定性 entry zone、5% 初始/10% 最大建议仓位、加减仓/退出/失效条件；
+- 有效期只取快照引用交易日历中的后 3 个开市日；日历不足则不触发；
+- 不包含、推算或强制生成 target_price。
+
+`POSITION_EXIT_V1`：
+
+- 只读取快照引用、属于当前用户且 quantity > 0 的 paper position；
+- 无正持仓固定返回 `REJECTED/HOLD + NO_POSITION`；
+- 检查跌破 MA20/MA60、MA20 斜率、20 日动量、波动/事件风险和市场
+  TREND_DOWN/EXTREME_RISK；
+- 重大风险给出 SELL，多个降险条件给出 REDUCE，否则 WATCH/HOLD；
+- `quantity/available_qty` 和 T+1 可卖信息进入 EvidenceRef/risk flag；
+- 即使建议 SELL，仍只生成研究提案，不调用人工模拟交易 API。
+
+### QuantTradeProposal、幂等和完整性
+
+`QuantTradeProposal` 保存 candidate/snapshot、策略和市场状态版本、因子集合版本、
+状态、候选动作、可选 entry zone、建议仓位、规则条件、交易日历有效期、预计持有
+周期、因子摘要和结果 ID、证据、风险、原因、解释、input_hash 和创建时间。Schema
+使用 `Literal[False]` 强制不可自动执行；没有目标价字段。
+
+不可变身份：
+
+```text
+FactorResult       (snapshot_id, factor_id, factor_version)
+MarketRegimeResult (snapshot_id, regime_version)
+QuantTradeProposal (snapshot_id, strategy_id, strategy_version)
+```
+
+重复输入和实现/参数哈希一致时返回已有对象；同一身份但输入、代码或参数哈希变化时
+写 `QUANT_INTEGRITY_CONFLICT` 并拒绝覆盖。proposal/result ID 由输入哈希确定性生成。
+任一策略 TRIGGERED 时，只有 `WATCHING` 候选允许转为 `SIGNAL_DETECTED`；不会推进
+AI、风控或订单状态。
+
+审计事件保存在额外 append-only `ag_quant_audit_events`，覆盖定义注册、因子计算、
+市场状态成功/失败、策略评估成功/失败、提案创建和完整性冲突。
+
+### 新快照版本关联
+
+新正式量化快照必须在创建之前：
+
+1. 因子和策略定义已经通过种子脚本登记；
+2. `factor_version_set` 与已登记 `factor-set-v1` 的 21 个精确版本完全一致；
+3. `strategy_version=strategy-set-v1`；
+4. 两者与 raw refs、cutoff 和数据版本一起参与 `immutable_hash`。
+
+旧快照不回填、不更新、不重算哈希。EvidenceSnapshot Schema 同时接受完整的旧
+空版本形态和完整的新版本形态，不接受只提供其中一项的半版本形态。
+
+### MongoDB 集合、索引和数据变化
+
+新增所需集合：
+
+```text
+ag_factor_definitions
+ag_factor_results
+ag_regime_results
+ag_strategy_definitions
+ag_quant_proposals
+```
+
+为公共市场输入和审计另增加：
+
+```text
+ag_market_contexts
+ag_quant_audit_events
+```
+
+索引包含指令要求的定义唯一身份、result/snapshot/factor 唯一身份、input_hash、
+symbol/market/date、snapshot/group、regime/version/status/date、strategy/version/
+status/markets、proposal_id、snapshot/strategy/version、candidate/status/created_at
+及审计 snapshot/type/time。继续使用同一 create-only 索引器：不 drop、不替换同名
+冲突，冲突明确失败。
+
+真实开发数据库执行结果：
+
+- 索引脚本第一次补建 PR-004 索引，第二次全部 `unchanged`；
+- 因子种子第一次写入 21 条，第二次 `seeded_or_verified=21`；
+- 策略种子第一次写入 2 条，第二次 `seeded_or_verified=2`；
+- 写入 23 条定义注册审计；
+- `ag_factor_results/ag_regime_results/ag_quant_proposals` 均为 0；
+- `paper_orders/paper_trades` 均为 0；
+- 没有迁移、更新或删除 PR-003 快照、候选、favorites、paper 或 analysis 数据。
+
+### API
+
+均复用现有 `get_current_user` 认证、response wrapper、request trace 和 MongoDB：
+
+```text
+GET  /api/alphaguard/factors/definitions
+GET  /api/alphaguard/factors/results?snapshot_id=...
+GET  /api/alphaguard/factors/results/{snapshot_id}
+POST /api/alphaguard/quant/evaluate/{snapshot_id}
+GET  /api/alphaguard/regimes/{snapshot_id}
+GET  /api/alphaguard/strategies/definitions
+GET  /api/alphaguard/quant-proposals
+```
+
+客户端不能上传 FactorResult、MarketRegimeResult 或 QuantTradeProposal；没有更新、
+删除或订单端点。计算 API 只选择快照中锁定的版本，不接受客户端临时结果或权重。
+
+### PR-004 测试和全阶段回归
+
+| 验证项 | 结果 |
+| --- | --- |
+| PR-004 Schema/因子/状态/策略/解析器/管线/API/索引 | `41 passed, 4 warnings` |
+| PR-003 专项回归 | `40 passed` |
+| PR-002 结构化决策专项 | `40 passed` |
+| PR-001 安全与配置回归 | `24 passed`（最终复跑含 `tests/test_config_system.py`） |
+| PR-001～PR-004 合并选择集 | `145 passed, 14 warnings` |
+| Python 新增/修改文件 `py_compile/compileall` | 通过 |
+| 全目录 `compileall` | 仅存量 `scripts/补充行业信息_akshare.py:81` 语法错误 |
+| `git diff --check` | 通过 |
+| 全量测试收集 | `824 collected, 15 errors`，错误文件/类别与 PR-003 相同 |
+| 前端 `npm run type-check` | 失败，仍为 34 个存量 `TS2345 DefaultRow` |
+| FastAPI 安全启动 | `GET /api/health` HTTP 200 |
+| FastAPI 实盘开关拒绝 | 退出码 3 |
+| `app/worker.py` 实盘开关拒绝 | 退出码 1，任务资源初始化前 |
+| `app/worker/analysis_worker.py` 实盘开关拒绝 | 退出码 1，任务资源初始化前 |
+| MongoDB / Redis | Docker healthy，实际 ping 为 `1.0 / True` |
+| 索引脚本 | 第二次执行全部 `unchanged`，无删除 |
+| 因子/策略脚本 dry-run | 通过，明确提示需 `--execute` |
+| 因子/策略脚本 execute 幂等 | `21 / 2` 两次一致 |
+| Quant API 冒烟 | 认证依赖和 definitions/proposals 查询 HTTP 200 |
+| 重复计算 | 复用 21 个结果、1 个状态、2 个提案，无重复 |
+| 无未来数据 | 行情、财务、新闻未来记录均排除；篡改哈希阻断 |
+| 自动交易副作用 | 订单、成交、持仓变化均为 0 |
+
+PR-003 为 783 collected；PR-004 新增 41 项后为 824 collected，增量完全对应本阶段
+测试。15 个收集错误、34 个前端错误和中文脚本语法错误均是已记录存量问题，没有
+新增错误类别，也没有跳过或顺手修复。
+
+### 设计差异、限制和安全影响
+
+1. 原设计建议将全部 Schema 放在多个 `app/schemas/alphaguard/*.py`；实际以单一
+   `quant.py` 保存一个严格真相来源，避免当前规模下跨文件循环。安全语义不变。
+2. 原设计列出独立 `market_context_service.py`；实际公共市场记录只能通过
+   `SnapshotDataResolver` 的明确快照引用读取，没有开放写 API。原因是当前项目没有
+   可靠市场宽度/指数入库链，贸然新增实时抓取会破坏无未来数据边界。后续只能由
+   独立数据工程阶段补齐，不得由策略引擎外部查询。
+3. 原设计可将 FactorEvidenceBundle 持久化；实际 bundle 在同一管线内确定性生成，
+   底层 FactorResult、Regime 和 Proposal 已持久化且都有哈希。未增加非必要集合。
+4. 额外增加 `ag_quant_audit_events`，用于满足定义/计算/冲突审计要求；它只追加，
+   不参与交易执行。
+5. 当前历史行情可承载全部价格因子，但实际开发数据库对应数据为 0；指数、市场宽度、
+   行业强度和交易日历也无业务数据。生产计算会明确数据不足，不会实时补齐或猜测。
+6. `event_risk_v1` 是固定关键词和结构化字段规则，不是语义模型；规则改变必须升版。
+7. 仓位百分比只是策略研究建议，尚未经过 PR-005 HardRiskEngine。
+
+### 兼容性和明确未实施
+
+- PR-003 旧快照保持字节/哈希不变；旧请求仍可创建空版本兼容快照；
+- PR-002 的结构化模型链和旧展示字段没有修改；
+- PR-001 安全配置和两套 Worker 入口没有修改；
+- 现有 favorites、人工模拟交易、手续费、滑点和 T+1 实现没有修改；
+- MongoDB 字段扩展和新集合不会改变旧文档解析；
+- 公开变化仅为新增认证 API 与 EvidenceSnapshot 创建请求允许完整版本锁。
+
+明确未实施 PR-005 及以后：
+
+```text
+ContextBuilder LLM 注入
+ConsensusEngine
+MaterialRevision 人工确认流
+HardRiskEngine / RiskDecision
+OrderIntent / MatchingEngine
+自动模拟交易或实盘
+Champion/Challenger 晋升
+全市场自动推荐
+Dify / Qlib / FinRL / RD-Agent
+```
+
+### PR-004 回退
+
+安全代码边界为：
+
+```text
+21e9792
+alphaguard-pr003-candidate-evidence
+```
+
+1. 当前 PR-004 尚未形成提交。先将 `git status --short` 和
+   `git diff --binary` 保存到工作区外，并把本节“新增”文件复制到带时间戳备份目录；
+2. 仅反向应用保存的 PR-004 tracked patch，并移动本节新增文件；不要使用
+   `git reset --hard` 或覆盖其他用户改动；
+3. PR-004 后续形成独立提交后，优先使用 `git revert <pr004-commit>`；
+4. PR-003 四个集合和历史快照绝不回填或删除，PR-001 安全配置绝不回退；
+5. 新增定义、结果和索引对 PR-003 代码不可见，可安全保留。若确需物理回退，先对
+   上述 7 个精确集合执行 `mongodump` 并验证备份，再逐个处理；禁止通配 drop；
+6. 当前真实库只有 21 个因子定义、2 个策略定义、23 个注册审计和索引，没有结果、
+   regime、proposal 或订单数据；
+7. 回退后复跑 PR-001 24 项、PR-002 40 项、PR-003 40 项，并重新验证 FastAPI
+   HTTP 200、API/两 Worker 实盘拒绝及 MongoDB/Redis healthy。
+
+### 当前 Git 状态和下一阶段闸门
+
+PR-003 已提交并标记；PR-004 当前为未提交的已跟踪修改和新增文件，未混入 PR-003
+提交。完成最后复跑后应以实际 `git status --short` 为准。PR-004 到此停止；
+不得开始 PR-005，进入 PR-005 必须由人工重新授权并先建立 PR-004 独立检查点。

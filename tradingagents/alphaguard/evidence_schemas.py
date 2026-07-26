@@ -12,7 +12,7 @@ from .instruments import Market, normalize_instrument
 
 DATA_QUALITY_SCHEMA_VERSION = "data-quality-report-v1"
 EVIDENCE_SNAPSHOT_SCHEMA_VERSION = "evidence-snapshot-v1"
-ALPHAGUARD_CODE_VERSION = "alphaguard-pr003-v1"
+ALPHAGUARD_CODE_VERSION = "alphaguard-pr004-v1"
 
 
 class EvidenceSchema(BaseModel):
@@ -127,8 +127,17 @@ class EvidenceSnapshot(EvidenceSchema):
             or self.data_quality.trade_date != self.trade_date
         ):
             raise ValueError("data quality identity must match EvidenceSnapshot")
-        if self.factor_version_set:
-            raise ValueError("factor_version_set must remain empty until PR-004")
-        if self.strategy_version is not None:
-            raise ValueError("strategy_version must remain None until PR-004")
+        legacy_unversioned = not self.factor_version_set and self.strategy_version is None
+        formal_quant = bool(self.factor_version_set) and bool(self.strategy_version)
+        if not (legacy_unversioned or formal_quant):
+            raise ValueError(
+                "factor_version_set and strategy_version must be supplied together"
+            )
+        if any(
+            not factor_id or not version or version.lower() == "latest"
+            for factor_id, version in self.factor_version_set.items()
+        ):
+            raise ValueError("factor versions must use explicit non-latest identifiers")
+        if self.strategy_version and self.strategy_version.lower() == "latest":
+            raise ValueError("strategy_version must be explicit and not latest")
         return self

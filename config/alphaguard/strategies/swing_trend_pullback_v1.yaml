@@ -1,0 +1,30 @@
+strategy_id: SWING_TREND_PULLBACK_V1
+strategy_version: 1.0.0
+strategy_set_version: strategy-set-v1
+name: Swing trend pullback
+description: Deterministic CN equity trend-pullback research strategy.
+status: CHAMPION
+supported_markets: [CN]
+allowed_regimes: [TREND_UP, RANGE_STRONG]
+required_group_scores: [TREND, MOMENTUM, LIQUIDITY, VOLATILITY_RISK, EVENT_RISK]
+factor_dependencies:
+  close_vs_ma60_v1: 1.0.0
+  ma20_slope_5d_v1: 1.0.0
+  momentum_20d_v1: 1.0.0
+  relative_strength_hs300_20d_v1: 1.0.0
+  average_amount20_v1: 1.0.0
+  volatility20_annualized_v1: 1.0.0
+  event_risk_v1: 1.0.0
+parameters:
+  minimum_trend_score: 55
+  minimum_momentum_score: 52
+  minimum_liquidity_score: 35
+  maximum_volatility_risk_score: 75
+  maximum_event_risk_score: 69
+  pullback_from_20d_high_min: 0.02
+  pullback_from_20d_high_max: 0.12
+  maximum_distance_from_ma20: 0.05
+  initial_position_pct: 0.05
+  max_position_pct: 0.10
+  valid_trading_sessions: 3
+  expected_holding_days: [5, 30]

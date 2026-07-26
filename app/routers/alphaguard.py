@@ -74,11 +74,20 @@ class EvidenceSnapshotCreateRequest(RequestSchema):
     strategy_version: str | None = None
 
     @model_validator(mode="after")
-    def enforce_pr003_boundary(self) -> "EvidenceSnapshotCreateRequest":
-        if self.factor_version_set:
-            raise ValueError("factor_version_set must remain empty until PR-004")
-        if self.strategy_version is not None:
-            raise ValueError("strategy_version must remain None until PR-004")
+    def enforce_version_lock(self) -> "EvidenceSnapshotCreateRequest":
+        legacy_unversioned = not self.factor_version_set and self.strategy_version is None
+        formal_quant = bool(self.factor_version_set) and bool(self.strategy_version)
+        if not (legacy_unversioned or formal_quant):
+            raise ValueError(
+                "factor_version_set and strategy_version must be supplied together"
+            )
+        if any(
+            not factor_id or not version or version.lower() == "latest"
+            for factor_id, version in self.factor_version_set.items()
+        ):
+            raise ValueError("factor versions must use explicit non-latest identifiers")
+        if self.strategy_version and self.strategy_version.lower() == "latest":
+            raise ValueError("strategy_version must be explicit and not latest")
         if any(version.strip().lower() == "latest" for version in self.prompt_versions.values()):
             raise ValueError("prompt versions must be explicit and must not use latest")
         return self

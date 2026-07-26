@@ -1,0 +1,21 @@
+strategy_id: POSITION_EXIT_V1
+strategy_version: 1.0.0
+strategy_set_version: strategy-set-v1
+name: Existing position exit monitor
+description: Deterministic exit research for positive snapshot-referenced paper positions.
+status: CHAMPION
+supported_markets: [CN, HK, US]
+allowed_regimes: [TREND_UP, RANGE_STRONG, RANGE_WEAK, TREND_DOWN, EXTREME_RISK]
+required_group_scores: [TREND, MOMENTUM, VOLATILITY_RISK, EVENT_RISK]
+factor_dependencies:
+  close_vs_ma20_v1: 1.0.0
+  close_vs_ma60_v1: 1.0.0
+  ma20_slope_5d_v1: 1.0.0
+  momentum_20d_v1: 1.0.0
+  volatility20_annualized_v1: 1.0.0
+  event_risk_v1: 1.0.0
+parameters:
+  elevated_volatility_risk_score: 75
+  blocking_event_risk_score: 70
+  reduce_position_pct: 0.50
+  expected_holding_days: [0, 5]

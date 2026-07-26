@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create the PR-003 MongoDB indexes without deleting existing data or indexes."""
+"""Create AlphaGuard PR-003/PR-004 indexes without deleting existing objects."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _keys(value):
 
 
 def print_plan() -> None:
-    print("AlphaGuard PR-003 MongoDB index plan (create-only):")
+    print("AlphaGuard PR-003/PR-004 MongoDB index plan (create-only):")
     for collection_name, specs in ALPHAGUARD_INDEX_SPECS.items():
         for spec in specs:
             print(
