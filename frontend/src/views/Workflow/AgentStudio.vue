@@ -818,6 +818,16 @@
                   </el-collapse>
                 </div>
                 <div v-else class="empty-note">该会话尚未执行缺口分析。请前往 Agent 工坊执行分析。</div>
+
+                <!-- v3.6.0 项6 路径B：Skill 生成 HITL 审核面板 -->
+                <SkillReviewCard
+                  v-if="currentWorkshopSessionId"
+                  :session-id="currentWorkshopSessionId"
+                  source-path="agent_workshop"
+                  @confirmed="handleSkillReviewUpdated"
+                  @rejected="handleSkillReviewUpdated"
+                  @updated="handleSkillReviewUpdated"
+                />
               </el-tab-pane>
             </el-tabs>
           </div>
@@ -854,6 +864,7 @@ import agentWorkshopApi, {
   type AgentWorkshopSessionDetail,
   type AgentWorkshopVersionPrompt,
 } from '@/api/agentWorkshop'
+import SkillReviewCard from '@/components/Workflow/SkillReviewCard.vue'
 
 type NanobotToolEventCard = {
   key: string
@@ -2233,6 +2244,19 @@ const loadVersionDetail = async (versionId: string) => {
   versionDetailVersion.value = versionResult
   versionDetailPrompt.value = versionPromptResult
   versionDetailEvaluation.value = evaluationResult?.items?.[0] || null
+}
+
+// v3.6.0 项6 路径B：Skill 审核confirm/reject 后刷新会话状态
+const handleSkillReviewUpdated = async () => {
+  const sessionId = currentWorkshopSessionId.value
+  if (!sessionId) return
+  try {
+    // 刷新当前会话，让 gap_report 中的 generated_skill_id 同步更新
+    const updated = await agentWorkshopApi.getSession(sessionId)
+    currentSession.value = updated
+  } catch (err) {
+    // 静默失败，SkillReviewCard 内部已处理状态更新
+  }
 }
 
 const publishVersionFromDetail = async () => {

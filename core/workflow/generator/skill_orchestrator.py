@@ -323,9 +323,14 @@ class SkillOrchestrator:
                 "error": str(e),
             }
 
-    async def _bind_one(self, agent_id: str, tool_id: str) -> None:
+    async def _bind_one(self, agent_id: str, tool_id: str, *, is_active: bool = False) -> None:
         """
         将一个 Skill 绑定到 Agent（upsert 到 tool_agent_bindings）
+
+        Args:
+            agent_id: 目标 Agent ID
+            tool_id: 要绑定的 Skill/工具 ID
+            is_active: 是否立即激活（默认 False 为草稿状态，发布后激活）
         """
         now = datetime.utcnow().isoformat()
         await self._db.tool_agent_bindings.update_one(
@@ -334,7 +339,7 @@ class SkillOrchestrator:
                 "$set": {
                     "agent_id": agent_id,
                     "tool_id": tool_id,
-                    "is_active": False,  # 草稿状态，发布后才激活
+                    "is_active": is_active,
                     "priority": 99,  # 新创建的 Skill 优先级较低
                     "updated_at": now,
                 },
