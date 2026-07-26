@@ -1723,41 +1723,64 @@ class SimpleAnalysisService:
                     action_translation = {
                         'BUY': '买入',
                         'SELL': '卖出',
+                        'REDUCE': '减仓',
                         'HOLD': '持有',
+                        'WAIT': '等待',
+                        'NONE': '无操作',
                         'buy': '买入',
                         'sell': '卖出',
-                        'hold': '持有'
+                        'hold': '持有',
+                        'wait': '等待',
+                        'none': '无操作',
                     }
-                    action = decision.get('action', '持有')
+                    action = decision.get('action', '不可执行')
                     chinese_action = action_translation.get(action, action)
 
                     formatted_decision = {
                         'action': chinese_action,
-                        'confidence': decision.get('confidence', 0.5),
-                        'risk_score': decision.get('risk_score', 0.3),
+                        'confidence': decision.get('confidence', 0.0),
+                        'risk_score': decision.get('risk_score'),
                         'target_price': target_price,
-                        'reasoning': decision.get('reasoning', '暂无分析推理')
+                        'reasoning': decision.get(
+                            'reasoning',
+                            '结构化决策不可用，禁止自动执行',
+                        ),
+                        'status': decision.get('status', 'INVALID_OUTPUT'),
+                        'compatibility_only': decision.get(
+                            'compatibility_only',
+                            True,
+                        ),
+                        'not_for_automated_execution': decision.get(
+                            'not_for_automated_execution',
+                            True,
+                        ),
                     }
 
                     logger.info(f"🎯 [DEBUG] 格式化后的decision: {formatted_decision}")
                 else:
                     # 处理其他类型
                     formatted_decision = {
-                        'action': '持有',
-                        'confidence': 0.5,
-                        'risk_score': 0.3,
+                        'action': '不可执行',
+                        'confidence': 0.0,
+                        'risk_score': None,
                         'target_price': None,
-                        'reasoning': '暂无分析推理'
+                        'reasoning': '结构化决策不可用，禁止自动执行',
+                        'status': 'INVALID_OUTPUT',
+                        'compatibility_only': True,
+                        'not_for_automated_execution': True,
                     }
                     logger.warning(f"⚠️ Decision不是字典类型: {type(decision)}")
             except Exception as e:
                 logger.error(f"❌ 格式化decision失败: {e}")
                 formatted_decision = {
-                    'action': '持有',
-                    'confidence': 0.5,
-                    'risk_score': 0.3,
+                    'action': '不可执行',
+                    'confidence': 0.0,
+                    'risk_score': None,
                     'target_price': None,
-                    'reasoning': '暂无分析推理'
+                    'reasoning': '结构化决策格式化失败，禁止自动执行',
+                    'status': 'INVALID_OUTPUT',
+                    'compatibility_only': True,
+                    'not_for_automated_execution': True,
                 }
 
             # 🔥 按照web目录的方式生成summary和recommendation
@@ -1785,7 +1808,7 @@ class SimpleAnalysisService:
 
             # 3. 生成recommendation（从decision的reasoning）
             if isinstance(formatted_decision, dict):
-                action = formatted_decision.get('action', '持有')
+                action = formatted_decision.get('action', '不可执行')
                 target_price = formatted_decision.get('target_price')
                 reasoning = formatted_decision.get('reasoning', '')
 
@@ -1832,6 +1855,11 @@ class SimpleAnalysisService:
                 "risk_level": "中等",  # 可以根据risk_score计算
                 "key_points": [],  # 可以从reasoning中提取关键点
                 "detailed_analysis": decision,
+                "normal_trade_plan": state.get("normal_trade_plan") if isinstance(state, dict) else None,
+                "top_review_decision": state.get("top_review_decision") if isinstance(state, dict) else None,
+                "decision_error": state.get("decision_error") if isinstance(state, dict) else None,
+                "normal_model_meta": state.get("normal_model_meta") if isinstance(state, dict) else None,
+                "top_model_meta": state.get("top_model_meta") if isinstance(state, dict) else None,
                 "execution_time": execution_time,
                 "tokens_used": decision.get("tokens_used", 0) if isinstance(decision, dict) else 0,
                 "state": state,
@@ -2643,6 +2671,12 @@ class SimpleAnalysisService:
 
                 # 🔥 关键修复：添加格式化后的decision字段！
                 "decision": result.get("decision", {}),
+                # AlphaGuard PR-002: backward-compatible document extension.
+                "normal_trade_plan": result.get("normal_trade_plan"),
+                "top_review_decision": result.get("top_review_decision"),
+                "decision_error": result.get("decision_error"),
+                "normal_model_meta": result.get("normal_model_meta"),
+                "top_model_meta": result.get("top_model_meta"),
 
                 # 元数据
                 "created_at": timestamp,
@@ -2681,6 +2715,11 @@ class SimpleAnalysisService:
                         "risk_level": result.get("risk_level", "中等"),
                         "key_points": result.get("key_points", []),
                         "detailed_analysis": result.get("detailed_analysis", {}),
+                        "normal_trade_plan": result.get("normal_trade_plan"),
+                        "top_review_decision": result.get("top_review_decision"),
+                        "decision_error": result.get("decision_error"),
+                        "normal_model_meta": result.get("normal_model_meta"),
+                        "top_model_meta": result.get("top_model_meta"),
                         "execution_time": result.get("execution_time", 0),
                         "tokens_used": result.get("tokens_used", 0),
                         "reports": reports,  # 包含提取的报告内容

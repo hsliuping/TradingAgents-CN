@@ -1,177 +1,329 @@
-import time
-import json
+"""Risk Judge node that emits AlphaGuard's authoritative TopReviewDecision."""
 
-# 导入统一日志系统
-from tradingagents.utils.logging_init import get_logger
+from __future__ import annotations
+
+import json
+from typing import Any
+from uuid import uuid4
+
+from pydantic import ValidationError
+
 from tradingagents.agents.utils.instrument_utils import build_instrument_context
+from tradingagents.alphaguard.decision_schemas import (
+    ModelExecutionMeta,
+    NormalTradePlan,
+    TopReviewDecision,
+    validate_review_against_plan,
+)
+from tradingagents.alphaguard.structured_output import (
+    invoke_json_object,
+    model_output_schema_json,
+    not_run_meta,
+)
+from tradingagents.utils.logging_init import get_logger
+
 logger = get_logger("default")
 
+TOP_REVIEW_PROMPT_NAME = "top_review_decision"
+TOP_REVIEW_PROMPT_VERSION = "top_review_decision_v1"
 
-def create_risk_manager(llm, memory):
+
+def _configured_provider(config: dict[str, Any]) -> str:
+    return str(
+        config.get("deep_provider") or config.get("llm_provider") or "unknown"
+    )
+
+
+def _configured_model(config: dict[str, Any]) -> str | None:
+    return config.get("deep_think_llm")
+
+
+def _failure_review(
+    *,
+    status: str,
+    plan_id: str,
+    snapshot_id: str,
+    model_meta: ModelExecutionMeta,
+    reason: str,
+) -> TopReviewDecision:
+    return TopReviewDecision(
+        review_id=str(uuid4()),
+        snapshot_id=snapshot_id,
+        plan_id=plan_id,
+        status=status,
+        completeness_score=0,
+        logic_consistency_score=0,
+        risk_control_score=0,
+        missing_evidence=[],
+        logical_conflicts=[],
+        risk_findings=[],
+        adjusted_plan=None,
+        material_change_fields=[],
+        review_reason=reason,
+        model_meta=model_meta,
+    )
+
+
+def _invalid_meta(
+    meta: ModelExecutionMeta,
+    error_type: str,
+    error_message: str,
+) -> ModelExecutionMeta:
+    data = meta.model_dump(mode="python")
+    data.update(
+        execution_status="INVALID_OUTPUT",
+        error_type=error_type,
+        error_message=error_message[:500],
+    )
+    return ModelExecutionMeta.model_validate(data)
+
+
+def _render_review(review: TopReviewDecision) -> str:
+    """Human/report compatibility text derived only from the validated review."""
+
+    lines = [
+        "# AlphaGuard 顶尖模型风险终审",
+        f"- 状态：{review.status}",
+        f"- 审核编号：{review.review_id}",
+        f"- 原计划编号：{review.plan_id}",
+        f"- 完整性评分：{review.completeness_score:.2f}",
+        f"- 逻辑一致性评分：{review.logic_consistency_score:.2f}",
+        f"- 风险控制评分：{review.risk_control_score:.2f}",
+        f"- 终审理由：{review.review_reason}",
+    ]
+    if review.material_change_fields:
+        lines.append(
+            "- 重大变更字段：" + ", ".join(review.material_change_fields)
+        )
+    if review.model_meta.error_type:
+        lines.append(f"- 错误类别：{review.model_meta.error_type}")
+    lines.append(
+        f"- Prompt：{review.model_meta.prompt_name}@{review.model_meta.prompt_version}"
+    )
+    return "\n".join(lines)
+
+
+def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
+    config = config or {}
+
     def risk_manager_node(state) -> dict:
-
         company_name = state["company_of_interest"]
         instrument_context = build_instrument_context(company_name)
-
-        history = state["risk_debate_state"]["history"]
-        risk_debate_state = state["risk_debate_state"]
-        market_research_report = state["market_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
-        sentiment_report = state["sentiment_report"]
-        trader_plan = state["investment_plan"]
-
-        curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
-
-        # 安全检查：确保memory不为None
-        if memory is not None:
-            past_memories = memory.get_memories(curr_situation, n_matches=2)
-        else:
-            logger.warning(f"⚠️ [DEBUG] memory为None，跳过历史记忆检索")
-            past_memories = []
+        risk_debate_state = dict(state.get("risk_debate_state") or {})
+        history = str(risk_debate_state.get("history", ""))
+        reports = {
+            "market_report": state.get("market_report", ""),
+            "sentiment_report": state.get("sentiment_report", ""),
+            "news_report": state.get("news_report", ""),
+            "fundamentals_report": state.get("fundamentals_report", ""),
+        }
+        current_situation = "\n\n".join(str(value) for value in reports.values())
 
         past_memory_str = ""
-        for i, rec in enumerate(past_memories, 1):
-            past_memory_str += rec["recommendation"] + "\n\n"
+        if memory is not None:
+            try:
+                memories = memory.get_memories(current_situation, n_matches=2)
+                past_memory_str = "\n\n".join(
+                    str(item.get("recommendation", ""))
+                    for item in memories
+                    if item.get("recommendation")
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Risk Judge memory lookup failed; continuing without memory: %s",
+                    exc.__class__.__name__,
+                )
 
-        prompt = f"""作为风险管理委员会主席和辩论主持人，您的目标是评估三位风险分析师——激进、中性和安全/保守——之间的辩论，并确定交易员的最佳行动方案。您的决策必须产生明确的建议：买入、卖出或持有。只有在有具体论据强烈支持时才选择持有，而不是在所有方面都似乎有效时作为后备选择。力求清晰和果断。
+        raw_plan = state.get("normal_trade_plan")
+        try:
+            if raw_plan is None:
+                raise ValueError("normal_trade_plan is missing from AgentState")
+            normal_plan = NormalTradePlan.model_validate(raw_plan)
+        except (ValidationError, ValueError, TypeError) as exc:
+            message = "Risk Judge blocked: valid normal_trade_plan is required"
+            meta = not_run_meta(
+                llm=llm,
+                provider=_configured_provider(config),
+                configured_model_name=_configured_model(config),
+                prompt_name=TOP_REVIEW_PROMPT_NAME,
+                prompt_version=TOP_REVIEW_PROMPT_VERSION,
+                error_type="MISSING_OR_INVALID_NORMAL_PLAN",
+                error_message=f"{message}: {exc.__class__.__name__}",
+            )
+            review = _failure_review(
+                status="INVALID_OUTPUT",
+                plan_id="unavailable-plan",
+                snapshot_id=f"legacy-analysis:{state.get('analysis_id') or 'unknown'}",
+                model_meta=meta,
+                reason=message,
+            )
+            decision_error = {
+                "stage": "RISK_JUDGE",
+                "status": "INVALID_OUTPUT",
+                "error_type": "MISSING_OR_INVALID_NORMAL_PLAN",
+                "error_message": message,
+            }
+        else:
+            if normal_plan.status in {"MODEL_FAILED", "INVALID_OUTPUT"}:
+                message = (
+                    "Risk Judge suspended because the authoritative normal plan "
+                    f"ended with {normal_plan.status}"
+                )
+                meta = not_run_meta(
+                    llm=llm,
+                    provider=_configured_provider(config),
+                    configured_model_name=_configured_model(config),
+                    prompt_name=TOP_REVIEW_PROMPT_NAME,
+                    prompt_version=TOP_REVIEW_PROMPT_VERSION,
+                    error_type=f"UPSTREAM_{normal_plan.status}",
+                    error_message=message,
+                )
+                review = _failure_review(
+                    status="SUSPEND",
+                    plan_id=normal_plan.plan_id,
+                    snapshot_id=normal_plan.snapshot_id,
+                    model_meta=meta,
+                    reason=message,
+                )
+                decision_error = state.get("decision_error") or {
+                    "stage": "TRADER",
+                    "status": normal_plan.status,
+                    "error_type": f"UPSTREAM_{normal_plan.status}",
+                    "error_message": message,
+                }
+            else:
+                schema_json = model_output_schema_json(TopReviewDecision)
+                messages = [
+                    {
+                        "role": "system",
+                        "content": f"""你是 AlphaGuard 的顶尖模型风险终审（Risk Judge），不是第二个独立 Trader。你的唯一正式机器输出是一个严格 JSON 对象，不得输出 Markdown、解释前缀或 JSON 之外的文本。
 
-决策指导原则：
-1. **总结关键论点**：提取每位分析师的最强观点，重点关注与背景的相关性。
-2. **提供理由**：用辩论中的直接引用和反驳论点支持您的建议。
-3. **完善交易员计划**：从交易员的原始计划**{trader_plan}**开始，根据分析师的见解进行调整。
-4. **从过去的错误中学习**：使用**{past_memory_str}**中的经验教训来解决先前的误判，改进您现在做出的决策，确保您不会做出错误的买入/卖出/持有决定而亏损。
+Prompt 名称与固定版本：{TOP_REVIEW_PROMPT_NAME}@{TOP_REVIEW_PROMPT_VERSION}
 
-交付成果：
-- 明确且可操作的建议：买入、卖出或持有。
-- 基于辩论和过去反思的详细推理。
+强制语义：
+- 只能对给定 NormalTradePlan 做 CONFIRM、RISK_ADJUST、MATERIAL_REVISION、REJECT 或 SUSPEND。
+- 不得绕过普通模型独立发起交易，不得把非交易计划改成交易计划，不得产生与原计划方向相反的新交易。
+- CONFIRM 时 adjusted_plan 必须为 null。
+- RISK_ADJUST 必须提供 adjusted_plan。
+- MATERIAL_REVISION 必须提供 adjusted_plan 和非空 material_change_fields。
+- REJECT/SUSPEND 不得产生 adjusted_plan。
+- target_price 可以为 null；不得推算、猜测或因其缺失改变动作。
+- 不得生成 model_meta；运行时会注入真实模型执行元数据。
+- 不得创建订单，也不得假设 ConsensusEngine、HardRiskEngine 或 PR-003 证据快照已经存在。
+
+模型输出 JSON Schema：
+{schema_json}
 
 标的约束：
-{instrument_context}
-
----
-
-**分析师辩论历史：**
-{history}
-
----
-
-专注于可操作的见解和持续改进。建立在过去经验教训的基础上，批判性地评估所有观点，确保每个决策都能带来更好的结果。请用中文撰写所有分析内容和建议。"""
-
-        # 📊 统计 prompt 大小
-        prompt_length = len(prompt)
-        # 粗略估算 token 数量（中文约 1.5-2 字符/token，英文约 4 字符/token）
-        estimated_tokens = int(prompt_length / 1.8)  # 保守估计
-
-        logger.info(f"📊 [Risk Manager] Prompt 统计:")
-        logger.info(f"   - 辩论历史长度: {len(history)} 字符")
-        logger.info(f"   - 交易员计划长度: {len(trader_plan)} 字符")
-        logger.info(f"   - 历史记忆长度: {len(past_memory_str)} 字符")
-        logger.info(f"   - 总 Prompt 长度: {prompt_length} 字符")
-        logger.info(f"   - 估算输入 Token: ~{estimated_tokens} tokens")
-
-        # 增强的LLM调用，包含错误处理和重试机制
-        max_retries = 3
-        retry_count = 0
-        response_content = ""
-
-        while retry_count < max_retries:
-            try:
-                logger.info(f"🔄 [Risk Manager] 调用LLM生成交易决策 (尝试 {retry_count + 1}/{max_retries})")
-
-                # ⏱️ 记录开始时间
-                start_time = time.time()
-
-                response = llm.invoke(prompt)
-
-                # ⏱️ 记录结束时间
-                elapsed_time = time.time() - start_time
-                
-                # 打印完整响应对象的结构，帮助调试
-                logger.info(f"🔍 [Risk Manager] LLM响应对象: type={type(response)}")
-                if hasattr(response, '__dict__'):
-                    logger.debug(f"🔍 [Risk Manager] 响应对象内容: {response.__dict__}")
-                
-                # 检查响应是否有效
-                if response is None:
-                    logger.warning(f"⚠️ [Risk Manager] LLM响应为 None (耗时 {elapsed_time:.2f}秒)")
-                    response_content = ""
-                elif hasattr(response, 'content') and response.content:
-                    response_content = response.content.strip()
-
-                    # 📊 统计响应信息
-                    response_length = len(response_content)
-                    estimated_output_tokens = int(response_length / 1.8)
-
-                    # 尝试获取实际的 token 使用情况（如果 LLM 返回了）
-                    usage_info = ""
-                    if hasattr(response, 'response_metadata') and response.response_metadata:
-                        metadata = response.response_metadata
-                        if 'token_usage' in metadata:
-                            token_usage = metadata['token_usage']
-                            usage_info = f", 实际Token: 输入={token_usage.get('prompt_tokens', 'N/A')} 输出={token_usage.get('completion_tokens', 'N/A')} 总计={token_usage.get('total_tokens', 'N/A')}"
-
-                    logger.info(f"⏱️ [Risk Manager] LLM调用耗时: {elapsed_time:.2f}秒")
-                    logger.info(f"📊 [Risk Manager] 响应统计: {response_length} 字符, 估算~{estimated_output_tokens} tokens{usage_info}")
-
-                    if len(response_content) > 10:  # 确保响应有实质内容
-                        logger.info(f"✅ [Risk Manager] LLM调用成功")
-                        break
-                    else:
-                        logger.warning(f"⚠️ [Risk Manager] LLM响应内容过短: {len(response_content)} 字符")
-                        response_content = ""
+{instrument_context}""",
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "normal_trade_plan": normal_plan.model_dump(
+                                    mode="json"
+                                ),
+                                "risk_debate_history": history,
+                                "reports": reports,
+                                "past_memory": past_memory_str,
+                            },
+                            ensure_ascii=False,
+                            default=str,
+                        ),
+                    },
+                ]
+                invocation = invoke_json_object(
+                    llm=llm,
+                    messages=messages,
+                    schema_model=TopReviewDecision,
+                    provider=_configured_provider(config),
+                    configured_model_name=_configured_model(config),
+                    prompt_name=TOP_REVIEW_PROMPT_NAME,
+                    prompt_version=TOP_REVIEW_PROMPT_VERSION,
+                )
+                decision_error = None
+                if invocation.failure_status:
+                    review = _failure_review(
+                        status=invocation.failure_status,
+                        plan_id=normal_plan.plan_id,
+                        snapshot_id=normal_plan.snapshot_id,
+                        model_meta=invocation.model_meta,
+                        reason=invocation.error_message or "风险终审模型执行失败",
+                    )
+                    decision_error = {
+                        "stage": "RISK_JUDGE",
+                        "status": invocation.failure_status,
+                        "error_type": invocation.error_type,
+                        "error_message": invocation.error_message,
+                    }
                 else:
-                    logger.warning(f"⚠️ [Risk Manager] LLM响应为空或无效")
-                    response_content = ""
+                    payload = dict(invocation.payload or {})
+                    adjusted_plan = payload.get("adjusted_plan")
+                    if isinstance(adjusted_plan, dict):
+                        adjusted_plan = dict(adjusted_plan)
+                        adjusted_plan.update(
+                            plan_id=normal_plan.plan_id,
+                            snapshot_id=normal_plan.snapshot_id,
+                            quant_proposal_id=normal_plan.quant_proposal_id,
+                            model_meta=invocation.model_meta.model_dump(mode="json"),
+                        )
+                        payload["adjusted_plan"] = adjusted_plan
+                    payload.update(
+                        review_id=str(uuid4()),
+                        snapshot_id=normal_plan.snapshot_id,
+                        plan_id=normal_plan.plan_id,
+                        model_meta=invocation.model_meta.model_dump(mode="json"),
+                    )
+                    try:
+                        review = TopReviewDecision.model_validate(payload)
+                        validate_review_against_plan(review, normal_plan)
+                    except (ValidationError, ValueError) as exc:
+                        message = (
+                            "TopReviewDecision schema/relationship validation "
+                            f"failed: {exc.__class__.__name__}"
+                        )
+                        invalid_meta = _invalid_meta(
+                            invocation.model_meta,
+                            "SCHEMA_VALIDATION_ERROR",
+                            message,
+                        )
+                        review = _failure_review(
+                            status="INVALID_OUTPUT",
+                            plan_id=normal_plan.plan_id,
+                            snapshot_id=normal_plan.snapshot_id,
+                            model_meta=invalid_meta,
+                            reason=message,
+                        )
+                        decision_error = {
+                            "stage": "RISK_JUDGE",
+                            "status": "INVALID_OUTPUT",
+                            "error_type": "SCHEMA_VALIDATION_ERROR",
+                            "error_message": message,
+                        }
 
-            except Exception as e:
-                elapsed_time = time.time() - start_time
-                logger.error(f"❌ [Risk Manager] LLM调用失败 (尝试 {retry_count + 1}): {str(e)}")
-                logger.error(f"⏱️ [Risk Manager] 失败前耗时: {elapsed_time:.2f}秒")
-                response_content = ""
-            
-            retry_count += 1
-            if retry_count < max_retries and not response_content:
-                logger.info(f"🔄 [Risk Manager] 等待2秒后重试...")
-                time.sleep(2)
-        
-        # 如果所有重试都失败，生成默认决策
-        if not response_content:
-            logger.error(f"❌ [Risk Manager] 所有LLM调用尝试失败，使用默认决策")
-            response_content = f"""**默认建议：持有**
-
-由于技术原因无法生成详细分析，基于当前市场状况和风险控制原则，建议对{company_name}采取持有策略。
-
-**理由：**
-1. 市场信息不足，避免盲目操作
-2. 保持现有仓位，等待更明确的市场信号
-3. 控制风险，避免在不确定性高的情况下做出激进决策
-
-**建议：**
-- 密切关注市场动态和公司基本面变化
-- 设置合理的止损和止盈位
-- 等待更好的入场或出场时机
-
-注意：此为系统默认建议，建议结合人工分析做出最终决策。"""
-
-        new_risk_debate_state = {
-            "judge_decision": response_content,
-            "history": risk_debate_state["history"],
-            "risky_history": risk_debate_state["risky_history"],
-            "safe_history": risk_debate_state["safe_history"],
-            "neutral_history": risk_debate_state["neutral_history"],
-            "latest_speaker": "Judge",
-            "current_risky_response": risk_debate_state["current_risky_response"],
-            "current_safe_response": risk_debate_state["current_safe_response"],
-            "current_neutral_response": risk_debate_state["current_neutral_response"],
-            "count": risk_debate_state["count"],
-        }
-
-        logger.info(f"📋 [Risk Manager] 最终决策生成完成，内容长度: {len(response_content)} 字符")
-        
+        rendered = _render_review(review)
+        risk_debate_state.update(
+            {
+                "judge_decision": rendered,
+                "latest_speaker": "Judge",
+            }
+        )
+        review_dict = review.model_dump(mode="json")
+        logger.info(
+            "AlphaGuard Risk Judge completed: status=%s review_id=%s prompt=%s",
+            review.status,
+            review.review_id,
+            TOP_REVIEW_PROMPT_VERSION,
+        )
         return {
-            "risk_debate_state": new_risk_debate_state,
-            "final_trade_decision": response_content,
+            "risk_debate_state": risk_debate_state,
+            "top_review_decision": review_dict,
+            "top_model_meta": review.model_meta.model_dump(mode="json"),
+            "decision_error": decision_error,
+            # Compatibility/report field only. It is never parsed back into a
+            # machine decision.
+            "final_trade_decision": rendered,
         }
 
     return risk_manager_node

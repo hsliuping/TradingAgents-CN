@@ -618,7 +618,7 @@ class TradingAgentsGraph:
 
         self.propagator = Propagator()
         self.reflector = Reflector(self.quick_thinking_llm)
-        self.signal_processor = SignalProcessor(self.quick_thinking_llm)
+        self.signal_processor = SignalProcessor()
 
         # State tracking
         self.curr_state = None
@@ -708,7 +708,9 @@ class TradingAgentsGraph:
         # Initialize state
         logger.debug(f"🔍 [GRAPH DEBUG] 创建初始状态，传递参数: company_name='{company_name}', trade_date='{trade_date}'")
         init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date
+            company_name,
+            trade_date,
+            analysis_id=str(task_id) if task_id else None,
         )
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的company_of_interest: '{init_agent_state.get('company_of_interest', 'NOT_FOUND')}'")
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的trade_date: '{init_agent_state.get('trade_date', 'NOT_FOUND')}'")
@@ -866,8 +868,15 @@ class TradingAgentsGraph:
         except Exception:
             model_info = "Unknown"
 
-        # 处理决策并添加模型信息
-        decision = self.process_signal(final_state["final_trade_decision"], company_name)
+        # The formal machine chain ends with the two validated objects. The
+        # legacy response is a one-way, non-executable display projection.
+        decision = self.signal_processor.process_structured(
+            final_state.get("normal_trade_plan"),
+            final_state.get("top_review_decision"),
+            company_name,
+        )
+        if final_state.get("decision_error"):
+            decision["decision_error"] = final_state["decision_error"]
         decision['model_info'] = model_info
 
         # Return decision and processed signal
@@ -1179,6 +1188,11 @@ class TradingAgentsGraph:
             },
             "investment_plan": final_state["investment_plan"],
             "final_trade_decision": final_state["final_trade_decision"],
+            "normal_trade_plan": final_state.get("normal_trade_plan"),
+            "top_review_decision": final_state.get("top_review_decision"),
+            "decision_error": final_state.get("decision_error"),
+            "normal_model_meta": final_state.get("normal_model_meta"),
+            "top_model_meta": final_state.get("top_model_meta"),
         }
 
         # Save to file
@@ -1210,5 +1224,18 @@ class TradingAgentsGraph:
         )
 
     def process_signal(self, full_signal, stock_symbol=None):
-        """Process a signal to extract the core decision."""
+        """Deprecated text facade; always returns an explicit invalid result."""
         return self.signal_processor.process_signal(full_signal, stock_symbol)
+
+    def process_structured_signal(
+        self,
+        normal_trade_plan,
+        top_review_decision,
+        stock_symbol=None,
+    ):
+        """Create the read-only legacy projection from validated objects."""
+        return self.signal_processor.process_structured(
+            normal_trade_plan,
+            top_review_decision,
+            stock_symbol,
+        )

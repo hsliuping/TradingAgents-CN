@@ -635,25 +635,18 @@ def format_analysis_results(results):
     decision = results['decision']
 
     # 提取关键信息
-    # decision 可能是字符串（如 "BUY", "SELL", "HOLD"）或字典
+    # PR-002: a string is display-only legacy data and cannot be promoted back
+    # into an authoritative machine decision.
     if isinstance(decision, str):
-        # 将英文投资建议转换为中文
-        action_translation = {
-            'BUY': '买入',
-            'SELL': '卖出',
-            'HOLD': '持有',
-            'buy': '买入',
-            'sell': '卖出',
-            'hold': '持有'
-        }
-        action = action_translation.get(decision.strip(), decision.strip())
-
         formatted_decision = {
-            'action': action,
-            'confidence': 0.7,  # 默认置信度
-            'risk_score': 0.3,  # 默认风险分数
-            'target_price': None,  # 字符串格式没有目标价格
-            'reasoning': f'基于AI分析，建议{decision.strip().upper()}'
+            'action': '不可执行',
+            'confidence': 0.0,
+            'risk_score': None,
+            'target_price': None,
+            'reasoning': '旧文本决策不能作为机器交易方向来源',
+            'status': 'INVALID_OUTPUT',
+            'compatibility_only': True,
+            'not_for_automated_execution': True,
         }
     elif isinstance(decision, dict):
         # 处理目标价格 - 确保正确提取数值
@@ -678,29 +671,46 @@ def format_analysis_results(results):
         action_translation = {
             'BUY': '买入',
             'SELL': '卖出',
+            'REDUCE': '减仓',
             'HOLD': '持有',
+            'WAIT': '等待',
+            'NONE': '无操作',
             'buy': '买入',
             'sell': '卖出',
-            'hold': '持有'
+            'hold': '持有',
+            'wait': '等待',
+            'none': '无操作',
         }
-        action = decision.get('action', '持有')
+        action = decision.get('action', '不可执行')
         chinese_action = action_translation.get(action, action)
 
         formatted_decision = {
             'action': chinese_action,
-            'confidence': decision.get('confidence', 0.5),
-            'risk_score': decision.get('risk_score', 0.3),
+            'confidence': decision.get('confidence', 0.0),
+            'risk_score': decision.get('risk_score'),
             'target_price': target_price,
-            'reasoning': decision.get('reasoning', '暂无分析推理')
+            'reasoning': decision.get(
+                'reasoning',
+                '结构化决策不可用，禁止自动执行',
+            ),
+            'status': decision.get('status', 'INVALID_OUTPUT'),
+            'compatibility_only': decision.get('compatibility_only', True),
+            'not_for_automated_execution': decision.get(
+                'not_for_automated_execution',
+                True,
+            ),
         }
     else:
         # 处理其他类型
         formatted_decision = {
-            'action': '持有',
-            'confidence': 0.5,
-            'risk_score': 0.3,
+            'action': '不可执行',
+            'confidence': 0.0,
+            'risk_score': None,
             'target_price': None,
-            'reasoning': f'分析结果: {str(decision)}'
+            'reasoning': f'结构化决策不可用: {type(decision).__name__}',
+            'status': 'INVALID_OUTPUT',
+            'compatibility_only': True,
+            'not_for_automated_execution': True,
         }
     
     # 格式化状态信息
