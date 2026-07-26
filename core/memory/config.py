@@ -70,6 +70,47 @@ def _build_mem0_collection_name(embedder: Optional[Dict[str, Any]]) -> str:
     return f"{_QDRANT_COLLECTION}_{provider}_{model}_{dims or '0'}_{fingerprint}"
 
 
+def _ensure_qdrant_collection_dimension(vector_store_cfg: Dict[str, Any], expected_dims: int) -> None:
+    """
+    确保本地 Qdrant collection 维度与 embedder 一致。
+
+    若集合已存在且实际维度 != expected_dims，则删除旧集合并让 mem0 重新创建。
+    这通常发生在 embedding 模型切换（如 1536 -> 1024）后：旧集合名虽然包含新维度，
+    但当时 mem0 的 vector_store 未显式传入 embedding_model_dims，导致实际以 1536 创建。
+    """
+    from qdrant_client import QdrantClient
+
+    path = vector_store_cfg.get("path")
+    collection_name = vector_store_cfg.get("collection_name")
+    if not path or not collection_name:
+        return
+
+    try:
+        client = QdrantClient(path=path)
+        try:
+            collections = client.get_collections().collections
+            if not any(col.name == collection_name for col in collections):
+                return
+
+            info = client.get_collection(collection_name)
+            actual_dims = int(info.config.params.vectors.size)
+            if actual_dims == expected_dims:
+                return
+
+            logger.warning(
+                "mem0 config: Qdrant collection %s 维度不匹配 (实际 %d, 期望 %d)，删除旧集合并重建",
+                collection_name,
+                actual_dims,
+                expected_dims,
+            )
+            client.delete_collection(collection_name)
+            # mem0 初始化时会自动创建新集合
+        finally:
+            client.close()
+    except Exception as e:
+        logger.warning("mem0 config: 检查/重建 Qdrant collection 时出错（已忽略）: %s", e)
+
+
 def _env(key: str, default: str = "") -> str:
     return (os.environ.get(key) or "").strip() or default
 
@@ -276,7 +317,19 @@ def _resolve_embedding_from_db(db_settings: dict) -> dict:
 
     # 本地 Embedding 模型：启动 Ollama 兼容代理，绕过外部 API
     if preferred_provider_name == _LOCAL_PROVIDER:
-        return _build_local_ollama_embedder(preferred_model_name)
+        try:
+            local_embedder = _build_local_ollama_embedder(preferred_model_name)
+            if local_embedder:
+                return local_embedder
+        except Exception as e:
+            logger.warning(
+                "mem0 config: 本地 Embedding 模型 %s 启动失败 (%s)，尝试回退到在线 Embedding provider",
+                preferred_model_name,
+                e,
+            )
+        # 本地模型不可用时，继续尝试在线 provider 兜底
+        preferred_provider_name = ""
+        preferred_model_name = ""
 
     sync_db = _get_sync_db()
     if sync_db is None:
@@ -338,13 +391,24 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
     # --- Vector Store: 独立子目录，避免与现有 QdrantAdapter 文件锁冲突 ---
     qdrant_base = _env("QDRANT_DATA_DIR", "./data/qdrant")
     mem0_qdrant_path = os.path.join(qdrant_base, "mem0")
+    # Qdrant vector store 默认维度为 1536；必须显式传入 embedding_model_dims，
+    # 否则 collection 创建/复用时维度会与 embedder 输出不一致，导致写入/搜索失败。
+    embedding_dims = 1024
+    if embedder:
+        embedding_dims = int(embedder.get("config", {}).get("embedding_dims") or embedding_dims)
+
+    vector_store_cfg = {
+        "path": mem0_qdrant_path,
+        "collection_name": collection_name,
+        "embedding_model_dims": embedding_dims,
+        "on_disk": True,
+    }
+    # 若旧集合维度不匹配，先删除以便 mem0 按正确维度重建
+    _ensure_qdrant_collection_dimension(vector_store_cfg, embedding_dims)
+
     vector_store = {
         "provider": "qdrant",
-        "config": {
-            "path": mem0_qdrant_path,
-            "collection_name": collection_name,
-            "on_disk": True,
-        },
+        "config": vector_store_cfg,
     }
 
     # --- LLM: 复用统一的系统模型选择与凭证解析逻辑 ---
