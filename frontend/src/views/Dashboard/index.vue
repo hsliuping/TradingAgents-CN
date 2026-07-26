@@ -33,7 +33,7 @@
 
 
     <!-- ════════ 增强版仪表盘内容（v3.0 统一布局） ════════ -->
-    <template>
+    <div class="dashboard-enhanced-content">
       <!-- KPI 数据卡片行 -->
       <KpiCards
         :recent-tasks="recentAnalyses"
@@ -197,7 +197,7 @@
           <p>暂无市场快讯</p>
         </div>
       </el-card>
-    </template>
+    </div>
     <!-- ════════ 增强版仪表盘内容结束 ════════ -->
 
 
