@@ -121,6 +121,11 @@ def _finish_meta(
     error_type: str | None = None,
     error_message: str | None = None,
     raw_text: str | None = None,
+    trace_id: str | None = None,
+    template_hash: str | None = None,
+    context_hash: str | None = None,
+    input_hash: str | None = None,
+    attempt_number: int = 1,
 ) -> ModelExecutionMeta:
     finished_at = datetime.now(timezone.utc)
     return ModelExecutionMeta(
@@ -134,6 +139,7 @@ def _finish_meta(
         latency_ms=max(0.0, (time.perf_counter() - started_perf) * 1000),
         execution_status=execution_status,
         request_id=request_id,
+        trace_id=trace_id,
         error_type=error_type,
         error_message=error_message,
         raw_output_hash=(
@@ -141,6 +147,10 @@ def _finish_meta(
             if raw_text
             else None
         ),
+        template_hash=template_hash,
+        context_hash=context_hash,
+        input_hash=input_hash,
+        attempt_number=attempt_number,
     )
 
 
@@ -153,6 +163,11 @@ def not_run_meta(
     prompt_version: str,
     error_type: str,
     error_message: str,
+    trace_id: str | None = None,
+    template_hash: str | None = None,
+    context_hash: str | None = None,
+    input_hash: str | None = None,
+    attempt_number: int = 1,
 ) -> ModelExecutionMeta:
     now = datetime.now(timezone.utc)
     name = _model_name(llm, configured_model_name)
@@ -166,8 +181,13 @@ def not_run_meta(
         finished_at=now,
         latency_ms=0,
         execution_status="NOT_RUN",
+        trace_id=trace_id,
         error_type=error_type,
         error_message=_sanitise_error(error_message),
+        template_hash=template_hash,
+        context_hash=context_hash,
+        input_hash=input_hash,
+        attempt_number=attempt_number,
     )
 
 
@@ -180,6 +200,11 @@ def invoke_json_object(
     configured_model_name: str | None,
     prompt_name: str,
     prompt_version: str,
+    trace_id: str | None = None,
+    template_hash: str | None = None,
+    context_hash: str | None = None,
+    input_hash: str | None = None,
+    attempt_number: int = 1,
 ) -> StructuredInvocation:
     """Invoke the model once and return one strict JSON object.
 
@@ -222,6 +247,11 @@ def invoke_json_object(
             execution_status="MODEL_FAILED",
             error_type=error_type,
             error_message=error_message,
+            trace_id=trace_id,
+            template_hash=template_hash,
+            context_hash=context_hash,
+            input_hash=input_hash,
+            attempt_number=attempt_number,
         )
         return StructuredInvocation(
             payload=None,
@@ -251,6 +281,11 @@ def invoke_json_object(
             request_id=request_id,
             error_type=error_type,
             error_message=error_message,
+            trace_id=trace_id,
+            template_hash=template_hash,
+            context_hash=context_hash,
+            input_hash=input_hash,
+            attempt_number=attempt_number,
         )
         return StructuredInvocation(
             payload=None,
@@ -292,6 +327,11 @@ def invoke_json_object(
             error_type=error_type,
             error_message=error_message,
             raw_text=raw_text,
+            trace_id=trace_id,
+            template_hash=template_hash,
+            context_hash=context_hash,
+            input_hash=input_hash,
+            attempt_number=attempt_number,
         )
         return StructuredInvocation(
             payload=None,
@@ -312,5 +352,10 @@ def invoke_json_object(
         execution_status="SUCCESS",
         request_id=request_id,
         raw_text=raw_text,
+        trace_id=trace_id,
+        template_hash=template_hash,
+        context_hash=context_hash,
+        input_hash=input_hash,
+        attempt_number=attempt_number,
     )
     return StructuredInvocation(payload=payload, model_meta=meta)

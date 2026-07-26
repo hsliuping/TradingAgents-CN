@@ -157,4 +157,109 @@ ALPHAGUARD_INDEX_SPECS = {
             "name": "idx_quant_event_type_time",
         },
     ],
+    "ag_decision_contexts": [
+        {
+            "keys": [("decision_context_id", 1)],
+            "name": "uniq_decision_context_id",
+            "unique": True,
+        },
+        {
+            "keys": [("analysis_id", 1)],
+            "name": "uniq_decision_context_analysis",
+            "unique": True,
+        },
+        {
+            "keys": [("snapshot_id", 1), ("quant_proposal_id", 1)],
+            "name": "idx_context_snapshot_proposal",
+        },
+        {"keys": [("context_hash", 1)], "name": "idx_context_hash"},
+    ],
+    "ag_consensus_decisions": [
+        {
+            "keys": [("consensus_id", 1)],
+            "name": "uniq_consensus_id",
+            "unique": True,
+        },
+        {
+            "keys": [("analysis_id", 1)],
+            "name": "uniq_consensus_analysis",
+            "unique": True,
+        },
+        {
+            "keys": [("snapshot_id", 1), ("created_at", -1)],
+            "name": "idx_consensus_snapshot_created",
+        },
+        {
+            "keys": [("status", 1), ("created_at", -1)],
+            "name": "idx_consensus_status_created",
+        },
+    ],
+    "ag_risk_policies": [
+        {
+            "keys": [("risk_policy_id", 1), ("version", 1)],
+            "name": "uniq_risk_policy_version",
+            "unique": True,
+        },
+        {"keys": [("status", 1)], "name": "idx_risk_policy_status"},
+    ],
+    "ag_risk_decisions": [
+        {
+            "keys": [("risk_decision_id", 1)],
+            "name": "uniq_risk_decision_id",
+            "unique": True,
+        },
+        {
+            "keys": [("consensus_id", 1)],
+            "name": "uniq_risk_consensus",
+            "unique": True,
+        },
+        {
+            "keys": [("snapshot_id", 1), ("created_at", -1)],
+            "name": "idx_risk_snapshot_created",
+        },
+        {
+            "keys": [("status", 1), ("created_at", -1)],
+            "name": "idx_risk_status_created",
+        },
+        {
+            "keys": [("account_id", 1), ("created_at", -1)],
+            "name": "idx_risk_account_created",
+        },
+    ],
+    "ag_decision_events": [
+        {
+            "keys": [("analysis_id", 1), ("created_at", -1)],
+            "name": "idx_decision_event_analysis_created",
+        },
+        {
+            "keys": [("snapshot_id", 1), ("created_at", -1)],
+            "name": "idx_decision_event_snapshot_created",
+        },
+        {
+            "keys": [("event_type", 1), ("created_at", -1)],
+            "name": "idx_decision_event_type_created",
+        },
+    ],
+    "ag_revision_requests": [
+        {
+            "keys": [("revision_request_id", 1)],
+            "name": "uniq_revision_request_id",
+            "unique": True,
+        },
+        {
+            "keys": [("analysis_id", 1), ("revision_round", 1)],
+            "name": "idx_revision_analysis_round",
+        },
+    ],
+    "ag_decision_runs": [
+        {
+            "keys": [("decision_run_key", 1), ("attempt_number", 1)],
+            "name": "uniq_decision_run_attempt",
+            "unique": True,
+        },
+        {
+            "keys": [("terminal_status", 1), ("updated_at", -1)],
+            "name": "idx_decision_run_terminal",
+        },
+    ],
 }

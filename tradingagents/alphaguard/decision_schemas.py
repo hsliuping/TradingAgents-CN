@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -94,6 +94,11 @@ class ModelExecutionMeta(AlphaGuardSchema):
         default=None,
         pattern=r"^[0-9a-f]{64}$",
     )
+    # Optional for stored PR-002 records; required by the PR-005 pipeline.
+    template_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    context_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    input_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    attempt_number: int = Field(default=1, ge=1)
 
     @model_validator(mode="after")
     def validate_timing_and_error(self) -> "ModelExecutionMeta":
@@ -113,6 +118,18 @@ class NormalTradePlan(AlphaGuardSchema):
     plan_id: str = Field(min_length=1)
     snapshot_id: str = Field(min_length=1)
     quant_proposal_id: str = Field(min_length=1)
+    # Backward-compatible provenance extensions. Formal PR-005 plans require
+    # these fields even though legacy PR-002 documents may omit them.
+    analysis_id: str | None = None
+    decision_context_id: str | None = None
+    symbol: str | None = None
+    market: str | None = None
+    trade_date: date | None = None
+    strategy_id: str | None = None
+    strategy_version: str | None = None
+    revision_round: int = Field(default=0, ge=0, le=1)
+    supersedes_plan_id: str | None = None
+    revision_request_id: str | None = None
 
     status: PlanStatus
     action: PlanAction
@@ -219,6 +236,17 @@ class NormalTradePlan(AlphaGuardSchema):
             raise ValueError("MODEL_FAILED requires matching model execution metadata")
         if self.status == "INVALID_OUTPUT" and self.model_meta.execution_status != "INVALID_OUTPUT":
             raise ValueError("INVALID_OUTPUT requires matching model execution metadata")
+        if self.revision_round == 0 and (
+            self.supersedes_plan_id is not None
+            or self.revision_request_id is not None
+        ):
+            raise ValueError("round-0 plan cannot reference a revision request")
+        if self.revision_round == 1 and (
+            not self.supersedes_plan_id or not self.revision_request_id
+        ):
+            raise ValueError(
+                "round-1 plan requires supersedes_plan_id and revision_request_id"
+            )
 
         return self
 
@@ -227,6 +255,15 @@ class TopReviewDecision(AlphaGuardSchema):
     review_id: str = Field(min_length=1)
     snapshot_id: str = Field(min_length=1)
     plan_id: str = Field(min_length=1)
+    analysis_id: str | None = None
+    decision_context_id: str | None = None
+    quant_proposal_id: str | None = None
+    symbol: str | None = None
+    market: str | None = None
+    trade_date: date | None = None
+    strategy_id: str | None = None
+    strategy_version: str | None = None
+    revision_round: int = Field(default=0, ge=0, le=1)
 
     status: ReviewStatus
     completeness_score: float = Field(ge=0, le=1)

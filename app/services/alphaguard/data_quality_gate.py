@@ -28,6 +28,10 @@ _REFERENCE_COLLECTIONS = {
     "paper_accounts": "paper_accounts",
     "paper_position": "paper_positions",
     "paper_positions": "paper_positions",
+    "paper_order": "paper_orders",
+    "paper_orders": "paper_orders",
+    "stock_basic_info": "stock_basic_info",
+    "instrument": "stock_basic_info",
     "benchmark_daily": "stock_daily_quotes",
     "index_daily": "stock_daily_quotes",
     "market_context": "ag_market_contexts",
@@ -50,6 +54,7 @@ _IDENTITY_FIELDS = (
     "ref_id",
     "calendar_id",
     "context_id",
+    "order_id",
 )
 _DATE_FIELDS = (
     "trade_date",

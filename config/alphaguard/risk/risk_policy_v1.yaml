@@ -1,0 +1,28 @@
+risk_policy_id: risk-policy-v1
+version: 1.0.0
+status: ACTIVE
+
+max_single_position_pct: 0.10
+max_total_exposure_pct: 0.60
+max_industry_exposure_pct: 0.25
+max_new_positions_per_day: 3
+min_cash_reserve_pct: 0.20
+max_order_participation_rate: 0.05
+
+minimum_average_amount_20d: null
+maximum_volatility_risk_score: null
+maximum_event_risk_score: null
+
+st_buy_enabled: false
+allow_buy_when_suspended: false
+allow_sell_when_suspended: false
+
+cn_buy_lot_size: 100
+allow_cn_sell_odd_lot: true
+
+decision_validity_required: true
+snapshot_integrity_required: true
+data_quality_fail_blocked: true
+
+live_trading_enabled: false
+blocked_symbols: []

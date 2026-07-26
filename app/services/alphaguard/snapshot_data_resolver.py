@@ -29,6 +29,10 @@ class ResolvedSnapshotData(BaseModel):
     news: list[dict[str, Any]] = Field(default_factory=list)
     announcements: list[dict[str, Any]] = Field(default_factory=list)
     positions: list[dict[str, Any]] = Field(default_factory=list)
+    portfolio_positions: list[dict[str, Any]] = Field(default_factory=list)
+    accounts: list[dict[str, Any]] = Field(default_factory=list)
+    orders: list[dict[str, Any]] = Field(default_factory=list)
+    instruments: list[dict[str, Any]] = Field(default_factory=list)
     market_context: list[dict[str, Any]] = Field(default_factory=list)
     trading_calendar: list[dict[str, Any]] = Field(default_factory=list)
     input_refs: list[str]
@@ -99,6 +103,10 @@ class SnapshotDataResolver:
             "news": [],
             "announcements": [],
             "positions": [],
+            "portfolio_positions": [],
+            "accounts": [],
+            "orders": [],
+            "instruments": [],
             "market_context": [],
             "trading_calendar": [],
         }
@@ -114,6 +122,16 @@ class SnapshotDataResolver:
             "announcements": "announcements",
             "account_positions": "positions",
             "positions": "positions",
+            "portfolio_positions": "portfolio_positions",
+            "account_portfolio_positions": "portfolio_positions",
+            "paper_accounts": "accounts",
+            "account": "accounts",
+            "accounts": "accounts",
+            "paper_orders": "orders",
+            "account_orders": "orders",
+            "orders": "orders",
+            "stock_basic_info": "instruments",
+            "instrument": "instruments",
             "market_context": "market_context",
             "market_breadth": "market_context",
             "trading_calendar": "trading_calendar",
@@ -174,6 +192,7 @@ class SnapshotDataResolver:
             "news",
             "announcements",
             "positions",
+            "instruments",
         } and not SnapshotDataResolver._matches_target(snapshot, document):
             return False
         if category in {"prices", "benchmark_prices", "market_context"}:
@@ -210,6 +229,27 @@ class SnapshotDataResolver:
                 document, ("as_of", "snapshot_at", "updated_at", "created_at")
             )
             return _on_or_before(observed, snapshot.price_cutoff_at)
+        if category in {"portfolio_positions", "accounts", "orders"}:
+            if str(document.get("user_id") or "") != snapshot.user_id:
+                return False
+            observed = _first_datetime(
+                document,
+                (
+                    "as_of",
+                    "snapshot_at",
+                    "updated_at",
+                    "created_at",
+                    "filled_at",
+                ),
+            )
+            return _on_or_before(observed, snapshot.price_cutoff_at)
+        if category == "instruments":
+            observed = _first_datetime(
+                document, ("as_of", "updated_at", "created_at")
+            )
+            return observed is None or _on_or_before(
+                observed, snapshot.price_cutoff_at
+            )
         if category == "trading_calendar":
             published = _first_datetime(
                 document, ("as_of", "published_at", "created_at")

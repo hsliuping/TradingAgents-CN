@@ -1268,3 +1268,573 @@ alphaguard-pr003-candidate-evidence
 PR-003 已提交并标记；PR-004 当前为未提交的已跟踪修改和新增文件，未混入 PR-003
 提交。完成最后复跑后应以实际 `git status --short` 为准。PR-004 到此停止；
 不得开始 PR-005，进入 PR-005 必须由人工重新授权并先建立 PR-004 独立检查点。
+
+---
+
+## PR-005：Dual Model Consensus & Hard Risk
+
+### 完成结论与阶段边界
+
+PR-005 已完成。开始阶段前已将 PR-004 建立为独立提交和标签：
+
+```text
+87026f5 feat(pr-004): establish deterministic quant research
+alphaguard-pr004-quant-research
+```
+
+同时确认 `alphaguard-pr001-baseline`、`alphaguard-pr002-structured-decision`、
+`alphaguard-pr003-candidate-evidence` 均存在，且
+`git diff alphaguard-pr004-quant-research..HEAD --check` 通过。
+
+本阶段正式链路为：
+
+```text
+TRIGGERED QuantTradeProposal
+  -> immutable DecisionContext
+  -> NormalTradePlan
+  -> TopReviewDecision
+  -> optional single RevisionRequest / revised plan / final review
+  -> pure-Python ConsensusEngine
+  -> ConsensusDecision
+  -> pure-Python HardRiskEngine
+  -> RiskDecision
+```
+
+链路严格终止于 `RiskDecision`。`PASS/REDUCE` 只表示具备进入后续阶段的资格；
+`RiskDecision.order_intent_created` 和 `DecisionPipelineResult.order_intent_created`
+均由 `Literal[False]` 强制为 false。本阶段没有 OrderIntent、PaperOrder、成交、
+现金/持仓修改、冻结、自动撮合、自动模拟交易或实盘连接。PR-001 的
+`SIM_AUTONOMOUS + live_trading_enabled=false` 和三个启动入口 fail-closed 保持不变。
+
+### 实际修改与新增文件
+
+修改：
+
+```text
+app/main.py
+app/services/alphaguard/data_quality_gate.py
+app/services/alphaguard/snapshot_data_resolver.py
+tradingagents/agents/managers/risk_manager.py
+tradingagents/agents/trader/trader.py
+tradingagents/agents/utils/agent_states.py
+tradingagents/alphaguard/decision_schemas.py
+tradingagents/alphaguard/mongo_indexes.py
+tradingagents/alphaguard/structured_output.py
+docs/refactor/CODEX_EXECUTION_STATUS.md
+```
+
+新增：
+
+```text
+tradingagents/alphaguard/decision_control_schemas.py
+app/schemas/alphaguard/decision.py
+app/models/alphaguard/decision_collections.py
+app/routers/alphaguard_decisions.py
+app/services/alphaguard/decision_context_builder.py
+app/services/alphaguard/decision_validation.py
+app/services/alphaguard/decision_model_runner.py
+app/services/alphaguard/revision_service.py
+app/services/alphaguard/consensus_engine.py
+app/services/alphaguard/risk_policy_registry.py
+app/services/alphaguard/risk_context_resolver.py
+app/services/alphaguard/hard_risk_engine.py
+app/services/alphaguard/decision_audit_service.py
+app/services/alphaguard/decision_pipeline.py
+config/alphaguard/risk/risk_policy_v1.yaml
+scripts/init_alphaguard_decision_indexes.py
+scripts/seed_alphaguard_risk_policies.py
+tests/unit/alphaguard/pr005_helpers.py
+tests/unit/alphaguard/test_decision_control_schemas_pr005.py
+tests/unit/alphaguard/test_consensus_engine_pr005.py
+tests/unit/alphaguard/test_hard_risk_engine_pr005.py
+tests/unit/alphaguard/test_decision_pipeline_pr005.py
+tests/unit/alphaguard/test_quant_model_permissions_pr005.py
+tests/unit/alphaguard/test_decision_persistence_api_pr005.py
+```
+
+没有修改 paper 路由/服务、订单、账户、持仓、费用、撮合、结算、前端视觉或真实券商
+代码。
+
+### DecisionContext 与 ContextBuilder
+
+`DecisionContext` 为 frozen Pydantic 对象，Schema 版本
+`decision-context-v1`，包含：
+
+- analysis/user/candidate/symbol/market/trade_date；
+- snapshot/proposal/strategy/factor-set/regime 的全部版本身份；
+- 完整 `QuantTradeProposal`、`MarketRegimeResult`、factor summary/result IDs；
+- price/financial/news/announcement/account/portfolio 六组 EvidenceRef；
+- data quality、risk flags、missing evidence；
+-普通/顶尖 Prompt 版本、创建时间和 `context_hash`。
+
+`context_hash` 对排除 ID/hash/创建时间后的规范 JSON 使用 UTF-8、确定性排序、
+固定 separators、禁止 NaN 和 SHA-256。同一输入得到相同哈希；对象创建后不可更新，
+同一 analysis 内容冲突会失败。
+
+ContextBuilder 只读取：
+
+1. 已保存且哈希有效的 EvidenceSnapshot；
+2. `SnapshotDataResolver` 逐项解析的 raw refs；
+3. 已保存、身份和 input hash 均一致的 FactorResult；
+4. 已保存 MarketRegimeResult、QuantTradeProposal、策略定义和候选身份；
+5. 快照显式引用的账户、持仓、订单完整性摘要、标的交易状态和交易日历。
+
+不按 symbol 查询最新行情/新闻/财报/持仓，不调用外部数据接口，不读取快照截止后的
+证据，不允许 Prompt 自行搜索或补全。证据按类别、时间、引用 ID 确定性排序，不复制
+无限原文。FactorResult 作为派生证据时，Builder 会继续验证其所有底层输入都存在于
+快照 raw refs。
+
+在模型调用之前 fail-closed 检查：
+
+- DataQuality 不能为 FAIL；
+- 必须有行情、账户、交易日历和标的交易状态证据；
+- 停牌、涨跌停和 ST 状态字段不能缺失；
+- BUY 必须有可验证组合快照，除非快照明确证明空组合；
+- SELL/REDUCE 必须有目标持仓及 available quantity；
+- 任一 user/symbol/market/trade_date/snapshot/proposal/strategy/version 身份不一致
+  立即写 `DECISION_CONTEXT_INVALID`，不调用任何模型。
+
+### 模型输入证据边界、Prompt 和执行元数据
+
+PR-002 的 legacy Prompt 未覆盖。PR-005 新版本：
+
+```text
+normal_trade_plan_quant_v1
+normal_trade_plan_revision_v1
+top_review_decision_quant_v1
+```
+
+Trader 的量化路径只从规范化 DecisionContext、原 QuantTradeProposal 和可选
+RevisionRequest 生成输入；Risk Judge 同时读取 DecisionContext、QuantProposal、
+NormalTradePlan、MarketRegime、快照账户/组合证据、风险政策摘要和风险事件，不只读
+普通模型结论。旧报告和 memory 文本不进入 PR-005 机器输入。
+
+`ModelExecutionMeta` 向后兼容扩展并在 PR-005 正式路径强制保存：
+
+```text
+provider/model_name/model_version
+prompt_name/prompt_version/template_hash
+context_hash/input_hash/raw_output_hash
+request_id/trace_id/attempt_number
+started_at/finished_at/latency_ms/execution_status
+error_type/error_message
+```
+
+成功结果必须有输出哈希；失败同样保留调用元数据。日志不保存密钥、完整认证头或原始
+敏感输出。
+
+### NormalTradePlan 与 QuantTradeProposal 约束
+
+现有 NormalTradePlan 采用向后兼容可选字段增加：
+
+```text
+analysis_id
+decision_context_id
+symbol
+market
+trade_date
+strategy_id
+strategy_version
+revision_round
+supersedes_plan_id
+revision_request_id
+```
+
+旧分析可以缺失，PR-005 正式路径全部强制匹配。只有：
+
+```text
+status=TRIGGERED
+action_candidate in BUY/SELL/REDUCE
+automated_execution_allowed=false
+```
+
+的 QuantTradeProposal 才进入模型。WATCH、REJECTED、INSUFFICIENT_DATA 和
+INVALID_INPUT 直接形成明确终止，不调用普通或顶尖模型。
+
+普通模型提出交易时必须：
+
+- action 与 QuantProposal 完全同向；
+- snapshot/proposal/context/strategy/symbol/market/trade_date 全部一致；
+- max position 不超过 QuantProposal；
+- EvidenceRef 必须存在于 DecisionContext；
+- 保留完整退出/失效条件和有效期；
+- `target_price=null` 合法且不会补价。
+
+反向交易、越权仓位、快照外证据、缺失执行元数据均转为明确 INVALID_OUTPUT；
+MODEL_FAILED/INVALID_OUTPUT/INSUFFICIENT_DATA 不会转换成 HOLD。
+
+### TopReviewDecision 权限与降险白名单
+
+顶尖模型是风险终审，不是第二个 Trader。`CONFIRM` 只能确认完整同向
+PROPOSE_TRADE。`RISK_ADJUST` 第一版只接受可被 Python 证明的纯降险：
+
+- 降低 initial/max position 和 confidence；
+- entry zone 只能缩为原区间子集；
+- valid_until 只能缩短；
+- stop/reduce/exit/invalidation/main risks 只能保留原项并追加；
+- 不改变 action、strategy、snapshot、proposal、context、symbol、market、
+  trade_date、核心 thesis、证据和其他计划身份；
+- 不把 null target_price 变成价格。
+
+提高仓位、扩大区间、延长有效期、删除原条件、修改 action/strategy/证据、增加目标价
+均为非法调整。顶尖模型如认为方向错误必须 REJECT，不能发起或反转交易。
+
+MATERIAL_REVISION 也不能借重大修订暗含提高仓位/置信度、扩大入场、延长有效期、
+删除既有风险条件、改变 add conditions、补目标价或更改身份/方向；这类输出直接
+INVALID_OUTPUT。
+
+### MATERIAL_REVISION 一轮返回和 RevisionRequest
+
+`RevisionRequest` 为 frozen `revision-request-v1`，保存 request/analysis/snapshot、
+original plan、review、固定 `revision_round=1`、requested changes、material fields、
+risk findings、constraints 和创建时间。
+
+流程严格为：
+
+```text
+round 0 MATERIAL_REVISION
+  -> 保存 RevisionRequest
+  -> 普通模型生成 revision_round=1 且带 supersedes_plan_id/revision_request_id 的计划
+  -> 顶尖模型第二次且最后一次审核
+```
+
+修订模型可以 WAIT/NO_TRADE/INSUFFICIENT_DATA，但不能换方向、换快照或引入外部证据。
+第二轮再次 MATERIAL_REVISION 固定触发 `REVISION_LIMIT_REACHED` 和
+CONSENSUS_REJECT；不存在递归或第三次模型调用。
+
+### ConsensusDecision 与 ConsensusEngine
+
+`ConsensusDecision` 版本 `consensus-decision-v1`，保存 consensus/analysis/snapshot/
+proposal/plan/review ID、状态、最终计划及 SHA-256、revision round、是否需普通模型
+再确认、原因、校验错误、`consensus-policy-v1` 和时间。
+
+ConsensusEngine 为纯 Python，不导入或调用 LLM，必检：
+
+- context/proposal/plan/review 的全部身份、方向、版本和 revision round；
+- proposal 必须 TRIGGERED，plan 必须 PROPOSE_TRADE；
+- Prompt/模型执行元数据和 context/input/output hash；
+- EvidenceRef 必须存在于 DecisionContext；
+- proposal/plan 有效期；
+- review 必须指向当前 plan；
+- adjusted plan 必须为严格白名单纯降险；
+- 最终计划 Pydantic Schema 和 final plan hash；
+- 重大修改最多一轮。
+
+状态映射：
+
+```text
+PROPOSE_TRADE + CONFIRM                 -> CONSENSUS_PASS
+PROPOSE_TRADE + 合法 RISK_ADJUST       -> CONSENSUS_PASS（使用 adjusted plan）
+round 0 MATERIAL_REVISION              -> CONSENSUS_REVISE
+round 1 CONFIRM/合法 RISK_ADJUST       -> CONSENSUS_PASS
+round 1 MATERIAL_REVISION              -> CONSENSUS_REJECT
+NO_TRADE/WAIT/REJECT                   -> CONSENSUS_REJECT
+MODEL_FAILED/INVALID_OUTPUT/身份或哈希错误 -> CONSENSUS_INVALID
+```
+
+只有 `CONSENSUS_PASS + final_plan != null` 才调用 HardRiskEngine。
+
+### RiskPolicy
+
+版本化 YAML 为 `risk-policy-v1@1.0.0`：
+
+```text
+max_single_position_pct=0.10
+max_total_exposure_pct=0.60
+max_industry_exposure_pct=0.25
+max_new_positions_per_day=3
+min_cash_reserve_pct=0.20
+max_order_participation_rate=0.05
+st_buy_enabled=false
+allow_buy_when_suspended=false
+allow_sell_when_suspended=false
+cn_buy_lot_size=100
+allow_cn_sell_odd_lot=true
+decision_validity_required=true
+snapshot_integrity_required=true
+data_quality_fail_blocked=true
+live_trading_enabled=false
+```
+
+当前没有可靠业务阈值的 minimum average amount、maximum volatility risk score 和
+maximum event risk score 保持 null，对应规则返回 NOT_APPLICABLE；没有伪造阈值。
+但数量参与率仍要求可靠 average_amount_20d，缺失时 SUSPEND。
+
+注册表使用 `config_hash`；相同版本同内容幂等，同版本不同内容拒绝覆盖。种子脚本
+默认 dry-run，必须显式 `--execute`；不提供公开 RiskPolicy 写 API。
+
+### RiskRuleResult 与 HardRiskEngine
+
+`RiskRuleResult` 版本 `risk-rule-result-v1`，每条规则保存 rule ID/version、状态、
+observed/threshold、原/调整仓位和数量、证据、原因及时间，并在 Schema 层禁止增加
+仓位或数量。
+
+HardRiskEngine 是纯 Python、只读取已解析快照，不调用 LLM、实时数据、账户写服务或
+订单服务。规则版本均为 1.0.0：
+
+```text
+AG-RISK-INTEGRITY
+AG-RISK-VALIDITY
+AG-RISK-TRADING-STATUS
+AG-RISK-ACCOUNT
+AG-RISK-PRICING
+AG-RISK-POSITION-LIMITS
+AG-RISK-NEW-POSITIONS
+AG-RISK-DUPLICATE-ORDER
+AG-RISK-LIQUIDITY
+AG-RISK-VOLATILITY
+AG-RISK-EVENT
+AG-RISK-TRADING-CALENDAR
+AG-RISK-QUANTITY
+```
+
+校验覆盖：
+
+- snapshot/context/consensus/final-plan/hash/身份/DataQuality/active policy；
+- proposal 和 plan 有效期；
+- 停牌、ST、涨停买入、跌停卖出、政策禁买名单；
+- 账户存在、ACTIVE/ENABLED、user/market/currency、现金/equity；
+- 当前/交易后单股、总仓位、行业仓位、现金保留和市场状态总敞口；
+- 当日新开仓、同向有效订单及订单快照完整性；
+- 流动性、波动和事件政策；
+- 快照交易日历、持仓数量、available_qty/T+1 和参与率。
+
+固定禁止条件/完整性错误优先 REJECT；关键证据、系统、账户或日历缺失为 SUSPEND；
+有可安全降低额度为 REDUCE；其余适用规则通过才 PASS。所有规则结果均保存，不能因
+一条通过覆盖更严格结果。HardRisk 输出 action 始终与 final plan 相同。
+
+### 仓位与数量计算
+
+BUY 批准仓位不大于：
+
+```text
+min(
+  final_plan.max_position_pct,
+  policy single-position cap,
+  min(policy, regime) total-exposure remaining,
+  industry-exposure remaining,
+  cash-after-reserve remaining
+)
+```
+
+只会降低，不会提高。保守定价使用 entry zone 上界；没有 entry zone/可靠快照价格时
+SUSPEND。批准数量再受现金/仓位及 5% average amount participation 上限约束；CN 买入
+向下取整到 100 股，取整后为 0 时 REJECT。
+
+SELL/REDUCE 只取 `min(held quantity, available_qty)`，不超过 T+1 可卖数量；退出允许
+奇数股，REDUCE 需要取整时只会向下。批准数量只是风险上限，不冻结资金且不是订单量。
+
+### T+1 与交易日历
+
+`earliest_eligible_execute_at` 只来自快照明确引用的、trade_date 之后第一个开市
+session；绝不使用自然日 `+1`。缺少可靠日历时规则 SUSPEND 且执行时间为 null。
+所有结果固定 `requires_execution_recheck=true`，因为 PR-006 在真正创建执行意图前
+仍必须重新检查动态交易状态。
+
+### RiskDecision
+
+`RiskDecision` 版本 `risk-decision-v1`，保存 risk/analysis/consensus/snapshot/
+proposal/account 身份、PASS/REDUCE/REJECT/SUSPEND、固定方向、原/批准仓位和数量、
+定价引用、最早执行时间、全部规则、原因、policy 版本、input hash 和创建时间。
+
+`input_hash` 包含 snapshot hash、resolved snapshot input hash、context hash、
+consensus hash、policy hash 和 account ID。Schema 和所有构造路径都强制
+`order_intent_created=false`。
+
+### DecisionPipeline、Candidate 状态和幂等
+
+公开编排入口：
+
+```python
+evaluate_quant_proposal(
+    quant_proposal_id: str,
+    account_id: str | None = None,
+)
+```
+
+流程按 Context -> normal -> top -> optional single revision -> consensus -> hard risk
+顺序保存对象和审计。候选状态只会走：
+
+```text
+SIGNAL_DETECTED -> AI_ANALYZING
+PROPOSE_TRADE   -> PLAN_PROPOSED -> TOP_REVIEWING
+PASS/REDUCE     -> APPROVED
+NO_TRADE/REJECT -> REJECTED
+WAIT/数据不足/模型失败 -> COOLDOWN
+系统/风控暂停或非法 -> RISK_ALERT/COOLDOWN
+```
+
+不会进入 ORDER_PENDING 或 POSITION_HELD。
+
+`decision_run_key = SHA-256(user_id, snapshot_id, quant_proposal_id, account_id,
+decision-pipeline-v1)`。相同 terminal run 默认返回已保存结果，不重复调用模型或写
+plan/review/consensus/risk；同身份 proposal input hash 改变时写完整性冲突并拒绝。
+只有内部显式 `retry_failed=true` 才能重试失败，公开 API 不暴露 force/retry；
+每次重试增加 attempt_number，历史失败计划、review、事件和 run 不覆盖。
+
+### MongoDB 集合、索引与数据变化
+
+新增：
+
+```text
+ag_decision_contexts
+ag_consensus_decisions
+ag_risk_policies
+ag_risk_decisions
+ag_decision_events
+ag_revision_requests
+ag_decision_runs
+```
+
+NormalTradePlan 和 TopReviewDecision 继续在 `analysis_reports` 中保存当前对象与历史
+数组，旧文档字段均可选。
+
+索引包含指令要求的 context/consensus/risk/policy/event/revision 唯一身份与查询索引，
+另加 `(decision_run_key, attempt_number)` 唯一索引和 terminal 查询索引。脚本只
+create，不 drop；同名规格冲突失败。实际重复执行全部显示 `unchanged`。
+
+真实开发库数据变化：
+
+- 已登记 1 条 `risk-policy-v1@1.0.0`，ACTIVE 且 live trading false；
+- PR-005 决策、context、consensus、risk、revision、event、run 均为 0；
+- `analysis_reports/paper_accounts/paper_positions/paper_orders/paper_trades` 均为 0；
+- 没有更新或删除 PR-003/PR-004 历史数据。
+
+### API
+
+复用现有 `get_current_user`、response wrapper、request trace 和 MongoDB：
+
+```text
+POST /api/alphaguard/decisions/evaluate/{quant_proposal_id}
+GET  /api/alphaguard/analyses/{analysis_id}
+GET  /api/alphaguard/decisions/{plan_id}
+GET  /api/alphaguard/reviews/{review_id}
+GET  /api/alphaguard/consensus/{consensus_id}
+GET  /api/alphaguard/risk-decisions/{risk_decision_id}
+GET  /api/alphaguard/decision-events
+```
+
+evaluate body 只允许可选 account_id。客户端不能上传计划、review、consensus、risk、
+Prompt、政策或模型桩；读取按当前 user 的 DecisionContext 归属授权。没有 update/
+delete、OrderIntent、自动订单或 `/paper/order` 调用。
+
+### 审计事件
+
+append-only `ag_decision_events` 保存 event/analysis/user/candidate/snapshot/proposal/
+plan/review/consensus/risk ID、round、attempt、trace、reason、时间和 Schema 版本。
+
+已覆盖：
+
+```text
+DECISION_CONTEXT_CREATED / DECISION_CONTEXT_INVALID
+NORMAL_MODEL_STARTED / NORMAL_MODEL_COMPLETED / NORMAL_MODEL_FAILED
+NORMAL_PLAN_REJECTED
+TOP_REVIEW_STARTED / TOP_REVIEW_COMPLETED / TOP_REVIEW_FAILED
+MATERIAL_REVISION_REQUESTED / NORMAL_REVISION_COMPLETED / REVISION_LIMIT_REACHED
+CONSENSUS_PASS / CONSENSUS_REVISE / CONSENSUS_REJECT / CONSENSUS_INVALID
+HARD_RISK_STARTED / HARD_RISK_PASS / HARD_RISK_REDUCE
+HARD_RISK_REJECT / HARD_RISK_SUSPEND
+DECISION_RUN_REUSED / DECISION_INTEGRITY_CONFLICT
+```
+
+### 测试和回归结果
+
+| 验证项 | 结果 |
+| --- | --- |
+| PR-005 Context/Schema/模型权限/修订/Consensus/HardRisk/Pipeline/API/索引 | `88 passed, 4 warnings` |
+| PR-001～PR-004 合并回归 | `145 passed, 14 warnings` |
+| 其中 PR-001 安全与配置 | `24 passed` |
+| 其中 PR-002 结构化决策 | `40 passed` |
+| 其中 PR-003 候选与快照 | `40 passed` |
+| 其中 PR-004 量化研究 | `41 passed` |
+| 全量测试收集 | `912 collected, 15 errors` |
+| 前端 `npm run type-check` | 失败，仍为 34 个存量 `TS2345 DefaultRow` |
+| 新增/修改 Python 文件 `py_compile` | 通过 |
+| 全目录 `compileall` | 仅存量 `scripts/补充行业信息_akshare.py:81` 语法错误 |
+| `git diff --check` | 通过 |
+| FastAPI 安全启动 | `GET /api/health` HTTP 200 |
+| FastAPI 实盘开关拒绝 | 退出码 3 |
+| `app/worker.py` 实盘开关拒绝 | 退出码 1，资源初始化前 |
+| `app/worker/analysis_worker.py` 实盘开关拒绝 | 退出码 1，资源初始化前 |
+| MongoDB / Redis | Docker healthy，实际 ping `1.0 / True` |
+| 决策索引脚本 | 重复执行全部 `unchanged` |
+| 风险政策脚本 dry-run | 通过，无写入 |
+| 风险政策 execute 幂等 | 两次均 `seeded_or_verified=risk-policy-v1@1.0.0` |
+| Decision API 冒烟 | 认证、路由和只读/服务依赖替换通过 |
+| 禁止订单依赖检查 | pipeline/consensus/hard-risk/router 无 OrderService、OrderIntent、PaperOrder、MatchingEngine 或 `/paper/order` 引用 |
+| 交易副作用检查 | 订单、成交、现金、持仓变化均为 0 |
+
+PR-004 收集为 824 项；PR-005 新增 88 项后为 912 项，增量完全对应本阶段专项测试。
+15 个全量收集错误、34 个前端 TS2345 和中文脚本语法错误的文件及类别与 PR-004
+完全一致，没有新增错误类别，也没有跳过测试或顺手修复无关存量技术债。
+
+### 兼容性、设计差异与已知限制
+
+1. 原设计建议将 context/consensus/risk 拆为三个 Schema 文件；实际用
+   `tradingagents/alphaguard/decision_control_schemas.py` 作为单一严格真相来源，
+   `app/schemas/alphaguard/decision.py` 只做后端重导出，避免跨层循环。安全语义不变。
+2. 原蓝图可理解为直接改写 PR-002 legacy LangGraph；实际保留旧 Graph 用于旧分析和
+   展示兼容，新认证 Decision API 通过独立 `DecisionPipeline` 编排正式 PR-005 链。
+   两者共用同一 Trader/Risk Judge 结构化节点和 Schema；旧文本不能进入正式
+   Consensus/HardRisk。
+3. 当前真实库没有可靠账户/组合/标的交易状态/交易日历公共数据。没有凭空适配或用
+   最新数据库数据代替快照；真实提案在补齐显式 raw refs 前会于 ContextBuilder 或
+   HardRisk SUSPEND/fail-closed。
+4. minimum liquidity、maximum volatility/event risk 阈值没有已确认业务依据，按
+   蓝图保持 null；后续只能通过新 RiskPolicy 版本调整，不能覆盖 v1。
+5. PR-005 RiskDecision 不是执行时行情担保，PR-006 必须再次验证交易状态、价格、
+   账户、T+1、现金和可卖数量。
+6. MongoDB 只新增集合/索引和可选分析字段，旧文档读取兼容；公开变化只有新增认证
+   API，无旧 API 破坏性变化。
+
+### 明确未实施 PR-006 及以后
+
+```text
+OrderIntent
+PaperOrder 自动创建
+MatchingEngine / FeeEngine
+资金冻结、账户/现金/持仓写入
+自动成交、结算和自动模拟交易
+人工模拟交易规则修改
+真实券商连接
+执行时动态风控担保
+Champion/Challenger
+策略自动晋升
+全市场自动推荐
+Dify / Qlib / FinRL / RD-Agent
+```
+
+### 数据和代码回退
+
+安全代码边界为：
+
+```text
+87026f5
+alphaguard-pr004-quant-research
+```
+
+PR-005 当前尚未提交，回退时必须保留可恢复性：
+
+1. 先把 `git status --short` 保存到工作区外；
+2. 使用
+   `git diff --binary alphaguard-pr004-quant-research > <安全目录>/pr005.patch`
+   保存 tracked patch，并将本节新增文件复制到带时间戳的工作区外备份；
+3. 仅反向应用该 PR-005 patch 并移走本节新增文件，不使用 `git reset --hard`、
+   `git checkout --` 或其他会覆盖用户工作的命令；
+4. PR-005 后续形成独立提交时，优先用 `git revert <pr005-commit>` 生成可审计回退；
+5. PR-001 安全配置以及 PR-003/PR-004 集合和历史数据绝不回退；
+6. 新索引和空 PR-005 集合可安全保留。若必须物理回退，先对上述 7 个精确集合执行
+   `mongodump` 并验证备份，再只删除精确 PR-005 索引/集合，禁止通配 drop；
+7. 唯一实际业务数据为 `risk-policy-v1@1.0.0`。物理删除前必须先备份该精确记录；
+   更安全的逻辑回退是将新版本政策标为 INACTIVE，而不是覆盖 v1 内容；
+8. 移除新增 router 后复跑 PR-001～PR-004 的 145 项，并重新验证 FastAPI HTTP 200、
+   API/两 Worker 实盘拒绝、MongoDB/Redis healthy、paper 数据无变化。
+
+### 当前 Git 状态与下一阶段闸门
+
+PR-001～PR-004 均为独立提交和标签。PR-005 当前是相对于
+`alphaguard-pr004-quant-research` 的未提交修改与新增文件，没有混入 PR-004。
+最终 `git diff --check` 通过。
+
+PR-005 到此停止。不得开始 PR-006；进入 PR-006 必须由人工另行授权，并先为当前
+PR-005 建立独立提交或可恢复检查点。

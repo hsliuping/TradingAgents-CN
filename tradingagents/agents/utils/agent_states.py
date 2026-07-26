@@ -108,6 +108,32 @@ class AgentState(MessagesState):
     top_model_meta: Annotated[
         Optional[dict[str, Any]], "Top review model execution audit metadata"
     ]
+    # PR-005 formal decision-control chain. Compatibility Graph callers may
+    # leave these absent; the AlphaGuard decision pipeline requires them.
+    quant_trade_proposal: Annotated[
+        Optional[dict[str, Any]], "Immutable PR-004 QuantTradeProposal"
+    ]
+    decision_context: Annotated[
+        Optional[dict[str, Any]], "Immutable snapshot-only DecisionContext"
+    ]
+    revision_request: Annotated[
+        Optional[dict[str, Any]], "At most one material RevisionRequest"
+    ]
+    original_normal_trade_plan: Annotated[
+        Optional[dict[str, Any]], "Round-0 plan for revision lineage"
+    ]
+    consensus_decision: Annotated[
+        Optional[dict[str, Any]], "Pure-Python ConsensusDecision"
+    ]
+    risk_decision: Annotated[
+        Optional[dict[str, Any]], "Pure-Python HardRisk RiskDecision"
+    ]
+    risk_policy_summary: Annotated[
+        Optional[dict[str, Any]], "Versioned risk policy summary for top review"
+    ]
+    revision_round: Annotated[int, "0 or the single allowed revision round 1"]
+    attempt_number: Annotated[int, "Explicit immutable model attempt number"]
+    trace_id: Annotated[Optional[str], "Cross-stage decision trace identifier"]
 
     # risk management team discussion step
     risk_debate_state: Annotated[

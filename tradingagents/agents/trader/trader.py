@@ -1,8 +1,9 @@
-"""Trader node that emits AlphaGuard's authoritative NormalTradePlan."""
+"""Trader node emitting PR-002 legacy or PR-005 quant-bound NormalTradePlan."""
 
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 from typing import Any
 from uuid import uuid4
@@ -11,6 +12,10 @@ from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
 from tradingagents.agents.utils.instrument_utils import build_instrument_context
+from tradingagents.alphaguard.decision_control_schemas import (
+    DecisionContext,
+    canonical_hash,
+)
 from tradingagents.alphaguard.decision_schemas import (
     ModelExecutionMeta,
     NormalTradePlan,
@@ -25,12 +30,12 @@ logger = get_logger("default")
 
 NORMAL_TRADE_PROMPT_NAME = "normal_trade_plan"
 NORMAL_TRADE_PROMPT_VERSION = "normal_trade_plan_v1"
+NORMAL_TRADE_QUANT_PROMPT_VERSION = "normal_trade_plan_quant_v1"
+NORMAL_TRADE_REVISION_PROMPT_VERSION = "normal_trade_plan_revision_v1"
 LEGACY_QUANT_PROPOSAL_ID = "legacy-quant:none"
 
 
 def _decision_snapshot_id(state: dict[str, Any]) -> str:
-    """Use a verified snapshot or an explicitly marked legacy identifier."""
-
     snapshot_id = state.get("snapshot_id")
     if snapshot_id:
         return str(snapshot_id)
@@ -38,10 +43,25 @@ def _decision_snapshot_id(state: dict[str, Any]) -> str:
         raise ValueError("non-legacy analysis requires snapshot_id")
     analysis_id = state.get("analysis_id")
     if not analysis_id:
-        company = state.get("company_of_interest", "unknown")
-        trade_date = state.get("trade_date", "unknown-date")
-        analysis_id = f"{company}:{trade_date}"
+        analysis_id = (
+            f"{state.get('company_of_interest', 'unknown')}:"
+            f"{state.get('trade_date', 'unknown-date')}"
+        )
     return f"legacy-analysis:{analysis_id}"
+
+
+def _invalid_meta(
+    meta: ModelExecutionMeta,
+    error_type: str,
+    error_message: str,
+) -> ModelExecutionMeta:
+    data = meta.model_dump(mode="python")
+    data.update(
+        execution_status="INVALID_OUTPUT",
+        error_type=error_type,
+        error_message=error_message[:500],
+    )
+    return ModelExecutionMeta.model_validate(data)
 
 
 def _failure_plan(
@@ -51,10 +71,28 @@ def _failure_plan(
     model_meta: ModelExecutionMeta,
     message: str,
 ) -> NormalTradePlan:
+    context = (
+        DecisionContext.model_validate(state["decision_context"])
+        if state.get("decision_context")
+        else None
+    )
+    revision = state.get("revision_request") or {}
     return NormalTradePlan(
         plan_id=str(uuid4()),
-        snapshot_id=_decision_snapshot_id(state),
-        quant_proposal_id=LEGACY_QUANT_PROPOSAL_ID,
+        snapshot_id=context.snapshot_id if context else _decision_snapshot_id(state),
+        quant_proposal_id=(
+            context.quant_proposal_id if context else LEGACY_QUANT_PROPOSAL_ID
+        ),
+        analysis_id=context.analysis_id if context else state.get("analysis_id"),
+        decision_context_id=context.decision_context_id if context else None,
+        symbol=context.symbol if context else None,
+        market=context.market if context else state.get("market"),
+        trade_date=context.trade_date if context else None,
+        strategy_id=context.strategy_id if context else None,
+        strategy_version=context.strategy_version if context else None,
+        revision_round=1 if revision else 0,
+        supersedes_plan_id=revision.get("original_plan_id"),
+        revision_request_id=revision.get("revision_request_id"),
         status=status,
         action="NONE",
         confidence=0,
@@ -77,23 +115,7 @@ def _failure_plan(
     )
 
 
-def _invalid_meta(
-    meta: ModelExecutionMeta,
-    error_type: str,
-    error_message: str,
-) -> ModelExecutionMeta:
-    data = meta.model_dump(mode="python")
-    data.update(
-        execution_status="INVALID_OUTPUT",
-        error_type=error_type,
-        error_message=error_message[:500],
-    )
-    return ModelExecutionMeta.model_validate(data)
-
-
 def _render_plan(plan: NormalTradePlan) -> str:
-    """Human/report compatibility text derived only from the validated plan."""
-
     lines = [
         "# AlphaGuard 普通模型交易计划",
         f"- 状态：{plan.status}",
@@ -102,11 +124,12 @@ def _render_plan(plan: NormalTradePlan) -> str:
         f"- 计划编号：{plan.plan_id}",
         f"- 快照编号：{plan.snapshot_id}",
         f"- 结论：{plan.thesis}",
+        (
+            f"- 目标价：{plan.target_price}"
+            if plan.target_price is not None
+            else "- 目标价：未提供（未推算）"
+        ),
     ]
-    if plan.target_price is not None:
-        lines.append(f"- 目标价：{plan.target_price}")
-    else:
-        lines.append("- 目标价：未提供（未推算）")
     if plan.model_meta.error_type:
         lines.append(f"- 错误类别：{plan.model_meta.error_type}")
     lines.append(
@@ -119,9 +142,13 @@ def create_trader(llm, memory, config: dict[str, Any] | None = None):
     config = config or {}
 
     def trader_node(state, name):
-        company_name = state["company_of_interest"]
+        context = (
+            DecisionContext.model_validate(state["decision_context"])
+            if state.get("decision_context")
+            else None
+        )
+        company_name = context.symbol if context else state["company_of_interest"]
         instrument_context = build_instrument_context(company_name)
-        investment_plan = state.get("investment_plan", "")
         reports = {
             "market_report": state.get("market_report", ""),
             "sentiment_report": state.get("sentiment_report", ""),
@@ -129,9 +156,10 @@ def create_trader(llm, memory, config: dict[str, Any] | None = None):
             "fundamentals_report": state.get("fundamentals_report", ""),
         }
         current_situation = "\n\n".join(str(value) for value in reports.values())
-
         past_memory_str = "暂无历史记忆数据可参考。"
-        if memory is not None:
+        # Quant mode is entirely determined by DecisionContext; old vector
+        # memory is never injected into the formal PR-005 model input.
+        if memory is not None and context is None:
             try:
                 memories = memory.get_memories(current_situation, n_matches=2)
                 recommendations = [
@@ -147,61 +175,82 @@ def create_trader(llm, memory, config: dict[str, Any] | None = None):
                     exc.__class__.__name__,
                 )
 
-        snapshot_id = _decision_snapshot_id(state)
-        snapshot_origin_instruction = (
-            f"snapshot_id 必须是 {snapshot_id}，它是已经过完整性、用户、"
-            "标的、市场和 DataQuality 校验的 PR-003 EvidenceSnapshot。"
-            if state.get("snapshot_id")
+        revision = state.get("revision_request")
+        prompt_version = (
+            NORMAL_TRADE_REVISION_PROMPT_VERSION
+            if revision
             else (
-                f"snapshot_id 必须是 {snapshot_id}；这是明确标记的旧人工分析"
-                "兼容来源，不允许自动执行。"
+                NORMAL_TRADE_QUANT_PROMPT_VERSION
+                if context
+                else NORMAL_TRADE_PROMPT_VERSION
             )
         )
-        schema_json = model_output_schema_json(NormalTradePlan)
-        messages = [
-            {
-                "role": "system",
-                "content": f"""你是 AlphaGuard 的普通模型 Trader。你的唯一正式机器输出是一个严格 JSON 对象，不得输出 Markdown、解释前缀或 JSON 之外的文本。
-
-Prompt 名称与固定版本：{NORMAL_TRADE_PROMPT_NAME}@{NORMAL_TRADE_PROMPT_VERSION}
-你的角色是提出或不提出普通模型交易计划，不是风险终审，也不能创建订单。
-
-强制语义：
-- status/action 必须严格匹配 Schema。
-- 证据不足使用 INSUFFICIENT_DATA + NONE。
-- 信息尚不确定但适合继续观察使用 WAIT + WAIT。
-- 正常不交易使用 NO_TRADE + NONE/HOLD。
-- 只有可执行逻辑完整时才使用 PROPOSE_TRADE + BUY/SELL/REDUCE。
-- target_price 可以为 null。缺失时不得推算、猜测或改变 action。
-- 不得生成 model_meta；运行时会注入真实供应商、模型、Prompt、时延与输出哈希。
-- {snapshot_origin_instruction}
-- quant_proposal_id 必须是 {LEGACY_QUANT_PROPOSAL_ID}，不得用空字符串掩盖 PR-004 尚未实施。
-- PROPOSE_TRADE 若暂时不能给出 valid_until，必须填写 valid_until_compatibility_reason。
-- BUY 若策略确实不需要 entry_zone，必须填写 entry_zone_not_required_reason。
-- 任何错误、空白或缺字段都不得用 HOLD 掩盖。
-
-模型输出 JSON Schema：
-{schema_json}
-
+        snapshot_id = context.snapshot_id if context else _decision_snapshot_id(state)
+        proposal_id = (
+            context.quant_proposal_id if context else LEGACY_QUANT_PROPOSAL_ID
+        )
+        quant_rules = ""
+        if context:
+            proposal = context.quant_proposal
+            quant_rules = f"""
+- 唯一 QuantTradeProposal 为 {proposal.proposal_id}，方向为 {proposal.action_candidate}。
+- PROPOSE_TRADE 只能使用 {proposal.action_candidate}，不得反向。
+- initial_position_pct 不得超过 {proposal.initial_position_pct}；
+  max_position_pct 不得超过 {proposal.max_position_pct}。
+- 只能引用 DecisionContext 中已有 EvidenceRef；不得搜索或补全快照外数据。
+- 运行时会注入全部证据链 ID、策略、标的和日期字段。
+- missing_evidence 不得被描述成中性或安全事实。"""
+        revision_rules = (
+            """
+- 这是唯一允许的 revision_round=1，必须回应 RevisionRequest。
+- 可以改为 WAIT、NO_TRADE 或 INSUFFICIENT_DATA，但不得反向交易。
+- 第二次终审后不会再次返回普通模型。"""
+            if revision
+            else ""
+        )
+        system_content = f"""你是 AlphaGuard 的普通模型 Trader。唯一正式输出是严格 JSON，不得输出 JSON 以外文本。
+Prompt：{NORMAL_TRADE_PROMPT_NAME}@{prompt_version}
+- 证据不足：INSUFFICIENT_DATA + NONE。
+- 可观察的不确定性：WAIT + WAIT。
+- 正常不交易：NO_TRADE + NONE/HOLD。
+- 完整交易计划：PROPOSE_TRADE + BUY/SELL/REDUCE。
+- target_price 可以为 null，禁止推算或猜测。
+- 不得生成 model_meta；运行时注入。
+- snapshot_id 必须是 {snapshot_id}；quant_proposal_id 必须是 {proposal_id}。
+- 失败、空白或缺字段不得伪装成 HOLD。
+{quant_rules}
+{revision_rules}
+JSON Schema：
+{model_output_schema_json(NormalTradePlan)}
 标的约束：
-{instrument_context}""",
-            },
+{instrument_context}"""
+        user_payload = (
+            {
+                "decision_context": context.model_dump(mode="json"),
+                "quant_trade_proposal": context.quant_proposal.model_dump(
+                    mode="json"
+                ),
+                "revision_request": revision,
+                "original_plan": state.get("original_normal_trade_plan"),
+            }
+            if context
+            else {
+                "company": company_name,
+                "trade_date": state.get("trade_date"),
+                "legacy_research_plan": state.get("investment_plan", ""),
+                "reports": reports,
+                "past_memory": past_memory_str,
+            }
+        )
+        messages = [
+            {"role": "system", "content": system_content},
             {
                 "role": "user",
                 "content": json.dumps(
-                    {
-                        "company": company_name,
-                        "trade_date": state.get("trade_date"),
-                        "legacy_research_plan": investment_plan,
-                        "reports": reports,
-                        "past_memory": past_memory_str,
-                    },
-                    ensure_ascii=False,
-                    default=str,
+                    user_payload, ensure_ascii=False, default=str
                 ),
             },
         ]
-
         invocation = invoke_json_object(
             llm=llm,
             messages=messages,
@@ -213,7 +262,12 @@ Prompt 名称与固定版本：{NORMAL_TRADE_PROMPT_NAME}@{NORMAL_TRADE_PROMPT_V
             ),
             configured_model_name=config.get("quick_think_llm"),
             prompt_name=NORMAL_TRADE_PROMPT_NAME,
-            prompt_version=NORMAL_TRADE_PROMPT_VERSION,
+            prompt_version=prompt_version,
+            trace_id=state.get("trace_id"),
+            template_hash=hashlib.sha256(system_content.encode()).hexdigest(),
+            context_hash=context.context_hash if context else None,
+            input_hash=canonical_hash(user_payload),
+            attempt_number=int(state.get("attempt_number") or 1),
         )
 
         decision_error = None
@@ -235,22 +289,56 @@ Prompt 名称与固定版本：{NORMAL_TRADE_PROMPT_NAME}@{NORMAL_TRADE_PROMPT_V
             payload.update(
                 plan_id=str(uuid4()),
                 snapshot_id=snapshot_id,
-                quant_proposal_id=LEGACY_QUANT_PROPOSAL_ID,
+                quant_proposal_id=proposal_id,
+                analysis_id=context.analysis_id if context else state.get("analysis_id"),
+                decision_context_id=context.decision_context_id if context else None,
+                symbol=context.symbol if context else None,
+                market=context.market if context else state.get("market"),
+                trade_date=context.trade_date if context else None,
+                strategy_id=context.strategy_id if context else None,
+                strategy_version=context.strategy_version if context else None,
+                revision_round=1 if revision else 0,
+                supersedes_plan_id=revision.get("original_plan_id") if revision else None,
+                revision_request_id=(
+                    revision.get("revision_request_id") if revision else None
+                ),
                 model_meta=invocation.model_meta.model_dump(mode="json"),
             )
             try:
                 plan = NormalTradePlan.model_validate(payload)
-            except ValidationError as exc:
-                message = f"NormalTradePlan schema validation failed: {exc.error_count()} error(s)"
-                invalid_meta = _invalid_meta(
-                    invocation.model_meta,
-                    "SCHEMA_VALIDATION_ERROR",
-                    message,
+                if context:
+                    from app.services.alphaguard.decision_validation import (
+                        validate_plan_against_context,
+                    )
+
+                    original = (
+                        NormalTradePlan.model_validate(
+                            state["original_normal_trade_plan"]
+                        )
+                        if revision
+                        else None
+                    )
+                    validate_plan_against_context(
+                        plan,
+                        context,
+                        original_plan=original,
+                        revision_request_id=(
+                            revision.get("revision_request_id") if revision else None
+                        ),
+                    )
+            except (ValidationError, ValueError) as exc:
+                message = (
+                    "NormalTradePlan schema/context validation failed: "
+                    f"{exc.__class__.__name__}"
                 )
                 plan = _failure_plan(
                     state=state,
                     status="INVALID_OUTPUT",
-                    model_meta=invalid_meta,
+                    model_meta=_invalid_meta(
+                        invocation.model_meta,
+                        "SCHEMA_VALIDATION_ERROR",
+                        message,
+                    ),
                     message=message,
                 )
                 decision_error = {
@@ -261,21 +349,18 @@ Prompt 名称与固定版本：{NORMAL_TRADE_PROMPT_NAME}@{NORMAL_TRADE_PROMPT_V
                 }
 
         rendered = _render_plan(plan)
-        plan_dict = plan.model_dump(mode="json")
         logger.info(
             "AlphaGuard Trader completed: status=%s action=%s plan_id=%s prompt=%s",
             plan.status,
             plan.action,
             plan.plan_id,
-            NORMAL_TRADE_PROMPT_VERSION,
+            prompt_version,
         )
         return {
             "messages": [AIMessage(content=rendered)],
-            "normal_trade_plan": plan_dict,
+            "normal_trade_plan": plan.model_dump(mode="json"),
             "normal_model_meta": plan.model_meta.model_dump(mode="json"),
             "decision_error": decision_error,
-            # Compatibility/report field only. It is never parsed back into a
-            # machine decision.
             "trader_investment_plan": rendered,
             "sender": name,
         }
