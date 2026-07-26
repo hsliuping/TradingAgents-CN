@@ -37,27 +37,30 @@ def _resolve_reflection_llm_client(db) -> Optional[Any]:
     解析完整 LLMConfig 并构建 UnifiedLLMClient。反思是轻量提炼任务，
     优先用 quick_analysis 模型以控制成本。
 
-    注意：调用方传入的 db 通常是同步 PyMongo Database，因此本函数使用
-    同步查询；若 db 为 Motor async client，则通过 fallback 走兜底逻辑。
+    db 类型兼容：
+    - 同步 PyMongo Database → 直接查询
+    - Motor AsyncIOMotorDatabase / 代理对象 → 自动回退到同步连接
+      （Motor 的 find_one 是 async 方法，同步调用只返回 coroutine 不会真正执行查询）
 
-    若数据库不可用或无可用配置，返回 None，由调用方兜底。
+    若数据库不可用或无可用配置，返回 None；调用方应据此跳过反思提炼，
+    降级到原文写入（infer=False），而不是用硬编码 provider 兜底——
+    如果系统未配置该 provider，兜底客户端同样无法工作。
     """
     try:
         from app.services.intelligent_assistant_service import (
             get_system_llm_config_from_config_doc,
         )
+        # 复用 mem0 配置层的 db 类型检测：Motor async client 会自动回退到同步连接
+        from core.memory.config import _read_active_system_config
 
-        config_doc = db.system_configs.find_one(
-            {"is_active": True},
-            sort=[("version", -1)],
-        )
+        config_doc = _read_active_system_config(db)
         if not config_doc:
-            logger.warning("[Reflection] 系统配置不存在，反思 LLM 将使用兜底 provider")
+            logger.warning("[Reflection] 系统配置不存在或读取失败，反思 LLM 不可用")
             return None
 
         llm_config = get_system_llm_config_from_config_doc(config_doc)
         if llm_config is None:
-            logger.warning("[Reflection] 系统配置中无可用 LLM 配置，反思 LLM 将使用兜底 provider")
+            logger.warning("[Reflection] 系统配置中无可用 LLM 配置，反思 LLM 不可用")
             return None
 
         from core.llm import UnifiedLLMClient
@@ -69,7 +72,7 @@ def _resolve_reflection_llm_client(db) -> Optional[Any]:
         )
         return UnifiedLLMClient.from_config(llm_config)
     except Exception as e:
-        logger.warning("[Reflection] 从系统配置解析 LLM 失败: %s，使用兜底 provider", e)
+        logger.warning("[Reflection] 从系统配置解析 LLM 失败: %s", e)
         return None
 
 
@@ -165,28 +168,33 @@ async def run_reflection(
         if llm_client is None:
             # 从系统配置解析 LLM，不再硬编码 provider
             llm_client = _resolve_reflection_llm_client(db)
-            if llm_client is None:
-                # 系统配置不可用时的最终兜底（保持原有降级行为）
-                from core.llm import UnifiedLLMClient
-                llm_client = UnifiedLLMClient.from_provider("deepseek")
 
-        from core.llm.models import Message, MessageRole
-        messages = [
-            Message(role=MessageRole.SYSTEM, content=system_prompt),
-            Message(role=MessageRole.USER, content=user_prompt),
-        ]
-        resp = await asyncio.wait_for(
-            llm_client.achat(messages),
-            timeout=_REFLECTION_LLM_TIMEOUT,
-        )
-        raw_content = resp.content or "" if hasattr(resp, "content") else str(resp)
-        lessons_json = _extract_json(raw_content)
-        if not lessons_json:
+        if llm_client is None:
+            # 系统配置不可用 → 直接走降级原文写入（不调 LLM 提炼）
+            # 不再使用 deepseek 等硬编码 provider 兜底：若系统未配置该 provider，
+            # 兜底客户端同样无法工作，反而掩盖配置问题。
             logger.warning(
-                "[Reflection] LLM 未返回有效 JSON（agent=%s），降级到原文写入。原始输出前200字: %s",
-                agent_id,
-                raw_content[:200],
+                "[Reflection] 系统配置未解析到可用 LLM，跳过反思提炼，降级写入原文（agent=%s scope=%s）",
+                agent_id, scope,
             )
+        else:
+            from core.llm.models import Message, MessageRole
+            messages = [
+                Message(role=MessageRole.SYSTEM, content=system_prompt),
+                Message(role=MessageRole.USER, content=user_prompt),
+            ]
+            resp = await asyncio.wait_for(
+                llm_client.achat(messages),
+                timeout=_REFLECTION_LLM_TIMEOUT,
+            )
+            raw_content = resp.content or "" if hasattr(resp, "content") else str(resp)
+            lessons_json = _extract_json(raw_content)
+            if not lessons_json:
+                logger.warning(
+                    "[Reflection] LLM 未返回有效 JSON（agent=%s），降级到原文写入。原始输出前200字: %s",
+                    agent_id,
+                    raw_content[:200],
+                )
     except asyncio.TimeoutError:
         logger.warning("[Reflection] LLM 调用超时（%ds，agent=%s），降级到原文写入", _REFLECTION_LLM_TIMEOUT, agent_id)
     except Exception as e:
