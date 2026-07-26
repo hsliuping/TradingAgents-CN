@@ -174,6 +174,9 @@ class StartupValidator:
         
         # 检查安全配置
         self._check_security_configs()
+
+        # AlphaGuard PR-001 固定安全模式校验
+        self._check_alphaguard_safety()
         
         # 设置验证结果
         self.result.success = len(self.result.missing_required) == 0 and len(self.result.invalid_configs) == 0
@@ -257,6 +260,32 @@ class StartupValidator:
                     ),
                 )
             )
+
+    def _check_alphaguard_safety(self):
+        """确保 PR-001 只能以模拟模式启动，且实盘始终关闭。"""
+        from app.core.alphaguard_config import (
+            AlphaGuardSafetyError,
+            validate_alphaguard_startup_safety,
+        )
+
+        try:
+            validate_alphaguard_startup_safety()
+        except AlphaGuardSafetyError as exc:
+            self.result.invalid_configs.append(
+                (
+                    ConfigItem(
+                        key=exc.config_key,
+                        level=ConfigLevel.REQUIRED,
+                        description="AlphaGuard PR-001 安全模式配置",
+                        example=(
+                            "ALPHAGUARD_SYSTEM_MODE=SIM_AUTONOMOUS, "
+                            "ALPHAGUARD_LIVE_TRADING_ENABLED=false"
+                        ),
+                    ),
+                    str(exc),
+                )
+            )
+            logger.error("❌ AlphaGuard 安全启动校验失败: %s", exc)
     
     def _print_validation_result(self):
         """输出验证结果"""
@@ -351,4 +380,3 @@ def validate_startup_config() -> ValidationResult:
     result = validator.validate()
     validator.raise_if_failed()
     return result
-

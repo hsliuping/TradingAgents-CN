@@ -17,6 +17,10 @@ from typing import Optional, Dict, Any
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
+from app.core.alphaguard_config import validate_alphaguard_startup_safety
+
+validate_alphaguard_startup_safety()
+
 from app.services.queue_service import get_queue_service
 from app.services.analysis_service import get_analysis_service
 from app.core.database import init_database, close_database

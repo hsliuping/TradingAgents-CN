@@ -18,6 +18,10 @@ from typing import Optional
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from app.core.alphaguard_config import validate_alphaguard_startup_safety
+
+validate_alphaguard_startup_safety()
+
 from app.core.logging_config import setup_logging
 from app.core.database import init_db, close_db, get_redis_client
 from app.core.config import settings
