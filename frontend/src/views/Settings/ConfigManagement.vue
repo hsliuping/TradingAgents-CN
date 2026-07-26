@@ -352,10 +352,16 @@
           <template #header>
             <div class="card-header">
               <h3>大模型配置</h3>
-              <el-button type="primary" @click="showAddLLMDialog">
-                <el-icon><Plus /></el-icon>
-                添加模型
-              </el-button>
+              <div>
+                <el-button type="success" plain @click="handleBatchImport" :loading="batchImporting">
+                  <el-icon><Download /></el-icon>
+                  一键导入
+                </el-button>
+                <el-button type="primary" @click="showAddLLMDialog">
+                  <el-icon><Plus /></el-icon>
+                  添加模型
+                </el-button>
+              </div>
             </div>
           </template>
 
@@ -1296,6 +1302,31 @@
       :config="currentLLMConfig"
       @success="handleLLMConfigSuccess"
     />
+
+    <!-- 一键导入对话框 -->
+    <el-dialog v-model="batchImportDialogVisible" title="一键导入大模型配置" width="480px">
+      <p style="margin-bottom: 16px; color: var(--el-text-color-regular); font-size: 14px;">
+        选择要导入的厂家，系统将自动从模型目录中导入该厂家下所有模型配置。
+      </p>
+      <el-checkbox-group v-model="selectedImportProviders">
+        <div v-for="p in importableProviders" :key="p.name" style="margin-bottom: 8px;">
+          <el-checkbox :label="p.name" :value="p.name">
+            {{ p.display_name }}
+            <el-tag v-if="p.extra_config?.has_api_key" size="small" type="success" style="margin-left: 4px;">已配置密钥</el-tag>
+            <el-tag v-else size="small" type="info" style="margin-left: 4px;">未配置密钥</el-tag>
+          </el-checkbox>
+        </div>
+      </el-checkbox-group>
+      <div v-if="importableProviders.length === 0" style="text-align: center; padding: 20px; color: var(--el-text-color-secondary);">
+        暂无已启用的厂家
+      </div>
+      <template #footer>
+        <el-button @click="batchImportDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchImporting" :disabled="selectedImportProviders.length === 0" @click="confirmBatchImport">
+          导入选中厂家
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 数据源配置对话框 -->
     <DataSourceConfigDialog
@@ -2560,6 +2591,44 @@ const migrateFromEnv = async () => {
 const llmDialogVisible = ref(false)
 const currentLLMConfig = ref<LLMConfig | null>(null)
 const isEditingLLM = ref(false)
+const batchImporting = ref(false)
+const batchImportDialogVisible = ref(false)
+const selectedImportProviders = ref<string[]>([])
+const importableProviders = ref<LLMProvider[]>([])
+
+const handleBatchImport = async () => {
+  // 加载厂家列表
+  try {
+    const providers = await configApi.getLLMProviders()
+    importableProviders.value = providers.filter((p: LLMProvider) => p.is_active)
+  } catch {
+    ElMessage.error('加载厂家列表失败')
+    return
+  }
+  selectedImportProviders.value = []
+  batchImportDialogVisible.value = true
+}
+
+const confirmBatchImport = async () => {
+  if (selectedImportProviders.value.length === 0) return
+
+  batchImporting.value = true
+  try {
+    const result = await configApi.batchImportLLMConfigs(selectedImportProviders.value)
+    if (result.success) {
+      ElMessage.success(result.message)
+      batchImportDialogVisible.value = false
+      await loadLLMConfigs()
+    } else {
+      ElMessage.warning(result.message)
+    }
+  } catch (error) {
+    console.error('批量导入失败:', error)
+    ElMessage.error('批量导入失败')
+  } finally {
+    batchImporting.value = false
+  }
+}
 
 const showAddLLMDialog = () => {
   currentLLMConfig.value = null

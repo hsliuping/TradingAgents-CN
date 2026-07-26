@@ -1079,7 +1079,150 @@ class ConfigService:
         except Exception as e:
             print(f"更新LLM配置失败: {e}")
             return False
-    
+
+    async def batch_import_llm_configs(self, selected_providers: List[str] = None) -> Dict[str, Any]:
+        """一键导入：从模型目录 + 厂家配置批量创建大模型配置
+
+        Args:
+            selected_providers: 指定导入的厂家列表，为空则导入所有已配置API密钥的厂家
+
+        逻辑：
+        1. 获取所有已启用且有 API Key 的厂家（可按 selected_providers 过滤）
+        2. 获取这些厂家的模型目录
+        3. 对目录中每个模型，如果大模型配置中不存在则创建
+        4. 从 DEFAULT_MODEL_CAPABILITIES 获取能力分级等元数据
+        """
+        from app.constants.model_capabilities import DEFAULT_MODEL_CAPABILITIES
+
+        try:
+            # 1. 获取已启用的厂家（按 selected_providers 过滤）
+            providers = await self.get_llm_providers()
+            active_providers = {
+                p.name: p for p in providers
+                if p.is_active
+                and (not selected_providers or p.name in selected_providers)
+                and (
+                    p.name.lower() in ("ollama", "localai")
+                    or (p.api_key and p.api_key.strip())
+                    or p.extra_config.get("has_api_key", False)
+                )
+            }
+            logger.info(f"📦 [batch_import] 活跃厂家: {list(active_providers.keys())}")
+
+            if not active_providers:
+                return {
+                    "success": False,
+                    "message": "没有已配置API密钥的厂家，请先在厂家管理中配置API密钥",
+                    "imported": 0,
+                    "skipped": 0,
+                    "errors": [],
+                }
+
+            # 2. 获取模型目录
+            catalogs = await self.get_model_catalog()
+            catalog_map = {c.provider: c for c in catalogs}
+
+            # 3. 获取现有大模型配置（用于去重）
+            config = await self.get_system_config()
+            existing_keys = set()
+            if config:
+                for llm in config.llm_configs:
+                    existing_keys.add(f"{llm.provider}/{llm.model_name}")
+
+            # 4. 批量创建
+            imported = 0
+            skipped = 0
+            errors = []
+            new_configs = []
+
+            for provider_name, provider in active_providers.items():
+                catalog = catalog_map.get(provider_name)
+                if not catalog:
+                    continue
+
+                for model in catalog.models:
+                    if model.is_deprecated:
+                        continue
+
+                    config_key = f"{provider_name}/{model.name}"
+                    if config_key in existing_keys:
+                        skipped += 1
+                        continue
+
+                    try:
+                        # 从能力目录获取元数据
+                        cap = DEFAULT_MODEL_CAPABILITIES.get(model.name, {})
+
+                        llm_config = LLMConfig(
+                            provider=provider_name,
+                            model_name=model.name,
+                            model_display_name=model.display_name,
+                            api_key="",  # 留空，运行时从厂家配置获取
+                            api_base=provider.default_base_url or "",
+                            max_tokens=model.max_tokens or 8000,
+                            temperature=0.2,
+                            timeout=180,
+                            retry_times=3,
+                            enabled=True,
+                            description=cap.get("description", model.description or ""),
+                            model_category=None,
+                            enable_memory=False,
+                            enable_debug=False,
+                            priority=0,
+                            input_price_per_1k=model.input_price_per_1k,
+                            output_price_per_1k=model.output_price_per_1k,
+                            currency=model.currency or "CNY",
+                            capability_level=cap.get("capability_level", 5),
+                            suitable_roles=[r.value if hasattr(r, "value") else str(r) for r in cap.get("suitable_roles", ["both"])] or ["both"],
+                            features=[f.value if hasattr(f, "value") else str(f) for f in cap.get("features", ["tool_calling", "long_context", "reasoning"])] or ["tool_calling", "long_context", "reasoning"],
+                            recommended_depths=cap.get("recommended_depths", ["快速", "基础", "标准", "深度", "全面"]) or ["快速", "基础", "标准", "深度", "全面"],
+                            performance_metrics=cap.get("performance_metrics"),
+                        )
+
+                        # 保存
+                        success = await self.update_llm_config(llm_config)
+                        if success:
+                            new_configs.append(llm_config)
+                            existing_keys.add(config_key)
+                            imported += 1
+                            logger.info(f"✅ [batch_import] 导入: {config_key}")
+                        else:
+                            errors.append(f"{config_key}: 保存失败")
+                    except Exception as e:
+                        errors.append(f"{config_key}: {str(e)}")
+                        logger.warning(f"⚠️ [batch_import] 导入失败 {config_key}: {e}")
+
+            # 同步定价
+            if imported > 0:
+                try:
+                    from app.core.config_bridge import sync_pricing_config_now
+                    sync_pricing_config_now()
+                except Exception:
+                    pass
+
+            message = f"成功导入 {imported} 个模型配置"
+            if skipped > 0:
+                message += f"，跳过 {skipped} 个已存在的配置"
+            if errors:
+                message += f"，{len(errors)} 个失败"
+
+            return {
+                "success": True,
+                "message": message,
+                "imported": imported,
+                "skipped": skipped,
+                "errors": errors,
+            }
+        except Exception as e:
+            logger.error(f"❌ [batch_import] 批量导入失败: {e}", exc_info=True)
+            return {
+                "success": False,
+                "message": f"批量导入失败: {str(e)}",
+                "imported": 0,
+                "skipped": 0,
+                "errors": [str(e)],
+            }
+
     async def test_llm_config(self, llm_config: LLMConfig) -> Dict[str, Any]:
         """测试大模型配置 - 真实调用API进行验证"""
         start_time = time.time()
