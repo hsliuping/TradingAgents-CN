@@ -198,12 +198,60 @@ class AnalystAgent(BaseAgent):
                     report = response.content if hasattr(response, 'content') else str(response)
             else:
                 raise ValueError("LLM not initialized")
-            
+
+            # 🆕 v3.5.0 质量门禁：检查报告完整性，失败时重试1次，仍失败标记 low_quality
+            quality_flag = self._check_and_retry_quality(
+                report=report,
+                messages=messages,
+                analysis_prompt=analysis_prompt if self._langchain_tools else None,
+                ticker=ticker,
+            )
+            # 重试成功时，用重试后的报告替换原报告
+            if quality_flag is None and hasattr(self, "_retry_report") and self._retry_report:
+                report = self._retry_report
+                self._retry_report = None  # 清理，避免影响下次调用
+
             # 5. 输出到state（只返回新增的字段，避免并发冲突）
             output_key = self.output_field or f"{self.analyst_type}_report"
 
             logger.info(f"分析师Agent {self.agent_id} 执行成功")
             result = {output_key: report}
+
+            # 质量门禁标记（写入 state.quality_flags，下游可知哪些报告质量差）
+            if quality_flag:
+                result["quality_flags"] = [quality_flag]
+
+            # 🆕 v3.6.0 项5 闭环：采集质量指标写入 MongoDB（供仪表盘查询）
+            # 不阻塞主流程，失败时静默降级
+            try:
+                from app.services.quality_metrics_service import QualityMetricsService
+                from app.core.database import get_mongo_db_sync
+                metrics_db = get_mongo_db_sync()
+                if metrics_db is not None:
+                    user_id = state.get("user_id") or state.get("userId") or "default_user"
+                    # 检测是否命中兜底文案
+                    hit_fallback = bool(quality_flag and quality_flag.get("severity") == "critical")
+                    fallback_pattern = quality_flag.get("reason", "") if quality_flag else ""
+                    # v3.6.0 fix：仅 critical 级别标记为低质量，warning 级别不标记
+                    is_low_quality = bool(quality_flag and quality_flag.get("severity") == "critical")
+                    retry_count = 1 if (quality_flag and quality_flag.get("retried")) else 0
+                    QualityMetricsService(db=metrics_db).record_analysis_metrics_sync(
+                        user_id=user_id,
+                        ticker=ticker,
+                        agent_id=self.agent_id,
+                        agent_type=self.analyst_type,
+                        report_content=report[:500] if isinstance(report, str) else "",
+                        report_length=len(report) if isinstance(report, str) else 0,
+                        is_low_quality=is_low_quality,
+                        quality_flags=[quality_flag] if quality_flag else [],
+                        hit_fallback=hit_fallback,
+                        fallback_pattern=fallback_pattern,
+                        retry_count=retry_count,
+                        analysis_date=analysis_date,
+                        workflow_id=state.get("workflow_id", ""),
+                    )
+            except Exception as metrics_exc:
+                logger.debug(f"[Analyst] 质量指标采集失败（不阻塞）: {metrics_exc}")
 
             # 🆕 附带工具调用摘要，供下游 Agent 引用
             tool_summary = self._format_tool_call_summary()
@@ -225,7 +273,115 @@ class AnalystAgent(BaseAgent):
             }
         finally:
             self._current_state = None
-    
+
+    def _check_and_retry_quality(
+        self,
+        report: str,
+        messages: list,
+        analysis_prompt: Optional[str],
+        ticker: str,
+    ) -> Optional[Dict[str, Any]]:
+        """v3.5.0 质量门禁：检查报告完整性，失败时重试1次，仍失败返回 quality_flag。
+
+        分层降级策略：
+        - critical 级别失败（空报告/兜底文案）→ 重试1次
+        - warning 级别失败（缺结论关键词）→ 不重试，只标记
+        - 重试后仍失败 → 返回 quality_flag 字典写入 state.quality_flags
+
+        Args:
+            report: 原始报告内容
+            messages: 原始消息列表（重试时复用）
+            analysis_prompt: 工具后分析提示词（重试时复用，无工具模式为 None）
+            ticker: 股票代码（用于日志和告警元数据）
+
+        Returns:
+            None 表示质量通过；Dict 表示质量标记（应写入 state.quality_flags）
+        """
+        from core.agents.quality_gate import validate_analyst_report
+
+        report_str = report if isinstance(report, str) else str(report)
+        qc_result = validate_analyst_report(
+            content=report_str,
+            agent_id=self.agent_id,
+            ticker=ticker,
+        )
+
+        if qc_result.is_valid:
+            logger.info(f"[QualityGate] {self.agent_id} 报告质量通过")
+            return None
+
+        # warning 级别：不重试，只标记
+        if not qc_result.should_retry:
+            logger.warning(
+                f"[QualityGate] {self.agent_id} 报告质量 warning：{qc_result.reason}"
+            )
+            return {
+                "agent_id": self.agent_id,
+                "analyst_type": self.analyst_type,
+                "ticker": ticker,
+                "reason": qc_result.reason,
+                "severity": qc_result.severity,
+                "retried": False,
+            }
+
+        # critical 级别：重试1次
+        logger.warning(
+            f"[QualityGate] {self.agent_id} 报告质量 critical：{qc_result.reason}，重试1次"
+        )
+        try:
+            retry_messages = list(messages) + [
+                HumanMessage(content=(
+                    f"注意：你刚才生成的报告存在问题（{qc_result.reason}）。"
+                    "请重新生成一份完整的分析报告，必须包含明确结论（如建议/判断/风险等）。"
+                    "直接输出报告内容，不要再调用任何工具。"
+                ))
+            ]
+            if self._langchain_tools and analysis_prompt:
+                retry_report = self.invoke_with_tools(retry_messages, analysis_prompt=analysis_prompt)
+            elif self._llm:
+                retry_response = self._llm.invoke(retry_messages)
+                retry_report = retry_response.content if hasattr(retry_response, 'content') else str(retry_response)
+            else:
+                retry_report = report  # 无法重试，保持原报告
+
+            # 二次校验
+            retry_str = retry_report if isinstance(retry_report, str) else str(retry_report)
+            qc_result2 = validate_analyst_report(
+                content=retry_str,
+                agent_id=self.agent_id,
+                ticker=ticker,
+            )
+
+            if qc_result2.is_valid:
+                logger.info(f"[QualityGate] {self.agent_id} 重试后质量通过")
+                # 用重试后的报告替换原报告（通过实例属性传递回 execute）
+                # 注意：这里直接修改不了 execute 的局部变量 report，
+                # 所以用 _retry_report 属性传递
+                self._retry_report = retry_report
+                return None
+            else:
+                logger.error(
+                    f"[QualityGate] {self.agent_id} 重试后仍不通过：{qc_result2.reason}，标记 low_quality"
+                )
+                return {
+                    "agent_id": self.agent_id,
+                    "analyst_type": self.analyst_type,
+                    "ticker": ticker,
+                    "reason": qc_result2.reason,
+                    "severity": qc_result2.severity,
+                    "retried": True,
+                }
+        except Exception as retry_err:
+            logger.error(f"[QualityGate] {self.agent_id} 重试异常：{retry_err}", exc_info=True)
+            return {
+                "agent_id": self.agent_id,
+                "analyst_type": self.analyst_type,
+                "ticker": ticker,
+                "reason": f"重试异常: {retry_err}",
+                "severity": "critical",
+                "retried": True,
+            }
+
     def _fetch_data_with_tools(
         self, 
         ticker: str, 
