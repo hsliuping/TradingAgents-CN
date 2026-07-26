@@ -1,0 +1,10 @@
+account_policy_id: paper-account-policy-v1
+version: 1.0.0
+market: CN
+currency: CNY
+initial_cash: "1000000.00"
+account_types:
+  - PAPER_QUANT
+  - PAPER_NORMAL
+  - PAPER_TOP_CONFIRMED
+  - PAPER_CHALLENGER

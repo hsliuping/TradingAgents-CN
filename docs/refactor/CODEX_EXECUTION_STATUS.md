@@ -2,8 +2,8 @@
 
 ## 当前状态
 
-- 更新时间：2026-07-26 16:52 CST（Asia/Shanghai）
-- 当前阶段：PR-004 Factor, Regime & Strategy Engine
+- 更新时间：2026-07-26 21:00 CST（Asia/Shanghai）
+- 当前阶段：PR-006 Automatic Paper Trading
 - 阶段状态：实现完成，验证完成
 - PR-001 检查点提交：`5c6ae8f`
 - PR-001 检查点标签：`alphaguard-pr001-baseline`
@@ -11,13 +11,18 @@
 - PR-002 检查点标签：`alphaguard-pr002-structured-decision`
 - PR-003 检查点提交：`21e9792`
 - PR-003 检查点标签：`alphaguard-pr003-candidate-evidence`
-- 后续阶段：PR-005 及以后均未开始
+- PR-004 检查点提交：`87026f5`
+- PR-004 检查点标签：`alphaguard-pr004-quant-research`
+- PR-005 检查点提交：`76f62e5`
+- PR-005 检查点标签：`alphaguard-pr005-consensus-risk`
+- PR-006 检查点标签：`alphaguard-pr006-automatic-paper`
+- 后续阶段：PR-007 及以后均未开始
 - 固定安全模式：`system_mode=SIM_AUTONOMOUS`
 - 实盘开关：`live_trading_enabled=false`
-- 数据迁移：未迁移用户、候选、快照、模拟持仓或交易数据
-- 数据库迁移/新集合：新增 7 个 PR-004 独立集合及 create-only 索引
-- MongoDB 文档变化：写入 21 个因子定义、2 个策略定义和 23 条注册审计事件
-- 公开 API：新增 7 个认证量化查询/受控计算端点；未增加结果上传或订单 API
+- 数据迁移：未迁移人工模拟账户、现金、持仓、订单或成交数据
+- 数据库迁移/新集合：新增 16 个 PR-006 自动模拟集合及 49 个 create-only 索引
+- MongoDB 文档变化：PR-006 仅建索引；政策、账户和自动交易文档仍为 0
+- 公开 API：新增 10 个认证只读端点和 1 个受控取消端点；无公共创建订单/成交/结算 API
 
 ## 基线来源
 
@@ -1838,3 +1843,509 @@ PR-001～PR-004 均为独立提交和标签。PR-005 当前是相对于
 
 PR-005 到此停止。不得开始 PR-006；进入 PR-006 必须由人工另行授权，并先为当前
 PR-005 建立独立提交或可恢复检查点。
+
+---
+
+## PR-006：Automatic Paper Trading
+
+### 完成结论和安全边界
+
+PR-006 已完成。开始本阶段前已确认工作区干净、PR-001～PR-005 标签完整，并将
+PR-005 固定为：
+
+```text
+76f62e5 feat(pr-005): establish consensus and hard risk
+alphaguard-pr005-consensus-risk
+```
+
+本阶段建立了独立于人工即时成交接口的自动模拟交易链：
+
+```text
+RiskDecision / benchmark source
+  -> DB-backed ExecutionOutbox
+  -> OrderIntentFactory / BenchmarkExecutionSafetyGate
+  -> immutable OrderIntent
+  -> centralized PaperOrder state machine
+  -> cash or FIFO lot reservation
+  -> immutable ExecutionMarketSnapshot
+  -> deterministic MatchingEngine
+  -> immutable PaperFill + Decimal FeeEngine
+  -> recoverable Settlement Saga
+  -> PositionLot / Position / Account / Ledger
+  -> DailyAccountSnapshot
+```
+
+所有 PR-006 Schema 继承固定约束：
+
+```text
+execution_environment = PAPER
+live_execution_allowed = false
+```
+
+PR-001 的 `system_mode=SIM_AUTONOMOUS` 和 `live_trading_enabled=false` 未修改；
+安全配置下 FastAPI 可启动，不安全配置下 FastAPI 和两套 Worker 仍在资源初始化前
+拒绝启动。代码没有 Broker SDK、BrokerAdapter、实盘订单对象或券商网络调用。
+
+### 实际修改和新增文件
+
+核心 Schema、集合及配置：
+
+- `tradingagents/alphaguard/paper_schemas.py`
+- `app/schemas/alphaguard/paper.py`
+- `app/models/alphaguard/paper_collections.py`
+- `app/models/alphaguard/__init__.py`
+- `tradingagents/alphaguard/mongo_indexes.py`
+- `tradingagents/alphaguard/candidate_schemas.py`
+- `config/alphaguard/paper/account_policy_v1.yaml`
+- `config/alphaguard/paper/execution_policy_v1.yaml`
+- `config/alphaguard/paper/fee_policy_v1.yaml`
+
+服务和编排：
+
+- `app/services/alphaguard/paper_storage.py`
+- `app/services/alphaguard/paper_policy_registry.py`
+- `app/services/alphaguard/paper_audit_service.py`
+- `app/services/alphaguard/paper_calendar_service.py`
+- `app/services/alphaguard/paper_account_service.py`
+- `app/services/alphaguard/benchmark_execution_safety_gate.py`
+- `app/services/alphaguard/execution_outbox_service.py`
+- `app/services/alphaguard/order_intent_factory.py`
+- `app/services/alphaguard/paper_order_service.py`
+- `app/services/alphaguard/execution_market_snapshot_service.py`
+- `app/services/alphaguard/matching_engine.py`
+- `app/services/alphaguard/fee_engine.py`
+- `app/services/alphaguard/paper_execution_service.py`
+- `app/services/alphaguard/settlement_service.py`
+- `app/services/alphaguard/paper_candidate_sync_service.py`
+- `app/services/alphaguard/paper_task_service.py`
+- `app/services/alphaguard/paper_jobs.py`
+- `app/services/alphaguard/decision_pipeline.py`
+- `app/services/alphaguard/candidate_pool_service.py`
+- `app/services/alphaguard/index_service.py`
+
+API、调度、脚本和前端：
+
+- `app/routers/alphaguard_paper.py`
+- `app/main.py`
+- `scripts/init_alphaguard_paper_indexes.py`
+- `scripts/seed_alphaguard_paper_policies.py`
+- `scripts/create_alphaguard_paper_accounts.py`
+- `frontend/src/api/alphaguardPaper.ts`
+- `frontend/src/components/paper/AlphaGuardAutoPaperPanel.vue`
+- `frontend/src/views/PaperTrading/index.vue`
+
+专项测试：
+
+- `tests/unit/alphaguard/pr006_helpers.py`
+- `tests/unit/alphaguard/test_paper_schemas_pr006.py`
+- `tests/unit/alphaguard/test_fee_matching_snapshot_pr006.py`
+- `tests/unit/alphaguard/test_paper_accounts_orders_settlement_pr006.py`
+- `tests/unit/alphaguard/test_outbox_intent_safety_pr006.py`
+- `tests/unit/alphaguard/test_paper_security_jobs_api_pr006.py`
+- `tests/integration/alphaguard/test_automatic_paper_trading_pr006.py`
+
+原有 `app/routers/paper.py`、`frontend/src/api/paper.ts` 和人工集合未修改。
+
+### 自动账户和人工账户隔离
+
+自动账户只使用 `ag_paper_*` / `ag_*` 专用集合，人工账户继续使用：
+
+```text
+paper_accounts
+paper_positions
+paper_orders
+paper_trades
+```
+
+自动账户类型为：
+
+| 账户类型 | 决策来源 | 审核语义 | 是否影响主 Candidate |
+| --- | --- | --- | --- |
+| `PAPER_QUANT` | `QuantTradeProposal(TRIGGERED)` | benchmark only，不伪造 Consensus/HardRisk | 否 |
+| `PAPER_NORMAL` | `revision_round=0` 的 `NormalTradePlan(PROPOSE_TRADE)` | benchmark only，不使用顶尖模型调整计划 | 否 |
+| `PAPER_TOP_CONFIRMED` | `RiskDecision(PASS/REDUCE)` | 必须已有 `ConsensusDecision=PASS` 和 HardRisk 批准 | 是 |
+| `PAPER_CHALLENGER` | PR-006 无自动来源 | 只建账户和执行能力，保持空账户 | 否 |
+
+账户唯一身份为 `user_id + account_type + market`。初始化为 create-only 幂等逻辑：
+已有账户和余额只复用，不覆盖、不重置。自动市场只接受 `CN/CNY`，金额和结算全部
+使用 `Decimal` / MongoDB `Decimal128`。
+
+初始资金来自 `paper-account-policy-v1@1.0.0`，默认值与现有人工账户默认资金一致，
+但不共享账户文档或余额。政策不散落在业务代码中。
+
+### BenchmarkExecutionSafetyGate
+
+`BenchmarkExecutionSafetyGate` 是纯 Python 机械准入门，只为 Quant/Normal 基准账户
+检查账户 ACTIVE、CN/CNY、现金、持仓、T+1 可卖 lot、仓位上限、总敞口、重复有效
+订单、A 股 100 股整数手、执行日期和交易状态。输出独立
+`BenchmarkExecutionDecision`，明确：
+
+```text
+benchmark_only = true
+consensus_approved = false
+hard_risk_approved = false
+```
+
+它不执行模型终审，也不命名为 HardRiskDecision。关键账户、价格、日历或交易状态
+缺失时为 `SUSPEND`，不会假设资金充足、持仓为零或标的可交易。
+
+### OrderIntent 和 OrderIntentFactory
+
+`OrderIntent` create-only、哈希校验且不可变，保存 source、analysis/candidate、
+snapshot/quant/plan/consensus/risk 标识、原始 action、side、数量、价格、执行窗口、
+政策版本、账户状态快照和稳定幂等键。
+
+映射规则：
+
+- `BUY -> side=BUY + LIMIT`，限价只能来自最终计划 `entry_zone.upper`；
+- `SELL/REDUCE -> side=SELL + MARKET_ON_OPEN`，保留 `original_action=REDUCE`；
+- 无可靠 BUY 入场上界、持久化交易日历、合法数量或身份链时不创建 Intent；
+- 不读取“最新价格”猜限价，不生成虚构卖价；
+- 执行窗口只由 `trading_calendar` 中明确 `is_open/open/is_trading_day=true`
+  的 CN session 生成，不使用自然日加减；
+- 幂等身份为账户、source type、source object、side 和 execution policy；
+- 同幂等键同内容复用，不同内容报完整性冲突。
+
+`PAPER_TOP_CONFIRMED` 重新检查 Risk/Consensus、approved quantity、account/symbol/
+market/snapshot、有效期和执行日期。历史 `RiskDecision.order_intent_created=false`
+永远不改写；创建事实记录在 Outbox、Intent 和事件中。
+
+### ExecutionOutbox
+
+DecisionPipeline 只持久化以下事件，不直接创建订单或改资产：
+
+```text
+CREATE_QUANT_BENCHMARK_INTENT
+CREATE_NORMAL_BENCHMARK_INTENT
+CREATE_TOP_CONFIRMED_INTENT
+```
+
+Outbox 状态为 `PENDING/PROCESSING/COMPLETED/FAILED/DEAD_LETTER`，保存 attempt、
+next attempt、经脱敏错误、幂等键和错误历史。重复消费不会重复创建 Intent、Order
+或预留；超过重试上限进入 DEAD_LETTER 并写审计，不静默丢失。
+
+### PaperOrder 状态机与预留
+
+集中状态机为：
+
+```text
+CREATED -> RESERVED -> SUBMITTED -> PENDING
+PENDING -> PARTIALLY_FILLED -> SETTLEMENT_PENDING -> PENDING/FILLED
+SETTLEMENT_PENDING -> SETTLEMENT_FAILED -> SETTLEMENT_PENDING
+CREATED/RESERVED/SUBMITTED/PENDING/PARTIALLY_FILLED
+  -> CANCELLED/REJECTED/EXPIRED
+```
+
+比总蓝图增加 `SETTLEMENT_PENDING` 和 `SETTLEMENT_FAILED`，原因是当前 MongoDB 不
+支持事务，订单必须在 Saga `COMMITTED` 后才可以变为 `PARTIALLY_FILLED/FILLED`。
+所有迁移通过服务校验并增加 `order_version`，禁止任意字符串覆盖。
+
+BUY 预留以限价、最大成交金额和保守最大费用计算，将
+`cash_available -> cash_reserved`；重复预留不重复扣款，实际消费后释放差额。
+可用现金永不为负，预留不足时拒绝剩余成交。
+
+SELL/REDUCE 按 FIFO 从 `available_from_date <= trade_date` 的 lot 分配，将可卖数量
+转为 lot `reserved_quantity`。T+1 未解锁 lot 不可预留，同一 lot 不会重复冻结。
+取消、拒绝、过期释放未成交余额；部分成交只消费实际成交部分。
+
+### ExecutionMarketSnapshot
+
+执行快照以 `symbol + CN + trade_date + data_version` 唯一，保存 Decimal OHLC/
+prev_close、volume/amount、suspended/ST、明确 limit up/down、source refs、cutoff、
+日线粒度和 immutable hash。
+
+- 只读取指定交易日的现有日线记录；
+- 当前日只允许收盘后构建，不读未来数据；
+- 缺 OHLC、交易状态、涨跌停价格或哈希不一致时阻断；
+- `tradestatus=1` 解释为可交易，`0` 解释为停牌；
+- 未发现可靠涨跌停字段时不使用 10% 硬编码猜测；
+- 同身份同内容复用，不同内容完整性冲突；
+- `simulation_granularity=DAILY_OHLCV`、
+  `matched_after_market_close=true`，不声称重建逐笔成交。
+
+执行行情和每日账户快照调度也只在持久化明确开市日运行；日历缺失或闭市直接跳过。
+
+### MatchingEngine、滑点和成交量
+
+`matching-engine-v1` 为纯 Python、确定性、无 LLM、无网络、无账户写入：
+
+- MARKET_ON_OPEN：BUY 为 open 加买入滑点，SELL 为 open 减卖出滑点；
+- BUY LIMIT：开盘不高于限价取 open，否则日内 low 触及才取 limit；
+- SELL LIMIT：开盘不低于限价取 open，否则日内 high 触及才取 limit；
+- 成交价经过 `0.01` tick、限价边界和明确涨跌停边界；
+- 停牌不成交；一字涨停不买、一字跌停不卖；
+- 缺可靠停牌/涨跌停状态为 BLOCKED，不假设可交易；
+- 容量为 `floor(volume * max_participation_rate)`，BUY 再向下取 100 股整数手；
+- 最终数量不超过订单剩余、容量和有效预留；
+- 同一订单同一交易日最多一个 Fill，由唯一索引保证；
+- 未到 earliest、已过期或当日已有 Fill 均不撮合。
+
+`paper-execution-policy-v1@1.0.0` 保存双边 5 bps 滑点、5% 成交量参与率、价格 tick、
+BUY LIMIT、退出 MOO、5 个有效 session 和日线模拟粒度；业务代码不散落这些常量。
+
+### FeeEngine、PaperFill、PositionLot 和 T+1
+
+FeeEngine 使用 `Decimal`，由 `paper-fee-policy-v1@1.0.0` 提供佣金率、最低佣金、
+卖出印花税、过户费和其他费用，输出不可变 `FeeBreakdown`，作用域为
+`ORDER_TRADE_DATE`。规则缺失或版本不存在时阻断结算，不默认费用为 0。
+
+现有 `paper_market_rules` 实际为空且无可依赖业务记录，因此没有假装复用；v1 参数
+与现有人工模拟默认规则对齐并独立版本化，后续费率变化必须新增版本。
+
+`PaperFill` 保存订单/Intent/账户、执行快照、交易日、数量、Decimal 成交价和名义
+金额、费用明细、净现金影响、匹配/费用版本、幂等键和不可变哈希。唯一身份为
+`order_id + trade_date`，重复匹配不会重复插入。
+
+BUY 成交创建 PositionLot，成本包含分摊买入费用；`available_from_date` 只能来自
+持久化交易日历的下一开市日。SELL/REDUCE 按 FIFO 消耗 lot，并支持部分卖出、
+全部退出和剩余零股退出。Position 是 lot 汇总缓存；不一致时 reconciliation 写
+完整性错误并阻断继续下单，fill/lot/ledger 是核对依据。
+
+### SettlementService、Saga、账本和资产守恒
+
+运行态确认 MongoDB `4.4.30` 为 standalone，`setName=null`；只读事务探针返回
+MongoDB code 20，因此采用可恢复 Saga，不假装多集合事务原子性：
+
+```text
+PREPARED
+  -> ACCOUNT_APPLIED
+  -> POSITION_APPLIED
+  -> LEDGER_APPLIED
+  -> COMMITTED
+FAILED / COMPENSATION_REQUIRED
+```
+
+每一步保存稳定幂等键和恢复状态。重复 fill 结算直接复用；进程中断后从已完成阶段
+继续，不重复扣款、加仓、减仓或记账。未 `COMMITTED` 的订单保持
+`SETTLEMENT_PENDING/FAILED`，绝不标为 FILLED。
+
+不可变账本记录 `CASH_CHANGE/POSITION_COST_CHANGE/FEE_EXPENSE/REALIZED_PNL/
+RESERVATION_RELEASE`，保存 before/after、fill、settlement 和幂等键。测试逐项验证：
+
+- 无费用成交瞬间权益守恒；
+- 有费用时权益变化只等于费用；
+- 部分成交后已消费与剩余预留一致；
+- 取消/过期只释放预留，不改变净资产；
+- 重复任务不会产生第二次资产变化；
+- 结算后现金、持仓和 lot 数量不为负。
+
+### 取消、过期、Worker 和每日任务
+
+唯一写操作 API 为订单取消。允许取消 CREATED/RESERVED/SUBMITTED/PENDING/
+PARTIALLY_FILLED，已成交部分保留，仅释放剩余现金或 lot 预留；重复取消幂等，不
+删除订单或 Fill。
+
+现有 APScheduler 中注册的 DB-backed 幂等任务包括：
+
+```text
+process_execution_outbox
+settle_pending_fills
+expire_orders
+release_stale_reservations
+roll_position_lot_availability
+build_execution_market_snapshots
+match_orders_for_trade_date
+create_daily_account_snapshots
+reconcile_paper_accounts
+```
+
+同时保留 `create_order_intents` 和 `submit_paper_orders` 显式任务入口。实际调度将
+factory、order creation 和 reservation 合并在同一 Outbox 消费工作流，减少
+Outbox COMPLETED 但订单未创建的间隙；各内部步骤仍独立幂等。这是相对蓝图的实现
+差异，不改变安全边界。
+
+每次任务运行保存 job type、trade date、幂等键、状态、attempt、起止时间和脱敏
+错误。同一 job key 重跑不重复创建 Intent/Order/Fill/Settlement/解锁/快照。
+
+### DailyAccountSnapshot 和 Candidate
+
+每日账户快照使用目标开市日收盘价，保存 Decimal 现金、冻结资金、持仓市值、权益、
+已实现/未实现盈亏、费用、gross exposure、持仓数、价格引用和输入哈希。价格缺失
+时 `valuation_complete=false` 并列出缺失标的，不按 0 静默宣称估值正常。
+
+只有 `PAPER_TOP_CONFIRMED` 同步主 Candidate：
+
+```text
+Intent / PENDING / PARTIALLY_FILLED -> ORDER_PENDING
+BUY FILLED -> POSITION_HELD
+SELL/REDUCE 后仍有仓位 -> POSITION_HELD
+清仓 -> WATCHING
+终止且无仓位 -> APPROVED/WATCHING/COOLDOWN（按原因）
+```
+
+Quant、Normal、Challenger 永不改变主 Candidate。同步失败只写事件并交由
+reconciliation 修复，不回滚已合法提交的结算。
+
+### MongoDB 集合和索引
+
+PR-006 使用 16 个专用集合：
+
+```text
+ag_paper_accounts
+ag_paper_account_snapshots
+ag_benchmark_execution_decisions
+ag_order_intents
+ag_paper_orders
+ag_paper_fills
+ag_paper_positions
+ag_paper_position_lots
+ag_paper_reservations
+ag_paper_ledger_entries
+ag_settlement_records
+ag_execution_market_snapshots
+ag_execution_outbox
+ag_paper_job_runs
+ag_paper_events
+ag_paper_policies
+```
+
+建立 49 个 create-only 索引，覆盖蓝图要求的账户、Intent、Order、Fill、Position、
+Lot、Reservation、Snapshot、Settlement、Outbox、AccountSnapshot、Job 和 Event
+唯一/查询键。脚本两次 execute 均显示 `created=0 unchanged=49 failed=0`，因为应用
+启动索引初始化已先创建相同索引；没有删除或覆盖任何旧索引，也未触碰人工集合。
+
+三项脚本默认 dry-run，只有 `--execute` 才写入：
+
+- 政策 dry-run 输出 3 个稳定配置哈希，无写入；
+- 账户 dry-run 输出 4 个账户类型和初始资金，无写入；
+- 索引 dry-run 输出 16 个集合、49 个索引，无写入；
+- 同版本政策不同内容拒绝覆盖，账户初始化不覆盖余额。
+
+当前真实库 PR-006 accounts/intents/orders/fills/lots/settlements 均为 0；人工
+paper_accounts/positions/orders/trades 也保持 0。PR-006 没有迁移或修改业务数据。
+
+### API、前端和审计
+
+认证 API 前缀为 `/api/alphaguard/paper`，新增 10 个 GET 查询端点和唯一 POST：
+
+```text
+POST /orders/{order_id}/cancel
+```
+
+客户端不能创建 OrderIntent、PaperOrder、PaperFill、Settlement、账户余额或持仓，
+不能上传成交价、政策或模型结果，也没有公共结算触发接口。未认证访问返回 401。
+
+PaperTrading 页面增加“人工模拟 / AlphaGuard 自动模拟”模式开关。自动视图支持
+账户类型切换、现金/冻结资金/总资产、持仓/可卖数量/lot、订单/部分成交、Fill、
+费用、source/Risk/Candidate/Analysis 关联和受控取消；没有下单、改价、改
+RiskDecision 或实盘开关。原人工页面和 API 保持原样。
+
+`ag_paper_events` 记录账户、Outbox、Intent、Order、Reservation、Snapshot、
+Matching、Settlement、Lot、AccountSnapshot 和完整性事件，包含 user/account/
+intent/order/fill/settlement/source/risk/trace/reason/time/schema 等关联标识；
+异常不只留普通日志。
+
+### 测试和运行验证
+
+| 验证项 | 结果 |
+| --- | --- |
+| PR-006 Schema/账户/来源/安全门/预留/状态机 | 通过 |
+| Snapshot/Matching/Fee/Fill/Lot/T+1 | 通过 |
+| Saga/恢复/账本/资产守恒 | 通过 |
+| Outbox/任务/取消/过期/幂等 | 通过 |
+| Candidate/人工隔离/禁止实盘/E2E | 通过 |
+| PR-006 专项合计 | `64 passed, 67 warnings` |
+| PR-001～PR-005 可运行选择集 | `233 passed, 13 warnings` |
+| 其中 PR-001 安全测试 | 保持通过 |
+| 前端 `npm run type-check` | 仍为 34 个存量 `DefaultRow TS2345`，无新增类别 |
+| 修改 Python 文件 `py_compile` | 通过 |
+| 全项目 compileall | 仅存量 `scripts/补充行业信息_akshare.py:81` 中文脚本语法错误 |
+| `git diff --check` | 通过 |
+| 全量测试收集 | 完成结果 `974 collected, 15 errors`；随后新增 2 个已独立通过测试，当前规模可确定为 976；最终复跑因旧模块收集期外部连接超过 10 分钟无输出而终止 |
+| FastAPI 安全启动 | `127.0.0.1:18006`，`/api/health` HTTP 200 |
+| 自动 Paper API 冒烟 | 未认证 accounts 返回 401，认证边界生效 |
+| FastAPI 不安全配置 | `live_trading_enabled=true` 时 exit 3、启动前阻断 |
+| `app/worker.py` 不安全配置 | exit 1、启动前阻断 |
+| `app/worker/analysis_worker.py` 不安全配置 | exit 1、启动前阻断 |
+| MongoDB / Redis | Mongo ping=1；Redis PONG；Docker 健康 |
+| MongoDB 事务能力 | standalone，事务探针 code 20，使用 Saga |
+| 索引脚本 | 两次 execute 均 49 unchanged；dry-run 通过 |
+| 政策/账户脚本 | dry-run 通过，无写入 |
+
+专项测试使用固定内存 Mongo、固定交易日历、固定 OHLCV 和模型/决策桩，不访问真实
+模型、行情、券商或外部网络。静态与运行测试证明：
+
+- PR-006 服务不导入人工 `app.routers.paper`；
+- 不调用旧 `/paper/order`；
+- 无 BrokerAdapter、券商 SDK 或真实订单网络请求；
+- 自动操作不写 `paper_accounts/paper_positions/paper_orders/paper_trades`；
+- 人工路由不写 `ag_paper_*`；
+- Challenger 无自动 Intent；
+- 所有自动对象为 PAPER 且 live_execution_allowed=false；
+- 重复整条任务链不产生第二次资产变化。
+
+### 设计差异、兼容性和已知限制
+
+1. 原蓝图优先 MongoDB transaction；实际 MongoDB 4.4 standalone 不支持，因此实现
+   可恢复 Saga，并增加 `SETTLEMENT_PENDING/SETTLEMENT_FAILED`。安全性更明确：
+   未提交结算不会被当作 FILLED。
+2. 原蓝图列出独立 create/submit 定时步骤；实际保留任务入口但生产调度由 Outbox
+   consumer 串联工厂、订单和预留，各步骤仍幂等，避免可靠事件与订单之间的窗口。
+3. 当前真实 `trading_calendar` 没有可用 session；真实自动订单会 fail-closed，
+   不会用周末、节假日或自然日 +1。上线数据准备必须先加载版本化交易日历。
+4. 当前真实日线只有 OHLCV/pre_close 和部分 `tradestatus/isST`，没有可靠板块涨跌
+   停价格。缺 limit_up/down 时执行快照阻断，不硬编码 10%。
+5. 当前 `paper_market_rules` 无记录，因此 fees 使用独立不可变 v1 政策；没有把缺失
+   规则解释为零费用。
+6. 第一版只支持 CN/CNY 日线盘后近似，不支持 HK/US、期货期权、融资融券、做空、
+   分钟/逐笔撮合。原人工 HK/US 兼容未删除。
+7. 当前政策和四类账户仅完成 dry-run，生产数据库没有自动创建；需人工明确执行
+   seed/account 脚本并补齐日历/交易状态数据后，真实自动链才会运行。
+8. 前端 34 个 DefaultRow TS2345、15 个旧收集错误和中文脚本语法错误均为既有上游
+   限制；第一次全量收集实际完成为 974/15，之后新增的 2 项已在 64 项专项中通过。
+   最终全量复跑在旧测试收集期建立外部连接并超过 10 分钟无输出后终止；976 是
+   `974 + 2` 的确定性规模推算，不宣称该次命令成功完成。没有为了数字跳过 PR-006
+   新测试，也没有顺手修复无关技术债。
+9. PR-006 只保存 DailyAccountSnapshot，不实现绩效评价、归因、Champion/Challenger
+   实验或策略晋升。
+
+### 明确未实施 PR-007 及以后
+
+```text
+绩效评价与归因
+Alpha Score / 风险调整收益评价
+Champion/Challenger 自动实验和晋升
+策略自动淘汰
+全市场自动推荐
+真实券商连接和实盘订单
+HK/US/衍生品自动撮合
+分钟级或逐笔仿真
+Dify / Qlib / FinRL / RD-Agent
+```
+
+没有修改 QuantTradeProposal、NormalTradePlan、TopReviewDecision、
+ConsensusDecision、RiskDecision 或 EvidenceSnapshot 的历史内容；DecisionPipeline
+只追加可靠 Outbox 事件。
+
+### 数据变化和完整回退
+
+PR-006 真实数据库只新增 create-only 索引，未 seed 政策、未创建账户、未产生 Intent、
+Order、Fill、Reservation、Settlement、Position、Lot、Ledger 或 AccountSnapshot。
+人工模拟数据未变化。
+
+完成检查点后的首选回退方法：
+
+1. 记录当前 `git status --short` 和 `git tag --list "alphaguard-pr00*"`；
+2. 用 `git revert <pr006-commit>` 创建可审计反向提交，不使用 `reset --hard` 或
+   `checkout --` 覆盖用户工作；
+3. 移除新增 router 和调度后复跑 PR-001～PR-005 的 233 项及三项启动保护；
+4. 49 个空索引/空集合可安全保留，不影响 PR-001～PR-005；
+5. 如必须物理移除，先对 16 个精确集合执行并验证 `mongodump`，确认均无业务文档，
+   再逐个删除精确 PR-006 索引/集合，禁止通配 drop；
+6. 若未来已执行 seed 或发生自动模拟交易，禁止直接 drop：先停调度、备份 policies/
+   accounts/intents/orders/fills/lots/ledger/settlements/outbox/events，完成账本与账户
+   reconciliation，再只做逻辑停用；
+7. 永远不删除或重置人工 `paper_*` 集合，不回退 PR-001 安全默认值；
+8. 回退后再次验证 FastAPI HTTP 200、不安全 FastAPI/两 Worker 阻断、Mongo/Redis
+   healthy、旧 `/paper/*` 冒烟和自动集合无残留副作用。
+
+### 当前 Git 状态与阶段闸门
+
+PR-001～PR-005 均为独立提交和标签。PR-006 的代码、测试和文档将形成单独提交并标记：
+
+```text
+alphaguard-pr006-automatic-paper
+```
+
+检查点完成后工作区应为 clean，`git diff alphaguard-pr005-consensus-risk..HEAD --check`
+应通过。PR-006 到此停止；PR-007 没有开始，必须由人工另行授权。

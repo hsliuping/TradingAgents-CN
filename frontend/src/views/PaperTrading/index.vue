@@ -4,14 +4,20 @@
       <div class="title">
         <el-icon style="margin-right:8px"><CreditCard /></el-icon>
         <span>模拟交易</span>
+        <el-radio-group v-model="paperMode" size="small" class="mode-switch">
+          <el-radio-button label="manual">人工模拟</el-radio-button>
+          <el-radio-button label="automatic">AlphaGuard 自动模拟</el-radio-button>
+        </el-radio-group>
       </div>
-      <div class="actions">
+      <div v-if="paperMode === 'manual'" class="actions">
         <el-button :icon="Refresh" text size="small" @click="refreshAll">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openOrderDialog">下市场单</el-button>
         <el-button type="danger" plain :icon="Delete" @click="confirmReset">重置账户</el-button>
       </div>
     </div>
 
+    <AlphaGuardAutoPaperPanel v-if="paperMode === 'automatic'" />
+    <template v-else>
     <!-- 风险提示横幅 -->
     <el-alert
       type="warning"
@@ -253,6 +259,7 @@
         <el-button type="primary" @click="submitOrder">提交</el-button>
       </template>
     </el-dialog>
+    </template>
   </div>
 </template>
 
@@ -265,6 +272,7 @@ import { paperApi } from '@/api/paper'
 import { analysisApi } from '@/api/analysis'
 import { stocksApi } from '@/api/stocks'
 import { formatDateTime } from '@/utils/datetime'
+import AlphaGuardAutoPaperPanel from '@/components/paper/AlphaGuardAutoPaperPanel.vue'
 
 // 路由与初始化
 const route = useRoute()
@@ -280,6 +288,7 @@ const orderDialog = ref(false)
 const order = ref({ side: 'buy', code: '', qty: 100 })
 const detectedMarket = ref<string>('')
 const activeMarketTab = ref<string>('CN')
+const paperMode = ref<'manual' | 'automatic'>('manual')
 
 // 计算属性：根据当前市场标签页过滤持仓
 const filteredPositions = computed(() => {
@@ -592,5 +601,6 @@ onMounted(() => {
 .paper-trading { padding: 16px; }
 .header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 12px; }
 .title { display:flex; align-items:center; font-weight: 600; font-size: 16px; }
+.mode-switch { margin-left: 16px; }
 .card-hd { font-weight: 600; }
 </style>

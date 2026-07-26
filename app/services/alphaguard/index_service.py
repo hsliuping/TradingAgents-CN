@@ -13,11 +13,23 @@ def _normalized_keys(value: Any) -> list[tuple[str, int]]:
     return [(str(key), int(direction)) for key, direction in value]
 
 
-async def ensure_alphaguard_indexes(db) -> list[str]:
+async def ensure_alphaguard_indexes(
+    db,
+    *,
+    collection_names: tuple[str, ...] | list[str] | None = None,
+) -> list[str]:
     """Create only missing indexes; fail on any name/options conflict."""
 
     actions: list[str] = []
-    for collection_name, specs in ALPHAGUARD_INDEX_SPECS.items():
+    selected = (
+        ALPHAGUARD_INDEX_SPECS.items()
+        if collection_names is None
+        else (
+            (name, ALPHAGUARD_INDEX_SPECS[name])
+            for name in collection_names
+        )
+    )
+    for collection_name, specs in selected:
         collection = db[collection_name]
         existing = {
             index["name"]: index

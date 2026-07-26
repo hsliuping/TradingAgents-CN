@@ -333,6 +333,87 @@ class CandidatePoolService:
             )
         return candidate
 
+    async def sync_top_confirmed_paper_state(
+        self,
+        *,
+        candidate_id: str,
+        user_id: str,
+        account_id: str,
+        order_id: str,
+        order_status: str,
+        position_quantity: int,
+        trace_id: str | None = None,
+    ) -> CandidateEntry:
+        """PR-006 state hook for PAPER_TOP_CONFIRMED only.
+
+        Callers must enforce the account type. Benchmark accounts never call
+        this method and therefore cannot mutate the main Candidate lifecycle.
+        """
+
+        current = await self.get_candidate(candidate_id, str(user_id))
+        if current is None:
+            raise LookupError("candidate not found")
+        active_statuses = {
+            "CREATED",
+            "RESERVED",
+            "SUBMITTED",
+            "PENDING",
+            "PARTIALLY_FILLED",
+            "SETTLEMENT_PENDING",
+            "SETTLEMENT_FAILED",
+        }
+        active_orders = set(current.active_order_ids)
+        held_accounts = set(current.held_account_ids)
+        if order_status in active_statuses:
+            active_orders.add(order_id)
+        else:
+            active_orders.discard(order_id)
+        if position_quantity > 0:
+            held_accounts.add(account_id)
+            target = CandidateStatus.POSITION_HELD
+        else:
+            held_accounts.discard(account_id)
+            if active_orders:
+                target = CandidateStatus.ORDER_PENDING
+            elif order_status == "FILLED":
+                target = CandidateStatus.WATCHING
+            elif order_status in {"CANCELLED", "EXPIRED"}:
+                target = CandidateStatus.APPROVED
+            elif order_status == "REJECTED":
+                target = CandidateStatus.REJECTED
+            else:
+                target = CandidateStatus.ORDER_PENDING
+        if current.status != target:
+            validate_candidate_transition(current.status, target)
+        now = datetime.utcnow()
+        candidate = CandidateEntry.model_validate(
+            current.model_copy(
+                update={
+                    "status": target,
+                    "active_order_ids": sorted(active_orders),
+                    "held_account_ids": sorted(held_accounts),
+                    "updated_at": now,
+                }
+            ).model_dump(mode="python")
+        )
+        await self.db["ag_candidates"].replace_one(
+            {"candidate_id": candidate_id, "user_id": str(user_id)},
+            _candidate_document(candidate),
+        )
+        if current.status != target:
+            await self._record_event(
+                candidate_id=candidate_id,
+                user_id=str(user_id),
+                event_type=CandidateEventType.STATUS_CHANGED,
+                previous_status=current.status,
+                new_status=target,
+                reason=(
+                    "PAPER_TOP_CONFIRMED automatic execution state synchronized"
+                ),
+                trace_id=trace_id,
+            )
+        return candidate
+
     async def update_candidate(
         self,
         candidate_id: str,

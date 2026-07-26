@@ -28,7 +28,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import alphaguard, alphaguard_decisions, alphaguard_quant, auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
+from app.routers import alphaguard, alphaguard_decisions, alphaguard_paper, alphaguard_quant, auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_data as stock_data_router
@@ -569,6 +569,93 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置（仅自选股）: {settings.NEWS_SYNC_CRON}")
 
+        # AlphaGuard PR-006: paper-only, idempotent DB-backed tasks.  They never
+        # import a broker adapter and remain protected by PR-001 startup guards.
+        from app.services.alphaguard.paper_jobs import (
+            create_daily_account_snapshots,
+            expire_orders,
+            match_orders_for_trade_date,
+            process_execution_outbox,
+            reconcile_paper_accounts,
+            release_stale_reservations,
+            roll_position_lot_availability,
+            settle_pending_fills,
+            build_execution_market_snapshots,
+        )
+
+        scheduler.add_job(
+            process_execution_outbox,
+            IntervalTrigger(seconds=30, timezone=settings.TIMEZONE),
+            id="alphaguard_paper_outbox",
+            name="AlphaGuard自动模拟交易Outbox",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            settle_pending_fills,
+            IntervalTrigger(seconds=60, timezone=settings.TIMEZONE),
+            id="alphaguard_paper_settlement",
+            name="AlphaGuard自动模拟交易结算恢复",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            expire_orders,
+            IntervalTrigger(minutes=5, timezone=settings.TIMEZONE),
+            id="alphaguard_paper_expiry",
+            name="AlphaGuard自动模拟订单过期",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            release_stale_reservations,
+            IntervalTrigger(minutes=10, timezone=settings.TIMEZONE),
+            id="alphaguard_paper_reservation_reconcile",
+            name="AlphaGuard自动模拟预留释放",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            roll_position_lot_availability,
+            CronTrigger(hour=8, minute=0, timezone=settings.TIMEZONE),
+            id="alphaguard_paper_lot_roll",
+            name="AlphaGuard模拟持仓T+1解锁",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            build_execution_market_snapshots,
+            CronTrigger(hour=15, minute=35, timezone=settings.TIMEZONE),
+            id="alphaguard_paper_execution_snapshot",
+            name="AlphaGuard执行行情快照",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            match_orders_for_trade_date,
+            CronTrigger(hour=15, minute=40, timezone=settings.TIMEZONE),
+            id="alphaguard_paper_matching",
+            name="AlphaGuard日线模拟撮合",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            create_daily_account_snapshots,
+            CronTrigger(hour=16, minute=20, timezone=settings.TIMEZONE),
+            id="alphaguard_paper_account_snapshot",
+            name="AlphaGuard自动账户日快照",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            reconcile_paper_accounts,
+            CronTrigger(hour=17, minute=0, timezone=settings.TIMEZONE),
+            id="alphaguard_paper_reconciliation",
+            name="AlphaGuard自动模拟资产核对",
+            replace_existing=True,
+            max_instances=1,
+        )
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
@@ -689,6 +776,7 @@ app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(alphaguard.router, prefix="/api", tags=["alphaguard"])
 app.include_router(alphaguard_quant.router, prefix="/api", tags=["alphaguard-quant"])
 app.include_router(alphaguard_decisions.router, prefix="/api", tags=["alphaguard-decisions"])
+app.include_router(alphaguard_paper.router, prefix="/api", tags=["alphaguard-paper"])
 app.include_router(reports.router, tags=["reports"])
 app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
 app.include_router(queue.router, prefix="/api/queue", tags=["queue"])

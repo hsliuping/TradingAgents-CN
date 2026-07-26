@@ -165,6 +165,8 @@ ALLOWED_CANDIDATE_TRANSITIONS: dict[CandidateStatus, set[CandidateStatus]] = {
         CandidateStatus.POSITION_HELD,
         CandidateStatus.APPROVED,
         CandidateStatus.REJECTED,
+        CandidateStatus.WATCHING,
+        CandidateStatus.COOLDOWN,
     },
     CandidateStatus.POSITION_HELD: {
         CandidateStatus.EXIT_REVIEW,

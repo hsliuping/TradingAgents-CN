@@ -1,0 +1,12 @@
+fee_policy_id: paper-fee-policy-v1
+version: 1.0.0
+market: CN
+currency: CNY
+commission_rate: "0.0003"
+minimum_commission: "5.00"
+sell_stamp_duty_rate: "0.001"
+transfer_fee_rate: "0.00002"
+regulatory_fee_rate: "0"
+other_fee_rate: "0"
+calculation_scope: ORDER_TRADE_DATE
+money_quantum: "0.01"

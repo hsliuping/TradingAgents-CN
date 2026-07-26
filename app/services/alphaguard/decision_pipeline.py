@@ -34,6 +34,7 @@ from .decision_model_runner import (
     ExistingProviderDecisionModelRunner,
 )
 from .hard_risk_engine import HardRiskEngine
+from .execution_outbox_service import ExecutionOutboxService
 from .revision_service import RevisionService
 from .risk_policy_registry import RiskPolicyRegistry
 
@@ -150,6 +151,9 @@ class DecisionPipeline:
         self.revisions = RevisionService(db)
         self.policies = RiskPolicyRegistry(db)
         self.candidates = CandidatePoolService(db=db)
+        # PR-006 boundary: decisions enqueue durable facts only.  This service
+        # never creates execution records, fills, or asset mutations.
+        self.execution_outbox = ExecutionOutboxService(db)
 
     async def _save_plan(self, context, plan: NormalTradePlan) -> None:
         await self.db["analysis_reports"].update_one(
@@ -373,6 +377,13 @@ class DecisionPipeline:
             attempt_number=attempt_number,
             trace_id=trace_id,
         )
+        await self.execution_outbox.enqueue(
+            event_type="CREATE_QUANT_BENCHMARK_INTENT",
+            source_object_id=context.quant_proposal_id,
+            user_id=context.user_id,
+            analysis_id=context.analysis_id,
+            candidate_id=context.candidate_id,
+        )
         if attempt_number > 1 and context.candidate_id:
             candidate = await self.candidates.get_candidate(
                 context.candidate_id, context.user_id
@@ -422,6 +433,14 @@ class DecisionPipeline:
                 trace_id=trace_id,
             )
         await self._save_plan(context, plan)
+        if plan.status == "PROPOSE_TRADE" and plan.revision_round == 0:
+            await self.execution_outbox.enqueue(
+                event_type="CREATE_NORMAL_BENCHMARK_INTENT",
+                source_object_id=plan.plan_id,
+                user_id=context.user_id,
+                analysis_id=context.analysis_id,
+                candidate_id=context.candidate_id,
+            )
         await audit.record(
             "NORMAL_MODEL_COMPLETED"
             if plan.status not in {"MODEL_FAILED", "INVALID_OUTPUT"}
@@ -715,6 +734,15 @@ class DecisionPipeline:
                 {"$setOnInsert": risk_decision.model_dump(mode="python")},
                 upsert=True,
             )
+            if risk_decision.status in {"PASS", "REDUCE"}:
+                await self.execution_outbox.enqueue(
+                    event_type="CREATE_TOP_CONFIRMED_INTENT",
+                    source_object_id=risk_decision.risk_decision_id,
+                    user_id=context.user_id,
+                    account_id=risk_decision.account_id,
+                    analysis_id=context.analysis_id,
+                    candidate_id=context.candidate_id,
+                )
             await audit.record(
                 f"HARD_RISK_{risk_decision.status}",
                 context=context,

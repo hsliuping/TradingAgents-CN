@@ -1,0 +1,14 @@
+execution_policy_id: paper-execution-policy-v1
+version: 1.0.0
+matching_engine_version: matching-engine-v1
+default_buy_order_type: LIMIT
+default_exit_order_type: MARKET_ON_OPEN
+buy_slippage_bps: "5"
+sell_slippage_bps: "5"
+max_participation_rate: "0.05"
+daily_fill_per_order_limit: 1
+simulation_granularity: DAILY_OHLCV
+price_tick: "0.01"
+cn_buy_lot_size: 100
+st_buy_enabled: false
+validity_sessions: 5

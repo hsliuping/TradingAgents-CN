@@ -1,4 +1,4 @@
-"""Declarative MongoDB index plan for AlphaGuard PR-003 and PR-004."""
+"""Declarative create-only MongoDB index plan for AlphaGuard."""
 
 from __future__ import annotations
 
@@ -260,6 +260,234 @@ ALPHAGUARD_INDEX_SPECS = {
         {
             "keys": [("terminal_status", 1), ("updated_at", -1)],
             "name": "idx_decision_run_terminal",
+        },
+    ],
+    "ag_paper_accounts": [
+        {
+            "keys": [("user_id", 1), ("account_type", 1), ("market", 1)],
+            "name": "uniq_paper_user_type_market",
+            "unique": True,
+        },
+        {"keys": [("account_id", 1)], "name": "uniq_paper_account_id", "unique": True},
+        {
+            "keys": [("status", 1), ("account_type", 1)],
+            "name": "idx_paper_account_status_type",
+        },
+    ],
+    "ag_benchmark_execution_decisions": [
+        {
+            "keys": [("benchmark_decision_id", 1)],
+            "name": "uniq_benchmark_decision_id",
+            "unique": True,
+        },
+        {
+            "keys": [("source_type", 1), ("source_object_id", 1), ("account_id", 1)],
+            "name": "uniq_benchmark_source_account",
+            "unique": True,
+        },
+    ],
+    "ag_order_intents": [
+        {"keys": [("intent_id", 1)], "name": "uniq_intent_id", "unique": True},
+        {
+            "keys": [("idempotency_key", 1)],
+            "name": "uniq_intent_idempotency",
+            "unique": True,
+        },
+        {
+            "keys": [("account_id", 1), ("created_at", -1)],
+            "name": "idx_intent_account_created",
+        },
+        {
+            "keys": [("source_object_id", 1), ("source_type", 1)],
+            "name": "idx_intent_source",
+        },
+    ],
+    "ag_paper_orders": [
+        {"keys": [("order_id", 1)], "name": "uniq_paper_order_id", "unique": True},
+        {"keys": [("intent_id", 1)], "name": "uniq_paper_order_intent", "unique": True},
+        {
+            "keys": [("account_id", 1), ("status", 1), ("created_at", -1)],
+            "name": "idx_paper_order_account_status",
+        },
+        {
+            "keys": [("status", 1), ("earliest_execute_at", 1)],
+            "name": "idx_paper_order_status_earliest",
+        },
+        {
+            "keys": [("symbol", 1), ("trade_date", -1)],
+            "name": "idx_paper_order_symbol_date",
+        },
+    ],
+    "ag_paper_fills": [
+        {"keys": [("fill_id", 1)], "name": "uniq_paper_fill_id", "unique": True},
+        {
+            "keys": [("idempotency_key", 1)],
+            "name": "uniq_paper_fill_idempotency",
+            "unique": True,
+        },
+        {
+            "keys": [("order_id", 1), ("trade_date", 1)],
+            "name": "uniq_paper_fill_order_date",
+            "unique": True,
+        },
+        {
+            "keys": [("account_id", 1), ("trade_date", -1)],
+            "name": "idx_paper_fill_account_date",
+        },
+    ],
+    "ag_paper_positions": [
+        {
+            "keys": [("account_id", 1), ("market", 1), ("symbol", 1)],
+            "name": "uniq_paper_position",
+            "unique": True,
+        },
+        {
+            "keys": [("account_id", 1), ("quantity", 1)],
+            "name": "idx_paper_position_quantity",
+        },
+    ],
+    "ag_paper_position_lots": [
+        {"keys": [("lot_id", 1)], "name": "uniq_paper_lot_id", "unique": True},
+        {
+            "keys": [("source_fill_id", 1)],
+            "name": "uniq_paper_lot_fill",
+            "unique": True,
+        },
+        {
+            "keys": [("account_id", 1), ("symbol", 1), ("available_from_date", 1)],
+            "name": "idx_paper_lot_availability",
+        },
+        {
+            "keys": [("account_id", 1), ("status", 1)],
+            "name": "idx_paper_lot_status",
+        },
+    ],
+    "ag_paper_reservations": [
+        {
+            "keys": [("reservation_id", 1)],
+            "name": "uniq_paper_reservation_id",
+            "unique": True,
+        },
+        {
+            "keys": [("idempotency_key", 1)],
+            "name": "uniq_paper_reservation_idempotency",
+            "unique": True,
+        },
+        {
+            "keys": [("order_id", 1), ("status", 1)],
+            "name": "idx_paper_reservation_order_status",
+        },
+    ],
+    "ag_execution_market_snapshots": [
+        {
+            "keys": [("execution_snapshot_id", 1)],
+            "name": "uniq_execution_snapshot_id",
+            "unique": True,
+        },
+        {
+            "keys": [("symbol", 1), ("market", 1), ("trade_date", 1), ("data_version", 1)],
+            "name": "uniq_execution_symbol_date_version",
+            "unique": True,
+        },
+        {
+            "keys": [("trade_date", -1), ("market", 1)],
+            "name": "idx_execution_snapshot_date_market",
+        },
+    ],
+    "ag_settlement_records": [
+        {
+            "keys": [("settlement_id", 1)],
+            "name": "uniq_settlement_id",
+            "unique": True,
+        },
+        {"keys": [("fill_id", 1)], "name": "uniq_settlement_fill", "unique": True},
+        {
+            "keys": [("status", 1), ("updated_at", 1)],
+            "name": "idx_settlement_status_updated",
+        },
+    ],
+    "ag_paper_ledger_entries": [
+        {
+            "keys": [("ledger_entry_id", 1)],
+            "name": "uniq_paper_ledger_id",
+            "unique": True,
+        },
+        {
+            "keys": [("idempotency_key", 1)],
+            "name": "uniq_paper_ledger_idempotency",
+            "unique": True,
+        },
+        {
+            "keys": [("account_id", 1), ("created_at", -1)],
+            "name": "idx_paper_ledger_account_created",
+        },
+    ],
+    "ag_execution_outbox": [
+        {
+            "keys": [("outbox_event_id", 1)],
+            "name": "uniq_execution_outbox_event_id",
+            "unique": True,
+        },
+        {
+            "keys": [("idempotency_key", 1)],
+            "name": "uniq_execution_outbox_idempotency",
+            "unique": True,
+        },
+        {
+            "keys": [("status", 1), ("next_attempt_at", 1)],
+            "name": "idx_execution_outbox_status_next",
+        },
+    ],
+    "ag_paper_account_snapshots": [
+        {
+            "keys": [("account_id", 1), ("trade_date", 1)],
+            "name": "uniq_paper_account_snapshot",
+            "unique": True,
+        },
+        {
+            "keys": [("trade_date", -1), ("account_id", 1)],
+            "name": "idx_paper_account_snapshot_date",
+        },
+    ],
+    "ag_paper_job_runs": [
+        {
+            "keys": [("idempotency_key", 1)],
+            "name": "uniq_paper_job_idempotency",
+            "unique": True,
+        },
+        {
+            "keys": [("job_type", 1), ("trade_date", -1)],
+            "name": "idx_paper_job_type_date",
+        },
+        {
+            "keys": [("status", 1), ("created_at", -1)],
+            "name": "idx_paper_job_status_created",
+        },
+    ],
+    "ag_paper_events": [
+        {
+            "keys": [("event_id", 1)],
+            "name": "uniq_paper_event_id",
+            "unique": True,
+        },
+        {
+            "keys": [("account_id", 1), ("created_at", -1)],
+            "name": "idx_paper_event_account_created",
+        },
+        {
+            "keys": [("order_id", 1), ("created_at", -1)],
+            "name": "idx_paper_event_order_created",
+        },
+        {
+            "keys": [("event_type", 1), ("created_at", -1)],
+            "name": "idx_paper_event_type_created",
+        },
+    ],
+    "ag_paper_policies": [
+        {
+            "keys": [("policy_type", 1), ("version", 1)],
+            "name": "uniq_paper_policy_version",
+            "unique": True,
         },
     ],
 }
