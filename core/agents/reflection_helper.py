@@ -29,6 +29,47 @@ logger = logging.getLogger(__name__)
 _REFLECTION_LLM_TIMEOUT = 30
 
 
+async def _resolve_reflection_llm_client(db) -> Optional[Any]:
+    """从系统配置解析反思用 LLM 客户端。
+
+    不再硬编码 provider，而是按系统设置中的模型选择顺序
+    （quick_analysis_model → deep_analysis_model → 第一个启用的配置）
+    解析完整 LLMConfig 并构建 UnifiedLLMClient。反思是轻量提炼任务，
+    优先用 quick_analysis 模型以控制成本。
+
+    若数据库不可用或无可用配置，返回 None，由调用方兜底。
+    """
+    try:
+        from app.services.intelligent_assistant_service import (
+            get_system_llm_config_from_config_doc,
+        )
+
+        config_doc = await db.system_configs.find_one(
+            {"is_active": True},
+            sort=[("version", -1)],
+        )
+        if not config_doc:
+            logger.warning("[Reflection] 系统配置不存在，反思 LLM 将使用兜底 provider")
+            return None
+
+        llm_config = get_system_llm_config_from_config_doc(config_doc)
+        if llm_config is None:
+            logger.warning("[Reflection] 系统配置中无可用 LLM 配置，反思 LLM 将使用兜底 provider")
+            return None
+
+        from core.llm import UnifiedLLMClient
+
+        logger.info(
+            "[Reflection] 从系统配置解析反思 LLM: provider=%s model=%s",
+            llm_config.provider,
+            llm_config.model,
+        )
+        return UnifiedLLMClient.from_config(llm_config)
+    except Exception as e:
+        logger.warning("[Reflection] 从系统配置解析 LLM 失败: %s，使用兜底 provider", e)
+        return None
+
+
 def run_reflection_sync(**kwargs) -> bool:
     """run_reflection 的同步包装器，供 sync 上下文（如 ResearcherAgent.execute）调用。
 
@@ -119,8 +160,12 @@ async def run_reflection(
     lessons_json: Optional[str] = None
     try:
         if llm_client is None:
-            from core.llm import UnifiedLLMClient
-            llm_client = UnifiedLLMClient.from_provider("deepseek")
+            # 从系统配置解析 LLM，不再硬编码 provider
+            llm_client = await _resolve_reflection_llm_client(db)
+            if llm_client is None:
+                # 系统配置不可用时的最终兜底（保持原有降级行为）
+                from core.llm import UnifiedLLMClient
+                llm_client = UnifiedLLMClient.from_provider("deepseek")
 
         from core.llm.models import Message, MessageRole
         messages = [
