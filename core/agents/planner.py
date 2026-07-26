@@ -608,7 +608,7 @@ class Planner:
             raw = resp.content or ""
             plan_data = self._parse_plan_json(raw)
             if plan_data is None:
-                logger.warning("[Planner] 修正重试：JSON 解析失败")
+                # _parse_plan_json 已记录具体原因（未找到JSON/JSON解析异常/结构无效）
                 return None
 
             steps = self._validate_steps(plan_data.get("steps", []))
