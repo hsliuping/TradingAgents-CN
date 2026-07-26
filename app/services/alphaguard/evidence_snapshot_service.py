@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import date, datetime
 from enum import Enum
 from typing import Any
@@ -21,6 +22,9 @@ from tradingagents.alphaguard.evidence_schemas import (
 from tradingagents.alphaguard.instruments import normalize_instrument
 
 from .data_quality_gate import DataQualityGate
+
+
+logger = logging.getLogger(__name__)
 
 
 class DataQualityBlockedError(ValueError):
@@ -55,6 +59,7 @@ def _canonical_value(value: Any) -> Any:
             str(key): _canonical_value(item)
             for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
             if key not in {"_id", "immutable_hash"}
+            and not (key == "champion_version_refs" and not item)
         }
     if isinstance(value, (set, frozenset)):
         return sorted(_canonical_value(item) for item in value)
@@ -141,6 +146,22 @@ class EvidenceSnapshotService:
         if report.status == "FAIL":
             raise DataQualityBlockedError(report)
 
+        champion_version_refs: dict[str, str] = {}
+        if data.get("factor_version_set") and data.get("strategy_version"):
+            has_pr008_registry = (
+                await self.db["ag_exp_champion_assignments"].find_one({})
+                is not None
+            )
+            if has_pr008_registry:
+                from .champion_resolver import ChampionResolver
+
+                champion_version_refs = (
+                    await ChampionResolver(self.db).resolve_required_components(
+                        market=market,
+                        as_of_trade_date=trade_date,
+                    )
+                )
+
         snapshot_data = {
             "snapshot_id": str(uuid4()),
             "user_id": str(user_id),
@@ -162,6 +183,7 @@ class EvidenceSnapshotService:
             # calculation. Empty/None remains a truthful legacy research mode.
             "factor_version_set": data.get("factor_version_set", {}),
             "strategy_version": data.get("strategy_version"),
+            "champion_version_refs": champion_version_refs,
             "normal_model_version": data.get("normal_model_version"),
             "top_model_version": data.get("top_model_version"),
             "prompt_versions": data.get("prompt_versions", {}),
@@ -174,6 +196,49 @@ class EvidenceSnapshotService:
         await self.db["ag_evidence_snapshots"].insert_one(
             _snapshot_document(snapshot)
         )
+        # PR-008 Shadow is best-effort and fully isolated.  A failure to enqueue
+        # experiment work must never roll back or pause the production snapshot.
+        try:
+            from app.services.alphaguard.experiment_task_service import (
+                ExperimentTaskService,
+            )
+
+            active_shadows = await self.db["ag_exp_shadow_runs"].find(
+                {"status": "ACTIVE"}
+            ).to_list(length=None)
+            task_service = ExperimentTaskService(self.db)
+            for shadow in active_shadows:
+                await task_service.enqueue(
+                    "SHADOW_SNAPSHOT",
+                    experiment_id=shadow["experiment_id"],
+                    payload={
+                        "shadow_run_id": shadow["shadow_run_id"],
+                        "snapshot_id": snapshot.snapshot_id,
+                    },
+                    requested_by="evidence-snapshot-hook",
+                    trade_date=snapshot.trade_date,
+                )
+        except Exception as exc:
+            # The durable experiment reconciliation worker records/retries
+            # experiment failures; production EvidenceSnapshot remains valid.
+            try:
+                from app.services.alphaguard.experiment_audit_service import (
+                    ExperimentAuditService,
+                )
+
+                await ExperimentAuditService(self.db).record(
+                    "EXPERIMENT_RUN_FAILED",
+                    f"Shadow enqueue failed: {type(exc).__name__}",
+                    user_id=str(user_id),
+                    market=snapshot.market,
+                    input_hash=snapshot.immutable_hash,
+                )
+            except Exception:
+                logger.exception(
+                    "PR-008 Shadow enqueue/audit failed without affecting "
+                    "production EvidenceSnapshot %s",
+                    snapshot.snapshot_id,
+                )
         return snapshot
 
     async def get(

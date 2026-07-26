@@ -181,10 +181,11 @@ async def cancel_order(
         PaperCandidateSyncService,
     )
 
-    await PaperCandidateSyncService(get_mongo_db()).sync_order(
-        order,
-        trace_id=getattr(request.state, "request_id", None),
-    )
+    if order.account_type != "PAPER_CHALLENGER":
+        await PaperCandidateSyncService(get_mongo_db()).sync_order(
+            order,
+            trace_id=getattr(request.state, "request_id", None),
+        )
     return ok(order.model_dump(mode="json"), "automatic paper order cancelled")
 
 

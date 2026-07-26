@@ -168,6 +168,8 @@ class PaperExecutionService:
             "order_id": order.order_id,
             "intent_id": order.intent_id,
             "account_id": order.account_id,
+            "experiment_id": order.experiment_id,
+            "assignment_id": order.assignment_id,
             "execution_snapshot_id": snapshot.execution_snapshot_id,
             "trade_date": snapshot.trade_date,
             "execution_time_policy": "AFTER_MARKET_CLOSE_DAILY_OHLCV_V1",
@@ -187,9 +189,12 @@ class PaperExecutionService:
             "execution_environment": "PAPER",
             "live_execution_allowed": False,
         }
+        hash_excludes = {"fill_id", "immutable_hash", "created_at"}
+        if payload["experiment_id"] is None and payload["assignment_id"] is None:
+            hash_excludes.update({"experiment_id", "assignment_id"})
         payload["immutable_hash"] = paper_canonical_hash(
             payload,
-            exclude={"fill_id", "immutable_hash", "created_at"},
+            exclude=hash_excludes,
         )
         fill = PaperFill.model_validate(payload)
         await self.fills.insert_one(model_document(fill))

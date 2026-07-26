@@ -168,6 +168,8 @@ class OrderIntent(PaperSchema):
     plan_id: str | None = None
     consensus_id: str | None = None
     risk_decision_id: str | None = None
+    experiment_id: str | None = None
+    assignment_id: str | None = None
     symbol: str = Field(pattern=r"^\d{6}$")
     market: Literal["CN"] = "CN"
     currency: Literal["CNY"] = "CNY"
@@ -217,10 +219,33 @@ class OrderIntent(PaperSchema):
             if self.consensus_approved or self.hard_risk_approved:
                 raise ValueError("benchmark intent cannot claim decision approval")
         elif self.account_type == "PAPER_CHALLENGER":
-            raise ValueError("PAPER_CHALLENGER cannot create an intent before PR-008")
+            if (
+                self.source_type != "CHALLENGER"
+                or self.benchmark_only
+                or not self.consensus_approved
+                or not self.hard_risk_approved
+                or not self.experiment_id
+                or not self.assignment_id
+            ):
+                raise ValueError(
+                    "PAPER_CHALLENGER intent requires experiment lineage and "
+                    "full consensus/hard-risk approval"
+                )
+        if (
+            self.account_type != "PAPER_CHALLENGER"
+            and (self.experiment_id is not None or self.assignment_id is not None)
+        ):
+            raise ValueError(
+                "experiment lineage is reserved for PAPER_CHALLENGER"
+            )
+        hash_excludes = {"intent_id", "immutable_hash", "created_at"}
+        # Preserve PR-006 immutable hashes for legacy/non-experiment intents.
+        # Challenger hashes bind both lineage fields when present.
+        if self.experiment_id is None and self.assignment_id is None:
+            hash_excludes.update({"experiment_id", "assignment_id"})
         expected_hash = paper_canonical_hash(
             self,
-            exclude={"intent_id", "immutable_hash", "created_at"},
+            exclude=hash_excludes,
         )
         if expected_hash != self.immutable_hash:
             raise ValueError("OrderIntent immutable_hash mismatch")
@@ -269,6 +294,8 @@ class PaperOrder(PaperSchema):
     source_type: str = Field(min_length=1)
     source_object_id: str = Field(min_length=1)
     risk_decision_id: str | None = None
+    experiment_id: str | None = None
+    assignment_id: str | None = None
     symbol: str = Field(pattern=r"^\d{6}$")
     market: Literal["CN"] = "CN"
     currency: Literal["CNY"] = "CNY"
@@ -486,6 +513,8 @@ class PaperFill(PaperSchema):
     order_id: str = Field(min_length=1)
     intent_id: str = Field(min_length=1)
     account_id: str = Field(min_length=1)
+    experiment_id: str | None = None
+    assignment_id: str | None = None
     execution_snapshot_id: str = Field(min_length=1)
     trade_date: date
     execution_time_policy: str = Field(min_length=1)
@@ -517,9 +546,12 @@ class PaperFill(PaperSchema):
         )
         if self.net_cash_effect != expected_effect:
             raise ValueError("fill net cash effect mismatch")
+        hash_excludes = {"fill_id", "immutable_hash", "created_at"}
+        if self.experiment_id is None and self.assignment_id is None:
+            hash_excludes.update({"experiment_id", "assignment_id"})
         expected_hash = paper_canonical_hash(
             self,
-            exclude={"fill_id", "immutable_hash", "created_at"},
+            exclude=hash_excludes,
         )
         if expected_hash != self.immutable_hash:
             raise ValueError("PaperFill immutable_hash mismatch")
@@ -689,6 +721,8 @@ class PaperEvent(PaperSchema):
     source_object_id: str | None = None
     snapshot_id: str | None = None
     risk_decision_id: str | None = None
+    experiment_id: str | None = None
+    assignment_id: str | None = None
     trace_id: str | None = None
     reason: str = Field(min_length=1)
     created_at: datetime

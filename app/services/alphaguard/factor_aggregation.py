@@ -23,10 +23,32 @@ ALL_GROUPS = (
 )
 
 
-def aggregate_factors(results) -> FactorEvidenceBundle:
-    factor_set_version, definitions, coverage_threshold = builtin_factor_definitions()
+def aggregate_factors(
+    results,
+    *,
+    factor_set_version: str | None = None,
+    factor_weights: dict[str, float] | None = None,
+    coverage_threshold: float | None = None,
+) -> FactorEvidenceBundle:
+    # Preserve PR-004 behavior when no Champion overrides are supplied.
+    builtin_version, definitions, builtin_coverage = builtin_factor_definitions()
+    resolved_factor_set_version = factor_set_version or builtin_version
+    resolved_coverage_threshold = (
+        builtin_coverage
+        if coverage_threshold is None
+        else float(coverage_threshold)
+    )
+    configured_weights = {
+        str(key): max(0.0, float(value))
+        for key, value in (factor_weights or {}).items()
+    }
+    selected_ids = {result.factor_id for result in results}
     definition_groups = {
-        group: [item.factor_id for item in definitions if item.group == group]
+        group: [
+            item.factor_id
+            for item in definitions
+            if item.group == group and item.factor_id in selected_ids
+        ]
         for group in ALL_GROUPS
     }
     by_id = {result.factor_id: result for result in results}
@@ -48,13 +70,20 @@ def aggregate_factors(results) -> FactorEvidenceBundle:
         missing.extend(missing_ids)
         total = len(factor_ids)
         coverage = len(valid) / total if total else 0.0
-        weights = {
-            result.factor_id: (1.0 / len(valid) if valid else 0.0)
+        raw_weights = {
+            result.factor_id: configured_weights.get(result.factor_id, 1.0)
             for result in valid
         }
+        weight_total = sum(raw_weights.values())
+        weights = {
+            factor_id: value / weight_total
+            for factor_id, value in raw_weights.items()
+        } if weight_total > 0 else {}
         score = (
             sum(float(result.normalized_score) * weights[result.factor_id] for result in valid)
-            if valid and coverage >= coverage_threshold
+            if valid
+            and coverage >= resolved_coverage_threshold
+            and weights
             else None
         )
         detail = GroupAggregation(
@@ -78,7 +107,7 @@ def aggregate_factors(results) -> FactorEvidenceBundle:
         risks.append("BLOCKING_EVENT_RISK")
     input_hash = sha256_value(
         {
-            "factor_set_version": factor_set_version,
+            "factor_set_version": resolved_factor_set_version,
             "results": [
                 {
                     "result_id": result.result_id,
@@ -87,12 +116,12 @@ def aggregate_factors(results) -> FactorEvidenceBundle:
                 }
                 for result in results
             ],
-            "group_coverage_threshold": coverage_threshold,
+            "group_coverage_threshold": resolved_coverage_threshold,
         }
     )
     return FactorEvidenceBundle(
         snapshot_id=results[0].snapshot_id if results else "missing-snapshot",
-        factor_set_version=factor_set_version,
+        factor_set_version=resolved_factor_set_version,
         results=results,
         group_scores=group_scores,
         group_coverage=group_coverage,

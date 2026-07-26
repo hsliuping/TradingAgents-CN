@@ -684,4 +684,165 @@ ALPHAGUARD_INDEX_SPECS = {
             "name": "idx_eval_execution_group_period",
         },
     ],
+    # PR-008 experiment collections are create-only and never share identity
+    # with production research, decision, evaluation, or paper-trading facts.
+    "ag_exp_component_versions": [
+        {"keys": [("version_ref", 1)], "name": "uniq_exp_component_version", "unique": True},
+        {
+            "keys": [("component_type", 1), ("component_key", 1), ("market", 1)],
+            "name": "idx_exp_component_identity",
+        },
+        {"keys": [("payload_hash", 1)], "name": "idx_exp_component_hash"},
+    ],
+    "ag_exp_definitions": [
+        {"keys": [("experiment_id", 1)], "name": "uniq_experiment_id", "unique": True},
+        {"keys": [("user_id", 1), ("status", 1)], "name": "idx_exp_user_status"},
+        {
+            "keys": [("component_type", 1), ("component_key", 1), ("market", 1)],
+            "name": "idx_exp_component_slot",
+        },
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_exp_status_created"},
+    ],
+    "ag_exp_variable_changes": [
+        {"keys": [("change_id", 1)], "name": "uniq_exp_change_id", "unique": True},
+        {
+            "keys": [("experiment_id", 1), ("variable_path", 1)],
+            "name": "uniq_exp_change_path",
+            "unique": True,
+        },
+        {"keys": [("experiment_id", 1), ("is_primary", 1)], "name": "idx_exp_primary_change"},
+    ],
+    "ag_exp_dataset_manifests": [
+        {"keys": [("dataset_manifest_id", 1)], "name": "uniq_exp_manifest_id", "unique": True},
+        {"keys": [("manifest_hash", 1)], "name": "uniq_exp_manifest_hash", "unique": True},
+        {
+            "keys": [("experiment_id", 1), ("start_trade_date", 1), ("end_trade_date", 1)],
+            "name": "idx_exp_manifest_range",
+        },
+    ],
+    "ag_exp_time_splits": [
+        {"keys": [("split_id", 1)], "name": "uniq_exp_split_id", "unique": True},
+        {
+            "keys": [("dataset_manifest_id", 1), ("method", 1), ("fold_number", 1)],
+            "name": "uniq_exp_manifest_fold",
+            "unique": True,
+        },
+    ],
+    "ag_exp_runs": [
+        {"keys": [("run_id", 1)], "name": "uniq_exp_run_id", "unique": True},
+        {
+            "keys": [
+                ("experiment_id", 1),
+                ("run_type", 1),
+                ("dataset_manifest_id", 1),
+                ("split_id", 1),
+                ("input_hash", 1),
+            ],
+            "name": "uniq_exp_run_input",
+            "unique": True,
+        },
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_exp_run_status"},
+        {"keys": [("experiment_id", 1), ("run_type", 1)], "name": "idx_exp_run_type"},
+    ],
+    "ag_exp_run_results": [
+        {"keys": [("result_id", 1)], "name": "uniq_exp_result_id", "unique": True},
+        {"keys": [("run_id", 1)], "name": "uniq_exp_result_run", "unique": True},
+        {"keys": [("experiment_id", 1), ("calculated_at", -1)], "name": "idx_exp_result_experiment"},
+    ],
+    "ag_exp_leakage_audits": [
+        {"keys": [("leakage_audit_id", 1)], "name": "uniq_exp_leakage_id", "unique": True},
+        {"keys": [("run_id", 1)], "name": "uniq_exp_leakage_run", "unique": True},
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_exp_leakage_status"},
+    ],
+    "ag_exp_robustness_reports": [
+        {"keys": [("robustness_report_id", 1)], "name": "uniq_exp_robustness_id", "unique": True},
+        {"keys": [("run_id", 1)], "name": "uniq_exp_robustness_run", "unique": True},
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_exp_robustness_status"},
+    ],
+    "ag_exp_shadow_runs": [
+        {"keys": [("shadow_run_id", 1)], "name": "uniq_exp_shadow_run", "unique": True},
+        {"keys": [("experiment_id", 1), ("status", 1)], "name": "idx_exp_shadow_status"},
+    ],
+    "ag_exp_shadow_outputs": [
+        {"keys": [("output_id", 1)], "name": "uniq_exp_shadow_output", "unique": True},
+        {
+            "keys": [("experiment_id", 1), ("run_id", 1), ("snapshot_id", 1)],
+            "name": "uniq_exp_shadow_opportunity",
+            "unique": True,
+        },
+        {"keys": [("run_id", 1), ("trade_date", 1)], "name": "idx_exp_shadow_date"},
+    ],
+    "ag_exp_challenger_assignments": [
+        {"keys": [("assignment_id", 1)], "name": "uniq_exp_challenger_assignment", "unique": True},
+        {"keys": [("experiment_id", 1), ("status", 1)], "name": "idx_exp_challenger_status"},
+        {"keys": [("account_id", 1), ("activation_trade_date", 1)], "name": "idx_exp_challenger_account"},
+        {"keys": [("exclusivity_key", 1), ("status", 1)], "name": "idx_exp_challenger_exclusivity"},
+    ],
+    "ag_exp_comparison_reports": [
+        {"keys": [("comparison_report_id", 1)], "name": "uniq_exp_comparison_id", "unique": True},
+        {"keys": [("experiment_id", 1), ("report_hash", 1)], "name": "uniq_exp_comparison_hash", "unique": True},
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_exp_comparison_status"},
+    ],
+    "ag_exp_risk_reviews": [
+        {"keys": [("review_id", 1)], "name": "uniq_exp_risk_review_id", "unique": True},
+        {"keys": [("comparison_report_id", 1)], "name": "uniq_exp_risk_review_report", "unique": True},
+        {"keys": [("experiment_id", 1), ("created_at", -1)], "name": "idx_exp_risk_review"},
+    ],
+    "ag_exp_promotion_policies": [
+        {
+            "keys": [("policy_id", 1), ("policy_version", 1)],
+            "name": "uniq_exp_promotion_policy",
+            "unique": True,
+        },
+        {"keys": [("immutable_hash", 1)], "name": "uniq_exp_policy_hash", "unique": True},
+    ],
+    "ag_exp_promotion_requests": [
+        {"keys": [("promotion_request_id", 1)], "name": "uniq_exp_promotion_request", "unique": True},
+        {"keys": [("experiment_id", 1), ("status", 1)], "name": "idx_exp_promotion_status"},
+    ],
+    "ag_exp_promotion_approvals": [
+        {"keys": [("approval_id", 1)], "name": "uniq_exp_promotion_approval", "unique": True},
+        {"keys": [("promotion_request_id", 1)], "name": "uniq_exp_approval_request", "unique": True},
+    ],
+    "ag_exp_promotion_sagas": [
+        {"keys": [("promotion_saga_id", 1)], "name": "uniq_exp_promotion_saga", "unique": True},
+        {"keys": [("promotion_request_id", 1)], "name": "idx_exp_saga_request"},
+        {"keys": [("rollback_id", 1)], "name": "idx_exp_saga_rollback"},
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_exp_saga_status"},
+    ],
+    "ag_exp_champion_assignments": [
+        {"keys": [("champion_slot_id", 1)], "name": "uniq_exp_champion_slot", "unique": True},
+        {
+            "keys": [("component_type", 1), ("component_key", 1), ("market", 1)],
+            "name": "uniq_exp_champion_identity",
+            "unique": True,
+        },
+        {"keys": [("status", 1), ("updated_at", -1)], "name": "idx_exp_champion_status"},
+    ],
+    "ag_exp_champion_history": [
+        {"keys": [("history_id", 1)], "name": "uniq_exp_champion_history", "unique": True},
+        {
+            "keys": [("champion_slot_id", 1), ("assignment.assignment_version", -1)],
+            "name": "idx_exp_champion_history_version",
+        },
+    ],
+    "ag_exp_rollbacks": [
+        {"keys": [("rollback_id", 1)], "name": "uniq_exp_rollback_id", "unique": True},
+        {"keys": [("champion_slot_id", 1), ("created_at", -1)], "name": "idx_exp_rollback_slot"},
+    ],
+    "ag_exp_locks": [
+        {"keys": [("lock_type", 1), ("created_at", -1)], "name": "idx_exp_lock_type"},
+    ],
+    "ag_exp_task_runs": [
+        {"keys": [("task_run_id", 1)], "name": "uniq_exp_task_run", "unique": True},
+        {"keys": [("idempotency_key", 1)], "name": "uniq_exp_task_idempotency", "unique": True},
+        {"keys": [("status", 1), ("created_at", 1)], "name": "idx_exp_task_pending"},
+        {"keys": [("job_type", 1), ("trade_date", -1)], "name": "idx_exp_task_type_date"},
+    ],
+    "ag_exp_events": [
+        {"keys": [("event_id", 1)], "name": "uniq_exp_event_id", "unique": True},
+        {"keys": [("experiment_id", 1), ("created_at", -1)], "name": "idx_exp_event_experiment"},
+        {"keys": [("event_type", 1), ("created_at", -1)], "name": "idx_exp_event_type"},
+        {"keys": [("champion_slot_id", 1), ("created_at", -1)], "name": "idx_exp_event_champion"},
+    ],
 }

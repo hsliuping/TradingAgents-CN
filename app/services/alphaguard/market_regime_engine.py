@@ -26,8 +26,9 @@ def _num(value: Any) -> float | None:
 
 def _market_metrics(
     data: ResolvedSnapshotData,
+    config: dict[str, Any] | None = None,
 ) -> tuple[dict[str, float | None], list[str], list[str]]:
-    config = regime_config()
+    config = config or regime_config()
     closes = [_num(row.get("close")) for row in data.benchmark_prices]
     missing = []
     invalid = []
@@ -91,25 +92,126 @@ def _market_metrics(
     return metrics, missing, invalid
 
 
+def calculate_regime_result(
+    data: ResolvedSnapshotData,
+    *,
+    config: dict[str, Any] | None = None,
+    calculated_at: datetime | None = None,
+) -> MarketRegimeResult:
+    """Pure deterministic regime evaluation used by production and PR-008."""
+
+    config = config or regime_config()
+    metrics, missing, invalid = _market_metrics(data, config)
+    input_hash = sha256_value(
+        {
+            "snapshot_input_hash": data.input_hash,
+            "regime_version": config["regime_version"],
+            "config_hash": sha256_value(config),
+            "metrics": metrics,
+            "missing": missing,
+            "invalid": invalid,
+        }
+    )
+    status = "CALCULATED"
+    regime = None
+    evidence = []
+    allow_new = False
+    allowed = ["POSITION_EXIT_V1"]
+    exposure = None
+    confidence = 0.0
+    thresholds = config["thresholds"]
+    required_metrics = (
+        "benchmark_close_vs_ma20",
+        "benchmark_close_vs_ma60",
+        "benchmark_ma20_slope_5d",
+        "benchmark_volatility20",
+        "market_breadth",
+        "industry_diffusion",
+    )
+    if invalid:
+        status = "INVALID_INPUT"
+        evidence = [f"invalid:{item}" for item in sorted(set(invalid))]
+    elif missing or any(metrics[key] is None for key in required_metrics):
+        status = "INSUFFICIENT_DATA"
+        evidence = [f"missing:{item}" for item in sorted(set(missing))]
+    else:
+        close20 = float(metrics["benchmark_close_vs_ma20"])
+        close60 = float(metrics["benchmark_close_vs_ma60"])
+        slope = float(metrics["benchmark_ma20_slope_5d"])
+        volatility = float(metrics["benchmark_volatility20"])
+        breadth = float(metrics["market_breadth"])
+        diffusion = float(metrics["industry_diffusion"])
+        extreme = bool(metrics["extreme_risk_flag"]) or (
+            volatility >= thresholds["extreme_volatility"]
+            and breadth <= thresholds["breadth_collapse"]
+        )
+        if extreme:
+            regime = "EXTREME_RISK"
+        elif (
+            close20 > 0
+            and close60 > 0
+            and slope > 0
+            and breadth >= thresholds["trend_breadth"]
+            and diffusion >= thresholds["strong_diffusion"]
+        ):
+            regime = "TREND_UP"
+        elif close60 < 0 and slope < 0 and breadth <= thresholds["weak_breadth"]:
+            regime = "TREND_DOWN"
+        elif close60 >= 0 and breadth >= 0:
+            regime = "RANGE_STRONG"
+        else:
+            regime = "RANGE_WEAK"
+        allowed = list(config["allowed_strategies"][regime])
+        allow_new = regime in {"TREND_UP", "RANGE_STRONG"}
+        exposure = float(config["exposure"][regime])
+        confidence = 1.0
+        evidence = [
+            f"benchmark_close_vs_ma20={close20:.6f}",
+            f"benchmark_close_vs_ma60={close60:.6f}",
+            f"benchmark_ma20_slope_5d={slope:.6f}",
+            f"benchmark_volatility20={volatility:.6f}",
+            f"market_breadth={breadth:.6f}",
+            f"industry_diffusion={diffusion:.6f}",
+        ]
+    return MarketRegimeResult(
+        regime_result_id=str(
+            uuid5(
+                NAMESPACE_URL,
+                f"alphaguard:regime:{data.snapshot.snapshot_id}:"
+                f"{config['regime_version']}:{input_hash}",
+            )
+        ),
+        snapshot_id=data.snapshot.snapshot_id,
+        trade_date=data.snapshot.trade_date,
+        calculation_status=status,
+        regime=regime,
+        confidence=confidence,
+        evidence=evidence,
+        metrics=metrics,
+        allowed_strategy_ids=allowed,
+        allow_new_positions=allow_new,
+        max_total_exposure_pct=exposure,
+        regime_version=config["regime_version"],
+        input_hash=input_hash,
+        calculated_at=calculated_at or datetime.utcnow(),
+    )
+
+
 class MarketRegimeEngine:
     def __init__(self, db):
         self.db = db
         self.audit = QuantAuditService(db)
 
     async def calculate(
-        self, data: ResolvedSnapshotData, *, trace_id: str | None = None
+        self,
+        data: ResolvedSnapshotData,
+        *,
+        trace_id: str | None = None,
+        config: dict[str, Any] | None = None,
     ) -> MarketRegimeResult:
-        config = regime_config()
-        metrics, missing, invalid = _market_metrics(data)
-        input_hash = sha256_value(
-            {
-                "snapshot_input_hash": data.input_hash,
-                "regime_version": config["regime_version"],
-                "metrics": metrics,
-                "missing": missing,
-                "invalid": invalid,
-            }
-        )
+        config = config or regime_config()
+        result = calculate_regime_result(data, config=config)
+        input_hash = result.input_hash
         existing = await self.db["ag_regime_results"].find_one(
             {
                 "snapshot_id": data.snapshot.snapshot_id,
@@ -130,99 +232,19 @@ class MarketRegimeEngine:
                 raise DefinitionConflictError("immutable MarketRegimeResult conflict")
             return stored
 
-        status = "CALCULATED"
-        regime = None
-        evidence = []
-        allow_new = False
-        allowed = ["POSITION_EXIT_V1"]
-        exposure = None
-        confidence = 0.0
-        thresholds = config["thresholds"]
-        required_metrics = (
-            "benchmark_close_vs_ma20",
-            "benchmark_close_vs_ma60",
-            "benchmark_ma20_slope_5d",
-            "benchmark_volatility20",
-            "market_breadth",
-            "industry_diffusion",
-        )
-        if invalid:
-            status = "INVALID_INPUT"
-            evidence = [f"invalid:{item}" for item in sorted(set(invalid))]
-        elif missing or any(metrics[key] is None for key in required_metrics):
-            status = "INSUFFICIENT_DATA"
-            evidence = [f"missing:{item}" for item in sorted(set(missing))]
-        else:
-            close20 = float(metrics["benchmark_close_vs_ma20"])
-            close60 = float(metrics["benchmark_close_vs_ma60"])
-            slope = float(metrics["benchmark_ma20_slope_5d"])
-            volatility = float(metrics["benchmark_volatility20"])
-            breadth = float(metrics["market_breadth"])
-            diffusion = float(metrics["industry_diffusion"])
-            extreme = bool(metrics["extreme_risk_flag"]) or (
-                volatility >= thresholds["extreme_volatility"]
-                and breadth <= thresholds["breadth_collapse"]
-            )
-            if extreme:
-                regime = "EXTREME_RISK"
-            elif (
-                close20 > 0
-                and close60 > 0
-                and slope > 0
-                and breadth >= thresholds["trend_breadth"]
-                and diffusion >= thresholds["strong_diffusion"]
-            ):
-                regime = "TREND_UP"
-            elif close60 < 0 and slope < 0 and breadth <= thresholds["weak_breadth"]:
-                regime = "TREND_DOWN"
-            elif close60 >= 0 and breadth >= 0:
-                regime = "RANGE_STRONG"
-            else:
-                regime = "RANGE_WEAK"
-            allowed = list(config["allowed_strategies"][regime])
-            allow_new = regime in {"TREND_UP", "RANGE_STRONG"}
-            exposure = float(config["exposure"][regime])
-            confidence = 1.0
-            evidence = [
-                f"benchmark_close_vs_ma20={close20:.6f}",
-                f"benchmark_close_vs_ma60={close60:.6f}",
-                f"benchmark_ma20_slope_5d={slope:.6f}",
-                f"benchmark_volatility20={volatility:.6f}",
-                f"market_breadth={breadth:.6f}",
-                f"industry_diffusion={diffusion:.6f}",
-            ]
-
-        result = MarketRegimeResult(
-            regime_result_id=str(
-                uuid5(
-                    NAMESPACE_URL,
-                    f"alphaguard:regime:{data.snapshot.snapshot_id}:{config['regime_version']}:{input_hash}",
-                )
-            ),
-            snapshot_id=data.snapshot.snapshot_id,
-            trade_date=data.snapshot.trade_date,
-            calculation_status=status,
-            regime=regime,
-            confidence=confidence,
-            evidence=evidence,
-            metrics=metrics,
-            allowed_strategy_ids=allowed,
-            allow_new_positions=allow_new,
-            max_total_exposure_pct=exposure,
-            regime_version=config["regime_version"],
-            input_hash=input_hash,
-            calculated_at=datetime.utcnow(),
-        )
         await self.db["ag_regime_results"].insert_one(result.model_dump(mode="python"))
         await self.audit.record(
             (
                 "REGIME_CALCULATED"
-                if status == "CALCULATED"
+                if result.calculation_status == "CALCULATED"
                 else "REGIME_CALCULATION_FAILED"
             ),
             snapshot_id=data.snapshot.snapshot_id,
             entity_id=result.regime_result_id,
             trace_id=trace_id,
-            details={"status": status, "regime": regime},
+            details={
+                "status": result.calculation_status,
+                "regime": result.regime,
+            },
         )
         return result

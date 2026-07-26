@@ -1,0 +1,21 @@
+replay_policy_id: replay-policy-v1
+version: 1.0.0
+
+supported_markets:
+  - CN
+
+supported_component_types:
+  - FACTOR_WEIGHT
+  - FACTOR_SET
+  - REGIME_CONFIG
+  - STRATEGY_CONFIG
+
+minimum_manifest_samples: 5
+minimum_train_samples: 20
+minimum_validation_samples: 5
+minimum_test_samples: 10
+default_embargo_trading_days: 20
+purge_overlapping_horizons: true
+maximum_label_horizon_trading_days: 20
+deterministic_order: trade_date_snapshot_id
+production_write_allowed: false

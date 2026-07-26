@@ -309,7 +309,11 @@ class FactorEngine:
         self.audit = QuantAuditService(db)
 
     async def calculate_all(
-        self, data: ResolvedSnapshotData, *, trace_id: str | None = None
+        self,
+        data: ResolvedSnapshotData,
+        *,
+        trace_id: str | None = None,
+        factor_ids: list[str] | None = None,
     ) -> list[FactorResult]:
         factor_set, definitions, _ = builtin_factor_definitions()
         if data.snapshot.factor_version_set != {
@@ -318,8 +322,16 @@ class FactorEngine:
             raise FactorCalculationError(
                 f"snapshot factor_version_set does not match {factor_set}"
             )
+        selected = set(factor_ids or [item.factor_id for item in definitions])
+        known = {item.factor_id for item in definitions}
+        if not selected or not selected <= known:
+            raise FactorCalculationError(
+                "Champion FactorSet references unknown or empty factor ids"
+            )
         results = []
         for definition in definitions:
+            if definition.factor_id not in selected:
+                continue
             results.append(await self.calculate(definition, data, trace_id=trace_id))
         return results
 

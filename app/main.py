@@ -28,7 +28,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import alphaguard, alphaguard_decisions, alphaguard_evaluations, alphaguard_paper, alphaguard_quant, auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
+from app.routers import alphaguard, alphaguard_decisions, alphaguard_evaluations, alphaguard_experiments, alphaguard_paper, alphaguard_quant, auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_data as stock_data_router
@@ -678,6 +678,57 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
             max_instances=1,
         )
+        # PR-008 experiment work is deliberately lower priority than
+        # production research, execution, settlement and PR-007 evaluation.
+        # Its DB-backed tasks are idempotent and failures cannot pause Champion.
+        from app.worker.alphaguard.experiment_tasks import (
+            challenger_monitor_worker,
+            experiment_reconciliation_worker,
+            experiment_run_consumer,
+            promotion_saga_recovery_worker,
+            shadow_experiment_worker,
+        )
+
+        scheduler.add_job(
+            experiment_run_consumer,
+            IntervalTrigger(minutes=30, timezone=settings.TIMEZONE),
+            id="alphaguard_experiment_consumer",
+            name="AlphaGuard低优先级实验任务",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            shadow_experiment_worker,
+            IntervalTrigger(minutes=10, timezone=settings.TIMEZONE),
+            id="alphaguard_shadow_worker",
+            name="AlphaGuard同快照Shadow",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            challenger_monitor_worker,
+            CronTrigger(hour=18, minute=10, timezone=settings.TIMEZONE),
+            id="alphaguard_challenger_monitor",
+            name="AlphaGuard挑战者隔离监控",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            promotion_saga_recovery_worker,
+            IntervalTrigger(minutes=10, timezone=settings.TIMEZONE),
+            id="alphaguard_promotion_saga_recovery",
+            name="AlphaGuard晋升Saga恢复",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            experiment_reconciliation_worker,
+            CronTrigger(hour=18, minute=30, timezone=settings.TIMEZONE),
+            id="alphaguard_experiment_reconciliation",
+            name="AlphaGuard实验与Champion一致性核对",
+            replace_existing=True,
+            max_instances=1,
+        )
 
         scheduler.start()
 
@@ -800,6 +851,7 @@ app.include_router(alphaguard.router, prefix="/api", tags=["alphaguard"])
 app.include_router(alphaguard_quant.router, prefix="/api", tags=["alphaguard-quant"])
 app.include_router(alphaguard_decisions.router, prefix="/api", tags=["alphaguard-decisions"])
 app.include_router(alphaguard_evaluations.router, prefix="/api", tags=["alphaguard-evaluations"])
+app.include_router(alphaguard_experiments.router, prefix="/api", tags=["alphaguard-experiments"])
 app.include_router(alphaguard_paper.router, prefix="/api", tags=["alphaguard-paper"])
 app.include_router(reports.router, tags=["reports"])
 app.include_router(screening.router, prefix="/api/screening", tags=["screening"])

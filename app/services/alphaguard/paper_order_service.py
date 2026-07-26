@@ -113,6 +113,8 @@ class PaperOrderService:
             source_type=intent.source_type,
             source_object_id=intent.source_object_id,
             risk_decision_id=intent.risk_decision_id,
+            experiment_id=intent.experiment_id,
+            assignment_id=intent.assignment_id,
             symbol=intent.symbol,
             market="CN",
             currency="CNY",

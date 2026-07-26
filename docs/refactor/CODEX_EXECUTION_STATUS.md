@@ -2896,3 +2896,587 @@ alphaguard-pr007-evaluation-attribution
 
 检查点完成后工作区为 clean，标签到 HEAD 的 diff check 通过。PR-007 到此停止；
 PR-008 没有开始，必须由人工另行授权。
+
+---
+
+## PR-008：Experiment Lab & Champion/Challenger
+
+### 1. 完成结论与安全边界
+
+PR-008 已完成源码、测试、运行基线和独立检查点准备。本阶段建立的是受控、可审计且
+可回退的实验闭环：
+
+```text
+不可变实验定义
+→ 固定 DatasetManifest
+→ 时间序列样本外/历史重放
+→ 泄漏审计与稳健性测试
+→ 同快照 Shadow
+→ 独占 PAPER_CHALLENGER Assignment
+→ 配对 ChampionComparisonReport
+→ 顶尖模型实验风险审查
+→ 管理员 PromotionRequest + PromotionApproval
+→ 可恢复 PromotionSaga
+→ 按交易日生效的 ChampionResolver
+```
+
+没有自动晋升或自动回退，没有修改 `live_trading_enabled=false`，没有真实交易，也没有
+开始 PR-009。真实评价样本仍为 0，因此生产比较只能得到 `INSUFFICIENT_DATA`，且无法
+创建 PromotionRequest；所有测试 fixture 只存在于 FakeDB，不写真实业务集合。
+
+### 2. 实际修改文件
+
+新增 Schema、集合和配置：
+
+- `tradingagents/alphaguard/experiment_schemas.py`
+- `app/schemas/alphaguard/experiment.py`
+- `app/models/alphaguard/experiment_collections.py`
+- `config/alphaguard/experiments/promotion_policy_v1.yaml`
+- `config/alphaguard/experiments/replay_policy_v1.yaml`
+- `config/alphaguard/experiments/robustness_suite_v1.yaml`
+
+新增实验服务：
+
+- `experiment_config.py`
+- `experiment_repository.py`
+- `experiment_audit_service.py`
+- `experiment_state_machine.py`
+- `experiment_component_adapters.py`
+- `experiment_registry.py`
+- `experiment_dataset_service.py`
+- `historical_replay_engine.py`
+- `walk_forward_validation.py`
+- `leakage_audit_service.py`
+- `robustness_test_service.py`
+- `shadow_experiment_service.py`
+- `challenger_assignment_service.py`
+- `challenger_order_intent_service.py`
+- `champion_comparison_service.py`
+- `experiment_risk_review_service.py`
+- `promotion_policy_service.py`
+- `champion_resolver.py`
+- `champion_promotion_service.py`
+- `champion_rollback_service.py`
+- `experiment_reconciliation.py`
+- `experiment_task_service.py`
+
+新增 Router、Worker、脚本、前端和测试：
+
+- `app/routers/alphaguard_experiments.py`
+- `app/worker/alphaguard/__init__.py`
+- `app/worker/alphaguard/experiment_tasks.py`
+- `scripts/init_alphaguard_experiment_indexes.py`
+- `scripts/import_current_champions.py`
+- `scripts/verify_champion_assignments.py`
+- `frontend/src/api/alphaguardExperiments.ts`
+- `frontend/src/components/paper/AlphaGuardExperimentLab.vue`
+- `tests/unit/alphaguard/pr008_helpers.py`
+- 四个 `test_experiment_*_pr008.py`
+
+最小修改现有接线：
+
+- `app/main.py`
+- `app/services/alphaguard/evidence_snapshot_service.py`
+- `app/services/alphaguard/factor_engine.py`
+- `app/services/alphaguard/factor_aggregation.py`
+- `app/services/alphaguard/market_regime_engine.py`
+- `app/services/alphaguard/quant_research_pipeline.py`
+- `app/services/alphaguard/paper_order_service.py`
+- `app/services/alphaguard/paper_execution_service.py`
+- `app/services/alphaguard/paper_task_service.py`
+- `app/routers/alphaguard_paper.py`
+- `tradingagents/alphaguard/evidence_schemas.py`
+- `tradingagents/alphaguard/paper_schemas.py`
+- `tradingagents/alphaguard/mongo_indexes.py`
+- 两个 AlphaGuard Schema `__init__.py`
+- `frontend/src/views/PaperTrading/index.vue`
+
+### 3. ExperimentRegistry 和组件支持范围
+
+`ExperimentRegistry` 只提供 create/get/list/validate/transition/suspend/retire 语义；没有
+任意字段 update。核心定义、基线、挑战版本、假设和主变量受 frozen Schema 与
+`immutable_definition_hash` 双重保护，内容变化必须创建新 Experiment。
+
+完整确定性执行适配器支持：
+
+```text
+FACTOR_WEIGHT
+FACTOR_SET
+REGIME_CONFIG
+STRATEGY_CONFIG
+```
+
+以下类型可登记，但当前工程没有足够安全的版本隔离接口，因此
+`execution_supported=false`、`promotion_eligible=false`，原因固定为
+`UNSUPPORTED_COMPONENT_ADAPTER`：
+
+```text
+FACTOR_FORMULA
+NORMAL_PROMPT
+TOP_PROMPT
+MODEL_CONFIG
+AGENT_CONFIG
+DEBATE_CONFIG
+HARD_RISK_CONFIG
+MATCHING_CONFIG
+```
+
+没有建立第二套生产配置体系。PR-004 的 Factor/Regime/Strategy 定义仍是基础事实；
+PR-008 仅创建不可变组件版本记录和唯一 Champion 指针。
+
+### 4. 单变量隔离
+
+标准实验必须且只能有一个 `is_primary=true` 的 `ExperimentVariableChange`。
+Registry 验证：
+
+1. baseline/challenger 都存在且属于同一 component slot；
+2. payload hash 不同，不能用同内容伪版本；
+3. `primary_variable_path` 确实变化；
+4. 除主变量外的规范化 payload 完全一致；
+5. 组件适配器支持相应执行；
+6. 版本 hash 有效；
+7. 实验不会修改生产配置。
+
+出现额外变化时自动定性为 `MULTIVARIATE`，允许研究但永远不可走标准晋升。
+
+### 5. 版本状态机
+
+实现 DRAFT、EXPERIMENT、BACKTESTED、SHADOW、CHALLENGER、CHAMPION、DEGRADED、
+SUSPENDED、RETIRED 的显式迁移表。禁止 DRAFT/BACKTESTED/SHADOW 直接进入 CHAMPION；
+只有携带有效人工批准上下文的 CHALLENGER 才能进入 CHAMPION；RETIRED 不可恢复。
+状态变更使用服务端规则并记录 `EXPERIMENT_STATE_CHANGED`，客户端不能提交任意状态。
+
+### 6. DatasetManifest
+
+`ExperimentDatasetManifest` 是 create-only：
+
+- Snapshot ID 与 symbols 排序去重；
+- 固定起止日期、cutoff、筛选规则和源集合 hash；
+- 同内容产生稳定 SHA-256；
+- 缺失、未来、market 不一致或 immutable hash 被篡改的 Snapshot 会阻断；
+- Manifest 创建后不会随着新数据自动追加；新样本必须新建 Manifest。
+
+### 7. 时间序列分割
+
+支持 `ANCHORED_HOLDOUT`、`ROLLING_WALK_FORWARD`、`EXPANDING_WALK_FORWARD`。
+不使用随机打乱。Train/Validation/Test 顺序严格，Test 只能更晚；embargo 至少覆盖
+当前最大评价期限 20 个交易观察点，并清除跨边界收益期限样本。样本不足返回
+`INSUFFICIENT_DATA`，不缩短测试期，也不只挑选最佳 fold。
+
+### 8. 历史重放和样本外验证
+
+`HistoricalReplayEngine` 按 Manifest 中 Snapshot 的 `(trade_date, snapshot_id)` 顺序
+执行。Champion 与 Challenger 使用同一 Snapshot、代码 commit、tree hash、配置 hash
+和除唯一变量外相同的版本。决策输出先产生，之后才读取已成熟 PR-007 HorizonLabel，
+避免标签进入决策输入。
+
+结果只写 `ag_exp_*`，不写 Candidate、生产 FactorResult、QuantProposal、模型决策、
+Outbox、Order、Fill 或账户。相同输入复用同一 run/result，确定性组件的 result hash
+稳定。OUT_OF_SAMPLE 每个 fold 单独保存并汇总，不在 Test 期重新调参。
+
+### 9. 泄漏审计
+
+`LeakageAuditReport` 独立检查未来价格、未来财务、未来新闻、评价标签、分割重叠和
+当前配置泄漏。任一布尔项为 true 即 `FAIL`，PromotionPolicy gate 不允许人工绕过。
+EvidenceSnapshot 的 cutoff 与 raw refs 仍是数据边界，重放不会读取“当前最新”配置或
+Manifest 之外的新 Snapshot。
+
+### 10. 稳健性测试
+
+影子稳健性套件版本为 `robustness-suite-v1@1.0.0`，包含：
+
+```text
+BASELINE
+FEE_1_5X / FEE_2X
+SLIPPAGE_1_5X / SLIPPAGE_2X
+ENTRY_DELAY_1D
+LIQUIDITY_REDUCTION
+MISSING_NONCORE_DATA
+WITHOUT_BEST_TRADE
+WITHOUT_TOP_5_TRADES
+REGIME_SEGMENTED
+```
+
+压力参数只作用于实验计算，不修改正式 FeeEngine/MatchingEngine，也不写正式账户。
+失败和不完整场景会保留；五类 Regime 缺失时报告明确 `INCOMPLETE`。
+
+### 11. Shadow
+
+新 EvidenceSnapshot 保存成功后只登记幂等、低优先级 `SHADOW_SNAPSHOT` 任务。Shadow
+读取生产 Champion 已完成使用的同一 Snapshot，固定除主变量外的全部版本，产出成对
+实验输出和差异，不修改 Candidate、生产研究/决策、Outbox、订单、成交或账户。
+Snapshot 保存主流程不会因 Shadow 登记失败而失败；异常写实验审计并留给 reconciliation。
+
+达到 PromotionPolicy 的 20 个观察交易日前不能进入 CHALLENGER。
+
+### 12. PAPER_CHALLENGER 与独占规则
+
+`ChallengerAssignmentService` 要求：
+
+- 实验已到 SHADOW 且满足观察期；
+- 同一 `user_id + market` 不存在其他 ACTIVE/CLOSING Assignment；
+- 目标账户必须是 `PAPER_CHALLENGER`；
+- 账户无未完成订单、预留或非零持仓；
+- 创建新的 baseline account snapshot，绝不自动清仓或重置余额；
+- 停止时如仍有订单/持仓只进入 CLOSING，待自然归零后 COMPLETED。
+
+Challenger OrderIntent 增加 `experiment_id/assignment_id` lineage，只能从实验专用输出中
+已经完整通过 NormalPlan、TopReview、Consensus、HardRisk 的链创建，且固定
+`execution_environment=PAPER`、`live_execution_allowed=false`。PAPER_CHALLENGER 的
+订单、成交和取消不会更新主 Candidate；PAPER_TOP_CONFIRMED 不受影响。
+
+实际适配差异：确定性组件目前能完整运行重放和 Shadow，但现有生产 DecisionPipeline
+没有“实验专用 Mongo 命名空间”的双模型执行接口。为避免 Challenger 污染生产决策集合，
+本阶段没有复用生产 Pipeline 或正式 Outbox 伪造该输出；内部 Intent 服务对缺少完整
+隔离链的输出 fail-closed。因此已实现 Assignment、lineage、账户隔离和受控执行入口，
+真实 PAPER_CHALLENGER 下单要等安全的隔离双模型适配器提供完整链后才会发生。安全影响
+是少执行而非越权执行；不得用测试对象填补该缺口。
+
+### 13. Champion/Challenger 公平比较
+
+`ChampionComparisonService` 综合历史重放、样本外、稳健性、Shadow、
+PAPER_CHALLENGER 和 PR-007 配对评价。比较 gate 包括样本量、配对覆盖、泄漏、稳健性、
+Shadow/Challenger 观察日、完整性错误、Regime 覆盖、最大回撤和极端交易依赖。
+
+报告同时保存 Champion、Challenger、同机会 paired 指标；改善、恶化、不可比和数据不足
+均保留。总收益更高不会自动变为 READY。
+
+### 14. PromotionPolicy
+
+锁定 `promotion-policy-v1@1.0.0`：
+
+- 历史样本 30、样本外 20、配对 20、配对覆盖 0.80；
+- Shadow 和 Challenger 各 20 个交易日；
+- 泄漏、稳健性、Shadow、PAPER_CHALLENGER、顶尖模型审查和人工批准均必需；
+- integrity error 必须为 0；
+- 未隐藏默认盈利门槛；净收益/收益回撤/费用/换手阈值为 null 时只展示、不猜阈值；
+- 回撤、极端交易依赖与 Regime 覆盖门槛显式版本化。
+
+Experiment 创建时锁定 policy version，不能看完结果再换策略。
+
+### 15. 顶尖模型实验风险审查
+
+结构化 Prompt 固定为 `experiment_risk_review_v1`，继续复用 PR-002
+`ModelExecutionMeta`，记录 provider/model/prompt/input/output hash、耗时、request/trace
+和错误。模型读取正面、负面、数据不足、泄漏、稳健性、Shadow、Challenger 与回退信息。
+
+只有 `READY_FOR_HUMAN_REVIEW` 可以进入 PromotionRequest；MORE_VALIDATION_REQUIRED、
+REJECT、SUSPEND、MODEL_FAILED、INVALID_OUTPUT 均 fail-closed。模型没有修改结果、
+Policy、审批或 Champion 的权限。
+
+### 16. 人工晋升
+
+晋升分为 PromotionRequest 和独立 PromotionApproval。所有写 API 需要现有管理员权限。
+批准必须验证：
+
+```text
+PROMOTE <experiment_id> TO <version_ref>
+当前 Champion hash
+Challenger hash
+锁定 Policy
+泄漏 PASS
+有效 READY 风险审查
+ComparisonReport 有效期
+有效交易日
+无完整性冲突
+存在 previous version
+```
+
+非管理员、错误确认文本、hash 并发变化、数据不足、泄漏失败或重复冲突均不能晋升。
+
+### 17. ChampionResolver、生效日期与生产接线
+
+`ChampionResolver` 是新任务唯一 PR-008 版本指针解析入口，只读取已 COMMITTED 的
+ChampionAssignment 和满足 `effective_from_trade_date` 的历史记录；解析失败不按最高
+版本或最新记录回退。
+
+新创建 EvidenceSnapshot 会由服务端解析并锁定完整 `champion_version_refs`。新的
+QuantResearchPipeline 在 Snapshot 携带锁定版本时，按这些版本解析 FactorSet/
+FactorWeight、Regime 与 Strategy；旧 Snapshot 不回填，继续走 PR-004 兼容路径。
+已有 Snapshot、FactorResult、QuantProposal、模型决策、RiskDecision、Intent、Order
+和 PositionLot 永远保持创建时版本。
+
+### 18. PromotionSaga 与并发锁
+
+MongoDB 4.4.30 当前为 standalone，`setName=None`，不支持多文档事务。因此没有伪装
+事务，而是实现：
+
+```text
+PREPARED
+→ LOCK_ACQUIRED
+→ CURRENT_CHAMPION_VERIFIED
+→ ASSIGNMENT_WRITTEN
+→ RESOLVER_VERIFIED
+→ COMMITTED
+```
+
+以及 ROLLBACK_REQUIRED/ROLLED_BACK/FAILED。锁有明确 slot identity 和过期时间；
+assignment 使用 CAS/version，旧指针写 ChampionHistory。只有 Saga COMMITTED 后
+Resolver 才会对生效日解析新版本。恢复 Worker 可验证并完成中断 Saga，或把仍匹配本
+Saga 的指针回滚；重复恢复幂等，不会形成两个 Active Champion。
+
+### 19. 回退机制
+
+回退是管理员明确操作，要求确认文本、原因、有效交易日和 current hash。它只将未来
+解析切回 `previous_version_ref`，使用相同锁、CAS、历史和 Saga 验证；不会删除失败版本、
+实验、比较报告、订单或持仓，也不会回写旧对象。自动监控只能产生告警，不能自动回退。
+
+### 20. MongoDB 集合和索引
+
+新增 24 个专用集合：
+
+```text
+ag_exp_component_versions
+ag_exp_definitions
+ag_exp_variable_changes
+ag_exp_dataset_manifests
+ag_exp_time_splits
+ag_exp_runs
+ag_exp_run_results
+ag_exp_leakage_audits
+ag_exp_robustness_reports
+ag_exp_shadow_runs
+ag_exp_shadow_outputs
+ag_exp_challenger_assignments
+ag_exp_comparison_reports
+ag_exp_risk_reviews
+ag_exp_promotion_policies
+ag_exp_promotion_requests
+ag_exp_promotion_approvals
+ag_exp_promotion_sagas
+ag_exp_champion_assignments
+ag_exp_champion_history
+ag_exp_rollbacks
+ag_exp_locks
+ag_exp_task_runs
+ag_exp_events
+```
+
+共 69 个 create-only 索引。脚本重复执行两次均为
+`created=0 unchanged=69 failed=0`；不删除或修改 PR-001～PR-007 索引。
+ACTIVE Challenger 采用部分唯一索引与 Service 锁双重约束。
+
+### 21. 配置、导入和真实数据变化
+
+`import_current_champions.py` 默认 dry-run，不按最高版本猜 Champion。显式执行只导入
+PR-004 当前已确认的 5 个确定性 slot。真实库当前变化：
+
+```text
+ag_exp_component_versions=5
+ag_exp_promotion_policies=1
+ag_exp_champion_assignments=5
+ag_exp_definitions=0
+ag_exp_runs=0
+```
+
+初次显式导入为 `created=5 reused=5 conflicts=0 failed=0`，随后重复执行为
+`created=0 reused=10 conflicts=0 failed=0`；
+`verify_champion_assignments.py` 为 `assignments=5 verified=5 conflicts=0`。
+5 个 bootstrap 指针使用显式生效日 `2026-07-27`；脚本执行时现在
+强制要求 `--effective-date`，同 slot 的生效日或其他 assignment 内容变化按 hash 冲突
+阻断，不会静默复用。真实交易日历集合当前为空，因此 bootstrap 脚本不宣称自行验证
+了该日期；后续 Promotion/Rollback 服务仍必须由持久化交易日历验证生效日。
+PR-008 首次真实 BSON 验证发现 Python `date` 不能直接编码，导入在写 Champion 前安全
+失败；已统一通过 `experiment_document` 将 date 转成 BSON datetime，并新增真实 BSON
+编码测试。失败时没有产生半成品 Champion 指针。
+
+### 22. API
+
+新增认证 API：
+
+- Experiment list/create/get/validate/run/runs/comparison；
+- Shadow start/pause/complete；
+- Challenger activate/deactivate；
+- experiment risk review；
+- promotion request create/approve/reject；
+- Champion list/get/rollback。
+
+普通用户只读自身授权数据；所有写操作显式 `_require_admin`。没有 delete、客户端结果
+上传、ChampionAssignment 修改、公开 OrderIntent/Order/Fill 创建或任意生产配置 API。
+大型任务只登记 DB-backed worker。安全启动 API 冒烟：health 200；未认证 experiments
+401；单元 API 权限测试验证管理员闸门和非管理员 403。
+
+### 23. 前端最小实验室
+
+PaperTrading 增加最小“AlphaGuard 实验室”：
+
+- Champion 总览、当前/前一版本、生效日和来源实验；
+- 实验列表和详情、唯一变量、Manifest、各阶段、负面结果和审计；
+- 管理员晋升对话框显示 current/challenger hash、泄漏/风险/失败 gate、回退版本和明确
+  确认文本；
+- 管理员回退对话框显示当前/目标版本、原因和生效日期。
+
+没有自动推荐、默认批准、结果修改、历史删除或真实交易入口。
+
+### 24. Worker 和调度
+
+实现 DB-backed、低优先级且幂等的：
+
+```text
+experiment_run_consumer
+historical_replay_worker
+walk_forward_validation_worker
+leakage_audit_worker
+robustness_test_worker
+shadow_experiment_worker
+challenger_monitor_worker
+comparison_report_worker
+experiment_risk_review_worker
+promotion_saga_recovery_worker
+experiment_reconciliation_worker
+```
+
+主调度只挂统一实验 consumer、Shadow、Challenger monitor、Saga recovery 和 reconciliation；
+细分 worker 可单独部署。任务运行晚于生产撮合、结算和 PR-007 评价；失败只写
+`ag_exp_task_runs/ag_exp_events`，不暂停 Champion 生产链。
+
+### 25. 审计、幂等和完整性
+
+Experiment、Manifest、Run、Leakage、Robustness、Shadow、Challenger、Comparison、
+RiskReview、Promotion、Saga、Champion 和 Rollback 全部有结构化 `ag_exp_events`。
+事件携带可用的 trace/experiment/run/manifest/split/shadow/assignment/promotion/saga/
+slot/version/hash/user/market lineage。
+
+稳定 identity/hash 覆盖 Experiment、Manifest、Split、Run、Output、Report、Task、
+Promotion 和 Assignment。同身份同内容复用；同身份不同内容报
+`ExperimentIntegrityConflict`。失败 task 保留错误，重跑不覆盖 terminal 结果。
+
+### 26. 生产链隔离
+
+静态依赖和运行测试确认：
+
+- Replay/Shadow 只写 `ag_exp_*`；
+- 不导入 BrokerAdapter，不调用真实订单网络；
+- Shadow 不写 Candidate、FactorResult、QuantProposal、决策、Outbox、Order、Fill、
+  Account、Position、Lot 或 Ledger；
+- Challenger 只允许 `PAPER_CHALLENGER`，不写 PAPER_TOP_CONFIRMED；
+- Challenger PaperOrder/Fill lineage 延续 experiment/assignment；
+- Challenger 订单状态不会改变主 Candidate；
+- PR-007 label 只在决策输出之后用于评价；
+- `live_trading_enabled=false` 和三入口 fail-closed 保护保持不变。
+
+### 27. 测试和验证结果
+
+PR-008 专项（Schema、Registry、全部状态迁移、Manifest、三种时间分割、泄漏、确定性
+重放、单变量隔离、稳健性、Shadow 无副作用、Challenger 隔离、比较、风险审查、人工
+晋升、Saga 恢复、Resolver 生效日、回退、BSON、API、Worker、真实样本不足）：
+
+```text
+84 passed
+```
+
+PR-001～PR-007 精确回归：
+
+```text
+346 passed
+```
+
+PR-001～PR-008 合并精确集：
+
+```text
+430 passed
+```
+
+其他验证：
+
+```text
+tests/ collect-only: 1109 collected, 15 known errors
+frontend type-check: 34 errors, all existing DefaultRow TS2345
+modified Python compile: passed
+scripts full compile: only known 补充行业信息_akshare.py:81 syntax error
+git diff --check: passed
+FastAPI safe start /api/health: HTTP 200
+experiment API without auth: HTTP 401
+FastAPI live=true: exit 3, startup rejected
+app/worker.py live=true: exit 1, startup rejected
+app/worker/analysis_worker.py live=true: exit 1, startup rejected
+MongoDB 4.4.30 ping: healthy, standalone, transactions unavailable
+Redis ping: healthy
+experiment indexes repeated: created=0, unchanged=69, failed=0
+Champion import initial/repeated: created=5/0, reused=5/10, conflicts=0
+Champion verify: assignments=5, verified=5, conflicts=0
+historical replay / worker / Shadow / Saga / rollback idempotency: passed in suite
+```
+
+15 个全量收集错误的文件和 ImportError 类别与 PR-007 一致；仅因新增测试，成功收集数
+从 1023 增至 1109。前端仍只有既有 34 个 TS2345，没有新增错误类别。
+
+### 28. 真实样本不足与已知限制
+
+真实库验证：
+
+```text
+ag_evidence_snapshots=0
+ag_quant_proposals=0
+ag_consensus_decisions=0
+ag_risk_decisions=0
+ag_paper_fills=0
+ag_eval_subjects=0
+ag_eval_paired_comparisons=0
+ag_exp_definitions=0
+ag_exp_runs=0
+```
+
+因此生产 ComparisonReport 必须 `INSUFFICIENT_DATA`，PromotionRequest 被拒绝，不存在
+虚假 Challenger 或虚假 Champion。其他存量限制保持：
+
+1. 真实 QFQ、交易日历、历史行业映射和评价样本不足；
+2. 模型/Prompt/HardRisk/Matching 组件无安全隔离适配器，仅允许登记；
+3. 确定性实验使用 PR-007 成熟标签评价，不能在标签成熟前给出收益结论；
+4. MongoDB standalone 必须依赖可恢复 Saga，不能宣称多文档 ACID；
+5. Challenger 完整双模型实验执行入口按第 12 节 fail-closed；
+6. FastAPI 关闭时既有股票同步线程可能延迟退出，未在本阶段扩大处理；
+7. 前端完整产品整合、可视化和运维能力属于 PR-009。
+
+### 29. 明确未实施 PR-009 及以后
+
+没有实现完整前端重构、自动晋升、自动回退、自动改因子/策略/Prompt/模型/HardRisk/
+Matching、自动实盘、券商连接、全市场自动推荐、Dify、Qlib、FinRL 或 RD-Agent。
+实验失败不会暂停 Champion 生产链。
+
+### 30. 完整回退
+
+代码回退：
+
+1. 暂停 5 个 `alphaguard_experiment_* / alphaguard_shadow_* /
+   alphaguard_challenger_*` 调度任务；
+2. 记录当前提交、标签、`git status --short`，并先导出数据库备份；
+3. 使用 `git revert <pr008-commit>` 创建可审计反向提交，禁止 `reset --hard`；
+4. 回退后复跑 PR-001～PR-007 精确集，预期 346 passed；
+5. 验证 FastAPI 200、live=true 三入口阻断、Mongo/Redis 健康。
+
+数据回退：
+
+1. 5 个 ChampionAssignment 目前只锁定既有 PR-004 版本；可保留，旧代码不会读取；
+2. 若必须移除，先 `mongodump` 全部精确 `ag_exp_*` 集合；
+3. 确认 `ag_exp_definitions/ag_exp_runs` 仍为 0 后，按精确 collection 名逐个处理，
+   禁止通配删除；
+4. 不删除 PR-004 Factor/Strategy、PR-005 Risk、PR-006 Paper、PR-007 Evaluation 数据；
+5. 不删除历史组件版本、失败实验或旧 Champion；生产已有对象不回写；
+6. 永远不回退 PR-001 的 SIM_AUTONOMOUS / live=false 安全不变量。
+
+### 31. 设计差异汇总
+
+原设计：所有组件均可登记；实际：只有四类确定性组件可执行，其余 fail-closed。
+原因是现有 Prompt/Model/Risk/Matching 缺少安全版本隔离接口。可比性影响是这些组件
+当前不能产生可晋升结果；生产安全影响为不运行，不会偷用 current/latest。
+
+原设计：PAPER_CHALLENGER 走完整隔离双模型链；实际：Assignment 和执行消费闸门已完成，
+但没有把生产 DecisionPipeline 复用到实验集合。原因是复用会污染正式决策、Outbox 和
+Candidate。可比性影响是当前真实 Challenger 交易样本仍为 0；生产安全影响为 fail-closed。
+安全隔离执行适配器只能在后续明确授权阶段补齐，不能用 fixture 冒充。
+
+原设计：MongoDB transaction 或 Saga；实际：standalone MongoDB 使用 Saga。可比性无
+影响；生产安全通过 CAS、锁、Resolver 验证、history 和恢复任务保证。
+
+### 32. 当前 Git 状态与阶段闸门
+
+本节随指定独立检查点提交：
+
+```text
+feat(alphaguard): complete PR-008 experiment lab
+tag: alphaguard-pr008-experiment-lab
+```
+
+提交和标签后 `git status --short` 必须为空，标签必须指向 HEAD。PR-008 到此停止；
+PR-009 及以后必须重新获得人工授权。

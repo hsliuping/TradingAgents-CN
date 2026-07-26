@@ -37,6 +37,12 @@ class PaperTaskService:
         self.accounts = PaperAccountService(db)
         self.candidate_sync = PaperCandidateSyncService(db)
 
+    async def _sync_candidate_if_production(self, order) -> None:
+        # PR-008 PAPER_CHALLENGER is an isolated experiment account and may
+        # never mutate the main Candidate state machine.
+        if order.account_type != "PAPER_CHALLENGER":
+            await self.candidate_sync.sync_order(order)
+
     async def process_execution_outbox(self, *, limit: int = 50) -> dict[str, int]:
         counts = {"completed": 0, "failed": 0, "dead_letter": 0}
         for pending in await self.outbox.pending(limit=limit):
@@ -46,7 +52,7 @@ class PaperTaskService:
             try:
                 intent = await self.intents.create_from_outbox(event)
                 order = await self.orders.create_reserve_submit(intent)
-                await self.candidate_sync.sync_order(order)
+                await self._sync_candidate_if_production(order)
                 await self.outbox.complete(event)
                 counts["completed"] += 1
             except Exception as exc:
@@ -73,7 +79,7 @@ class PaperTaskService:
 
             intent = OrderIntent.model_validate(clean_document(raw))
             order = await self.orders.create_reserve_submit(intent)
-            await self.candidate_sync.sync_order(order)
+            await self._sync_candidate_if_production(order)
             if order.status in {"PENDING", "PARTIALLY_FILLED"}:
                 submitted += 1
         return submitted
@@ -159,7 +165,7 @@ class PaperTaskService:
                 settlement = await self.settlement.settle_fill(fill["fill_id"])
                 order = await self.orders.get_order(settlement.order_id)
                 if order:
-                    await self.candidate_sync.sync_order(order)
+                    await self._sync_candidate_if_production(order)
                 committed += int(settlement.status == "COMMITTED")
             except Exception:
                 failed += 1
@@ -188,7 +194,7 @@ class PaperTaskService:
             )
             if order.status == "EXPIRED":
                 expired += 1
-                await self.candidate_sync.sync_order(order)
+                await self._sync_candidate_if_production(order)
         return expired
 
     async def release_stale_reservations(self) -> int:

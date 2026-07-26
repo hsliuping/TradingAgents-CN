@@ -91,6 +91,9 @@ class EvidenceSnapshot(EvidenceSchema):
     raw_refs: dict[str, list[str]]
     factor_version_set: dict[str, str] = Field(default_factory=dict)
     strategy_version: str | None = None
+    # PR-008 server-resolved immutable component pointers.  Legacy snapshots
+    # legitimately omit this map and retain their PR-004 version fields.
+    champion_version_refs: dict[str, str] = Field(default_factory=dict)
     normal_model_version: str | None = None
     top_model_version: str | None = None
     prompt_versions: dict[str, str] = Field(default_factory=dict)
@@ -140,4 +143,13 @@ class EvidenceSnapshot(EvidenceSchema):
             raise ValueError("factor versions must use explicit non-latest identifiers")
         if self.strategy_version and self.strategy_version.lower() == "latest":
             raise ValueError("strategy_version must be explicit and not latest")
+        if any(
+            not slot_id
+            or not version_ref
+            or version_ref.strip().lower() == "latest"
+            for slot_id, version_ref in self.champion_version_refs.items()
+        ):
+            raise ValueError(
+                "Champion version refs must use explicit non-latest identifiers"
+            )
         return self

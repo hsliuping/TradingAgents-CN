@@ -1,0 +1,46 @@
+policy_id: promotion-policy-v1
+policy_version: 1.0.0
+
+required_run_types:
+  - HISTORICAL_REPLAY
+  - OUT_OF_SAMPLE
+  - ROBUSTNESS
+  - SHADOW
+  - PAPER_CHALLENGER
+
+minimum_sample_rules:
+  historical_samples: 30
+  out_of_sample_samples: 20
+  paired_samples: 20
+  paired_coverage: 0.80
+  shadow_trade_days: 20
+  challenger_trade_days: 20
+
+maximum_integrity_errors: 0
+
+require_leakage_pass: true
+require_robustness_pass: true
+require_shadow: true
+require_paper_challenger: true
+require_top_risk_review: true
+require_human_approval: true
+
+# PR-008 intentionally has no hidden profitability hurdle.  Null means the
+# metric must still be displayed but is not by itself a promotion threshold.
+performance_thresholds:
+  minimum_net_return_improvement: null
+  minimum_return_drawdown_improvement: null
+  maximum_fee_drag_increase: null
+  maximum_turnover_increase: null
+
+risk_thresholds:
+  maximum_drawdown_worsening: 0.00
+  maximum_integrity_errors: 0
+  maximum_leakage_violations: 0
+
+stability_thresholds:
+  minimum_paired_coverage: 0.80
+  maximum_top_trade_contribution_pct: 0.35
+  maximum_top_five_trade_contribution_pct: 0.70
+  minimum_regime_segments: 3
+  comparison_max_age_days: 30

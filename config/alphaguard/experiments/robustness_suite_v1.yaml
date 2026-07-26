@@ -1,0 +1,32 @@
+robustness_suite_id: robustness-suite-v1
+version: 1.0.0
+
+scenarios:
+  - BASELINE
+  - FEE_1_5X
+  - FEE_2X
+  - SLIPPAGE_1_5X
+  - SLIPPAGE_2X
+  - ENTRY_DELAY_1D
+  - LIQUIDITY_REDUCTION
+  - MISSING_NONCORE_DATA
+  - WITHOUT_BEST_TRADE
+  - WITHOUT_TOP_5_TRADES
+  - REGIME_SEGMENTED
+
+fee_multipliers:
+  FEE_1_5X: 1.5
+  FEE_2X: 2.0
+
+slippage_multipliers:
+  SLIPPAGE_1_5X: 1.5
+  SLIPPAGE_2X: 2.0
+
+liquidity_capacity_multiplier: 0.5
+entry_delay_trading_days: 1
+required_regimes:
+  - TREND_UP
+  - RANGE_STRONG
+  - RANGE_WEAK
+  - TREND_DOWN
+  - EXTREME_RISK
