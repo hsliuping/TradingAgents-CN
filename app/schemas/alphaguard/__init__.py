@@ -11,6 +11,19 @@ from .quant import (
     QuantTradeProposal,
     StrategyDefinition,
 )
+from .evaluation import (
+    AccountPerformanceMetric,
+    AttributionOverride,
+    AttributionRecord,
+    CounterfactualEvaluation,
+    EvaluationEvent,
+    EvaluationRun,
+    EvaluationRunResult,
+    EvaluationSubject,
+    HorizonLabel,
+    ModuleEvaluationMetric,
+    PairedDecisionComparison,
+)
 
 __all__ = [
     "FactorDefinition",
@@ -22,4 +35,15 @@ __all__ = [
     "QuantAuditEvent",
     "QuantTradeProposal",
     "StrategyDefinition",
+    "AccountPerformanceMetric",
+    "AttributionOverride",
+    "AttributionRecord",
+    "CounterfactualEvaluation",
+    "EvaluationEvent",
+    "EvaluationRun",
+    "EvaluationRunResult",
+    "EvaluationSubject",
+    "HorizonLabel",
+    "ModuleEvaluationMetric",
+    "PairedDecisionComparison",
 ]

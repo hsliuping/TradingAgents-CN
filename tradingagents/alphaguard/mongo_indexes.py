@@ -490,4 +490,198 @@ ALPHAGUARD_INDEX_SPECS = {
             "unique": True,
         },
     ],
+    "ag_eval_subjects": [
+        {
+            "keys": [
+                ("subject_type", 1),
+                ("source_object_id", 1),
+                ("evaluation_version", 1),
+            ],
+            "name": "uniq_eval_subject_source_version",
+            "unique": True,
+        },
+        {"keys": [("subject_id", 1)], "name": "uniq_eval_subject_id", "unique": True},
+        {
+            "keys": [("user_id", 1), ("decision_trade_date", -1)],
+            "name": "idx_eval_subject_user_date",
+        },
+        {
+            "keys": [("snapshot_id", 1), ("decision_stage", 1)],
+            "name": "idx_eval_subject_snapshot_stage",
+        },
+        {
+            "keys": [("symbol", 1), ("market", 1), ("decision_trade_date", -1)],
+            "name": "idx_eval_subject_symbol_date",
+        },
+        {
+            "keys": [("decision_stage", 1), ("decision_status", 1)],
+            "name": "idx_eval_subject_stage_status",
+        },
+    ],
+    "ag_eval_horizon_labels": [
+        {
+            "keys": [
+                ("subject_id", 1),
+                ("horizon", 1),
+                ("anchor_type", 1),
+                ("calculation_version", 1),
+            ],
+            "name": "uniq_eval_label_subject_horizon",
+            "unique": True,
+        },
+        {"keys": [("label_id", 1)], "name": "uniq_eval_label_id", "unique": True},
+        {
+            "keys": [("status", 1), ("horizon_end_date", 1)],
+            "name": "idx_eval_label_status_maturity",
+        },
+        {
+            "keys": [("horizon", 1), ("calculated_at", -1)],
+            "name": "idx_eval_label_horizon_calculated",
+        },
+    ],
+    "ag_eval_counterfactuals": [
+        {
+            "keys": [
+                ("subject_id", 1),
+                ("mode", 1),
+                ("execution_rule_version", 1),
+            ],
+            "name": "uniq_eval_counterfactual_subject_mode",
+            "unique": True,
+        },
+        {
+            "keys": [("counterfactual_id", 1)],
+            "name": "uniq_eval_counterfactual_id",
+            "unique": True,
+        },
+        {
+            "keys": [("status", 1), ("created_at", -1)],
+            "name": "idx_eval_counterfactual_status",
+        },
+    ],
+    "ag_eval_account_metrics": [
+        {
+            "keys": [
+                ("account_id", 1),
+                ("period_start", 1),
+                ("period_end", 1),
+                ("metric_version", 1),
+            ],
+            "name": "uniq_eval_account_metric_period",
+            "unique": True,
+        },
+        {
+            "keys": [("account_type", 1), ("period_end", -1)],
+            "name": "idx_eval_account_type_period",
+        },
+        {
+            "keys": [("status", 1), ("period_end", -1)],
+            "name": "idx_eval_account_status_period",
+        },
+    ],
+    "ag_eval_paired_comparisons": [
+        {
+            "keys": [
+                ("comparison_type", 1),
+                ("left_subject_id", 1),
+                ("right_subject_id", 1),
+                ("comparison_version", 1),
+            ],
+            "name": "uniq_eval_paired_subjects",
+            "unique": True,
+        },
+        {
+            "keys": [("snapshot_id", 1), ("comparison_type", 1)],
+            "name": "idx_eval_paired_snapshot_type",
+        },
+        {
+            "keys": [("pairing_status", 1), ("calculated_at", -1)],
+            "name": "idx_eval_paired_status",
+        },
+    ],
+    "ag_eval_attributions": [
+        {
+            "keys": [("subject_id", 1), ("attribution_rule_version", 1)],
+            "name": "uniq_eval_attribution_subject_version",
+            "unique": True,
+        },
+        {
+            "keys": [("attribution_id", 1)],
+            "name": "uniq_eval_attribution_id",
+            "unique": True,
+        },
+        {
+            "keys": [("primary_category", 1), ("calculated_at", -1)],
+            "name": "idx_eval_attribution_category",
+        },
+        {
+            "keys": [("outcome_class", 1), ("calculated_at", -1)],
+            "name": "idx_eval_attribution_outcome",
+        },
+        {
+            "keys": [("status", 1), ("calculated_at", -1)],
+            "name": "idx_eval_attribution_status",
+        },
+    ],
+    "ag_eval_attribution_overrides": [
+        {
+            "keys": [("override_id", 1)],
+            "name": "uniq_eval_override_id",
+            "unique": True,
+        },
+        {
+            "keys": [("attribution_id", 1), ("created_at", -1)],
+            "name": "idx_eval_override_attribution",
+        },
+        {
+            "keys": [("user_id", 1), ("created_at", -1)],
+            "name": "idx_eval_override_user",
+        },
+    ],
+    "ag_eval_runs": [
+        {
+            "keys": [("idempotency_key", 1)],
+            "name": "uniq_eval_run_idempotency",
+            "unique": True,
+        },
+        {
+            "keys": [("status", 1), ("as_of_trade_date", -1)],
+            "name": "idx_eval_run_status_date",
+        },
+        {"keys": [("started_at", -1)], "name": "idx_eval_run_started"},
+    ],
+    "ag_eval_events": [
+        {"keys": [("event_id", 1)], "name": "uniq_eval_event_id", "unique": True},
+        {
+            "keys": [("subject_id", 1), ("created_at", -1)],
+            "name": "idx_eval_event_subject",
+        },
+        {
+            "keys": [("evaluation_job_id", 1), ("created_at", -1)],
+            "name": "idx_eval_event_job",
+        },
+        {
+            "keys": [("event_type", 1), ("created_at", -1)],
+            "name": "idx_eval_event_type",
+        },
+    ],
+    "ag_eval_factor_metrics": [
+        {"keys": [("metric_id", 1)], "name": "uniq_eval_factor_metric", "unique": True},
+        {"keys": [("scope_user_id", 1), ("group_key", 1), ("period_end", -1)], "name": "idx_eval_factor_period"},
+    ],
+    "ag_eval_regime_metrics": [
+        {"keys": [("metric_id", 1)], "name": "uniq_eval_regime_metric", "unique": True},
+        {"keys": [("scope_user_id", 1), ("group_key", 1), ("period_end", -1)], "name": "idx_eval_regime_period"},
+    ],
+    "ag_eval_strategy_metrics": [
+        {"keys": [("metric_id", 1)], "name": "uniq_eval_strategy_metric", "unique": True},
+        {"keys": [("scope_user_id", 1), ("group_key", 1), ("period_end", -1)], "name": "idx_eval_strategy_period"},
+    ],
+    "ag_eval_execution_metrics": [
+        {"keys": [("metric_id", 1)], "name": "uniq_eval_execution_metric", "unique": True},
+        {
+            "keys": [("scope_user_id", 1), ("module_type", 1), ("group_key", 1), ("period_end", -1)],
+            "name": "idx_eval_execution_group_period",
+        },
+    ],
 }

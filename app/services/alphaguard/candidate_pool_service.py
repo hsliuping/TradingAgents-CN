@@ -455,6 +455,10 @@ class CandidatePoolService:
     async def _live_monitoring_reasons(
         self, candidate: CandidateEntry, remaining_sources: set[CandidateSource]
     ) -> tuple[list[str], list[str], list[str]]:
+        from app.services.alphaguard.evaluation_repository import (
+            EvaluationRepository,
+        )
+
         reasons: list[str] = []
         held_accounts = set(candidate.held_account_ids)
         active_orders = set(candidate.active_order_ids)
@@ -502,6 +506,13 @@ class CandidatePoolService:
             reasons.append("active_plan")
         if candidate.status in _IN_PROGRESS_STATUSES:
             reasons.append("analysis_in_progress")
+        if (
+            await EvaluationRepository(self.db).pending_candidate_count(
+                candidate.candidate_id
+            )
+            > 0
+        ):
+            reasons.append("pending_evaluation")
         return sorted(set(reasons)), sorted(held_accounts), sorted(active_orders)
 
     async def remove_source(

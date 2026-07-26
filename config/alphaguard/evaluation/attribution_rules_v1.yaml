@@ -1,0 +1,26 @@
+attribution_rule_id: attribution-rules-v1
+version: 1.0.0
+primary_horizon: 10D
+
+thresholds:
+  success_return: "0.03"
+  loss_return: "-0.03"
+  missed_opportunity_return: "0.05"
+  avoided_loss_return: "-0.05"
+  material_mae: "-0.08"
+  material_fee_drag_pct: "0.01"
+  material_slippage_pct: "0.01"
+
+rules:
+  - {rule_id: AG-ATTR-DATA-001, category: DATA_QUALITY}
+  - {rule_id: AG-ATTR-CANDIDATE-001, category: CANDIDATE_SELECTION}
+  - {rule_id: AG-ATTR-FACTOR-001, category: FACTOR_FAILURE}
+  - {rule_id: AG-ATTR-REGIME-001, category: REGIME_MISCLASSIFICATION}
+  - {rule_id: AG-ATTR-ENTRY-001, category: STRATEGY_ENTRY}
+  - {rule_id: AG-ATTR-NORMAL-001, category: NORMAL_MODEL}
+  - {rule_id: AG-ATTR-TOP-001, category: TOP_MODEL}
+  - {rule_id: AG-ATTR-CONSENSUS-001, category: CONSENSUS}
+  - {rule_id: AG-ATTR-RISK-001, category: HARD_RISK}
+  - {rule_id: AG-ATTR-EXECUTION-001, category: EXECUTION}
+  - {rule_id: AG-ATTR-SHOCK-001, category: MARKET_SHOCK}
+  - {rule_id: AG-ATTR-UNKNOWN-001, category: UNKNOWN}

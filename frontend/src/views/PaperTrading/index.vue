@@ -7,6 +7,7 @@
         <el-radio-group v-model="paperMode" size="small" class="mode-switch">
           <el-radio-button label="manual">人工模拟</el-radio-button>
           <el-radio-button label="automatic">AlphaGuard 自动模拟</el-radio-button>
+          <el-radio-button label="evaluation">AlphaGuard 评价中心</el-radio-button>
         </el-radio-group>
       </div>
       <div v-if="paperMode === 'manual'" class="actions">
@@ -17,6 +18,7 @@
     </div>
 
     <AlphaGuardAutoPaperPanel v-if="paperMode === 'automatic'" />
+    <AlphaGuardEvaluationCenter v-else-if="paperMode === 'evaluation'" />
     <template v-else>
     <!-- 风险提示横幅 -->
     <el-alert
@@ -273,6 +275,7 @@ import { analysisApi } from '@/api/analysis'
 import { stocksApi } from '@/api/stocks'
 import { formatDateTime } from '@/utils/datetime'
 import AlphaGuardAutoPaperPanel from '@/components/paper/AlphaGuardAutoPaperPanel.vue'
+import AlphaGuardEvaluationCenter from '@/components/paper/AlphaGuardEvaluationCenter.vue'
 
 // 路由与初始化
 const route = useRoute()
@@ -288,7 +291,7 @@ const orderDialog = ref(false)
 const order = ref({ side: 'buy', code: '', qty: 100 })
 const detectedMarket = ref<string>('')
 const activeMarketTab = ref<string>('CN')
-const paperMode = ref<'manual' | 'automatic'>('manual')
+const paperMode = ref<'manual' | 'automatic' | 'evaluation'>('manual')
 
 // 计算属性：根据当前市场标签页过滤持仓
 const filteredPositions = computed(() => {

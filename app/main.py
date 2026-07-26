@@ -28,7 +28,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import alphaguard, alphaguard_decisions, alphaguard_paper, alphaguard_quant, auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
+from app.routers import alphaguard, alphaguard_decisions, alphaguard_evaluations, alphaguard_paper, alphaguard_quant, auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_data as stock_data_router
@@ -647,6 +647,29 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
             max_instances=1,
         )
+        # AlphaGuard PR-007 is evaluation-only.  It is scheduled after paper
+        # account snapshots and its failures are isolated from execution.
+        from app.services.alphaguard.evaluation_jobs import (
+            run_pending_evaluations,
+            schedule_daily_evaluation,
+        )
+
+        scheduler.add_job(
+            schedule_daily_evaluation,
+            CronTrigger(hour=16, minute=35, timezone=settings.TIMEZONE),
+            id="alphaguard_evaluation_schedule",
+            name="AlphaGuard评价任务登记",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            run_pending_evaluations,
+            IntervalTrigger(minutes=15, timezone=settings.TIMEZONE),
+            id="alphaguard_evaluation_worker",
+            name="AlphaGuard评价与规则归因",
+            replace_existing=True,
+            max_instances=1,
+        )
         scheduler.add_job(
             reconcile_paper_accounts,
             CronTrigger(hour=17, minute=0, timezone=settings.TIMEZONE),
@@ -776,6 +799,7 @@ app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(alphaguard.router, prefix="/api", tags=["alphaguard"])
 app.include_router(alphaguard_quant.router, prefix="/api", tags=["alphaguard-quant"])
 app.include_router(alphaguard_decisions.router, prefix="/api", tags=["alphaguard-decisions"])
+app.include_router(alphaguard_evaluations.router, prefix="/api", tags=["alphaguard-evaluations"])
 app.include_router(alphaguard_paper.router, prefix="/api", tags=["alphaguard-paper"])
 app.include_router(reports.router, tags=["reports"])
 app.include_router(screening.router, prefix="/api/screening", tags=["screening"])

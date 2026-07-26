@@ -2349,3 +2349,550 @@ alphaguard-pr006-automatic-paper
 
 检查点完成后工作区应为 clean，`git diff alphaguard-pr005-consensus-risk..HEAD --check`
 应通过。PR-006 到此停止；PR-007 没有开始，必须由人工另行授权。
+
+---
+
+## PR-007：Evaluation & Attribution
+
+### 1. 完成结论
+
+PR-007 已完成。系统在 PR-001～PR-006 的不可变决策、风控和自动模拟交易事实之上，
+增加了一条只读生产事实、只写 `ag_eval_*` 集合的评价链：
+
+```text
+QuantTradeProposal / NormalTradePlan / TopReviewDecision
+ConsensusDecision / RiskDecision / BenchmarkExecutionDecision
+ExecutionOutbox / OrderIntent / PaperOrder / PaperFill / PositionExit
+        ↓
+EvaluationSubject
+        ↓
+1D / 5D / 10D / 20D HorizonLabel
+        ↓
+CounterfactualEvaluation / AccountPerformanceMetric
+PairedDecisionComparison / ModuleEvaluationMetric
+        ↓
+AttributionRecord + append-only AttributionOverride
+```
+
+评价模块允许在期限成熟后读取事后行情，但其任何对象都不能成为候选、证据、因子、
+市场状态、策略、模型决策、Consensus、HardRisk 或自动模拟执行的输入。评价失败不会
+阻断或回滚合法交易事实，也不会修改账户、现金、持仓、订单、成交和结算。
+
+### 2. 实际修改和新增文件
+
+核心 Schema 与集合：
+
+```text
+tradingagents/alphaguard/evaluation_schemas.py
+app/schemas/alphaguard/evaluation.py
+app/models/alphaguard/evaluation_collections.py
+tradingagents/alphaguard/__init__.py
+app/schemas/alphaguard/__init__.py
+```
+
+评价服务：
+
+```text
+app/services/alphaguard/evaluation_policy_registry.py
+app/services/alphaguard/evaluation_repository.py
+app/services/alphaguard/evaluation_audit_service.py
+app/services/alphaguard/trading_horizon_resolver.py
+app/services/alphaguard/adjusted_price_resolver.py
+app/services/alphaguard/horizon_label_service.py
+app/services/alphaguard/evaluation_subject_builder.py
+app/services/alphaguard/counterfactual_evaluation_engine.py
+app/services/alphaguard/account_metric_service.py
+app/services/alphaguard/paired_comparison_service.py
+app/services/alphaguard/module_metric_service.py
+app/services/alphaguard/attribution_rule_registry.py
+app/services/alphaguard/attribution_engine.py
+app/services/alphaguard/evaluation_pipeline.py
+app/services/alphaguard/evaluation_jobs.py
+```
+
+配置、索引、API、调度和候选保护：
+
+```text
+config/alphaguard/evaluation/evaluation_policy_v1.yaml
+config/alphaguard/evaluation/attribution_rules_v1.yaml
+scripts/init_alphaguard_evaluation_indexes.py
+tradingagents/alphaguard/mongo_indexes.py
+app/routers/alphaguard_evaluations.py
+app/main.py
+app/services/alphaguard/candidate_pool_service.py
+```
+
+前端：
+
+```text
+frontend/src/api/alphaguardEvaluations.ts
+frontend/src/components/paper/AlphaGuardEvaluationCenter.vue
+frontend/src/views/PaperTrading/index.vue
+```
+
+测试：
+
+```text
+tests/unit/alphaguard/pr007_helpers.py
+tests/unit/alphaguard/test_evaluation_schemas_horizons_pr007.py
+tests/unit/alphaguard/test_evaluation_subjects_candidate_pr007.py
+tests/unit/alphaguard/test_metrics_pairing_attribution_pr007.py
+tests/unit/alphaguard/test_counterfactual_pipeline_security_pr007.py
+```
+
+### 3. EvaluationSubject
+
+`EvaluationSubject` 是 create-only 的评价样本，保存：
+
+- `subject_id / subject_type / source_object_id / source_object_version`；
+- `user_id / analysis_id / candidate_id / snapshot_id / quant_proposal_id`；
+- `symbol / market / decision_trade_date / decision_stage / decision_status`；
+- 原始动作、仓位、入场区间、有效期和可追溯证据；
+- 是否被选择执行、是否存在实际成交、完整 lineage IDs；
+- `discovered_at / evaluation_version / immutable_hash / schema_version`。
+
+发现器从既有对象原样发现量化提案、普通计划、顶尖终审、Consensus、HardRisk、
+BenchmarkSafety、Outbox、Intent、Order、Fill 和平仓事实，不调用模型，也不重新解释
+自然语言。实际成交通过 lineage 反向标记上游样本的 `actual_execution_exists`。
+
+为避免错误语义复用，实际实现增加两个安全扩展：
+
+- `BENCHMARK_DECISION`：只表示 BenchmarkExecutionSafetyGate，绝不伪装 HardRisk；
+- `EXECUTION_OUTBOX`：表示待处理、失败或死信的执行来源，绝不伪装订单或成交。
+
+### 4. HorizonLabel
+
+每个 subject 按 anchor 生成不可变标签：
+
+- `DECISION_CLOSE`：所有决策样本的标准比较锚点；
+- `PLANNED_ENTRY`：BUY 计划入场区间上界的路径标签，不声明真实成交；
+- `ACTUAL_FILL`：真实 Fill 的执行锚点；
+- `COUNTERFACTUAL_FILL`：反事实执行结果内部使用。
+
+标签明确保存状态、价格口径、数据版本、输入哈希、数据引用、收益、相对收益、
+MFE/MAE 和触发信息。未成熟为 `PENDING`，行情不足为 `INSUFFICIENT_DATA`，来源不合法
+为 `INVALID_SOURCE`；这些状态不会被填成零收益或正常样本。
+
+### 5. 交易日期限定义
+
+版本化政策 `evaluation-policy-v1 / 1.0.0` 定义：
+
+```text
+1D  = 决策日后的第 1 个开放交易日
+5D  = 决策日后的第 5 个开放交易日
+10D = 决策日后的第 10 个开放交易日
+20D = 决策日后的第 20 个开放交易日
+```
+
+期限只使用 `trading_calendar` 中显式 `market=CN, is_open=true` 的 session。自然日 `+N`
+不是后备方案；周末、节假日和缺失交易日历不会被猜测。历史回放发现器还增加
+`decision_trade_date <= as_of_trade_date` 的硬过滤，禁止未来决策对象进入过去评价批次。
+
+### 6. 复权价格口径
+
+标签要求行情记录显式包含：
+
+```text
+adjustment_mode = QFQ
+data_version
+trade_date
+open / high / low / close
+```
+
+解析器不会从未复权 OHLC 推算复权价格，不会调用实时接口补数据，也不会把缺失版本
+解释为某个默认版本。同一交易日重复记录内容不一致会报完整性冲突。
+
+`ACTUAL_FILL` 的收益标签使用同一 QFQ 序列的复权 anchor close 与未来复权 close；
+PR-006 的原始成交价单独保存在 `execution_anchor_price`。继续持有反事实则只用原始
+成交价和到期日不可变 `ExecutionMarketSnapshot` 的原始 close，避免原始成交价和
+复权未来价混算。
+
+### 7. MFE / MAE 口径
+
+在 anchor 之后、期限结束日之前（含结束日）的复权日线区间内：
+
+```text
+MFE = max(adjusted_high) / adjusted_anchor_price - 1
+MAE = min(adjusted_low)  / adjusted_anchor_price - 1
+```
+
+`action_aligned_return` 对 BUY 保持收益方向，对 SELL/REDUCE 取反；原始市场路径的
+`raw_forward_return` 始终保留。空路径不会生成伪造的 0 MFE/MAE。
+
+### 8. 相对指数和行业收益
+
+指数基准第一版固定为政策中的沪深 300 `000300`，必须与标的使用相同：
+
+- anchor 日与期限结束日；
+- QFQ 口径；
+- 显式 `data_version`。
+
+`relative_benchmark_return = raw_forward_return - benchmark_return`。
+
+现有真实库没有可靠的“快照时行业映射 + 同版本行业指数复权序列”，因此行业字段保留，
+但返回 `industry_unavailable_reason`，不会使用当前最新行业分类回填，也不会伪造中性
+行业收益。这是 fail-closed 的数据能力限制。
+
+### 9. CounterfactualEvaluation
+
+反事实引擎是纯 Python，仅产生评价对象：
+
+- `SIGNAL_ONLY`：未交易信号的市场表现，不宣称可执行；
+- `EXECUTABLE_SHADOW`：以固定标准资金、同一版本 MatchingEngine/FeeEngine、历史不可变
+  ExecutionMarketSnapshot 做影子撮合，支持多日和部分成交；
+- `CONTINUE_HOLDING`：对实际退出样本估算继续持有至主期限的事后结果。
+
+它只导入 PR-006 的纯函数 MatchingEngine 和 FeeEngine，不导入 OrderService、
+ReservationService、SettlementService 或 Worker，不创建正式 Intent/Order/Fill，
+不修改账户。缺日历、执行快照、交易状态、费用政策或原始 Fill 时返回明确不足状态。
+
+### 10. 实际执行评价
+
+执行样本覆盖 Outbox、Intent、Order、Fill 和 PositionExit，可观察：
+
+- 从决策到执行各阶段状态；
+- 提交、拒绝、过期、部分成交和完整成交比例；
+- 是否真正执行以及规则版本；
+- 计划与执行的配对差异；
+- Fill 费用和继续持有反事实；
+- 账户日快照的费用拖累、换手、敞口和估值完整性。
+
+由于当前只有日线盘后模拟，不声称获得逐笔滑点、盘中路径或真实可成交队列位置。
+
+### 11. 四账户指标
+
+`AccountPerformanceMetric` 对四种自动模拟账户使用完全相同的 Decimal 口径：
+
+```text
+PAPER_QUANT
+PAPER_NORMAL
+PAPER_TOP_CONFIRMED
+PAPER_CHALLENGER
+```
+
+保存期初/期末权益、总收益、最大回撤、已实现/未实现盈亏、费用、费用拖累、平均敞口、
+换手、Fill/订单数量、胜率、Profit Factor 和估值完整/不完整天数。
+
+指标只读取指定期间内的 DailyAccountSnapshot、Fill、Order 和已提交 Settlement。
+Order/Settlement 缺少可靠业务日期时不进入该期间，避免待成交对象导致异常或跨期污染。
+少于两期快照为 `INSUFFICIENT_HISTORY`；任一日估值不完整为
+`INCOMPLETE_VALUATION`，不会把缺价按零估值后宣称完整。
+
+### 12. 配对比较方法
+
+配对只在同一真实机会身份下成立，至少要求：
+
+- `snapshot_id / symbol / market / decision_trade_date` 完全一致；
+- 1D、5D、10D、20D 四个期限均成熟；
+- 两边复权模式、价格版本、基准版本和期限结束日一致；
+- 执行比较还必须具备规则版本。
+
+实现比较：
+
+```text
+QUANT_VS_NORMAL
+NORMAL_VS_TOP
+TOP_VS_HARD_RISK
+ORIGINAL_VS_RISK_REDUCED
+PLAN_VS_EXECUTION
+```
+
+不满足可比条件时保存 `NOT_COMPARABLE` 和具体原因，不把非配对样本强行计算为模型价值。
+
+### 13. Quant、Normal、Top、Consensus 和 HardRisk 评价
+
+阶段指标统一保存覆盖率、1/5/10/20D 原始和方向对齐平均收益、MFE、MAE、执行选择率、
+实际成交率、拒绝率、调整率、模型错误率、避免亏损数和错失机会数。
+
+- Quant：评价 TRIGGERED/WATCH/REJECTED 等原始量化结果；
+- Normal：与 Quant 同机会配对，测量普通模型增量；
+- Top：区分 CONFIRM、RISK_ADJUST、MATERIAL_REVISION、REJECT、SUSPEND 和模型错误；
+- Consensus：区分 PASS、REVISE、REJECT、INVALID 的拦截结果；
+- HardRisk：区分 PASS、REDUCE、REJECT、SUSPEND，并保留仓位变化。
+
+所有“价值”都是同机会、同期限的事后诊断，不是因果结论。
+
+### 14. BenchmarkSafety 独立评价
+
+BenchmarkExecutionSafetyGate 输出使用独立 `BENCHMARK_DECISION` subject 和
+`decision_stage=BENCHMARK_SAFETY`。Schema 双向强制这种映射，防止基准机械安全门被
+保存或展示成通过了 Consensus/HardRisk。
+
+### 15. 因子、Regime 和 Strategy 评价
+
+因子指标按 `factor_id:factor_version` 聚合真实 `normalized_score / raw_value /
+direction`，保存：
+
+- 数据覆盖率和缺失率；
+- 1/5/10/20D 平均收益；
+- 方向命中率；
+- 10D 分数分桶收益；
+- 平均 MFE/MAE；
+- `future_normalization_used=false`。
+
+样本不足时 Rank IC 明确为未计算，不做伪统计。Regime 评价保存对应样本的基准收益和
+MFE/MAE，但因缺少可靠市场宽度数据，标记 `market_breadth_status=UNAVAILABLE`，
+不宣称“市场状态判定正确”。Strategy 按 strategy/version/status 聚合相同标签合同。
+
+### 16. AttributionRuleRegistry 与失败归因
+
+版本化规则 `attribution-rules-v1 / 1.0.0`，主归因期限为 10D，覆盖：
+
+```text
+DATA_QUALITY
+CANDIDATE_SELECTION
+FACTOR_FAILURE
+REGIME_MISCLASSIFICATION
+STRATEGY_ENTRY
+NORMAL_MODEL
+TOP_MODEL
+CONSENSUS
+HARD_RISK
+EXECUTION
+MARKET_SHOCK
+UNKNOWN
+```
+
+规则阈值来自 YAML，不散落在代码中。归因区分盈利、亏损、避免亏损、错失机会、
+中性和数据不足；输出规则 ID、主/次类别、证据、置信度和机器说明，并始终显示
+“规则化诊断，不代表严格因果”。期限未成熟时归因为 `PENDING_HORIZON`，数据不足
+优先归 `DATA_QUALITY`，不会硬猜模块责任。
+
+### 17. 人工覆盖机制
+
+人工只能追加 `AttributionOverride`：
+
+- 保存原 Attribution ID、覆盖类别、原因、用户和时间；
+- 不 update/delete 原机器归因；
+- 同一内容幂等复用，同一身份不同内容报冲突；
+- API 返回机器归因及完整 overrides 历史。
+
+人工覆盖不进入自动学习、决策、风控或执行。
+
+### 18. MongoDB 集合和索引
+
+新增 13 个只用于评价的集合：
+
+```text
+ag_eval_subjects
+ag_eval_horizon_labels
+ag_eval_counterfactuals
+ag_eval_account_metrics
+ag_eval_paired_comparisons
+ag_eval_attributions
+ag_eval_attribution_overrides
+ag_eval_runs
+ag_eval_events
+ag_eval_factor_metrics
+ag_eval_regime_metrics
+ag_eval_strategy_metrics
+ag_eval_execution_metrics
+```
+
+共 42 个 create-only 索引，覆盖不可变身份、版本、用户/日期、stage/status、成熟期、
+账户、比较、归因、任务和事件查询。索引脚本可重复运行，第二次结果为
+`created=0, unchanged=42`；冲突明确失败，不删除已有索引。
+
+实际数据库只创建了这 42 个索引及空集合，13 个集合文档数均为 0；没有 seed 评价
+结果，也没有修改 PR-001～PR-006 或人工模拟集合。
+
+### 19. API
+
+认证后提供：
+
+```text
+GET  /api/alphaguard/evaluations/overview
+GET  /api/alphaguard/evaluations/subjects
+GET  /api/alphaguard/evaluations/subjects/{subject_id}
+GET  /api/alphaguard/evaluations/decisions/{source_object_id}
+GET  /api/alphaguard/evaluations/accounts
+GET  /api/alphaguard/evaluations/accounts/compare
+GET  /api/alphaguard/evaluations/model-value
+GET  /api/alphaguard/evaluations/factors
+GET  /api/alphaguard/evaluations/regimes
+GET  /api/alphaguard/evaluations/strategies
+GET  /api/alphaguard/evaluations/execution
+GET  /api/alphaguard/evaluations/counterfactuals
+GET  /api/alphaguard/attributions
+POST /api/alphaguard/evaluations/run
+POST /api/alphaguard/attributions/{attribution_id}/overrides
+```
+
+所有查询按当前用户授权；全用户回放仅管理员可登记。`run` 只登记幂等后台任务，不在
+请求线程执行大批计算。客户端不能上传收益标签、价格、Counterfactual、Metric 或机器
+归因，也没有评价对象 update/delete API。
+
+API 冒烟：overview=200、run=200、非管理员 all-users=403，重复登记只产生一个 run。
+
+### 20. 前端页面
+
+PaperTrading 增加“评价与归因”只读标签，包含：
+
+- 全样本概览；
+- 四账户对比（包括 Challenger `NOT_ACTIVE` 占位）；
+- 模型价值和阶段指标；
+- 反事实与未成交诊断；
+- 机器归因和人工覆盖历史。
+
+页面显示样本量、数据不足和“非严格因果”提示，不提供自动交易、价格修改、风险修改、
+归因机器事实修改、策略晋升或 Challenger 启动控件。
+
+### 21. Worker 和调度
+
+在既有 FastAPI APScheduler 中：
+
+```text
+16:20  PR-006 DailyAccountSnapshot
+16:35  PR-007 schedule_daily_evaluation
+每15分钟 run_pending_evaluations
+17:00  PR-006 account reconciliation
+```
+
+评价 Worker 从 `ag_eval_runs` 读取 PENDING/FAILED 任务；统一流水线严格按 subject、
+label、counterfactual、account metric、paired comparison、module metric、attribution
+执行。蓝图中的各任务名保留为统一入口别名，实际使用一个有序、幂等流水线，减少中间
+阶段错序。评价异常只记录 `ag_eval_runs/ag_eval_events`，不会中断 PR-006 调度。
+
+### 22. 幂等和完整性
+
+- run key = as-of trade date + user scope + evaluation version；
+- 相同 terminal run 直接复用，不重复计算；
+- immutable repository 对同身份同内容复用、同身份不同内容报完整性冲突；
+- Subject、Label、Counterfactual、Comparison、Attribution 和 Metric 均有稳定 ID/hash；
+- 失败重试增加 attempt，并保留 `error_history`；
+- 单 subject 评价不发现无关样本，也不错误计算全账户/全样本统计；
+- 候选物理删除前检查未完成评价引用；存在引用时 fail-closed；
+- 重复 Worker 冒烟结果：第一次 completed=1，第二次 completed=0，attempt 保持 1。
+
+### 23. 无未来数据回流和无账户副作用
+
+静态依赖和运行测试确认：
+
+- EvaluationPipeline 写集合白名单只有 13 个 `ag_eval_*`；
+- 评价服务不导入 OrderService、ReservationService、SettlementService 或 Broker；
+- 不更新 EvidenceSnapshot、FactorResult、QuantProposal、模型计划、Review、Consensus、
+  RiskDecision、OrderIntent、PaperOrder、PaperFill、账户、现金、持仓或 PositionLot；
+- Factor/Regime/Strategy/Context/Decision/HardRisk 不导入 evaluation 模块；
+- 未来行情只在期限成熟后的评价模块读取；
+- 评价结果不会被注入 Prompt、ContextBuilder 或任何执行政策；
+- `live_trading_enabled=false` 和两套 Worker fail-closed 保护保持不变。
+
+### 24. 测试和验证结果
+
+PR-007 专项：
+
+```text
+49 passed
+```
+
+覆盖 Schema、期限成熟、交易日历、QFQ/版本、篡改与冲突、MFE/MAE、基准收益、样本
+发现、Benchmark 独立语义、历史回放截止日、候选删除保护、反事实影子多日/部分成交、
+继续持有原始价格口径、账户指标、严格配对、模块统计、规则归因、人工覆盖、API 权限、
+任务幂等、单样本评价、无未来数据回流和无生产副作用。
+
+PR-001～PR-007 精确回归集：
+
+```text
+346 passed
+```
+
+其中 PR-001～PR-006 原基线 297 项继续通过；PR-007 新增 49 项。
+
+其他验证：
+
+```text
+tests/ collect-only: 1023 collected, 15 known errors
+frontend type-check: 34 errors, all TS2345
+Python compile (app/tradingagents/tests/PR-007 script): passed
+scripts full compile: only known 补充行业信息_akshare.py:81 syntax error
+git diff --check: passed
+FastAPI safe start /api/health: HTTP 200
+FastAPI live=true: exit 3, startup rejected
+app/worker.py live=true: exit 1, startup rejected
+app/worker/analysis_worker.py live=true: exit 1, startup rejected
+MongoDB ping: healthy
+Redis ping: healthy
+evaluation index repeated run: created=0, unchanged=42
+API smoke: 200 / 200 / admin guard 403
+evaluation worker idempotency smoke: reused terminal result
+```
+
+15 个收集错误与 PR-006 的类别完全一致；前端仍只有既有 34 个 `DefaultRow TS2345`。
+没有跳过 PR-007 新测试，也没有为了数字修复无关上游技术债。
+
+根目录 collect-only 会收集并执行旧 `scripts/test_*.py`，触发外部 AkShare/网络和交互式
+输入，已安全中断；不把该次中断命令宣称为完整收集。上述 `tests/` 范围的 1023/15 是
+实际完成的全测试目录收集结果。
+
+### 25. 兼容性、设计差异和已知限制
+
+1. 现有公共行情没有已验证的持久化 QFQ OHLC 与版本合同；真实标签会 fail-closed 为
+   `INSUFFICIENT_DATA/INVALID_SOURCE`，不会用未复权数据冒充。
+2. 现有真实交易日历和真实市场评价样本为空，当前 13 个评价集合也为 0 文档；本阶段
+   验证使用固定离线数据，没有伪造生产评价结果。
+3. 行业映射/行业指数缺少快照时版本，行业相对收益明确为空；后续只能通过版本化数据
+   准备补齐，不能读取当前行业覆盖历史。
+4. `RuleCondition` 仍是结构化容器中的自然语言条件，没有可安全机器比较的价格阈值，
+   因此 stop/exit touch 字段保留但不自动猜测触发。
+5. 日线模拟只支持每订单每日一个 Fill；执行评价不能重建真实逐笔成交或队列优先级。
+6. 小样本统计明确 `INSUFFICIENT_SAMPLE`；Rank IC、市场宽度和严格因果归因不伪造。
+7. 账户指标依赖至少两期完整 DailyAccountSnapshot；Challenger 在 PR-008 前正常显示
+   `NOT_ACTIVE/INSUFFICIENT_HISTORY`。
+8. 调度使用一个统一评价 run 承载蓝图中的多个作业名。其安全影响是阶段顺序更清晰，
+   失败隔离不变；若未来数据规模需要分片，可在后续阶段拆成相同幂等合同的独立 Worker。
+9. 安全扩展的 `BENCHMARK_DECISION` 和 `EXECUTION_OUTBOX` 比把它们伪装成 HardRisk/
+   Order 更保守；不改变任何 PR-006 Schema 或历史对象。
+10. FastAPI 关闭时仍可观察到既有股票同步后台线程延迟退出；HTTP 启动和安全保护均已
+    验证，此存量问题未在 PR-007 扩大处理。
+
+### 26. 明确未实施 PR-008 及以后
+
+```text
+Champion/Challenger 自动实验
+策略自动晋升、降级或淘汰
+模型自动选择或权重调整
+将评价标签反馈到 Prompt、Factor、Regime、Strategy、Consensus 或 HardRisk
+自动改变执行/费用/风险政策
+全市场自动推荐
+真实券商、实盘订单或 live 开关
+Dify / Qlib / FinRL / RD-Agent
+```
+
+PAPER_CHALLENGER 只读取并显示 PR-006 创建的空账户状态，不创建 Intent 或交易。
+
+### 27. 数据变化和完整回退
+
+本阶段真实数据库变化仅为 13 个空评价集合上的 42 个 create-only 索引；评价文档为 0，
+PR-001～PR-006、人工 paper 和自动 `ag_paper_*` 数据均未修改。
+
+完成检查点后的回退：
+
+1. 停用 `alphaguard_evaluation_schedule` 和 `alphaguard_evaluation_worker`；
+2. 记录 `git status --short`、目标 commit 和 tag；
+3. 使用 `git revert <pr007-commit>` 创建可审计反向提交，不使用 `reset --hard`；
+4. 移除评价 router/前端入口/调度后，复跑 PR-001～PR-006 的 297 项精确回归；
+5. 42 个空索引和空集合可保留，不影响交易链；
+6. 如必须物理移除，先确认 13 个精确集合文档数均为 0 并做 `mongodump`，再逐个 drop
+   精确评价集合；禁止通配删除；
+7. 若未来已产生评价文档，先完整备份全部 `ag_eval_*`，评价数据仍可离线保留，因为它
+   不参与生产交易；
+8. 回退后验证 FastAPI HTTP 200、三项 live=true 阻断、Mongo/Redis healthy、
+   PR-006 自动模拟链和人工 `/paper/*` 均无变化；
+9. 永远不回退 PR-001 的 `SIM_AUTONOMOUS / live_trading_enabled=false` 安全不变量。
+
+### 28. 当前 Git 状态与阶段闸门
+
+PR-001～PR-006 均保留独立提交和标签。PR-007 的代码、测试和本文档形成单独提交：
+
+```text
+feat(alphaguard): complete PR-007 evaluation and attribution
+```
+
+并标记：
+
+```text
+alphaguard-pr007-evaluation-attribution
+```
+
+检查点完成后工作区为 clean，标签到 HEAD 的 diff check 通过。PR-007 到此停止；
+PR-008 没有开始，必须由人工另行授权。

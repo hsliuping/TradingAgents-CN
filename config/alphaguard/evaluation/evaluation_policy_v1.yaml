@@ -1,0 +1,21 @@
+evaluation_policy_id: evaluation-policy-v1
+version: 1.0.0
+
+horizons:
+  1D: 1
+  5D: 5
+  10D: 10
+  20D: 20
+
+primary_attribution_horizon: 10D
+benchmark_symbol: "000300"
+required_price_adjustment_mode: QFQ
+normalized_shadow_notional: "100000.00"
+cross_section_min_samples: 10
+paired_min_samples: 5
+
+evaluation_version: evaluation-v1
+label_calculation_version: horizon-label-v1
+counterfactual_version: counterfactual-v1
+account_metric_version: account-metric-v1
+comparison_version: paired-comparison-v1

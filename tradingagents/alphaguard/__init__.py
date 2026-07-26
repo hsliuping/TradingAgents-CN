@@ -18,6 +18,15 @@ from .candidate_schemas import (
     CandidateStatus,
 )
 from .evidence_schemas import DataQualityReport, EvidenceSnapshot
+from .evaluation_schemas import (
+    AccountPerformanceMetric,
+    AttributionOverride,
+    AttributionRecord,
+    CounterfactualEvaluation,
+    EvaluationSubject,
+    HorizonLabel,
+    PairedDecisionComparison,
+)
 
 __all__ = [
     "EvidenceRef",
@@ -35,4 +44,11 @@ __all__ = [
     "CandidateStatus",
     "DataQualityReport",
     "EvidenceSnapshot",
+    "AccountPerformanceMetric",
+    "AttributionOverride",
+    "AttributionRecord",
+    "CounterfactualEvaluation",
+    "EvaluationSubject",
+    "HorizonLabel",
+    "PairedDecisionComparison",
 ]
