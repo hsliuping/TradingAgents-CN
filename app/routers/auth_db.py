@@ -69,19 +69,21 @@ class CreateUserRequest(BaseModel):
 async def get_current_user(authorization: Optional[str] = Header(default=None)) -> dict:
     """获取当前用户信息"""
     logger.debug(f"🔐 认证检查开始")
-    logger.debug(f"📋 Authorization header: {authorization[:50] if authorization else 'None'}...")
+    logger.debug(
+        f"📋 Authorization header present={bool(authorization)}, "
+        f"length={len(authorization) if authorization else 0}"
+    )
 
     if not authorization:
         logger.warning("❌ 没有Authorization header")
         raise HTTPException(status_code=401, detail="No authorization header")
 
     if not authorization.lower().startswith("bearer "):
-        logger.warning(f"❌ Authorization header格式错误: {authorization[:20]}...")
+        logger.warning("❌ Authorization header格式错误")
         raise HTTPException(status_code=401, detail="Invalid authorization format")
 
     token = authorization.split(" ", 1)[1]
     logger.debug(f"🎫 提取的token长度: {len(token)}")
-    logger.debug(f"🎫 Token前20位: {token[:20]}...")
 
     token_data = AuthService.verify_token(token)
     logger.debug(f"🔍 Token验证结果: {token_data is not None}")

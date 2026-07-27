@@ -191,19 +191,32 @@ async def process_task(task_id: str) -> None:
 async def worker_loop(stop_event: asyncio.Event):
     r = get_redis_client()
     logger.info("Worker loop started")
-    while not stop_event.is_set():
+    heartbeat_key = "alphaguard:worker:queue"
+    try:
+        while not stop_event.is_set():
+            try:
+                # The TTL makes stale workers observable without a second state store.
+                await r.set(
+                    heartbeat_key,
+                    datetime.utcnow().isoformat(),
+                    ex=15,
+                )
+                # BLPOP returns (list, task_id) when an item is available.
+                item: Optional[list] = await r.blpop(READY_LIST, timeout=5)
+                if not item:
+                    continue
+                _, task_id = item
+                await process_task(task_id)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.exception(f"Worker loop error: {e}")
+                await asyncio.sleep(1)
+    finally:
         try:
-            # BLPOP returns (list, task_id) when an item is available
-            item: Optional[list] = await r.blpop(READY_LIST, timeout=5)
-            if not item:
-                continue
-            _, task_id = item
-            await process_task(task_id)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.exception(f"Worker loop error: {e}")
-            await asyncio.sleep(1)
+            await r.delete(heartbeat_key)
+        except Exception:
+            logger.warning("Failed to remove queue worker heartbeat", exc_info=True)
     logger.info("Worker loop stopped")
 
 

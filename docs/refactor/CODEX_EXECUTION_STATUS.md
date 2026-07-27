@@ -3480,3 +3480,552 @@ tag: alphaguard-pr008-experiment-lab
 
 提交和标签后 `git status --short` 必须为空，标签必须指向 HEAD。PR-008 到此停止；
 PR-009 及以后必须重新获得人工授权。
+
+---
+
+## PR-009：Front-end Integration & Operations（2026-07-27）
+
+### 1. 完成结论
+
+PR-009 已按最小 MVP 范围完成代码、统一前端、Operations Center、分层健康检查、数据
+准备度、持久化告警、受控运维任务、Compose、初始化/备份/恢复脚本和运维文档。
+PR-001 的安全不变量保持：
+
+```text
+system_mode=SIM_AUTONOMOUS
+live_trading_enabled=false
+live_execution_allowed=false
+live_ready=false
+```
+
+本结论严格区分代码完成和真实运行准备度：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=DEGRADED
+DATA_READY=false
+PAPER_READY=false
+EVALUATION_READY=false
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+```
+
+没有实现真实交易、券商连接、全市场自动推荐、分钟级交易或 PR-010 及以后功能。
+
+### 2. 实际修改和新增文件
+
+核心新增：
+
+```text
+tradingagents/alphaguard/operations_schemas.py
+app/schemas/alphaguard/operations.py
+app/models/alphaguard/operations_collections.py
+app/services/alphaguard/operations_service.py
+app/services/alphaguard/operations_alert_service.py
+app/services/alphaguard/operations_job_service.py
+app/routers/alphaguard_operations.py
+
+frontend/src/api/alphaguard.ts
+frontend/src/api/alphaguardOperations.ts
+frontend/src/views/AlphaGuard/AlphaGuardLayout.vue
+frontend/src/views/AlphaGuard/Overview.vue
+frontend/src/views/AlphaGuard/Candidates.vue
+frontend/src/views/AlphaGuard/Decisions.vue
+frontend/src/views/AlphaGuard/Paper.vue
+frontend/src/views/AlphaGuard/Evaluations.vue
+frontend/src/views/AlphaGuard/Experiments.vue
+frontend/src/views/AlphaGuard/Operations.vue
+
+scripts/init_alphaguard_operations_indexes.py
+scripts/alphaguard_initialize.py
+scripts/alphaguard_readiness_report.py
+scripts/alphaguard_backup.py
+scripts/alphaguard_restore.py
+scripts/alphaguard_mvp_smoke.py
+Makefile
+
+docs/operations/ALPHAGUARD_RUNBOOK.md
+docs/operations/ALPHAGUARD_DEPLOYMENT.md
+docs/operations/ALPHAGUARD_BACKUP_RESTORE.md
+docs/operations/ALPHAGUARD_MVP_ACCEPTANCE.md
+
+tests/unit/alphaguard/test_operations_pr009.py
+tests/unit/alphaguard/test_frontend_operations_contract_pr009.py
+tests/integration/alphaguard/test_mvp_smoke_pr009.py
+```
+
+必要接线和安全修复：
+
+```text
+README.md
+app/main.py
+app/worker.py
+app/routers/health.py
+app/routers/auth_db.py
+app/routers/config.py
+app/services/auth_service.py
+app/services/config_service.py
+app/services/user_service.py
+app/models/alphaguard/__init__.py
+app/schemas/alphaguard/__init__.py
+docker-compose.yml
+frontend/src/api/request.ts
+frontend/src/stores/auth.ts
+frontend/src/router/index.ts
+frontend/src/components/Layout/SidebarMenu.vue
+tradingagents/config/config_manager.py
+tradingagents/llm_adapters/google_openai_adapter.py
+tradingagents/llm_adapters/openai_compatible_base.py
+tradingagents/llm_adapters/dashscope_openai_adapter.py
+tradingagents/alphaguard/__init__.py
+tradingagents/alphaguard/mongo_indexes.py
+```
+
+### 3. AlphaGuard 统一导航和系统总览
+
+新增 `/alphaguard` 父路由和七个子页面：
+
+```text
+/alphaguard/overview
+/alphaguard/candidates
+/alphaguard/decisions
+/alphaguard/paper
+/alphaguard/evaluations
+/alphaguard/experiments
+/alphaguard/operations
+```
+
+侧边栏新增唯一 AlphaGuard 入口；旧 `/paper` 保持人工即时模拟交易，不改请求/响应和
+视觉结构。统一 Layout 持续显示 `PAPER ONLY`、实盘永久关闭和
+“Risk PASS 不等于订单”。
+
+Overview 显示真实 readiness、样本计数、阻断项、开放告警和安全声明。空集合显示空态，
+不生成演示候选、交易、评价或 Challenger。
+
+### 4. 候选池
+
+候选页面复用现有认证 Candidate API。用户只能添加或移除 `USER_SELECTED` 来源；移除
+来源时继续尊重持仓、有效订单和其他来源保护。页面明确说明不会进行全市场自动推荐。
+服务端继续按当前用户过滤，客户端不能指定其他 user_id。
+
+### 5. 决策中心
+
+决策时间线保留 analysis/snapshot/trace lineage，并分 Tab 独立展示：
+
+```text
+NormalTradePlan
+TopReviewDecision
+ConsensusDecision
+RiskDecision
+BenchmarkExecutionDecision（预留只读位）
+```
+
+缺失对象显示 `null`；模型失败、非法输出和数据不足不会被前端转换为 HOLD。
+
+### 6. 自动模拟交易页面
+
+`/alphaguard/paper` 复用 PR-006 的隔离自动账户组件，展示四类账户、现金/冻结资金、
+Position/Lot、Order/Fill、费用和来源 lineage。原人工 `/paper` 完全保留。
+前端没有 OrderIntent/Order/Fill 创建入口，没有上传成交价或修改资产入口。
+
+### 7. 评价中心和实验室
+
+评价页复用 PR-007 只读评价中心；真实样本为 0 时显示 `INSUFFICIENT_DATA`。实验页复用
+PR-008 最小实验室，保留失败 gate、负面指标、人工晋升和回退语义。当前完整
+PAPER_CHALLENGER 双模型隔离适配器仍未实现，因此明确显示
+`FULL_CHALLENGER_PIPELINE_NOT_READY`，不会创建虚假样本。
+
+### 8. Operations Center
+
+Operations Center 提供：
+
+- 服务状态、延迟、脱敏错误；
+- 数据覆盖、数量和阻断原因；
+- 调度任务、最近运行、积压和错误；
+- 持久化告警确认/解决；
+- 只读版本和完整性结果；
+- 管理员受控 DB-backed 任务。
+
+普通用户可查看脱敏系统状态；审计查询、告警写操作和任务登记要求后端真实
+`is_admin=true`。客户端不能提交脚本、函数、Shell、配置覆盖或任意任务参数。
+
+### 9. ServiceHealth、DataReadiness 和 JobHealth
+
+严格 Schema：
+
+```text
+ServiceHealth
+DataReadinessStatus
+JobHealth
+OperationalAlert
+SystemReadinessReport
+OperationsJobRequest（内部）
+```
+
+全部 `extra=forbid`，业务返回对象 frozen。ServiceHealth 覆盖 FastAPI、MongoDB、
+Redis、Scheduler、两套 Worker 和全部 AlphaGuard 必要索引。
+
+DataReadiness 对以下组件 fail-closed：
+
+```text
+TRADING_CALENDAR
+QFQ_PRICE_DATA
+RAW_PRICE_DATA
+FINANCIAL_DATA
+NEWS_DATA
+ANNOUNCEMENT_DATA
+MARKET_CONTEXT
+INDUSTRY_HISTORY
+MODEL_PROVIDER
+CHAMPION_ASSIGNMENTS
+EVALUATION_SAMPLES
+EXPERIMENT_SAMPLES
+CHALLENGER_PIPELINE
+```
+
+QFQ 必须同时有 `price_adjustment_mode=QFQ`、`price_data_version` 和交易日期；缺失不
+读取实时价补齐。Champion 检查唯一身份、版本存在、Pydantic Schema、assignment hash
+和未完成 Promotion Saga。
+
+JobHealth 汇总数据同步、候选/快照、分析、Outbox、撮合、结算、过期、T+1、账户快照、
+评价、实验和 Saga recovery。没有记录时显示 IDLE/DISABLED，不伪造成功时间。
+
+### 10. 告警和审计
+
+新增持久化告警集合 `ag_ops_alerts` 和追加式审计 `ag_ops_events`。同
+`category + code + source_module + source_object_id` 使用稳定 fingerprint 聚合并增加
+occurrence_count。告警支持 OPEN → ACKNOWLEDGED → RESOLVED；同问题再出现会重新打开，
+不会删除历史。所有错误和解决说明递归脱敏。
+
+Operations 审计接口可按 trace/snapshot/analysis/order/experiment 关联读取 PR-003～
+PR-008 与 PR-009 事件；只有管理员可以查询全局审计链。
+
+### 11. 受控任务和幂等
+
+只允许：
+
+```text
+HEALTH_CHECK
+DATA_READINESS_CHECK
+PAPER_RECONCILIATION
+EVALUATION_RECALCULATION
+EXPERIMENT_RECONCILIATION
+PROMOTION_SAGA_RECOVERY
+INTEGRITY_CHECK
+```
+
+请求先写 `ag_ops_job_requests`，使用稳定 idempotency key 和 CAS claim；主调度每分钟
+消费。重复登记返回原对象，不重复执行。没有任意函数执行、eval/exec 或公共修复数据
+接口。
+
+### 12. 权限、用户隔离和 Secret 脱敏
+
+后端写操作统一 `_require_admin`。修复了前端把所有登录用户强制标记为 admin 的存量
+行为；现在角色严格取自数据库 `user.is_admin`，后端仍为最终权限门。
+
+前端公共 API 日志递归屏蔽 Authorization、API Key、Token、Password、Secret、Cookie
+和 Credential，不再打印 refresh token 前缀、原始响应或 Axios error/config。
+后端认证、配置、用户和三个模型适配器也不再记录：
+
+```text
+Authorization/Token/JWT Secret 前缀
+API Key/Secret 前缀或后缀
+密码哈希前缀
+初始化管理员明文密码
+API Key mismatch 的收到值/期望值
+```
+
+日志仅保留是否配置、长度、provider、error_code、trace_id 等非敏感元数据。
+Operations API 和页面不返回密钥、连接密码、认证头或完整堆栈。
+
+### 13. 配置和版本展示
+
+只读版本接口显示 code commit/tree、构建版本、Consensus 版本、版本化 Risk/Paper/Fee/
+Matching/Evaluation/Promotion 配置摘要和 committed Champion 指针。没有通用配置编辑
+API，配置 hash 经过规范化 JSON、SHA-256 和递归脱敏。
+
+### 14. 分层健康检查
+
+```text
+GET /health/live
+GET /health/ready
+GET /api/alphaguard/operations/readiness
+```
+
+Liveness 不做依赖 I/O。Readiness 检查 PR-001 安全配置、MongoDB、Redis、必要索引、
+Champion、Scheduler、Worker 和交易日历；业务数据不足返回 HTTP 200 + DEGRADED，让
+管理面可访问。核心依赖失败或安全配置 UNSAFE 返回 503。完整业务报告带稳定
+config/report hash，并强制 `live_ready=false`。
+
+### 15. MongoDB 集合和索引
+
+新增：
+
+```text
+ag_ops_alerts
+ag_ops_events
+ag_ops_check_runs
+ag_ops_job_requests
+```
+
+共 14 个 create-only 索引，覆盖 ID、状态/时间、fingerprint、alert/job 关联和幂等键。
+显式执行后重复两次均为：
+
+```text
+created=0 unchanged=14 failed=0
+```
+
+不删除 PR-001～PR-008 索引或历史数据。当前 AlphaGuard 专用集合总数 75，索引总数
+236，完整性检查缺失索引为 0。
+
+### 16. Docker Compose、Worker 和一键命令
+
+Compose 现包含 FastAPI、Vue、MongoDB、Redis、queue-worker 和 analysis-worker。三个
+Python 入口都显式传递：
+
+```text
+ALPHAGUARD_SYSTEM_MODE=SIM_AUTONOMOUS
+ALPHAGUARD_LIVE_TRADING_ENABLED=false
+```
+
+FastAPI 健康探针使用 `/health/ready`；queue-worker 写 Redis TTL 心跳
+`alphaguard:worker:queue`，analysis-worker 复用 `worker:*:heartbeat`。删除了 Compose
+已废弃的顶层 `version` 字段，`docker compose config --quiet` 通过。
+
+Makefile 提供 dev/test/type-check/readiness/init/indexes/backup/smoke/compose/safety
+命令。初始化、索引和备份默认 dry-run，只有 `--execute` 才写入。
+
+### 17. 备份和恢复
+
+备份范围直接来自 `ALPHAGUARD_INDEX_SPECS` 的 75 个显式集合，不使用通配符，不包含
+旧人工：
+
+```text
+paper_accounts
+paper_positions
+paper_orders
+paper_trades
+```
+
+格式为 BSON stream，manifest 保存数据库、记录数和逐文件 SHA-256。真实演练已完成：
+75 个集合备份，恢复到临时新库，逐集合计数差异为 0；随后删除临时验证库和临时备份
+目录，源库未覆盖。
+
+默认恢复到新数据库。覆盖当前库必须同时使用：
+
+```text
+--overwrite-current
+--confirmation "OVERWRITE <database>"
+```
+
+MongoDB 4.4 standalone 不支持所需多文档事务；恢复中断必须视为未完成，不能启动
+Worker。
+
+### 18. 前端浏览和 MVP 冒烟
+
+使用真实 Vite dev server 和本地 Chrome/Playwright 验证：
+
+- 未登录 `/alphaguard` 正确跳转登录；
+- 隔离 API stub 下 Overview 显示 NOT_READY、实盘关闭和七个导航；
+- Candidates 显示用户添加入口和“不会自动推荐全市场股票”；
+- 无浏览器 console error 或遮挡问题；
+- stub 不写真实 MongoDB。
+
+后端 TestClient 冒烟验证 readiness fail-closed、告警、受控任务幂等、普通用户 403 和
+管理员登记。`scripts/alphaguard_mvp_smoke.py` 为 2 passed。
+
+### 19. 测试和回归结果
+
+```text
+PR-009 专项：19 passed
+PR-001～PR-008 精确回归：430 passed, 94 warnings
+tests/ collect-only：1127 collected, 15 known errors
+仓库根 collect-only：1356 collected, 28 errors
+```
+
+`tests/` 的 15 个错误文件和 ImportError 类别与 PR-008 完全一致；成功收集数从 1109
+增至 1127，正好增加 18 个可收集 PR-009 测试（PR-009 实际执行 19 case，含参数/结构
+差异）。仓库根目录额外 13 类来自存量 `scripts/test_*.py` 被 pytest 当测试导入，
+其中包含缺失旧模块、交互 `input()`、实时新浪/东方财富访问和测试模块重名；不是
+PR-009 新错误。根目录收集本身访问外网且耗时 685 秒，正式可比基线继续使用 `tests/`。
+
+其他验证：
+
+```text
+modified Python py_compile: passed
+scripts compileall: only known scripts/补充行业信息_akshare.py:81 SyntaxError
+git diff --check: passed
+docker compose config --quiet: passed
+MongoDB ping: healthy
+Redis ping: PONG
+FastAPI /health/live: HTTP 200
+FastAPI /health/ready: HTTP 200, DEGRADED/NOT_READY
+Operations readiness without auth: HTTP 401
+FastAPI live=true: exit 3, rejected
+queue-worker live=true: exit 1, rejected
+analysis-worker live=true: exit 1, rejected
+Operations indexes repeat: unchanged=14, failed=0
+initialization/index/backup dry-run: no writes
+Vite isolated production bundle: 2609 modules, passed
+```
+
+### 20. 前端类型检查和正式构建
+
+`npm run type-check` 仍为 34 个既有 `DefaultRow TS2345`，分布在 Dashboard、Favorites、
+Reports、Screening、Settings、LogManagement 和 SchedulerManagement 9 个旧文件。
+PR-009 新文件错误数为 0，错误数量和类别未增加。
+
+正式 `npm run build` 先执行 vue-tsc，因此仍被同一 34 个存量错误阻断；不得宣称正式
+构建全通过。为单独验证 PR-009 bundle，`npx vite build` 成功完成 2609 模块生产打包。
+本阶段未大规模重构 9 个无关旧页面来粉饰数字。
+
+### 21. 当前真实运行和数据准备度
+
+真实数据库：`tradingagentscn_v0_banana`。实际样本：
+
+```text
+ag_candidates=0
+ag_evidence_snapshots=0
+ag_quant_proposals=0
+ag_decision_contexts=0
+ag_consensus_decisions=0
+ag_risk_decisions=0
+ag_paper_accounts=0
+ag_order_intents=0
+ag_paper_orders=0
+ag_paper_fills=0
+ag_eval_subjects=0
+ag_eval_paired_comparisons=0
+ag_exp_definitions=0
+ag_exp_runs=0
+ag_exp_challenger_assignments=0
+```
+
+真实数据状态：
+
+```text
+TRADING_CALENDAR=NOT_READY (0)
+QFQ_PRICE_DATA=NOT_READY (0)
+RAW_PRICE_DATA=NOT_READY (0)
+FINANCIAL_DATA=NOT_READY (0)
+NEWS_DATA=NOT_READY (0)
+ANNOUNCEMENT_DATA=NOT_READY (0)
+MARKET_CONTEXT=NOT_READY (0)
+INDUSTRY_HISTORY=NOT_READY (0)
+MODEL_PROVIDER=READY (1)
+CHAMPION_ASSIGNMENTS=READY (5)
+EVALUATION_SAMPLES=NOT_READY (0)
+EXPERIMENT_SAMPLES=NOT_READY (0)
+CHALLENGER_PIPELINE=NOT_READY (0)
+```
+
+MongoDB 和 Redis 容器健康；FastAPI 可安全启动；queue-worker 与 analysis-worker 当前
+未部署/无新鲜心跳，所以 RUNTIME_READY 诚实标记 DEGRADED。没有自动账户和 paper
+policy 实例，PAPER_READY=false。
+
+### 22. 启动期存量副作用
+
+真实 FastAPI 启动会触发现有 `MultiSourceBasicsSyncService` 的启动期股票基础列表
+检查；本次从 AKShare 获取 5533 个代码，`stock_basic_info` 当前为 5533。该集合不是
+AlphaGuard 决策证据、QFQ、交易日历或评价样本，readiness 仍为 NOT_READY。
+
+这是上游既有启动行为，不是 PR-009 seed；没有将其删除或伪装成 AlphaGuard DATA_READY。
+关闭 FastAPI 时该后台线程可能延迟约 4 秒退出并产生一次 Python shutdown logging
+错误，这与 PR-008 已记录的“股票同步线程延迟退出”限制一致。后续应在独立运维修复中
+增加可取消任务边界，不能在 PR-009 顺手重构数据同步。
+
+### 23. MVP 验收状态
+
+`docs/operations/ALPHAGUARD_MVP_ACCEPTANCE.md` 已按真实证据勾选。安全、代码、API、
+前端、索引、备份、测试和隔离项通过；以下保持未勾选：
+
+- 两套 Worker 新鲜心跳；
+- CN 交易日历覆盖；
+- QFQ 覆盖；
+- 财务、新闻、公告、市场环境和历史行业证据。
+
+因此本阶段只能声明 CODE_COMPLETE，不能声明 RUNTIME/DATA/PAPER/EVALUATION/
+CHALLENGER ready。
+
+### 24. 已知限制和设计差异
+
+1. 正式前端构建仍被 34 个上游类型错误阻断；PR-009 bundle 可构建但不是完整 type-safe
+   发布门。
+2. 全仓 pytest 发现配置会收集有联网/交互副作用的旧脚本；正式 `tests/` 基线仍有 15
+   个存量错误。
+3. MongoDB standalone 使用 PR-006/PR-008 的 recoverable Saga，不能宣称跨集合 ACID。
+4. 真实交易日历/QFQ/财务/新闻/公告/市场/行业数据和自动账户尚未初始化。
+5. Challenger 完整隔离双模型执行适配器未实现，继续 fail-closed。
+6. 启动期旧股票同步会访问外部数据源，并可能在 shutdown 后短暂继续。
+7. Operations 手工任务由 API Scheduler 消费；当前 Compose Worker 未运行时只会持久化
+   请求，不会假装任务已完成。
+
+总蓝图要求当前阶段提供可操作 MVP；实际实现保留 PR-007/PR-008 页面组件并放入统一
+导航，而非重写全部前端。原因是避免改变已验证业务逻辑；安全影响为只读复用和后端
+权限闸门，无执行范围扩大。
+
+### 25. 明确未实施范围
+
+没有实现：
+
+```text
+真实交易
+BrokerAdapter / 券商 SDK
+实盘开关 API
+自动实盘资金或持仓同步
+全市场自动推荐
+分钟级/高频撮合
+新的因子、策略、模型或 Champion
+自动晋升或自动回退
+虚假 Candidate / Evidence / Evaluation / Experiment fixture
+PR-010 及以后功能
+```
+
+### 26. 数据变化
+
+新增四个空 Operations 集合及 14 个索引；真实运维检查使用
+`persist_alerts=false`，没有为了展示创建告警或任务。没有写候选、证据、决策、订单、
+Fill、账户、评价或实验样本。真实备份恢复验证只写临时数据库，验证后已删除。
+
+`stock_basic_info=5533` 来自既有 FastAPI 启动同步，非 AlphaGuard seed；当前样本文档的
+更新时间早于 PR-009 最终安全启动，最终启动只读取/复用列表。
+
+### 27. 完整回退
+
+代码回退：
+
+1. 停止 backend、queue-worker、analysis-worker 和 frontend；
+2. 先运行 `scripts/alphaguard_backup.py --execute` 并验证 manifest SHA；
+3. 记录当前提交/标签和 `git status --short`；
+4. 使用 `git revert <pr009-commit>` 创建可审计反向提交，禁止 `reset --hard`；
+5. 重新部署 PR-008 Compose/前端；
+6. 复跑 PR-001～PR-008 精确回归，预期 430 passed；
+7. 验证三入口 live=true 仍拒绝启动。
+
+数据回退：
+
+1. `ag_ops_*` 可安全保留，PR-008 不读取；
+2. 若必须移除，先备份并按四个精确集合名处理，禁止通配删除；
+3. 不删除 PR-003～PR-008 集合、索引、Champion 或历史事件；
+4. 不触碰旧人工 paper 集合；
+5. 不因回退改变任何已有 Snapshot、Decision、Order、Fill、Lot 或持仓；
+6. 永远不回退 PR-001 的 SIM_AUTONOMOUS / live=false 不变量。
+
+### 28. 独立检查点和当前 Git 状态
+
+本节随指定独立检查点提交：
+
+```text
+commit message: feat(alphaguard): complete PR-009 frontend and operations
+tag: alphaguard-pr009-mvp
+```
+
+提交和标签后要求：
+
+```text
+git status --short  # empty
+alphaguard-pr009-mvp -> HEAD
+```
+
+PR-009 到此停止；不得开始 PR-010。

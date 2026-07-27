@@ -1,5 +1,3 @@
-version: '3.8'
-
 # TradingAgents-CN v1.0.0-preview Docker Compose配置
 # 支持前后端分离部署
 
@@ -39,6 +37,8 @@ services:
       # API配置
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
+      ALPHAGUARD_SYSTEM_MODE: "${ALPHAGUARD_SYSTEM_MODE:-SIM_AUTONOMOUS}"
+      ALPHAGUARD_LIVE_TRADING_ENABLED: "${ALPHAGUARD_LIVE_TRADING_ENABLED:-false}"
       # CORS配置
       CORS_ORIGINS: "http://localhost:3000,http://localhost:8080,http://localhost:5173"
     depends_on:
@@ -49,11 +49,101 @@ services:
     networks:
       - tradingagents-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # 旧 Redis 队列消费者；保持现有任务入口并暴露带 TTL 的心跳。
+  queue-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: tradingagents-backend:v1.0.0-preview
+    container_name: tradingagents-queue-worker
+    command: ["python", "app/worker.py"]
+    volumes:
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+      TZ: "Asia/Shanghai"
+      TRADINGAGENTS_LOG_LEVEL: "INFO"
+      TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
+      TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
+      TRADINGAGENTS_CACHE_TYPE: redis
+      DOCKER_CONTAINER: "true"
+      ALPHAGUARD_SYSTEM_MODE: "${ALPHAGUARD_SYSTEM_MODE:-SIM_AUTONOMOUS}"
+      ALPHAGUARD_LIVE_TRADING_ENABLED: "${ALPHAGUARD_LIVE_TRADING_ENABLED:-false}"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tradingagents-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # 现行分析 Worker；与 queue-worker 使用相同 fail-closed 安全配置。
+  analysis-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: tradingagents-backend:v1.0.0-preview
+    container_name: tradingagents-analysis-worker
+    command: ["python", "-m", "app.worker.analysis_worker"]
+    volumes:
+      - ./logs:/app/logs
+      - ./config:/app/config
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+      TZ: "Asia/Shanghai"
+      TRADINGAGENTS_LOG_LEVEL: "INFO"
+      TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
+      TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
+      TRADINGAGENTS_CACHE_TYPE: redis
+      DOCKER_CONTAINER: "true"
+      ALPHAGUARD_SYSTEM_MODE: "${ALPHAGUARD_SYSTEM_MODE:-SIM_AUTONOMOUS}"
+      ALPHAGUARD_LIVE_TRADING_ENABLED: "${ALPHAGUARD_LIVE_TRADING_ENABLED:-false}"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tradingagents-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -205,4 +295,3 @@ networks:
   tradingagents-network:
     driver: bridge
     name: tradingagents-network
-

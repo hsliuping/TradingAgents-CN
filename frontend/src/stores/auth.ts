@@ -3,6 +3,18 @@ import { useStorage } from '@vueuse/core'
 import { authApi } from '@/api/auth'
 import type { User, LoginForm, RegisterForm } from '@/types/auth'
 
+const safeAuthErrorForLog = (error: any) => ({
+  name: String(error?.name || 'Error'),
+  message: String(error?.message || 'authentication request failed')
+    .replace(/(bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
+    .replace(
+      /((?:api[_-]?key|password|secret|token)\s*[:=]\s*)[^\s,;]+/gi,
+      '$1[REDACTED]'
+    ),
+  code: error?.code ? String(error.code) : undefined,
+  status: error?.response?.status
+})
+
 export interface AuthState {
   // 认证状态
   isAuthenticated: boolean
@@ -33,7 +45,7 @@ export const useAuthStore = defineStore('auth', {
       if (!token || typeof token !== 'string') return false
       // 检查是否是mock token（开发时可能设置的测试token）
       if (token === 'mock-token' || token.startsWith('mock-')) {
-        console.warn('⚠️ 检测到mock token，将被清除:', token)
+        console.warn('⚠️ 检测到mock token，将被清除')
         return false
       }
       // JWT token应该有3个部分，用.分隔
@@ -198,9 +210,8 @@ export const useAuthStore = defineStore('auth', {
           // 设置认证信息
           this.setAuthInfo(access_token, refresh_token, user)
 
-          // 开源版admin用户拥有所有权限
-          this.permissions = ['*']
-          this.roles = ['admin']
+          this.permissions = user.is_admin ? ['*'] : []
+          this.roles = user.is_admin ? ['admin'] : ['user']
 
           // 同步用户偏好设置到 appStore
           this.syncUserPreferencesToAppStore()
@@ -216,7 +227,7 @@ export const useAuthStore = defineStore('auth', {
           return false
         }
       } catch (error: any) {
-        console.error('登录失败:', error)
+        console.error('登录失败:', safeAuthErrorForLog(error))
         // 不在这里显示错误消息，由调用方显示
         return false
       } finally {
@@ -237,7 +248,7 @@ export const useAuthStore = defineStore('auth', {
           return false
         }
       } catch (error: any) {
-        console.error('注册失败:', error)
+        console.error('注册失败:', safeAuthErrorForLog(error))
         ElMessage.error(error.message || '注册失败，请重试')
         return false
       }
@@ -249,7 +260,7 @@ export const useAuthStore = defineStore('auth', {
         // 调用登出API
         await authApi.logout()
       } catch (error) {
-        console.error('登出API调用失败:', error)
+        console.error('登出API调用失败:', safeAuthErrorForLog(error))
       } finally {
         // 无论API调用是否成功，都清除本地认证信息
         this.clearAuthInfo()
@@ -272,7 +283,6 @@ export const useAuthStore = defineStore('auth', {
 
         console.log('📝 Refresh token信息:', {
           length: this.refreshToken.length,
-          prefix: this.refreshToken.substring(0, 10),
           isValid: this.refreshToken.split('.').length === 3
         })
 
@@ -283,7 +293,7 @@ export const useAuthStore = defineStore('auth', {
         }
 
         const response = await authApi.refreshToken(this.refreshToken)
-        console.log('📨 刷新响应:', response)
+        console.log('📨 刷新响应已收到:', { success: response.success })
 
         if (response.success) {
           const { access_token, refresh_token } = response.data
@@ -295,7 +305,7 @@ export const useAuthStore = defineStore('auth', {
           throw new Error(response.message || 'Token刷新失败')
         }
       } catch (error: any) {
-        console.error('❌ Token刷新异常:', error)
+        console.error('❌ Token刷新异常:', safeAuthErrorForLog(error))
 
         // 如果是网络错误或服务器错误，不要立即清除认证信息
         if (error.code === 'NETWORK_ERROR' || error.response?.status >= 500) {
@@ -331,16 +341,16 @@ export const useAuthStore = defineStore('auth', {
           throw new Error(response.message || '获取用户信息失败')
         }
       } catch (error) {
-        console.error('❌ 获取用户信息失败:', error)
+        console.error('❌ 获取用户信息失败:', safeAuthErrorForLog(error))
         // 重新抛出错误，让上层处理
         throw error
       }
     },
     
-    // 开源版不需要权限检查，admin拥有所有权限
+    // 权限必须与后端用户记录一致；不能把普通用户提升为管理员。
     async fetchUserPermissions() {
-      this.permissions = ['*']
-      this.roles = ['admin']
+      this.permissions = this.user?.is_admin ? ['*'] : []
+      this.roles = this.user?.is_admin ? ['admin'] : ['user']
       return true
     },
     
@@ -362,7 +372,7 @@ export const useAuthStore = defineStore('auth', {
           return false
         }
       } catch (error: any) {
-        console.error('更新用户信息失败:', error)
+        console.error('更新用户信息失败:', safeAuthErrorForLog(error))
         ElMessage.error(error.message || '更新失败，请重试')
         return false
       }
@@ -423,7 +433,7 @@ export const useAuthStore = defineStore('auth', {
           return false
         }
       } catch (error: any) {
-        console.error('修改密码失败:', error)
+        console.error('修改密码失败:', safeAuthErrorForLog(error))
         ElMessage.error(error.message || '修改密码失败，请重试')
         return false
       }
@@ -459,7 +469,7 @@ export const useAuthStore = defineStore('auth', {
           }
         } catch (error) {
           const err = error as { code?: string; message?: string }
-          console.error('❌ 检查认证状态失败:', err)
+          console.error('❌ 检查认证状态失败:', safeAuthErrorForLog(err))
           // 如果是网络错误或超时，不清除认证信息，只是标记为未认证
           if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
             console.warn('⚠️ 网络超时，保留认证信息但标记为未认证状态')

@@ -845,4 +845,28 @@ ALPHAGUARD_INDEX_SPECS = {
         {"keys": [("event_type", 1), ("created_at", -1)], "name": "idx_exp_event_type"},
         {"keys": [("champion_slot_id", 1), ("created_at", -1)], "name": "idx_exp_event_champion"},
     ],
+    # PR-009 operational facts are append-only or state-controlled and never
+    # replace research, decision, paper, evaluation, or experiment facts.
+    "ag_ops_alerts": [
+        {"keys": [("alert_id", 1)], "name": "uniq_ops_alert_id", "unique": True},
+        {"keys": [("status", 1), ("severity", 1), ("last_seen_at", -1)], "name": "idx_ops_alert_status"},
+        {"keys": [("code", 1), ("source_object_id", 1)], "name": "idx_ops_alert_fingerprint"},
+    ],
+    "ag_ops_events": [
+        {"keys": [("event_id", 1)], "name": "uniq_ops_event_id", "unique": True},
+        {"keys": [("event_type", 1), ("created_at", -1)], "name": "idx_ops_event_type"},
+        {"keys": [("alert_id", 1), ("created_at", -1)], "name": "idx_ops_event_alert"},
+        {"keys": [("job_request_id", 1), ("created_at", -1)], "name": "idx_ops_event_job"},
+    ],
+    "ag_ops_check_runs": [
+        {"keys": [("check_run_id", 1)], "name": "uniq_ops_check_run", "unique": True},
+        {"keys": [("report_hash", 1)], "name": "idx_ops_check_report_hash"},
+        {"keys": [("created_at", -1)], "name": "idx_ops_check_created"},
+    ],
+    "ag_ops_job_requests": [
+        {"keys": [("job_request_id", 1)], "name": "uniq_ops_job_request", "unique": True},
+        {"keys": [("idempotency_key", 1)], "name": "uniq_ops_job_idempotency", "unique": True},
+        {"keys": [("status", 1), ("created_at", 1)], "name": "idx_ops_job_pending"},
+        {"keys": [("job_name", 1), ("created_at", -1)], "name": "idx_ops_job_name"},
+    ],
 }

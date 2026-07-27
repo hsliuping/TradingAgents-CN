@@ -30,6 +30,33 @@ export interface RequestConfig extends AxiosRequestConfig {
 const recentMessages = new Map<string, number>()
 const MESSAGE_THROTTLE_TIME = 3000 // 3秒内相同消息不重复显示
 
+const SENSITIVE_LOG_KEY = /authorization|api[_-]?key|password|secret|token|cookie|credential/i
+const sanitizeForLog = (value: any, depth = 0): any => {
+  if (value == null || typeof value !== 'object') {
+    return typeof value === 'string'
+      ? value.replace(
+          /(bearer\s+)[^\s,;]+|((?:api[_-]?key|password|secret|token)\s*[:=]\s*)[^\s,;]+/gi,
+          '$1$2[REDACTED]'
+        )
+      : value
+  }
+  if (depth >= 5) return '[TRUNCATED]'
+  if (Array.isArray(value)) return value.map(item => sanitizeForLog(item, depth + 1))
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      SENSITIVE_LOG_KEY.test(key) ? '[REDACTED]' : sanitizeForLog(item, depth + 1)
+    ])
+  )
+}
+const safeErrorForLog = (error: any) => ({
+  name: String(error?.name || 'Error'),
+  message: sanitizeForLog(String(error?.message || 'request failed')),
+  code: error?.code ? String(error.code) : undefined,
+  status: error?.response?.status,
+  requestId: error?.response?.headers?.['x-request-id']
+})
+
 // 401 错误处理标志（避免多个请求同时触发登录跳转）
 let isHandling401 = false
 
@@ -107,8 +134,7 @@ const createAxiosInstance = (): AxiosInstance => {
           console.log('🔐 已设置Authorization头:', {
             hasToken: !!token,
             tokenLength: token?.length || 0,
-            tokenPrefix: token?.substring(0, 20) || 'None',
-            authHeader: config.headers.Authorization?.substring(0, 30) || 'None'
+            authHeaderPresent: !!config.headers.Authorization
           })
         } else {
           console.log('⚠️ 未设置Authorization头:', {
@@ -151,22 +177,22 @@ const createAxiosInstance = (): AxiosInstance => {
           }
         }
       } catch (e) {
-        console.warn('端点兼容检查异常', e)
+        console.warn('端点兼容检查异常', safeErrorForLog(e))
       }
 
       console.log(`🚀 API请求: ${config.method?.toUpperCase()} ${config.url}`, {
         baseURL: config.baseURL,
         fullURL: `${config.baseURL}${config.url}`,
-        params: config.params,
-        data: config.data,
-        headers: config.headers,
+        params: sanitizeForLog(config.params),
+        data: sanitizeForLog(config.data),
+        headers: sanitizeForLog(config.headers),
         timeout: config.timeout
       })
 
       return config
     },
     (error) => {
-      console.error('❌ 请求拦截器错误:', error)
+      console.error('❌ 请求拦截器错误:', safeErrorForLog(error))
       return Promise.reject(error)
     }
   )
@@ -183,7 +209,10 @@ const createAxiosInstance = (): AxiosInstance => {
         appStore.setLoading(false)
       }
 
-      console.log(`✅ API响应: ${response.status} ${response.config.url}`, response.data)
+      console.log(
+        `✅ API响应: ${response.status} ${response.config.url}`,
+        sanitizeForLog(response.data)
+      )
 
       // 检查业务状态码
       const data = response.data as ApiResponse
@@ -222,13 +251,10 @@ const createAxiosInstance = (): AxiosInstance => {
       }
 
       console.error(`❌ API错误: ${error.response?.status} ${error.config?.url}`, {
-        error: error,
         message: error.message,
         code: error.code,
-        response: error.response,
-        request: error.request,
-        config: error.config,
-        stack: error.stack
+        responseData: sanitizeForLog(error.response?.data),
+        requestId: error.response?.headers?.['x-request-id']
       })
 
       // 处理HTTP状态码错误
@@ -263,7 +289,7 @@ const createAxiosInstance = (): AxiosInstance => {
                   console.log('❌ Token刷新失败')
                 }
               } catch (refreshError) {
-                console.error('❌ Token刷新异常:', refreshError)
+                console.error('❌ Token刷新异常:', safeErrorForLog(refreshError))
               }
             }
 
@@ -472,7 +498,7 @@ export const testApiConnection = async (): Promise<boolean> => {
     console.log('🔍 [API_TEST] 健康检查成功:', response)
     return true
   } catch (error: any) {
-    console.error('🔍 [API_TEST] 健康检查失败:', error)
+    console.error('🔍 [API_TEST] 健康检查失败:', safeErrorForLog(error))
 
     if (error.code === 'ECONNABORTED') {
       console.error('🔍 [API_TEST] 连接超时 - 后端服务可能未启动')

@@ -31,7 +31,10 @@ class AuthService:
         try:
             logger.debug(f"🔍 开始验证token")
             logger.debug(f"📝 Token长度: {len(token)}")
-            logger.debug(f"🔑 JWT密钥: {settings.JWT_SECRET[:10]}...")
+            logger.debug(
+                f"🔑 JWT密钥已配置: {bool(settings.JWT_SECRET)}, "
+                f"长度: {len(settings.JWT_SECRET)}"
+            )
             logger.debug(f"🔧 JWT算法: {settings.JWT_ALGORITHM}")
 
             payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])

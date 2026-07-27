@@ -93,6 +93,37 @@
 
 面向中文用户的**多智能体与大模型股票分析学习平台**。帮助你系统化学习如何使用多智能体交易框架与 AI 大模型进行合规的股票研究与策略实验，不提供实盘交易指令，平台定位为学习与研究用途。
 
+## AlphaGuard MVP
+
+本仓库在既有 FastAPI、Vue、MongoDB、Redis、任务系统和 LangGraph 架构上增量实现
+AlphaGuard。当前安全不变量为：
+
+```text
+system_mode=SIM_AUTONOMOUS
+live_trading_enabled=false
+```
+
+AlphaGuard 支持结构化双模型决策、证据快照、量化研究、Python Consensus 与硬风控、
+隔离的自动模拟交易、评价归因和受控 Champion/Challenger 实验。统一前端入口为
+`/alphaguard/overview`；旧 `/paper` 继续保留为人工即时模拟交易，两套账户与集合互不
+混用。系统不包含真实券商连接，也不提供实盘开关。
+
+安全启动与准备度：
+
+```bash
+make init-dry-run
+make readiness
+make smoke
+docker compose up -d --build
+```
+
+业务数据不足会明确返回 `NOT_READY`，不会伪装成 HOLD、可交易或实验优胜。详细操作见：
+
+- [AlphaGuard 运维手册](./docs/operations/ALPHAGUARD_RUNBOOK.md)
+- [AlphaGuard MVP 部署](./docs/operations/ALPHAGUARD_DEPLOYMENT.md)
+- [备份与恢复](./docs/operations/ALPHAGUARD_BACKUP_RESTORE.md)
+- [MVP 验收清单](./docs/operations/ALPHAGUARD_MVP_ACCEPTANCE.md)
+
 ## 🙏 致敬源项目
 
 感谢 [Tauric Research](https://github.com/TauricResearch) 团队创造的革命性多智能体交易框架 [TradingAgents](https://github.com/TauricResearch/TradingAgents)！

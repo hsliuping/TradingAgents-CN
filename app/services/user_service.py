@@ -138,10 +138,10 @@ class UserService:
             # 验证密码
             input_password_hash = self.hash_password(password)
             stored_password_hash = user_doc["hashed_password"]
-            logger.info(f"🔍 [authenticate_user] 密码哈希对比:")
-            logger.info(f"   输入密码哈希: {input_password_hash[:20]}...")
-            logger.info(f"   存储密码哈希: {stored_password_hash[:20]}...")
-            logger.info(f"   哈希匹配: {input_password_hash == stored_password_hash}")
+            logger.info(
+                "🔍 [authenticate_user] 密码哈希验证已执行，"
+                f"哈希匹配: {input_password_hash == stored_password_hash}"
+            )
 
             if not self.verify_password(password, user_doc["hashed_password"]):
                 logger.warning(f"❌ [authenticate_user] 密码错误: {username}")
@@ -340,7 +340,6 @@ class UserService:
             admin_doc["_id"] = result.inserted_id
             
             logger.info(f"✅ 管理员用户创建成功: {username}")
-            logger.info(f"   密码: {password}")
             logger.info("   ⚠️  请立即修改默认密码！")
             
             return User(**admin_doc)

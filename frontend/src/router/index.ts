@@ -360,6 +360,74 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/alphaguard',
+    name: 'AlphaGuard',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    redirect: '/alphaguard/overview',
+    meta: {
+      title: 'AlphaGuard',
+      icon: 'Lock',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'AlphaGuardShell',
+        component: () => import('@/views/AlphaGuard/AlphaGuardLayout.vue'),
+        redirect: '/alphaguard/overview',
+        meta: {
+          title: 'AlphaGuard',
+          requiresAuth: true
+        },
+        children: [
+          {
+            path: 'overview',
+            name: 'AlphaGuardOverview',
+            component: () => import('@/views/AlphaGuard/Overview.vue'),
+            meta: { title: 'AlphaGuard 总览', requiresAuth: true }
+          },
+          {
+            path: 'candidates',
+            name: 'AlphaGuardCandidates',
+            component: () => import('@/views/AlphaGuard/Candidates.vue'),
+            meta: { title: 'AlphaGuard 候选池', requiresAuth: true }
+          },
+          {
+            path: 'decisions',
+            name: 'AlphaGuardDecisions',
+            component: () => import('@/views/AlphaGuard/Decisions.vue'),
+            meta: { title: 'AlphaGuard 决策链', requiresAuth: true }
+          },
+          {
+            path: 'paper',
+            name: 'AlphaGuardPaper',
+            component: () => import('@/views/AlphaGuard/Paper.vue'),
+            meta: { title: 'AlphaGuard 自动模拟', requiresAuth: true }
+          },
+          {
+            path: 'evaluations',
+            name: 'AlphaGuardEvaluations',
+            component: () => import('@/views/AlphaGuard/Evaluations.vue'),
+            meta: { title: 'AlphaGuard 评价中心', requiresAuth: true }
+          },
+          {
+            path: 'experiments',
+            name: 'AlphaGuardExperiments',
+            component: () => import('@/views/AlphaGuard/Experiments.vue'),
+            meta: { title: 'AlphaGuard 实验室', requiresAuth: true }
+          },
+          {
+            path: 'operations',
+            name: 'AlphaGuardOperations',
+            component: () => import('@/views/AlphaGuard/Operations.vue'),
+            meta: { title: 'AlphaGuard 运维中心', requiresAuth: true }
+          }
+        ]
+      }
+    ]
+  },
+  {
     path: '/paper',
     name: 'PaperTrading',
     component: () => import('@/layouts/BasicLayout.vue'),

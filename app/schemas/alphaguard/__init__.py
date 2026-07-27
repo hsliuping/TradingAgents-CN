@@ -45,6 +45,14 @@ from .experiment import (
     ShadowRun,
     TimeSeriesSplitDefinition,
 )
+from .operations import (
+    DataReadinessStatus,
+    JobHealth,
+    OperationalAlert,
+    OperationsJobRequest,
+    ServiceHealth,
+    SystemReadinessReport,
+)
 
 __all__ = [
     "FactorDefinition",
@@ -86,4 +94,10 @@ __all__ = [
     "RollbackRecord",
     "ShadowRun",
     "TimeSeriesSplitDefinition",
+    "DataReadinessStatus",
+    "JobHealth",
+    "OperationalAlert",
+    "OperationsJobRequest",
+    "ServiceHealth",
+    "SystemReadinessReport",
 ]

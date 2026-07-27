@@ -111,7 +111,9 @@ class ConfigManager:
             # 对OpenAI密钥进行格式验证（始终启用）
             if provider.lower() == "openai" and api_key:
                 if not self.validate_openai_api_key_format(api_key):
-                    logger.warning(f"⚠️ OpenAI API密钥格式不正确，将被忽略: {api_key[:10]}...")
+                    logger.warning(
+                        f"⚠️ OpenAI API密钥格式不正确，将被忽略（长度: {len(api_key)}）"
+                    )
                     return ""
             return api_key
         return ""

@@ -1189,7 +1189,11 @@ class ConfigService:
             used_db_credentials = False
             used_env_credentials = False
 
-            logger.info(f"🔍 [TEST] Received API Key from config: {repr(api_key)} (type: {type(api_key).__name__}, length: {len(api_key) if api_key else 0})")
+            logger.info(
+                "🔍 [TEST] Received API Key metadata: "
+                f"present={bool(api_key)}, type={type(api_key).__name__}, "
+                f"length={len(api_key) if api_key else 0}"
+            )
 
             # 根据不同的数据源类型进行测试
             if ds_type == "tushare":
@@ -1209,8 +1213,10 @@ class ConfigService:
                     if db_config and db_config.api_key:
                         # 对数据库中的完整 API Key 进行相同的截断处理
                         truncated_db_key = self._truncate_api_key(db_config.api_key)
-                        logger.info(f"🔍 [TEST] Database API Key truncated: {truncated_db_key}")
-                        logger.info(f"🔍 [TEST] Received API Key: {api_key}")
+                        logger.info(
+                            "🔍 [TEST] Comparing submitted masked API Key "
+                            "with persisted credential"
+                        )
 
                         # 比较截断后的值
                         if api_key == truncated_db_key:
@@ -1227,8 +1233,8 @@ class ConfigService:
                                 "response_time": time.time() - start_time,
                                 "details": {
                                     "error": "truncated_key_mismatch",
-                                    "received": api_key,
-                                    "expected": truncated_db_key
+                                    "received_length": len(api_key),
+                                    "expected_length": len(truncated_db_key)
                                 }
                             }
                     else:
@@ -1502,8 +1508,10 @@ class ConfigService:
                     if db_config and db_config.api_key:
                         # 对数据库中的完整 API Key 进行相同的截断处理
                         truncated_db_key = self._truncate_api_key(db_config.api_key)
-                        logger.info(f"🔍 [TEST] Database API Key truncated: {truncated_db_key}")
-                        logger.info(f"🔍 [TEST] Received API Key: {api_key}")
+                        logger.info(
+                            "🔍 [TEST] Comparing submitted masked API Key "
+                            "with persisted credential"
+                        )
 
                         # 比较截断后的值
                         if api_key == truncated_db_key:
@@ -1520,8 +1528,8 @@ class ConfigService:
                                 "response_time": time.time() - start_time,
                                 "details": {
                                     "error": "truncated_key_mismatch",
-                                    "received": api_key,
-                                    "expected": truncated_db_key
+                                    "received_length": len(api_key),
+                                    "expected_length": len(truncated_db_key)
                                 }
                             }
                     else:
@@ -4741,7 +4749,11 @@ class ConfigService:
                 "temperature": 0.1
             }
             logger.info(f"🔍 [测试API] 完整请求体: model={test_model}, max_tokens=200, temperature=0.1")
-            logger.info(f"🔍 [测试API] 请求 Headers: Content-Type={headers.get('Content-Type')}, Auth=Bearer...{api_key[-8:] if api_key and len(api_key)>8 else 'EMPTY'}")
+            logger.info(
+                "🔍 [测试API] 请求 Headers: "
+                f"Content-Type={headers.get('Content-Type')}, "
+                f"Authorization配置={bool(api_key)}"
+            )
 
             response = requests.post(url, json=data, headers=headers, timeout=15)
             logger.info(f"🔍 [测试API] 响应状态码: {response.status_code}")
