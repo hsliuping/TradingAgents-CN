@@ -56,6 +56,14 @@ _IDENTITY_FIELDS = (
     "context_id",
     "order_id",
 )
+_COLON_PRESERVING_IDENTITIES = {
+    # Real-data calendar rows use stable identities such as CN:2026-07-27.
+    # Preserve the complete identifier instead of treating the date portion as
+    # the optional legacy reference-date suffix.
+    "trading_calendar",
+    # Sync job identities are also namespace-qualified with colons.
+    "sync_status",
+}
 _DATE_FIELDS = (
     "trade_date",
     "date",
@@ -131,8 +139,12 @@ class DataQualityGate:
                 if len(parts) < 2:
                     invalid.append(reference)
                     continue
-                collection_name = _REFERENCE_COLLECTIONS.get(parts[0])
-                identifier = parts[1]
+                reference_type = parts[0]
+                collection_name = _REFERENCE_COLLECTIONS.get(reference_type)
+                preserves_colons = reference_type in _COLON_PRESERVING_IDENTITIES
+                identifier = (
+                    ":".join(parts[1:]) if preserves_colons else parts[1]
+                )
                 if collection_name is None or not identifier:
                     invalid.append(reference)
                     continue
@@ -145,7 +157,7 @@ class DataQualityGate:
                 candidates = await db[collection_name].find(
                     {"$or": clauses}
                 ).to_list(length=None)
-                if len(parts) >= 3:
+                if len(parts) >= 3 and not preserves_colons:
                     reference_date = _as_datetime(":".join(parts[2:]))
                     if reference_date is not None:
                         candidates = [
@@ -163,7 +175,7 @@ class DataQualityGate:
                 document = candidates[0]
                 cleaned = dict(document)
                 cleaned["_reference"] = reference
-                if len(parts) >= 3:
+                if len(parts) >= 3 and not preserves_colons:
                     cleaned["_reference_date"] = ":".join(parts[2:])
                 resolved[category].append(cleaned)
         return resolved, invalid

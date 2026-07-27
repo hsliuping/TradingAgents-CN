@@ -11,6 +11,7 @@ from app.schemas.alphaguard.decision import (
 from app.services.alphaguard.execution_outbox_service import ExecutionOutboxService
 from app.services.alphaguard.paper_account_service import PaperAccountService
 from app.services.alphaguard.paper_storage import clean_document
+from app.services.alphaguard.paper_storage import mongo_date
 from app.services.alphaguard.paper_task_service import PaperTaskService
 from app.services.alphaguard.risk_policy_registry import RiskPolicyRegistry
 from tests.unit.alphaguard._fakes import FakeDB
@@ -160,7 +161,10 @@ async def test_risk_to_outbox_order_fill_saga_lot_snapshot_and_candidate():
     assert snapshot_count == 4
     account_snapshot = clean_document(
         await db["ag_paper_account_snapshots"].find_one(
-            {"account_id": account.account_id, "trade_date": date(2026, 7, 2)}
+            {
+                "account_id": account.account_id,
+                "trade_date": mongo_date(date(2026, 7, 2)),
+            }
         )
     )
     assert account_snapshot["valuation_complete"] is True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
 import re
@@ -16,6 +17,10 @@ def to_mongo_value(value: Any) -> Any:
         return to_mongo_value(value.model_dump(mode="python"))
     if isinstance(value, Decimal):
         return Decimal128(value)
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, time.min)
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, dict):
@@ -29,6 +34,12 @@ def to_mongo_value(value: Any) -> Any:
     if isinstance(value, (set, frozenset)):
         return [to_mongo_value(item) for item in sorted(value)]
     return value
+
+
+def mongo_date(value: date) -> datetime:
+    """Return the canonical BSON representation for a date-only identity."""
+
+    return datetime.combine(value, time.min)
 
 
 def from_mongo_value(value: Any) -> Any:

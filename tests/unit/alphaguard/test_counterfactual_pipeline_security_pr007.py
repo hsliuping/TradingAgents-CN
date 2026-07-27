@@ -19,7 +19,7 @@ from app.services.alphaguard.execution_market_snapshot_service import (
 )
 from app.services.alphaguard.matching_engine import MatchingEngine
 from app.services.alphaguard.paper_policy_registry import PaperPolicyRegistry
-from app.services.alphaguard.paper_storage import clean_document
+from app.services.alphaguard.paper_storage import clean_document, mongo_date
 from tests.unit.alphaguard._fakes import FakeDB
 from tests.unit.alphaguard.pr006_helpers import daily_record, setup_paper
 from tests.unit.alphaguard.pr007_helpers import (
@@ -178,7 +178,7 @@ async def test_shadow_uses_formal_matching_function_and_supports_multi_day_parti
     formal_order = PaperOrder.model_validate(shadow.hypothetical_order)
     raw_snapshot = clean_document(
         await db["ag_execution_market_snapshots"].find_one(
-            {"trade_date": date(2026, 7, 2)}
+            {"trade_date": mongo_date(date(2026, 7, 2))}
         )
     )
     formal_snapshot = ExecutionMarketSnapshot.model_validate(raw_snapshot)

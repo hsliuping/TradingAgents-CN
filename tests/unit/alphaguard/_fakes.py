@@ -19,6 +19,18 @@ def _matches(document, query):
         if isinstance(expected, dict):
             if "$gt" in expected and not (actual is not None and actual > expected["$gt"]):
                 return False
+            if "$gte" in expected and not (
+                actual is not None and actual >= expected["$gte"]
+            ):
+                return False
+            if "$lt" in expected and not (
+                actual is not None and actual < expected["$lt"]
+            ):
+                return False
+            if "$lte" in expected and not (
+                actual is not None and actual <= expected["$lte"]
+            ):
+                return False
             if "$nin" in expected and actual in expected["$nin"]:
                 return False
             if "$in" in expected and actual not in expected["$in"]:
@@ -167,9 +179,14 @@ class Collection:
     def list_indexes(self):
         return Cursor(self.indexes)
 
-    async def create_index(self, keys, name, unique=False):
+    async def create_index(self, keys, name, unique=False, **options):
         self.indexes.append(
-            {"name": name, "key": dict(keys), "unique": bool(unique)}
+            {
+                "name": name,
+                "key": dict(keys),
+                "unique": bool(unique),
+                **options,
+            }
         )
         return name
 

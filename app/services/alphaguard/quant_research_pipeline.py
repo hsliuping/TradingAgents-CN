@@ -16,6 +16,7 @@ from .factor_aggregation import aggregate_factors
 from .factor_engine import FactorEngine
 from .factor_registry import DefinitionConflictError, FactorRegistry
 from .market_regime_engine import MarketRegimeEngine
+from .paper_storage import to_mongo_value
 from .quant_audit_service import QuantAuditService
 from .snapshot_data_resolver import SnapshotDataResolver
 from .strategy_engine import StrategyEngine
@@ -226,7 +227,7 @@ class QuantResearchPipeline:
                 raise DefinitionConflictError("immutable QuantTradeProposal conflict")
             return stored
         await self.db["ag_quant_proposals"].insert_one(
-            proposal.model_dump(mode="python")
+            to_mongo_value(proposal.model_dump(mode="python"))
         )
         await self.audit.record(
             "QUANT_PROPOSAL_CREATED",

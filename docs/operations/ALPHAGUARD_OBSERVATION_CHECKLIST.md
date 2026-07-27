@@ -140,3 +140,49 @@ evidence_links_or_ids:
 - 数据、账户、候选、Snapshot、QuantProposal、Order、Fill 和 EvaluationSubject 当前均
   未伪造或强制创建。
 - 当前阻断项详见 `ALPHAGUARD_DATA_BRINGUP.md` 和执行状态文档。
+
+## Real Data Activation 观察（2026-07-27 13:25 CST）
+
+- Worker 真实心跳：queue TTL=12、analysis TTL=37，两个容器均 healthy；无虚假心跳。
+- `TRADING_CALENDAR=READY`：2557 条，2020-01-01 至 2026-12-31；跨周末
+  2026-07-24 → 2026-07-27 的 T+1 已验证。
+- 五个用户指定候选的 RAW/QFQ 均为 861 个交易日，最近完整日为 2026-07-24；
+  沪深 300 同范围 861 根。
+- 财务 66 条、新闻 50 条、公告 2700 条，所有行具有真实时间字段、稳定
+  `ref_id`、版本和内容 hash；重复引用为 0。
+- 五个标的 2026-07-24 DataQuality 预检查均 PASS。
+- `MARKET_CONTEXT=NOT_READY`；行业为 `PARTIAL/CURRENT_ONLY`，不得解释为完整历史。
+- 管理员 dry-run 为 `WOULD_CREATE`，尚未进行隐藏密码 execute；因此自动账户、候选、
+  Snapshot、QuantProposal 和 EvaluationSubject 仍为 0。
+- Champion 在 2026-07-24 正确阻断，在 2026-07-27 可解析 5/5；当前盘中不创建
+  2026-07-27 日线快照。
+- Outbox、Order、Fill、Reservation、Ledger、Settlement 均为 0；没有重复订单或
+  资产变化。
+- 安全配置仍为 `SIM_AUTONOMOUS / live_trading_enabled=false`。
+
+## Real Data Activation 完成观察（2026-07-27 20:50 CST）
+
+- queue-worker 与 analysis-worker 容器均 healthy；两个 Redis 心跳均持续推进，analysis
+  心跳跨 35 秒观测窗口发生更新。
+- 管理员 `alphaguard_admin` 已通过现有认证体系创建并成功登录；密码只保存在本机
+  Keychain。
+- PAPER_QUANT、PAPER_NORMAL、PAPER_TOP_CONFIRMED 各 100 万元，冻结为 0，
+  无仓位/订单/成交/预留/账本，三个 DailyAccountSnapshot 均完整，现金守恒。
+- PAPER_CHALLENGER 未创建、未激活。
+- 五个指定候选均为 USER_SELECTED/WATCHING，DataQuality 预检 5/5 PASS。
+- 300750 的真实 Snapshot
+  `8096af28-88aa-4eb1-b51e-dc6b3852debc` 哈希验证通过；共锁定 2207 个证据引用和
+  5 个 Champion 版本。
+- 21 个 FactorResult 已保存；市场环境为空使 Regime 明确
+  `INSUFFICIENT_DATA`，未默认 `RANGE_WEAK`。
+- 两个 QuantProposal 分别为 REJECTED/NO_POSITION 和
+  INSUFFICIENT_DATA/REGIME_INSUFFICIENT_DATA；未调用模型或订单链。
+- 2 个 EvaluationSubject、8 个 PENDING HorizonLabel 已登记，无未来标签计算。
+- 真实量化和评价链重复运行后 Factor/Regime/Proposal/Subject 计数不变，评价对象
+  `0 created / 2 reused`。
+- Outbox、Intent、Order、Fill 均为 0；无重复订单或资产不守恒。
+- Operations：CODE_COMPLETE=true、RUNTIME_READY=true、PAPER_READY=true；
+  DATA_READY=false（MARKET_CONTEXT、历史行业）、EVALUATION_READY=false（标签未成熟）。
+- 三个启动入口在 `live=true` 时均 fail-closed；未修改任何生产交易参数或版本。
+- AlphaGuard 精确回归 441 passed；全量收集仍是既有 15 错误，前端仍是既有 34 个
+  DefaultRow TS2345，没有新增错误类别。

@@ -18,6 +18,7 @@ from app.services.alphaguard.paper_execution_service import PaperExecutionServic
 from app.services.alphaguard.paper_order_service import PaperOrderService
 from app.services.alphaguard.paper_storage import (
     clean_document,
+    mongo_date,
     model_document,
     safe_error_message,
 )
@@ -132,7 +133,7 @@ class PaperTaskService:
                     {
                         "symbol": order.symbol,
                         "market": "CN",
-                        "trade_date": trade_date,
+                        "trade_date": mongo_date(trade_date),
                     }
                 )
             )

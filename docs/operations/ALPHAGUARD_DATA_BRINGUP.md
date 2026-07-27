@@ -11,30 +11,34 @@ create-only 或幂等，必须保留来源、截止时间和版本，不能用�
 
 ## 2. 2026-07-27 真实基线
 
-数据库为 `tradingagentscn_v0_banana`。当前 `stock_basic_info=5533`，它只证明股票
-基础列表存在，不是决策证据。以下 AlphaGuard 数据集合均为 0：
+数据库为 `tradingagentscn_v0_banana`。`stock_basic_info=5533`，用户明确选择：
+`600519`、`601318`、`000333`、`002594`、`300750`。2026-07-27 已使用
+BaoStock 00.9.30 和 AKShare 1.18.78 完成受控版本化同步：
 
 | 数据项 | 当前来源能力 | 目标存储 | 时间字段 | 版本要求 | 当前覆盖 | 快照可稳定引用 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 交易日历 | AKShare `tool_trade_date_hist_sina` 只读探测成功 | `trading_calendar` | `session_date` / `trade_date` | `calendar_version`、来源哈希、`published_at` | 持久化 0；探测范围 1990-12-19 至 2026-12-31 | 否 |
-| 原始日线 | AKShare/现有历史同步器；本次远端连接被关闭 | `stock_daily_quotes` | `trade_date` | 原始模式、来源版本、批次哈希 | 0 标的、0 记录 | 否 |
-| QFQ 日线 | BaoStock 只读 `adjustflag=2` 探测成功；现有保存器未写显式 QFQ 合约 | `stock_daily_quotes` | `trade_date` | `price_adjustment_mode=QFQ`、`price_data_version`、调整后 OHLC、稳定 `data_ref` | 0 标的、0 记录 | 否 |
-| 沪深 300 | BaoStock 只读探测成功；AKShare 本次连接失败 | `stock_daily_quotes` | `trade_date` | 与标的一致的原始/QFQ版本 | 持久化 0；只读探测得到 2026-07-01 至 2026-07-24 共 18 根日线 | 否 |
+| 交易日历 | AKShare，BaoStock 作为合法备用 | `trading_calendar` | `session_date`、`as_of` | manifest SHA-256、逐行内容 hash | 2557 条，2020-01-01 至 2026-12-31 | 是 |
+| 原始日线 | BaoStock `adjustflag=3` | `stock_daily_quotes` | `trade_date`、`timestamp` | RAW 版本、来源响应 hash | 5 标的各 862 根，2023-01-03 至 2026-07-27 | 是 |
+| QFQ 日线 | BaoStock `adjustflag=2` | `stock_daily_quotes` | `trade_date`、`timestamp` | `price_adjustment_mode=QFQ`、调整后 OHLC、稳定 `data_ref` | 5 标的各 862 根，与 RAW 日期完全重合 | 是 |
+| 沪深 300 | BaoStock `sh.000300` | `stock_daily_quotes` | `trade_date`、`timestamp` | `INDEX_UNADJUSTED_EQUIVALENT`、稳定版本 | 862 根，2023-01-03 至 2026-07-27 | 是 |
 | 市场环境 | 当前无真实生产器 | `ag_market_contexts` | `trade_date`、`as_of` | 市场环境规则版本、输入哈希 | 0 | 否 |
-| 财务数据 | 现有 Tushare/AKShare/BaoStock 同步入口 | `stock_financial_data` | `report_period`、真实披露日 | 数据源版本、披露版本、输入哈希 | 0 标的、0 记录 | 否 |
-| 财务披露日期 | Tushare适配字段较完整；当前 token 校验失败 | 随财务文档 | `f_ann_date` / `ann_date` / `publish_date` | 不允许用报告期或抓取时间代替 | 0 | 否 |
-| 新闻 | 现有 AKShare/Tushare 入口；无自选标的可同步 | `stock_news` | `publish_time` | 来源、抓取批次、内容哈希 | 0 | 否 |
-| 公告 | 当前无已验证的独立生产链 | `stock_announcements` | `announcement_time` | 公告 ID、来源、内容哈希 | 0 | 否 |
-| 行业历史映射 | `stock_basic_info.industry` 只有当前值，不能代表历史 | `stock_industry_history` | `effective_from` / `effective_to` | 分类体系和映射版本 | 0 | 否 |
+| 财务数据 | BaoStock profit data | `stock_financial_data` | `report_period`、`published_at` | 来源版本、披露身份、内容 hash | 每标的 13–14 期，共 66 条 | 是 |
+| 财务披露日期 | BaoStock `pubDate` | 随财务文档 | `f_ann_date` / `ann_date` / `published_at` | 不用报告期或抓取时间代替 | 66/66 有实际披露日 | 是 |
+| 新闻 | AKShare `stock_news_em` | `stock_news` | `publish_time`、`collected_at` | 来源 ID、内容 hash | 每标的 10–12 条，共 53 条 | 是 |
+| 公告 | AKShare CNInfo disclosure | `stock_announcements` | `announcement_time`、`collected_at` | CNInfo ID/内容 hash | 每标的 297–722 条，共 2716 条 | 是 |
+| 行业历史映射 | BaoStock 当前 CSRC 分类 | `stock_industry_history` | `effective_from` / `effective_to` | 分类体系和映射版本 | 5 条，均为 2026-07-27 `CURRENT_ONLY` | 仅当日后可引用 |
 
 额外状态：
 
-- Tushare 当前 token 无效，不能作为可用源。
-- AKShare 交易日历接口可达；股票和指数日线接口本次返回远端断开，必须按失败处理。
-- BaoStock 可登录且可读取 QFQ 日线，但现有 `HistoricalDataService` 只保存普通
-  OHLC/`adjustflag`，未满足 `AdjustedPriceResolver` 的显式版本合约。禁止直接把这些
-  行宣称为 AlphaGuard QFQ。
-- `ag_evidence_snapshots`、`ag_quant_proposals`、`ag_eval_subjects` 均为 0。
+- Tushare 当前 token 无效，未使用。
+- AKShare 某些行情接口仍会被远端断开，因此价格只使用已验证 BaoStock 接口；
+  AKShare 只负责已验证的日历、新闻和 CNInfo 公告能力。
+- `scripts/sync_alphaguard_real_data.py` 默认 dry-run，候选域必须逐个传入用户指定
+  `--symbol`，不会抓取或写入全市场候选。
+- 所有 7150 条候选业务记录（不含复用的沪深 300）和 2557 条日历记录均具有
+  `ref_id`、`data_version`、`content_hash` 和确定时间字段；重复 `ref_id=0`。
+- 已创建 1 个真实 EvidenceSnapshot、21 个 FactorResult、1 个 RegimeResult、
+  2 个 QuantProposal、2 个 EvaluationSubject 和 8 个 PENDING HorizonLabel。
 
 ## 3. 最低数据范围
 
@@ -72,8 +76,8 @@ create-only 或幂等，必须保留来源、截止时间和版本，不能用�
 - 财务按披露版本保存，修订报表不能覆盖旧披露版本。
 - 新闻和公告使用来源 ID 或规范化内容哈希去重，保存真实发布时间。
 - 交易日历保存其发布/抓取截止时间；不能用自然日 `+1` 计算 T+1。
-- 当前历史日线唯一索引未包含复权模式和数据版本；在该存储契约补齐并测试前，QFQ
-  同步保持 NOT_READY。
+- 真实激活行使用 sparse 唯一 `ref_id`；旧历史行不被覆盖。AdjustedPriceResolver
+  只接受显式 QFQ 版本，混合版本继续 fail-closed。
 
 ## 6. 数据质量规则
 
@@ -110,6 +114,8 @@ create-only 或幂等，必须保留来源、截止时间和版本，不能用�
 ```bash
 .venv/bin/python scripts/alphaguard_readiness_report.py --json
 .venv/bin/python scripts/verify_champion_assignments.py
+.venv/bin/python scripts/sync_alphaguard_real_data.py --domain TRADING_CALENDAR --start 2020-01-01 --end 2026-12-31
+.venv/bin/python scripts/sync_alphaguard_real_data.py --domain CANDIDATE_REAL_DATA --start 2023-01-01 --end 2026-07-24 --symbol 600519 --symbol 601318 --symbol 000333 --symbol 002594 --symbol 300750
 .venv/bin/python scripts/init_alphaguard_paper_indexes.py
 curl -fsS http://127.0.0.1:8000/health/ready
 docker compose ps
@@ -124,12 +130,33 @@ git diff --check
 
 ## 10. 当前不支持或尚未就绪
 
-- 版本化交易日历持久化任务尚未注册。
-- 显式版本化 QFQ 写入契约尚未接入现有 HistoricalDataService。
-- 沪深 300、市场环境和历史行业映射尚无通过完整性验证的生产同步器。
-- 公告尚无独立且稳定的持久化生产链。
-- Tushare 认证不可用；AKShare 日线端点本次不可用。
-- 没有管理员用户，也没有用户明确选择的 3～5 个候选代码。
+- 市场环境仍为 0，Regime 必须返回 `INSUFFICIENT_DATA`，不得默认
+  `RANGE_WEAK`。
+- 行业只有 2026-07-27 当前映射；Operations 将其报告为 `PARTIAL /
+  INDUSTRY_HISTORY_CURRENT_ONLY`，不得用于之前日期。
+- 本地管理员和三个 MVP 自动账户已按现有认证/账户规则初始化；PAPER_CHALLENGER
+  保持 0。
+- 最近完整价格日为 2026-07-27；Champion 生效日已由持久化日历确认，首个正式快照
+  已创建并通过不可变哈希回读验证。
+- Tushare 认证不可用；AKShare 行情端点不作为当前价格源。
 
-因此当前 `DATA_READY=false`。上述事实不得通过手工改状态、测试 fixture 或伪造引用
-变为 true。
+因此当前 `DATA_READY=false`、`PAPER_READY=true`、`EVALUATION_READY=false`。
+这三个值只能随真实对象和真实运行证据变化，不能手工修改。
+
+## 11. 首次真实激活对象
+
+```text
+admin user_id=6a6747f8bc01c5e4b2be6a45
+candidate count=5
+snapshot_id=8096af28-88aa-4eb1-b51e-dc6b3852debc
+snapshot hash verified=true
+FactorResult=21
+Regime=INSUFFICIENT_DATA / missing:market_context
+QuantProposal=2 / REJECTED + INSUFFICIENT_DATA
+EvaluationSubject=2
+HorizonLabel=8 PENDING
+Outbox=Intent=Order=Fill=0
+```
+
+这次真实链验证了缺少市场环境时 fail-closed；后续数据准备应补齐版本化
+`ag_market_contexts` 和历史行业映射，而不是修改 Regime 或策略阈值。

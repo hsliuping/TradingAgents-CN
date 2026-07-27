@@ -12,7 +12,11 @@ from app.services.alphaguard.paper_calendar_service import (
     PaperTradingCalendarService,
     TradingCalendarUnavailable,
 )
-from app.services.alphaguard.paper_storage import model_document, safe_error_message
+from app.services.alphaguard.paper_storage import (
+    model_document,
+    mongo_date,
+    safe_error_message,
+)
 from app.services.alphaguard.paper_task_service import PaperTaskService
 from scripts.init_alphaguard_paper_indexes import PAPER_COLLECTIONS
 from tests.unit.alphaguard._fakes import FakeDB
@@ -215,6 +219,13 @@ async def test_daily_snapshot_marks_missing_prices_instead_of_silent_zero():
     )
     assert snapshot.valuation_complete is False
     assert snapshot.missing_price_symbols == ["600519"]
+    stored = await db["ag_paper_account_snapshots"].find_one(
+        {
+            "account_id": account.account_id,
+            "trade_date": mongo_date(date(2026, 7, 2)),
+        }
+    )
+    assert isinstance(stored["trade_date"], datetime)
 
 
 def test_retry_error_redacts_credentials():

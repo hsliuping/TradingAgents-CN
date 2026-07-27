@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
+from app.services.alphaguard.paper_storage import model_document
 from tradingagents.alphaguard.evaluation_schemas import EvaluationEvent
 
 
@@ -27,5 +28,5 @@ class EvaluationAuditService:
             created_at=datetime.utcnow(),
             **{key: value for key, value in identity.items() if key in allowed},
         )
-        await self.collection.insert_one(event.model_dump(mode="python"))
+        await self.collection.insert_one(model_document(event))
         return event

@@ -11,6 +11,7 @@ from app.services.alphaguard.paper_audit_service import PaperAuditService
 from app.services.alphaguard.paper_policy_registry import PaperPolicyRegistry
 from app.services.alphaguard.paper_storage import (
     clean_document,
+    mongo_date,
     model_document,
 )
 from tradingagents.alphaguard.paper_schemas import (
@@ -303,9 +304,10 @@ class PaperAccountService:
         *,
         now: datetime | None = None,
     ) -> DailyAccountSnapshot:
+        trade_date_value = mongo_date(trade_date)
         existing = clean_document(
             await self.snapshots.find_one(
-                {"account_id": account_id, "trade_date": trade_date}
+                {"account_id": account_id, "trade_date": trade_date_value}
             )
         )
         if existing:
@@ -328,7 +330,7 @@ class PaperAccountService:
                     {
                         "symbol": position.symbol,
                         "market": "CN",
-                        "trade_date": trade_date,
+                        "trade_date": trade_date_value,
                     }
                 )
             )

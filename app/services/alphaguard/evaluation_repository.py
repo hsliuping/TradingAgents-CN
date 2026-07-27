@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.models.alphaguard.evaluation_collections import EVALUATION_COLLECTIONS
-from app.services.alphaguard.paper_storage import clean_document
+from app.services.alphaguard.paper_storage import clean_document, model_document
 from pydantic import BaseModel
 
 
@@ -58,7 +58,7 @@ class EvaluationRepository:
                     f"immutable {name} identity has conflicting content"
                 )
             return type(model).model_validate(existing), False
-        await collection.insert_one(model.model_dump(mode="python"))
+        await collection.insert_one(model_document(model))
         return model, True
 
     async def append_override(self, model: BaseModel) -> BaseModel:
@@ -66,7 +66,7 @@ class EvaluationRepository:
         existing = await collection.find_one({"override_id": model.override_id})
         if existing is not None:
             raise EvaluationIntegrityConflict("AttributionOverride is append-only")
-        await collection.insert_one(model.model_dump(mode="python"))
+        await collection.insert_one(model_document(model))
         return model
 
     async def save_horizon_label(self, model: BaseModel) -> tuple[BaseModel, bool]:
@@ -79,7 +79,7 @@ class EvaluationRepository:
         collection = self.db[self._collection("horizon_labels")]
         existing = clean_document(await collection.find_one(identity))
         if existing is None:
-            await collection.insert_one(model.model_dump(mode="python"))
+            await collection.insert_one(model_document(model))
             return model, True
         stored = type(model).model_validate(existing)
         if stored.status == "PENDING" and model.status != "PENDING":
@@ -88,7 +88,7 @@ class EvaluationRepository:
             # immutable thereafter.
             await collection.replace_one(
                 identity,
-                model.model_dump(mode="python"),
+                model_document(model),
             )
             return model, True
         if stored.input_hash != model.input_hash:
@@ -106,11 +106,11 @@ class EvaluationRepository:
         collection = self.db[self._collection("counterfactuals")]
         existing = clean_document(await collection.find_one(identity))
         if existing is None:
-            await collection.insert_one(model.model_dump(mode="python"))
+            await collection.insert_one(model_document(model))
             return model, True
         stored = type(model).model_validate(existing)
         if stored.status == "PENDING" and model.status != "PENDING":
-            await collection.replace_one(identity, model.model_dump(mode="python"))
+            await collection.replace_one(identity, model_document(model))
             return model, True
         if stored.input_hash != model.input_hash:
             raise EvaluationIntegrityConflict(
@@ -126,11 +126,11 @@ class EvaluationRepository:
         collection = self.db[self._collection("attributions")]
         existing = clean_document(await collection.find_one(identity))
         if existing is None:
-            await collection.insert_one(model.model_dump(mode="python"))
+            await collection.insert_one(model_document(model))
             return model, True
         stored = type(model).model_validate(existing)
         if stored.status == "PENDING_HORIZON" and model.status != "PENDING_HORIZON":
-            await collection.replace_one(identity, model.model_dump(mode="python"))
+            await collection.replace_one(identity, model_document(model))
             return model, True
         if stored.input_hash != model.input_hash:
             raise EvaluationIntegrityConflict(

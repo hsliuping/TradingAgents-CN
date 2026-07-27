@@ -8,7 +8,11 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from app.services.alphaguard.paper_audit_service import PaperAuditService
-from app.services.alphaguard.paper_storage import clean_document, model_document
+from app.services.alphaguard.paper_storage import (
+    clean_document,
+    model_document,
+    mongo_date,
+)
 from tradingagents.alphaguard.instruments import normalize_instrument
 from tradingagents.alphaguard.paper_schemas import (
     ExecutionMarketSnapshot,
@@ -88,7 +92,9 @@ class ExecutionMarketSnapshotService:
         source_document = await self.db["stock_daily_quotes"].find_one(
             {
                 "$or": [{"symbol": symbol}, {"code": symbol}],
-                "trade_date": trade_date.isoformat(),
+                "trade_date": {
+                    "$in": [mongo_date(trade_date), trade_date.isoformat()]
+                },
                 "period": "daily",
             },
             sort=[("updated_at", -1)],
@@ -196,8 +202,8 @@ class ExecutionMarketSnapshotService:
             "low": low,
             "close": close,
             "prev_close": (
-                Decimal(str(record["pre_close"]))
-                if record.get("pre_close") is not None
+                Decimal(str(record.get("pre_close") or record.get("prev_close")))
+                if (record.get("pre_close") or record.get("prev_close")) is not None
                 else None
             ),
             "volume": volume,
@@ -228,7 +234,7 @@ class ExecutionMarketSnapshotService:
         identity = {
             "symbol": symbol,
             "market": "CN",
-            "trade_date": trade_date,
+            "trade_date": mongo_date(trade_date),
             "data_version": data_version,
         }
         existing = clean_document(await self.collection.find_one(identity))

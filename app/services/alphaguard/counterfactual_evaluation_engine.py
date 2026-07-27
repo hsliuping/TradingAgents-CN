@@ -12,7 +12,7 @@ from app.services.alphaguard.evaluation_repository import EvaluationRepository
 from app.services.alphaguard.fee_engine import FeeEngine
 from app.services.alphaguard.matching_engine import MatchingEngine
 from app.services.alphaguard.paper_policy_registry import PaperPolicyRegistry
-from app.services.alphaguard.paper_storage import clean_document
+from app.services.alphaguard.paper_storage import clean_document, mongo_date
 from tradingagents.alphaguard.evaluation_schemas import (
     CounterfactualEvaluation,
     evaluation_hash,
@@ -178,12 +178,17 @@ class CounterfactualEvaluationEngine:
         raw_snapshots = await self.db["ag_execution_market_snapshots"].find(
             {"symbol": subject.symbol, "market": "CN"}
         ).to_list(length=None)
-        snapshots = [
-            ExecutionMarketSnapshot.model_validate(clean_document(item))
-            for item in raw_snapshots
-            if subject.decision_trade_date < item.get("trade_date")
-            <= primary.horizon_end_date
-        ]
+        snapshots = []
+        for item in raw_snapshots:
+            snapshot = ExecutionMarketSnapshot.model_validate(
+                clean_document(item)
+            )
+            if (
+                subject.decision_trade_date
+                < snapshot.trade_date
+                <= primary.horizon_end_date
+            ):
+                snapshots.append(snapshot)
         snapshots.sort(key=lambda item: item.trade_date)
         if (
             not snapshots
@@ -428,7 +433,12 @@ class CounterfactualEvaluationEngine:
                 {
                     "symbol": subject.symbol,
                     "market": subject.market,
-                    "trade_date": primary.horizon_end_date,
+                    "trade_date": {
+                        "$in": [
+                            mongo_date(primary.horizon_end_date),
+                            primary.horizon_end_date.isoformat(),
+                        ]
+                    },
                 }
             )
         )

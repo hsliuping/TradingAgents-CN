@@ -192,6 +192,26 @@ async def test_data_readiness_is_fail_closed_and_integrity_detects_negatives():
     assert integrity["status"] == "FAIL"
 
 
+@pytest.mark.asyncio
+async def test_current_only_industry_mapping_is_not_reported_as_history_ready():
+    db = FakeDB()
+    await db["stock_industry_history"].insert_one(
+        {
+            "symbol": "600519",
+            "effective_from": datetime(2026, 7, 27),
+            "history_coverage_status": "CURRENT_ONLY",
+        }
+    )
+    statuses = await AlphaGuardOperationsService(db).data_readiness(
+        now=datetime(2026, 7, 27, 9)
+    )
+    industry = next(
+        item for item in statuses if item.component == "INDUSTRY_HISTORY"
+    )
+    assert industry.status == "PARTIAL"
+    assert industry.blocking_reasons == ["INDUSTRY_HISTORY_CURRENT_ONLY"]
+
+
 def test_operations_api_write_handlers_require_admin_and_expose_no_arbitrary_write():
     routes = {
         (method, route.path)

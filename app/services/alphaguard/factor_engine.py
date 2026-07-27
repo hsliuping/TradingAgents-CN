@@ -11,6 +11,7 @@ from uuid import NAMESPACE_URL, uuid5
 from app.schemas.alphaguard import FactorDefinition, FactorResult
 
 from .factor_registry import DefinitionConflictError, builtin_factor_definitions
+from .paper_storage import to_mongo_value
 from .quant_audit_service import QuantAuditService
 from .quant_config import sha256_value
 from .snapshot_data_resolver import ResolvedSnapshotData
@@ -420,7 +421,9 @@ class FactorEngine:
                 details={"error_type": type(exc).__name__},
             )
             raise
-        await self.db["ag_factor_results"].insert_one(result.model_dump(mode="python"))
+        await self.db["ag_factor_results"].insert_one(
+            to_mongo_value(result.model_dump(mode="python"))
+        )
         await self.audit.record(
             "FACTOR_CALCULATED",
             snapshot_id=data.snapshot.snapshot_id,

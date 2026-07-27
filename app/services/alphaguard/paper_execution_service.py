@@ -11,7 +11,11 @@ from app.services.alphaguard.matching_engine import MatchingEngine
 from app.services.alphaguard.paper_audit_service import PaperAuditService
 from app.services.alphaguard.paper_order_service import PaperOrderService
 from app.services.alphaguard.paper_policy_registry import PaperPolicyRegistry
-from app.services.alphaguard.paper_storage import clean_document, model_document
+from app.services.alphaguard.paper_storage import (
+    clean_document,
+    model_document,
+    mongo_date,
+)
 from tradingagents.alphaguard.paper_schemas import (
     ExecutionMarketSnapshot,
     PAPER_SCHEMA_VERSION,
@@ -49,7 +53,10 @@ class PaperExecutionService:
         snapshot = ExecutionMarketSnapshot.model_validate(raw_snapshot)
         existing = clean_document(
             await self.fills.find_one(
-                {"order_id": order_id, "trade_date": snapshot.trade_date}
+                {
+                    "order_id": order_id,
+                    "trade_date": mongo_date(snapshot.trade_date),
+                }
             )
         )
         if existing:

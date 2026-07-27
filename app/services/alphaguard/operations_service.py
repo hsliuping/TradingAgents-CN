@@ -348,7 +348,6 @@ class AlphaGuardOperationsService:
             ("NEWS_DATA", ("stock_news", "news_data"), ["SNAPSHOT"], "NEWS_DATA_MISSING"),
             ("ANNOUNCEMENT_DATA", ("stock_announcements", "announcements"), ["SNAPSHOT"], "ANNOUNCEMENT_DATA_MISSING"),
             ("MARKET_CONTEXT", ("ag_market_contexts",), ["REGIME"], "MARKET_CONTEXT_MISSING"),
-            ("INDUSTRY_HISTORY", ("industry_history", "stock_industry_history"), ["ATTRIBUTION", "INDUSTRY_EXPOSURE"], "INDUSTRY_HISTORY_MISSING"),
         ):
             statuses.append(
                 await self._collection_readiness(
@@ -361,6 +360,7 @@ class AlphaGuardOperationsService:
                     empty_reason=reason,
                 )
             )
+        statuses.append(await self._industry_readiness(now))
         statuses.append(await self._model_readiness(now))
         statuses.append(await self._champion_readiness(now))
         evaluation_count = await _count(self.db["ag_eval_subjects"])
@@ -410,6 +410,61 @@ class AlphaGuardOperationsService:
             )
         )
         return statuses
+
+    async def _industry_readiness(self, now: datetime) -> DataReadinessStatus:
+        chosen = None
+        count = 0
+        for name in ("industry_history", "stock_industry_history"):
+            current = await _count(self.db[name])
+            if current:
+                chosen, count = name, current
+                break
+        if not chosen:
+            return DataReadinessStatus(
+                component="INDUSTRY_HISTORY",
+                status="NOT_READY",
+                market="CN",
+                record_count=0,
+                required_for=["ATTRIBUTION", "INDUSTRY_EXPOSURE"],
+                blocking_reasons=["INDUSTRY_HISTORY_MISSING"],
+                last_checked_at=now,
+            )
+        rows = await self.db[chosen].find({}).limit(5000).to_list(length=5000)
+        dates = [
+            value
+            for row in rows
+            if (
+                value := _as_date(
+                    row.get("effective_from")
+                    or row.get("trade_date")
+                    or row.get("date")
+                )
+            )
+            is not None
+        ]
+        current_only = sum(
+            str(row.get("history_coverage_status") or "").upper()
+            == "CURRENT_ONLY"
+            for row in rows
+        )
+        complete = bool(dates) and current_only == 0
+        return DataReadinessStatus(
+            component="INDUSTRY_HISTORY",
+            status="READY" if complete else "PARTIAL",
+            market="CN",
+            coverage_start=min(dates) if dates else None,
+            coverage_end=max(dates) if dates else None,
+            record_count=count,
+            required_for=["ATTRIBUTION", "INDUSTRY_EXPOSURE"],
+            blocking_reasons=(
+                [] if complete else ["INDUSTRY_HISTORY_CURRENT_ONLY"]
+            ),
+            warnings=[
+                f"source_collection={chosen}",
+                f"current_only_records={current_only}",
+            ],
+            last_checked_at=now,
+        )
 
     async def _collection_readiness(
         self,

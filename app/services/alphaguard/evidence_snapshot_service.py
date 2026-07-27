@@ -22,6 +22,7 @@ from tradingagents.alphaguard.evidence_schemas import (
 from tradingagents.alphaguard.instruments import normalize_instrument
 
 from .data_quality_gate import DataQualityGate
+from .paper_storage import to_mongo_value
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,23 @@ def _clean_document(document: dict[str, Any] | None) -> dict[str, Any] | None:
     cleaned = dict(document)
     cleaned.pop("_id", None)
     return cleaned
+
+
+def _bson_stable_value(value: Any) -> Any:
+    """Normalize datetimes to MongoDB's millisecond storage precision."""
+
+    if isinstance(value, BaseModel):
+        return _bson_stable_value(value.model_dump(mode="python"))
+    if isinstance(value, datetime):
+        return value.replace(microsecond=(value.microsecond // 1000) * 1000)
+    if isinstance(value, dict):
+        return {
+            str(key): _bson_stable_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_bson_stable_value(item) for item in value]
+    return value
 
 
 def _canonical_value(value: Any) -> Any:
@@ -88,7 +106,9 @@ def calculate_immutable_hash(
 
 
 def _snapshot_document(snapshot: EvidenceSnapshot) -> dict[str, Any]:
-    return snapshot.model_dump(mode="python")
+    return to_mongo_value(
+        _bson_stable_value(snapshot.model_dump(mode="python"))
+    )
 
 
 class EvidenceSnapshotService:
@@ -100,7 +120,7 @@ class EvidenceSnapshotService:
 
     @property
     def db(self):
-        return self._db or get_mongo_db()
+        return self._db if self._db is not None else get_mongo_db()
 
     async def create(
         self,
@@ -140,8 +160,11 @@ class EvidenceSnapshotService:
             raw_refs=data["raw_refs"],
             required_sources=data.pop("required_sources", None),
         )
+        report = DataQualityReport.model_validate(
+            _bson_stable_value(report.model_dump(mode="python"))
+        )
         await self.db["ag_data_quality_reports"].insert_one(
-            report.model_dump(mode="python")
+            to_mongo_value(report.model_dump(mode="python"))
         )
         if report.status == "FAIL":
             raise DataQualityBlockedError(report)
@@ -191,7 +214,15 @@ class EvidenceSnapshotService:
             "schema_version": EVIDENCE_SNAPSHOT_SCHEMA_VERSION,
             "code_version": ALPHAGUARD_CODE_VERSION,
         }
-        snapshot_data["immutable_hash"] = calculate_immutable_hash(snapshot_data)
+        snapshot_data = _bson_stable_value(snapshot_data)
+        # Hash the canonical Pydantic representation. Real snapshots contain
+        # large reference sets whose input order is normalized by the schema;
+        # hashing before validation would make the stored object fail its own
+        # integrity check even though its evidence content is unchanged.
+        snapshot_data["immutable_hash"] = "0" * 64
+        normalized = EvidenceSnapshot.model_validate(snapshot_data)
+        snapshot_data = normalized.model_dump(mode="python")
+        snapshot_data["immutable_hash"] = calculate_immutable_hash(normalized)
         snapshot = EvidenceSnapshot.model_validate(snapshot_data)
         await self.db["ag_evidence_snapshots"].insert_one(
             _snapshot_document(snapshot)

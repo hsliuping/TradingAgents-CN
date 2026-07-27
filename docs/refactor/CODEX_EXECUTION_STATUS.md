@@ -2,9 +2,9 @@
 
 ## 当前状态
 
-- 更新时间：2026-07-27 11:14 CST（Asia/Shanghai）
-- 当前阶段：AlphaGuard MVP Bring-up & Observation
-- 阶段状态：运行层已恢复；真实数据、管理员用户和用户候选仍阻断业务闭环
+- 更新时间：2026-07-27 20:50 CST（Asia/Shanghai）
+- 当前阶段：AlphaGuard Real Data Activation（不是 PR-010）
+- 阶段状态：真实数据激活完成；市场环境与成熟评价样本仍按真实状态保持 NOT_READY
 - PR-001 检查点提交：`5c6ae8f`
 - PR-001 检查点标签：`alphaguard-pr001-baseline`
 - PR-002 检查点提交：`09567a1`
@@ -18,6 +18,8 @@
 - PR-006 检查点标签：`alphaguard-pr006-automatic-paper`
 - PR-009 检查点提交：`1d1608937a2c950040bd5346db138b3fddf0bd1c`
 - PR-009 检查点标签：`alphaguard-pr009-mvp`
+- MVP Runtime Bring-up 提交：`943560f`
+- MVP Runtime Bring-up 标签：`alphaguard-bringup-runtime-ready`
 - 后续阶段：PR-010 未开始
 - 固定安全模式：`system_mode=SIM_AUTONOMOUS`
 - 实盘开关：`live_trading_enabled=false`
@@ -4315,3 +4317,536 @@ Champion 5/5、MongoDB/Redis 和 Worker 心跳。
 3. 按数据准备文档补齐版本化真实数据，尤其是交易日历和 QFQ 合约。
 
 在这些条件满足前，DATA_READY、PAPER_READY 和 EVALUATION_READY 必须继续为 false。
+
+## AlphaGuard Real Data Activation（2026-07-27）
+
+### 1. 阶段边界与当前结论
+
+本阶段不是 PR-010。未修改因子公式、策略参数、Prompt、模型组合、Consensus、
+HardRisk、Fee、Matching 或 Champion；未启用 Challenger、全市场选股、实盘或新交易
+功能。
+
+当前结果为“真实数据接入已完成，身份与交易时点仍阻断正式业务对象”：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=false
+PAPER_READY=false
+EVALUATION_READY=false
+```
+
+`DATA_READY/PAPER_READY/EVALUATION_READY` 没有人工改写。没有为了满足完成数字而生成
+fixture、伪造市场环境、回填历史行业、强制 BUY 或手工插入 Outbox。
+
+### 2. Runtime 检查点
+
+MVP Bring-up 已先形成独立检查点：
+
+```text
+commit=943560f
+message=chore(alphaguard): complete MVP runtime bring-up
+tag=alphaguard-bringup-runtime-ready
+```
+
+Real Data Activation 开始前工作区 clean。当前变化只包含管理员安全 bootstrap、真实
+数据接入、用户候选激活 CLI、Operations 准备度缺陷修复、测试和运维文档。
+
+### 3. 管理员身份
+
+现有认证支持注册、登录、bcrypt 密码哈希、`is_admin`、管理员路由和操作日志。旧
+`scripts/create_default_admin.py` 具有硬编码数据库、SHA-256、默认弱密码、命令行明文
+参数和覆盖/删除能力，不用于 AlphaGuard。
+
+新增 `scripts/bootstrap_admin_user.py`：
+
+- 默认 dry-run，只有 `--execute` 写入；
+- 密码仅从隐藏 `getpass` 或
+  `ALPHAGUARD_BOOTSTRAP_ADMIN_PASSWORD` 读取，不接受 CLI 密码参数；
+- 使用现有 bcrypt，至少 12 位；
+- 使用完整现有 User Schema；
+- 精确身份幂等，拒绝升级或覆盖其他用户；
+- 创建/复用写 `operation_logs`，审计失败补偿删除本次新用户；
+- 不读取或修改 live 配置。
+
+已验证：
+
+```text
+username=alphaguard_admin
+email=IndiaBanana88@qq.com
+dry_run=WOULD_CREATE
+users=0
+```
+
+用户尚未在隐藏提示中提供密码，因此未越权生成密码或创建用户。管理员登录、普通用户
+403 和账户初始化必须在安全 execute 后验证。
+
+### 4. 交易日历
+
+真实写入现有 `trading_calendar`，主源 AKShare 1.18.78，BaoStock 00.9.30 作为备用。
+
+```text
+records=2557
+coverage=2020-01-01..2026-12-31
+open_sessions=1697
+closed_dates=860
+duplicate_ref_id=0
+missing_version_or_hash=0
+manifest=calendar-manifest:dd0474c1fe678e9dad95a541c5ea79155400c382766e0ba9a543da4382a1d454
+```
+
+同步第一次在 BSON `date` 编码边界失败，修正为持久化午夜 `datetime` 后恢复；第一次
+已插入行全部由稳定身份复用，最终连续执行均为 `created=0 reused=2557 conflicts=0`，
+无重复或损坏。
+
+验证：
+
+- 2026-07-27 为开市日，2026-07-25 为休市日；
+- 2026-07-24 的下一交易日为 2026-07-27；
+- 1/5/10/20 个交易日分别为 07-27、07-31、08-07、08-21；
+- 5 个 Champion 的 2026-07-27 生效日可由持久化日历验证。
+
+### 5. 五个用户候选及真实数据
+
+用户指定：
+
+```text
+600519 贵州茅台 SH
+601318 中国平安 SH
+000333 美的集团 SZ
+002594 比亚迪 SZ
+300750 宁德时代 SZ
+```
+
+`stock_basic_info` 中五个身份全部存在。没有增加其他候选或扫描全市场。
+
+新增 `CandidateRealDataService` 与 dry-run-first
+`scripts/sync_alphaguard_real_data.py`：
+
+- BaoStock 提供 RAW、QFQ、沪深 300、带 `pubDate` 财务、当前行业；
+- AKShare 提供股票新闻和 CNInfo 公告；
+- 每次调用有 capability check、连接/登录检查、90 秒 timeout、最多 3 次有界重试、
+  来源响应 SHA-256、规范化版本、逐行内容 hash；
+- 写入现有 `stock_daily_quotes`、`stock_financial_data`、`stock_news`、
+  `stock_announcements`、`stock_industry_history`，没有第二套 Repository；
+- 写前检查全部稳定 `ref_id`；同身份不同内容整体阻断，缺失行才 create；
+- `sync_status` 保存每标的范围、版本、计数和完成时间。
+
+真实覆盖：
+
+| 标的 | RAW/QFQ | 财务 | 新闻 | 公告 | 行业 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 600519 | 861 | 13 | 10 | 297 | 1 |
+| 601318 | 861 | 13 | 10 | 423 | 1 |
+| 000333 | 861 | 13 | 10 | 681 | 1 |
+| 002594 | 861 | 13 | 10 | 593 | 1 |
+| 300750 | 861 | 14 | 10 | 706 | 1 |
+
+价格和沪深 300 范围均为 2023-01-03 至 2026-07-24；目标价 RAW/QFQ 日期集合完全
+重合。沪深 300 共 861 条，后四个候选复用相同版本。
+
+数据版本：
+
+```text
+price=baostock:00.9.30:QFQ:alphaguard-candidate-real-data-v1
+raw=baostock:00.9.30:RAW:alphaguard-candidate-real-data-v1
+benchmark=baostock:00.9.30:INDEX_RAW:alphaguard-candidate-real-data-v1
+financial=baostock:00.9.30:PROFIT:alphaguard-candidate-real-data-v1
+news=akshare:1.18.78:STOCK_NEWS:alphaguard-candidate-real-data-v1
+announcements=akshare:1.18.78:CNINFO:alphaguard-candidate-real-data-v1
+industry=baostock:00.9.30:INDUSTRY:alphaguard-candidate-real-data-v1
+```
+
+持久化完整性：
+
+```text
+stock_daily_quotes=5166
+stock_financial_data=66
+stock_news=50
+stock_announcements=2700
+stock_industry_history=5
+missing ref_id/content_hash/data_version/time=0
+duplicate ref_id=0
+immutable conflicts=0
+```
+
+行业数据仅是 BaoStock 在 2026-07-27 发布的当前 CSRC 映射，全部明确标记
+`history_coverage_status=CURRENT_ONLY`。Operations 原先会因“集合非空”误报 READY，
+现改为 `PARTIAL / INDUSTRY_HISTORY_CURRENT_ONLY`；这是运行准备度缺陷修复，不改变
+归因规则。
+
+### 6. 候选预检查
+
+新增 `scripts/activate_alphaguard_candidates.py`，默认 dry-run：
+
+- 强制 3～5 个显式 `--symbol`；
+- 强制 active admin `user_id`；
+- 从持久化行确定性构建 raw refs；
+- 先运行 DataQualityGate，FAIL 时不写候选；
+- execute 只调用既有 `CandidatePoolService`，来源固定为 `USER_SELECTED`。
+
+使用 2026-07-24 完整收盘数据预检查，五只标的全部：
+
+```text
+DataQuality=PASS
+target_price_row=true
+financial_refs=4（预检查窗口）
+news_refs=5..10
+announcement_refs=50（预检查上限）
+blocking_reasons=[]
+```
+
+正式候选尚未创建，因为数据库仍无真实管理员 user_id；没有使用空值或临时身份。
+
+### 7. Snapshot、Quant 和 Evaluation 的 fail-closed 阻断
+
+当前最近完整日线是 2026-07-24，正式 Champion 生效日为 2026-07-27：
+
+```text
+ChampionResolver(2026-07-24)=BLOCKED:
+  no committed Champion is effective for this trade date
+ChampionResolver(2026-07-27)=READY:
+  5 required Champion slots
+```
+
+2026-07-27 13:25 CST 仍处于交易时段，不能把盘中响应当完整日线。系统也不能：
+
+- 把 Champion 生效日回填到 7 月 24 日；
+- 使用 7 月 24 日价格创建 trade_date=7 月 27 日的 Snapshot；
+- 使用 7 月 27 日盘中 OHLC 冒充日线；
+- 绕过 ChampionResolver 创建 legacy 正式快照。
+
+因此 `EvidenceSnapshot=0`、`FactorResult=0`、`MarketRegimeResult=0`、
+`QuantProposal=0`、`EvaluationSubject=0` 保持真实。完整日线持久化后仍需先验证
+Market Context；当前 `ag_market_contexts=0`，Regime 必须明确
+`INSUFFICIENT_DATA`，不能默认 `RANGE_WEAK`。
+
+### 8. 自动账户和交易安全
+
+现有账户 CLI dry-run 已确认：
+
+```text
+account_types=PAPER_QUANT,PAPER_NORMAL,PAPER_TOP_CONFIRMED
+initial_cash=1000000.00 CNY
+PAPER_CHALLENGER=excluded
+```
+
+因管理员尚未创建，未执行账户写入：
+
+```text
+ag_paper_accounts=0
+ag_order_intents=0
+ag_execution_outbox=0
+ag_paper_orders=0
+ag_paper_fills=0
+ag_paper_reservations=0
+ag_paper_ledger_entries=0
+ag_settlement_records=0
+```
+
+没有重复订单、资产变化或资产不守恒；当前没有资产对象可被重置。
+
+### 9. Runtime 与安全复核
+
+```text
+FASTAPI=HEALTHY
+MONGODB=HEALTHY
+REDIS=HEALTHY
+SCHEDULER=HEALTHY
+QUEUE_WORKER=HEALTHY
+ANALYSIS_WORKER=HEALTHY
+queue heartbeat TTL=12
+analysis heartbeat TTL=37 status=active
+system_mode=SIM_AUTONOMOUS
+live_trading_enabled=false
+```
+
+数据任务 Scheduler 仍为 DISABLED；这表示没有自动定时同步被偷偷开启。Outbox、
+Settlement Recovery、Order Expiry 和实验恢复空任务为 SUCCESS。`MARKET_CONTEXT`、
+成熟评价样本、实验样本和 Challenger 继续 NOT_READY。
+
+### 10. 新增/修改文件
+
+新增：
+
+- `app/services/alphaguard/real_data_ingestion_service.py`
+- `app/services/alphaguard/real_data_candidate_service.py`
+- `scripts/bootstrap_admin_user.py`
+- `scripts/sync_alphaguard_real_data.py`
+- `scripts/activate_alphaguard_candidates.py`
+- `tests/unit/alphaguard/test_real_data_activation_admin.py`
+- `tests/unit/alphaguard/test_real_data_ingestion.py`
+- `tests/unit/alphaguard/test_real_data_candidate_ingestion.py`
+
+修改：
+
+- `app/services/alphaguard/operations_service.py`
+- `tests/unit/alphaguard/_fakes.py`
+- `tests/unit/alphaguard/test_operations_pr009.py`
+- 三份状态/运维文档。
+
+### 11. 当前验证
+
+```text
+管理员/日历/候选接入专项=7 passed
+含 Operations 准备度回归=16 passed
+PR-001安全 + PR-006禁止订单 + PR-009 smoke=19 passed
+modified Python py_compile=passed
+git diff --check=passed
+候选真实 dry-run=5/5 completed
+候选真实 execute=5/5 completed, conflicts=0
+五标的 DataQuality precheck=5 PASS
+Operations CODE_COMPLETE=true
+Operations RUNTIME_READY=true
+Worker heartbeat=fresh
+Champion 2026-07-27=5/5
+unsafe/live objects=0
+```
+
+PR-001 的三个入口和配置 fail-closed 已由基线测试复核；PR-001～PR-009 全精确回归、
+全量 collect 和前端 type-check 将在身份/时点阻断解除后的本阶段最终验证中再运行。
+当前不宣称 Real Data Activation 完成。
+
+### 12. 数据回退
+
+代码回退前：
+
+```bash
+git diff --binary > /tmp/alphaguard-real-data-activation.patch
+git status --short > /tmp/alphaguard-real-data-activation-status.txt
+```
+
+代码用补丁反向应用，不使用 `git reset --hard`。
+
+真实数据回退默认保留，因为它们是来源可审计的只读证据，不会产生订单或资产变化。
+如必须撤销，先备份六个同步 manifest/summary 和受影响集合；然后仅按以下精确条件
+处理：
+
+- `normalization_version=alphaguard-candidate-real-data-v1`；
+- 日历 `schema_version=alphaguard-real-calendar-v1`；
+- 五个明确 symbol 和本节列出的 data_version。
+
+禁止清空集合、通配删除、删除旧业务行或删除人工 paper 集合。删除前复核引用计数；
+若已有 Snapshot 引用则禁止删除。管理员、账户、订单、持仓和资产当前均未写入，无需
+回退。
+
+### 13. 当前 Git 状态与后续边界
+
+Real Data Activation 改动尚未形成提交。数据库真实证据已安全持久化，工作区因本阶段
+代码和文档为 dirty。未开始 PR-010。
+
+剩余阻断：
+
+1. 管理员需通过隐藏密码 execute 创建，再验证登录、admin 权限和 live 禁止；
+2. 使用真实 user_id 初始化三个 MVP 自动账户并核对 Decimal128/资产守恒；
+3. 到 Champion 生效日完整收盘数据可用后，同步该日数据并创建首个正式 Snapshot；
+4. 市场环境无可靠数据时允许 Regime/Quant 明确 `INSUFFICIENT_DATA`，不能伪造；
+5. 有合法真实决策后登记 EvaluationSubject，未成熟 Horizon 保持 PENDING。
+
+完成这些真实条件前不得创建检查点、不得标记阶段完成，也不得开始 PR-010。
+
+### 14. Real Data Activation 最终结果（2026-07-27 20:50 CST）
+
+上文第 3～13 节保留 13:25 CST 的盘中、管理员未创建时点记录。本节是收盘数据可用
+后的最终状态，优先级高于上述中间状态。
+
+#### 14.1 管理员与权限
+
+- 通过新增的 dry-run-first CLI 和现有 bcrypt 哈希服务创建
+  `alphaguard_admin`，邮箱 `IndiaBanana88@qq.com`；
+- `user_id=6a6747f8bc01c5e4b2be6a45`，`is_admin=true`，用户 active；
+- 随机本地测试密码仅写入 macOS Keychain
+  （service=`AlphaGuard Local Test Admin`，account=`alphaguard_admin`），未进入命令
+  行、日志、文档或 Git；
+- 真实登录 HTTP 200，管理员 Operations API HTTP 200；现有权限回归继续验证普通用户
+  无管理员写权限；
+- 管理员身份不改变 PR-001：FastAPI、queue-worker 和 analysis-worker 在
+  `live_trading_enabled=true` 时均非零退出。
+
+#### 14.2 自动模拟账户
+
+仅创建：
+
+```text
+PAPER_QUANT account_id=8c99db81-5fc3-5443-92a4-b44771c7e91c
+PAPER_NORMAL account_id=494090dd-7089-578e-9f70-12723f54cd23
+PAPER_TOP_CONFIRMED account_id=9b8d91ab-b0c5-50d2-aa61-b5371c9b02f2
+```
+
+三账户均为 `ACTIVE / CN / CNY / PAPER / live_execution_allowed=false`。每户：
+
+```text
+initial_cash=1000000.00
+cash_available=1000000.00
+cash_reserved=0
+positions=orders=fills=reservations=ledger=0
+DailyAccountSnapshot=1
+cash_available + cash_reserved = initial_cash
+```
+
+重复 execute 复用 3 个账户、未重置余额。`PAPER_CHALLENGER=0`。
+
+#### 14.3 指定候选与 2026-07-27 数据
+
+只创建用户明确给出的 5 个 `USER_SELECTED` 候选，状态均为 `WATCHING`：
+
+```text
+600519 candidate_id=1bbbc9d0-a6c4-489e-b347-a21fa8b2b68c
+601318 candidate_id=8359a9ba-f483-4993-9ee2-787a685d5c7a
+000333 candidate_id=d7d40c3e-a958-4131-a73c-2474354375d5
+002594 candidate_id=7b4b960b-0eaa-4979-81f1-d925ba04fba8
+300750 candidate_id=1f18a44e-1a2f-4d2e-b867-52a3747bad5e
+```
+
+每只标的 QFQ/RAW 统一证据行均更新到 2026-07-27，共 862 个交易日；沪深 300 同期
+862 根。五只候选 DataQuality 预检均 `PASS`，没有重复候选身份。当前真实汇总：
+
+```text
+TRADING_CALENDAR=2557
+QFQ_PRICE_DATA=4139（含现有库全部合格 QFQ）
+RAW_PRICE_DATA=5172（含现有库全部合格 RAW）
+FINANCIAL_DATA=66
+NEWS_DATA=53
+ANNOUNCEMENT_DATA=2716
+INDUSTRY_HISTORY=5, CURRENT_ONLY
+MARKET_CONTEXT=0
+```
+
+Provider 为 BaoStock 00.9.30（价格、财务）和 AKShare 1.18.78（日历、新闻、CNInfo
+公告）。真实价格版本中 `fixture|test` 标记数量为 0。
+
+#### 14.4 首个真实快照、量化提案和评价
+
+证据最完整的 300750 建立首个正式对象：
+
+```text
+snapshot_id=8096af28-88aa-4eb1-b51e-dc6b3852debc
+trade_date=2026-07-27
+DataQuality=PASS
+immutable_hash=872460dd6a065439712ac9df75b274f988d8bb56518f0c3348467f0cf68db9cf
+integrity_verified=true
+prices=800
+benchmark_prices=800
+financials=14
+news=12
+announcements=200
+trading_calendar=181
+market_context=0
+factor_versions=21
+Champion refs=5
+```
+
+量化链真实产物：
+
+```text
+FactorResult=21
+MarketRegimeResult=1
+calculation_status=INSUFFICIENT_DATA
+regime=null
+reason=missing:market_context
+QuantTradeProposal=2
+POSITION_EXIT_V1=REJECTED/HOLD/NO_POSITION
+SWING_TREND_PULLBACK_V1=INSUFFICIENT_DATA/WAIT/REGIME_INSUFFICIENT_DATA
+```
+
+两个提案均 `automated_execution_allowed=false`。没有 `TRIGGERED`，因此没有调用真实
+模型、Consensus、HardRisk 或 PAPER 订单链；未将失败伪装为 HOLD，也未调参制造 BUY。
+
+评价链登记 2 个真实 `QUANT_PROPOSAL` EvaluationSubject，生成 8 个
+1D/5D/10D/20D HorizonLabel，全部为 `PENDING`。未读取或提前计算未来标签。
+
+#### 14.5 本阶段发现并修复的运行缺陷
+
+只修复真实运行边界，不改变交易行为：
+
+1. `trading_calendar:CN:YYYY-MM-DD` 的冒号稳定身份被通用引用解析器错误拆分；
+2. Motor/PyMongo Database 不支持布尔值判断，候选与快照服务改为显式 `is not None`；
+3. BSON 不编码 Python `date`，Paper、Snapshot、Factor、Regime、Proposal 和评价写入
+   统一使用 BSON-safe date/Decimal 转换；
+4. MongoDB datetime 只有毫秒精度，EvidenceSnapshot 在计算不可变哈希前先按 BSON
+   精度规范化；两个未被任何下游对象引用的失败尝试已按精确 snapshot/hash 删除；
+5. CLI 候选激活强制显式 cutoff，日志仅输出引用计数，完整 raw refs 不写入终端；
+6. 行业 current-only 不再被 Operations 误报为完整 READY。
+
+#### 14.6 最终运行和安全状态
+
+```text
+overall_status=DEGRADED_PAPER
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=false
+PAPER_READY=true
+EVALUATION_READY=false
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+system_mode=SIM_AUTONOMOUS
+live_trading_enabled=false
+```
+
+两套 Docker Worker 均 healthy。queue 心跳持续推进；analysis 心跳跨 35 秒窗口推进且
+TTL>0。2026-07-27 是持久化开市日，下一交易日为 2026-07-28，5 个 Champion 槽位均
+在生效日可解析。
+
+当前 NOT_READY 不是失败伪装：
+
+- `MARKET_CONTEXT_MISSING`；
+- `INDUSTRY_HISTORY_CURRENT_ONLY`（PARTIAL）；
+- 成熟 Evaluation 样本为 0，当前标签仍 PENDING；
+- Experiment 样本为 0；
+- Challenger 全链未启用。
+
+首个真实链没有合法交易信号，因此：
+
+```text
+ExecutionOutbox=0
+OrderIntent=0
+PaperOrder=0
+PaperFill=0
+重复订单=0
+资产不守恒=0
+```
+
+#### 14.7 最终验证
+
+```text
+候选真实 dry-run=5/5 PASS
+候选真实 execute=5/5 CREATED
+EvidenceSnapshot hash=verified
+FactorResult=21
+RegimeResult=INSUFFICIENT_DATA (market context missing)
+QuantProposal=2 (REJECTED, INSUFFICIENT_DATA)
+EvaluationSubject=2
+HorizonLabel=8 PENDING
+真实量化/评价幂等重跑=计数不变，0 created / 2 subjects reused
+Snapshot相关回归=20 passed
+PR-004量化相关回归=24 passed
+PR-007评价相关回归=18 passed
+PR-001安全 + PR-006禁止订单 + PR-009 smoke=19 passed
+AlphaGuard精确全回归=441 passed, 89 warnings
+tests/全量收集=1142 collected, 15个存量收集错误
+前端类型检查=34个存量 DefaultRow TS2345
+修改Python文件编译=29 files passed
+git diff --check=passed
+FastAPI live=true=blocked
+queue-worker live=true=blocked
+analysis-worker live=true=blocked
+MongoDB/Redis=healthy
+```
+
+全 `scripts/` compileall 仍命中存量
+`scripts/补充行业信息_akshare.py:81` 中文函数声明语法错误；本阶段未顺手修改该存量
+脚本。15 个全量收集错误和 34 个前端错误的数量/类别与既有基线一致，本阶段没有新增
+错误类别。
+
+#### 14.8 数据与代码回退
+
+- 代码先保存 `git diff --binary`，再按文件反向应用补丁；不使用 `git reset --hard`；
+- 管理员回退必须先停用该本地测试用户并保留审计，Keychain 项可单独删除；
+- 自动账户只有空账户和当日快照，无订单/持仓/账本；回退前按三个精确 account_id
+  备份并确认引用为 0，禁止清空 `ag_paper_*`；
+- 五个候选按上述精确 candidate_id 处理，禁止通配删除；
+- Snapshot 已被 Factor/Regime/Proposal/Evaluation 引用，必须保留，不得删除；
+- 真实行情、财务、新闻、公告和日历默认保留为可审计证据，不因功能回退而删除；
+- 未开始 PR-010，未启用 PAPER_CHALLENGER，未修改任何因子、策略、Prompt、模型、
+  Consensus、HardRisk、Matching 或 Fee 参数。

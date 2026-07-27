@@ -70,7 +70,7 @@ class CandidatePoolService:
 
     @property
     def db(self):
-        return self._db or get_mongo_db()
+        return self._db if self._db is not None else get_mongo_db()
 
     async def _record_event(
         self,

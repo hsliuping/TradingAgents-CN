@@ -238,6 +238,52 @@ async def test_legal_snapshot_creation_succeeds():
     )
     assert snapshot.data_quality.status == "PASS"
     assert EvidenceSnapshotService.verify_integrity(snapshot)
+
+
+@pytest.mark.asyncio
+async def test_snapshot_hash_uses_schema_normalized_reference_order():
+    db = FakeDB()
+    gate = StubGate(quality("PASS"))
+    payload = create_payload(
+        raw_refs={
+            "prices": [
+                "market_quotes:z:2026-07-24",
+                "market_quotes:a:2026-07-24",
+                "market_quotes:z:2026-07-24",
+            ]
+        }
+    )
+
+    snapshot = await EvidenceSnapshotService(db, gate).create(
+        user_id="user-1",
+        payload=payload,
+    )
+
+    assert snapshot.raw_refs["prices"] == [
+        "market_quotes:a:2026-07-24",
+        "market_quotes:z:2026-07-24",
+    ]
+    assert EvidenceSnapshotService.verify_integrity(snapshot)
+
+
+@pytest.mark.asyncio
+async def test_snapshot_hash_is_stable_at_mongodb_datetime_precision():
+    db = FakeDB()
+    microsecond_report = quality("PASS").model_copy(
+        update={"checked_at": CUTOFF.replace(microsecond=123456)}
+    )
+
+    snapshot = await EvidenceSnapshotService(
+        db,
+        StubGate(microsecond_report),
+    ).create(
+        user_id="user-1",
+        payload=create_payload(),
+    )
+
+    assert snapshot.created_at.microsecond % 1000 == 0
+    assert snapshot.data_quality.checked_at.microsecond == 123000
+    assert EvidenceSnapshotService.verify_integrity(snapshot)
     assert db["ag_evidence_snapshots"].count() == 1
     assert db["ag_data_quality_reports"].count() == 1
 
