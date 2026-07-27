@@ -140,6 +140,7 @@ class TraderAgent(BaseAgent):
 
             if self._llm:
                 response = self._llm.invoke(messages)
+                self._last_llm_response = response  # P1: stash 供子类采集 token_usage
 
                 # 🔍 调试日志：打印 LLM 响应
                 logger.info(f"🔍 [TraderAgent] LLM 响应长度: {len(response.content)}")

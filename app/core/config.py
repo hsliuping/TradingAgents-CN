@@ -168,6 +168,12 @@ class Settings(BaseSettings):
     METRICS_ENABLED: bool = Field(default=True)
     HEALTH_CHECK_INTERVAL: int = Field(default=60)  # 60秒
 
+    # Agent 执行轨迹采集（P1: 机器可读执行轨迹）
+    AGENT_EXECUTION_TRACE_ENABLED: bool = Field(
+        default=True,
+        description="启用 Agent 执行轨迹采集（写入 MongoDB agent_execution_traces 集合）"
+    )
+
 
     # 配置真相来源（方案A）：file|db|hybrid
     # - file：以文件/env 为准（推荐，生产缺省）

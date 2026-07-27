@@ -292,6 +292,10 @@ class ResearchManagerV2(ManagerAgent):
             logger.info("✅ [ResearchManagerV2] schema 校验通过")
             result[self.output_field] = json.dumps(validated_dict, ensure_ascii=False)
             result["investment_plan_validation_status"] = "passed"
+            self._record_trace_validation(
+                validation_status="passed",
+                validation_details={"analysis_view": validated_dict.get("analysis_view"), "confidence": validated_dict.get("confidence")},
+            )
             decision_content = result[self.output_field]
         else:
             # ❌ 校验失败：显式上报（不静默兜底），保留原始输出供排查
@@ -300,6 +304,11 @@ class ResearchManagerV2(ManagerAgent):
             result[self.output_field] = decision_text
             result["investment_plan_validation_status"] = "failed"
             result["investment_plan_validation_error"] = validation_error
+            self._record_trace_validation(
+                validation_status="failed",
+                validation_error=validation_error,
+                validation_details={"raw_output_preview": decision_text[:500]},
+            )
             decision_content = decision_text
 
         # 从 state 中获取现有的 investment_debate_state（如果有）

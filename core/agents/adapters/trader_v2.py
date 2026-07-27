@@ -257,35 +257,96 @@ class TraderV2(TraderAgent):
         logger.info("📝 [TraderV2] 开始执行用户版研究简报生成")
         logger.info("=" * 80)
 
-        # 调用父类方法获取基本输出
-        result = super().execute(state)
+        # P1: 启动执行轨迹采集（TraderV2 自行管理，因为父类 TraderAgent 不在 ManagerAgent 改造范围）
+        from core.agents.execution_trace_recorder import (
+            start_execution_trace, is_trace_enabled, record_trace_validation
+        )
+        recorder = None
+        if is_trace_enabled():
+            try:
+                recorder = start_execution_trace(self, state)
+            except Exception as e:
+                logger.warning(f"⚠️ [TraderV2] 启动轨迹采集失败: {e}")
 
-        # 提取简报内容（兼容字典/字符串两种输出形态）
-        decision_value = result.get(self.output_field, "")
-        if isinstance(decision_value, dict):
-            decision_text = (
-                decision_value.get("content", "")
-                or decision_value.get("markdown", "")
-                or str(decision_value)
-            )
-        else:
-            decision_text = str(decision_value) if decision_value else ""
+        try:
+            # 记录输入
+            if recorder:
+                _input_keys = [
+                    "investment_plan", "market_report", "fundamentals_report",
+                    "news_report", "sentiment_report", "index_report", "sector_report",
+                    "bull_report", "bear_report", "risk_assessment",
+                ]
+                _inputs = {k: state.get(k) for k in _input_keys if state.get(k)}
+                recorder.record_inputs(_inputs)
 
-        # 🔥 合规校验（让错误显式化，不静默兜底）
-        validation_warning = self._validate_trader_output(decision_text)
+            # 调用父类方法获取基本输出
+            import time as _time
+            _t0 = _time.time()
+            result = super().execute(state)
+            _llm_duration_ms = int((_time.time() - _t0) * 1000)
 
-        if validation_warning is None:
-            logger.info("✅ [TraderV2] 合规校验通过")
-            result["trader_plan_validation_status"] = "passed"
-        else:
-            logger.warning(f"⚠️ [TraderV2] 合规校验发现问题: {validation_warning}")
-            logger.warning(f"⚠️ [TraderV2] 原始输出前 500 字符: {decision_text[:500]}")
-            result["trader_plan_validation_status"] = "failed"
-            result["trader_plan_validation_warning"] = validation_warning
+            # 提取简报内容（兼容字典/字符串两种输出形态）
+            decision_value = result.get(self.output_field, "")
+            if isinstance(decision_value, dict):
+                decision_text = (
+                    decision_value.get("content", "")
+                    or decision_value.get("markdown", "")
+                    or str(decision_value)
+                )
+            else:
+                decision_text = str(decision_value) if decision_value else ""
 
-        logger.info("✅ [TraderV2] 用户版研究简报生成完成")
-        logger.info("=" * 80)
-        return result
+            # P1: 记录输出快照和 token_usage（从 TraderAgent stash 的 _last_llm_response 提取）
+            if recorder:
+                _llm_response = getattr(self, "_last_llm_response", None)
+                if _llm_response is not None:
+                    recorder.record_llm_response(_llm_response, llm_duration_ms=_llm_duration_ms)
+                else:
+                    # response 不可达时，仅记录输出快照（无 token_usage）
+                    from app.models.execution_trace import OutputSnapshot
+                    recorder.trace.output = OutputSnapshot(
+                        output_raw_length=len(decision_text),
+                        output_raw_preview=decision_text[:500] if decision_text else None,
+                        output_parsed_keys=list(decision_value.keys()) if isinstance(decision_value, dict) else [],
+                        output_parsed_success=decision_value.get("success", True) if isinstance(decision_value, dict) else True,
+                        output_parsed_type="dict" if isinstance(decision_value, dict) else type(decision_value).__name__,
+                    )
+                    recorder.trace.llm_duration_ms = _llm_duration_ms
+                recorder.record_parsed_output(decision_value if isinstance(decision_value, dict) else decision_text)
+
+            # 🔥 合规校验（让错误显式化，不静默兜底）
+            validation_warning = self._validate_trader_output(decision_text)
+
+            if validation_warning is None:
+                logger.info("✅ [TraderV2] 合规校验通过")
+                result["trader_plan_validation_status"] = "passed"
+                if recorder:
+                    record_trace_validation(
+                        trace_id=recorder.trace_id, validation_status="passed",
+                    )
+            else:
+                logger.warning(f"⚠️ [TraderV2] 合规校验发现问题: {validation_warning}")
+                logger.warning(f"⚠️ [TraderV2] 原始输出前 500 字符: {decision_text[:500]}")
+                result["trader_plan_validation_status"] = "failed"
+                result["trader_plan_validation_warning"] = validation_warning
+                if recorder:
+                    record_trace_validation(
+                        trace_id=recorder.trace_id, validation_status="failed",
+                        validation_error=validation_warning,
+                        validation_details={"raw_output_preview": decision_text[:500]},
+                    )
+
+            logger.info("✅ [TraderV2] 用户版研究简报生成完成")
+            logger.info("=" * 80)
+            return result
+
+        except Exception as e:
+            if recorder:
+                recorder.record_error(e)
+            raise
+        finally:
+            if recorder:
+                recorder.finish()
 
     def _validate_trader_output(self, text: str) -> Optional[str]:
         """

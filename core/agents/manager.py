@@ -85,7 +85,8 @@ class ManagerAgent(BaseAgent):
         self.memory = memory
         self.debate_rounds = debate_rounds
         self.debate_history = []
-        
+        self._last_trace_id = None  # P1: 执行轨迹 ID（供子类回填校验结果）
+
         logger.debug(f"ManagerAgent '{self.agent_id}' 初始化完成")
 
     def delegate_to_agent(
@@ -127,6 +128,19 @@ class ManagerAgent(BaseAgent):
         """
         logger.info(f"开始执行管理者Agent: {self.agent_id}")
 
+        # P1: 启动执行轨迹采集
+        from core.agents.execution_trace_recorder import (
+            start_execution_trace, is_trace_enabled
+        )
+        recorder = None
+        if is_trace_enabled():
+            try:
+                recorder = start_execution_trace(self, state)
+                self._last_trace_id = recorder.trace_id
+            except Exception as e:
+                logger.warning(f"⚠️ 启动轨迹采集失败（不影响 agent）: {e}")
+                self._last_trace_id = None
+
         try:
             # 1. 提取输入参数（兼容多种参数名）
             ticker = state.get("ticker") or state.get("company_of_interest")
@@ -162,7 +176,9 @@ class ManagerAgent(BaseAgent):
             
             # 2. 收集所需的输入
             inputs = self._collect_inputs(state)
-            
+            if recorder:
+                recorder.record_inputs(inputs)
+
             if not inputs:
                 raise ValueError("No inputs available for decision making")
             
@@ -193,6 +209,8 @@ class ManagerAgent(BaseAgent):
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
+            if recorder:
+                recorder.record_prompts(system_prompt, user_prompt)
 
             logger.info(f"系统提示词: {system_prompt}")
             logger.info(f"用户提示词: {user_prompt}")
@@ -216,12 +234,19 @@ class ManagerAgent(BaseAgent):
             logger.info(f"🤖 [{self.agent_id}] LLM 类型: {type(self._llm).__name__}")
 
             if self._llm:
+                import time as _time
+                _t0 = _time.time()
                 response = self._llm.invoke(messages)
+                _llm_duration_ms = int((_time.time() - _t0) * 1000)
+                if recorder:
+                    recorder.record_llm_response(response, llm_duration_ms=_llm_duration_ms)
                 logger.info(f"✅ [{self.agent_id}] LLM 调用成功")
                 logger.info(f"📝 [{self.agent_id}] LLM 响应长度: {len(response.content)} 字符")
                 logger.info(f"📝 [{self.agent_id}] 完整 LLM 响应:\n{'='*80}\n{response.content}\n{'='*80}")
 
                 decision = self._parse_response(response.content)
+                if recorder:
+                    recorder.record_parsed_output(decision)
                 logger.info(f"✅ [{self.agent_id}] 响应解析成功")
                 logger.info(f"📝 [{self.agent_id}] 解析结果类型: {type(decision)}")
                 logger.info(f"📝 [{self.agent_id}] llm返回的解析结果: {decision}")
@@ -256,6 +281,8 @@ class ManagerAgent(BaseAgent):
             return result
 
         except Exception as e:
+            if recorder:
+                recorder.record_error(e)
             logger.error(f"管理者Agent {self.agent_id} 执行失败: {e}", exc_info=True)
             # 返回错误状态（只返回新增的字段）
             output_key = self.output_field or f"{self.manager_type}_decision"
@@ -265,6 +292,24 @@ class ManagerAgent(BaseAgent):
                     "success": False
                 }
             }
+        finally:
+            if recorder:
+                recorder.finish()
+
+    def _record_trace_validation(
+        self,
+        validation_status: str,
+        validation_error: Optional[str] = None,
+        validation_details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """P1: 回填校验结果到执行轨迹（供子类调用，非阻塞）"""
+        from core.agents.execution_trace_recorder import record_trace_validation
+        record_trace_validation(
+            trace_id=self._last_trace_id,
+            validation_status=validation_status,
+            validation_error=validation_error,
+            validation_details=validation_details,
+        )
     
     def _collect_inputs(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
