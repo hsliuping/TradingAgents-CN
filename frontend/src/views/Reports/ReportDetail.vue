@@ -1051,23 +1051,14 @@ const formatRiskAssessment = (value: any): string | null => {
   return parts.join('\n\n')
 }
 
-const _unwrapJsonString = (raw: string): string => {
-  // 处理被 JSON 序列化两次的字符串："{\"risk_level\":...}"
-  let text = raw.trim()
-  while (
-    ((text.startsWith('"') && text.endsWith('"')) ||
-      (text.startsWith("'") && text.endsWith("'"))) &&
-    text.length >= 2
-  ) {
-    try {
-      const unquoted = JSON.parse(text)
-      if (typeof unquoted !== 'string') break
-      text = unquoted.trim()
-    } catch {
-      text = text.slice(1, -1).trim()
-    }
+const _stripJsonCodeFence = (text: string): string => {
+  // 去除 ```json ... ``` 或 ``` ... ``` 代码块包裹
+  let t = text.trim()
+  const fenceMatch = t.match(/^```(?:json|JSON)?\s*\n([\s\S]*?)\n```\s*$/i)
+  if (fenceMatch) {
+    t = fenceMatch[1].trim()
   }
-  return text
+  return t
 }
 
 const _looksLikeRiskJson = (text: string): boolean => {
@@ -1087,20 +1078,21 @@ const extractStructuredText = (value: any): string | null => {
   if (!value) return null
 
   if (typeof value === 'string') {
-    const trimmed = _unwrapJsonString(value.trim())
-    if (!trimmed) return null
+    // 先剥离 ```json 代码块，再判断是否为风险治理 JSON
+    const stripped = _stripJsonCodeFence(value.trim())
+    if (!stripped) return null
 
-    // 如果是风险治理 JSON 字符串，先解析再格式化为可读文本
-    if (_looksLikeRiskJson(trimmed)) {
+    if (_looksLikeRiskJson(stripped)) {
       try {
-        const parsed = JSON.parse(trimmed)
+        const parsed = JSON.parse(stripped)
         const riskText = formatRiskAssessment(parsed)
         if (riskText) return riskText
       } catch {
         // 不是合法 JSON，按普通文本返回
       }
     }
-    return trimmed
+    // 如果原文是 ```json 代码块但不是风险 JSON，返回剥离后的内容
+    return stripped !== value.trim() ? stripped : value.trim()
   }
 
   if (typeof value === 'object') {
@@ -1109,6 +1101,7 @@ const extractStructuredText = (value: any): string | null => {
     if (riskText) return riskText
 
     // 对象里嵌套 content/text 字段时，递归尝试解析
+    // 真实数据结构: { content: "```json\n{...}\n```", success: true }
     for (const key of ['content', 'markdown', 'text', 'message', 'report', 'judge_decision', 'risk_assessment', 'risk_management_decision']) {
       const item = value[key]
       if (item) {

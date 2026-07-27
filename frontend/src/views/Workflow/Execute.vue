@@ -737,6 +737,15 @@ const _formatRiskAssessmentJson = (value: any): string | null => {
   return parts.join('\n\n')
 }
 
+const _stripJsonCodeFence = (text: string): string => {
+  let t = text.trim()
+  const fenceMatch = t.match(/^```(?:json|JSON)?\s*\n([\s\S]*?)\n```\s*$/i)
+  if (fenceMatch) {
+    t = fenceMatch[1].trim()
+  }
+  return t
+}
+
 const _looksLikeRiskJsonString = (text: string): boolean => {
   const lowered = text.toLowerCase()
   return text.startsWith('{') && (
@@ -754,28 +763,34 @@ const extractContent = (value: any): string => {
 
   // 处理风险治理 JSON 字符串/对象，渲染为可读 Markdown
   if (typeof value === 'string') {
-    const trimmed = value.trim()
-    if (!trimmed) return ''
-    if (_looksLikeRiskJsonString(trimmed)) {
+    // 先剥离 ```json 代码块
+    const stripped = _stripJsonCodeFence(value.trim())
+    if (!stripped) return ''
+    if (_looksLikeRiskJsonString(stripped)) {
       try {
-        const parsed = JSON.parse(trimmed)
+        const parsed = JSON.parse(stripped)
         const riskText = _formatRiskAssessmentJson(parsed)
         if (riskText) return riskText
       } catch {
         // 不是合法 JSON，按普通文本返回
       }
     }
-    return trimmed
+    // 如果原文是 ```json 代码块但不是风险 JSON，返回剥离后的内容
+    return stripped !== value.trim() ? stripped : value.trim()
   }
 
   if (typeof value === 'object') {
     const riskText = _formatRiskAssessmentJson(value)
     if (riskText) return riskText
 
+    // 真实数据结构: { content: "```json\n{...}\n```", success: true }
     const keys = ['content', 'markdown', 'text', 'message', 'report', 'risk_assessment', 'risk_management_decision']
     for (const k of keys) {
       const v = (value as any)[k]
-      if (typeof v === 'string' && v.trim() !== '') return v
+      if (v) {
+        const nested = extractContent(v)
+        if (nested) return nested
+      }
     }
     try {
       return JSON.stringify(value)
