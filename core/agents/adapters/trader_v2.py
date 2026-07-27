@@ -6,13 +6,70 @@
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..trader import TraderAgent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
 
 logger = logging.getLogger(__name__)
+
+
+# ==================== 合规约束 & 校验契约定义 ====================
+# 目的：与 risk_manager_v2 / research_manager_v2 形成同构的"规格驱动"闭环，
+# 让 LLM 输出从"自由决策"降级为"按预定义结构翻译"，从源头消除合规风险。
+# 由于 trader_v2 输出是用户可读的 Markdown 简报（非结构化 JSON 决策），
+# 这里采用"合规约束 prompt 前置 + 术语扫描校验"的轻量模式，
+# 不强制 JSON schema，但显式上报合规违规，便于监控和排查。
+
+
+# 研究整合员合规约束 & 简报结构契约。
+# 按硬约束"system prompt 必须将格式要求放在最前面"，此常量会被前置到
+# _build_system_prompt 返回值的最前面，确保 LLM 优先看到合规与结构约束。
+TRADER_COMPLIANCE_PROMPT = """【合规性约束·必须严格遵守】
+1. 禁止使用 "看涨" / "看跌" / "买入" / "卖出" / "加仓" / "减仓" / "持有" / "清仓" 等交易指令或市场观点术语。
+2. 统一使用 "乐观" / "审慎" / "中性" 表达研究结论倾向（"乐观/审慎/中性" 表达的是研究倾向，不构成交易建议）。
+3. 禁止给出具体目标价或止损价，不得延伸为价格区间、上涨/下跌空间、风险收益比或操作建议。
+4. 禁止承诺收益或保证盈利，必须提示风险。
+5. 所有结论必须严格基于提供的报告内容，不得补造信息或引入模型内部知识。
+
+【简报结构契约·必须遵守】
+请按以下结构输出 Markdown 用户版研究简报，每个章节标题必须出现且顺序一致：
+
+## 一句话结论
+（用一句话概括当前研究判断，使用"乐观/审慎/中性"表达倾向）
+
+## 核心依据
+（概括最关键的 2-4 条证据，每条单独成行）
+
+## 当前判断的限制
+（说明信息缺口、脆弱前提与结论边界）
+
+## 后续观察事项
+（列出最值得继续跟踪的公开信号）
+
+## 资料边界说明
+（如果报告未提供关键信息，必须明确指出）
+
+## 免责声明
+本研究简报仅供信息参考，不构成投资建议或交易承诺。请结合自身情况独立判断。
+
+"""
+
+
+# 合规禁用术语表（校验管线使用，与 prompt 约束保持一致）
+TRADER_FORBIDDEN_TERMS: Tuple[str, ...] = (
+    "看涨", "看跌", "买入", "卖出", "加仓", "减仓", "清仓",
+)
+
+# 注意："持有" 在简报中可能出现于"持有该观点"等非交易语境，单独校验会产生误报，
+# 因此不放入强制禁用表，仅在 prompt 层面约束。如需更严格校验，可在此添加。
+
+# 简报必备章节标记（校验管线使用）
+TRADER_REQUIRED_SECTIONS: Tuple[str, ...] = (
+    "一句话结论", "核心依据",
+)
+
 
 # 尝试导入工具函数
 try:
@@ -146,14 +203,20 @@ class TraderV2(TraderAgent):
             fallback_prompt=None,
             prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
-        
-        logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
+
+        # 🔥 按硬约束"system prompt 必须将格式要求放在最前面"，
+        # 将合规约束 & 简报结构契约前置到 prompt 最前面，确保 LLM 优先看到合规约束，
+        # 不依赖数据库迁移即可立即生效。
         if prompt:
-            logger.debug("✅ 从模板系统获取交易员系统提示词")
+            prompt = TRADER_COMPLIANCE_PROMPT + prompt
+            logger.info(f"📝 系统提示词长度: {len(prompt)} 字符（含合规约束）")
+            logger.debug("✅ 从模板系统获取交易员系统提示词（已前置合规约束）")
             return prompt
-        
-        # 默认系统提示词（合规版本）
-        return """你是一位研究整合员，负责根据风险审阅后的综合研究结论生成用户版研究简报。
+
+        logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
+
+        # 默认系统提示词（合规版本）— 同样前置合规约束，保证 fallback 路径也受约束
+        return TRADER_COMPLIANCE_PROMPT + """你是一位研究整合员，负责根据风险审阅后的综合研究结论生成用户版研究简报。
 
 ## 你的职责
 
@@ -177,7 +240,87 @@ class TraderV2(TraderAgent):
 
 **免责声明**：
     本研究简报仅供信息参考，不构成投资建议或交易承诺。请结合自身情况独立判断。"""
-    
+
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行研究简报生成，并添加合规校验显式上报。
+
+        重写父类方法以在 LLM 输出后添加合规术语扫描和结构完整性校验，
+        让错误显式化（参考 risk_manager_v2 / research_manager_v2 的校验管线模式）。
+
+        校验策略：
+        - 校验通过：设置 trader_plan_validation_status="passed"
+        - 校验失败：保留原始输出（用户可读简报不自动修改，避免引入错误），
+          设置 trader_plan_validation_status="failed" + trader_plan_validation_warning
+        """
+        logger.info("=" * 80)
+        logger.info("📝 [TraderV2] 开始执行用户版研究简报生成")
+        logger.info("=" * 80)
+
+        # 调用父类方法获取基本输出
+        result = super().execute(state)
+
+        # 提取简报内容（兼容字典/字符串两种输出形态）
+        decision_value = result.get(self.output_field, "")
+        if isinstance(decision_value, dict):
+            decision_text = (
+                decision_value.get("content", "")
+                or decision_value.get("markdown", "")
+                or str(decision_value)
+            )
+        else:
+            decision_text = str(decision_value) if decision_value else ""
+
+        # 🔥 合规校验（让错误显式化，不静默兜底）
+        validation_warning = self._validate_trader_output(decision_text)
+
+        if validation_warning is None:
+            logger.info("✅ [TraderV2] 合规校验通过")
+            result["trader_plan_validation_status"] = "passed"
+        else:
+            logger.warning(f"⚠️ [TraderV2] 合规校验发现问题: {validation_warning}")
+            logger.warning(f"⚠️ [TraderV2] 原始输出前 500 字符: {decision_text[:500]}")
+            result["trader_plan_validation_status"] = "failed"
+            result["trader_plan_validation_warning"] = validation_warning
+
+        logger.info("✅ [TraderV2] 用户版研究简报生成完成")
+        logger.info("=" * 80)
+        return result
+
+    def _validate_trader_output(self, text: str) -> Optional[str]:
+        """
+        校验 LLM 输出的合规性和结构完整性。
+
+        由于 trader_v2 输出是用户可读的 Markdown 简报（非结构化 JSON），
+        本方法采用"合规术语扫描 + 结构完整性检查"的轻量模式，
+        检测到违规时返回警告字符串（保留原输出），通过则返回 None。
+
+        Args:
+            text: LLM 输出的研究简报文本
+
+        Returns:
+            None: 校验通过
+            str: 校验警告描述（含违规详情），用于显式上报
+        """
+        if not text or not text.strip():
+            return "输出为空"
+
+        warnings: List[str] = []
+
+        # 1. 合规术语扫描（检测交易指令或市场观点术语）
+        found_forbidden = [term for term in TRADER_FORBIDDEN_TERMS if term in text]
+        if found_forbidden:
+            warnings.append(f"检测到不合规术语: {found_forbidden}")
+
+        # 2. 结构完整性检查（必备章节标记）
+        missing_sections = [s for s in TRADER_REQUIRED_SECTIONS if s not in text]
+        if missing_sections:
+            warnings.append(f"缺少必备章节: {missing_sections}")
+
+        if warnings:
+            return "; ".join(warnings)
+        return None
+
     def _build_user_prompt(
         self,
         ticker: str,
