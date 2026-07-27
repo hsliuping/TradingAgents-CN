@@ -70,13 +70,58 @@ def _build_mem0_collection_name(embedder: Optional[Dict[str, Any]]) -> str:
     return f"{_QDRANT_COLLECTION}_{provider}_{model}_{dims or '0'}_{fingerprint}"
 
 
+def _backup_collection_payload(client, collection_name: str, base_path: str) -> Optional[str]:
+    """备份 collection 的所有 payload 到 JSON 文件，返回备份文件路径。
+
+    维度不匹配时旧向量无法直接迁移到新 collection，但 payload（用户记忆文本和元数据）
+    可以通过 migrate_mem0_collection.py 脚本用新 embedder 重新向量化后写入。
+    """
+    import json
+    from datetime import datetime
+
+    backup_dir = os.path.join(base_path, "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_file = os.path.join(backup_dir, f"{collection_name}_{timestamp}.json")
+
+    points = []
+    offset = None
+    while True:
+        batch, offset = client.scroll(
+            collection_name=collection_name,
+            limit=256,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if not batch:
+            break
+        for p in batch:
+            points.append({"id": str(p.id), "payload": p.payload})
+        if offset is None:
+            break
+
+    with open(backup_file, "w", encoding="utf-8") as f:
+        json.dump(
+            {"collection": collection_name, "count": len(points), "points": points},
+            f, ensure_ascii=False, indent=2,
+        )
+    return backup_file
+
+
 def _ensure_qdrant_collection_dimension(vector_store_cfg: Dict[str, Any], expected_dims: int) -> None:
     """
     确保本地 Qdrant collection 维度与 embedder 一致。
 
-    若集合已存在且实际维度 != expected_dims，则删除旧集合并让 mem0 重新创建。
-    这通常发生在 embedding 模型切换（如 1536 -> 1024）后：旧集合名虽然包含新维度，
-    但当时 mem0 的 vector_store 未显式传入 embedding_model_dims，导致实际以 1536 创建。
+    应在 mem0 初始化**之前**调用（此时无 QdrantClient 持有文件锁）。
+    若在 mem0 已初始化后调用（如 health_check 路径），会因 portalocker 文件锁失败——
+    但此时 mem0 已正常工作，说明维度必然匹配，失败可安全忽略。
+
+    行为：
+    1. 当前 collection 不存在 → mem0 自动创建，无需处理
+    2. 当前 collection 存在且维度匹配 → 无需处理
+    3. 当前 collection 存在但维度不匹配 → 先备份 payload 到 JSON，再删除重建
+    4. 扫描所有 mem0_memories* 旧 collection，提示用户手动迁移
     """
     from qdrant_client import QdrantClient
 
@@ -89,26 +134,55 @@ def _ensure_qdrant_collection_dimension(vector_store_cfg: Dict[str, Any], expect
         client = QdrantClient(path=path)
         try:
             collections = client.get_collections().collections
+
+            # 问题 5：扫描遗留的旧命名 collection，提示用户迁移
+            for col in collections:
+                name = col.name
+                if name == collection_name or not name.startswith(_QDRANT_COLLECTION):
+                    continue
+                logger.info(
+                    "mem0 config: 检测到历史 collection '%s'（当前使用 '%s'）。"
+                    "如需迁移数据，请执行：python app/scripts/migrate_mem0_collection.py --source %s",
+                    name, collection_name, name,
+                )
+
+            # 检查当前 collection 维度
             if not any(col.name == collection_name for col in collections):
-                return
+                return  # collection 不存在，mem0 会自动创建
 
             info = client.get_collection(collection_name)
             actual_dims = int(info.config.params.vectors.size)
             if actual_dims == expected_dims:
-                return
+                return  # 维度匹配，无需处理
 
+            # 问题 3：维度不匹配 → 先备份 payload，再删除
             logger.warning(
-                "mem0 config: Qdrant collection %s 维度不匹配 (实际 %d, 期望 %d)，删除旧集合并重建",
-                collection_name,
-                actual_dims,
-                expected_dims,
+                "mem0 config: Qdrant collection %s 维度不匹配 (实际 %d, 期望 %d)，"
+                "先备份 payload 再删除旧集合并重建",
+                collection_name, actual_dims, expected_dims,
             )
+            backup_path = _backup_collection_payload(client, collection_name, path)
+            if backup_path:
+                logger.warning(
+                    "mem0 config: 旧 collection payload 已备份到 %s",
+                    backup_path,
+                )
+            else:
+                logger.error(
+                    "mem0 config: 备份失败，拒绝删除 collection %s。"
+                    "请手动迁移后重启服务。",
+                    collection_name,
+                )
+                return  # 备份失败就不删除
+
             client.delete_collection(collection_name)
-            # mem0 初始化时会自动创建新集合
+            # mem0 初始化时会按 expected_dims 自动创建新集合
         finally:
             client.close()
     except Exception as e:
-        logger.warning("mem0 config: 检查/重建 Qdrant collection 时出错（已忽略）: %s", e)
+        # 文件锁冲突（AlreadyLocked）说明 mem0 已初始化并在用此 collection，
+        # 维度必然匹配（否则写入早就报错），可安全忽略。
+        logger.debug("mem0 config: 检查/重建 Qdrant collection 时出错（已忽略）: %s", e)
 
 
 def _env(key: str, default: str = "") -> str:
@@ -169,7 +243,16 @@ def _get_embedding_dimension(model_name: str) -> int:
         from core.llm.embedding_manager import EMBEDDING_DIMENSIONS
 
         model_key = (model_name or "").strip()
-        return int(EMBEDDING_DIMENSIONS.get(model_key, EMBEDDING_DIMENSIONS.get("default", 1024)))
+        dims = EMBEDDING_DIMENSIONS.get(model_key)
+        if dims is not None:
+            return int(dims)
+        logger.warning(
+            "mem0 config: Embedding 模型 '%s' 不在维度表中，默认使用 1024 维。"
+            "若实际维度不符（写入时报 ValueError: shapes not aligned），"
+            "请在 core/llm/embedding_manager.py 的 EMBEDDING_DIMENSIONS 中补充该模型的维度。",
+            model_key,
+        )
+        return int(EMBEDDING_DIMENSIONS.get("default", 1024))
     except Exception:
         return 1024
 
@@ -403,9 +486,9 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
         "embedding_model_dims": embedding_dims,
         "on_disk": True,
     }
-    # 若旧集合维度不匹配，先删除以便 mem0 按正确维度重建
-    _ensure_qdrant_collection_dimension(vector_store_cfg, embedding_dims)
-
+    # 注意：维度检查（_ensure_qdrant_collection_dimension）已移到
+    # MemoryService._ensure_init 中执行。build_mem0_config 应为纯函数，
+    # 不产生副作用。健康检查等路径调用 build_mem0_config 时不会触发文件锁冲突。
     vector_store = {
         "provider": "qdrant",
         "config": vector_store_cfg,
