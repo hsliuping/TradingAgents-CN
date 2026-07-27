@@ -839,12 +839,22 @@ class AlphaGuardOperationsService:
         calendar_ready = self._data_ready(data, "TRADING_CALENDAR")
         qfq_ready = self._data_ready(data, "QFQ_PRICE_DATA")
         champion_ready = self._data_ready(data, "CHAMPION_ASSIGNMENTS")
-        account_count = await _count(self.db["ag_paper_accounts"])
+        active_account_rows = await self.db["ag_paper_accounts"].find(
+            {"status": "ACTIVE", "market": "CN"}
+        ).to_list(length=None)
+        active_account_types = {
+            str(row.get("account_type")) for row in active_account_rows
+        }
+        required_paper_account_types = {
+            "PAPER_QUANT",
+            "PAPER_NORMAL",
+            "PAPER_TOP_CONFIRMED",
+        }
         paper_policy_count = await _count(self.db["ag_paper_policies"])
         paper_ready = bool(
             calendar_ready
             and champion_ready
-            and account_count >= 4
+            and required_paper_account_types <= active_account_types
             and paper_policy_count >= 1
             and not required_services_bad
         )

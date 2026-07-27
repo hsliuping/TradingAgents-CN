@@ -32,6 +32,23 @@ services:
       TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
       TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
       TRADINGAGENTS_CACHE_TYPE: redis
+      # 当前 Settings 使用规范 MONGODB_*/REDIS_* 变量；旧 URL 仅保留兼容。
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: "27017"
+      MONGODB_USERNAME: admin
+      MONGODB_PASSWORD: tradingagents123
+      MONGODB_AUTH_SOURCE: admin
+      MONGODB_DATABASE: "${MONGODB_DATABASE:-tradingagentscn}"
+      MONGODB_DATABASE_SCOPE: "${MONGODB_DATABASE_SCOPE:-auto}"
+      MONGODB_DATABASE_INSTANCE: "${MONGODB_DATABASE_INSTANCE:-}"
+      # Deprecated ConfigManager still consumes these names. Keep it on the
+      # same container network/database instead of falling back to localhost.
+      MONGODB_CONNECTION_STRING: "mongodb://admin:tradingagents123@mongodb:27017/?authSource=admin"
+      MONGODB_DATABASE_NAME: "${MONGODB_DATABASE_NAME:-tradingagentscn}"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: tradingagents123
+      REDIS_DB: "0"
       # Docker环境标识
       DOCKER_CONTAINER: "true"
       # API配置
@@ -83,6 +100,20 @@ services:
       TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
       TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
       TRADINGAGENTS_CACHE_TYPE: redis
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: "27017"
+      MONGODB_USERNAME: admin
+      MONGODB_PASSWORD: tradingagents123
+      MONGODB_AUTH_SOURCE: admin
+      MONGODB_DATABASE: "${MONGODB_DATABASE:-tradingagentscn}"
+      MONGODB_DATABASE_SCOPE: "${MONGODB_DATABASE_SCOPE:-auto}"
+      MONGODB_DATABASE_INSTANCE: "${MONGODB_DATABASE_INSTANCE:-}"
+      MONGODB_CONNECTION_STRING: "mongodb://admin:tradingagents123@mongodb:27017/?authSource=admin"
+      MONGODB_DATABASE_NAME: "${MONGODB_DATABASE_NAME:-tradingagentscn}"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: tradingagents123
+      REDIS_DB: "0"
       DOCKER_CONTAINER: "true"
       ALPHAGUARD_SYSTEM_MODE: "${ALPHAGUARD_SYSTEM_MODE:-SIM_AUTONOMOUS}"
       ALPHAGUARD_LIVE_TRADING_ENABLED: "${ALPHAGUARD_LIVE_TRADING_ENABLED:-false}"
@@ -128,6 +159,20 @@ services:
       TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
       TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
       TRADINGAGENTS_CACHE_TYPE: redis
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: "27017"
+      MONGODB_USERNAME: admin
+      MONGODB_PASSWORD: tradingagents123
+      MONGODB_AUTH_SOURCE: admin
+      MONGODB_DATABASE: "${MONGODB_DATABASE:-tradingagentscn}"
+      MONGODB_DATABASE_SCOPE: "${MONGODB_DATABASE_SCOPE:-auto}"
+      MONGODB_DATABASE_INSTANCE: "${MONGODB_DATABASE_INSTANCE:-}"
+      MONGODB_CONNECTION_STRING: "mongodb://admin:tradingagents123@mongodb:27017/?authSource=admin"
+      MONGODB_DATABASE_NAME: "${MONGODB_DATABASE_NAME:-tradingagentscn}"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: tradingagents123
+      REDIS_DB: "0"
       DOCKER_CONTAINER: "true"
       ALPHAGUARD_SYSTEM_MODE: "${ALPHAGUARD_SYSTEM_MODE:-SIM_AUTONOMOUS}"
       ALPHAGUARD_LIVE_TRADING_ENABLED: "${ALPHAGUARD_LIVE_TRADING_ENABLED:-false}"

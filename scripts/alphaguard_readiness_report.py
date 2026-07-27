@@ -8,6 +8,8 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from redis.asyncio import Redis
@@ -18,6 +20,26 @@ if str(ROOT) not in sys.path:
 
 from app.core.config import settings  # noqa: E402
 from app.services.alphaguard.operations_service import AlphaGuardOperationsService  # noqa: E402
+
+
+class _RemoteSchedulerProbe:
+    running = True
+
+    def get_job(self, _job_id):
+        return None
+
+
+def _scheduler_probe(health_url: str):
+    """Use the API process' own readiness result to avoid a false standalone STALE."""
+    try:
+        with urlopen(health_url, timeout=2) as response:
+            payload = json.load(response)
+    except (OSError, URLError, ValueError):
+        return None
+    blockers = set(payload.get("blocking_items") or [])
+    if response.status == 200 and "SCHEDULER" not in blockers:
+        return _RemoteSchedulerProbe()
+    return None
 
 
 def readiness_dimensions(report) -> dict[str, bool | str]:
@@ -59,7 +81,7 @@ def readiness_dimensions(report) -> dict[str, bool | str]:
     }
 
 
-async def run(*, as_json: bool) -> int:
+async def run(*, as_json: bool, health_url: str) -> int:
     mongo = AsyncIOMotorClient(
         settings.MONGO_URI,
         serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,
@@ -67,8 +89,9 @@ async def run(*, as_json: bool) -> int:
     redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
     try:
         db = mongo[settings.MONGO_DB]
+        scheduler = await asyncio.to_thread(_scheduler_probe, health_url)
         report = await AlphaGuardOperationsService(
-            db, redis_client=redis, scheduler=None
+            db, redis_client=redis, scheduler=scheduler
         ).readiness(persist_alerts=False)
         payload = report.model_dump(mode="json")
         dimensions = readiness_dimensions(report)
@@ -109,5 +132,12 @@ async def run(*, as_json: bool) -> int:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--health-url",
+        default="http://127.0.0.1:8000/health/ready",
+        help="FastAPI readiness endpoint used to verify the in-process scheduler",
+    )
     args = parser.parse_args()
-    raise SystemExit(asyncio.run(run(as_json=args.json)))
+    raise SystemExit(
+        asyncio.run(run(as_json=args.json, health_url=args.health_url))
+    )

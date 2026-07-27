@@ -2,9 +2,9 @@
 
 ## 当前状态
 
-- 更新时间：2026-07-26 21:00 CST（Asia/Shanghai）
-- 当前阶段：PR-006 Automatic Paper Trading
-- 阶段状态：实现完成，验证完成
+- 更新时间：2026-07-27 11:14 CST（Asia/Shanghai）
+- 当前阶段：AlphaGuard MVP Bring-up & Observation
+- 阶段状态：运行层已恢复；真实数据、管理员用户和用户候选仍阻断业务闭环
 - PR-001 检查点提交：`5c6ae8f`
 - PR-001 检查点标签：`alphaguard-pr001-baseline`
 - PR-002 检查点提交：`09567a1`
@@ -16,7 +16,9 @@
 - PR-005 检查点提交：`76f62e5`
 - PR-005 检查点标签：`alphaguard-pr005-consensus-risk`
 - PR-006 检查点标签：`alphaguard-pr006-automatic-paper`
-- 后续阶段：PR-007 及以后均未开始
+- PR-009 检查点提交：`1d1608937a2c950040bd5346db138b3fddf0bd1c`
+- PR-009 检查点标签：`alphaguard-pr009-mvp`
+- 后续阶段：PR-010 未开始
 - 固定安全模式：`system_mode=SIM_AUTONOMOUS`
 - 实盘开关：`live_trading_enabled=false`
 - 数据迁移：未迁移人工模拟账户、现金、持仓、订单或成交数据
@@ -4029,3 +4031,287 @@ alphaguard-pr009-mvp -> HEAD
 ```
 
 PR-009 到此停止；不得开始 PR-010。
+
+---
+
+## AlphaGuard MVP Bring-up & Observation（2026-07-27）
+
+### 1. 阶段结论
+
+本阶段没有开始 PR-010，没有新增交易能力，也没有修改因子、策略、Prompt、模型、
+HardRisk、撮合或费用参数。运行层已从无 Worker 心跳恢复为：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=false
+PAPER_READY=false
+EVALUATION_READY=false
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+```
+
+因此本阶段不是完整业务闭环完成状态。真实数据、管理员用户和用户明确选择的候选仍是
+阻断项；没有通过手工改状态、测试 fixture 或伪造心跳绕过。
+
+### 2. 起点和 Git 检查
+
+开始时：
+
+```text
+git status --short: empty
+branch: main
+HEAD: 1d1608937a2c950040bd5346db138b3fddf0bd1c
+alphaguard-pr009-mvp -> 1d1608937a2c950040bd5346db138b3fddf0bd1c
+```
+
+没有修改 PR-009 已提交历史，没有创建新提交或标签。
+
+### 3. 运行准备缺陷修复
+
+实际修改：
+
+- `Dockerfile.backend`
+  - legacy Docker builder 不提供 `TARGETARCH` 时改用 `dpkg --print-architecture`；
+  - 修复 Apple Silicon 上误下载 amd64 pandoc/wkhtmltopdf 的构建失败；
+  - 未改运行依赖版本。
+- `docker-compose.yml`
+  - backend、queue-worker、analysis-worker 显式传入当前 Settings 使用的
+    `MONGODB_*`/`REDIS_*`；
+  - 旧 ConfigManager 兼容变量也指向 Docker 网络内的 `mongodb`，不再先连接
+    `localhost` 后退回 JSON；
+  - 三入口继续固定 `SIM_AUTONOMOUS` 和 `live=false`。
+- `app/core/redis_client.py`
+  - 用平台 `socket.TCP_KEEP*` 常量替换硬编码数字；
+  - 修复 Linux 容器 Redis 初始化的 `EINVAL`。
+- `scripts/alphaguard_readiness_report.py`
+  - 通过 FastAPI 自身 `/health/ready` 验证 API 进程内 Scheduler，消除只读独立脚本
+    永远看不到 Scheduler 的假 DEGRADED；
+  - API 不可达时仍 fail-closed 为不可见。
+- `app/services/alphaguard/operations_service.py`
+  - PAPER_READY 按本阶段启用的三个账户类型判断，不再把未启用的
+    PAPER_CHALLENGER 当作必要账户。
+- `app/services/alphaguard/paper_account_service.py` 与
+  `scripts/create_alphaguard_paper_accounts.py`
+  - 初始化器支持显式账户子集，默认只选择 PAPER_QUANT、PAPER_NORMAL、
+    PAPER_TOP_CONFIRMED；
+  - PAPER_CHALLENGER 默认不创建；
+  - 执行前要求 active admin、唯一索引和既有账户身份检查；
+  - 重复初始化仍复用，不重置余额。
+- 新增 `tests/unit/alphaguard/test_bringup_runtime.py`。
+
+本机忽略文件 `.env` 只将旧 ConfigManager 的数据库名对齐为
+`tradingagentscn_v0_banana`；未提交密钥或认证信息。
+
+### 4. Operations 严重度基线
+
+#### BLOCKING
+
+1. `TRADING_CALENDAR_MISSING`：0 条。
+2. `RAW_PRICE_DATA_MISSING`：0 条。
+3. `QFQ_DATA_MISSING`：0 条，现有历史保存器还缺显式 QFQ/版本合约。
+4. `FINANCIAL_DATA_MISSING`：0 条，真实披露日期也不可验证。
+5. `NEWS_DATA_MISSING`：0 条。
+6. `ANNOUNCEMENT_DATA_MISSING`：0 条。
+7. `MARKET_CONTEXT_MISSING`：0 条。
+8. `INDUSTRY_HISTORY_MISSING`：0 条。
+9. `users=0`：无法验证管理员，禁止初始化自动账户。
+10. `user_favorites=0`、`favorites=0`、`ag_candidates=0`：用户未明确选择 3～5 个
+    标的，禁止代选或写候选。
+
+#### DEGRADED
+
+1. Tushare token 校验失败，不能作为当前真实数据源。
+2. AKShare 交易日历只读探测成功，但股票/沪深300日线本次出现远端断开。
+3. 正式前端 type-check 仍有 34 个既有 `DefaultRow TS2345`。
+
+#### NOT_READY
+
+- DATA_READY、PAPER_READY、EVALUATION_READY、CHALLENGER_READY。
+- `EVALUATION_SAMPLES_EMPTY`、`EXPERIMENT_SAMPLES_EMPTY`。
+- 数据同步、候选对账、Snapshot、Factor/Strategy、分析、撮合、T+1、账户快照、
+  Evaluation 和实验任务没有真实输入，报告为 DISABLED/IDLE，未伪造运行记录。
+
+#### STALE
+
+- 无。queue-worker 与 analysis-worker 的 TTL 心跳均持续更新，Operations 不再报告
+  Worker STALE。
+
+### 5. 服务、Worker、任务和 Champion
+
+最终镜像：`sha256:82462fe486221e7c630ffb131aad6fccf30a7a3b2ff6e16a70abe8ff8fac243d`。
+
+```text
+FASTAPI=HEALTHY
+MONGODB=HEALTHY
+ALPHAGUARD_INDEXES=HEALTHY
+REDIS=HEALTHY
+SCHEDULER=HEALTHY
+QUEUE_WORKER=HEALTHY
+ANALYSIS_WORKER=HEALTHY
+```
+
+- 三个应用容器 restart_count 均为 0。
+- queue 心跳键 `alphaguard:worker:queue` 的值持续变化，最终观测 TTL=13。
+- analysis 心跳为 active，最终观测 TTL=57，`current_task=null`。
+- 两个 Worker 均连接 `tradingagentscn_v0_banana` 和同一 Redis。
+- Scheduler 已注册，Outbox/Settlement Recovery/Order Expiry 空任务幂等成功，backlog=0。
+- Champion 校验 `assignments=5 verified=5 conflicts=0`。
+- Operations integrity：负现金 0、负持仓 0、DEAD_LETTER 0、卡住 Settlement Saga 0、
+  卡住 Promotion Saga 0、缺失索引 0，结论 PASS。
+
+### 6. 真实数据能力
+
+只读探测结果：
+
+- AKShare 版本 1.18.79；
+- 交易日历接口返回 8797 条，范围 1990-12-19 至 2026-12-31，但尚未版本化持久化；
+- AKShare 股票原始/QFQ和沪深300日线请求均被远端关闭；
+- BaoStock 登录成功，沪深300 QFQ 只读请求返回 18 根日线，范围
+  2026-07-01 至 2026-07-24；
+- BaoStock 现有持久化链未写 `price_adjustment_mode`、`price_data_version` 和
+  `adjusted_*`，因此未将探测数据写入业务集合或冒充 DATA_READY；
+- `stock_basic_info=5533`，只有当前行业字段，不能回填历史行业映射。
+
+完整来源、时间字段、版本要求、覆盖、同步顺序、质量规则、重试和存储约束见
+`docs/operations/ALPHAGUARD_DATA_BRINGUP.md`。
+
+### 7. 自动账户、候选和真实链路
+
+已完成：
+
+- 自动 paper 49 个索引连续两次执行均 `created=0 unchanged=49 failed=0`；
+- ACCOUNT、EXECUTION、FEE 三个既有 1.0.0 policy 写入 MongoDB，第二次执行
+  `created=0 reused=3`；
+- 初始化 dry-run 默认仅显示三个 MVP 账户和 1,000,000.00 CNY，未写账户。
+
+未执行：
+
+- 因 `users=0`，无法通过 active admin 检查，`ag_paper_accounts` 保持 0；
+- PAPER_CHALLENGER 保持未初始化；
+- 因没有用户明确选择的代码，候选池保持 0；
+- 因真实证据集合为 0，未创建 EvidenceSnapshot、QuantProposal 或模型决策；
+- 未创建 Outbox、Order、Fill、PositionLot、Ledger、DailyAccountSnapshot 或
+  EvaluationSubject；
+- 没有合法信号可用于首个 PAPER 闭环，未强制产生 BUY。
+
+最终真实计数：
+
+```text
+ag_paper_policies=3
+ag_paper_accounts=0
+ag_candidates=0
+ag_evidence_snapshots=0
+ag_quant_proposals=0
+ag_execution_outbox=0
+ag_paper_orders=0
+ag_paper_fills=0
+ag_paper_ledger_entries=0
+ag_paper_account_snapshots=0
+ag_eval_subjects=0
+```
+
+### 8. 安全不变量
+
+```text
+system_mode=SIM_AUTONOMOUS
+live_trading_enabled=false
+live_execution_allowed=false
+FastAPI live=true: exit 3
+queue-worker live=true: exit 1
+analysis-worker live=true: exit 1
+```
+
+三次均由真实原启动入口拒绝。没有券商 SDK、BrokerAdapter、真实订单请求或实盘开关
+变更。
+
+### 9. 前端 34 个 TS2345
+
+涉及 9 个旧文件：
+
+```text
+frontend/src/views/Dashboard/index.vue
+frontend/src/views/Favorites/index.vue
+frontend/src/views/Reports/index.vue
+frontend/src/views/Reports/TokenStatistics.vue
+frontend/src/views/Screening/index.vue
+frontend/src/views/Settings/components/MarketCategoryManagement.vue
+frontend/src/views/Settings/ConfigManagement.vue
+frontend/src/views/System/LogManagement.vue
+frontend/src/views/System/SchedulerManagement.vue
+```
+
+根因是 Element Plus 表格 slot 的 `row` 被推断为 `DefaultRow`，而现有 formatter/
+handler 要求 `AnalysisTask`、`FavoriteItem` 等具体领域类型。AlphaGuard 新页面没有
+该错误；Vite bundle 可以构建，但正式 `npm run build` 仍会先被 type-check 阻断。
+
+最小安全修复应逐页建立表格数据到领域模型的类型收窄/适配，保留 handler 的领域类型，
+然后对 9 个页面做交互回归。使用全局 `any`、关闭 vue-tsc 或扩大 DefaultRow 类型都会
+掩盖真实不匹配。该修复跨 9 个无关旧页面，不是集中式低风险单点修改，本阶段未实施。
+
+### 10. 测试与验证
+
+```text
+本次运行修复专项 + PR-009 smoke: 14 passed
+PR-001～PR-009 精确回归及本次新增测试: 452 passed
+tests/ collect-only: 1131 collected, 15 known errors
+frontend type-check: 34 existing DefaultRow TS2345
+npx vite build: 2609 modules, passed
+modified Python py_compile: passed
+git diff --check: passed
+docker compose config --quiet: passed
+MongoDB/Redis: healthy
+FastAPI /health/ready: HTTP 200, DEGRADED/NOT_READY only because real data blockers
+paper policy seed repeat: created=0 reused=3
+paper index repeat: created=0 unchanged=49 failed=0
+Champion verify: 5/5, conflicts=0
+Operations integrity: PASS
+```
+
+15 个全量收集错误的文件和类别与 PR-009 一致；成功收集数从 1127 增到 1131，对应
+本次新增 3 个测试和收集计数变化。没有为数字修复无关测试。
+
+### 11. 运维文档
+
+新增：
+
+- `docs/operations/ALPHAGUARD_DATA_BRINGUP.md`
+- `docs/operations/ALPHAGUARD_OBSERVATION_CHECKLIST.md`
+
+两份文档不包含时间承诺，不允许自动改生产版本。
+
+### 12. 回退
+
+代码尚未提交。回退前先保存：
+
+```bash
+git diff --binary > /tmp/alphaguard-mvp-bringup.patch
+git status --short > /tmp/alphaguard-mvp-bringup-status.txt
+```
+
+然后仅对本节列出的已跟踪文件反向应用补丁，并将两份新运维文档和新测试移动到带时间戳
+备份目录；不要使用 `git reset --hard`。将本机忽略 `.env` 的
+`MONGODB_DATABASE_NAME` 恢复为回退版本要求的值，重新构建
+`tradingagents-backend:v1.0.0-preview`，再部署 PR-009 三个服务。
+
+数据库中的三个 `ag_paper_policies` 与 PR-006 固定配置完全一致，安全回退默认保留。
+若必须删除，先做 AlphaGuard 备份，再只按三个精确 `policy_type + version=1.0.0`
+身份处理，禁止清空集合或通配删除。索引、Champion、基础资料和历史 Operations 记录
+不删除。
+
+回退后必须复跑 449 项 PR-001～PR-009 精确基线、三入口 live=true 阻断、
+Champion 5/5、MongoDB/Redis 和 Worker 心跳。
+
+### 13. 当前 Git 状态与下一步边界
+
+当前工作区包含本阶段 8 个已跟踪修改、2 份新运维文档和 1 个新测试，尚未提交。
+运行容器使用包含这些修改的最终镜像。没有开始 PR-010。
+
+继续真实业务 bring-up 所需的外部输入只有：
+
+1. 先通过现有认证流程创建或确认一个 active admin 用户；
+2. 由用户明确给出 3～5 个 CN 候选代码；
+3. 按数据准备文档补齐版本化真实数据，尤其是交易日历和 QFQ 合约。
+
+在这些条件满足前，DATA_READY、PAPER_READY 和 EVALUATION_READY 必须继续为 false。

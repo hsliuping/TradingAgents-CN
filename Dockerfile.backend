@@ -34,13 +34,18 @@ RUN mkdir -p /app/logs /app/data /app/config && \
         fonts-noto-cjk \
         wget \
         xvfb && \
-    # 根据架构设置变量
-    if [ "$TARGETARCH" = "arm64" ]; then \
+    # BuildKit 会提供 TARGETARCH；legacy builder 不会，因此从容器本身
+    # 的 dpkg 架构回退，避免在 arm64 主机上误装 amd64 软件包。
+    DETECTED_ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" && \
+    if [ "$DETECTED_ARCH" = "arm64" ]; then \
         PANDOC_ARCH="arm64"; \
         WKHTMLTOPDF_ARCH="arm64"; \
-    else \
+    elif [ "$DETECTED_ARCH" = "amd64" ]; then \
         PANDOC_ARCH="amd64"; \
         WKHTMLTOPDF_ARCH="amd64"; \
+    else \
+        echo "Unsupported build architecture: $DETECTED_ARCH" >&2; \
+        exit 1; \
     fi && \
     # 下载并安装 pandoc
     wget -q https://github.com/jgm/pandoc/releases/download/3.8.2.1/pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \

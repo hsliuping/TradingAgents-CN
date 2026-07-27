@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from collections.abc import Iterable
 from uuid import NAMESPACE_URL, uuid5
 
 from app.services.alphaguard.paper_audit_service import PaperAuditService
@@ -43,12 +44,23 @@ class PaperAccountService:
         self,
         user_id: str,
         *,
+        account_types: Iterable[str] | None = None,
         now: datetime | None = None,
     ) -> dict[str, PaperAccount]:
         policy = await self.policies.account_policy()
         now = now or datetime.utcnow()
+        selected_types = tuple(
+            dict.fromkeys(account_types or policy.account_types)
+        )
+        unsupported = set(selected_types) - set(policy.account_types)
+        if not selected_types:
+            raise ValueError("at least one paper account type is required")
+        if unsupported:
+            raise ValueError(
+                f"paper account types are not present in policy: {sorted(unsupported)}"
+            )
         result: dict[str, PaperAccount] = {}
-        for account_type in policy.account_types:
+        for account_type in selected_types:
             identity = {
                 "user_id": str(user_id),
                 "account_type": account_type,
