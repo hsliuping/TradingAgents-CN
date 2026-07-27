@@ -708,11 +708,71 @@ const goBack = () => {
   router.push('/workflow')
 }
 
+const _formatRiskAssessmentJson = (value: any): string | null => {
+  if (!value || typeof value !== 'object') return null
+  const riskLevel = value.risk_level || value.riskLevel
+  const riskScore = value.risk_score ?? value.riskScore
+  const reasoning = value.reasoning || value.conclusion || value.summary || value.assessment
+  const keyRisks = value.key_risks || value.keyRisks || value.risks
+  const riskControl = value.risk_control || value.riskControl || value.control || value.suggestions
+  const investmentAdjustment = value.investment_adjustment || value.investmentAdjustment || value.adjustment
+
+  if (riskLevel === undefined && riskScore === undefined && !reasoning && !riskControl && !investmentAdjustment) {
+    return null
+  }
+
+  const parts: string[] = []
+  if (riskLevel !== undefined) parts.push(`**风险等级**：${riskLevel}`)
+  if (riskScore !== undefined) {
+    const score = typeof riskScore === 'number' ? riskScore.toFixed(2) : riskScore
+    parts.push(`**风险评分**：${score}`)
+  }
+  if (reasoning) parts.push(`**评估结论**：${reasoning}`)
+  if (Array.isArray(keyRisks) && keyRisks.length > 0) {
+    parts.push('**核心风险**：')
+    keyRisks.forEach((risk: any) => { if (risk) parts.push(`- ${String(risk).trim()}`) })
+  }
+  if (riskControl) parts.push(`**风控建议**：${riskControl}`)
+  if (investmentAdjustment) parts.push(`**投资调整建议**：${investmentAdjustment}`)
+  return parts.join('\n\n')
+}
+
+const _looksLikeRiskJsonString = (text: string): boolean => {
+  const lowered = text.toLowerCase()
+  return text.startsWith('{') && (
+    lowered.includes('"risk_level"') ||
+    lowered.includes('"risk_score"') ||
+    lowered.includes('"reasoning"') ||
+    lowered.includes('"key_risks"') ||
+    lowered.includes('"risk_control"') ||
+    lowered.includes('"investment_adjustment"')
+  )
+}
+
 const extractContent = (value: any): string => {
   if (value == null) return ''
-  if (typeof value === 'string') return value
+
+  // 处理风险治理 JSON 字符串/对象，渲染为可读 Markdown
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return ''
+    if (_looksLikeRiskJsonString(trimmed)) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        const riskText = _formatRiskAssessmentJson(parsed)
+        if (riskText) return riskText
+      } catch {
+        // 不是合法 JSON，按普通文本返回
+      }
+    }
+    return trimmed
+  }
+
   if (typeof value === 'object') {
-    const keys = ['content', 'markdown', 'text', 'message', 'report']
+    const riskText = _formatRiskAssessmentJson(value)
+    if (riskText) return riskText
+
+    const keys = ['content', 'markdown', 'text', 'message', 'report', 'risk_assessment', 'risk_management_decision']
     for (const k of keys) {
       const v = (value as any)[k]
       if (typeof v === 'string' && v.trim() !== '') return v

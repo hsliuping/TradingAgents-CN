@@ -1015,11 +1015,12 @@ const formatRiskAssessment = (value: any): string | null => {
   if (!value || typeof value !== 'object') return null
   const riskLevel = value.risk_level || value.riskLevel
   const riskScore = value.risk_score ?? value.riskScore
-  const reasoning = value.reasoning || value.conclusion || value.summary
+  const reasoning = value.reasoning || value.conclusion || value.summary || value.assessment
   const keyRisks = value.key_risks || value.keyRisks || value.risks
-  const riskControl = value.risk_control || value.riskControl || value.control
+  const riskControl = value.risk_control || value.riskControl || value.control || value.suggestions
+  const investmentAdjustment = value.investment_adjustment || value.investmentAdjustment || value.adjustment
 
-  if (riskLevel === undefined && riskScore === undefined && !reasoning && !riskControl) {
+  if (riskLevel === undefined && riskScore === undefined && !reasoning && !riskControl && !investmentAdjustment) {
     return null
   }
 
@@ -1043,19 +1044,54 @@ const formatRiskAssessment = (value: any): string | null => {
   if (riskControl) {
     parts.push(`**风控建议**：${riskControl}`)
   }
+  if (investmentAdjustment) {
+    parts.push(`**投资调整建议**：${investmentAdjustment}`)
+  }
 
   return parts.join('\n\n')
+}
+
+const _unwrapJsonString = (raw: string): string => {
+  // 处理被 JSON 序列化两次的字符串："{\"risk_level\":...}"
+  let text = raw.trim()
+  while (
+    ((text.startsWith('"') && text.endsWith('"')) ||
+      (text.startsWith("'") && text.endsWith("'"))) &&
+    text.length >= 2
+  ) {
+    try {
+      const unquoted = JSON.parse(text)
+      if (typeof unquoted !== 'string') break
+      text = unquoted.trim()
+    } catch {
+      text = text.slice(1, -1).trim()
+    }
+  }
+  return text
+}
+
+const _looksLikeRiskJson = (text: string): boolean => {
+  const lowered = text.toLowerCase()
+  return (
+    text.startsWith('{') &&
+    (lowered.includes('"risk_level"') ||
+      lowered.includes('"risk_score"') ||
+      lowered.includes('"reasoning"') ||
+      lowered.includes('"key_risks"') ||
+      lowered.includes('"risk_control"') ||
+      lowered.includes('"investment_adjustment"'))
+  )
 }
 
 const extractStructuredText = (value: any): string | null => {
   if (!value) return null
 
   if (typeof value === 'string') {
-    const trimmed = value.trim()
+    const trimmed = _unwrapJsonString(value.trim())
     if (!trimmed) return null
 
     // 如果是风险治理 JSON 字符串，先解析再格式化为可读文本
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    if (_looksLikeRiskJson(trimmed)) {
       try {
         const parsed = JSON.parse(trimmed)
         const riskText = formatRiskAssessment(parsed)
@@ -1072,10 +1108,12 @@ const extractStructuredText = (value: any): string | null => {
     const riskText = formatRiskAssessment(value)
     if (riskText) return riskText
 
-    for (const key of ['content', 'markdown', 'text', 'message', 'report', 'judge_decision']) {
+    // 对象里嵌套 content/text 字段时，递归尝试解析
+    for (const key of ['content', 'markdown', 'text', 'message', 'report', 'judge_decision', 'risk_assessment', 'risk_management_decision']) {
       const item = value[key]
-      if (typeof item === 'string' && item.trim()) {
-        return item
+      if (item) {
+        const nested = extractStructuredText(item)
+        if (nested) return nested
       }
     }
   }
