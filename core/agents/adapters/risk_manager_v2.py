@@ -476,12 +476,44 @@ class RiskManagerV2(ManagerAgent):
                 "risk_score": validated_dict.get("risk_score"),
                 "content": final_trade_decision_markdown,
             }
-            # 显式标记校验通过，便于前端/日志区分新旧数据
-            result["risk_assessment_validation_status"] = "passed"
-            self._record_trace_validation(
-                validation_status="passed",
-                validation_details={"risk_level": validated_dict.get("risk_level"), "risk_score": validated_dict.get("risk_score")},
+
+            # 🔥 P2: 执行断言（非阻塞），合并结果到 validation_status
+            assertion_result = self._run_assertions(
+                raw_text=risk_assessment_text, parsed=validated_dict
             )
+            assertion_violations_dump = [v.model_dump() for v in assertion_result.violations]
+            if assertion_violations_dump:
+                result["risk_assessment_assertion_violations"] = assertion_violations_dump
+
+            if assertion_result.has_error_violation:
+                # error 级别断言违规 → 降级 validation_status 为 failed
+                logger.warning(
+                    f"⚠️ [RiskManagerV2] 断言 error 违规 {assertion_result.error_count} 条，降级 validation_status"
+                )
+                result["risk_assessment_validation_status"] = "failed"
+                result["risk_assessment_validation_error"] = (
+                    f"断言违规: {assertion_result.error_count} 条 error"
+                )
+                self._record_trace_validation(
+                    validation_status="failed",
+                    validation_error=result["risk_assessment_validation_error"],
+                    validation_details={
+                        "risk_level": validated_dict.get("risk_level"),
+                        "risk_score": validated_dict.get("risk_score"),
+                        "assertion_violations": assertion_violations_dump,
+                    },
+                )
+            else:
+                # 仅 warning 或无违规 → 保持 passed
+                result["risk_assessment_validation_status"] = "passed"
+                self._record_trace_validation(
+                    validation_status="passed",
+                    validation_details={
+                        "risk_level": validated_dict.get("risk_level"),
+                        "risk_score": validated_dict.get("risk_score"),
+                        "assertion_violations": assertion_violations_dump,
+                    },
+                )
         else:
             # ❌ 校验失败：显式上报（不静默兜底），保留原始输出供排查
             logger.error(f"❌ [RiskManagerV2] schema 校验失败: {validation_error}")
@@ -489,10 +521,19 @@ class RiskManagerV2(ManagerAgent):
             result[self.output_field] = risk_assessment_text
             result["risk_assessment_validation_status"] = "failed"
             result["risk_assessment_validation_error"] = validation_error
+
+            # 🔥 P2: 校验失败时也执行断言（用于累积命中统计，但不改变已 failed 的状态）
+            assertion_result = self._run_assertions(
+                raw_text=risk_assessment_text, parsed=None
+            )
+            assertion_violations_dump = [v.model_dump() for v in assertion_result.violations]
             self._record_trace_validation(
                 validation_status="failed",
                 validation_error=validation_error,
-                validation_details={"raw_output_preview": risk_assessment_text[:500]},
+                validation_details={
+                    "raw_output_preview": risk_assessment_text[:500],
+                    "assertion_violations": assertion_violations_dump,
+                },
             )
             # 走原有 _extract_final_trade_decision 兜底逻辑（兼容历史 LLM 输出格式）
             final_trade_decision_dict = self._extract_final_trade_decision(risk_assessment_text)

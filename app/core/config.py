@@ -174,6 +174,16 @@ class Settings(BaseSettings):
         description="启用 Agent 执行轨迹采集（写入 MongoDB agent_execution_traces 集合）"
     )
 
+    # Agent 断言执行（P2: 反思 lesson 升级为可执行断言）
+    AGENT_ASSERTION_ENABLED: bool = Field(
+        default=True,
+        description="启用 Agent 断言执行（从 agent_assertions 集合加载并执行断言）"
+    )
+    AGENT_ASSERTION_CACHE_TTL_SECONDS: int = Field(
+        default=60,
+        description="断言进程内缓存 TTL（秒），避免每次执行都查 MongoDB"
+    )
+
 
     # 配置真相来源（方案A）：file|db|hybrid
     # - file：以文件/env 为准（推荐，生产缺省）

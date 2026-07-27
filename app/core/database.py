@@ -440,6 +440,13 @@ async def init_database_views_and_indexes():
         except Exception as trace_exc:
             logger.warning(f"⚠️ 执行轨迹索引初始化失败（不影响应用启动）: {trace_exc}")
 
+        # 4. 创建 agent 断言集合索引（P2 可执行断言）
+        try:
+            from app.services.agent_assertion_service import agent_assertion_service
+            await agent_assertion_service.create_indexes()
+        except Exception as assertion_exc:
+            logger.warning(f"⚠️ 断言索引初始化失败（不影响应用启动）: {assertion_exc}")
+
         logger.info("✅ 数据库视图和索引初始化完成")
 
     except Exception as e:

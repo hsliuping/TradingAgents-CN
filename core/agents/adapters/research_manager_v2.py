@@ -291,11 +291,42 @@ class ResearchManagerV2(ManagerAgent):
             # ✅ 校验通过：存储为 JSON 字符串（保持 type=string 兼容下游消费者）
             logger.info("✅ [ResearchManagerV2] schema 校验通过")
             result[self.output_field] = json.dumps(validated_dict, ensure_ascii=False)
-            result["investment_plan_validation_status"] = "passed"
-            self._record_trace_validation(
-                validation_status="passed",
-                validation_details={"analysis_view": validated_dict.get("analysis_view"), "confidence": validated_dict.get("confidence")},
+
+            # 🔥 P2: 执行断言（非阻塞），合并结果到 validation_status
+            assertion_result = self._run_assertions(
+                raw_text=decision_text, parsed=validated_dict
             )
+            assertion_violations_dump = [v.model_dump() for v in assertion_result.violations]
+            if assertion_violations_dump:
+                result["investment_plan_assertion_violations"] = assertion_violations_dump
+
+            if assertion_result.has_error_violation:
+                logger.warning(
+                    f"⚠️ [ResearchManagerV2] 断言 error 违规 {assertion_result.error_count} 条，降级 validation_status"
+                )
+                result["investment_plan_validation_status"] = "failed"
+                result["investment_plan_validation_error"] = (
+                    f"断言违规: {assertion_result.error_count} 条 error"
+                )
+                self._record_trace_validation(
+                    validation_status="failed",
+                    validation_error=result["investment_plan_validation_error"],
+                    validation_details={
+                        "analysis_view": validated_dict.get("analysis_view"),
+                        "confidence": validated_dict.get("confidence"),
+                        "assertion_violations": assertion_violations_dump,
+                    },
+                )
+            else:
+                result["investment_plan_validation_status"] = "passed"
+                self._record_trace_validation(
+                    validation_status="passed",
+                    validation_details={
+                        "analysis_view": validated_dict.get("analysis_view"),
+                        "confidence": validated_dict.get("confidence"),
+                        "assertion_violations": assertion_violations_dump,
+                    },
+                )
             decision_content = result[self.output_field]
         else:
             # ❌ 校验失败：显式上报（不静默兜底），保留原始输出供排查
@@ -304,10 +335,19 @@ class ResearchManagerV2(ManagerAgent):
             result[self.output_field] = decision_text
             result["investment_plan_validation_status"] = "failed"
             result["investment_plan_validation_error"] = validation_error
+
+            # 🔥 P2: 校验失败时也执行断言（用于累积命中统计）
+            assertion_result = self._run_assertions(
+                raw_text=decision_text, parsed=None
+            )
+            assertion_violations_dump = [v.model_dump() for v in assertion_result.violations]
             self._record_trace_validation(
                 validation_status="failed",
                 validation_error=validation_error,
-                validation_details={"raw_output_preview": decision_text[:500]},
+                validation_details={
+                    "raw_output_preview": decision_text[:500],
+                    "assertion_violations": assertion_violations_dump,
+                },
             )
             decision_content = decision_text
 

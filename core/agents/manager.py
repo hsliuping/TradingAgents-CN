@@ -86,6 +86,7 @@ class ManagerAgent(BaseAgent):
         self.debate_rounds = debate_rounds
         self.debate_history = []
         self._last_trace_id = None  # P1: 执行轨迹 ID（供子类回填校验结果）
+        self._last_assertion_result = None  # P2: 最近一次断言执行结果（供子类参考）
 
         logger.debug(f"ManagerAgent '{self.agent_id}' 初始化完成")
 
@@ -310,6 +311,36 @@ class ManagerAgent(BaseAgent):
             validation_error=validation_error,
             validation_details=validation_details,
         )
+
+    def _run_assertions(
+        self,
+        raw_text: str,
+        parsed: Optional[Dict[str, Any]] = None,
+    ):
+        """P2: 执行召回的断言（非阻塞）。
+
+        供子类在 _validate_* 完成后调用。返回 AssertionRunResult，
+        由子类决定如何合并到 validation_status。
+
+        全程 try/except，失败返回 AssertionRunResult(ran=False)，
+        不影响 agent 主流程。
+        """
+        from app.core.config import settings
+        from app.models.agent_assertion import AssertionRunResult
+        if not getattr(settings, "AGENT_ASSERTION_ENABLED", True):
+            return AssertionRunResult(ran=False)
+        try:
+            from core.agents.assertion_executor import assertion_executor
+            result = assertion_executor.run_assertions_sync(
+                agent_id=self.agent_id,
+                raw_text=raw_text,
+                parsed=parsed,
+            )
+            self._last_assertion_result = result
+            return result
+        except Exception as e:
+            logger.warning(f"⚠️ [{self.agent_id}] 断言执行失败（不影响 agent）: {e}")
+            return AssertionRunResult(ran=False)
     
     def _collect_inputs(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """

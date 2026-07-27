@@ -1295,6 +1295,7 @@ from app.routers import skill_gaps as skill_gaps_router
 from app.routers import skill_center as skill_center_router
 from app.routers import agent_workshop as agent_workshop_router
 from app.routers import workflow_generation as workflow_generation_router
+from app.routers import agent_assertions as agent_assertions_router
 register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
 register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
 register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
@@ -1304,6 +1305,7 @@ register_router_with_log(app, skill_gaps_router.router, "Skill 缺口路由 (ski
 register_router_with_log(app, skill_center_router.router, "Skill 中心聚合路由 (skill-center)", tags=["skill-center"])
 register_router_with_log(app, agent_workshop_router.router, "Agent 工坊路由 (agent-workshop)", tags=["agent-workshop"])
 register_router_with_log(app, workflow_generation_router.router, "AI 工作流创建路由 (workflow-generation)", tags=["workflow-generation"])
+register_router_with_log(app, agent_assertions_router.router, "Agent 断言管理路由 (agent-assertions)", tags=["agent-assertions"])
 
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router

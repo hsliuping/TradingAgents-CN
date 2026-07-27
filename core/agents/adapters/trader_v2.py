@@ -317,23 +317,61 @@ class TraderV2(TraderAgent):
             # 🔥 合规校验（让错误显式化，不静默兜底）
             validation_warning = self._validate_trader_output(decision_text)
 
-            if validation_warning is None:
+            # 🔥 P2: 执行断言（非阻塞）。TraderV2 继承 TraderAgent（非 ManagerAgent），
+            # 直接调用 assertion_executor 单例（parsed=None，因为输出是 Markdown）。
+            from app.core.config import settings as _settings
+            assertion_violations_dump: list = []
+            assertion_has_error = False
+            assertion_error_count = 0
+            if getattr(_settings, "AGENT_ASSERTION_ENABLED", True):
+                try:
+                    from core.agents.assertion_executor import assertion_executor
+                    assertion_result = assertion_executor.run_assertions_sync(
+                        agent_id=self.agent_id,
+                        raw_text=decision_text,
+                        parsed=None,
+                    )
+                    assertion_violations_dump = [v.model_dump() for v in assertion_result.violations]
+                    assertion_has_error = assertion_result.has_error_violation
+                    assertion_error_count = assertion_result.error_count
+                    if assertion_violations_dump:
+                        result["trader_plan_assertion_violations"] = assertion_violations_dump
+                except Exception as assertion_exc:
+                    logger.warning(f"⚠️ [TraderV2] 断言执行失败（不影响 agent）: {assertion_exc}")
+
+            # 合并断言结果到 validation_status
+            if validation_warning is None and not assertion_has_error:
                 logger.info("✅ [TraderV2] 合规校验通过")
                 result["trader_plan_validation_status"] = "passed"
                 if recorder:
                     record_trace_validation(
                         trace_id=recorder.trace_id, validation_status="passed",
+                        validation_details={"assertion_violations": assertion_violations_dump},
                     )
             else:
-                logger.warning(f"⚠️ [TraderV2] 合规校验发现问题: {validation_warning}")
-                logger.warning(f"⚠️ [TraderV2] 原始输出前 500 字符: {decision_text[:500]}")
+                # 合规校验或断言 error 违规任一失败 → failed
+                if validation_warning:
+                    logger.warning(f"⚠️ [TraderV2] 合规校验发现问题: {validation_warning}")
+                    logger.warning(f"⚠️ [TraderV2] 原始输出前 500 字符: {decision_text[:500]}")
+                if assertion_has_error:
+                    logger.warning(
+                        f"⚠️ [TraderV2] 断言 error 违规 {assertion_error_count} 条"
+                    )
                 result["trader_plan_validation_status"] = "failed"
-                result["trader_plan_validation_warning"] = validation_warning
+                if validation_warning:
+                    result["trader_plan_validation_warning"] = validation_warning
+                if assertion_has_error:
+                    result["trader_plan_validation_error"] = (
+                        f"断言违规: {assertion_error_count} 条 error"
+                    )
                 if recorder:
                     record_trace_validation(
                         trace_id=recorder.trace_id, validation_status="failed",
-                        validation_error=validation_warning,
-                        validation_details={"raw_output_preview": decision_text[:500]},
+                        validation_error=validation_warning or f"断言违规: {assertion_error_count} 条 error",
+                        validation_details={
+                            "raw_output_preview": decision_text[:500],
+                            "assertion_violations": assertion_violations_dump,
+                        },
                     )
 
             logger.info("✅ [TraderV2] 用户版研究简报生成完成")

@@ -67,6 +67,69 @@ class ExecutionTraceService:
             logger.warning(f"⚠️ 校验结果回填失败（不影响 agent 执行）: {e}")
             return False
 
+    def get_traces_sync(
+        self,
+        agent_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        validation_status: Optional[str] = None,
+        success: Optional[bool] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: int = 100,
+    ) -> List[AgentExecutionTrace]:
+        """同步查询轨迹（供独立脚本/回归测试使用，无需 async 上下文）。"""
+        try:
+            db = get_mongo_db_sync()
+            collection = db[self.COLLECTION_NAME]
+            query: Dict[str, Any] = {}
+            if agent_id:
+                query["agent_id"] = agent_id
+            if workflow_id:
+                query["workflow_id"] = workflow_id
+            if validation_status:
+                query["validation.validation_status"] = validation_status
+            if success is not None:
+                query["success"] = success
+            if start_date or end_date:
+                query["started_at"] = {}
+                if start_date:
+                    query["started_at"]["$gte"] = start_date
+                if end_date:
+                    query["started_at"]["$lte"] = end_date
+
+            cursor = collection.find(query).sort("started_at", -1).limit(limit)
+            traces: List[AgentExecutionTrace] = []
+            for doc in cursor:
+                doc.pop("_id", None)
+                try:
+                    traces.append(AgentExecutionTrace(**doc))
+                except Exception as parse_exc:
+                    logger.warning(f"⚠️ 轨迹解析失败（跳过）: {parse_exc}")
+            return traces
+        except Exception as e:
+            logger.error(f"❌ 同步查询轨迹失败: {e}")
+            return []
+
+    def get_failure_patterns_sync(
+        self,
+        agent_id: Optional[str] = None,
+        days: int = 7,
+        limit: int = 100,
+    ) -> List[AgentExecutionTrace]:
+        """同步获取失败模式（供断言生成器脚本使用）。
+
+        返回 validation_status="failed" 的轨迹。
+        """
+        end_date = now_tz()
+        start_date = end_date - timedelta(days=days)
+        return self.get_traces_sync(
+            agent_id=agent_id,
+            validation_status="failed",
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
     # ==================== 异步 API（后台扫描/查询/P2 反思） ====================
 
     async def get_traces(
