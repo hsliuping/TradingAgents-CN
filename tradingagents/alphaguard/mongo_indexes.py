@@ -142,8 +142,112 @@ ALPHAGUARD_INDEX_SPECS = {
     "ag_market_contexts": [
         {"keys": [("context_id", 1)], "name": "uniq_market_context_id", "unique": True},
         {
+            "keys": [("ref_id", 1)],
+            "name": "uniq_market_context_ref",
+            "unique": True,
+            "sparse": True,
+        },
+        {
+            "keys": [("market", 1), ("trade_date", 1), ("data_version", 1)],
+            "name": "uniq_market_context_version",
+            "unique": True,
+        },
+        {
             "keys": [("market", 1), ("trade_date", -1)],
             "name": "idx_market_context_date",
+        },
+        {
+            "keys": [("calculation_status", 1), ("trade_date", -1)],
+            "name": "idx_market_context_status_date",
+        },
+    ],
+    "ag_security_master_sources": [
+        {
+            "keys": [("source_id", 1)],
+            "name": "uniq_security_master_source_id",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("symbol", 1),
+                ("market", 1),
+                ("provider", 1),
+                ("data_version", 1),
+            ],
+            "name": "uniq_security_master_source_version",
+            "unique": True,
+        },
+        {
+            "keys": [("symbol", 1), ("collected_at", -1)],
+            "name": "idx_security_master_source_symbol",
+        },
+    ],
+    "ag_market_context_sources": [
+        {
+            "keys": [("source_id", 1)],
+            "name": "uniq_market_context_source_id",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("market", 1),
+                ("trade_date", 1),
+                ("provider", 1),
+                ("provider_version", 1),
+                ("normalization_version", 1),
+            ],
+            "name": "uniq_market_context_source_version",
+            "unique": True,
+        },
+        {
+            "keys": [("content_hash", 1)],
+            "name": "idx_market_context_source_hash",
+        },
+    ],
+    "ag_security_trading_statuses": [
+        {
+            "keys": [("trading_status_id", 1)],
+            "name": "uniq_security_trading_status_id",
+            "unique": True,
+        },
+        {
+            "keys": [("ref_id", 1)],
+            "name": "uniq_security_trading_status_ref",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("symbol", 1),
+                ("market", 1),
+                ("trade_date", 1),
+                ("data_version", 1),
+            ],
+            "name": "uniq_security_trading_status_version",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("symbol", 1),
+                ("market", 1),
+                ("trade_date", -1),
+                ("calculation_status", 1),
+            ],
+            "name": "idx_security_trading_status_lookup",
+        },
+    ],
+    "ag_production_data_events": [
+        {
+            "keys": [("event_id", 1)],
+            "name": "uniq_production_data_event",
+            "unique": True,
+        },
+        {
+            "keys": [("event_type", 1), ("created_at", -1)],
+            "name": "idx_production_data_event_type",
+        },
+        {
+            "keys": [("symbol", 1), ("trade_date", -1)],
+            "name": "idx_production_data_event_symbol_date",
         },
     ],
     "ag_quant_audit_events": [

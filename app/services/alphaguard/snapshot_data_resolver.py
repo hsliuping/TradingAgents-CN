@@ -12,6 +12,7 @@ from tradingagents.alphaguard.instruments import normalize_instrument
 
 from .data_quality_gate import DataQualityGate, _as_datetime
 from .evidence_snapshot_service import EvidenceSnapshotService
+from .paper_storage import clean_document
 from .quant_config import sha256_value
 
 
@@ -146,8 +147,11 @@ class SnapshotDataResolver:
                 reference = str(document.get("_reference"))
                 permitted = self._permitted(snapshot, category, document)
                 if permitted:
-                    cleaned = dict(document)
-                    cleaned.pop("_id", None)
+                    cleaned = clean_document(document)
+                    if cleaned is None:
+                        raise SnapshotResolutionError(
+                            f"resolved reference unexpectedly empty: {reference}"
+                        )
                     accepted[category].append(cleaned)
                 else:
                     excluded.append(reference)

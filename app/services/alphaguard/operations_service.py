@@ -9,6 +9,7 @@ import subprocess
 import time
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -19,6 +20,9 @@ from app.core.alphaguard_config import (
 from app.services.alphaguard.champion_resolver import assignment_hash
 from app.services.alphaguard.operations_alert_service import OperationsAlertService
 from app.services.alphaguard.paper_storage import clean_document, safe_error_message
+from app.services.alphaguard.production_data_config import (
+    production_market_context_policy,
+)
 from tradingagents.alphaguard.mongo_indexes import ALPHAGUARD_INDEX_SPECS
 from tradingagents.alphaguard.experiment_schemas import ChampionAssignment
 from tradingagents.alphaguard.operations_schemas import (
@@ -31,12 +35,18 @@ from tradingagents.alphaguard.operations_schemas import (
 
 
 ROOT = Path(__file__).resolve().parents[3]
+CN_MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 REQUIRED_CHAMPION_TYPES = {
     "FACTOR_WEIGHT",
     "FACTOR_SET",
     "REGIME_CONFIG",
     "STRATEGY_CONFIG",
 }
+
+
+def _cn_market_now() -> datetime:
+    """Return the persisted CN-market wall clock without timezone metadata."""
+    return datetime.now(CN_MARKET_TIMEZONE).replace(tzinfo=None)
 
 JOB_REGISTRY: tuple[dict[str, Any], ...] = (
     {"job_name": "trading_calendar_sync", "worker": "scheduler", "scheduler_id": None},
@@ -125,7 +135,7 @@ class AlphaGuardOperationsService:
         self.alerts = OperationsAlertService(db)
 
     async def service_health(self, *, now: datetime | None = None) -> list[ServiceHealth]:
-        now = now or datetime.utcnow()
+        now = now or _cn_market_now()
         services = [
             ServiceHealth(
                 service_name="FASTAPI",
@@ -318,7 +328,7 @@ class AlphaGuardOperationsService:
         return result
 
     async def data_readiness(self, *, now: datetime | None = None) -> list[DataReadinessStatus]:
-        now = now or datetime.utcnow()
+        now = now or _cn_market_now()
         statuses: list[DataReadinessStatus] = []
         statuses.append(
             await self._collection_readiness(
@@ -347,7 +357,6 @@ class AlphaGuardOperationsService:
             ("FINANCIAL_DATA", ("financial_data", "stock_financial_data"), ["SNAPSHOT"], "FINANCIAL_DATA_MISSING"),
             ("NEWS_DATA", ("stock_news", "news_data"), ["SNAPSHOT"], "NEWS_DATA_MISSING"),
             ("ANNOUNCEMENT_DATA", ("stock_announcements", "announcements"), ["SNAPSHOT"], "ANNOUNCEMENT_DATA_MISSING"),
-            ("MARKET_CONTEXT", ("ag_market_contexts",), ["REGIME"], "MARKET_CONTEXT_MISSING"),
         ):
             statuses.append(
                 await self._collection_readiness(
@@ -360,6 +369,7 @@ class AlphaGuardOperationsService:
                     empty_reason=reason,
                 )
             )
+        statuses.append(await self._market_context_readiness(now))
         statuses.append(await self._industry_readiness(now))
         statuses.append(await self._model_readiness(now))
         statuses.append(await self._champion_readiness(now))
@@ -429,7 +439,7 @@ class AlphaGuardOperationsService:
                 blocking_reasons=["INDUSTRY_HISTORY_MISSING"],
                 last_checked_at=now,
             )
-        rows = await self.db[chosen].find({}).limit(5000).to_list(length=5000)
+        rows = await self.db[chosen].find({}).to_list(length=None)
         dates = [
             value
             for row in rows
@@ -494,7 +504,7 @@ class AlphaGuardOperationsService:
                 blocking_reasons=[empty_reason],
                 last_checked_at=now,
             )
-        rows = await self.db[chosen].find({}).limit(5000).to_list(length=5000)
+        rows = await self.db[chosen].find({}).to_list(length=None)
         dates = [
             parsed
             for row in rows
@@ -515,9 +525,7 @@ class AlphaGuardOperationsService:
         )
 
     async def _qfq_readiness(self, now: datetime) -> DataReadinessStatus:
-        rows = await self.db["stock_daily_quotes"].find({}).limit(5000).to_list(
-            length=5000
-        )
+        rows = await self.db["stock_daily_quotes"].find({}).to_list(length=None)
         qfq = [
             row
             for row in rows
@@ -543,6 +551,46 @@ class AlphaGuardOperationsService:
             record_count=len(qfq),
             required_for=["EVALUATION", "HISTORICAL_REPLAY"],
             blocking_reasons=[] if qfq and dates else ["QFQ_DATA_MISSING"],
+            last_checked_at=now,
+        )
+
+    async def _market_context_readiness(
+        self,
+        now: datetime,
+    ) -> DataReadinessStatus:
+        policy = production_market_context_policy()
+        query = {
+            "market": "CN",
+            "calculation_version": policy["calculation_version"],
+            "calculation_status": "READY",
+            "available_at": {"$lte": now},
+            "collected_at": {"$lte": now},
+        }
+        rows = await self.db["ag_market_contexts"].find(query).to_list(
+            length=None
+        )
+        dates = [
+            value
+            for row in rows
+            if (value := _as_date(row.get("trade_date"))) is not None
+        ]
+        return DataReadinessStatus(
+            component="MARKET_CONTEXT",
+            status="READY" if rows and dates else "NOT_READY",
+            market="CN",
+            coverage_start=min(dates) if dates else None,
+            coverage_end=max(dates) if dates else None,
+            record_count=len(rows),
+            required_for=["REGIME"],
+            blocking_reasons=(
+                []
+                if rows and dates
+                else ["MARKET_CONTEXT_CURRENT_VERSION_MISSING"]
+            ),
+            warnings=[
+                "source_collection=ag_market_contexts",
+                f"calculation_version={policy['calculation_version']}",
+            ],
             last_checked_at=now,
         )
 
@@ -625,7 +673,7 @@ class AlphaGuardOperationsService:
         )
 
     async def job_health(self, *, now: datetime | None = None) -> list[JobHealth]:
-        now = now or datetime.utcnow()
+        now = now or _cn_market_now()
         result: list[JobHealth] = []
         for descriptor in JOB_REGISTRY:
             scheduler_job = (
@@ -863,7 +911,7 @@ class AlphaGuardOperationsService:
         now: datetime | None = None,
         persist_alerts: bool = True,
     ) -> SystemReadinessReport:
-        now = now or datetime.utcnow()
+        now = now or _cn_market_now()
         safety = load_alphaguard_safety_settings()
         services, data, jobs = await asyncio.gather(
             self.service_health(now=now),

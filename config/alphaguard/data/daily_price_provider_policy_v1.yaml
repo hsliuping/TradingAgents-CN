@@ -1,0 +1,35 @@
+policy_id: alphaguard-daily-price-provider-policy-v1
+policy_version: 1.0.0
+market: CN
+normalization_version: alphaguard-daily-price-normalization-v1
+
+market_close_time: "15:00:00"
+price_quantum: "0.0001"
+amount_quantum_cny: "0.01"
+
+provider_priority:
+  - BAOSTOCK
+  - AKSHARE_EASTMONEY
+  - AKSHARE_TENCENT
+
+raw_cross_validation:
+  price_absolute_tolerance: "0.01"
+  price_relative_tolerance: "0.00001"
+  volume_absolute_tolerance_shares: 100
+  volume_relative_tolerance: "0.00001"
+  amount_absolute_tolerance_cny: "100"
+  amount_relative_tolerance: "0.00001"
+
+qfq_cross_validation:
+  price_absolute_tolerance: "0.05"
+  price_relative_tolerance: "0.001"
+
+volume_normalization:
+  BAOSTOCK: SHARES
+  AKSHARE_EASTMONEY: HANDS_X100_TO_SHARES
+  AKSHARE_TENCENT: AKSHARE_DECLARED_SHARES_WITH_SZ000_SH000_PATCH_V1
+
+amount_normalization:
+  BAOSTOCK: CNY
+  AKSHARE_EASTMONEY: CNY
+  AKSHARE_TENCENT: AKSHARE_NORMALIZED_CNY

@@ -4964,3 +4964,336 @@ collected / 15 errors；AlphaGuard 精确集合没有新增失败。
 当前 Operations：`CODE_COMPLETE=true`、`RUNTIME_READY=true`、`PAPER_READY=true`、
 `EVALUATION_READY=true`、`DATA_READY=false`、`LIVE_READY=false`。本阶段已完成并停止；
 未开始 PR-010，未扩大为逐日回放，未增加标的，未运行双模型全量回放，未调参。
+
+## 16. Production Data Completion & Live Observation（进行中）
+
+本阶段不是 PR-010。历史回放已先形成独立检查点：
+
+```text
+commit=aae0d371604a585cdf01693b541b0a1e82d5b6ce
+message=feat(alphaguard): complete historical backfill and accelerated evaluation
+tag=alphaguard-historical-backfill-v1
+tag peeled commit=aae0d371604a585cdf01693b541b0a1e82d5b6ce
+```
+
+### 16.1 Canonical 只读分析
+
+读取 canonical run `9b921ffa-71a5-578b-85e8-252b2f9cfca9` 的既有对象，使用
+`persist=false` 生成增强分析视图；没有重跑 Snapshot/Factor/Regime/Strategy，没有更新
+canonical report、历史对象或标签。
+
+```text
+planned/completed/skipped/failed=125/125/0/0
+DataQuality PASS/WARN/FAIL=0/125/0
+FactorResult=2625
+RegimeResult=125
+Proposal REJECTED/WATCH/TRIGGERED=200/46/4
+Shadow Fill=0
+EvaluationSubject=250
+20D CALCULATED/PENDING=240/10
+read_only_analysis_view_hash=0e6da588ced6afe7b90819092b19ce7e1ec8c076087bad670508478c0dc31d53
+```
+
+增强报告按 `factor_id + factor_version` 保存有效样本、缺失率、各期限收益、方向命中、
+MFE/MAE 和固定分桶；缺失因子不再错误关联未来收益。Regime 报告包含完整六状态分布、
+沪深300后续收益和标的 MFE/MAE。因为研究成交和账户权益序列均为 0，实际账户最大回撤
+明确为 null，而不是用端点收益伪造。四个 TRIGGERED 的完整纯信号标签、entry zone、
+Factor 摘要和执行缺口记录在
+`docs/research/ALPHAGUARD_BACKFILL_RESULTS.md`。
+
+### 16.2 生产数据对象
+
+新增独立生产输入：
+
+- `ag_security_master_sources`：BaoStock `query_stock_basic` 原始身份审计；
+- `ag_market_context_sources`：独立生产全市场抓取原始审计；
+- `ag_market_contexts`：Regime 所需的版本化生产 MarketContext；
+- `ag_security_trading_statuses`：QFQ + 证券资料 + 规则版本生成的每日交易状态；
+- `ag_production_data_events`：create-only 数据事件。
+
+`stock_basic_info` 仍是唯一生产证券资料 Repository；新增服务只补充五只用户指定股票的
+真实上市日期、来源版本和审计引用，没有建立第二套生产配置或证券主表。
+
+五只候选使用 BaoStock 00.9.30 完成 security master：
+
+```text
+000333 2013-09-18
+002594 2011-06-30
+300750 2018-06-11
+600519 2001-08-27
+601318 2007-03-01
+```
+
+首次同步暴露 MongoDB datetime 毫秒精度与 Python 微秒 hash 不一致。原五条审计记录
+保留；`security-master-normalization-v1.1` 将时间先规范到 BSON 精度，新五条可重复解析，
+现有 Repository 只引用 v1.1。重复 execute 为 5 REUSED / 5 UNCHANGED。
+
+2026-07-27 五只股票的 versioned trading status 均为 READY：
+
+```text
+000333/002594/600519/601318=主板普通10%
+300750=创业板普通20%
+ST=false, suspended=false
+tick_size=0.01, lot_size=100
+```
+
+主板、创业板、科创板、北交所、ST、上市初期无涨跌幅限制、旧主板特殊规则、退市整理和
+tick 取整均由 immutable YAML 版本控制；不能可靠解析时继续
+`INSUFFICIENT_DATA`。ExecutionMarketSnapshot 只在 source price version、规则版本、
+交易日和 cutoff 唯一匹配时读取该记录，未修改 Matching 或 Fee。
+
+### 16.3 20D 和新交易日链路
+
+截至 2026-07-28 盘中，十条 20D 的 horizon_end 为当日，仍为 PENDING。新增成熟服务
+只选择 canonical lineage 的 `DECISION_CLOSE + 20D + PENDING`，要求当日收盘后正式 QFQ
+和沪深300指数等价数据已经持久化；价格引用同时要求 `available_at` 和 `collected_at`
+不晚于评价截止时间。修改前后比较全部旧成熟 label hash，重复运行成熟 0。
+
+2026-07-28 12:00 左右实际执行了一次默认 dry-run。服务在读取或修改标签前返回
+`current trading day has not completed; labels remain PENDING`，没有数据库写入。随后只读
+复核仍为：
+
+```text
+1D/5D/10D CALCULATED=250/250/250
+20D CALCULATED/PENDING=240/10
+```
+
+生产观察脚本要求同日 15:00 后 cutoff、exact-date READY MarketContext、五个 READY
+TradingStatus 和现有 USER_SELECTED candidates。它依次调用现有 DataQuality、
+EvidenceSnapshot、Factor/Regime/Strategy；只有真实 TRIGGERED 才进入现有 DecisionPipeline。
+无 TRIGGERED 时对正式 Outbox、Intent、Order、Fill、Account、Position、Lot、
+Reservation、Ledger、Settlement、DailyAccountSnapshot 的 count + content hash 做前后
+比较。
+
+### 16.4 测试隔离
+
+根 `pytest.ini` 和 `conftest.py` 增加显式 suite：
+
+```text
+offline（默认）
+unit
+integration
+network
+interactive
+manual
+legacy_collection_error
+all
+```
+
+默认 offline 通过 collection-time 精确文件清单隔离实时网络/交互/人工脚本，仍保留安全
+测试和确定性 integration，并在进程级阻断 INET socket 与 `input()`。默认入口现在只包含
+已审计的 AlphaGuard unit/integration；未经逐文件审计的旧顶层 debug、Provider 和本机
+服务脚本保留在显式 `manual/network/interactive` 边界。当前默认离线入口为
+`465 passed, 89 warnings`。显式 `legacy_collection_error` 入口准确复现 14 个当前存量
+导入错误，没有删除、吞错或全局 skip；该旧入口自身可能执行旧模块的本机 Mongo 初始化，
+所以不属于默认离线 CI。
+
+生产数据与测试边界专项为 `10 passed`；PR-001～PR-009 加本阶段新增测试的完整
+AlphaGuard 精确回归即上述 `465 passed`。本阶段没有修改 Factor、Regime、
+Strategy、Prompt、模型、Consensus、HardRisk、Matching、Fee 或 Champion；未新增股票、
+未激活 PAPER_CHALLENGER、未创建真实订单、未开始 PR-010。
+
+### 16.5 运行态、安全与资产核验
+
+2026-07-28 12:07～12:11 的只读核验：
+
+```text
+Docker backend / queue-worker / analysis-worker / MongoDB / Redis=healthy
+AlphaGuard required indexes missing=0（production data indexes=18）
+queue-worker heartbeat TTL=13s
+analysis-worker heartbeat TTL=42s
+FastAPI live=true=exit 3
+queue-worker live=true=exit 1
+analysis-worker live=true=exit 1
+三个正式自动账户=ACTIVE，initial/available=1000000.00，reserved=0
+Position/Order/Fill/Reservation/Ledger/Settlement=0
+每账户 DailyAccountSnapshot=1
+Snapshot/Proposal/Outbox/Intent/Order/Fill duplicate identity=0
+正式 ag_quant_proposals=2；Outbox/Intent/Order/Fill=0
+```
+
+Operations 实际为 `DEGRADED_PAPER`：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=false
+PAPER_READY=true
+EVALUATION_READY=true
+LIVE_READY=false
+blocking=MARKET_CONTEXT_CURRENT_VERSION_MISSING
+```
+
+另外两个既有非本阶段阻断仍为 `EXPERIMENT_SAMPLES_EMPTY` 和
+`FULL_CHALLENGER_PIPELINE_NOT_READY`；本阶段按要求不补 Challenger。最近日志中的
+Tushare token 错误是已知 Provider 不可用，没有被当成空数据或成功同步。
+
+### 16.6 幂等缺陷修复
+
+- Production MarketContext 重复运行现在复用首次保存的 `available_at/collected_at`；
+  同一版本、同一内容即使执行时钟变化仍返回 `REUSED`，内容变化仍
+  `INTEGRITY_CONFLICT`。
+- security master 目标为 `UNCHANGED` 时不再刷新 `updated_at`，完全跳过目标 upsert；
+  历史审计源和现有生产记录均未删除或重写。
+- ExecutionMarketSnapshot 与剩余标签成熟都同时检查 `available_at` 和
+  `collected_at`，不能用声明时间早于真实采集时间的记录绕过 cutoff。
+
+### 16.7 当前未完成条件
+
+- 2026-07-27 原独立同步进程已完成 5201/5201 全市场记录，但 v1
+  `collected_at=2026-07-28 11:44` 晚于声明的 `available_at=2026-07-27 15:00`；
+  该行保留为审计、消费者拒绝，未重复同步；
+- 后续 policy/normalization/calculation 已升级为 v1.1，要求
+  `available_at=max(close, collected_at)`；当前 v1.1 生产记录为 0；
+- 2026-07-28 尚未收盘，正式 QFQ 不能入库，十条 20D 不能提前成熟；
+- 同理，2026-07-28 五标的新 Snapshot/Regime/Proposal 尚不能运行；
+- 因这些真实时间/数据条件，当前 `DATA_READY` 和 `LIVE_READY` 不能人工改为 true。
+
+### 16.8 当前 Git 状态
+
+```text
+HEAD=aae0d371604a585cdf01693b541b0a1e82d5b6ce
+tag=alphaguard-historical-backfill-v1
+historical checkpoint=clean and independently committed
+Production Data Completion changes=working tree, not committed
+```
+
+当前阶段尚未形成完成检查点：2026-07-28 正式收盘数据和 current v1.1
+MarketContext 均未满足，不能把“代码可运行”冒充为“生产数据完成”。工作区差异只包含本
+阶段生产数据接入、时序/幂等缺陷修复、测试边界与四份要求文档；没有回滚或重做历史
+检查点。
+
+## 17. Production Data Completion & Live Observation（完成）
+
+本节取代 16.7/16.8 的盘中状态。本阶段仍不是 PR-010；没有修改 Factor、Regime、
+Strategy、Prompt、模型、Consensus、HardRisk、Matching、Fee 或 Champion。
+
+### 17.1 AKShare 日线回退与正式增量
+
+新增统一 `DailyPriceProviderRegistry / DailyPriceProviderResolver`，Provider 声明能力、
+底层来源、版本、RAW/QFQ/index、volume/amount、更新时间和网络属性。实现：
+
+- BaoStock `query_history_k_data_plus`；
+- AKShare/Eastmoney `stock_zh_a_hist`、`index_zh_a_hist`；
+- AKShare/Tencent `stock_zh_a_hist_tx`。
+
+Provider 网络对象不能进入 Snapshot；只有规范化、交叉验证、持久化及本地 gate 后才可
+使用。成交量统一为股，成交额统一为 CNY；原始 source identity、response hash、
+validation refs、Provider update time 和 content hash 全部保留。
+
+2026-07-24 能力验证：BaoStock 与本地控制记录一致；Tencent 的股票 RAW/QFQ 经单位和
+Decimal 量化后在 v1 容差内，沪深300有 0.0013～0.0035 点精度差；Eastmoney 当次远端
+断连。2026-07-28 精确探测中 BaoStock 与 Tencent 对六个标的都返回完整正式日线，
+Eastmoney ERROR。最终选择 BaoStock，`fallback_reason=null`；Tencent 只作为
+validation ref。Provider 自身更新时间均不可得，按事实保存 null。
+
+只新增 2026-07-28 六条 `stock_daily_quotes`。五股各有明确 RAW 和 QFQ version；沪深300
+为 `INDEX_UNADJUSTED_EQUIVALENT`。首次写入后同步复跑全部 REUSED，同身份不同 hash 仍
+抛 `INTEGRITY_CONFLICT`，禁止 upsert 覆盖。
+
+### 17.2 交易状态与 Production MarketContext
+
+五个 `ag_security_trading_statuses` 全部 READY：000333/002594 为深主板10%，
+300750 为创业板20%，600519/601318 为沪主板10%；全部非ST、非停牌、tick 0.01、lot
+100。上市初期、ST、科创板、北交所、退市整理和无价格限制分支均由版本化规则处理，不可
+判断时仍 INSUFFICIENT_DATA。
+
+2026-07-28 Production MarketContext v1.1：
+
+```text
+context_id=10b1f30f-60d8-5798-bc9c-0c9f11685cd1
+provider=AKShare/Tencent 1.18.78
+universe provider=BaoStock 00.9.30
+source/expected=5193/5201
+coverage universe/high-low/sector=0.998462/0.999230/1
+advance/decline/unchanged=2365/2681/147
+new_high/new_low=268/458
+industry_diffusion=0.3
+benchmark close/MA20/MA60=4569.5235/4743.523775/4838.2949667
+volatility20=0.2950825816
+status=READY
+```
+
+使用当日实际 A股 universe、120日 Tencent 日线、十个行业指数和持久化沪深300序列；
+没有读写 `ag_research_*`，没有用五只候选或0填充缺失。跨执行时刻复跑为 source/context
+REUSED。
+
+### 17.3 20D、生产观察与资产
+
+Canonical run 的 20D DECISION_CLOSE 仍为 240 CALCULATED / 10 PENDING。十条到期记录
+需要跨 `candidate-real-data-v1` 与 `daily-price-normalization-v1` 两个 QFQ version；
+AdjustedPriceResolver 按既有规则拒绝混合。一次不完整计算的十条记录由严格 lineage、
+状态、空 refs 和 input-hash CAS 恢复为 PENDING；240条 CALCULATED 未修改。最终 dry-run
+成熟0、blocker全部为 `VERSION_LOCKED_QFQ_SERIES_UNAVAILABLE`。
+
+五个 2026-07-28 Candidate：
+
+```text
+DataQuality PASS=5
+EvidenceSnapshot=5（integrity=5）
+FactorResult=105
+RegimeResult=5（INSUFFICIENT_DATA=5）
+QuantProposal=10（REJECTED=5, INSUFFICIENT_DATA=5）
+EvaluationSubject=10
+TRIGGERED=0
+```
+
+不可变 Snapshot 只锁定新增 version 的当日 benchmark ref，现有 RegimeEngine 需要61条
+close，因此正确返回 `missing:benchmark_prices.close[61]`，没有默认 RANGE_WEAK。无
+TRIGGERED，所以 Normal/Top/Consensus/HardRisk 没有被调用，也没有 Intent/Outbox。
+
+正式 Outbox、Intent、Order、Fill、Position、Lot、Reservation、Ledger、Settlement 全部
+为0；三账户各 cash_available=1000000.00、cash_reserved=0、无费用和PnL变化。前后
+content hash 相同；Snapshot/Factor/Regime/Proposal/EvaluationSubject 重复身份为0。
+
+### 17.4 测试、运行态和 Readiness
+
+```text
+默认离线 CI=490 passed, 89 warnings
+Production data + provider 专项=33 passed
+修改 Python 编译=passed
+git diff --check=passed
+Operations integrity=PASS
+MongoDB/Redis/Scheduler=HEALTHY
+backend/queue-worker/analysis-worker=HEALTHY
+queue/analysis heartbeat TTL=13/41
+FastAPI/queue-worker/analysis-worker live=true=全部非零退出
+required indexes missing=0
+```
+
+Readiness：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=true
+PAPER_READY=true
+EVALUATION_READY=true
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+overall=DEGRADED_PAPER
+```
+
+Operations 过去使用 UTC-naive `now` 比较 CN-market-naive available_at，误把收盘后记录
+判为未来；现统一使用 `Asia/Shanghai` wall clock，不降低时序门禁。QFQ/RAW coverage
+不再被任意5000行读取上限截断。`INDUSTRY_HISTORY` 仍为 PARTIAL/CURRENT_ONLY，只用于
+归因且缺失时保持 null；CLI 不再把这个非生产链硬依赖混入 DATA_READY。
+
+### 17.5 实际文件范围与回退
+
+新增 production data schemas/collections、daily Provider/Resolver、增量价格、Security
+Master、交易状态、MarketContext、标签成熟与观察服务；新增对应 dry-run-first 脚本、
+版本化 YAML、create-only 索引、离线/网络测试边界和专项测试。修改仅涉及现有数据解析、
+执行快照时序门禁、Operations readiness、Decimal canonical 化、历史报告只读统计和本节
+四份文档。
+
+回退代码使用本阶段独立提交的父提交；数据库对象不通配删除。若需回退，按
+trade_date=2026-07-28、精确 ref/context/status/snapshot ID 先做引用审计；EvidenceSnapshot、
+Factor、Regime、Proposal 和 EvaluationSubject 已形成 lineage，应默认保留。正式交易
+集合和账户无需资产回滚，因为本阶段没有资产变化。
+
+已知限制：十条20D仍因版本连续性保持PENDING；五个当日 Regime 因不可变 Snapshot 的
+benchmark version seam 保持 INSUFFICIENT_DATA；历史行业映射 current-only；Eastmoney
+接口当次断连；Provider 自身更新时间不可得；Challenger 与 live 继续关闭。未开始
+PR-010。

@@ -222,3 +222,82 @@ evidence_links_or_ids:
 
 每日实时观察仍应继续使用前述清单。历史回放的成熟样本不能替代生产数据同步、生产
 MarketContext、真实订单结算观察或未来 20 个交易日的实时稳定性观察。
+
+## Production Data Completion 实时观察
+
+### 每日收盘前
+
+- [ ] 不运行当日 Snapshot、MarketContext、交易状态、ExecutionSnapshot 或标签成熟。
+- [ ] 不使用盘中 QFQ、临时网络响应或自然日推算期限。
+- [ ] queue-worker / analysis-worker 心跳和 backlog 正常。
+- [ ] `live_trading_enabled=false`，三个不安全启动入口继续 fail-closed。
+
+### 每日收盘后
+
+- [ ] 正式 RAW/QFQ 五标的与沪深300均存在 exact trade_date、稳定 ref/version/hash。
+- [ ] 生产 MarketContext 使用当日实际 A 股 universe 和十个行业指数，coverage 达标。
+- [ ] 五标的 SecurityTradingStatus 唯一、READY，来源价格版本与证券资料版本锁定。
+- [ ] DataQuality 没有 future/ambiguous/stale ref。
+- [ ] 五个 USER_SELECTED Candidate 的 Snapshot hash 完整，重复运行只复用。
+- [ ] FactorResult 唯一，不发生 input hash 冲突。
+- [ ] Regime 不因已可补的 MarketContext 字段缺失而失败；其他不可得项继续 fail-closed。
+- [ ] Proposal 只允许 TRIGGERED/WATCH/REJECTED/INSUFFICIENT_DATA，不强制制造信号。
+- [ ] 只有真实 TRIGGERED 才进入现有模型、Consensus、HardRisk 和受控 Outbox。
+- [ ] 模型失败或非法输出停止订单链，不转成默认 HOLD。
+- [ ] Snapshot/Proposal/EvaluationSubject 幂等，Outbox/Intent/Order 没有重复。
+- [ ] Account/Position/Lot/Reservation/Ledger/Settlement 的 count 与 content hash 可解释。
+- [ ] 既有成熟 HorizonLabel hash 不变；当日新成熟标签只读正式完整 QFQ。
+
+### 当前观察（2026-07-28 盘中）
+
+- [x] 历史回放只读分析视图已生成，没有重跑或修改 canonical 历史对象。
+- [x] 五只候选真实证券资料已写入 v1.1 并重复幂等复用。
+- [x] 2026-07-27 五只候选显式涨跌停/交易状态全部 READY，重复执行全部 REUSED。
+- [x] 默认离线 AlphaGuard CI 在进程级阻断 INET socket 和 `input()`：
+  `465 passed, 89 warnings`。
+- [x] 14 个旧导入错误通过显式 `legacy_collection_error` 入口原样复现，没有吞错。
+- [x] 原后台同步进程完成一条 2026-07-27 独立生产 MarketContext；未重复启动。
+- [x] 时序审计发现其 collected_at 晚于声明 available_at；v1 行保留但生产消费者拒绝。
+- [x] MongoDB、Redis、Scheduler、queue-worker、analysis-worker 均为 HEALTHY。
+- [x] queue-worker / analysis-worker 心跳 TTL 实测 13 秒 / 42 秒。
+- [x] FastAPI、queue-worker、analysis-worker 在 `live=true` 时分别 exit 3/1/1。
+- [x] 三个自动账户现金守恒，冻结为 0，无仓位、订单、Fill、Reservation、Ledger 或
+  Settlement；每账户已有一条 DailyAccountSnapshot。
+- [x] 正式 Snapshot、Proposal、Outbox、Intent、Order、Fill 身份无重复。
+- [x] 20D 收盘前 dry-run 被安全阻断且没有写入，仍为 240 CALCULATED / 10 PENDING。
+- [ ] 当前 v1.1 生产 MarketContext 尚无合格记录，DATA_READY 继续 NOT_READY。
+- [ ] 2026-07-28 尚未收盘，正式 QFQ 尚不能用于十条 20D 标签或新交易日生产链。
+- [ ] 2026-07-28 新 Snapshot/Regime/Proposal 尚未运行。
+
+当前未产生正式订单、账户资金或持仓变化；历史四个 TRIGGERED 仍只属于
+`RESEARCH_BACKFILL`，不得改写为成交。
+
+## 2026-07-28 收盘后观察结果
+
+- [x] 六个标的 exact-date Provider 日线门禁通过；BaoStock 为主来源，Tencent 为独立
+  validation ref，Eastmoney 远端断连被记录且未写空记录。
+- [x] 六条 `stock_daily_quotes` 均为正式 Provider 日线、完整 OHLC/volume/amount、
+  收盘后采集、版本与 hash 明确；重复同步 REUSED。
+- [x] 五个交易状态 READY：四个主板10%、一个创业板20%，全部非ST、非停牌。
+- [x] Production MarketContext v1.1 READY，实际 A股 universe 5193/5201、十个行业指数
+  coverage=1；没有用五只候选或沪深300涨跌代替市场宽度。
+- [x] MarketContext 跨执行时刻重复抓取为 source/context REUSED，hash 稳定。
+- [x] 五个候选 DataQuality PASS；Snapshot=5、Factor=105、Regime=5、Proposal=10、
+  EvaluationSubject=10，重复身份均为0。
+- [x] Regime 对不可变 Snapshot 中不足61条的版本锁定基准序列返回
+  `INSUFFICIENT_DATA`；没有默认成 RANGE_WEAK。
+- [x] Proposal 分布为 REJECTED=5、INSUFFICIENT_DATA=5、TRIGGERED=0；模型和订单链未
+  启动。
+- [x] Intent/Outbox/Order/Fill/Position/Lot/Reservation/Ledger/Settlement 均为0；
+  三账户可用现金各100万元、冻结0、无资产变化。
+- [x] 20D 的240条已成熟记录不变；十条跨版本序列不足的记录保持 PENDING，重复成熟0。
+- [x] Operations integrity PASS：无负资产、死信、卡住 Saga 或缺失索引。
+- [x] MongoDB、Redis、Scheduler、backend、queue-worker、analysis-worker HEALTHY；
+  心跳 TTL 实测13/41秒。
+- [x] FastAPI、queue-worker、analysis-worker 在 `live=true` 时全部非零退出。
+- [x] 默认离线 CI `490 passed, 89 warnings`；没有访问实时网络或等待输入。
+- [x] 当前 Readiness 为 CODE/RUNTIME/DATA/PAPER/EVALUATION/EXPERIMENT READY，
+  CHALLENGER/LIVE=false；历史行业映射仍单独 PARTIAL。
+
+每日观察仍需继续。`DATA_READY=true` 不取消单对象 fail-closed：价格版本连续性不足、
+模型失败、Consensus/HardRisk拒绝或执行数据缺失时，订单链必须停止。

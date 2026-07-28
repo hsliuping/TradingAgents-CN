@@ -15,7 +15,12 @@ def _matches(document, query):
             if not any(_matches(document, clause) for clause in expected):
                 return False
             continue
-        actual = document.get(key)
+        actual = document
+        for part in key.split("."):
+            if not isinstance(actual, dict):
+                actual = None
+                break
+            actual = actual.get(part)
         if isinstance(expected, dict):
             if "$gt" in expected and not (actual is not None and actual > expected["$gt"]):
                 return False
@@ -33,7 +38,13 @@ def _matches(document, query):
                 return False
             if "$nin" in expected and actual in expected["$nin"]:
                 return False
-            if "$in" in expected and actual not in expected["$in"]:
+            if "$in" in expected:
+                if isinstance(actual, list):
+                    if not any(item in expected["$in"] for item in actual):
+                        return False
+                elif actual not in expected["$in"]:
+                    return False
+            if "$ne" in expected and actual == expected["$ne"]:
                 return False
             if "$exists" in expected and (key in document) != expected["$exists"]:
                 return False
@@ -175,6 +186,9 @@ class Collection:
             document for document in self.documents if not _matches(document, query)
         ]
         return Result(deleted_count=before - len(self.documents))
+
+    async def count_documents(self, query):
+        return sum(_matches(document, query) for document in self.documents)
 
     def list_indexes(self):
         return Cursor(self.indexes)

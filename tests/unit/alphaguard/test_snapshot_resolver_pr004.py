@@ -1,6 +1,8 @@
 from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
+from bson import Decimal128
 
 from app.services.alphaguard.evidence_snapshot_service import calculate_immutable_hash
 from app.services.alphaguard.snapshot_data_resolver import (
@@ -58,7 +60,11 @@ async def stored_snapshot(db, *, versioned=True):
 async def test_resolver_excludes_future_market_financial_and_news_data():
     db = FakeDB()
     await db["stock_daily_quotes"].insert_one(
-        {"ref_id": "p0", "trade_date": "2026-07-01", "close": 10}
+        {
+            "ref_id": "p0",
+            "trade_date": "2026-07-01",
+            "close": Decimal128("10.25"),
+        }
     )
     await db["stock_daily_quotes"].insert_one(
         {"ref_id": "p1", "trade_date": "2026-07-02", "close": 99}
@@ -96,6 +102,7 @@ async def test_resolver_excludes_future_market_financial_and_news_data():
     await stored_snapshot(db)
     resolved = await SnapshotDataResolver(db).resolve("snapshot", user_id="user")
     assert [item["ref_id"] for item in resolved.prices] == ["p0"]
+    assert resolved.prices[0]["close"] == Decimal("10.25")
     assert [item["ref_id"] for item in resolved.financials] == ["f0"]
     assert [item["ref_id"] for item in resolved.news] == ["n0"]
     assert [item["ref_id"] for item in resolved.trading_calendar] == ["c0"]

@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import yaml
+from bson import Decimal128
 from pydantic import BaseModel
 
 
@@ -33,6 +35,10 @@ def canonical_value(value: Any) -> Any:
         return value.value
     if isinstance(value, (datetime, date)):
         return value.isoformat()
+    if isinstance(value, Decimal128):
+        return format(value.to_decimal(), "f")
+    if isinstance(value, Decimal):
+        return format(value, "f")
     if isinstance(value, dict):
         return {
             str(key): canonical_value(item)

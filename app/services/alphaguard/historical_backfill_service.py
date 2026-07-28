@@ -1604,7 +1604,11 @@ class HistoricalBackfillService:
         )
 
     async def build_report(
-        self, backfill_run_id: str, *, now: datetime | None = None
+        self,
+        backfill_run_id: str,
+        *,
+        now: datetime | None = None,
+        persist: bool = True,
     ) -> HistoricalBackfillReport:
         now = now or datetime.utcnow()
         run_raw = clean_document(
@@ -1651,12 +1655,12 @@ class HistoricalBackfillService:
                 {"backfill_run_id": backfill_run_id}
             ).to_list(length=None)
         ]
-        subjects = [
+        subjects = sorted([
             clean_document(item)
             for item in await self.db["ag_eval_subjects"].find({}).to_list(length=None)
             if str((item.get("lineage_ids") or {}).get("backfill_run_id") or "")
             == backfill_run_id
-        ]
+        ], key=lambda item: (str(item.get("source_object_id")), str(item.get("subject_id"))))
         subject_ids = [str(item["subject_id"]) for item in subjects]
         labels = [
             clean_document(item)
@@ -1706,7 +1710,14 @@ class HistoricalBackfillService:
                 subject_by_sample.setdefault(sample_id, str(item["subject_id"]))
 
         factor_missing: dict[str, list[int]] = defaultdict(list)
+        factor_versions: dict[str, set[str]] = defaultdict(set)
         factor_horizon_returns: dict[str, dict[str, list[Decimal]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        factor_horizon_mfe: dict[str, dict[str, list[Decimal]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        factor_horizon_mae: dict[str, dict[str, list[Decimal]]] = defaultdict(
             lambda: defaultdict(list)
         )
         factor_direction_hits: dict[str, dict[str, list[Decimal]]] = defaultdict(
@@ -1718,7 +1729,17 @@ class HistoricalBackfillService:
         for wrapper in factors:
             result = wrapper.get("factor_result") or {}
             factor_id = str(result.get("factor_id") or "UNKNOWN")
-            factor_missing[factor_id].append(int(result.get("raw_value") is None))
+            factor_versions[factor_id].add(
+                str(result.get("factor_version") or "UNKNOWN")
+            )
+            raw_value_missing = result.get("raw_value") is None
+            factor_missing[factor_id].append(int(raw_value_missing))
+            # Forward-return statistics describe observations where the factor
+            # itself was available.  Associating a missing factor with the
+            # sample's later return would manufacture apparent performance for
+            # a value that the historical decision never observed.
+            if raw_value_missing:
+                continue
             subject_id = subject_by_sample.get(str(wrapper.get("sample_id") or ""))
             if not subject_id:
                 continue
@@ -1732,6 +1753,14 @@ class HistoricalBackfillService:
                     continue
                 raw_return = Decimal(str(label["raw_forward_return"]))
                 factor_horizon_returns[factor_id][horizon].append(raw_return)
+                if label.get("mfe") is not None:
+                    factor_horizon_mfe[factor_id][horizon].append(
+                        Decimal(str(label["mfe"]))
+                    )
+                if label.get("mae") is not None:
+                    factor_horizon_mae[factor_id][horizon].append(
+                        Decimal(str(label["mae"]))
+                    )
                 if direction in {"POSITIVE", "NEGATIVE"}:
                     factor_direction_hits[factor_id][horizon].append(
                         raw_return if direction == "POSITIVE" else -raw_return
@@ -1764,6 +1793,10 @@ class HistoricalBackfillService:
                     regime_metrics[regime_name][f"stock_mae_{horizon}"].append(
                         Decimal(str(label["mae"]))
                     )
+                if label.get("mfe") is not None:
+                    regime_metrics[regime_name][f"stock_mfe_{horizon}"].append(
+                        Decimal(str(label["mfe"]))
+                    )
         proposal_counter = Counter(
             str((item.get("quant_proposal") or {}).get("status"))
             for item in proposals
@@ -1774,6 +1807,37 @@ class HistoricalBackfillService:
             for item in proposals
             if (item.get("quant_proposal") or {}).get("status") == "TRIGGERED"
         ]
+        strategy_status_metrics: dict[
+            str, dict[str, dict[str, list[Decimal]]]
+        ] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+        strategy_version_counter: Counter = Counter()
+        proposals_by_sample: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for wrapper in proposals:
+            proposal = wrapper.get("quant_proposal") or {}
+            status = str(proposal.get("status") or "UNKNOWN")
+            strategy_version_counter[
+                (
+                    str(proposal.get("strategy_id") or "UNKNOWN"),
+                    str(proposal.get("strategy_version") or "UNKNOWN"),
+                    status,
+                )
+            ] += 1
+            sample_id = str(wrapper.get("sample_id") or "")
+            if sample_id:
+                proposals_by_sample[sample_id].append(proposal)
+            subject_id = subject_by_source.get(str(proposal.get("proposal_id") or ""))
+            for horizon, label in labels_by_subject.get(subject_id or "", {}).items():
+                if label.get("status") != "CALCULATED":
+                    continue
+                for metric_name, label_field in (
+                    ("raw_return", "raw_forward_return"),
+                    ("mfe", "mfe"),
+                    ("mae", "mae"),
+                ):
+                    if label.get(label_field) is not None:
+                        strategy_status_metrics[status][horizon][metric_name].append(
+                            Decimal(str(label[label_field]))
+                        )
         entry_touch_count = 0
         entry_touch_evaluated = 0
         for proposal in triggered:
@@ -1810,6 +1874,94 @@ class HistoricalBackfillService:
             str(item.get("outcome_class") or "UNRESOLVED")
             for item in attributions
         )
+        sample_by_id = {
+            str(item.get("sample_id")): item
+            for item in samples
+            if item.get("sample_id")
+        }
+        regime_by_sample = {
+            str(item.get("sample_id")): item.get("regime_result") or {}
+            for item in regimes
+        }
+        factor_by_sample: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for item in factors:
+            factor_by_sample[str(item.get("sample_id") or "")].append(
+                item.get("factor_result") or {}
+            )
+        shadow_by_proposal = {
+            str(item.get("proposal_id")): item
+            for item in shadows
+            if item.get("proposal_id")
+        }
+        triggered_details = []
+        for wrapper in sorted(
+            proposals,
+            key=lambda item: (
+                str(item.get("trade_date") or ""),
+                str(item.get("symbol") or ""),
+                str((item.get("quant_proposal") or {}).get("proposal_id") or ""),
+            ),
+        ):
+            proposal = wrapper.get("quant_proposal") or {}
+            if proposal.get("status") != "TRIGGERED":
+                continue
+            sample_id = str(wrapper.get("sample_id") or "")
+            sample = sample_by_id.get(sample_id, {})
+            regime_result = regime_by_sample.get(sample_id, {})
+            shadow = shadow_by_proposal.get(str(proposal.get("proposal_id")), {})
+            subject_id = subject_by_source.get(str(proposal.get("proposal_id")))
+            pure_signal = {}
+            for horizon, label in sorted(
+                labels_by_subject.get(subject_id or "", {}).items()
+            ):
+                pure_signal[horizon] = {
+                    "status": label.get("status"),
+                    "sample_count": 1,
+                    "raw_forward_return": label.get("raw_forward_return"),
+                    "mfe": label.get("mfe"),
+                    "mae": label.get("mae"),
+                    "entry_zone_touched": label.get("entry_zone_touched"),
+                }
+            missing_limit_fields = []
+            if shadow.get("status") == "INSUFFICIENT_DATA":
+                reason = str(shadow.get("reason") or "")
+                if "limit_up_price" in reason or "limit" in reason.lower():
+                    missing_limit_fields = [
+                        "limit_up_price",
+                        "limit_down_price",
+                    ]
+            triggered_details.append(
+                {
+                    "proposal_id": proposal.get("proposal_id"),
+                    "symbol": proposal.get("symbol") or sample.get("symbol"),
+                    "trade_date": proposal.get("trade_date") or sample.get("trade_date"),
+                    "strategy_id": proposal.get("strategy_id"),
+                    "strategy_version": proposal.get("strategy_version"),
+                    "entry_zone": proposal.get("entry_zone"),
+                    "regime": regime_result.get("regime"),
+                    "regime_version": regime_result.get("regime_version"),
+                    "factor_summary": proposal.get("factor_summary") or {},
+                    "factor_versions": {
+                        str(item.get("factor_id")): str(item.get("factor_version"))
+                        for item in sorted(
+                            factor_by_sample.get(sample_id, []),
+                            key=lambda value: str(value.get("factor_id")),
+                        )
+                    },
+                    "risk_flags": proposal.get("risk_flags") or [],
+                    "reason_codes": proposal.get("reason_codes") or [],
+                    "shadow_status": shadow.get("status"),
+                    "safety_gate_reason": shadow.get("reason"),
+                    "missing_limit_fields": missing_limit_fields,
+                    "pure_signal_evaluation": pure_signal,
+                    "executable_trade_claim": False,
+                }
+            )
+        safety_gate_reasons = Counter(
+            str(item.get("reason") or "UNKNOWN")
+            for item in shadows
+            if item.get("status") in {"INSUFFICIENT_DATA", "BLOCKED", "NO_FILL"}
+        )
         report_payload = {
             "backfill_run_id": backfill_run_id,
             "status": (
@@ -1839,7 +1991,13 @@ class HistoricalBackfillService:
             },
             "factor_summary": {
                 factor_id: {
+                    "factor_version": (
+                        sorted(factor_versions[factor_id])[0]
+                        if len(factor_versions[factor_id]) == 1
+                        else "INTEGRITY_CONFLICT"
+                    ),
                     "sample_count": len(values),
+                    "valid_sample_count": len(values) - sum(values),
                     "missing_count": sum(values),
                     "missing_rate": (
                         Decimal(sum(values)) / Decimal(len(values))
@@ -1850,6 +2008,12 @@ class HistoricalBackfillService:
                         horizon: {
                             "sample_count": len(values_by_horizon),
                             "average_raw_return": _mean(values_by_horizon),
+                            "average_mfe": _mean(
+                                factor_horizon_mfe[factor_id].get(horizon, [])
+                            ),
+                            "average_mae": _mean(
+                                factor_horizon_mae[factor_id].get(horizon, [])
+                            ),
                             "direction_evaluated_count": len(
                                 factor_direction_hits[factor_id].get(horizon, [])
                             ),
@@ -1891,6 +2055,17 @@ class HistoricalBackfillService:
             "regime_summary": {
                 "sample_count": len(regimes),
                 "distribution": dict(sorted(regime_counter.items())),
+                "complete_distribution": {
+                    name: regime_counter[name]
+                    for name in (
+                        "TREND_UP",
+                        "RANGE_STRONG",
+                        "RANGE_WEAK",
+                        "TREND_DOWN",
+                        "EXTREME_RISK",
+                        "INSUFFICIENT_DATA",
+                    )
+                },
                 "forward_metrics": {
                     regime_name: {
                         metric: {
@@ -1902,6 +2077,10 @@ class HistoricalBackfillService:
                     }
                     for regime_name, metrics in sorted(regime_metrics.items())
                 },
+                "actual_account_max_drawdown": None,
+                "actual_account_max_drawdown_reason": (
+                    "no research fill or account-equity series exists"
+                ),
             },
             "strategy_summary": {
                 "proposal_count": len(proposals),
@@ -1925,6 +2104,37 @@ class HistoricalBackfillService:
                     if shadows
                     else None
                 ),
+                "status_forward_metrics": {
+                    status: {
+                        horizon: {
+                            metric: {
+                                "sample_count": len(metric_values),
+                                "average": _mean(metric_values),
+                                "worst": (
+                                    min(metric_values) if metric_values else None
+                                ),
+                            }
+                            for metric, metric_values in sorted(metrics.items())
+                        }
+                        for horizon, metrics in sorted(horizons.items())
+                    }
+                    for status, horizons in sorted(
+                        strategy_status_metrics.items()
+                    )
+                },
+                "strategy_version_status_distribution": [
+                    {
+                        "strategy_id": key[0],
+                        "strategy_version": key[1],
+                        "status": key[2],
+                        "sample_count": value,
+                    }
+                    for key, value in sorted(strategy_version_counter.items())
+                ],
+                "safety_gate_block_reasons": dict(
+                    sorted(safety_gate_reasons.items())
+                ),
+                "triggered_samples": triggered_details,
             },
             "model_summary": {
                 "model_replay_requested": False,
@@ -1989,6 +2199,8 @@ class HistoricalBackfillService:
             created_at=now,
             **report_payload,
         )
+        if not persist:
+            return report
         collection = self.db["ag_research_backfill_reports"]
         existing_raw = clean_document(
             await collection.find_one({"backfill_run_id": backfill_run_id})

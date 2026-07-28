@@ -60,7 +60,6 @@ def readiness_dimensions(report) -> dict[str, bool | str]:
         "NEWS_DATA",
         "ANNOUNCEMENT_DATA",
         "MARKET_CONTEXT",
-        "INDUSTRY_HISTORY",
         "MODEL_PROVIDER",
         "CHAMPION_ASSIGNMENTS",
     }

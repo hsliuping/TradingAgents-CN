@@ -13,6 +13,7 @@ from app.services.alphaguard.paper_storage import (
     model_document,
     mongo_date,
 )
+from app.services.alphaguard.production_data_config import cn_price_limit_policy
 from tradingagents.alphaguard.instruments import normalize_instrument
 from tradingagents.alphaguard.paper_schemas import (
     ExecutionMarketSnapshot,
@@ -109,6 +110,38 @@ class ExecutionMarketSnapshotService:
             raise ExecutionSnapshotError(
                 "exact-date stock_daily_quotes record does not exist"
             )
+        if raw.get("limit_up_price") is None or raw.get("limit_down_price") is None:
+            policy = cn_price_limit_policy()
+            statuses = await self.db["ag_security_trading_statuses"].find(
+                {
+                    "symbol": symbol,
+                    "market": "CN",
+                    "trade_date": mongo_date(trade_date),
+                    "calculation_version": policy["calculation_version"],
+                    "source_price_data_version": str(
+                        raw.get("price_data_version")
+                        or raw.get("data_version")
+                        or ""
+                    ),
+                    "calculation_status": "READY",
+                    "available_at": {"$lte": cutoff_at},
+                    "collected_at": {"$lte": cutoff_at},
+                }
+            ).to_list(length=2)
+            if len(statuses) != 1:
+                raise ExecutionSnapshotError(
+                    "execution daily data lacks one unambiguous versioned "
+                    "trading-status record"
+                )
+            trading_status = clean_document(statuses[0])
+            raw["limit_up_price"] = trading_status["upper_limit_price"]
+            raw["limit_down_price"] = trading_status["lower_limit_price"]
+            raw["suspended"] = trading_status["is_suspended"]
+            raw["st_status"] = trading_status["is_st"]
+            raw["_execution_source_refs"] = [
+                source_ref,
+                f"ag_security_trading_statuses:{trading_status['ref_id']}",
+            ]
         return await self.create_from_daily_record(
             record=raw,
             symbol=symbol,
@@ -187,6 +220,7 @@ class ExecutionMarketSnapshotService:
         volume = int(Decimal(str(volume_raw)))
         if volume < 0:
             raise ExecutionSnapshotError("execution volume cannot be negative")
+        source_refs = record.get("_execution_source_refs") or [source_ref]
         payload = {
             "execution_snapshot_id": str(
                 uuid5(
@@ -216,7 +250,7 @@ class ExecutionMarketSnapshotService:
             "st_status": st_status,
             "limit_up_price": limit_up,
             "limit_down_price": limit_down,
-            "source_refs": [source_ref],
+            "source_refs": [str(item) for item in source_refs if item],
             "data_version": data_version,
             "cutoff_at": cutoff_at,
             "simulation_granularity": "DAILY_OHLCV",

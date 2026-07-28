@@ -60,7 +60,10 @@ async def main(args: argparse.Namespace) -> None:
         db = client[settings.MONGO_DB]
         service = HistoricalBackfillService(db)
         if args.report_only:
-            report = await service.build_report(args.report_only)
+            report = await service.build_report(
+                args.report_only,
+                persist=False,
+            )
             print(json.dumps(report.model_dump(mode="json"), ensure_ascii=False, indent=2))
             return
 

@@ -1,0 +1,30 @@
+policy_id: cn-price-limit-rules-v1
+policy_version: 1.0.0
+calculation_version: cn-price-limit-calculation-v1
+market: CN
+tick_size: "0.01"
+lot_size: 100
+registration_mainboard_effective_date: 2023-04-10
+chinext_reform_effective_date: 2020-08-24
+initial_no_limit_sessions: 5
+boards:
+  SSE_MAIN:
+    prefixes: ["600", "601", "603", "605"]
+    normal_limit_rate: "0.10"
+    st_limit_rate: "0.05"
+  SZSE_MAIN:
+    prefixes: ["000", "001", "002", "003"]
+    normal_limit_rate: "0.10"
+    st_limit_rate: "0.05"
+  CHINEXT:
+    prefixes: ["300", "301"]
+    normal_limit_rate: "0.20"
+    st_limit_rate: "0.20"
+  STAR:
+    prefixes: ["688", "689"]
+    normal_limit_rate: "0.20"
+    st_limit_rate: "0.20"
+  BSE:
+    prefixes: ["4", "8", "92"]
+    normal_limit_rate: "0.30"
+    st_limit_rate: "0.30"

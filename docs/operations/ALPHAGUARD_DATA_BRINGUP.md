@@ -194,3 +194,266 @@ Outbox=Intent=Order=Fill=0
 
 三个 0% 覆盖财务因子和 `revenue_yoy_v1` 的 10.4% 缺失已记录为数据限制，不通过修改
 因子公式处理。详细结果见 `docs/research/ALPHAGUARD_BACKFILL_RESULTS.md`。
+
+## 14. Production Data Completion（2026-07-28）
+
+本阶段没有从 `ag_research_*` 复制生产对象，也没有修改 Factor、Regime、Strategy、
+Prompt、模型、Consensus、HardRisk、Matching、Fee 或 Champion。新增生产数据身份如下：
+
+| 数据域 | 生产集合 | 真实来源 | 时间/版本身份 |
+| --- | --- | --- | --- |
+| 证券资料原始审计 | `ag_security_master_sources` | BaoStock `query_stock_basic` 00.9.30 | `available_at/collected_at` + provider raw hash + normalization version |
+| 证券资料解析目标 | 现有 `stock_basic_info` | 同上 | `security_master_source_ref/security_master_data_version/content_hash` |
+| 全市场环境原始审计 | `ag_market_context_sources` | BaoStock 全 A 股历史截面、十个行业指数 + 正式沪深300 | trade_date/provider/normalization/content hash |
+| 全市场环境 | `ag_market_contexts` | 独立生产抓取计算 | trade_date/data_version/calculation_version/content hash |
+| 每日证券交易状态 | `ag_security_trading_statuses` | 正式 QFQ 日线 + 证券资料 + 版本化规则 | symbol/trade_date/price version/security-master version/rule version |
+
+### 14.1 MarketContext 字段映射
+
+| Regime 输入 | 来源/计算 |
+| --- | --- |
+| 指数收盘、MA20、MA60 | 同一 `price_data_version` 的正式 `stock_daily_quotes:000300` |
+| MA20 斜率 | 当前 MA20 相对五个交易日前 MA20，`production-market-context-calculation-v1.1` |
+| 20日波动率 | 正式沪深300连续收盘收益标准差年化 |
+| 市场成交额/变化 | BaoStock 全 A 股当日成交额与前20个交易日均值 |
+| 上涨/下跌/市场宽度 | 当日实际 A 股 universe；不使用五只候选或沪深300替代 |
+| 新高/新低 | 每只实际 universe 股票相对前20个交易日 |
+| 行业扩散度 | 十个交易所行业指数上涨比例 |
+| 极端风险标志 | 只调用现有 Regime 阈值计算，不新增或修改阈值 |
+
+缺失值不填 0，不足数据返回 `INSUFFICIENT_DATA`，不会默认 `RANGE_WEAK`。同一
+`trade_date + data_version` 内容相同复用，内容不同返回 `INTEGRITY_CONFLICT`。
+
+### 14.2 涨跌停与交易状态
+
+版本化 `cn-price-limit-rules-v1@1.0.0` 覆盖：
+
+- 沪深主板普通 10%、ST/*ST 5%；
+- 创业板、科创板 20%，创业板 2020-08-24 前按旧规则；
+- 北交所 30%；
+- 2023-04-10 后注册制主板及创业板/科创板/北交所上市初期五个交易日无涨跌幅限制；
+- 老主板上市初期、退市整理、身份冲突、未知板块或无涨跌幅限制日均 fail-closed；
+- 0.01 元 tick 使用 `ROUND_HALF_UP`，lot size=100；
+- 停牌和 ST 使用正式日线显式字段，不根据名称单独猜测。
+
+五只候选的 BaoStock 上市资料已经 dry-run、写入并重复复用：
+
+```text
+000333 2013-09-18 美的集团
+002594 2011-06-30 比亚迪
+300750 2018-06-11 宁德时代
+600519 2001-08-27 贵州茅台
+601318 2007-03-01 中国平安
+```
+
+首次实现发现 MongoDB datetime 只保留毫秒，早期五条审计源使用微秒参与 hash，重复校验
+因而被安全阻断。旧五条没有删除；新增
+`security-master-normalization-v1.1` 后生成五条可复现版本，现有
+`stock_basic_info` 只引用 v1.1。重复 execute 为 `source=REUSED / target=UNCHANGED`。
+
+2026-07-27 五只候选交易状态均为 READY，并已重复复用：
+
+```text
+000333 SZSE_MAIN upper/lower=92.95/76.05
+002594 SZSE_MAIN upper/lower=101.08/82.70
+300750 CHINEXT    upper/lower=459.61/306.41
+600519 SSE_MAIN  upper/lower=1427.15/1167.67
+601318 SSE_MAIN  upper/lower=59.42/48.62
+```
+
+这些记录在 2026-07-28 才完成采集，`available_at` 不会被伪装成 2026-07-27 当时已知；
+不会回写历史回放，也不会让四个历史 TRIGGERED 伪装成实际可成交。
+
+### 14.2.1 首条生产 MarketContext 的时序审计
+
+被中断的原同步进程继续在后台完成，没有重新启动。只读结果：
+
+```text
+trade_date=2026-07-27
+provider=baostock 00.9.30
+source_record_count/expected=5201/5201
+amount_window=20
+sector_records=10
+benchmark_records=61
+universe/high-low/sector coverage=1/0.9992309171/1
+advance/decline/unchanged=4884/268/49
+calculation_status=READY
+missing_fields=[]
+source count=1
+context count=1
+duplicate identity=0
+```
+
+但是该 v1 记录的 `available_at=2026-07-27 15:00`，真实
+`collected_at=2026-07-28 11:44`。内容虽然完整，时点不可用于 2026-07-27 决策。记录不
+覆盖、不删除；消费者现在同时要求：
+
+```text
+calculation_version=current policy version
+available_at <= cutoff_at
+collected_at <= cutoff_at
+```
+
+后续生成版本升级为 policy `1.0.1`、normalization/calculation `v1.1`，其
+`available_at=max(trade close, first collected_at)`，source 也保存 `available_at`，时间先
+规范到 MongoDB 毫秒精度。遵照“不重复同步”的要求，本阶段没有再次抓取或写入
+2026-07-27 v1.1；因此当前版本生产 MarketContext 数量为 0，`DATA_READY` 继续
+NOT_READY，而不是因一条时序不合格记录变成 true。
+
+### 14.3 剩余 20D 标签
+
+Canonical run 仍为 `20D CALCULATED=240 / PENDING=10`。十条 PENDING 的真实期限日为
+2026-07-28。只有在当日 15:00 后、五标的及沪深300的完整正式 QFQ/指数等价日线持久化
+且具有稳定 ref/version/hash 后，才允许运行：
+
+```bash
+.venv/bin/python scripts/mature_alphaguard_backfill_labels.py \
+  --backfill-run-id 9b921ffa-71a5-578b-85e8-252b2f9cfca9 \
+  --as-of-trade-date 2026-07-28
+```
+
+dry-run 全部 READY 后才可显式加 `--execute`。服务只选择 canonical lineage 的
+`DECISION_CLOSE + 20D + PENDING`，执行前后比较全部既有成熟标签 hash；重复执行必须成熟
+0 条。价格行的 `available_at` 和 `collected_at` 都必须不晚于评价截止时间。盘中、缺正式
+QFQ、未来日期或任一 source 不完整时明确阻断。
+
+2026-07-28 12:00 左右已运行一次默认 dry-run，结果为
+`current trading day has not completed; labels remain PENDING`。该检查发生在标签查询和
+替换前，没有数据库写入。随后只读复核仍为 `20D CALCULATED=240 / PENDING=10`。
+
+### 14.4 测试边界
+
+根目录 `pytest.ini` 和 collection-time 分类只隔离精确清单，不删除或全局 skip 测试：
+
+```bash
+# 默认离线确定性 CI：不访问实时网络，不等待 input
+.venv/bin/python -m pytest
+
+# 显式实时网络边界
+.venv/bin/python -m pytest --alphaguard-suite=network
+
+# 显式交互/人工边界
+.venv/bin/python -m pytest --alphaguard-suite=interactive
+.venv/bin/python -m pytest --alphaguard-suite=manual
+
+# 显式复现存量导入错误
+.venv/bin/python -m pytest --alphaguard-suite=legacy_collection_error --collect-only
+```
+
+默认离线入口只包含已经审计的 AlphaGuard unit/integration，并在进程级禁止 INET socket
+和 `input()`；未经逐文件审计的旧顶层 debug、Provider 和本机服务测试保留在显式
+`manual/network/interactive` 边界。实际结果为：
+
+```text
+默认离线确定性 CI=465 passed, 89 warnings
+生产数据 + 测试边界专项=10 passed
+显式 legacy_collection_error=14 个既有 ImportError，exit 2
+```
+
+14 个错误没有被吞掉或改成业务通过。显式 legacy 入口会执行旧模块现有的本机 Mongo
+初始化日志，默认离线入口不会放行网络或交互。
+
+### 14.5 当前运行状态
+
+```text
+MongoDB/Redis/Scheduler/queue-worker/analysis-worker=HEALTHY
+queue-worker heartbeat TTL=13s
+analysis-worker heartbeat TTL=42s
+FastAPI/queue-worker/analysis-worker live=true=exit 3/1/1
+三个自动账户 initial_cash/cash_available=1000000.00/1000000.00
+cash_reserved=0
+Position/Order/Fill/Reservation/Ledger/Settlement=0
+正式 Snapshot/Proposal/Outbox/Intent/Order/Fill duplicate identity=0
+```
+
+当前 Operations 保持 `DATA_READY=false`，直接阻断为
+`MARKET_CONTEXT_CURRENT_VERSION_MISSING`。v1.1 生成器已修复跨执行时刻幂等：重复运行
+复用第一次 `available_at/collected_at`；security master 的 `UNCHANGED` 目标不再刷新
+`updated_at`。这些修复没有触发新的 Provider 同步或数据库写入。
+
+## Production Data Completion 最终记录（2026-07-28 收盘后）
+
+本节取代上方“盘中 / 尚无 v1.1”的即时状态。没有重新运行历史回放、全量行情、账户、
+Champion 或索引初始化。
+
+### 日线 Provider 与持久化
+
+- 已知完整日 `2026-07-24`：BaoStock 与既有本地记录逐字段一致；AKShare/Tencent 在统一
+  Decimal 量化和单位换算后，股票 RAW/QFQ 价格在版本化容差内，volume/amount 的尾差被
+  明确记录；沪深300存在 0.0013～0.0035 点的 Provider 精度差异，仍在容差内。
+- AKShare/Eastmoney 的 `stock_zh_a_hist` / `index_zh_a_hist` 能力存在，但当次连接被远端
+  关闭；没有将空响应写入数据库。
+- `2026-07-28`：BaoStock RAW/QFQ（指数为
+  `INDEX_UNADJUSTED_EQUIVALENT`）六个标的均 VALID；AKShare/Tencent 六个标的均 VALID；
+  Eastmoney 均 ERROR。Resolver 选择 BaoStock，`fallback_reason=null`，Tencent 只写入
+  `validation_refs`。
+- 股票 RAW 容差为价格 `max(0.01, 0.001%)`、volume `max(100股, 0.001%)`、amount
+  `max(100元, 0.001%)`；QFQ 价格容差为 `max(0.05, 0.1%)`。成交量统一为股、成交额统一为
+  CNY，价格量化到 0.0001、金额量化到 0.01。
+- 本地 exact-date 六条记录全部为 `bar_granularity=PROVIDER_DAILY`、
+  `bar_completion_status=COMPLETED`，collected_at 为 17:52:49～17:53:01 CST，晚于收盘；
+  RAW/QFQ/index 版本、来源身份和 content hash 完整。重复同步全部 REUSED，原始
+  collected_at/hash 不变。
+
+### 交易状态和 MarketContext
+
+五只股票的 2026-07-28 `ag_security_trading_statuses` 全部 READY 且重复 REUSED：
+
+```text
+000333  SZSE_MAIN  previous=84.13   upper/lower=92.54/75.72
+002594  SZSE_MAIN  previous=92.40   upper/lower=101.64/83.16
+300750  CHINEXT    previous=400.00  upper/lower=480.00/320.00
+600519  SSE_MAIN   previous=1289.50 upper/lower=1418.45/1160.55
+601318  SSE_MAIN   previous=53.41   upper/lower=58.75/48.07
+```
+
+全部 `is_st=false / is_suspended=false / tick_size=0.01 / lot_size=100`。规则分别使用主板
+10%和创业板20%，没有统一按10%计算。
+
+生产 MarketContext v1.1 使用独立的当日 BaoStock A股 universe 与
+AKShare/Tencent 120日历史日线构建，没有读取或复制 `ag_research_*`：
+
+```text
+context_id=10b1f30f-60d8-5798-bc9c-0c9f11685cd1
+status=READY
+provider=akshare-tencent 1.18.78
+universe provider=baostock 00.9.30
+source/expected=5193/5201
+universe/high-low/sector coverage=0.998462/0.999230/1
+advance/decline/unchanged=2365/2681/147
+new_high/new_low=268/458
+industry_diffusion=0.3
+benchmark_close/MA20/MA60=4569.5235/4743.523775/4838.2949667
+benchmark_volatility20=0.2950825816
+calculation_version=production-market-context-calculation-v1.1
+```
+
+首次写入后跨执行时刻完整复跑为 `source_action=REUSED /
+context_action=REUSED`；content hash 稳定，研究与生产对象隔离。
+
+### 评价、观察和 Readiness
+
+十条剩余 20D 标签因历史 QFQ 与新增日线的版本 seam 不能组成单一锁定序列，保持
+`240 CALCULATED / 10 PENDING`。这是 fail-closed，不是用缺失数据完成成熟。
+
+五个候选均 `DataQuality=PASS`，新增对象为 Snapshot 5、Factor 105、Regime 5、Proposal
+10、EvaluationSubject 10；唯一身份重复均为 0。Regime 因不可变 Snapshot 中只锁定了
+新增版本的一条沪深300记录而返回 `INSUFFICIENT_DATA`，Proposal 为 5 REJECTED +
+5 INSUFFICIENT_DATA，无 TRIGGERED。模型、Consensus、HardRisk 和订单链没有被伪造。
+
+Operations 当前：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=true
+PAPER_READY=true
+EVALUATION_READY=true
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+```
+
+`INDUSTRY_HISTORY` 仍明确为 `PARTIAL / CURRENT_ONLY`，只影响历史行业归因，不被伪装成
+READY。`DATA_READY` 的生产数据域已完成，但不表示每个不可变 Snapshot 都有连续单版本
+历史。完整 Challenger 按既有边界保持关闭，live 永久 fail-closed。

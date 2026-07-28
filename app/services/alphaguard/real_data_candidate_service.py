@@ -21,6 +21,7 @@ from .real_data_ingestion_service import (
     real_data_hash,
 )
 from .data_quality_gate import DataQualityGate
+from .production_data_config import production_market_context_policy
 
 
 PRICE_FIELDS = (
@@ -1037,19 +1038,28 @@ class CandidateRealDataService:
             .sort("session_date", 1)
             .to_list(length=None)
         )
+        market_context_policy = production_market_context_policy()
         market_context = (
             await self.db["ag_market_contexts"]
             .find(
                 {
                     "market": "CN",
-                    "trade_date": {"$lte": _business_timestamp(trade_date)},
+                    "trade_date": _business_timestamp(trade_date),
+                    "calculation_status": "READY",
+                    "calculation_version": market_context_policy[
+                        "calculation_version"
+                    ],
+                    "available_at": {"$lte": cutoff_at},
+                    "collected_at": {"$lte": cutoff_at},
                 }
             )
-            .sort("trade_date", -1)
-            .limit(1)
-            .to_list(length=1)
+            .limit(2)
+            .to_list(length=2)
         )
-        market_context.reverse()
+        if len(market_context) > 1:
+            raise RealDataIntegrityConflict(
+                "production MarketContext identity is ambiguous"
+            )
 
         def refs(prefix: str, documents: list[dict[str, Any]]) -> list[str]:
             return [
@@ -1089,6 +1099,11 @@ class CandidateRealDataService:
             "announcement_data_version": (
                 str(announcements[-1].get("data_version"))
                 if announcements
+                else None
+            ),
+            "market_context_data_version": (
+                str(market_context[-1].get("data_version"))
+                if market_context
                 else None
             ),
         }
