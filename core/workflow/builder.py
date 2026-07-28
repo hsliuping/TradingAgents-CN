@@ -366,15 +366,30 @@ class LegacyDependencyProvider:
             logger.info(f"  - Deep API Key: 空")
 
         try:
+            # 🔧 从数据库读取模型配置（max_tokens, temperature, timeout, reasoning_effort）
+            # 优先级：用户显式指定(self._config) > 数据库配置 > 默认值
+            # 修复：之前 builder 不读 DB 的 max_tokens，导致 UI 配置的 Token 数不生效
+            from app.services.simple_analysis_service import _load_model_config_from_db
+            quick_db_cfg = _load_model_config_from_db(quick_model)
+            deep_db_cfg = _load_model_config_from_db(deep_model)
+
+            quick_max_tokens = self._config.get("quick_max_tokens") or quick_db_cfg.get("max_tokens", 2000)
+            deep_max_tokens = self._config.get("deep_max_tokens") or deep_db_cfg.get("max_tokens", 4000)
+            logger.info(
+                f"🔧 [依赖提供者] max_tokens: quick={quick_model}={quick_max_tokens}, "
+                f"deep={deep_model}={deep_max_tokens}"
+            )
+
             # 创建快速模型
             self._quick_llm = create_llm_by_provider(
                 provider=quick_provider,
                 model=quick_model,
                 backend_url=quick_url,
-                temperature=self._config.get("quick_temperature", 0.1),
-                max_tokens=self._config.get("quick_max_tokens", 2000),
-                timeout=self._config.get("quick_timeout", 60),
-                api_key=quick_api_key
+                temperature=self._config.get("quick_temperature") or quick_db_cfg.get("temperature", 0.1),
+                max_tokens=quick_max_tokens,
+                timeout=self._config.get("quick_timeout") or quick_db_cfg.get("timeout", 60),
+                api_key=quick_api_key,
+                reasoning_effort=quick_db_cfg.get("reasoning_effort"),
             )
 
             # 创建深度模型
@@ -382,10 +397,11 @@ class LegacyDependencyProvider:
                 provider=deep_provider,
                 model=deep_model,
                 backend_url=deep_url,
-                temperature=self._config.get("deep_temperature", 0.1),
-                max_tokens=self._config.get("deep_max_tokens", 4000),
-                timeout=self._config.get("deep_timeout", 120),
-                api_key=deep_api_key
+                temperature=self._config.get("deep_temperature") or deep_db_cfg.get("temperature", 0.1),
+                max_tokens=deep_max_tokens,
+                timeout=self._config.get("deep_timeout") or deep_db_cfg.get("timeout", 120),
+                api_key=deep_api_key,
+                reasoning_effort=deep_db_cfg.get("reasoning_effort"),
             )
 
             logger.info("[依赖提供者] LLM 实例创建成功")
@@ -434,18 +450,22 @@ class LegacyDependencyProvider:
         api_key_from_db = config.get("api_key")
         api_key = api_key_from_config or api_key_from_db
 
-        # 使用默认参数，并允许 Agent 级覆盖
+        # 🔧 从数据库读取模型配置（max_tokens, temperature, timeout, reasoning_effort）
+        # 优先级：显式参数 > self._config > 数据库配置 > 默认值
+        from app.services.simple_analysis_service import _load_model_config_from_db
+        db_cfg = _load_model_config_from_db(model)
+
         resolved_temperature = (
             temperature if temperature is not None
-            else self._config.get(f"{llm_type}_temperature", 0.1)
+            else self._config.get(f"{llm_type}_temperature") or db_cfg.get("temperature", 0.1)
         )
         resolved_max_tokens = (
             max_tokens if max_tokens is not None
-            else self._config.get(f"{llm_type}_max_tokens", 2000 if llm_type == "quick" else 4000)
+            else self._config.get(f"{llm_type}_max_tokens") or db_cfg.get("max_tokens", 2000 if llm_type == "quick" else 4000)
         )
         resolved_timeout = (
             timeout if timeout is not None
-            else self._config.get(f"{llm_type}_timeout", 60 if llm_type == "quick" else 120)
+            else self._config.get(f"{llm_type}_timeout") or db_cfg.get("timeout", 60 if llm_type == "quick" else 120)
         )
 
         logger.info(
@@ -465,7 +485,8 @@ class LegacyDependencyProvider:
             temperature=resolved_temperature,
             max_tokens=resolved_max_tokens,
             timeout=resolved_timeout,
-            api_key=api_key
+            api_key=api_key,
+            reasoning_effort=db_cfg.get("reasoning_effort"),
         )
 
     def _get_llm_config_from_db(self) -> Dict[str, Any]:
@@ -2124,14 +2145,24 @@ class WorkflowBuilder:
 
     def _try_create_legacy_agent(self, agent_id: str) -> Optional[Callable]:
         """
-        尝试使用遗留适配器创建智能体
+        尝试使用遗留适配器创建智能体 — 已停用
+
+        v3.0 起旧版 agent（不带 _v2 后缀）不再维护，所有入口已封堵。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
 
         Args:
             agent_id: 智能体 ID
 
         Returns:
-            可调用的节点函数，如果不支持则返回 None
+            始终返回 None（旧版 agent 已停用，走 placeholder_node 占位）
         """
+        logger.warning(
+            "[已停用] _try_create_legacy_agent 已停用，agent_id=%s 应使用对应的 _v2 版本。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md",
+            agent_id,
+        )
+        return None
+        # pragma: no cover - 以下旧版 factory_map 代码保留但不执行，为 v4.0 删除做准备
         # 智能体到工厂函数的映射
         factory_map = {
             # 分析师

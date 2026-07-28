@@ -4231,11 +4231,20 @@ class PortfolioService:
         stock_code: str,
         market: str = "A股"
     ) -> Optional[Dict[str, Any]]:
-        """使用新版 StockAnalysisEngine 获取分析报告
+        """使用新版 StockAnalysisEngine 获取分析报告 — 已停用
 
-        Returns:
-            分析报告字典，失败返回 None
+        v3.0 起旧版 StockAnalysisEngine 已停用（死代码，无调用者）。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
         """
+        raise RuntimeError(
+            "[已停用] PortfolioService._get_stock_analysis_via_engine 已停用，"
+            "请使用 analyze_position_by_code_v2 或 _get_cached_stock_analysis_report。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         try:
             from tradingagents.core.engine.stock_analysis_engine import StockAnalysisEngine
             from core.workflow.builder import LegacyDependencyProvider
@@ -4310,7 +4319,10 @@ class PortfolioService:
         market: str = "A股",
         skip_if_not_exists: bool = False
     ) -> Optional[Dict[str, Any]]:
-        """使用旧版 simple_analysis_service 获取分析报告（降级方案）
+        """使用旧版 simple_analysis_service 获取分析报告（降级方案）— 已停用
+
+        v3.0 起旧版 legacy 引擎已停用（死代码，无调用者）。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
 
         Args:
             user_id: 用户ID
@@ -4320,7 +4332,16 @@ class PortfolioService:
 
         Returns:
             分析报告字典，如果 skip_if_not_exists=True 且没有缓存则返回 None
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
         """
+        raise RuntimeError(
+            "[已停用] PortfolioService._get_stock_analysis_via_legacy 已停用，"
+            "请使用 analyze_position_by_code_v2 或 _get_cached_stock_analysis_report。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         from app.services.simple_analysis_service import get_simple_analysis_service
         from app.models.analysis import SingleAnalysisRequest, AnalysisParameters
         from app.core.database import get_mongo_db

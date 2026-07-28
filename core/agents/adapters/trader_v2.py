@@ -259,7 +259,7 @@ class TraderV2(TraderAgent):
 
         # P1: 启动执行轨迹采集（TraderV2 自行管理，因为父类 TraderAgent 不在 ManagerAgent 改造范围）
         from core.agents.execution_trace_recorder import (
-            start_execution_trace, is_trace_enabled, record_trace_validation
+            start_execution_trace, is_trace_enabled
         )
         recorder = None
         if is_trace_enabled():
@@ -344,8 +344,11 @@ class TraderV2(TraderAgent):
                 logger.info("✅ [TraderV2] 合规校验通过")
                 result["trader_plan_validation_status"] = "passed"
                 if recorder:
-                    record_trace_validation(
-                        trace_id=recorder.trace_id, validation_status="passed",
+                    # 用 set_validation 更新内存对象，确保 finish() 的 insert 携带 validation
+                    # （trader_v2 的 finish 在 finally 中晚于本调用，若用 record_trace_validation
+                    #  的 DB update 会因文档未 insert 而 no-op，随后被 finish 覆盖为 None）
+                    recorder.set_validation(
+                        validation_status="passed",
                         validation_details={"assertion_violations": assertion_violations_dump},
                     )
             else:
@@ -365,8 +368,8 @@ class TraderV2(TraderAgent):
                         f"断言违规: {assertion_error_count} 条 error"
                     )
                 if recorder:
-                    record_trace_validation(
-                        trace_id=recorder.trace_id, validation_status="failed",
+                    recorder.set_validation(
+                        validation_status="failed",
                         validation_error=validation_warning or f"断言违规: {assertion_error_count} 条 error",
                         validation_details={
                             "raw_output_preview": decision_text[:500],

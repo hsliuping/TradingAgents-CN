@@ -32,10 +32,21 @@ class ExecutionTraceService:
         try:
             db = get_mongo_db_sync()
             collection = db[self.COLLECTION_NAME]
+            # 🔍 INFO 日志：确认 save_trace_sync 被调用及连接的数据库（排查端口问题）
+            db_name = db.name
+            from app.core.config import settings
+            mongo_port = settings.MONGODB_PORT
+            logger.info(
+                f"📋 [轨迹写入] save_trace_sync 调用: agent={trace.agent_id}, "
+                f"trace_id={trace.trace_id}, db={db_name}, MONGODB_PORT={mongo_port}"
+            )
             doc = trace.model_dump()
             # datetime 字段保持原生 datetime 类型，PyMongo 会自动转为 BSON
             collection.insert_one(doc)
-            logger.debug(f"✅ 执行轨迹已保存: trace_id={trace.trace_id}, agent={trace.agent_id}")
+            logger.info(
+                f"✅ [轨迹写入] 成功: trace_id={trace.trace_id}, agent={trace.agent_id}, "
+                f"db={db_name}, port={mongo_port}"
+            )
             return True
         except Exception as e:
             logger.warning(f"⚠️ 执行轨迹保存失败（不影响 agent 执行）: {e}")

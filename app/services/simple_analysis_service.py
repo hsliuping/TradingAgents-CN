@@ -888,14 +888,20 @@ class SimpleAnalysisService:
             return PyObjectId(new_object_id)
 
     def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
-        """获取或创建TradingAgents实例
+        """获取或创建TradingAgents实例 — 已停用
 
-        ⚠️ 注意：为了避免并发执行时的数据混淆，每次都创建新实例
-        虽然这会增加一些初始化开销，但可以确保线程安全
+        v3.0 起旧版 TradingAgentsGraph 引擎已停用。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
 
-        TradingAgentsGraph 实例包含可变状态（self.ticker, self.curr_state等），
-        如果多个线程共享同一个实例，会导致数据混淆。
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
         """
+        raise RuntimeError(
+            "[已停用] SimpleAnalysisService._get_trading_graph 已停用，"
+            "TradingAgentsGraph 不再实例化。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         # 🔧 [并发安全] 每次都创建新实例，避免多线程共享状态
         # 不再使用缓存，因为 TradingAgentsGraph 有可变的实例变量
         logger.info(f"🔧 创建新的TradingAgents实例（并发安全模式）...")
@@ -1101,7 +1107,20 @@ class SimpleAnalysisService:
         user_id: str,
         request: SingleAnalysisRequest
     ):
-        """在后台执行分析任务"""
+        """在后台执行分析任务 — 已停用
+
+        v3.0 起旧版 legacy 引擎已停用，队列 Worker 应走 v2 引擎分支。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
+        """
+        raise RuntimeError(
+            "[已停用] SimpleAnalysisService.execute_analysis_background 已停用，"
+            "task_id=%s 应改用 v2 引擎（thread_worker 的 engine='v2' 分支）。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md" % task_id
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         # 🔧 使用 get_symbol() 方法获取股票代码（兼容 symbol 和 stock_code 字段）
         stock_code = request.get_symbol()
 
@@ -1421,7 +1440,20 @@ class SimpleAnalysisService:
         request: SingleAnalysisRequest,
         progress_tracker: Optional[RedisProgressTracker] = None
     ) -> Dict[str, Any]:
-        """同步执行分析（在共享线程池中运行）"""
+        """同步执行分析（在共享线程池中运行）— 已停用
+
+        v3.0 起旧版 legacy 引擎已停用。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
+        """
+        raise RuntimeError(
+            "[已停用] SimpleAnalysisService._execute_analysis_sync 已停用，"
+            "task_id=%s 应改用 v2 引擎。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md" % task_id
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         # 🔧 使用共享线程池，支持多个任务并发执行
         # 不再每次创建新的线程池，避免串行执行
         loop = asyncio.get_event_loop()
@@ -1445,7 +1477,20 @@ class SimpleAnalysisService:
         request: SingleAnalysisRequest,
         progress_tracker: Optional[RedisProgressTracker] = None
     ) -> Dict[str, Any]:
-        """同步执行分析的具体实现"""
+        """同步执行分析的具体实现 — 已停用
+
+        v3.0 起旧版 legacy 引擎已停用。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
+        """
+        raise RuntimeError(
+            "[已停用] SimpleAnalysisService._run_analysis_sync 已停用，"
+            "task_id=%s 应改用 v2 引擎。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md" % task_id
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         try:
             # 🔑 关键：在方法开始时提取股票代码（兼容 symbol 和 stock_code 字段）
             stock_code = request.get_symbol()

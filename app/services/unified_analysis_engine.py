@@ -422,8 +422,24 @@ class UnifiedAnalysisEngine:
 
         Returns:
             实际使用的引擎类型
+
+        Raises:
+            RuntimeError: 当请求 legacy 引擎时（已停用）
         """
+        # v3.0 起旧版 legacy 引擎已停用
+        if requested_engine == "legacy":
+            raise RuntimeError(
+                "[已停用] UnifiedAnalysisEngine._select_engine 拒绝 legacy 引擎，"
+                "请改用 workflow 或 auto。"
+                "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+            )
         if requested_engine == "auto":
+            # 防御：若注册表默认引擎被改成 legacy，强制改为 workflow
+            if default_engine == "legacy":
+                self.logger.warning(
+                    "⚠️ 注册表默认引擎为 legacy，已强制改为 workflow（legacy 已停用）"
+                )
+                return "workflow"
             return default_engine
         return requested_engine
     
@@ -674,7 +690,10 @@ class UnifiedAnalysisEngine:
         config,
         progress_callback: Optional[Callable] = None
     ) -> Dict[str, Any]:
-        """通过旧引擎执行（TradingAgentsGraph）
+        """通过旧引擎执行（TradingAgentsGraph）— 已停用
+
+        v3.0 起旧版 legacy 引擎已停用，所有入口已封堵。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
 
         Args:
             task: 任务对象
@@ -683,7 +702,17 @@ class UnifiedAnalysisEngine:
 
         Returns:
             执行结果
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
         """
+        raise RuntimeError(
+            "[已停用] UnifiedAnalysisEngine._execute_via_legacy 已停用，"
+            "任务 %s 应改用 workflow 引擎执行。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+            % getattr(task, "task_id", "<unknown>")
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         self.logger.info(f"🔄 使用旧引擎执行: TradingAgentsGraph")
 
         # 只支持股票分析任务

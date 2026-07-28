@@ -295,7 +295,7 @@ class ThreadWorker:
 
             elif engine_type == "unified":
                 # 使用统一分析服务
-                from app.services.simple_analysis_service import UnifiedAnalysisService
+                from app.services.unified_analysis_service import UnifiedAnalysisService
 
                 unified_service = UnifiedAnalysisService()
                 await unified_service.analyze_stock(
@@ -307,6 +307,16 @@ class ThreadWorker:
                 logger.info(f"✅ [unified引擎] 任务完成: {task_id}")
 
             else:
+                # 旧版 legacy 引擎已停用 — 拒绝执行
+                logger.error(
+                    f"❌ [ThreadWorker] 拒绝执行 legacy 引擎任务: task_id={task_id}, engine={engine_type}"
+                )
+                raise RuntimeError(
+                    "[已停用] thread_worker 拒绝 engine=%s 的任务，"
+                    "请将队列参数 engine 改为 'v2'。"
+                    "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md" % engine_type
+                )
+                # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
                 # 使用 legacy 引擎
                 from app.services.simple_analysis_service import SimpleAnalysisService
                 from app.models.analysis import SingleAnalysisRequest, AnalysisParameters

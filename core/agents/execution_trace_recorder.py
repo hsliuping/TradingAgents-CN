@@ -20,6 +20,7 @@ from app.models.execution_trace import (
     OutputSnapshot,
     PromptSnapshot,
     TokenUsage,
+    ValidationResult,
 )
 from app.services.execution_trace_service import execution_trace_service
 from app.utils.timezone import now_tz
@@ -200,6 +201,41 @@ class ExecutionTraceRecorder:
             execution_trace_service.save_trace_sync(self._trace)
         except Exception as e:
             logger.warning(f"⚠️ 执行轨迹 finish 失败（不影响 agent）: {e}")
+
+    def set_validation(
+        self,
+        validation_status: str,
+        validation_error: Optional[str] = None,
+        validation_details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """回填校验结果到内存 trace 对象（供 finish 时一并写入）。
+
+        解决 trader_v2 时序问题：trader_v2 的 record_trace_validation（DB update）
+        在 finish（insert）之前执行，此时文档不存在导致 update no-op，
+        随后 finish 的 insert 用内存中 validation=None 覆盖。
+
+        本方法更新内存对象的 validation 字段，使 finish 的 insert 携带正确值。
+        若已 finish（文档已 insert），则降级为 DB update（兼容 ManagerAgent
+        在 super().execute finally 中先 finish、子类后回填的场景）。
+        """
+        try:
+            if self._trace.validation is None:
+                self._trace.validation = ValidationResult()
+            self._trace.validation.validation_status = validation_status
+            if validation_error is not None:
+                self._trace.validation.validation_error = validation_error
+            if validation_details is not None:
+                self._trace.validation.validation_details = validation_details
+        except Exception as e:
+            logger.debug(f"记录校验结果到内存失败: {e}")
+        # 若文档已 insert（finish 已执行），同步更新 DB
+        if self._finished:
+            record_trace_validation(
+                trace_id=self._trace.trace_id,
+                validation_status=validation_status,
+                validation_error=validation_error,
+                validation_details=validation_details,
+            )
 
 
 def start_execution_trace(
