@@ -4850,3 +4850,117 @@ MongoDB/Redis=healthy
 - 真实行情、财务、新闻、公告和日历默认保留为可审计证据，不因功能回退而删除；
 - 未开始 PR-010，未启用 PAPER_CHALLENGER，未修改任何因子、策略、Prompt、模型、
   Consensus、HardRisk、Matching 或 Fee 参数。
+
+## 15. Historical Backfill & Accelerated Evaluation（完成）
+
+本阶段不是 PR-010。固定 2026-01-01 至 2026-06-30、五个用户指定标的和
+`WEEKLY_LAST_SESSION`；持久化日历实际得到 25 个日期、125 个计划样本。
+
+新增研究隔离能力：
+
+- `HistoricalBackfillRun/CoverageRecord/ResearchSnapshot/Sample/Report`；
+- 历史实际 universe 的 BaoStock MarketContext 来源与计算结果；
+- create-only `ag_research_*` 集合和 38 个索引；
+- 纯 Factor/Regime/Strategy 回放、PR-007成熟标签、Counterfactual 和 Attribution；
+- 只写研究集合的 MatchingEngine/FeeEngine 影子执行；
+- dry-run-first 的索引、MarketContext 同步和 Backfill 运行/恢复/报告脚本；
+- 运行前后正式 Outbox、Intent、Order、Fill、Account、Position、Lot、Reservation、
+  Ledger、Settlement 数量与内容哈希检查。
+
+真实字段适配：股票历史价格为 QFQ；沪深300为显式
+`INDEX_UNADJUSTED_EQUIVALENT`，只在基准评价读取时视为指数等价口径。五只股票日线没有
+显式涨跌停价，因此影子执行不会推算边界。行业历史仍是 current-only，历史行业相对收益
+保持 null。
+
+### 15.1 真实 MarketContext
+
+BaoStock 00.9.30 对 25/25 个抽样日完成实际 A 股 universe 和十个行业指数读取：A 股
+代码并集 5,216，每日 5,182～5,207；universe coverage=1，high/low coverage 约
+0.99749～0.99981，sector coverage=1。`ag_research_market_context_sources=25`、
+`ag_research_market_contexts=25`，READY=25，Provider 失败和重复身份均为 0。
+
+生产 `ag_market_contexts` 仍为 0；研究数据未复制到生产，Operations 的
+`MARKET_CONTEXT_MISSING` 继续真实存在。
+
+### 15.2 Canonical 回放
+
+```text
+backfill_run_id=9b921ffa-71a5-578b-85e8-252b2f9cfca9
+report_id=54c36431-b5c6-5236-aaa2-73a4293d6efe
+report_status=READY
+planned/completed/skipped/failed=125/125/0/0
+Snapshot=125
+FactorResult=2625（21/样本）
+RegimeResult=125
+QuantProposal=250
+EvaluationSubject=250
+HorizonLabel=1016
+Counterfactual=500
+Attribution=250
+```
+
+Regime 分布为 RANGE_STRONG 45、RANGE_WEAK 65、TREND_DOWN 10、TREND_UP 5；Proposal
+为 REJECTED 200、WATCH 46、TRIGGERED 4。4 个 TRIGGERED 全部因原始日线缺显式涨跌停价
+返回影子 `INSUFFICIENT_DATA`，研究 Fill=0。模型回放未请求，Consensus/HardRisk 未伪造。
+
+1D/5D/10D 的 250 个 DECISION_CLOSE 标签全部成熟；20D 为 240 CALCULATED、10 PENDING。
+后者成熟日为 2026-07-28，截至当前日期未提前读取。行业相对收益全部保持 null。
+
+### 15.3 幂等、恢复和隔离
+
+- Canonical execute 立即复跑后 run/report/hash/attempt 和所有研究集合计数不变；
+- 正式十集合在每次运行前后 count/content hash 相同；当前 Outbox、Intent、Order、Fill、
+  Position、Lot、Reservation、Ledger、Settlement 均为 0；
+- 三个正式自动账户仍各 100 万元、冻结 0、无持仓/订单/账本，三份账户快照权益均为
+  100 万元；
+- 实现期间两个缺陷恢复 run 保留为研究审计，不隐藏、不删除、不计入 canonical 报告；
+- 修复 Decimal-safe 研究哈希、恢复后报告 CAS 刷新、运行代码 tree hash 范围三个缺陷，
+  未改变 Factor、Regime、Strategy、Prompt、模型、Consensus、HardRisk、Matching、Fee
+  或 Champion。
+
+### 15.4 文件
+
+新增：
+
+- `tradingagents/alphaguard/backfill_schemas.py`
+- `app/models/alphaguard/backfill_collections.py`
+- `app/services/alphaguard/historical_backfill_config.py`
+- `app/services/alphaguard/historical_market_context_service.py`
+- `app/services/alphaguard/historical_shadow_execution_service.py`
+- `app/services/alphaguard/historical_backfill_service.py`
+- `config/alphaguard/research/backfill_policy_v1.yaml`
+- `scripts/init_alphaguard_backfill_indexes.py`
+- `scripts/sync_alphaguard_historical_market_context.py`
+- `scripts/run_alphaguard_historical_backfill.py`
+- 两个历史回放测试文件和两份研究文档。
+
+修改：
+
+- `tradingagents/alphaguard/mongo_indexes.py`
+- `app/services/alphaguard/adjusted_price_resolver.py`
+- `app/services/alphaguard/horizon_label_service.py`
+- 三份执行/运维状态文档。
+
+### 15.5 最终验证与当前状态
+
+```text
+新增历史回放测试=11 passed
+AlphaGuard PR-001～PR-009 精确回归=455 passed, 89 warnings
+研究索引重复执行=created 0, unchanged 38, failed 0
+Champion=5/5 verified, conflicts 0
+FastAPI live/ready=200/200
+MongoDB/Redis=healthy
+queue/analysis Worker=healthy, heartbeat TTL>0（最终观测 12/46）
+三个 live=true 启动入口=全部阻断
+Python compile=passed
+git diff --check=passed
+敏感信息扫描=0 hits
+```
+
+根目录全量 collect 会执行存量实时网络和交互脚本；本次 395.17 秒后在 197 collected、
+12 errors 时中止，未完成，不能宣称既有 15 个错误已复核。最近完整基线仍为 1142
+collected / 15 errors；AlphaGuard 精确集合没有新增失败。
+
+当前 Operations：`CODE_COMPLETE=true`、`RUNTIME_READY=true`、`PAPER_READY=true`、
+`EVALUATION_READY=true`、`DATA_READY=false`、`LIVE_READY=false`。本阶段已完成并停止；
+未开始 PR-010，未扩大为逐日回放，未增加标的，未运行双模型全量回放，未调参。

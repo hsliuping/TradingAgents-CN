@@ -211,6 +211,7 @@ class HorizonLabelService:
                     start=anchor_date,
                     end=horizon_end,
                     required_mode=self.policy.required_price_adjustment_mode,
+                    allow_index_unadjusted_equivalent=True,
                 )
                 benchmark_by_date = {bar.trade_date: bar for bar in benchmark}
                 benchmark_anchor = benchmark_by_date.get(anchor_date)

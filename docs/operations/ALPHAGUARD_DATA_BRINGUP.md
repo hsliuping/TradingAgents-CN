@@ -160,3 +160,37 @@ Outbox=Intent=Order=Fill=0
 
 这次真实链验证了缺少市场环境时 fail-closed；后续数据准备应补齐版本化
 `ag_market_contexts` 和历史行业映射，而不是修改 Regime 或策略阈值。
+
+## 12. Historical Backfill 数据接入（2026-07-27）
+
+历史研究回放没有复用生产 `ag_market_contexts` 身份，而是新增 create-only 的
+`ag_research_market_context_sources/ag_research_market_contexts`：
+
+- 持久化日历在 2026-01-01 至 2026-06-30 实际选出 25 个每周最后开市日；
+- 第一轮固定为 5 个用户指定标的，共 125 个计划样本；
+- 五只标的 QFQ/RAW 和沪深300均覆盖 2023-01-03 至 2026-07-27，各 862 根；
+- 股票使用 `QFQ`，沪深300使用明确的 `INDEX_UNADJUSTED_EQUIVALENT`，评价解析器只对
+  指数基准接受该等价口径；
+- BaoStock 每个抽样日的实际沪深 A 股 universe 用于上涨/下跌、成交额和高低点，不用
+  五只候选替代全市场；
+- 十个历史交易所行业指数用于行业扩散，current-only 的五条股票行业映射不参与历史；
+- 股票日线没有显式 `limit_up_price/limit_down_price`，因此研究影子执行明确返回
+  `INSUFFICIENT_DATA`，不推算板块涨跌停边界。
+
+历史 MarketContext 同步脚本默认 dry-run，真实 execute 使用 20 秒 socket 超时、三次重试、
+逐阶段进度、源响应哈希、归一化记录和 BSON 15MB 上限检查。中断前不会写半成品；同一
+日期/Provider/版本重复执行复用，内容变化则完整性冲突。
+
+## 13. Historical Backfill 完成状态（2026-07-27）
+
+- 研究 MarketContext：25/25 READY，实际 A 股 universe 并集 5,216，Provider 失败 0；
+- canonical run `9b921ffa-71a5-578b-85e8-252b2f9cfca9`：125/125 完成；
+- 125 个研究 Snapshot、2,625 个 FactorResult、125 个 RegimeResult、250 个 Proposal；
+- 250 个研究 EvaluationSubject，1D/5D/10D 全成熟，20D 为 240 成熟和 10 PENDING；
+- 缺失历史新闻和 current-only 行业映射仅产生 WARN/null，没有用未来数据回填；
+- 研究数据没有写入 `ag_market_contexts`，所以生产 `DATA_READY=false` 继续正确；
+- 生产数据补齐顺序不变：正式 MarketContext 与 point-in-time 行业历史仍需合法 Provider
+  和版本化同步，不能从研究集合复制或人工改 readiness。
+
+三个 0% 覆盖财务因子和 `revenue_yoy_v1` 的 10.4% 缺失已记录为数据限制，不通过修改
+因子公式处理。详细结果见 `docs/research/ALPHAGUARD_BACKFILL_RESULTS.md`。

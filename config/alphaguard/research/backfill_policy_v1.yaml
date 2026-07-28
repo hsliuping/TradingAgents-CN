@@ -1,0 +1,43 @@
+policy_id: historical-backfill-policy-v1
+version: 1.0.0
+market: CN
+sampling_method: WEEKLY_LAST_SESSION
+
+market_context:
+  provider: baostock
+  normalization_version: alphaguard-market-context-v1
+  history_buffer_calendar_days: 120
+  rolling_high_low_sessions: 20
+  amount_ratio_sessions: 20
+  minimum_universe_coverage: 0.95
+  minimum_high_low_coverage: 0.80
+  minimum_sector_coverage: 0.80
+  query_retry_attempts: 3
+  socket_timeout_seconds: 20
+  query_delay_seconds: 0.01
+  sector_index_codes:
+    - sh.000032
+    - sh.000033
+    - sh.000034
+    - sh.000035
+    - sh.000036
+    - sh.000037
+    - sh.000038
+    - sh.000039
+    - sh.000040
+    - sh.000041
+
+evaluation:
+  horizons:
+    1D: 1
+    5D: 5
+    10D: 10
+    20D: 20
+  benchmark_symbol: "000300"
+  required_price_adjustment_mode: QFQ
+
+execution:
+  require_explicit_limit_prices: true
+  normalized_account_policy: paper-account-policy-v1
+  execution_policy: paper-execution-policy-v1
+  fee_policy: paper-fee-policy-v1

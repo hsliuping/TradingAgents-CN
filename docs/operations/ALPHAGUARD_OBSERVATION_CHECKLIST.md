@@ -186,3 +186,39 @@ evidence_links_or_ids:
 - 三个启动入口在 `live=true` 时均 fail-closed；未修改任何生产交易参数或版本。
 - AlphaGuard 精确回归 441 passed；全量收集仍是既有 15 错误，前端仍是既有 34 个
   DefaultRow TS2345，没有新增错误类别。
+
+## Historical Backfill 观察项
+
+- [ ] 只允许 `RESEARCH_BACKFILL / research_only=true / automated_execution_allowed=false`。
+- [ ] 研究 Snapshot、Factor、Regime、Proposal、ShadowExecution 只写 `ag_research_*`。
+- [ ] 研究 EvaluationSubject 的 lineage 包含 `backfill_run_id` 和 `sample_id`。
+- [ ] 财务、新闻和公告均不晚于历史 cutoff；未来行情只在决策冻结后用于标签。
+- [ ] MarketContext 使用历史实际 universe，覆盖率和 Provider 失败数量已记录。
+- [ ] current-only 行业映射没有回填历史，行业相对收益缺失时为 null。
+- [ ] 缺显式涨跌停边界的影子执行为 `INSUFFICIENT_DATA`，没有推算成交。
+- [ ] 1D/5D/10D/20D 标签按真实持久化交易日成熟，未来期限保持 PENDING。
+- [ ] 同一 run 重复执行不增加 Snapshot、Proposal、Label、Shadow 或 Attribution。
+- [ ] 回放前后十个正式交易集合的 count 和 content hash 完全一致。
+- [ ] 报告明确标注为历史研究，不是实时生产成绩、实际账户收益或投资建议。
+
+## Historical Backfill 完成观察（2026-07-27 23:43 CST）
+
+- [x] Canonical run `9b921ffa-71a5-578b-85e8-252b2f9cfca9` 为
+  `RESEARCH_BACKFILL / research_only=true / automated_execution_allowed=false`。
+- [x] 25 个历史 MarketContext 全部 READY；125/125 样本完成，无跳过和失败。
+- [x] 财务、新闻、公告和行情严格按历史 cutoff 截断；20D 未成熟的 10 个标签保持
+  PENDING 至 2026-07-28。
+- [x] current-only 行业映射未回填；1016 个标签的行业相对收益均为 null。
+- [x] 4 个 TRIGGERED 因缺显式涨跌停边界返回 `INSUFFICIENT_DATA`；研究成交为 0。
+- [x] 幂等复跑不增加 run attempt、Snapshot、Factor、Proposal、Label、Shadow 或
+  Attribution，report hash 不变。
+- [x] 正式 Outbox/Intent/Order/Fill/Position/Lot/Reservation/Ledger/Settlement 均为 0；
+  三账户现金、冻结和权益守恒。
+- [x] queue/analysis Worker healthy，真实心跳 TTL>0（最终观测 12/46）；MongoDB/Redis
+  healthy。
+- [x] `live=true` 下 FastAPI、queue-worker、analysis-worker 均拒绝启动。
+- [x] Operations 当前 `DATA_READY=false` 是生产 MarketContext 缺失，不被研究数据掩盖。
+- [x] 未修改任何交易参数、Champion 或生产版本；未开始 PR-010。
+
+每日实时观察仍应继续使用前述清单。历史回放的成熟样本不能替代生产数据同步、生产
+MarketContext、真实订单结算观察或未来 20 个交易日的实时稳定性观察。

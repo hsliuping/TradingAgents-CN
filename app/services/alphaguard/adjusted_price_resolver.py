@@ -67,6 +67,7 @@ class AdjustedPriceResolver:
         end: date,
         required_mode: str,
         required_version: str | None = None,
+        allow_index_unadjusted_equivalent: bool = False,
     ) -> list[AdjustedPriceBar]:
         documents = await self.collection.find(
             {
@@ -92,7 +93,10 @@ class AdjustedPriceResolver:
                 or document.get("adjusted_data_version")
                 or ""
             )
-            if mode != required_mode.upper() or not version:
+            accepted_modes = {required_mode.upper()}
+            if allow_index_unadjusted_equivalent:
+                accepted_modes.add("INDEX_UNADJUSTED_EQUIVALENT")
+            if mode not in accepted_modes or not version:
                 continue
             if required_version is not None and version != required_version:
                 continue

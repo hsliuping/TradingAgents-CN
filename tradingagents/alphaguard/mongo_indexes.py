@@ -869,4 +869,103 @@ ALPHAGUARD_INDEX_SPECS = {
         {"keys": [("status", 1), ("created_at", 1)], "name": "idx_ops_job_pending"},
         {"keys": [("job_name", 1), ("created_at", -1)], "name": "idx_ops_job_name"},
     ],
+    # Historical backfill is a research-only namespace.  These indexes are
+    # create-only and intentionally do not touch PR-006 execution/account
+    # collections or PR-003 production snapshots/results.
+    "ag_research_backfill_runs": [
+        {"keys": [("backfill_run_id", 1)], "name": "uniq_research_backfill_run", "unique": True},
+        {"keys": [("input_hash", 1)], "name": "uniq_research_backfill_input", "unique": True},
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_research_backfill_status"},
+    ],
+    "ag_research_backfill_samples": [
+        {"keys": [("sample_id", 1)], "name": "uniq_research_sample", "unique": True},
+        {
+            "keys": [("backfill_run_id", 1), ("symbol", 1), ("trade_date", 1)],
+            "name": "uniq_research_run_symbol_date",
+            "unique": True,
+        },
+        {"keys": [("backfill_run_id", 1), ("status", 1)], "name": "idx_research_sample_status"},
+    ],
+    "ag_research_coverage": [
+        {"keys": [("coverage_id", 1)], "name": "uniq_research_coverage", "unique": True},
+        {
+            "keys": [("backfill_run_id", 1), ("symbol", 1), ("trade_date", 1)],
+            "name": "uniq_research_coverage_sample",
+            "unique": True,
+        },
+        {"keys": [("status", 1), ("trade_date", 1)], "name": "idx_research_coverage_status"},
+    ],
+    "ag_research_market_context_sources": [
+        {"keys": [("source_id", 1)], "name": "uniq_research_market_source", "unique": True},
+        {
+            "keys": [
+                ("market", 1),
+                ("trade_date", 1),
+                ("provider", 1),
+                ("provider_version", 1),
+                ("normalization_version", 1),
+            ],
+            "name": "uniq_research_market_source_identity",
+            "unique": True,
+        },
+        {"keys": [("content_hash", 1)], "name": "idx_research_market_source_hash"},
+    ],
+    "ag_research_market_contexts": [
+        {"keys": [("context_id", 1)], "name": "uniq_research_market_context", "unique": True},
+        {
+            "keys": [("market", 1), ("trade_date", 1), ("data_version", 1)],
+            "name": "uniq_research_market_context_version",
+            "unique": True,
+        },
+        {"keys": [("calculation_status", 1), ("trade_date", 1)], "name": "idx_research_market_context_status"},
+    ],
+    "ag_research_snapshots": [
+        {"keys": [("research_snapshot_id", 1)], "name": "uniq_research_snapshot", "unique": True},
+        {"keys": [("sample_id", 1)], "name": "uniq_research_snapshot_sample", "unique": True},
+        {"keys": [("backfill_run_id", 1), ("source_trade_date", 1)], "name": "idx_research_snapshot_run_date"},
+    ],
+    "ag_research_factor_results": [
+        {"keys": [("result_id", 1)], "name": "uniq_research_factor_result", "unique": True},
+        {"keys": [("backfill_run_id", 1), ("sample_id", 1)], "name": "idx_research_factor_sample"},
+    ],
+    "ag_research_factor_bundles": [
+        {"keys": [("sample_id", 1)], "name": "uniq_research_factor_bundle", "unique": True},
+        {"keys": [("backfill_run_id", 1)], "name": "idx_research_factor_bundle_run"},
+    ],
+    "ag_research_regime_results": [
+        {"keys": [("regime_result_id", 1)], "name": "uniq_research_regime_result", "unique": True},
+        {"keys": [("sample_id", 1)], "name": "uniq_research_regime_sample", "unique": True},
+        {"keys": [("backfill_run_id", 1)], "name": "idx_research_regime_run"},
+    ],
+    "ag_research_quant_proposals": [
+        {"keys": [("proposal_id", 1)], "name": "uniq_research_quant_proposal", "unique": True},
+        {"keys": [("backfill_run_id", 1), ("sample_id", 1)], "name": "idx_research_proposal_sample"},
+    ],
+    "ag_research_execution_snapshots": [
+        {"keys": [("execution_snapshot_id", 1)], "name": "uniq_research_execution_snapshot", "unique": True},
+        {
+            "keys": [("symbol", 1), ("market", 1), ("trade_date", 1), ("data_version", 1)],
+            "name": "uniq_research_execution_market_version",
+            "unique": True,
+        },
+    ],
+    "ag_research_shadow_executions": [
+        {"keys": [("shadow_execution_id", 1)], "name": "uniq_research_shadow_execution", "unique": True},
+        {
+            "keys": [("backfill_run_id", 1), ("proposal_id", 1)],
+            "name": "uniq_research_shadow_proposal",
+            "unique": True,
+        },
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_research_shadow_status"},
+    ],
+    "ag_research_backfill_reports": [
+        {"keys": [("report_id", 1)], "name": "uniq_research_backfill_report", "unique": True},
+        {"keys": [("backfill_run_id", 1)], "name": "uniq_research_backfill_run_report", "unique": True},
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_research_backfill_report_status"},
+    ],
+    "ag_research_backfill_events": [
+        {"keys": [("event_id", 1)], "name": "uniq_research_backfill_event", "unique": True},
+        {"keys": [("backfill_run_id", 1), ("created_at", -1)], "name": "idx_research_backfill_event_run"},
+        {"keys": [("event_type", 1), ("created_at", -1)], "name": "idx_research_backfill_event_type"},
+    ],
 }
