@@ -1,0 +1,7 @@
+policy_id: alphaguard-production-market-context-history-policy
+policy_version: 1.0.0
+market: CN
+normalization_version: alphaguard-production-market-context-history-v1.1
+calculation_version: production-market-context-calculation-v1.1
+prior_session_count: 120
+response_hash_scope: DAILY_SOURCE_ROW

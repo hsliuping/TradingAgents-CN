@@ -5297,3 +5297,90 @@ Factor、Regime、Proposal 和 EvaluationSubject 已形成 lineage，应默认�
 benchmark version seam 保持 INSUFFICIENT_DATA；历史行业映射 current-only；Eastmoney
 接口当次断连；Provider 自身更新时间不可得；Challenger 与 live 继续关闭。未开始
 PR-010。
+
+## 18. Production History Continuity & Observation Phase 2（完成）
+
+本阶段不是 PR-010，没有修改 Factor、Regime、Strategy、Prompt、模型、Consensus、
+HardRisk、Matching、Fee、Champion 或交易参数。
+
+### 18.1 Production MarketContext 历史
+
+使用持久化 CN 交易日历选定 2026-07-28 之前 120 个开市日
+（2026-01-26～2026-07-27），由正式 BaoStock 历史 Universe、
+AKShare/Tencent 日线、十个行业指数和持久化沪深300重新构建：
+
+```text
+history normalization=alphaguard-production-market-context-history-v1.1
+calculation=production-market-context-calculation-v1.1
+READY=120/120
+首次 CREATED source/context=120/120
+跨执行时刻复跑 REUSED source/context=120/120
+duplicate identity=0
+provider failure=0
+```
+
+历史 Universe 单日覆盖率为 0.9903846154～0.9994230769，新高/新低最低覆盖率
+0.9974942174，行业覆盖率 1。没有读取或复制 `ag_research_*`，没有覆盖 2026-07-28
+current v1.1 Context。历史记录的 `available_at/collected_at` 保存真实补采时刻。
+
+### 18.2 Regime 与不可变对象
+
+MarketRegime 实际最长强制窗口为 61 根沪深300 close；MarketContext 同时强制当日市场
+宽度和行业扩散度。历史 Context 已完整，因此
+`MARKET_CONTEXT_HISTORY_READY=true`。
+
+五个既有 2026-07-28 Snapshot 不能回填新引用。按 Snapshot 锁定 Champion 配置执行纯
+内存复核，5/5 的 result ID 与 input hash 不变，仍因只有一根锁定基准价格而
+`INSUFFICIENT_DATA`，故 `REGIME_READY=false`。没有覆盖 RegimeResult、重跑 Proposal 或
+调用模型链。
+
+一次早期复核误用了默认 Regime 配置并创建 5 条无引用的
+`INSUFFICIENT_DATA` 结果。精确引用审计确认下游引用为 0 后，只删除该 5 个 ID并恢复原始
+5 条结果；随后新增 Snapshot 锁定版本的无持久化复核入口和防回归测试。资产与正式交易
+对象未受影响。
+
+### 18.3 20D 连续性
+
+Canonical run 的 10 条 PENDING 20D 标签在 2026-07-28 出现 QFQ version seam。窗口没有
+缺少交易日，但现有 Repository 不支持同一 symbol/date 并列第二版本而不产生查询歧义。
+采用安全方案B：
+
+```text
+20D DECISION_CLOSE CALCULATED=240（未修改）
+20D DECISION_CLOSE PENDING=10
+blocker=VERSION_LOCKED_QFQ_SERIES_UNAVAILABLE
+跨版本拼接=0
+```
+
+### 18.4 完整性、测试和 Readiness
+
+正式 Intent/Outbox/Order/Fill/Position/Lot/Reservation/Ledger/Settlement 均为0；
+三个账户各 cash_available=1,000,000 CNY、cash_reserved=0。候选、Snapshot、Factor、
+Regime、Proposal、EvaluationSubject、HorizonLabel 的真实身份重复组均为0；生产对象
+引用研究 lineage 为0；无负资产、死信、卡住 Settlement/Promotion Saga。
+
+```text
+新增连续性+生产数据测试=22 passed, 84 warnings
+默认离线CI=497 passed, 89 warnings
+Python编译/git diff --check/敏感信息扫描=passed
+MongoDB/Redis/Scheduler/FastAPI/两套Worker=HEALTHY
+三个入口 live=true=全部拒绝启动
+```
+
+Readiness 仍由现有报告计算：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=true
+PAPER_READY=true
+EVALUATION_READY=true
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+overall=DEGRADED_PAPER
+```
+
+下一持久化开市日为 2026-07-29；完成时尚无该日完整收盘数据，因此未运行下一日观察链。
+回退代码使用本阶段提交的父提交；数据库历史证据默认保留，若需移除必须先做引用审计，
+并仅按历史 normalization 和精确日期范围处理。未开始 PR-010。

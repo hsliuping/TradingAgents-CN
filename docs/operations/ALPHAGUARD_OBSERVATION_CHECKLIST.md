@@ -301,3 +301,32 @@ MarketContext、真实订单结算观察或未来 20 个交易日的实时稳定
 
 每日观察仍需继续。`DATA_READY=true` 不取消单对象 fail-closed：价格版本连续性不足、
 模型失败、Consensus/HardRisk拒绝或执行数据缺失时，订单链必须停止。
+
+## Production History Continuity Phase 2 核验
+
+- [x] 交易日只来自持久化 `trading_calendar`；选中 2026-01-26～2026-07-27 共120日。
+- [x] 历史 MarketContext 使用实际日期 Universe，不使用当前全集、五候选或研究集合。
+- [x] 120个 Context 全部 READY；Universe 最低覆盖0.9903846154、行业覆盖1。
+- [x] 首次 source/context CREATED=120/120；第二次完整执行 REUSED=120/120。
+- [x] 120个日期、身份和 content hash 均唯一；2026-07-28 current Context 未覆盖。
+- [x] source/context 首次采集时间不因复跑刷新，历史补采不伪装成历史当时采集。
+- [x] 五个锁定 Regime 只读复核 result ID/input hash 不变，冲突和缺失均为0。
+- [x] 不可变 Snapshot 仍缺61根同版本 benchmark close，继续
+  `INSUFFICIENT_DATA`，没有强制得出 Regime。
+- [x] 240个已成熟20D标签未修改；10个跨QFQ版本标签继续PENDING。
+- [x] 正式生产对象对研究 lineage 引用为0；研究集合没有进入生产交易链。
+- [x] Intent/Outbox/Order/Fill/Position/Lot/Reservation/Ledger/Settlement 仍为0。
+- [x] 三个账户可用现金各100万元、冻结0；无负资产、死信或卡住Saga。
+- [x] MongoDB、Redis、Scheduler、FastAPI、queue-worker、analysis-worker均HEALTHY。
+- [x] FastAPI和两个Worker在`live=true`时均拒绝启动。
+- [x] 新增专项22 passed；默认离线CI 497 passed，未访问实时网络或等待输入。
+- [ ] 下一开市日2026-07-29尚未完整收盘入库，未运行下一日生产观察链。
+
+当前：
+
+```text
+MARKET_CONTEXT_HISTORY_READY=true
+REGIME_READY=false（既有Snapshot锁定benchmark version seam）
+CHALLENGER_READY=false
+LIVE_READY=false
+```

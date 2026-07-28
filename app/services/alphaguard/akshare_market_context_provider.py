@@ -167,6 +167,9 @@ class AKShareTencentMarketContextProvider:
         provider_version = str(capability["provider_version"])
         universe_version = str(capability["universe_provider_version"])
         normalization = str(context_policy["normalization_version"])
+        point_in_time_response_hashes = (
+            context_policy.get("response_hash_scope") == "DAILY_SOURCE_ROW"
+        )
         attempts = int(context_policy["query_retry_attempts"])
         timeout_seconds = float(context_policy["socket_timeout_seconds"])
         rolling = int(context_policy["rolling_high_low_sessions"])
@@ -320,7 +323,11 @@ class AKShareTencentMarketContextProvider:
                             ),
                         }
                     )
-                    response_hashes_by_date[row_date][code] = response_hash
+                    response_hashes_by_date[row_date][code] = (
+                        backfill_hash(row)
+                        if point_in_time_response_hashes
+                        else response_hash
+                    )
                 if close is not None and close > 0:
                     closes.append(close)
 
@@ -361,7 +368,11 @@ class AKShareTencentMarketContextProvider:
                                     if close is not None and previous
                                     else None
                                 ),
-                                "response_hash": response_hash,
+                                "response_hash": (
+                                    backfill_hash(row)
+                                    if point_in_time_response_hashes
+                                    else response_hash
+                                ),
                             }
                         )
                     if close is not None and close > 0:

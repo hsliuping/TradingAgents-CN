@@ -317,3 +317,30 @@ EvaluationSubject。
 
 以上是历史研究结果和生产数据观察，不是实时生产成绩、实际账户收益或投资建议；没有
 证明策略、因子或模型未来有效。
+
+## 11. Production History Continuity 附记
+
+本节不重新运行 canonical backfill，也不修改本报告的历史统计。生产侧已由独立正式源
+重建 2026-01-26～2026-07-27 共120个 MarketContext，120/120 READY；跨执行时刻第二次
+完整同步全部 REUSED。研究 Context 没有复制到生产，生产 lineage 也没有引用研究对象。
+
+Canonical run 的 20D 状态保持：
+
+```text
+DECISION_CLOSE CALCULATED=240
+DECISION_CLOSE PENDING=10
+PLANNED_ENTRY CALCULATED=4
+```
+
+10 条 PENDING 对应 2026-06-30 决策、2026-07-28 终点。21个交易日没有缺行，但终点从
+旧 `alphaguard-candidate-real-data-v1` 切换到新
+`alphaguard-daily-price-normalization-v1`。当前仓储身份无法安全并列重建一个统一版本
+窗口，因此选择方案B，不跨版本拼接、不改写240条成熟标签。
+
+历史 Production MarketContext READY 不改变 2026-07-28 已创建 Snapshot 的
+immutable refs。五个锁定 Regime 只读复核 ID/input hash 5/5 不变，仍为
+`INSUFFICIENT_DATA`；没有重新运行 Strategy、模型或订单链。正式账户和交易集合没有资产
+变化。
+
+这些变化只说明生产市场环境输入的历史覆盖已补齐；不构成新的回放收益、实际账户收益、
+投资建议，也没有证明策略、因子或模型未来有效。

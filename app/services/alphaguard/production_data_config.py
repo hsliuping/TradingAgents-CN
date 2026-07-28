@@ -46,6 +46,32 @@ def production_market_context_policy() -> dict[str, Any]:
 
 
 @lru_cache(maxsize=1)
+def production_market_context_history_policy() -> dict[str, Any]:
+    value = _load("market_context_history_policy_v1.yaml")
+    required = {
+        "policy_id",
+        "policy_version",
+        "market",
+        "normalization_version",
+        "calculation_version",
+        "prior_session_count",
+        "response_hash_scope",
+    }
+    missing = sorted(required - set(value))
+    if missing:
+        raise ValueError(
+            f"production MarketContext history policy lacks {missing}"
+        )
+    if value["response_hash_scope"] != "DAILY_SOURCE_ROW":
+        raise ValueError(
+            "production MarketContext history requires DAILY_SOURCE_ROW hashes"
+        )
+    result = dict(value)
+    result["immutable_hash"] = production_data_hash(value)
+    return result
+
+
+@lru_cache(maxsize=1)
 def cn_price_limit_policy() -> dict[str, Any]:
     value = _load("cn_price_limit_rules_v1.yaml")
     required = {

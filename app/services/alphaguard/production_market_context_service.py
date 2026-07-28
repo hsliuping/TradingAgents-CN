@@ -355,7 +355,7 @@ class ProductionMarketContextService:
         )
         data_version = (
             f"{fetched.provider}:{fetched.provider_version}:MARKET_CONTEXT:"
-            f"{self.policy['normalization_version']}:"
+            f"{fetched.normalization_version}:"
             f"{self.policy['calculation_version']}"
         )
         context_identity = {

@@ -457,3 +457,38 @@ LIVE_READY=false
 `INDUSTRY_HISTORY` 仍明确为 `PARTIAL / CURRENT_ONLY`，只影响历史行业归因，不被伪装成
 READY。`DATA_READY` 的生产数据域已完成，但不表示每个不可变 Snapshot 都有连续单版本
 历史。完整 Challenger 按既有边界保持关闭，live 永久 fail-closed。
+
+## Production History Continuity Phase 2
+
+生产 MarketContext v1.1 历史已按持久化交易日历补齐：
+
+```text
+范围=2026-01-26..2026-07-27
+开市日=120
+READY=120
+source/context 首次创建=120/120
+第二次完整执行复用=120/120
+历史 normalization=alphaguard-production-market-context-history-v1.1
+calculation=production-market-context-calculation-v1.1
+```
+
+数据来自历史日实际 BaoStock A股 Universe、AKShare/Tencent 个股日线、十个行业指数及
+持久化沪深300，不来自研究 Context。A股单日覆盖率最低 0.9903846154，新高/新低最低
+覆盖率 0.9974942174，行业覆盖率为 1；120 日均无 Provider 失败或
+`INSUFFICIENT_DATA`。2026-07-28 current v1.1 保持原 ID/hash/时间。
+
+这使生产 MarketContext 历史输入本身 READY，但不会回填既有 Snapshot。2026-07-28 的
+五个不可变 Snapshot 仍只锁定一根新版本沪深300，故锁定 Regime 结果 5/5 保持
+`INSUFFICIENT_DATA`。下一开市日 2026-07-29 尚未收盘和持久化，没有运行新观察链。
+
+Canonical 10 条 20D 标签继续使用安全方案B：240 条已成熟标签不动，10 条因 7月28日
+QFQ 版本断点保持 PENDING；不跨版本拼接。生产与研究 lineage 交叉引用为 0，正式交易和
+账户资产没有变化。
+
+```text
+MARKET_CONTEXT_HISTORY_READY=true
+REGIME_READY=false
+DATA_READY=true
+LIVE_READY=false
+overall=DEGRADED_PAPER
+```
