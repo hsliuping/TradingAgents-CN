@@ -1223,4 +1223,92 @@ ALPHAGUARD_INDEX_SPECS = {
         {"keys": [("backfill_run_id", 1), ("created_at", -1)], "name": "idx_research_backfill_event_run"},
         {"keys": [("event_type", 1), ("created_at", -1)], "name": "idx_research_backfill_event_type"},
     ],
+    "ag_model_profiles": [
+        {
+            "keys": [("profile_id", 1), ("profile_version", 1)],
+            "name": "uniq_model_profile_version",
+            "unique": True,
+        },
+        {"keys": [("role", 1), ("enabled", 1)], "name": "idx_model_profile_role"},
+        {"keys": [("config_hash", 1)], "name": "idx_model_profile_hash"},
+    ],
+    "ag_model_prompt_versions": [
+        {
+            "keys": [("prompt_id", 1), ("prompt_version", 1)],
+            "name": "uniq_model_prompt_version",
+            "unique": True,
+        },
+        {"keys": [("role", 1), ("enabled", 1)], "name": "idx_model_prompt_role"},
+        {"keys": [("template_hash", 1)], "name": "idx_model_prompt_hash"},
+    ],
+    "ag_model_capability_checks": [
+        {
+            "keys": [("capability_check_id", 1)],
+            "name": "uniq_model_capability_check",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("profile_id", 1),
+                ("profile_version", 1),
+                ("checked_at", -1),
+            ],
+            "name": "idx_model_capability_profile",
+        },
+        {"keys": [("status", 1), ("checked_at", -1)], "name": "idx_model_capability_status"},
+    ],
+    "ag_model_runs": [
+        {
+            "keys": [("model_run_id", 1)],
+            "name": "uniq_model_run",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("analysis_id", 1),
+                ("snapshot_id", 1),
+                ("run_mode", 1),
+                ("role", 1),
+                ("agent_name", 1),
+                ("model_profile_id", 1),
+                ("model_profile_version", 1),
+                ("prompt_id", 1),
+                ("prompt_version", 1),
+                ("request_hash", 1),
+                ("attempt", 1),
+            ],
+            "name": "uniq_model_run_identity",
+            "unique": True,
+        },
+        {"keys": [("snapshot_id", 1), ("created_at", -1)], "name": "idx_model_run_snapshot"},
+        {"keys": [("run_mode", 1), ("created_at", -1)], "name": "idx_model_run_mode"},
+        {"keys": [("error_category", 1), ("created_at", -1)], "name": "idx_model_run_error"},
+    ],
+    "ag_model_research_results": [
+        {
+            "keys": [("research_result_id", 1)],
+            "name": "uniq_model_research_result",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("analysis_id", 1),
+                ("snapshot_id", 1),
+                ("context_hash", 1),
+                ("agent_name", 1),
+            ],
+            "name": "uniq_model_research_identity",
+            "unique": True,
+        },
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_model_research_status"},
+    ],
+    "ag_model_validation_runs": [
+        {
+            "keys": [("validation_run_id", 1)],
+            "name": "uniq_model_validation_run",
+            "unique": True,
+        },
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_model_validation_status"},
+        {"keys": [("snapshot_id", 1), ("created_at", -1)], "name": "idx_model_validation_snapshot"},
+    ],
 }

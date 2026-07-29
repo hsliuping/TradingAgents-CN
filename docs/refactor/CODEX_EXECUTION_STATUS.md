@@ -2,9 +2,9 @@
 
 ## 当前状态
 
-- 更新时间：2026-07-27 20:50 CST（Asia/Shanghai）
-- 当前阶段：AlphaGuard Real Data Activation（不是 PR-010）
-- 阶段状态：真实数据激活完成；市场环境与成熟评价样本仍按真实状态保持 NOT_READY
+- 更新时间：2026-07-29 23:35 CST（Asia/Shanghai）
+- 当前阶段：PR-010 Real Model Runtime & Dual-Model Decision Completion
+- 阶段状态：Level A runtime-ready；三个真实Profile认证失败，Level B未完成
 - PR-001 检查点提交：`5c6ae8f`
 - PR-001 检查点标签：`alphaguard-pr001-baseline`
 - PR-002 检查点提交：`09567a1`
@@ -20,7 +20,10 @@
 - PR-009 检查点标签：`alphaguard-pr009-mvp`
 - MVP Runtime Bring-up 提交：`943560f`
 - MVP Runtime Bring-up 标签：`alphaguard-bringup-runtime-ready`
-- 后续阶段：PR-010 未开始
+- 当前基线：`ff266683130366baf7a0ee02e61754a4c6ee78f6`
+- 当前基线标签：`alphaguard-production-evidence-v2`
+- 本阶段检查点：`alphaguard-pr010-model-runtime-ready`（Level A临时检查点）
+- 后续阶段：PR-010 Level B待有效凭证和核验价格Profile；PR-011未开始
 - 固定安全模式：`system_mode=SIM_AUTONOMOUS`
 - 实盘开关：`live_trading_enabled=false`
 - 数据迁移：未迁移人工模拟账户、现金、持仓、订单或成交数据
@@ -6147,3 +6150,154 @@ blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
 即`MODEL_NOT_CONFIGURED`。没有真实模型成功结果，Consensus/HardRisk未到达；不构成交易
 建议。代码回退到父检查点`ebe9811`时，create-only生产v2重处理对象默认保留审计，旧代码
 不会将其当作实时对象；不得为回退删除或改写正式历史。未开始PR-010。
+
+## 24. PR-010 Real Model Runtime（Level A runtime-ready）
+
+### 24.1 完成结论和边界
+
+本阶段完成了真实模型运行时的Level A工程准备，但没有满足Level B真实双模型完成条件。
+三个登记Profile的显式、无生成访问探测均返回`401 UNAUTHORIZED`，因此系统按
+`MODEL_NOT_CONFIGURED` fail-closed，没有进行付费结构化生成，没有生成真实Normal或Top
+结果，也没有调用Consensus、HardRisk或交易链。检查点只能使用临时
+`alphaguard-pr010-model-runtime-ready`，不得标记为PR-010真实双模型完成。
+
+未修改Factor、Regime、Strategy、Prompt语义职责、Consensus、HardRisk、Fee、Matching
+或Champion；未启用PAPER_CHALLENGER、自动选股、券商或实盘。没有开始PR-011。
+
+### 24.2 Provider、Profile、Prompt和配置来源
+
+沿用现有Provider适配层，新增文件登记和Mongo create-only解析，不建立第二套交易配置。
+生产运行只接受`config/alphaguard/models/model_runtime_v1.yaml`登记的精确版本：
+
+```text
+RESEARCH_AGENT: alphaguard_research_openai@v1
+  provider=openai, model=gpt-4o-mini
+NORMAL_TRADER: alphaguard_normal_openai@v1
+  provider=openai, model=gpt-4o-mini
+TOP_RISK_REVIEWER: alphaguard_top_openai@v1
+  provider=openai, model=o4-mini
+```
+
+固定Prompt为`model_capability_prompt@v1`、
+`alphaguard_research_snapshot@v1`、
+`normal_trade_plan_prompt@alphaguard-normal-quant-v1`、
+`top_risk_review_prompt@alphaguard-top-review-v1`和
+`material_revision_prompt@alphaguard-normal-revision-v1`。Profile、Prompt和完整配置均有
+稳定hash；Mongo保存不可变登记副本，内容不同的相同身份返回`INTEGRITY_CONFLICT`。
+正式Decision Pipeline不再猜测或构造默认模型；旧`create()`默认模型入口被永久阻断。
+
+### 24.3 Credential、能力探测和真实结果
+
+Credential只保存`env:OPENAI_API_KEY`引用；API、Mongo、审计、异常和前端不保存或返回
+明文。能力探测分为本地配置检查、无生成模型访问检查和显式结构化能力检查。当前三项真实
+访问结果均为：
+
+```text
+research gpt-4o-mini = UNAUTHORIZED
+normal gpt-4o-mini = UNAUTHORIZED
+top o4-mini = UNAUTHORIZED
+sanitized_message = provider authentication failed; details redacted
+```
+
+因此没有付费结构化请求。验证run
+`020b2e7d-3787-5d3a-846f-1d4615c88a19`状态为
+`MODEL_NOT_CONFIGURED`，执行门禁为`BLOCKED_VALIDATION_MODE`，未创建Snapshot、
+Proposal或模型run。正式Level B必须先在安全环境提供有效凭证，并新建包含已核验输入/
+输出单价的版本化Profile；现有Profile单价为空，预算服务会以
+`BUDGET_PRICING_UNAVAILABLE`继续阻断生成。
+
+### 24.4 统一上下文、研究角色和严格结构化输出
+
+Normal和Top共享同一个Snapshot v2锁定的`ModelRuntimeContext`及context hash；上下文只
+包含不可变Snapshot、Manifest、Factor、Regime、Proposal、版本和证据引用，不查询latest
+数据。研究层支持基本面、技术、新闻、市场、看涨和看跌六个角色；社交媒体角色明确
+`DISABLED_NOT_REQUIRED`。研究失败、预算阻断、非法输出和模型失败均是独立状态，不能
+转换为默认HOLD。
+
+结构化输出按登记能力使用Native Schema、Tool Call或JSON Schema；AUTO只按该受控顺序
+选择，任何解析或Schema失败均fail-closed。Provider SDK重试关闭，运行时只对timeout、
+rate limit和短暂Provider错误做版本化指数退避；401、模型不存在、能力不支持、非法JSON
+不重试。每次尝试都有独立审计，重试前重新检查日/分析/Snapshot调用、token和费用预算。
+
+### 24.5 预算、审计、集合、索引和幂等
+
+预算策略`alphaguard_model_budget@v1`限制单次输入/输出token、单分析调用数、单Snapshot
+token、每日调用数和每日费用。模型审计保存Profile/Prompt、context/request/response
+hash、结构化模式、token、延迟、估算费用、错误类型和脱敏摘要，不保存原始模型输出或
+凭证。新增create-only集合：
+
+```text
+ag_model_profiles
+ag_model_prompt_versions
+ag_model_capability_checks
+ag_model_runs
+ag_model_research_results
+ag_model_validation_runs
+```
+
+索引脚本两次执行结果为首次创建20项、第二次`created=0, unchanged=20`；seed首次创建
+3个Profile和5个Prompt，第二次全部REUSED。模型run的唯一身份包含analysis、snapshot、
+run_mode、role、agent、Profile/Prompt版本、request hash和attempt；并发重复写通过
+重读和hash比较复用，内容冲突明确失败。
+
+### 24.6 API、前端、Operations和Demo隔离
+
+新增只读状态/Profile/Prompt/run API及管理员能力探测和真实验证入口。写操作需要管理员，
+不能提交任意模型名、Prompt或Credential；能力探测明确标记可能访问网络。Operations新增
+“模型运行”页签，显示精确Profile/Prompt、Credential/能力/预算状态和脱敏错误。Decisions
+时间线新增TradingAgents研究、运行模式和模型元数据，不会将未到达显示为HOLD。
+
+隔离Demo只返回固定`STRUCTURAL_FIXTURE_ONLY`状态，模型Profile为Demo身份，能力为
+`NOT_CONFIGURED`、执行为`DISABLED`，且没有能力探测写入口。实际浏览器验证了登录、
+Decisions和Operations模型页签，控制台错误为0；页面明确提示不会显示、修改或传输API
+Key。Demo数据不进入生产库。
+
+### 24.7 数据、账户、安全入口和测试
+
+最终正式计数：
+
+```text
+Candidate=5
+EvidenceSnapshot=16
+QuantProposal=32
+ModelProfile=3
+PromptVersion=5
+ModelRun=0
+ModelResearchResult=0
+OrderIntent/Outbox/Order/Fill/Position/Reservation/Ledger=0
+```
+
+三个正式自动模拟账户均保持`initial_cash=available_cash=1000000.00`、
+`reserved_cash=realized_pnl=fees=0`，没有模型运行时副作用。当前专项测试
+`16 passed`；默认离线CI为`550 passed, 89 warnings`；前端`npm run type-check`、正式
+`npm run build`和`npx vite build`均PASS；Python编译和`git diff --check`通过。MongoDB、
+Redis、Scheduler、FastAPI、queue-worker和analysis-worker健康；FastAPI及两个Worker在
+`live_trading_enabled=true`时继续拒绝启动。
+
+Readiness仍由现有服务计算：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=true
+PAPER_READY=true
+EVALUATION_READY=true
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+overall=DEGRADED_PAPER
+blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
+MODEL_RUNTIME_LEVEL_A=true
+REAL_DUAL_MODEL_LEVEL_B=false
+```
+
+### 24.8 已知限制与回退
+
+当前唯一关键阻断是三类Profile认证失败，其次是已登记Profile没有核验价格，无法可靠执行
+费用预算。不能通过默认模型、固定HOLD、模型桩或测试fixture声称真实双模型完成。恢复真实
+凭证后应先运行显式网络能力检查，再创建含核验价格的新Profile版本并运行受控验证；不能
+覆盖v1。
+
+代码回退到父检查点`ff26668`时，create-only的Profile、Prompt、能力检查和验证run保留为
+审计历史，旧代码不会读取这些集合；不得删除或改写它们。配置回退通过切回旧代码完成，
+不清除Mongo、不重置账户、不修改Champion。

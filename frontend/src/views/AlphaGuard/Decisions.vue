@@ -69,10 +69,11 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { alphaguardApi, type DecisionEvent, type EvidenceSnapshotSummary, type FactorResultSummary, type QuantProposalSummary, type RegimeResultSummary } from '@/api/alphaguard'
+import { alphaguardModelsApi, type ModelRunSummary, type ResearchResultSummary } from '@/api/alphaguardModels'
 
 interface Stage { key: string; label: string; status: string; reason: string; objectIds: string[]; hashes: string[]; versions: string[]; traceIds: string[]; createdAt: string; evidenceCount: number; payload: unknown }
 interface RunModeInfo { key: string; label: string; type: 'success' | 'warning' | 'info' | 'danger' }
-interface Timeline { symbol: string; tradeDate: string; mode: RunModeInfo; snapshot: EvidenceSnapshotSummary; factors: FactorResultSummary[]; regime: RegimeResultSummary; proposals: QuantProposalSummary[]; proposalStatuses: Array<{status:string;count:number}>; stages: Stage[]; modelReached: boolean; intentReached: boolean }
+interface Timeline { symbol: string; tradeDate: string; mode: RunModeInfo; snapshot: EvidenceSnapshotSummary; factors: FactorResultSummary[]; regime: RegimeResultSummary; proposals: QuantProposalSummary[]; modelRuns: ModelRunSummary[]; research: ResearchResultSummary[]; proposalStatuses: Array<{status:string;count:number}>; stages: Stage[]; modelReached: boolean; intentReached: boolean }
 const loading = ref(false)
 const timelines = ref<Timeline[]>([])
 const selected = ref<Timeline | null>(null)
@@ -122,8 +123,8 @@ async function load() {
     for (const proposal of proposalRes.data.items) groups.set(proposal.snapshot_id, [...(groups.get(proposal.snapshot_id) || []), proposal])
     for (const candidate of candidateRes.data.items) if (candidate.latest_snapshot_id && !groups.has(candidate.latest_snapshot_id)) groups.set(candidate.latest_snapshot_id, [])
     timelines.value = await Promise.all([...groups.entries()].map(async ([snapshotId, proposals]) => {
-      const [snapshotRes, factorRes, regimeRes] = await Promise.all([alphaguardApi.evidenceSnapshot(snapshotId), alphaguardApi.factorResults(snapshotId), alphaguardApi.regime(snapshotId)])
-      return buildTimeline(snapshotRes.data, factorRes.data.items, regimeRes.data, proposals, eventRes.data.items.filter(item => item.snapshot_id === snapshotId))
+      const [snapshotRes, factorRes, regimeRes, modelRes] = await Promise.all([alphaguardApi.evidenceSnapshot(snapshotId), alphaguardApi.factorResults(snapshotId), alphaguardApi.regime(snapshotId), alphaguardModelsApi.snapshotRuns(snapshotId)])
+      return buildTimeline(snapshotRes.data, factorRes.data.items, regimeRes.data, proposals, eventRes.data.items.filter(item => item.snapshot_id === snapshotId), modelRes.data.runs, modelRes.data.research)
     }))
     timelines.value.sort((a,b) => `${b.tradeDate}:${b.symbol}`.localeCompare(`${a.tradeDate}:${a.symbol}`))
     if (!selected.value && timelines.value.length) selected.value = timelines.value[0]
@@ -131,12 +132,17 @@ async function load() {
   finally { loading.value = false }
 }
 
-function buildTimeline(snapshot: EvidenceSnapshotSummary, factors: FactorResultSummary[], regime: RegimeResultSummary, proposals: QuantProposalSummary[], events: DecisionEvent[]): Timeline {
+function buildTimeline(snapshot: EvidenceSnapshotSummary, factors: FactorResultSummary[], regime: RegimeResultSummary, proposals: QuantProposalSummary[], events: DecisionEvent[], modelRuns: ModelRunSummary[], research: ResearchResultSummary[]): Timeline {
   const normalEvent = events.find(item => item.plan_id || item.event_type.startsWith('NORMAL_MODEL'))
   const topEvent = events.find(item => item.review_id)
   const consensusEvent = events.find(item => item.consensus_id)
   const riskEvent = events.find(item => item.risk_decision_id)
   const intentEvent = events.find(item => item.intent_id)
+  const normalRun = modelRuns.find(item => item.role === 'NORMAL_TRADER')
+  const topRun = modelRuns.find(item => item.role === 'TOP_RISK_REVIEWER')
+  const researchStatus = research.length
+    ? research.every(item => ['SUCCESS', 'INSUFFICIENT_DATA', 'DISABLED_NOT_REQUIRED'].includes(item.status)) ? 'SUCCESS' : research.find(item => !['SUCCESS', 'INSUFFICIENT_DATA', 'DISABLED_NOT_REQUIRED'].includes(item.status))?.status || 'BLOCKED'
+    : 'NOT_REACHED'
   const proposalStatus = proposals.some(item => item.status === 'TRIGGERED') ? 'TRIGGERED' : proposals.some(item => item.status === 'INSUFFICIENT_DATA') ? 'INSUFFICIENT_DATA' : proposals[0]?.status || 'NOT_CREATED'
   const proposalReason = missingReason(proposals)
   const stages: Stage[] = [
@@ -147,17 +153,18 @@ function buildTimeline(snapshot: EvidenceSnapshotSummary, factors: FactorResultS
     stage('context','MarketContext',snapshot.market_context_id ? 'REFERENCED' : 'NOT_REACHED',snapshot.market_context_id ? 'Snapshot 已锁定生产 MarketContext' : 'Snapshot 未引用 MarketContext',{market_context_id:snapshot.market_context_id},{objectIds:snapshot.market_context_id ? [snapshot.market_context_id] : []}),
     stage('regime','MarketRegime',regime.calculation_status,regime.evidence.join('；') || String(regime.regime || '没有可用 Regime'),regime,{objectIds:[regime.regime_result_id],hashes:[regime.input_hash],versions:[regime.regime_version],createdAt:regime.calculated_at}),
     stage('proposal','QuantProposal',proposalStatus,proposalReason,proposals,{objectIds:proposals.map(item => item.proposal_id),hashes:proposals.map(item => item.input_hash || '').filter(Boolean),versions:[...new Set(proposals.map(item => item.strategy_version))],createdAt:proposals[0]?.created_at || '',evidenceCount:proposals.reduce((n,item) => n + (item.evidence_refs?.length || 0),0)}),
-    stage('normal','NormalTradePlan',normalEvent?.status || (normalEvent ? 'CREATED' : 'NOT_REACHED'),normalEvent?.reason || proposalReason,normalEvent || null,eventOptions(normalEvent, normalEvent?.plan_id)),
-    stage('top','TopReviewDecision',topEvent?.status || (topEvent ? 'CREATED' : 'NOT_REACHED'),topEvent?.reason || 'NormalTradePlan 未形成，Top 未调用',topEvent || null,eventOptions(topEvent, topEvent?.review_id)),
+    stage('research','TradingAgents 研究',researchStatus,research.length ? `${research.length} 个 Snapshot-bound Agent 结果；运行模式 ${modelRuns[0]?.run_mode || '未记录'}` : 'Proposal 未触发或模型运行时未到达',research,{objectIds:research.map(item => item.research_result_id),versions:[...new Set(modelRuns.filter(item => item.role === 'RESEARCH_AGENT').map(item => `${item.model_profile_id}@${item.model_profile_version}`))],createdAt:research[0]?.created_at || '',evidenceCount:research.reduce((count,item) => count + item.evidence_refs.length,0)}),
+    stage('normal','NormalTradePlan',normalEvent?.status || normalRun?.structured_output_status || 'NOT_REACHED',normalEvent?.reason || normalRun?.error_category || proposalReason,normalEvent || normalRun || null,{...eventOptions(normalEvent, normalEvent?.plan_id),objectIds:[normalEvent?.plan_id,normalRun?.model_run_id].filter((value): value is string => Boolean(value)),versions:normalRun ? [`${normalRun.model_profile_id}@${normalRun.model_profile_version}`,`${normalRun.prompt_id}@${normalRun.prompt_version}`] : []}),
+    stage('top','TopReviewDecision',topEvent?.status || topRun?.structured_output_status || 'NOT_REACHED',topEvent?.reason || topRun?.error_category || 'NormalTradePlan 未形成，Top 未调用',topEvent || topRun || null,{...eventOptions(topEvent, topEvent?.review_id),objectIds:[topEvent?.review_id,topRun?.model_run_id].filter((value): value is string => Boolean(value)),versions:topRun ? [`${topRun.model_profile_id}@${topRun.model_profile_version}`,`${topRun.prompt_id}@${topRun.prompt_version}`] : []}),
     stage('consensus','ConsensusDecision',consensusEvent?.status || (consensusEvent ? 'CREATED' : 'NOT_REACHED'),consensusEvent?.reason || 'Normal/Top 未同时到达，Consensus 未调用',consensusEvent || null,eventOptions(consensusEvent, consensusEvent?.consensus_id)),
     stage('risk','HardRiskDecision',riskEvent?.status || (riskEvent ? 'CREATED' : 'NOT_REACHED'),riskEvent?.reason || 'Consensus 未通过，HardRisk 未调用',riskEvent || null,eventOptions(riskEvent, riskEvent?.risk_decision_id)),
     stage('intent','OrderIntent',intentEvent?.status || (intentEvent ? 'CREATED' : 'NOT_CREATED'),intentEvent?.reason || '没有完整通过量化、模型、一致性与硬风控的合法方案',intentEvent || null,eventOptions(intentEvent, intentEvent?.intent_id))
   ]
-  return { symbol:snapshot.symbol, tradeDate:snapshot.trade_date.slice(0,10), mode:runMode(snapshot), snapshot, factors, regime, proposals, proposalStatuses:proposalCounts(proposals), stages, modelReached:Boolean(normalEvent), intentReached:Boolean(intentEvent) }
+  return { symbol:snapshot.symbol, tradeDate:snapshot.trade_date.slice(0,10), mode:runMode(snapshot), snapshot, factors, regime, proposals, modelRuns, research, proposalStatuses:proposalCounts(proposals), stages, modelReached:Boolean(normalEvent || normalRun), intentReached:Boolean(intentEvent) }
 }
 function selectTimeline(row: Timeline) { selected.value = row }
 function inspectStage(value: Stage) { stageDetail.value = value; detailVisible.value = true }
-function stageType(status: string) { if (['PASS','CREATED','CALCULATED','REFERENCED','TRIGGERED','COMPLETE'].includes(status)) return 'success'; if (['FAIL','REJECTED','MODEL_FAILED','HARD_RISK_REJECT'].includes(status)) return 'danger'; if (['INSUFFICIENT_DATA','LEGACY_EVIDENCE_INCOMPLETE','LEGACY_CONTRACT_UNVERIFIED'].includes(status)) return 'warning'; return 'info' }
+function stageType(status: string) { if (['PASS','SUCCESS','READY','CREATED','CALCULATED','REFERENCED','TRIGGERED','COMPLETE'].includes(status)) return 'success'; if (['FAIL','REJECTED','MODEL_FAILED','INVALID_OUTPUT','HARD_RISK_REJECT'].includes(status)) return 'danger'; if (['INSUFFICIENT_DATA','MODEL_NOT_CONFIGURED','BUDGET_BLOCKED','LEGACY_EVIDENCE_INCOMPLETE','LEGACY_CONTRACT_UNVERIFIED'].includes(status)) return 'warning'; return 'info' }
 function timelineType(status: string) { return stageType(status) === 'success' ? 'success' : stageType(status) === 'danger' ? 'danger' : stageType(status) === 'warning' ? 'warning' : 'info' }
 onMounted(load)
 </script>

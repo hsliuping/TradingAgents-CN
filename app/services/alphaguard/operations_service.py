@@ -414,7 +414,8 @@ class AlphaGuardOperationsService:
                 required_for=["PAPER_CHALLENGER", "PROMOTION"],
                 blocking_reasons=["FULL_CHALLENGER_PIPELINE_NOT_READY"],
                 warnings=[
-                    "PR-008 deliberately fails closed until an isolated full dual-model adapter exists"
+                    "PAPER_CHALLENGER remains disabled; PR-010 Normal/Top "
+                    "capability and a valid experiment must be READY first"
                 ],
                 last_checked_at=now,
             )
@@ -595,22 +596,40 @@ class AlphaGuardOperationsService:
         )
 
     async def _model_readiness(self, now: datetime) -> DataReadinessStatus:
-        raw = clean_document(
-            await self.db["system_configs"].find_one({"is_active": True})
-        ) or {}
-        enabled = [
+        from .model_runtime_status_service import ModelRuntimeStatusService
+
+        runtime = await ModelRuntimeStatusService(self.db).status(admin=True)
+        profiles = runtime["profiles"]
+        required = [
             item
-            for item in raw.get("llm_configs", [])
-            if item.get("enabled") is True
+            for item in profiles
+            if item["role"]
+            in {"RESEARCH_AGENT", "NORMAL_TRADER", "TOP_RISK_REVIEWER"}
         ]
+        status = (
+            "READY"
+            if runtime["status"] == "READY"
+            else "NOT_CONFIGURED"
+            if runtime["status"] == "NOT_CONFIGURED"
+            else "PARTIAL"
+        )
+        reasons = []
+        for item in required:
+            if not item["configured"]:
+                reasons.append(f"{item['role']}_MODEL_NOT_CONFIGURED")
+            elif item["capability"] != "READY":
+                reasons.append(
+                    f"{item['role']}_CAPABILITY_{item['capability']}"
+                )
         return DataReadinessStatus(
             component="MODEL_PROVIDER",
-            status="READY" if enabled else "NOT_CONFIGURED",
-            record_count=len(enabled),
+            status=status,
+            record_count=len(profiles),
             required_for=["NORMAL_MODEL", "TOP_REVIEW"],
-            blocking_reasons=[] if enabled else ["MODEL_PROVIDER_NOT_CONFIGURED"],
+            blocking_reasons=sorted(set(reasons)),
             warnings=[
-                f"configured_provider_count={len(enabled)}"
+                f"registered_profile_count={len(profiles)}",
+                "readiness requires exact persisted profile, prompt, credential, and network capability",
             ],
             last_checked_at=now,
         )

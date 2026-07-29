@@ -28,7 +28,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import alphaguard, alphaguard_decisions, alphaguard_evaluations, alphaguard_experiments, alphaguard_operations, alphaguard_paper, alphaguard_quant, auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
+from app.routers import alphaguard, alphaguard_decisions, alphaguard_evaluations, alphaguard_experiments, alphaguard_models, alphaguard_operations, alphaguard_paper, alphaguard_quant, auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_data as stock_data_router
@@ -866,6 +866,7 @@ app.include_router(alphaguard_quant.router, prefix="/api", tags=["alphaguard-qua
 app.include_router(alphaguard_decisions.router, prefix="/api", tags=["alphaguard-decisions"])
 app.include_router(alphaguard_evaluations.router, prefix="/api", tags=["alphaguard-evaluations"])
 app.include_router(alphaguard_experiments.router, prefix="/api", tags=["alphaguard-experiments"])
+app.include_router(alphaguard_models.router, prefix="/api", tags=["alphaguard-models"])
 app.include_router(alphaguard_operations.router, prefix="/api", tags=["alphaguard-operations"])
 app.include_router(alphaguard_paper.router, prefix="/api", tags=["alphaguard-paper"])
 app.include_router(reports.router, tags=["reports"])

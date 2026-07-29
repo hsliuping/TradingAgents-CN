@@ -177,13 +177,15 @@ def create_trader(llm, memory, config: dict[str, Any] | None = None):
 
         revision = state.get("revision_request")
         prompt_version = (
-            NORMAL_TRADE_REVISION_PROMPT_VERSION
+            str(config.get("normal_revision_prompt_version"))
+            if revision and config.get("normal_revision_prompt_version")
+            else str(config.get("normal_prompt_version"))
+            if context and config.get("normal_prompt_version")
+            else NORMAL_TRADE_REVISION_PROMPT_VERSION
             if revision
-            else (
-                NORMAL_TRADE_QUANT_PROMPT_VERSION
-                if context
-                else NORMAL_TRADE_PROMPT_VERSION
-            )
+            else NORMAL_TRADE_QUANT_PROMPT_VERSION
+            if context
+            else NORMAL_TRADE_PROMPT_VERSION
         )
         snapshot_id = context.snapshot_id if context else _decision_snapshot_id(state)
         proposal_id = (
@@ -242,6 +244,38 @@ JSON Schema：
                 "past_memory": past_memory_str,
             }
         )
+        registered_template = config.get(
+            "normal_revision_prompt_template"
+            if revision
+            else "normal_prompt_template"
+        )
+        if context and registered_template:
+            system_content = str(registered_template).format(
+                context_json=json.dumps(
+                    context.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                research_json=json.dumps(
+                    state.get("tradingagents_research") or {},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                normal_plan_json=json.dumps(
+                    state.get("original_normal_trade_plan") or {},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                revision_request_json=json.dumps(
+                    revision or {},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            )
+            system_content += (
+                "\n\nExact model-facing JSON Schema:\n"
+                + model_output_schema_json(NormalTradePlan)
+            )
         messages = [
             {"role": "system", "content": system_content},
             {
@@ -265,9 +299,29 @@ JSON Schema：
             prompt_version=prompt_version,
             trace_id=state.get("trace_id"),
             template_hash=hashlib.sha256(system_content.encode()).hexdigest(),
-            context_hash=context.context_hash if context else None,
+            context_hash=(
+                state.get("model_runtime_context_hash")
+                or (context.context_hash if context else None)
+            ),
             input_hash=canonical_hash(user_payload),
             attempt_number=int(state.get("attempt_number") or 1),
+            structured_output_mode=str(
+                config.get("normal_structured_output_mode") or "AUTO"
+            ),
+            model_profile_id=config.get("normal_profile_id"),
+            model_profile_version=config.get("normal_profile_version"),
+            prompt_id=config.get("normal_prompt_id"),
+            input_cost_per_million=config.get("normal_input_cost_per_million"),
+            output_cost_per_million=config.get("normal_output_cost_per_million"),
+            cost_currency=str(config.get("cost_currency") or "USD"),
+            max_retries=int(
+                state.get("model_max_retries")
+                if state.get("model_max_retries") is not None
+                else config.get("normal_max_retries") or 0
+            ),
+            retry_backoff_seconds=float(
+                config.get("normal_retry_backoff_seconds") or 0
+            ),
         )
 
         decision_error = None
@@ -360,6 +414,10 @@ JSON Schema：
             "messages": [AIMessage(content=rendered)],
             "normal_trade_plan": plan.model_dump(mode="json"),
             "normal_model_meta": plan.model_meta.model_dump(mode="json"),
+            "normal_model_attempts": [
+                item.model_dump(mode="json")
+                for item in invocation.attempt_metas
+            ],
             "decision_error": decision_error,
             "trader_investment_plan": rendered,
             "sender": name,

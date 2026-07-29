@@ -104,6 +104,11 @@ Normal 是第一轮结构化交易计划；Top 独立复核计划和证据。Con
 可执行一致意见；HardRisk 再执行不可绕过的账户、仓位、价格和市场安全检查。前一步通过
 不代表后一步通过。
 
+PR-010模型运行时将“TradingAgents 研究”、Normal、Top、Consensus和HardRisk作为独立阶段
+显示。模型节点还会显示运行模式、Profile/Prompt版本、结构化输出模式以及脱敏后的失败
+原因。研究角色未启用、供应商未配置、预算阻断或结构化输出非法时，后续节点保持未到达；
+页面不会以默认模型、默认HOLD或猜测的配置继续执行。
+
 ## 为什么没有订单
 
 只有合法 Proposal、Normal、Top、Consensus、HardRisk 和执行安全门全部通过，系统才会
@@ -138,8 +143,14 @@ Fill、费用和日快照。
 ## 运维中心
 
 遇到页面加载失败、数据不足、Worker stale、评价未成熟或完整性告警时进入运维中心。
-依次查看服务、数据准备、任务、告警、完整性与版本。只允许登记白名单幂等任务；页面不
-提供环境变量编辑、任意 Shell、任意 Mongo 查询或 live 开关。
+依次查看服务、数据准备、任务、告警、模型运行、完整性与版本。只允许登记白名单幂等
+任务；页面不提供环境变量编辑、任意 Shell、任意 Mongo 查询或 live 开关。
+
+“模型运行”显示三个受控角色及其固定Profile、Prompt版本、Credential状态、Provider
+能力、预算状态和最近运行摘要。管理员可以显式触发受控能力探测，但不能提交任意模型名、
+Prompt或凭证。能力探测可能访问供应商并产生费用，提交前必须确认；普通用户只能查看。
+前端不会显示、修改或传输API Key。凭证只能通过本机安全环境、Keychain映射或容器Secret
+提供，不能写入数据库配置、日志或截图。
 
 ## 常见问题
 
@@ -164,5 +175,11 @@ Fill、持仓和评价数量在演示前后保持不变。Demo 顶部横幅不�
 Scheduler/Worker，也不提供生产写入口。演示数据不得用于投资判断或正式评价结论。
 
 当前生产状态为 `DEGRADED_PAPER`，`CHALLENGER_READY=false`、`LIVE_READY=false`。
-FastAPI和两个Worker继续在live配置下fail-closed。正式前端构建仍有34个未触达页面的
-存量 `DefaultRow TS2345`；AlphaGuard、认证、API和Demo本阶段文件类型错误为0。
+FastAPI和两个Worker继续在live配置下fail-closed。前端类型安全检查点
+`alphaguard-frontend-type-safe` 已清除原34个 `DefaultRow TS2345`，正式
+`npm run type-check`、`npm run build` 和 `npx vite build` 均通过。
+
+模型运行时当前为Level A准备态：Profile、Prompt、Credential引用、能力探测、预算、
+审计、严格结构化输出和前端可见性已就绪；三个真实Profile的供应商访问探测均返回脱敏的
+认证失败，因此未执行付费结构化生成，也没有真实Normal→Top结果。Demo的模型状态是
+`STRUCTURAL_FIXTURE_ONLY`，不属于真实模型效果或生产数据。

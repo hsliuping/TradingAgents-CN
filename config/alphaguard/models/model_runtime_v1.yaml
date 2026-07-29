@@ -1,0 +1,164 @@
+schema_version: model_runtime_config_v1
+runtime_version: alphaguard_model_runtime_v1
+created_at: "2026-07-29T00:00:00+00:00"
+
+budget_policy:
+  policy_id: alphaguard_model_budget
+  policy_version: v1
+  max_input_tokens_per_call: 24000
+  max_output_tokens_per_call: 4000
+  max_calls_per_analysis: 10
+  max_tokens_per_snapshot: 80000
+  max_daily_calls: 100
+  max_daily_cost: 20.0
+  currency: USD
+
+profiles:
+  - profile_id: alphaguard_research_openai
+    profile_version: v1
+    role: RESEARCH_AGENT
+    provider: openai
+    model_name: gpt-4o-mini
+    model_version:
+    base_url: https://api.openai.com/v1
+    structured_output_mode: NATIVE_SCHEMA
+    temperature: 0.1
+    max_input_tokens: 24000
+    max_output_tokens: 3000
+    timeout_seconds: 120
+    max_retries: 1
+    retry_backoff_seconds: 2
+    credential_ref: env:OPENAI_API_KEY
+    prompt_profile_id: alphaguard_research_snapshot
+    input_cost_per_million:
+    output_cost_per_million:
+    enabled: true
+    production_allowed: true
+    research_allowed: true
+
+  - profile_id: alphaguard_normal_openai
+    profile_version: v1
+    role: NORMAL_TRADER
+    provider: openai
+    model_name: gpt-4o-mini
+    model_version:
+    base_url: https://api.openai.com/v1
+    structured_output_mode: NATIVE_SCHEMA
+    temperature: 0.2
+    max_input_tokens: 24000
+    max_output_tokens: 4000
+    timeout_seconds: 180
+    max_retries: 1
+    retry_backoff_seconds: 2
+    credential_ref: env:OPENAI_API_KEY
+    prompt_profile_id: normal_trade_plan_prompt
+    input_cost_per_million:
+    output_cost_per_million:
+    enabled: true
+    production_allowed: true
+    research_allowed: true
+
+  - profile_id: alphaguard_top_openai
+    profile_version: v1
+    role: TOP_RISK_REVIEWER
+    provider: openai
+    model_name: o4-mini
+    model_version:
+    base_url: https://api.openai.com/v1
+    structured_output_mode: NATIVE_SCHEMA
+    temperature: 0.1
+    max_input_tokens: 24000
+    max_output_tokens: 4000
+    timeout_seconds: 180
+    max_retries: 1
+    retry_backoff_seconds: 2
+    credential_ref: env:OPENAI_API_KEY
+    prompt_profile_id: top_risk_review_prompt
+    input_cost_per_million:
+    output_cost_per_million:
+    enabled: true
+    production_allowed: true
+    research_allowed: true
+
+prompts:
+  - prompt_id: model_capability_prompt
+    prompt_version: v1
+    role: MODEL_CAPABILITY_CHECK
+    schema_target: CapabilityEcho
+    enabled: true
+    template: |
+      This is an AlphaGuard provider capability check. It cannot place trades.
+      Return exactly {"status":"READY","note":"structured output available"}.
+
+  - prompt_id: alphaguard_research_snapshot
+    prompt_version: v1
+    role: RESEARCH_AGENT
+    schema_target: ResearchAgentOutput
+    enabled: true
+    template: |
+      You are the AlphaGuard {agent_role}. Use only the immutable Snapshot v2
+      context below. Do not fetch current data, infer missing evidence, or issue
+      orders. Return exactly one object matching the supplied JSON schema.
+      Every conclusion must cite evidence_refs present in the context.
+
+      Snapshot context:
+      {context_json}
+
+  - prompt_id: normal_trade_plan_prompt
+    prompt_version: alphaguard-normal-quant-v1
+    role: NORMAL_TRADER
+    schema_target: NormalTradePlan
+    enabled: true
+    template: |
+      You are AlphaGuard's Normal trader. Evaluate whether the existing
+      QuantTradeProposal is supported by the immutable Snapshot v2 evidence.
+      Do not discover a new opportunity, fetch current data, or invent missing
+      values. Return exactly one NormalTradePlan matching the supplied schema.
+      Data insufficiency must be explicit and non-executable.
+
+      Snapshot-bound decision context:
+      {context_json}
+
+      TradingAgents research:
+      {research_json}
+
+  - prompt_id: top_risk_review_prompt
+    prompt_version: alphaguard-top-review-v1
+    role: TOP_RISK_REVIEWER
+    schema_target: TopReviewDecision
+    enabled: true
+    template: |
+      You are AlphaGuard's Top risk reviewer. Review only the supplied Normal
+      plan and immutable Snapshot v2 context. You may confirm, reduce risk,
+      narrow conditions, reject, suspend, or request one material revision.
+      Never reverse direction, increase position, loosen a stop, delete risk
+      conditions, or create an order. Return exactly one TopReviewDecision.
+
+      Snapshot-bound decision context:
+      {context_json}
+
+      Normal plan:
+      {normal_plan_json}
+
+      TradingAgents research:
+      {research_json}
+
+  - prompt_id: material_revision_prompt
+    prompt_version: alphaguard-normal-revision-v1
+    role: NORMAL_TRADER
+    schema_target: NormalTradePlan
+    enabled: true
+    template: |
+      Revise the supplied NormalTradePlan once, using only the immutable
+      Snapshot v2 context and the Top review request. Do not reverse direction,
+      expand risk, fetch current data, or invent evidence. Return exactly one
+      revised NormalTradePlan. A second revision is forbidden.
+
+      Snapshot-bound decision context:
+      {context_json}
+
+      Original plan:
+      {normal_plan_json}
+
+      Revision request:
+      {revision_request_json}

@@ -99,6 +99,21 @@ class ModelExecutionMeta(AlphaGuardSchema):
     context_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     input_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     attempt_number: int = Field(default=1, ge=1)
+    # PR-010 additive audit fields. Optional defaults preserve every immutable
+    # PR-002/PR-005 document while formal profile-based calls populate them.
+    model_profile_id: str | None = None
+    model_profile_version: str | None = None
+    prompt_id: str | None = None
+    structured_output_mode: Literal[
+        "NATIVE_SCHEMA",
+        "TOOL_CALL",
+        "JSON_SCHEMA",
+    ] | None = None
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    estimated_cost: float | None = Field(default=None, ge=0)
+    cost_currency: str | None = None
 
     @model_validator(mode="after")
     def validate_timing_and_error(self) -> "ModelExecutionMeta":

@@ -151,7 +151,11 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                 )
 
         prompt_version = (
-            TOP_REVIEW_QUANT_PROMPT_VERSION if context else TOP_REVIEW_PROMPT_VERSION
+            str(config.get("top_prompt_version"))
+            if context and config.get("top_prompt_version")
+            else TOP_REVIEW_QUANT_PROMPT_VERSION
+            if context
+            else TOP_REVIEW_PROMPT_VERSION
         )
         raw_plan = state.get("normal_trade_plan")
         try:
@@ -169,7 +173,10 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                 error_type="MISSING_OR_INVALID_NORMAL_PLAN",
                 error_message=f"{message}: {exc.__class__.__name__}",
                 trace_id=state.get("trace_id"),
-                context_hash=context.context_hash if context else None,
+                context_hash=(
+                    state.get("model_runtime_context_hash")
+                    or (context.context_hash if context else None)
+                ),
                 attempt_number=int(state.get("attempt_number") or 1),
             )
             review = _failure_review(
@@ -203,7 +210,10 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                     error_type=f"UPSTREAM_{normal_plan.status}",
                     error_message=message,
                     trace_id=state.get("trace_id"),
-                    context_hash=context.context_hash if context else None,
+                    context_hash=(
+                        state.get("model_runtime_context_hash")
+                        or (context.context_hash if context else None)
+                    ),
                     attempt_number=int(state.get("attempt_number") or 1),
                 )
                 review = _failure_review(
@@ -271,6 +281,29 @@ JSON Schema：
                         "past_memory": past_memory_str,
                     }
                 )
+                registered_template = config.get("top_prompt_template")
+                if context and registered_template:
+                    system_content = str(registered_template).format(
+                        context_json=json.dumps(
+                            context.model_dump(mode="json"),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        normal_plan_json=json.dumps(
+                            normal_plan.model_dump(mode="json"),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        research_json=json.dumps(
+                            state.get("tradingagents_research") or {},
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                    )
+                    system_content += (
+                        "\n\nExact model-facing JSON Schema:\n"
+                        + model_output_schema_json(TopReviewDecision)
+                    )
                 invocation = invoke_json_object(
                     llm=llm,
                     messages=[
@@ -291,9 +324,33 @@ JSON Schema：
                     template_hash=hashlib.sha256(
                         system_content.encode()
                     ).hexdigest(),
-                    context_hash=context.context_hash if context else None,
+                    context_hash=(
+                        state.get("model_runtime_context_hash")
+                        or (context.context_hash if context else None)
+                    ),
                     input_hash=canonical_hash(user_payload),
                     attempt_number=int(state.get("attempt_number") or 1),
+                    structured_output_mode=str(
+                        config.get("top_structured_output_mode") or "AUTO"
+                    ),
+                    model_profile_id=config.get("top_profile_id"),
+                    model_profile_version=config.get("top_profile_version"),
+                    prompt_id=config.get("top_prompt_id"),
+                    input_cost_per_million=config.get(
+                        "top_input_cost_per_million"
+                    ),
+                    output_cost_per_million=config.get(
+                        "top_output_cost_per_million"
+                    ),
+                    cost_currency=str(config.get("cost_currency") or "USD"),
+                    max_retries=int(
+                        state.get("model_max_retries")
+                        if state.get("model_max_retries") is not None
+                        else config.get("top_max_retries") or 0
+                    ),
+                    retry_backoff_seconds=float(
+                        config.get("top_retry_backoff_seconds") or 0
+                    ),
                 )
                 decision_error = None
                 if invocation.failure_status:
@@ -444,6 +501,14 @@ JSON Schema：
             "risk_debate_state": risk_debate_state,
             "top_review_decision": review.model_dump(mode="json"),
             "top_model_meta": review.model_meta.model_dump(mode="json"),
+            "top_model_attempts": [
+                item.model_dump(mode="json")
+                for item in (
+                    invocation.attempt_metas
+                    if "invocation" in locals()
+                    else (review.model_meta,)
+                )
+            ],
             "decision_error": decision_error,
             "final_trade_decision": rendered,
         }

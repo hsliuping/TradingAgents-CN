@@ -31,12 +31,14 @@ from .decision_context_builder import (
 )
 from .decision_model_runner import (
     DecisionModelRunner,
-    ExistingProviderDecisionModelRunner,
 )
 from .hard_risk_engine import HardRiskEngine
 from .execution_outbox_service import ExecutionOutboxService
+from .model_runtime_context import build_model_runtime_context
+from .profiled_decision_model_runner import ProfiledDecisionModelRunner
 from .revision_service import RevisionService
 from .risk_policy_registry import RiskPolicyRegistry
+from .snapshot_research_runtime import SnapshotResearchRuntime
 
 
 class DecisionIntegrityError(ValueError):
@@ -67,6 +69,7 @@ def _now_meta(
     attempt_number: int,
     error_message: str,
     trace_id: str | None,
+    error_type: str = "MODEL_NOT_CONFIGURED",
 ) -> ModelExecutionMeta:
     now = datetime.now(timezone.utc)
     return ModelExecutionMeta(
@@ -80,7 +83,7 @@ def _now_meta(
         latency_ms=0,
         execution_status="MODEL_FAILED",
         trace_id=trace_id,
-        error_type="PROMPT_CONFIGURATION_ERROR",
+        error_type=error_type,
         error_message=error_message[:500],
         template_hash=canonical_hash("normal_trade_plan_quant_v1"),
         context_hash=context_hash,
@@ -95,6 +98,7 @@ def _model_configuration_failure(
     attempt_number: int,
     error_message: str,
     trace_id: str | None,
+    error_type: str = "MODEL_NOT_CONFIGURED",
 ) -> NormalTradePlan:
     return NormalTradePlan(
         plan_id=str(uuid4()),
@@ -130,6 +134,7 @@ def _model_configuration_failure(
             attempt_number=attempt_number,
             error_message=error_message,
             trace_id=trace_id,
+            error_type=error_type,
         ),
     )
 
@@ -412,13 +417,62 @@ class DecisionPipeline:
         )
         if runner is None:
             try:
-                runner = await ExistingProviderDecisionModelRunner.create(context)
+                runtime_context = build_model_runtime_context(context, resolved)
+                research_runtime = SnapshotResearchRuntime(self.db)
+                research = await research_runtime.run(
+                    analysis_id=context.analysis_id,
+                    context=runtime_context,
+                    run_mode="PRODUCTION",
+                )
+                research.append(
+                    await research_runtime.disabled_social_result(
+                        analysis_id=context.analysis_id,
+                        context=runtime_context,
+                    )
+                )
+                blocked_research = next(
+                    (
+                        item
+                        for item in research
+                        if item.status
+                        not in {
+                            "SUCCESS",
+                            "INSUFFICIENT_DATA",
+                            "DISABLED_NOT_REQUIRED",
+                        }
+                    ),
+                    None,
+                )
+                if blocked_research is not None:
+                    raise RuntimeError(
+                        "TradingAgents research blocked: "
+                        f"{blocked_research.status}"
+                    )
+                runner = await ProfiledDecisionModelRunner.create(
+                    db=self.db,
+                    run_mode="PRODUCTION",
+                    automated_execution_allowed=True,
+                    model_runtime_context_hash=runtime_context.context_hash,
+                    research_results=[
+                        item.model_dump(mode="json") for item in research
+                    ],
+                )
             except Exception as exc:
+                failure_text = str(exc).upper()
                 plan = _model_configuration_failure(
                     context,
                     attempt_number=attempt_number,
                     error_message=f"model configuration failed: {type(exc).__name__}",
                     trace_id=trace_id,
+                    error_type=(
+                        "BUDGET_BLOCKED"
+                        if "BUDGET" in failure_text
+                        else "INVALID_OUTPUT"
+                        if "INVALID_OUTPUT" in failure_text
+                        else "MODEL_FAILED"
+                        if "MODEL_FAILED" in failure_text
+                        else "MODEL_NOT_CONFIGURED"
+                    ),
                 )
             else:
                 plan = await runner.run_normal(

@@ -41,7 +41,8 @@ VITE_API_PROXY_TARGET=http://127.0.0.1:8010 npm run dev -- --host 0.0.0.0
 
 进入“决策链”。选择 `300750` 可查看演示的完整
 Quant -> Normal -> Top -> Consensus -> HardRisk -> OrderIntent 路径；其他标的展示 WATCH、
-Top 拒绝或 HardRisk 拒绝。
+Top 拒绝或 HardRisk 拒绝。时间线中的“TradingAgents 研究”与 Normal/Top 分开显示；
+`NOT_REACHED`、`MODEL_FAILED` 和 `INVALID_OUTPUT` 不会被页面补成 HOLD。
 
 ## 6. 查看模拟账户
 
@@ -55,7 +56,9 @@ Top 拒绝或 HardRisk 拒绝。
 
 ## 8. 查看系统健康
 
-进入“运维中心”，依次查看服务、数据准备、任务、告警、完整性与版本。真实环境也可运行：
+进入“运维中心”，依次查看服务、数据准备、任务、告警、模型运行、完整性与版本。
+“模型运行”只展示已登记的 Profile、Prompt、能力状态、预算和脱敏错误，不展示或接收
+API Key。真实环境也可运行：
 
 ```bash
 curl --fail http://localhost:8000/health/live
@@ -70,8 +73,12 @@ curl --fail http://localhost:8000/health/ready
 - 真实系统状态：`DEGRADED_PAPER`，表示部分能力安全关闭，不是系统故障；
 - `CHALLENGER_READY=false`、`LIVE_READY=false`，页面没有实盘入口；
 - 演示数据库与生产数据库完全隔离，演示中的订单、成交和收益不是生产数据；
-- 正式 `npm run build` 仍被34个未触达页面的存量 `DefaultRow TS2345` 阻断，AlphaGuard、
-  认证和 Demo 本阶段文件没有新增类型错误。
+- 前端类型安全检查点 `alphaguard-frontend-type-safe` 已清除原34个
+  `DefaultRow TS2345`；`npm run type-check`、正式 `npm run build` 和
+  `npx vite build` 均可通过；
+- 模型运行时目前只达到 Level A：三个登记Profile的真实供应商访问探测均因认证失败而
+  fail-closed，未产生模型结果、订单或账户变动。不要在页面、文档或命令行参数中输入
+  API Key。
 
 验收截图位于 [`docs/ux/screenshots`](../ux/screenshots/)，完整说明见
 [`ALPHAGUARD_FRONTEND_GUIDE.md`](ALPHAGUARD_FRONTEND_GUIDE.md)。

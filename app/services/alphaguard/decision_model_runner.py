@@ -12,8 +12,6 @@ from tradingagents.alphaguard.decision_schemas import (
     NormalTradePlan,
     TopReviewDecision,
 )
-from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.graph.trading_graph import create_llm_by_provider
 
 
 class DecisionModelRunner(Protocol):
@@ -45,16 +43,12 @@ class ExistingProviderDecisionModelRunner:
 
     @staticmethod
     def configured_models(context: DecisionContext) -> tuple[str, str]:
-        normal_model = (
-            (context.quant_proposal.model_extra or {}).get(
-                "normal_model_version"
-            )
-            if context.quant_proposal.model_extra
-            else None
-        )
+        from .model_profile_registry import ModelProfileRegistry
+
+        registry = ModelProfileRegistry()
         return (
-            str(normal_model or DEFAULT_CONFIG["quick_think_llm"]),
-            str(DEFAULT_CONFIG["deep_think_llm"]),
+            registry.for_role("NORMAL_TRADER").model_name,
+            registry.for_role("TOP_RISK_REVIEWER").model_name,
         )
 
     @staticmethod
@@ -110,9 +104,9 @@ class ExistingProviderDecisionModelRunner:
                     "provider": str(info.get("provider") or "unconfigured"),
                     "model_name": model_name,
                     "model_version": model_name,
-                    "model_registry_configured": (
-                        model_registry_configured
-                    ),
+                    "model_registry_configured": model_registry_configured,
+                    # This label is retained for old audit compatibility only.
+                    # ``create`` below permanently rejects this path.
                     "configuration_source": (
                         "REGISTERED_MODEL_CONFIG"
                         if model_registry_configured
@@ -151,49 +145,10 @@ class ExistingProviderDecisionModelRunner:
 
     @classmethod
     async def create(cls, context: DecisionContext):
-        from app.services.simple_analysis_service import (
-            get_model_config_sync,
-            get_provider_and_url_by_model_sync,
+        raise RuntimeError(
+            "legacy default-model construction is disabled; use "
+            "ProfiledDecisionModelRunner with persisted exact profiles"
         )
-
-        normal_model, top_model = cls.configured_models(context)
-
-        def construct():
-            normal_info = get_provider_and_url_by_model_sync(normal_model)
-            top_info = get_provider_and_url_by_model_sync(top_model)
-            normal_config = get_model_config_sync(normal_model)
-            top_config = get_model_config_sync(top_model)
-            normal_llm = create_llm_by_provider(
-                provider=normal_info["provider"],
-                model=normal_model,
-                backend_url=normal_info.get("backend_url") or "",
-                temperature=float(normal_config.get("temperature", 0.2)),
-                max_tokens=int(normal_config.get("max_tokens", 4000)),
-                timeout=int(normal_config.get("timeout", 180)),
-                api_key=normal_info.get("api_key"),
-            )
-            top_llm = create_llm_by_provider(
-                provider=top_info["provider"],
-                model=top_model,
-                backend_url=top_info.get("backend_url") or "",
-                temperature=float(top_config.get("temperature", 0.1)),
-                max_tokens=int(top_config.get("max_tokens", 4000)),
-                timeout=int(top_config.get("timeout", 180)),
-                api_key=top_info.get("api_key"),
-            )
-            config = {
-                "quick_provider": normal_info["provider"],
-                "deep_provider": top_info["provider"],
-                "quick_think_llm": normal_model,
-                "deep_think_llm": top_model,
-            }
-            return (
-                create_trader(normal_llm, None, config),
-                create_risk_manager(top_llm, None, config),
-            )
-
-        normal_node, top_node = await asyncio.to_thread(construct)
-        return cls(normal_node=normal_node, top_node=top_node)
 
     @staticmethod
     def _base_state(

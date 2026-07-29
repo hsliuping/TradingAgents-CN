@@ -209,6 +209,14 @@ async def decision_events(_user: dict[str, Any] = Depends(current_demo_user)):
     return ok({"items": _clean(_data()["decision_events"])})
 
 
+@app.get("/api/alphaguard/models/snapshots/{snapshot_id}/runs")
+async def demo_model_snapshot_runs(
+    snapshot_id: str,
+    _user: dict[str, Any] = Depends(current_demo_user),
+):
+    return ok({"runs": [], "research": []})
+
+
 @app.get("/api/alphaguard/decisions/{plan_id}")
 @app.get("/api/alphaguard/reviews/{plan_id}")
 @app.get("/api/alphaguard/consensus/{plan_id}")
@@ -375,4 +383,28 @@ async def integrity(_user: dict[str, Any] = Depends(current_demo_user)):
         "workers_started": False,
         "production_writes": 0,
         "fixture_hash": _data()["fixture_hash"],
+    })
+
+
+@app.get("/api/alphaguard/models/status")
+async def demo_model_status(_user: dict[str, Any] = Depends(current_demo_user)):
+    return ok({
+        "status": "NOT_CONFIGURED",
+        "profiles": [
+            {
+                "role": role,
+                "profile_id": f"demo-{role.lower()}",
+                "profile_version": "demo-v1",
+                "provider": "DEMO",
+                "model_name": "STRUCTURAL_FIXTURE_ONLY",
+                "configured": False,
+                "capability": "DISABLED",
+                "last_check": None,
+            }
+            for role in (
+                "RESEARCH_AGENT",
+                "NORMAL_TRADER",
+                "TOP_RISK_REVIEWER",
+            )
+        ],
     })

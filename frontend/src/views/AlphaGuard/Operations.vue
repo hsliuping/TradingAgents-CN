@@ -67,6 +67,41 @@
         </el-table>
         <el-empty v-if="!alerts.length" description="暂无持久化告警" />
       </el-tab-pane>
+      <el-tab-pane label="模型运行">
+        <div class="status-line">
+          <el-tag :type="modelStatus?.status === 'READY' ? 'success' : modelStatus?.status === 'DEGRADED' ? 'warning' : 'danger'">
+            {{ modelStatus?.status || 'NOT_CONFIGURED' }}
+          </el-tag>
+          <span>只有精确登记并通过网络能力检查的 Normal / Top Profile 才能进入生产链。</span>
+        </div>
+        <el-table :data="modelStatus?.profiles || []" size="small">
+          <el-table-column prop="role" label="角色" min-width="180" />
+          <el-table-column label="Profile" min-width="230">
+            <template #default="{ row }">{{ row.profile_id }}@{{ row.profile_version }}</template>
+          </el-table-column>
+          <el-table-column prop="provider" label="Provider" width="110" />
+          <el-table-column prop="model_name" label="模型" min-width="150" />
+          <el-table-column label="Prompt" min-width="220">
+            <template #default="{ row }">{{ row.prompt_id || '—' }}@{{ row.prompt_version || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="Configured" width="135">
+            <template #default="{ row }"><el-tag :type="row.configured ? 'success' : 'danger'">{{ row.configured ? 'CONFIGURED' : 'NOT_CONFIGURED' }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="capability" label="Capability" width="160" />
+          <el-table-column prop="last_check" label="Last Check" min-width="190" />
+          <el-table-column v-if="authStore.isAdmin && !isDemo" label="操作" width="130">
+            <template #default="{ row }">
+              <el-button link @click="checkCapability(row)">能力检查</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-descriptions v-if="modelStatus?.budget" class="budget-summary" :column="3" border>
+          <el-descriptions-item label="Daily Calls">{{ modelStatus.budget.daily_calls }} / {{ modelStatus.budget.max_daily_calls }}</el-descriptions-item>
+          <el-descriptions-item label="Daily Cost">{{ modelStatus.budget.daily_cost }} / {{ modelStatus.budget.max_daily_cost }} {{ modelStatus.budget.currency }}</el-descriptions-item>
+          <el-descriptions-item label="Budget Policy">{{ modelStatus.budget.policy_id }}@{{ modelStatus.budget.policy_version }}</el-descriptions-item>
+        </el-descriptions>
+        <el-alert class="model-secret-notice" type="info" :closable="false" title="前端不会显示、修改或传输 API Key，也不提供任意 Prompt 或未登记模型调用入口。" />
+      </el-tab-pane>
       <el-tab-pane label="完整性与版本">
         <h4>完整性</h4><pre>{{ pretty(integrity) }}</pre>
         <h4>版本（已脱敏）</h4><pre>{{ pretty(versions) }}</pre>
@@ -80,6 +115,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { alphaguardModelsApi, type ModelRuntimeStatus } from '@/api/alphaguardModels'
 import {
   alphaguardOperationsApi,
   type DataReadiness,
@@ -101,6 +137,7 @@ const alerts = ref<OperationalAlert[]>([])
 const manualJobs = ref<string[]>([])
 const versions = ref<Record<string, unknown>>({})
 const integrity = ref<Record<string, unknown>>({})
+const modelStatus = ref<ModelRuntimeStatus | null>(null)
 const statusType = computed(() => readiness.value?.overall_status === 'READY_FOR_PAPER' ? 'success' : readiness.value?.overall_status === 'UNSAFE' ? 'danger' : 'warning')
 const short = (value?: string) => value ? value.slice(0, 12) : '—'
 const pretty = (value: unknown) => JSON.stringify(value, null, 2)
@@ -109,14 +146,15 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    const [r, s, d, j, a, v, i] = await Promise.all([
+    const [r, s, d, j, a, v, i, m] = await Promise.all([
       alphaguardOperationsApi.readiness(),
       alphaguardOperationsApi.services(),
       alphaguardOperationsApi.dataReadiness(),
       alphaguardOperationsApi.jobs(),
       alphaguardOperationsApi.alerts(),
       alphaguardOperationsApi.versions(),
-      alphaguardOperationsApi.integrity()
+      alphaguardOperationsApi.integrity(),
+      alphaguardModelsApi.status()
     ])
     readiness.value = r.data
     services.value = s.data.items
@@ -126,11 +164,31 @@ async function load() {
     alerts.value = a.data.items
     versions.value = v.data
     integrity.value = i.data
+    modelStatus.value = m.data
   } catch (error: any) {
     loadError.value = `${error?.message || '未知错误'}；页面不会用缓存状态伪装服务健康。`
   } finally {
     loading.value = false
   }
+}
+async function checkCapability(row: Record<string, unknown>) {
+  if (typeof row.profile_id !== 'string' || typeof row.profile_version !== 'string') {
+    ElMessage.error('模型Profile身份无效，能力检查已阻断')
+    return
+  }
+  await ElMessageBox.confirm(
+    '将使用已登记 Profile 执行最小、不可交易的真实网络能力检查，并受预算约束。不会创建订单。',
+    '确认模型能力检查',
+    { type: 'warning', confirmButtonText: '执行检查' }
+  )
+  await alphaguardModelsApi.capabilityCheck({
+    profile_id: row.profile_id,
+    profile_version: row.profile_version,
+    idempotency_key: `ui-${row.profile_id}-${Date.now()}`,
+    network: true
+  })
+  ElMessage.success('能力检查已完成')
+  await load()
 }
 async function runJob(name: string) {
   await alphaguardOperationsApi.runJob(name)
@@ -157,6 +215,7 @@ onMounted(load)
 .safety-strip span { color: var(--el-text-color-secondary); font-size: 12px; }
 .header-row, .status-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--el-border-color-light); }
+.budget-summary, .model-secret-notice { margin-top: 16px; }
 pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--el-fill-color-light); border-radius: 6px; white-space: pre-wrap; }
 @media (max-width: 700px) { .safety-strip { grid-template-columns: 1fr; } }
 </style>
