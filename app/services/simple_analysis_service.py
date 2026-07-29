@@ -330,6 +330,17 @@ def _load_model_config_from_db(model_name: str) -> dict:
         return {}
 
 
+def get_model_config_sync(model_name: str) -> dict:
+    """Public read-only model runtime configuration used by safe adapters.
+
+    The returned mapping deliberately excludes credentials. Provider/API-key
+    resolution remains in ``get_provider_and_url_by_model_sync`` so callers do
+    not need to log or persist secrets while recording temperature and timeout.
+    """
+
+    return _load_model_config_from_db(model_name)
+
+
 def _get_env_api_key_for_provider(provider: str) -> str:
     """
     从环境变量获取指定供应商的 API Key

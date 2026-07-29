@@ -16,6 +16,8 @@ from tradingagents.alphaguard.paper_schemas import (
     paper_canonical_hash,
 )
 
+from .execution_mode_safety_gate import ExecutionModeSafetyGate
+
 
 class ExecutionOutboxConflictError(ValueError):
     pass
@@ -26,6 +28,7 @@ class ExecutionOutboxService:
         self.db = db
         self.collection = db["ag_execution_outbox"]
         self.audit = PaperAuditService(db)
+        self.execution_mode_gate = ExecutionModeSafetyGate(db)
 
     async def enqueue(
         self,
@@ -39,6 +42,10 @@ class ExecutionOutboxService:
         now: datetime | None = None,
     ) -> ExecutionOutboxEvent:
         now = now or datetime.utcnow()
+        await self.execution_mode_gate.assert_outbox_allowed(
+            event_type=event_type,
+            source_object_id=source_object_id,
+        )
         identity_payload = {
             "event_type": event_type,
             "source_object_id": source_object_id,

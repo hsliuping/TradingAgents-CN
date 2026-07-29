@@ -14,6 +14,7 @@
     <el-table :data="timelines" size="small" highlight-current-row @row-click="selectTimeline">
       <el-table-column prop="tradeDate" label="交易日" width="110" />
       <el-table-column prop="symbol" label="标的" width="90" />
+      <el-table-column label="运行模式" width="165"><template #default="{ row }"><el-tag :type="row.mode.type">{{ row.mode.label }}</el-tag></template></el-table-column>
       <el-table-column label="DataQuality" width="120"><template #default="{ row }"><el-tag :type="stageType(row.stages[0].status)">{{ row.stages[0].status }}</el-tag></template></el-table-column>
       <el-table-column label="Regime" width="165"><template #default="{ row }"><el-tag :type="stageType(row.regime.calculation_status)">{{ row.regime.calculation_status }}</el-tag></template></el-table-column>
       <el-table-column label="Proposal" min-width="230"><template #default="{ row }"><span v-for="item in row.proposalStatuses" :key="item.status" class="status-chip"><el-tag :type="stageType(item.status)" size="small">{{ item.status }} {{ item.count }}</el-tag></span></template></el-table-column>
@@ -24,6 +25,14 @@
     <el-empty v-if="!loading && !timelines.length" description="尚无真实决策链对象" />
 
     <section v-if="selected" class="timeline-section">
+      <el-alert
+        v-if="selected.mode.key === 'PRODUCTION_REPROCESS'"
+        class="mode-alert"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="PRODUCTION REPROCESS · 非当时实时决策 · 禁止自动执行"
+      />
       <div class="section-header"><div><strong>{{ selected.symbol }} · {{ selected.tradeDate }}</strong><span>Snapshot {{ selected.snapshot.snapshot_id }}</span></div><el-tag>{{ selected.stages.length }} 个阶段</el-tag></div>
       <el-timeline>
         <el-timeline-item v-for="stage in selected.stages" :key="stage.key" :timestamp="stage.createdAt || '未创建'" :type="timelineType(stage.status)">
@@ -62,7 +71,8 @@ import { Refresh } from '@element-plus/icons-vue'
 import { alphaguardApi, type DecisionEvent, type EvidenceSnapshotSummary, type FactorResultSummary, type QuantProposalSummary, type RegimeResultSummary } from '@/api/alphaguard'
 
 interface Stage { key: string; label: string; status: string; reason: string; objectIds: string[]; hashes: string[]; versions: string[]; traceIds: string[]; createdAt: string; evidenceCount: number; payload: unknown }
-interface Timeline { symbol: string; tradeDate: string; snapshot: EvidenceSnapshotSummary; factors: FactorResultSummary[]; regime: RegimeResultSummary; proposals: QuantProposalSummary[]; proposalStatuses: Array<{status:string;count:number}>; stages: Stage[]; modelReached: boolean; intentReached: boolean }
+interface RunModeInfo { key: string; label: string; type: 'success' | 'warning' | 'info' | 'danger' }
+interface Timeline { symbol: string; tradeDate: string; mode: RunModeInfo; snapshot: EvidenceSnapshotSummary; factors: FactorResultSummary[]; regime: RegimeResultSummary; proposals: QuantProposalSummary[]; proposalStatuses: Array<{status:string;count:number}>; stages: Stage[]; modelReached: boolean; intentReached: boolean }
 const loading = ref(false)
 const timelines = ref<Timeline[]>([])
 const selected = ref<Timeline | null>(null)
@@ -78,6 +88,17 @@ function benchmarkCount(snapshot: EvidenceSnapshotSummary) { return snapshot.act
 function evidenceContractStatus(snapshot: EvidenceSnapshotSummary) {
   if (snapshot.evidence_contract_status) return snapshot.evidence_contract_status
   return benchmarkCount(snapshot) < 61 ? 'LEGACY_EVIDENCE_INCOMPLETE' : 'LEGACY_CONTRACT_UNVERIFIED'
+}
+function runMode(snapshot: EvidenceSnapshotSummary): RunModeInfo {
+  const key = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true' ? 'UI_DEMO' : snapshot.run_mode || (snapshot.analysis_id?.startsWith('research:') ? 'RESEARCH_BACKFILL' : 'ACTUAL_PRODUCTION')
+  const modes: Record<string, RunModeInfo> = {
+    ACTUAL_PRODUCTION: { key, label: '生产实时', type: 'success' },
+    PRODUCTION_REPROCESS: { key, label: '生产重处理', type: 'warning' },
+    EVIDENCE_CONTRACT_VALIDATION: { key, label: '研究回放', type: 'info' },
+    RESEARCH_BACKFILL: { key, label: '研究回放', type: 'info' },
+    UI_DEMO: { key, label: 'Demo', type: 'info' }
+  }
+  return modes[key] || { key, label: key, type: 'info' }
 }
 function proposalCounts(items: QuantProposalSummary[]) { const counts: Record<string, number> = {}; for (const item of items) counts[item.status] = (counts[item.status] || 0) + 1; return Object.entries(counts).map(([status,count]) => ({status,count})) }
 function missingReason(proposals: QuantProposalSummary[]) { const reasons = [...new Set(proposals.flatMap(item => item.reason_codes || []))]; return reasons.join('；') || '没有可进入模型链的 Proposal' }
@@ -111,7 +132,7 @@ async function load() {
 }
 
 function buildTimeline(snapshot: EvidenceSnapshotSummary, factors: FactorResultSummary[], regime: RegimeResultSummary, proposals: QuantProposalSummary[], events: DecisionEvent[]): Timeline {
-  const normalEvent = events.find(item => item.plan_id)
+  const normalEvent = events.find(item => item.plan_id || item.event_type.startsWith('NORMAL_MODEL'))
   const topEvent = events.find(item => item.review_id)
   const consensusEvent = events.find(item => item.consensus_id)
   const riskEvent = events.find(item => item.risk_decision_id)
@@ -132,7 +153,7 @@ function buildTimeline(snapshot: EvidenceSnapshotSummary, factors: FactorResultS
     stage('risk','HardRiskDecision',riskEvent?.status || (riskEvent ? 'CREATED' : 'NOT_REACHED'),riskEvent?.reason || 'Consensus 未通过，HardRisk 未调用',riskEvent || null,eventOptions(riskEvent, riskEvent?.risk_decision_id)),
     stage('intent','OrderIntent',intentEvent?.status || (intentEvent ? 'CREATED' : 'NOT_CREATED'),intentEvent?.reason || '没有完整通过量化、模型、一致性与硬风控的合法方案',intentEvent || null,eventOptions(intentEvent, intentEvent?.intent_id))
   ]
-  return { symbol:snapshot.symbol, tradeDate:snapshot.trade_date.slice(0,10), snapshot, factors, regime, proposals, proposalStatuses:proposalCounts(proposals), stages, modelReached:Boolean(normalEvent), intentReached:Boolean(intentEvent) }
+  return { symbol:snapshot.symbol, tradeDate:snapshot.trade_date.slice(0,10), mode:runMode(snapshot), snapshot, factors, regime, proposals, proposalStatuses:proposalCounts(proposals), stages, modelReached:Boolean(normalEvent), intentReached:Boolean(intentEvent) }
 }
 function selectTimeline(row: Timeline) { selected.value = row }
 function inspectStage(value: Stage) { stageDetail.value = value; detailVisible.value = true }
@@ -145,7 +166,7 @@ onMounted(load)
 .page-grid { display: grid; gap: 16px; }
 .page-heading, .section-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .page-heading h2 { margin: 0 0 4px; font-size: 22px; }.page-heading p { margin: 0; color: var(--el-text-color-secondary); }
-.status-chip { margin-right: 6px; }.timeline-section { padding: 20px 0 0; border-top: 1px solid var(--el-border-color-light); }.section-header { margin-bottom: 18px; }.section-header div { display: grid; gap: 4px; }.section-header span { color: var(--el-text-color-secondary); font-size: 13px; }
+.status-chip { margin-right: 6px; }.timeline-section { padding: 20px 0 0; border-top: 1px solid var(--el-border-color-light); }.mode-alert { margin-bottom: 16px; }.section-header { margin-bottom: 18px; }.section-header div { display: grid; gap: 4px; }.section-header span { color: var(--el-text-color-secondary); font-size: 13px; }
 .stage-button { width: 100%; display: grid; grid-template-columns: minmax(150px, 220px) auto 1fr; align-items: center; gap: 12px; border: 0; background: transparent; text-align: left; cursor: pointer; padding: 4px 0 12px; }.stage-name { font-weight: 600; }.stage-reason { color: var(--el-text-color-secondary); overflow-wrap: anywhere; }
 pre { max-height: 520px; overflow: auto; padding: 12px; background: var(--el-fill-color-light); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 700px) { .stage-button { grid-template-columns: 1fr auto; }.stage-reason { grid-column: 1 / -1; }.page-heading { flex-direction: column; } }

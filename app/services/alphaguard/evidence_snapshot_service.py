@@ -83,6 +83,13 @@ def _canonical_value(value: Any) -> Any:
             "required_benchmark_count",
             "actual_benchmark_count",
             "evidence_contract_status",
+            "run_mode",
+            "source_trade_date",
+            "evidence_contract_version",
+            "reprocess_reason",
+            "reprocess_input_hash",
+            "original_realtime_run",
+            "automated_execution_allowed",
         }
         return {
             str(key): _canonical_value(item)
@@ -152,6 +159,31 @@ class EvidenceSnapshotService:
         payload: dict[str, Any],
     ) -> EvidenceSnapshot:
         data = dict(payload)
+        internal_snapshot_id = data.pop("_internal_snapshot_id", None)
+        if internal_snapshot_id is not None:
+            if data.get("run_mode") != "PRODUCTION_REPROCESS":
+                raise ValueError(
+                    "deterministic internal snapshot identity is restricted "
+                    "to PRODUCTION_REPROCESS"
+                )
+            existing = await self.db[self.snapshot_collection].find_one(
+                {"snapshot_id": str(internal_snapshot_id)}
+            )
+            if existing is not None:
+                stored = EvidenceSnapshot.model_validate(
+                    _clean_document(existing)
+                )
+                if (
+                    not self.verify_integrity(stored)
+                    or stored.run_mode != "PRODUCTION_REPROCESS"
+                    or stored.reprocess_input_hash
+                    != data.get("reprocess_input_hash")
+                ):
+                    raise SnapshotValidationError(
+                        "INTEGRITY_CONFLICT: deterministic reprocess "
+                        "Snapshot identity changed"
+                    )
+                return stored
         if data.get("factor_version_set") or data.get("strategy_version"):
             from .factor_registry import FactorRegistry
             from .strategy_registry import STRATEGY_SET_VERSION, StrategyRegistry
@@ -235,7 +267,7 @@ class EvidenceSnapshotService:
                 )
 
         snapshot_data = {
-            "snapshot_id": str(uuid4()),
+            "snapshot_id": str(internal_snapshot_id or uuid4()),
             "user_id": str(user_id),
             "analysis_id": data.get("analysis_id"),
             "symbol": symbol,
@@ -265,6 +297,17 @@ class EvidenceSnapshotService:
             "required_benchmark_count": data.get("required_benchmark_count"),
             "actual_benchmark_count": data.get("actual_benchmark_count"),
             "evidence_contract_status": data.get("evidence_contract_status"),
+            "run_mode": data.get("run_mode"),
+            "source_trade_date": data.get("source_trade_date"),
+            "evidence_contract_version": data.get(
+                "evidence_contract_version"
+            ),
+            "reprocess_reason": data.get("reprocess_reason"),
+            "reprocess_input_hash": data.get("reprocess_input_hash"),
+            "original_realtime_run": data.get("original_realtime_run"),
+            "automated_execution_allowed": data.get(
+                "automated_execution_allowed"
+            ),
             "data_quality": report.model_dump(mode="python"),
             "raw_refs": data["raw_refs"],
             # Version selection is immutable and hashed before any PR-004

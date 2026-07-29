@@ -5977,3 +5977,173 @@ blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
 已知限制：旧正式2026-07-29结果仍是2/61的安全停止；完整v2结果只属于研究隔离验证；4个
 历史TRIGGERED均缺版本化交易状态和明确涨跌停价，故没有真实模型调用或研究影子成交；
 真实Normal→Top→Consensus→HardRisk生产案例仍不存在。未开始PR-010。
+
+## 23. Production v2 Reprocess & Real Model Validation（完成）
+
+本阶段从 `alphaguard-evidence-window-v2`（`ebe9811`）开始，只使用已经持久化的
+2026-07-29正式数据创建不可执行的生产重处理结果。没有重新同步数据、重新运行历史回放，
+也没有修改Factor、Strategy、Prompt、模型选择、Consensus、HardRisk、Matching、Fee、
+交易参数或Champion。
+
+### 23.1 生产v2身份、Manifest和旧对象保护
+
+重处理固定标记：
+
+```text
+run_mode=PRODUCTION_REPROCESS
+source_trade_date=2026-07-29
+reprocess_reason=EVIDENCE_CONTRACT_UPGRADE
+original_realtime_run=false
+automated_execution_allowed=false
+run_id=01bd1eb7-36a9-5593-b630-ac3aeb3ff50d
+input_hash=968a25ed870ba94bf05a6b4376896ab709c4c83ce1621fd32595a1a0e62cfbf2
+result_hash=503f354f6c47fc4e0dce3476c22b378626407f9ad2371f9cd49157823eb82fd9
+```
+
+Snapshot稳定UUIDv5身份包含用户、市场、标的、交易日、Snapshot/Evidence Contract版本、
+run mode、Champion版本集合、所有显式引用与输入hash。`ag_evidence_snapshots`只对
+`snapshot_id`唯一，因此同一symbol/trade_date的v1实时对象和v2重处理对象可并存；
+Resolver始终按精确`snapshot_id`读取，不使用“最新版本”替换历史身份。
+
+两个create-only Manifest均直接复用Evidence Window v2的正式对象：
+
+```text
+Benchmark Manifest=739886d2-4e17-52fa-bef0-9312cad1f0c4
+Benchmark hash=0fbd423021f7840e866670c2d1097501a4a6ddaae572e806e1355f8e27cc2eb7
+Benchmark=61/61 COMPLETE
+MarketContext Manifest=965c1bc0-b78e-5f2a-a946-06e130d50561
+MarketContext hash=d286c5165100c4c4936a02f05f644221084ea285e1ecaacd2210fc416c4d2c36
+MarketContext=121/121
+```
+
+5个旧v1 Snapshot的ID、schema和immutable hash在重处理前后逐项相同；旧Factor、Regime、
+Proposal、正式EvaluationSubject和HorizonLabel均未覆盖、迁移或删除。前端继续把旧对象
+显示为`LEGACY_EVIDENCE_INCOMPLETE`。
+
+### 23.2 五个生产重处理Snapshot、Regime和Proposal
+
+重处理在既有正式create-only集合创建5个v2 Snapshot、5个DataQuality报告、105个
+FactorResult、5个RegimeResult和10个QuantProposal；Snapshot全部DataQuality PASS并锁定
+61/61 Benchmark与121/121 MarketContext证据。
+
+| symbol | v2 snapshot_id | Regime | Proposal结果 |
+| --- | --- | --- | --- |
+| 000333 | `a1e3e12c-38a7-50bc-9d12-248cf377e98a` | RANGE_WEAK | POSITION_EXIT REJECTED/NO_POSITION；SWING REJECTED/REGIME_DISALLOWS_NEW_POSITION |
+| 002594 | `491493a7-7cb0-55e2-b3b6-00027d7517bc` | RANGE_WEAK | POSITION_EXIT REJECTED/NO_POSITION；SWING REJECTED/REGIME_DISALLOWS_NEW_POSITION |
+| 300750 | `65494d47-734b-5625-88d0-800041d8146a` | RANGE_WEAK | POSITION_EXIT REJECTED/NO_POSITION；SWING REJECTED/REGIME_DISALLOWS_NEW_POSITION |
+| 600519 | `0f1d33f0-4e69-5018-908c-caa0f3b304e3` | RANGE_WEAK | POSITION_EXIT REJECTED/NO_POSITION；SWING REJECTED/REGIME_DISALLOWS_NEW_POSITION |
+| 601318 | `bcf46a5f-80cc-5a8c-a317-30e5d9f42751` | RANGE_WEAK | POSITION_EXIT REJECTED/NO_POSITION；SWING REJECTED/REGIME_DISALLOWS_NEW_POSITION |
+
+五个Regime均由正式Engine只读Snapshot显式引用计算，`calculation_status=CALCULATED`；
+没有查询latest。10个Proposal全部由现有策略自然拒绝，没有TRIGGERED，也没有改动门槛。
+
+生产重处理评价写入独立
+`ag_production_reprocess_evaluation_subjects=10`，均标记
+`evaluation_mode=PRODUCTION_REPROCESS`、`actual_production_decision=false`、
+`actual_execution=false`和四个PENDING期限。正式`ag_eval_subjects=772`、
+`ag_eval_horizon_labels=3096`保持不变，重处理结果不进入实时累计指标。
+
+### 23.3 真实模型配置与fail-closed结果
+
+当前Snapshot锁定模型仍是：
+
+```text
+Normal model=gpt-4o-mini temperature=0.2 timeout=180
+Normal prompt=normal_trade_plan_quant_v1
+Top model=o4-mini temperature=0.1 timeout=180
+Top prompt=top_review_decision_quant_v1
+pricing_status=UNAVAILABLE
+```
+
+活跃`system_configs v2`实际只登记`gpt-3.5-turbo`、`glm-4`和`qwen-turbo`；
+`gpt-4o-mini`与`o4-mini`均没有明确模型注册。首次安全调用前的配置检查曾错误地把代码默认
+回退URL和环境占位值识别为已配置；Normal因此实际调用一次并得到401
+`MODEL_FAILED`。该失败、request/input hash、模型/Prompt版本、时延和脱敏错误保留在不可变
+重处理run中；没有转换成默认HOLD，Top、Consensus与HardRisk均未调用。
+
+配置检查已最小修复：只有现有模型注册、非占位凭证和backend同时存在时才报告
+`CONFIGURED`。当前两节点均明确返回：
+
+```text
+model_registry_configured=false
+configuration_source=DEFAULT_FALLBACK_UNREGISTERED
+credential_configured=false
+backend_configured=false
+structured_output_capability=false
+status=MODEL_NOT_CONFIGURED
+```
+
+修复没有修改模型选择、凭证或已存run，也没有发起第二次模型调用。下一次新身份验证将在
+调用前安全停止；本阶段没有真实模型成功结果、模型效果结论或真实Normal→Top完整案例。
+
+### 23.4 执行隔离、前端、幂等和资产
+
+新增执行模式安全门在Outbox插入和OrderIntent消费两处解析Snapshot lineage。对
+`PRODUCTION_REPROCESS`及`automated_execution_allowed=false`显式抛出阻断；
+本轮实际门禁结果为`BLOCKED`，不是依赖调用方省略调用。
+
+正式库最终保持：
+
+```text
+EvidenceSnapshot=16
+FactorResult=336
+RegimeResult=16
+QuantProposal=32
+production reprocess run=1
+production reprocess evaluation=10
+OrderIntent/Outbox/Order/Fill/Position/Reservation/Ledger=0
+```
+
+相同命令复跑返回`REUSED`，run ID/result hash及所有集合计数不变；旧5个v1 Snapshot
+ID/hash不变。三个账户均保持
+`initial_cash=cash_available=1000000.00`、`cash_reserved=0`、
+`realized_pnl=total_fees=0`。
+
+Decisions只读页面现在区分`生产实时`、`生产重处理`、`研究回放`和`Demo`。重处理对象显示
+`PRODUCTION REPROCESS · 非当时实时决策 · 禁止自动执行`，并沿用Snapshot v2的61/61
+Benchmark、两个Manifest和Evidence Contract COMPLETE展示；不进入实际账户交易历史。
+
+### 23.5 修改、测试、健康、Readiness与回退
+
+主要新增`production_reprocess_service.py`、`execution_mode_safety_gate.py`、dry-run-first
+验证脚本和专项测试；扩展Snapshot provenance、DataQuality账户引用、DecisionContext的
+非持久化重处理入口、现有ModelRunner配置审计、只读Decision event与前端运行模式展示。
+
+```text
+本阶段专项组合=49 passed, 88 warnings
+默认离线CI=534 passed, 89 warnings
+AlphaGuard/PR-001～PR-009精确回归=534 passed, 89 warnings
+frontend type-check=PASS
+正式 npm run build=PASS
+npx vite build=PASS（2611 modules）
+Python编译=PASS
+git diff --check=PASS
+敏感信息扫描=本阶段修改无发现
+MongoDB/Redis/Scheduler/FastAPI/queue-worker/analysis-worker=HEALTHY
+queue-worker heartbeat TTL=13秒
+analysis-worker heartbeat TTL=47秒
+FastAPI live=true=exit 3
+queue-worker live=true=exit 1
+analysis-worker live=true=exit 1
+```
+
+最终Readiness继续由现有服务计算：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=true
+PAPER_READY=true
+EVALUATION_READY=true
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+overall=DEGRADED_PAPER
+blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
+```
+
+已知限制：Operations的通用`MODEL_PROVIDER`维度只表示至少一个任意模型配置启用，不代表
+当前Snapshot锁定的Normal/Top模型可用；本阶段的精确配置审计才是这两个节点的真实状态，
+即`MODEL_NOT_CONFIGURED`。没有真实模型成功结果，Consensus/HardRisk未到达；不构成交易
+建议。代码回退到父检查点`ebe9811`时，create-only生产v2重处理对象默认保留审计，旧代码
+不会将其当作实时对象；不得为回退删除或改写正式历史。未开始PR-010。

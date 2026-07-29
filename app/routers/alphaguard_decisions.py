@@ -191,4 +191,140 @@ async def list_decision_events(
         .limit(limit)
         .to_list(length=limit)
     )
-    return ok({"items": [_clean(item) for item in documents]})
+    items = [_clean(item) for item in documents]
+    reprocess_query: dict = {"user_id": str(current_user["id"])}
+    reprocess_runs = await (
+        get_mongo_db()["ag_production_reprocess_runs"]
+        .find(reprocess_query)
+        .sort("created_at", -1)
+        .limit(limit)
+        .to_list(length=limit)
+    )
+    for raw_run in reprocess_runs:
+        run = _clean(raw_run)
+        validation = run.get("model_validation") or {}
+        if snapshot_id and validation.get("snapshot_id") != snapshot_id:
+            continue
+        reprocess_analysis_id = (
+            f"alphaguard-production-reprocess:"
+            f"{run.get('reprocess_run_id')}"
+        )
+        if analysis_id and analysis_id != reprocess_analysis_id:
+            continue
+        common = {
+            "analysis_id": reprocess_analysis_id,
+            "user_id": str(current_user["id"]),
+            "snapshot_id": validation.get("snapshot_id"),
+            "quant_proposal_id": validation.get("proposal_id"),
+            "trace_id": (
+                f"production-reprocess-model:"
+                f"{run.get('reprocess_run_id')}"
+            ),
+            "run_mode": "PRODUCTION_REPROCESS",
+            "original_realtime_run": False,
+            "automated_execution_allowed": False,
+            "created_at": run.get("created_at"),
+        }
+        event_rows = []
+        normal = validation.get("normal")
+        if normal:
+            meta = normal.get("model_meta") or {}
+            event_rows.append(
+                {
+                    **common,
+                    "event_id": (
+                        f"{run.get('reprocess_run_id')}:normal"
+                    ),
+                    "event_type": "NORMAL_MODEL_COMPLETED",
+                    "plan_id": normal.get("plan_id"),
+                    "status": normal.get("status"),
+                    "reason": normal.get("thesis"),
+                    "input_hash": meta.get("input_hash"),
+                    "output_hash": meta.get("raw_output_hash"),
+                    "component_version": (
+                        f"{meta.get('model_name')}@"
+                        f"{meta.get('model_version')}"
+                    ),
+                    "created_at": meta.get("finished_at")
+                    or run.get("created_at"),
+                }
+            )
+        elif validation.get("status") in {
+            "MODEL_NOT_CONFIGURED",
+            "MODEL_FAILED",
+        }:
+            event_rows.append(
+                {
+                    **common,
+                    "event_id": (
+                        f"{run.get('reprocess_run_id')}:normal-status"
+                    ),
+                    "event_type": "NORMAL_MODEL_FAILED",
+                    "status": validation.get("status"),
+                    "reason": validation.get("error")
+                    or validation.get("status"),
+                }
+            )
+        top = validation.get("top")
+        if top:
+            meta = top.get("model_meta") or {}
+            event_rows.append(
+                {
+                    **common,
+                    "event_id": f"{run.get('reprocess_run_id')}:top",
+                    "event_type": "TOP_REVIEW_COMPLETED",
+                    "review_id": top.get("review_id"),
+                    "status": top.get("status"),
+                    "reason": top.get("review_reason"),
+                    "input_hash": meta.get("input_hash"),
+                    "output_hash": meta.get("raw_output_hash"),
+                    "component_version": (
+                        f"{meta.get('model_name')}@"
+                        f"{meta.get('model_version')}"
+                    ),
+                    "created_at": meta.get("finished_at")
+                    or run.get("created_at"),
+                }
+            )
+        consensus = validation.get("consensus")
+        if consensus:
+            event_rows.append(
+                {
+                    **common,
+                    "event_id": (
+                        f"{run.get('reprocess_run_id')}:consensus"
+                    ),
+                    "event_type": "CONSENSUS_COMPLETED",
+                    "consensus_id": consensus.get("consensus_id"),
+                    "status": consensus.get("status"),
+                    "reason": "; ".join(consensus.get("reasons") or []),
+                    "component_version": consensus.get(
+                        "consensus_policy_version"
+                    ),
+                    "created_at": consensus.get("created_at"),
+                }
+            )
+        risk = validation.get("hard_risk")
+        if risk:
+            event_rows.append(
+                {
+                    **common,
+                    "event_id": f"{run.get('reprocess_run_id')}:risk",
+                    "event_type": "HARD_RISK_COMPLETED",
+                    "risk_decision_id": risk.get("risk_decision_id"),
+                    "status": risk.get("status"),
+                    "reason": "; ".join(risk.get("reasons") or []),
+                    "input_hash": risk.get("input_hash"),
+                    "component_version": risk.get("risk_policy_version"),
+                    "created_at": risk.get("created_at"),
+                }
+            )
+        if event_type:
+            event_rows = [
+                item
+                for item in event_rows
+                if item.get("event_type") == event_type
+            ]
+        items.extend(event_rows)
+    items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    return ok({"items": items[:limit]})

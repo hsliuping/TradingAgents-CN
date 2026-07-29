@@ -26,6 +26,9 @@ _REFERENCE_COLLECTIONS = {
     "stock_announcements": "stock_announcements",
     "paper_account": "paper_accounts",
     "paper_accounts": "paper_accounts",
+    # Versioned AlphaGuard paper accounts live in the PR-006 collection.
+    # This separate reference type avoids changing legacy snapshot resolution.
+    "ag_paper_account": "ag_paper_accounts",
     "paper_position": "paper_positions",
     "paper_positions": "paper_positions",
     "paper_order": "paper_orders",
@@ -60,6 +63,7 @@ _IDENTITY_FIELDS = (
     "manifest_id",
     "trading_status_id",
     "order_id",
+    "account_snapshot_id",
 )
 _COLON_PRESERVING_IDENTITIES = {
     # Real-data calendar rows use stable identities such as CN:2026-07-27.

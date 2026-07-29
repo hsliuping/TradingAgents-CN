@@ -43,6 +43,112 @@ class ExistingProviderDecisionModelRunner:
         self.normal_node = normal_node
         self.top_node = top_node
 
+    @staticmethod
+    def configured_models(context: DecisionContext) -> tuple[str, str]:
+        normal_model = (
+            (context.quant_proposal.model_extra or {}).get(
+                "normal_model_version"
+            )
+            if context.quant_proposal.model_extra
+            else None
+        )
+        return (
+            str(normal_model or DEFAULT_CONFIG["quick_think_llm"]),
+            str(DEFAULT_CONFIG["deep_think_llm"]),
+        )
+
+    @staticmethod
+    def _credential_looks_configured(value: Any) -> bool:
+        if not value:
+            return False
+        normalized = str(value).strip().lower()
+        if not normalized:
+            return False
+        placeholder_markers = (
+            "your-api-key",
+            "your_api_key",
+            "your-openai",
+            "your_openai",
+            "placeholder",
+            "replace-me",
+            "replace_me",
+            "changeme",
+        )
+        return not any(marker in normalized for marker in placeholder_markers)
+
+    @classmethod
+    async def configuration_status(
+        cls, context: DecisionContext
+    ) -> dict[str, dict[str, Any]]:
+        """Return auditable capability state without exposing credentials."""
+
+        from app.services.simple_analysis_service import (
+            get_model_config_sync,
+            get_provider_and_url_by_model_sync,
+        )
+
+        normal_model, top_model = cls.configured_models(context)
+
+        def inspect() -> dict[str, dict[str, Any]]:
+            result: dict[str, dict[str, Any]] = {}
+            for role, model_name in (
+                ("normal", normal_model),
+                ("top", top_model),
+            ):
+                info = get_provider_and_url_by_model_sync(model_name)
+                config = get_model_config_sync(model_name)
+                credential = info.get("api_key")
+                model_registry_configured = bool(config)
+                credential_configured = bool(
+                    model_registry_configured
+                    and cls._credential_looks_configured(credential)
+                )
+                backend_configured = bool(
+                    model_registry_configured and info.get("backend_url")
+                )
+                result[role] = {
+                    "provider": str(info.get("provider") or "unconfigured"),
+                    "model_name": model_name,
+                    "model_version": model_name,
+                    "model_registry_configured": (
+                        model_registry_configured
+                    ),
+                    "configuration_source": (
+                        "REGISTERED_MODEL_CONFIG"
+                        if model_registry_configured
+                        else "DEFAULT_FALLBACK_UNREGISTERED"
+                    ),
+                    "credential_configured": credential_configured,
+                    "backend_configured": backend_configured,
+                    "temperature": float(
+                        config.get(
+                            "temperature",
+                            0.2 if role == "normal" else 0.1,
+                        )
+                    ),
+                    "max_tokens": int(config.get("max_tokens", 4000)),
+                    "timeout": int(config.get("timeout", 180)),
+                    "prompt_version": (
+                        context.normal_prompt_version
+                        if role == "normal"
+                        else context.top_prompt_version
+                    ),
+                    "structured_output_capability": backend_configured,
+                    "pricing_status": "UNAVAILABLE",
+                    "status": (
+                        "CONFIGURED"
+                        if (
+                            model_registry_configured
+                            and credential_configured
+                            and backend_configured
+                        )
+                        else "MODEL_NOT_CONFIGURED"
+                    ),
+                }
+            return result
+
+        return await asyncio.to_thread(inspect)
+
     @classmethod
     async def create(cls, context: DecisionContext):
         from app.services.simple_analysis_service import (
@@ -50,11 +156,7 @@ class ExistingProviderDecisionModelRunner:
             get_provider_and_url_by_model_sync,
         )
 
-        normal_model = (
-            context.quant_proposal.model_extra or {}
-        ).get("normal_model_version") if context.quant_proposal.model_extra else None
-        normal_model = normal_model or DEFAULT_CONFIG["quick_think_llm"]
-        top_model = DEFAULT_CONFIG["deep_think_llm"]
+        normal_model, top_model = cls.configured_models(context)
 
         def construct():
             normal_info = get_provider_and_url_by_model_sync(normal_model)

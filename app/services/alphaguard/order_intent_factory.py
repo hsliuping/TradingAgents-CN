@@ -18,6 +18,9 @@ from app.services.alphaguard.benchmark_execution_safety_gate import (
 from app.services.alphaguard.evidence_snapshot_service import (
     EvidenceSnapshotService,
 )
+from app.services.alphaguard.execution_mode_safety_gate import (
+    ExecutionModeSafetyGate,
+)
 from app.services.alphaguard.paper_account_service import PaperAccountService
 from app.services.alphaguard.paper_audit_service import PaperAuditService
 from app.services.alphaguard.paper_calendar_service import (
@@ -121,6 +124,7 @@ class OrderIntentFactory:
         self.policies = PaperPolicyRegistry(db)
         self.audit = PaperAuditService(db)
         self.benchmark_gate = BenchmarkExecutionSafetyGate()
+        self.execution_mode_gate = ExecutionModeSafetyGate(db)
 
     async def create_from_outbox(
         self,
@@ -128,6 +132,10 @@ class OrderIntentFactory:
         *,
         now: datetime | None = None,
     ) -> OrderIntent:
+        await self.execution_mode_gate.assert_outbox_allowed(
+            event_type=event.event_type,
+            source_object_id=event.source_object_id,
+        )
         if event.status != "PROCESSING":
             raise OrderIntentRejected("outbox event must be PROCESSING")
         if event.event_type == "CREATE_TOP_CONFIRMED_INTENT":

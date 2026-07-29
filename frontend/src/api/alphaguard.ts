@@ -36,6 +36,9 @@ export interface DecisionEvent {
   output_hash?: string | null
   component_version?: string | null
   evidence_refs?: unknown[]
+  run_mode?: string | null
+  original_realtime_run?: boolean | null
+  automated_execution_allowed?: boolean | null
   created_at: string
 }
 
@@ -78,6 +81,12 @@ export interface EvidenceSnapshotSummary {
   required_benchmark_count?: number | null
   actual_benchmark_count?: number | null
   evidence_contract_status?: 'COMPLETE' | 'LEGACY_EVIDENCE_INCOMPLETE' | null
+  run_mode?: 'ACTUAL_PRODUCTION' | 'PRODUCTION_REPROCESS' | 'EVIDENCE_CONTRACT_VALIDATION' | 'RESEARCH_BACKFILL' | 'UI_DEMO' | null
+  source_trade_date?: string | null
+  evidence_contract_version?: string | null
+  reprocess_reason?: string | null
+  original_realtime_run?: boolean | null
+  automated_execution_allowed?: boolean | null
   data_quality: {
     status: string
     blocking_reasons: string[]

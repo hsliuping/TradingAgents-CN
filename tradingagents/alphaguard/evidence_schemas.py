@@ -108,6 +108,24 @@ class EvidenceSnapshot(EvidenceSchema):
         "COMPLETE",
         "LEGACY_EVIDENCE_INCOMPLETE",
     ] | None = None
+    # Explicit execution provenance for post-close production reprocessing.
+    # Optional defaults preserve the exact validation and hash of immutable
+    # v1/v2 records created before this contract was introduced.
+    run_mode: Literal[
+        "ACTUAL_PRODUCTION",
+        "PRODUCTION_REPROCESS",
+        "EVIDENCE_CONTRACT_VALIDATION",
+        "RESEARCH_BACKFILL",
+        "UI_DEMO",
+    ] | None = None
+    source_trade_date: date | None = None
+    evidence_contract_version: str | None = None
+    reprocess_reason: str | None = None
+    reprocess_input_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    original_realtime_run: bool | None = None
+    automated_execution_allowed: bool | None = None
     data_quality: DataQualityReport
     raw_refs: dict[str, list[str]]
     factor_version_set: dict[str, str] = Field(default_factory=dict)
@@ -219,4 +237,20 @@ class EvidenceSnapshot(EvidenceSchema):
             raise ValueError(
                 f"unsupported EvidenceSnapshot schema: {self.schema_version}"
             )
+        if self.run_mode == "PRODUCTION_REPROCESS":
+            if self.schema_version != EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2:
+                raise ValueError(
+                    "PRODUCTION_REPROCESS requires EvidenceSnapshot v2"
+                )
+            if (
+                self.source_trade_date != self.trade_date
+                or self.evidence_contract_version != "evidence-contract-v2"
+                or self.reprocess_reason != "EVIDENCE_CONTRACT_UPGRADE"
+                or self.reprocess_input_hash is None
+                or self.original_realtime_run is not False
+                or self.automated_execution_allowed is not False
+            ):
+                raise ValueError(
+                    "PRODUCTION_REPROCESS provenance is incomplete or executable"
+                )
         return self

@@ -138,13 +138,24 @@ class DecisionContextBuilder:
             missing.append("account_snapshot")
         if not data.trading_calendar:
             missing.append("trading_calendar")
-        if not data.instruments:
+        trading_state = (
+            data.trading_status[-1]
+            if data.trading_status
+            else data.instruments[-1]
+            if data.instruments
+            else None
+        )
+        if trading_state is None:
             missing.append("instrument_trading_state")
         else:
-            instrument = data.instruments[-1]
-            required = ["suspended"]
+            versioned_status = bool(data.trading_status)
+            required = ["is_suspended" if versioned_status else "suspended"]
             required.append(
-                "at_limit_up"
+                "upper_limit_price"
+                if versioned_status and proposal.action_candidate == "BUY"
+                else "lower_limit_price"
+                if versioned_status
+                else "at_limit_up"
                 if proposal.action_candidate == "BUY"
                 else "at_limit_down"
             )
@@ -153,7 +164,8 @@ class DecisionContextBuilder:
             missing.extend(
                 f"instrument.{field}"
                 for field in required
-                if field not in instrument
+                if field not in trading_state
+                or trading_state.get(field) is None
             )
         if proposal.action_candidate in {"SELL", "REDUCE"} and not data.positions:
             missing.append("target_position_snapshot")
@@ -176,6 +188,8 @@ class DecisionContextBuilder:
         quant_proposal_id: str,
         *,
         user_id: str,
+        allow_reprocess_model_validation: bool = False,
+        persist: bool = True,
     ) -> tuple[DecisionContext, ResolvedSnapshotData]:
         document = await self.db["ag_quant_proposals"].find_one(
             {"proposal_id": quant_proposal_id, "user_id": str(user_id)}
@@ -183,11 +197,12 @@ class DecisionContextBuilder:
         if document is None:
             raise DecisionContextError("QuantTradeProposal not found")
         proposal = QuantTradeProposal.model_validate(_clean(document))
-        if (
+        normally_eligible = (
             proposal.status != "TRIGGERED"
             or proposal.action_candidate not in {"BUY", "SELL", "REDUCE"}
             or proposal.automated_execution_allowed is not False
-        ):
+        )
+        if normally_eligible and not allow_reprocess_model_validation:
             raise ProposalNotEligibleError(
                 "only TRIGGERED BUY/SELL/REDUCE proposals enter model review"
             )
@@ -196,6 +211,15 @@ class DecisionContextBuilder:
             proposal.snapshot_id,
             user_id=str(user_id),
         )
+        if allow_reprocess_model_validation and (
+            data.snapshot.run_mode != "PRODUCTION_REPROCESS"
+            or data.snapshot.automated_execution_allowed is not False
+            or data.snapshot.original_realtime_run is not False
+        ):
+            raise DecisionContextError(
+                "model-validation bypass is restricted to non-executable "
+                "PRODUCTION_REPROCESS snapshots"
+            )
         self._validate_critical_evidence(proposal, data)
         snapshot = data.snapshot
         if (
@@ -258,9 +282,50 @@ class DecisionContextBuilder:
                 "strategy_version": proposal.strategy_version,
             }
         )
-        if strategy_document is None:
-            raise DecisionContextError("StrategyDefinition not found")
-        bundle = aggregate_factors(factors)
+        if snapshot.champion_version_refs:
+            from .quant_research_pipeline import QuantResearchPipeline
+
+            (
+                factor_payload,
+                locked_factor_set_version,
+                _,
+                locked_strategies,
+            ) = await QuantResearchPipeline(self.db)._locked_champion_inputs(
+                snapshot.champion_version_refs
+            )
+            locked_strategy = next(
+                (
+                    item
+                    for item in locked_strategies
+                    if item.strategy_id == proposal.strategy_id
+                    and item.strategy_version == proposal.strategy_version
+                ),
+                None,
+            )
+            if locked_strategy is None:
+                raise DecisionContextError(
+                    "Champion-locked StrategyDefinition not found"
+                )
+            if proposal.factor_set_version != locked_factor_set_version:
+                raise DecisionContextError(
+                    "Champion-locked factor-set version mismatch"
+                )
+            bundle = aggregate_factors(
+                factors,
+                factor_set_version=locked_factor_set_version,
+                factor_weights=factor_payload.get("factor_weights"),
+                coverage_threshold=factor_payload.get(
+                    "group_coverage_threshold"
+                ),
+            )
+            strategy_code_hash = locked_strategy.code_hash
+            strategy_parameter_hash = locked_strategy.parameter_hash
+        else:
+            if strategy_document is None:
+                raise DecisionContextError("StrategyDefinition not found")
+            bundle = aggregate_factors(factors)
+            strategy_code_hash = strategy_document.get("code_hash")
+            strategy_parameter_hash = strategy_document.get("parameter_hash")
         expected_input_hash = sha256_value(
             {
                 "snapshot_input_hash": data.input_hash,
@@ -268,8 +333,8 @@ class DecisionContextBuilder:
                 "regime_input_hash": regime.input_hash,
                 "strategy_id": proposal.strategy_id,
                 "strategy_version": proposal.strategy_version,
-                "code_hash": strategy_document.get("code_hash"),
-                "parameter_hash": strategy_document.get("parameter_hash"),
+                "code_hash": strategy_code_hash,
+                "parameter_hash": strategy_parameter_hash,
             }
         )
         if proposal.input_hash != expected_input_hash:
@@ -314,6 +379,7 @@ class DecisionContextBuilder:
             "price_evidence": sorted(
                 _refs(data.prices, "price")
                 + _refs(data.instruments, "instrument")
+                + _refs(data.trading_status, "trading_status")
                 + _refs(data.trading_calendar, "trading_calendar"),
                 key=lambda item: item.evidence_id,
             )[:MAX_EVIDENCE_REFS_PER_CATEGORY],
@@ -350,6 +416,8 @@ class DecisionContextBuilder:
         )
         context = DecisionContext.model_validate(payload)
 
+        if not persist:
+            return context, data
         existing = await self.db["ag_decision_contexts"].find_one(
             {"analysis_id": analysis_id}
         )
