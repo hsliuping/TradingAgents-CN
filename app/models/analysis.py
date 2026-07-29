@@ -74,6 +74,11 @@ class AnalysisParameters(BaseModel):
         default=None,
         description="工作流 ID (仅 unified 引擎有效)，不指定则使用系统默认工作流"
     )
+    # 执行轨迹开关（单次任务级别）
+    enable_trace: bool = Field(
+        default=False,
+        description="是否记录本次分析的执行轨迹（Prompt全文、LLM原始返回、校验结果）。默认关闭，排查问题时可开启。"
+    )
 
 
 class AnalysisResult(BaseModel):

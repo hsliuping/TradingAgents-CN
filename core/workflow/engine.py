@@ -121,6 +121,7 @@ def _prepare_workflow_runtime_inputs(
     inputs: Dict[str, Any],
     workflow_id: Optional[str],
     execution_id: str,
+    task_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """向工作流初始 state 注入轻量运行时上下文，不污染返回结果。"""
     prepared_inputs = inputs.copy() if inputs else {}
@@ -140,6 +141,9 @@ def _prepare_workflow_runtime_inputs(
         runtime_context["workflow_id"] = workflow_id
     if execution_id and not runtime_context.get("execution_id"):
         runtime_context["execution_id"] = execution_id
+    # 🔑 注入 task_id（任务中心的 task_id，执行轨迹按此关联，前端按 task_id 查轨迹）
+    if task_id and not runtime_context.get("task_id"):
+        runtime_context["task_id"] = task_id
     if prepared_inputs.get("user_id") and not runtime_context.get("user_id"):
         runtime_context["user_id"] = prepared_inputs.get("user_id")
     if context_user_id and not runtime_context.get("user_id"):
@@ -440,6 +444,7 @@ class WorkflowEngine:
             inputs,
             self._definition.id if self._definition else None,
             self._task_id,
+            task_id=self._task_id,
         )
         execution_config = self._build_execution_config(config, runtime_inputs)
 
@@ -657,6 +662,7 @@ class WorkflowEngine:
             inputs,
             self._definition.id if self._definition else None,
             self._task_id,
+            task_id=self._task_id,
         )
         execution_config = self._build_execution_config(config, runtime_inputs)
 
@@ -744,6 +750,7 @@ class WorkflowEngine:
             inputs,
             self._definition.id if self._definition else None,
             self._task_id,
+            task_id=self._task_id,
         )
         
         execution = self._create_execution(inputs)

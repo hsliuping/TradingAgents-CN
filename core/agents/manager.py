@@ -143,9 +143,6 @@ class ManagerAgent(BaseAgent):
                 self._last_trace_id = None
 
         try:
-            # 1. 提取输入参数（兼容多种参数名）
-            ticker = state.get("ticker") or state.get("company_of_interest")
-
             # 🔍 调试日志：排查 ticker 丢失问题
             logger.error(
                 f"🔍 [{self.agent_id}] state keys: {list(state.keys())[:20]}, "
@@ -153,24 +150,8 @@ class ManagerAgent(BaseAgent):
                 f"trade_info存在={('trade_info' in state)}, code={state.get('trade_info', {}).get('code') if isinstance(state.get('trade_info'), dict) else 'N/A'}"
             )
 
-            # 🆕 支持交易复盘场景：从 trade_info 中提取 code
-            if not ticker and "trade_info" in state:
-                trade_info = state.get("trade_info", {})
-                if isinstance(trade_info, dict):
-                    ticker = trade_info.get("code")
-            
-            # 🆕 支持持仓分析场景：从 position_info 中提取 code
-            if not ticker and "position_info" in state:
-                position_info = state.get("position_info", {})
-                if isinstance(position_info, dict):
-                    ticker = position_info.get("code")
-
-            analysis_date = state.get("analysis_date") or state.get("trade_date") or state.get("end_date")
-
-            # 🆕 支持交易复盘场景：使用当前日期作为分析日期
-            if not analysis_date:
-                from datetime import datetime
-                analysis_date = datetime.now().strftime("%Y-%m-%d")
+            # 1. 提取输入参数（统一使用基类方法，兼容多种字段名与场景兜底）
+            ticker, analysis_date = self._extract_common_params(state)
 
             if not ticker:
                 raise ValueError("Missing required parameters: ticker")

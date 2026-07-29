@@ -89,6 +89,7 @@ class BaseAgent(ABC):
         self._tools: Dict[str, Callable] = {}  # 旧版工具字典
         self._langchain_tools: List[BaseTool] = []  # 新版 LangChain 工具列表
         self._prompt_template: Optional[str] = None
+        self._execution_recorder = None  # 🔑 执行轨迹 recorder（由 start_execution_trace 自动绑定）
 
         # v2.0: 动态加载工具
         if tool_ids is not None:
@@ -396,6 +397,104 @@ class BaseAgent(ABC):
         )
         return system_prompt + guard
 
+    def _extract_common_params(self, state: Dict[str, Any]) -> tuple:
+        """🔑 统一提取 ticker 和 analysis_date，包含多字段兼容与兜底逻辑。
+
+        所有子类（AnalystAgent / TraderAgent / ResearcherAgent / ManagerAgent
+        及各适配器）应调用此方法，避免重复实现参数提取逻辑。
+
+        兼容场景：
+        - ticker：state["ticker"] → state["company_of_interest"]
+                  → state["trade_info"]["code"]（交易复盘）
+                  → state["position_info"]["code"]（持仓分析）
+        - analysis_date：state["analysis_date"] → state["trade_date"]
+                         → state["end_date"] → 当前日期兜底
+
+        Args:
+            state: 工作流状态字典
+
+        Returns:
+            (ticker, analysis_date) 元组。
+            analysis_date 保证非空（兜底当前日期）；
+            ticker 可能为 None（由调用方决定是否抛异常）。
+        """
+        # 1. 提取 ticker（兼容多种字段名 + 场景兜底）
+        ticker = state.get("ticker") or state.get("company_of_interest")
+
+        # 支持交易复盘场景：从 trade_info 中提取 code
+        if not ticker and "trade_info" in state:
+            trade_info = state.get("trade_info", {})
+            if isinstance(trade_info, dict):
+                ticker = trade_info.get("code")
+
+        # 支持持仓分析场景：从 position_info 中提取 code
+        if not ticker and "position_info" in state:
+            position_info = state.get("position_info", {})
+            if isinstance(position_info, dict):
+                ticker = position_info.get("code")
+
+        # 2. 提取 analysis_date（兼容多种字段名）
+        analysis_date = (
+            state.get("analysis_date")
+            or state.get("trade_date")
+            or state.get("end_date")
+        )
+
+        # 兜底：如果 analysis_date 为空，使用当前日期
+        if not analysis_date:
+            from datetime import datetime
+            analysis_date = datetime.now().strftime("%Y-%m-%d")
+            logger.info(f"[{self.agent_id}] analysis_date 为空，使用当前日期: {analysis_date}")
+
+        return ticker, analysis_date
+
+    def _record_llm_response_to_trace(self, response: Any, llm_duration_ms: Optional[int] = None) -> None:
+        """🔑 自动记录 LLM 响应到执行轨迹（如果有 recorder 绑定）
+
+        由 invoke_with_tools 内部调用，确保所有继承 BaseAgent 的适配器
+        （如 fundamentals_analyst_v2、index_analyst_v2 等）都能自动记录 Token 用量，
+        无需在各适配器的 execute 方法中手动调用 record_llm_response。
+        """
+        recorder = getattr(self, '_execution_recorder', None)
+        if recorder and response is not None:
+            try:
+                recorder.record_llm_response(response, llm_duration_ms=llm_duration_ms)
+            except Exception as e:
+                logger.debug(f"[{self.agent_id}] 自动记录 LLM 响应失败（不影响 agent）: {e}")
+
+    def _invoke_llm_with_trace(self, messages: list) -> Any:
+        """🔑 封装 self._llm.invoke(messages)，自动记录 Prompt 和 LLM 响应到执行轨迹
+
+        供不使用 invoke_with_tools 的 Agent（如风险分析师、交易员）调用，
+        替代直接调用 self._llm.invoke(messages)。
+        """
+        # 记录 Prompt
+        _recorder = getattr(self, '_execution_recorder', None)
+        if _recorder:
+            try:
+                _sys_prompt = ""
+                _usr_prompt = ""
+                for _msg in messages:
+                    _content = getattr(_msg, 'content', '') or ''
+                    if type(_msg).__name__ == 'SystemMessage':
+                        _sys_prompt = _content
+                    elif type(_msg).__name__ == 'HumanMessage':
+                        if not _usr_prompt:
+                            _usr_prompt = _content
+                if _sys_prompt or _usr_prompt:
+                    _recorder.record_prompts(_sys_prompt, _usr_prompt)
+            except Exception:
+                pass
+
+        # 调用 LLM
+        _start = time.time()
+        response = self._llm.invoke(messages)
+        _duration_ms = int((time.time() - _start) * 1000)
+
+        # 记录 LLM 响应
+        self._record_llm_response_to_trace(response, llm_duration_ms=_duration_ms)
+        return response
+
     def register_tool(
         self,
         func: Callable,
@@ -460,9 +559,48 @@ class BaseAgent(ABC):
         if metadata:
             delegated_state["delegation_metadata"] = metadata
 
-        result = target_agent.execute(delegated_state)
-        logger.info(f"[BaseAgent] {self.agent_id} 子 Agent 调用完成: {normalized_target}")
-        return result
+        # 🔑 统一执行轨迹埋点：委托调用也需要记录轨迹
+        _delegate_recorder = None
+        from core.agents.execution_trace_recorder import start_execution_trace, is_trace_enabled
+        if is_trace_enabled():
+            try:
+                _delegate_recorder = start_execution_trace(target_agent, delegated_state)
+                target_agent._last_trace_id = _delegate_recorder.trace_id
+            except Exception as e:
+                logger.warning(f"⚠️ [{normalized_target}] 启动轨迹采集失败（不影响 agent）: {e}")
+
+        try:
+            # P1: 记录 Prompt（如果子 Agent 暴露了提示词构建方法）
+            if _delegate_recorder:
+                try:
+                    _delegate_recorder.record_inputs({"ticker": delegated_state.get("ticker"), "analysis_date": delegated_state.get("analysis_date")})
+                except Exception:
+                    pass
+
+            result = target_agent.execute(delegated_state)
+            logger.info(f"[BaseAgent] {self.agent_id} 子 Agent 调用完成: {normalized_target}")
+
+            # P1: 记录解析后的输出
+            if _delegate_recorder:
+                try:
+                    _delegate_recorder.record_parsed_output(result)
+                except Exception:
+                    pass
+
+            return result
+        except Exception as e:
+            if _delegate_recorder:
+                try:
+                    _delegate_recorder.record_error(e)
+                except Exception:
+                    pass
+            raise
+        finally:
+            if _delegate_recorder:
+                try:
+                    _delegate_recorder.finish()
+                except Exception:
+                    pass
     
     def render_prompt(
         self,
@@ -558,6 +696,26 @@ class BaseAgent(ABC):
         current_messages = list(messages)
         # 🆕 重置工具调用摘要收集器（每次 invoke_with_tools 独立统计）
         self._tool_call_summaries_collected = []
+        # 🔑 LLM 耗时（毫秒），供 _record_llm_response_to_trace 记录
+        _llm_ms: Optional[int] = None
+
+        # 🔑 自动记录 Prompt 到执行轨迹（从 messages 中提取 SystemMessage 和 HumanMessage）
+        _recorder = getattr(self, '_execution_recorder', None)
+        if _recorder:
+            try:
+                _sys_prompt = ""
+                _usr_prompt = ""
+                for _msg in current_messages:
+                    _content = getattr(_msg, 'content', '') or ''
+                    if type(_msg).__name__ == 'SystemMessage':
+                        _sys_prompt = _content
+                    elif type(_msg).__name__ == 'HumanMessage':
+                        if not _usr_prompt:  # 只取第一个 HumanMessage
+                            _usr_prompt = _content
+                if _sys_prompt or _usr_prompt:
+                    _recorder.record_prompts(_sys_prompt, _usr_prompt)
+            except Exception:
+                pass
 
         logger.info(f"🚀 [{self.agent_id}] 开始工具调用循环，最大迭代次数: {max_iterations}")
         logger.info(f"🔧 [{self.agent_id}] 可用工具数量: {len(self._langchain_tools) if self._langchain_tools else 0}")
@@ -669,7 +827,6 @@ class BaseAgent(ABC):
                 try:
                     if retry_count > 0:
                         # 重试时等待（指数退避）
-                        import time
                         wait_time = min(2 ** retry_count, 10)  # 最多等待10秒
                         logger.info(f"⏳ [{self.agent_id}] 等待 {wait_time} 秒后重试（第 {retry_count}/{max_retries} 次）...")
                         time.sleep(wait_time)
@@ -685,7 +842,11 @@ class BaseAgent(ABC):
                             llm_with_tools = self._llm
                             logger.info(f"🔗 [{self.agent_id}] 重试时使用原始LLM，保留所有参数")
                     
+                    _llm_start = time.time()
                     response = llm_with_tools.invoke(current_messages)
+                    _llm_ms = int((time.time() - _llm_start) * 1000)
+                    # 🔑 记录工具调用阶段的 LLM 响应（含 Token 用量）
+                    self._record_llm_response_to_trace(response, llm_duration_ms=_llm_ms)
                     # 成功，跳出重试循环
                     break
                     
@@ -821,24 +982,25 @@ class BaseAgent(ABC):
                     try:
                         if retry_count > 0:
                             # 重试时等待（指数退避）
-                            import time
                             wait_time = min(2 ** retry_count, 10)  # 最多等待10秒
                             logger.info(f"⏳ [{self.agent_id}] 等待 {wait_time} 秒后重试生成报告（第 {retry_count}/{max_retries} 次）...")
                             time.sleep(wait_time)
                             logger.info(f"🔄 [{self.agent_id}] 开始第 {retry_count} 次重试生成报告...")
                         
                         # 🔥 使用原始的 self._llm，确保参数（temperature, max_tokens等）保留
+                        _llm_start = time.time()
                         final_response = self._llm.invoke(current_messages)
+                        _llm_ms = int((time.time() - _llm_start) * 1000)
                         # 成功，跳出重试循环
                         break
-                        
+
                     except Exception as e:
                         error_msg = str(e)
                         last_error = e
-                        
+
                         # 🔥 检查是否是 choices 为 null 的错误或其他可重试的错误
                         is_retryable = is_retryable_llm_error(error_msg)
-                        
+
                         if is_retryable and retry_count < max_retries:
                             retry_count += 1
                             logger.warning(f"⚠️ [{self.agent_id}] 生成报告时 LLM 调用失败（可重试错误）: {error_msg}")
@@ -941,14 +1103,15 @@ class BaseAgent(ABC):
                         try:
                             if retry_count > 0:
                                 # 重试时等待（指数退避）
-                                import time
                                 wait_time = min(2 ** retry_count, 10)  # 最多等待10秒
                                 logger.info(f"⏳ [{self.agent_id}] 等待 {wait_time} 秒后重试（第 {retry_count}/{max_retries} 次）...")
                                 time.sleep(wait_time)
                                 logger.info(f"🔄 [{self.agent_id}] 开始第 {retry_count} 次重试...")
                             
                             # 🔥 使用原始的 self._llm，确保参数（temperature, max_tokens等）保留
+                            _llm_start = time.time()
                             final_response = self._llm.invoke(current_messages)
+                            _llm_ms = int((time.time() - _llm_start) * 1000)
                             # 成功，跳出重试循环
                             break
                             
@@ -1017,8 +1180,12 @@ class BaseAgent(ABC):
                     # 再次检查
                     if hasattr(final_response, 'tool_calls') and final_response.tool_calls:
                         logger.error(f"❌ [{self.agent_id}] 重试后仍返回 tool_calls，放弃")
+                        self._last_llm_response = final_response
+                        self._record_llm_response_to_trace(final_response, llm_duration_ms=_llm_ms)
                         return "分析报告生成失败：LLM 持续返回工具调用而不是报告内容。请更换模型或重试。"
 
+                self._last_llm_response = final_response
+                self._record_llm_response_to_trace(final_response, llm_duration_ms=_llm_ms)
                 content = final_response.content if hasattr(final_response, 'content') else str(final_response)
                 logger.info(f"✅ [{self.agent_id}] 报告生成完成，长度: {len(content)} 字符")
                 logger.debug(f"🔍 [{self.agent_id}] 报告内容预览: {content[:200] if content else '(空)'}")
@@ -1034,6 +1201,8 @@ class BaseAgent(ABC):
                 return content
             else:
                 # 没有工具调用，直接返回内容
+                self._last_llm_response = response
+                self._record_llm_response_to_trace(response, llm_duration_ms=_llm_ms)
                 content = response.content if hasattr(response, 'content') else str(response)
                 logger.info(f"📝 [{self.agent_id}] 直接响应（无工具调用），长度: {len(content)} 字符")
                 return content
@@ -1262,6 +1431,21 @@ class BaseAgent(ABC):
                 "success": _tool_success,
                 "error": _tool_error,
             })
+
+            # 🔑 记录工具调用到执行轨迹
+            _recorder = getattr(self, '_execution_recorder', None)
+            if _recorder:
+                try:
+                    _recorder.record_tool_call(
+                        tool_name=tool_name,
+                        tool_args=tool_args if isinstance(tool_args, dict) else {"value": str(tool_args)},
+                        success=_tool_success,
+                        error=_tool_error,
+                        result_length=len(_result_str),
+                        result_preview=_result_str,
+                    )
+                except Exception:
+                    pass
 
             # 创建工具消息
             tool_messages.append(ToolMessage(

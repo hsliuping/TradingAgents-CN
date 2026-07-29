@@ -566,7 +566,10 @@ class UnifiedAnalysisEngine:
 
         # 通用兜底参数（当 input_config 不存在或未定义对应字段时）
         from datetime import datetime
-        workflow_inputs.setdefault("analysis_date", datetime.now().strftime("%Y-%m-%d"))
+        # 🔑 注意：不能用 setdefault，因为 API 请求可能传入 analysis_date=None，
+        # setdefault 不会覆盖已存在但值为 None 的 key，导致下游 Agent 报错
+        if not workflow_inputs.get("analysis_date"):
+            workflow_inputs["analysis_date"] = datetime.now().strftime("%Y-%m-%d")
         workflow_inputs.setdefault("research_depth", "标准")
         workflow_inputs.setdefault("lookback_days", 30)
         workflow_inputs.setdefault("max_debate_rounds", 3)
@@ -669,13 +672,26 @@ class UnifiedAnalysisEngine:
 
         # 执行工作流（WorkflowAPI.execute 是同步方法，需要在线程中运行）
         import asyncio
-        result = await asyncio.to_thread(
-            workflow_api.execute,
-            workflow_id=workflow_id,
-            inputs=workflow_inputs,
-            legacy_config=legacy_config,
-            progress_callback=wrapped_progress_callback  # 使用包装的回调
-        )
+
+        # 🔑 执行轨迹单次开启：如果任务输入指定 enable_trace=true，临时全局开启
+        # 注意：不能用线程本地变量，因为分析师在并行子线程执行，读不到主线程的标记
+        def _execute_with_trace_context():
+            from app.core.config import settings
+            old_value = settings.AGENT_EXECUTION_TRACE_ENABLED
+            if task.task_params.get("enable_trace"):
+                settings.AGENT_EXECUTION_TRACE_ENABLED = True
+            try:
+                return workflow_api.execute(
+                    workflow_id=workflow_id,
+                    inputs=workflow_inputs,
+                    legacy_config=legacy_config,
+                    progress_callback=wrapped_progress_callback,
+                    task_id=task.task_id,
+                )
+            finally:
+                settings.AGENT_EXECUTION_TRACE_ENABLED = old_value
+
+        result = await asyncio.to_thread(_execute_with_trace_context)
 
         # 检查执行结果
         if not result.get("success"):

@@ -2030,6 +2030,7 @@ class WorkflowBuilder:
         )
         started_at = utc_now()
 
+        _trace_recorder = None  # 🔑 统一执行轨迹埋点：提前初始化，确保 finally 可用
         try:
             agent_state = state
             if isinstance(state, dict):
@@ -2048,12 +2049,32 @@ class WorkflowBuilder:
             import time as _time
             _agent_start = _time.time()
             logger.info(f"[节点执行] ⏳ {node_id} ({node_label}) - 调用 agent_callable...")
+
+            # 🔑 统一执行轨迹埋点：在节点执行层面启动轨迹采集
+            # 这样无论适配器是否覆盖 execute，都能记录轨迹
+            _agent_obj = agent_callable if hasattr(agent_callable, 'execute') else None
+            if _agent_obj is not None:
+                from core.agents.execution_trace_recorder import start_execution_trace, is_trace_enabled
+                if is_trace_enabled():
+                    try:
+                        _trace_recorder = start_execution_trace(_agent_obj, agent_state)
+                        _agent_obj._last_trace_id = _trace_recorder.trace_id
+                    except Exception as _trace_err:
+                        logger.warning(f"⚠️ [节点执行] 启动轨迹采集失败（不影响执行）: {_trace_err}")
+
             raw_result = agent_callable(agent_state)
             _agent_elapsed = _time.time() - _agent_start
             logger.info(f"[节点执行] ⏱️ {node_id} ({node_label}) - agent_callable 执行完成, 耗时: {_agent_elapsed:.1f}s")
             result = raw_result if isinstance(raw_result, dict) else {
                 (output_field or f"{agent_id}_report"): raw_result
             }
+
+            # 🔑 统一执行轨迹埋点：记录解析后的输出
+            if _trace_recorder:
+                try:
+                    _trace_recorder.record_parsed_output(result)
+                except Exception:
+                    pass
 
             logger.info(f"[节点执行] 📝 {node_id} ({node_label}) - 返回字段: {list(result.keys())}")
 
@@ -2100,6 +2121,13 @@ class WorkflowBuilder:
             logger.info(f"[节点执行] ✅ {node_id} ({node_label}) - 执行完成")
             return result
         except Exception as exc:
+            # 🔑 统一执行轨迹埋点：记录异常
+            if _trace_recorder:
+                try:
+                    _trace_recorder.record_error(exc)
+                except Exception:
+                    pass
+
             invocation_result = InvocationResult(
                 invocation_id=invocation_request.invocation_id,
                 target_type=InvocationTargetType.AGENT,
@@ -2142,6 +2170,13 @@ class WorkflowBuilder:
                 f"[节点执行] ⚠️ {node_id} ({node_label}) - 降级处理，工作流继续执行"
             )
             return degraded
+        finally:
+            # 🔑 统一执行轨迹埋点：完成采集并写入 MongoDB（非阻塞）
+            if _trace_recorder:
+                try:
+                    _trace_recorder.finish()
+                except Exception:
+                    pass
 
     def _try_create_legacy_agent(self, agent_id: str) -> Optional[Callable]:
         """

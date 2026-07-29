@@ -98,10 +98,21 @@ class ResearcherAgent(BaseAgent):
 
         import time as _time_exec
         _exec_start = _time_exec.time()
-        try:
-            # 1. 提取输入参数（兼容多种参数名）
-            ticker = state.get("ticker") or state.get("company_of_interest")
 
+        # P1: 启动执行轨迹采集
+        from core.agents.execution_trace_recorder import (
+            start_execution_trace, is_trace_enabled
+        )
+        recorder = None
+        if is_trace_enabled():
+            try:
+                recorder = start_execution_trace(self, state)
+                self._last_trace_id = recorder.trace_id
+            except Exception as e:
+                logger.warning(f"⚠️ [{self.agent_id}] 启动轨迹采集失败（不影响 agent）: {e}")
+                self._last_trace_id = None
+
+        try:
             # 🔍 调试日志：排查 ticker 丢失问题
             logger.error(
                 f"🔍 [{self.agent_id}] state keys: {list(state.keys())[:20]}, "
@@ -109,24 +120,8 @@ class ResearcherAgent(BaseAgent):
                 f"trade_info存在={('trade_info' in state)}, code={state.get('trade_info', {}).get('code') if isinstance(state.get('trade_info'), dict) else 'N/A'}"
             )
 
-            # 🆕 支持交易复盘场景：从 trade_info 中提取 code
-            if not ticker and "trade_info" in state:
-                trade_info = state.get("trade_info", {})
-                if isinstance(trade_info, dict):
-                    ticker = trade_info.get("code")
-            
-            # 🆕 支持持仓分析场景：从 position_info 中提取 code
-            if not ticker and "position_info" in state:
-                position_info = state.get("position_info", {})
-                if isinstance(position_info, dict):
-                    ticker = position_info.get("code")
-
-            analysis_date = state.get("analysis_date") or state.get("trade_date") or state.get("end_date")
-
-            # 🆕 支持交易复盘场景：使用当前日期作为分析日期
-            if not analysis_date:
-                from datetime import datetime
-                analysis_date = datetime.now().strftime("%Y-%m-%d")
+            # 1. 提取输入参数（统一使用基类方法，兼容多种字段名与场景兜底）
+            ticker, analysis_date = self._extract_common_params(state)
 
             if not ticker:
                 logger.error(f"❌ [{self.agent_id}] ticker 未找到！state 全部 keys: {list(state.keys())}")
@@ -190,6 +185,14 @@ class ResearcherAgent(BaseAgent):
 
             logger.info(f"系统提示词: {system_prompt}")
             logger.info(f"用户提示词: {user_prompt}")
+
+            # P1: 记录 Prompt
+            if recorder:
+                try:
+                    recorder.record_inputs({"ticker": ticker, "analysis_date": analysis_date, "reports_keys": list(reports.keys()) if isinstance(reports, dict) else []})
+                    recorder.record_prompts(system_prompt, user_prompt)
+                except Exception as e:
+                    logger.debug(f"[{self.agent_id}] 记录 Prompt 失败（不影响 agent）: {e}")
             
             if self._llm:
                 import time
@@ -204,6 +207,14 @@ class ResearcherAgent(BaseAgent):
                     logger.error(f"❌ [{self.agent_id}] LLM 调用失败, 耗时: {_llm_elapsed:.1f}s, 错误: {_llm_err}", exc_info=True)
                     raise
                 report = self._parse_response(response.content)
+
+                # P1: 记录 LLM 响应和解析输出
+                if recorder:
+                    try:
+                        recorder.record_llm_response(response, llm_duration_ms=int(_llm_elapsed * 1000))
+                        recorder.record_parsed_output({"report": report[:500] if isinstance(report, str) else str(report)[:500]})
+                    except Exception as e:
+                        logger.debug(f"[{self.agent_id}] 记录 LLM 响应失败（不影响 agent）: {e}")
             else:
                 raise ValueError("LLM not initialized")
             
@@ -229,6 +240,12 @@ class ResearcherAgent(BaseAgent):
 
         except Exception as e:
             logger.error(f"研究员Agent {self.agent_id} 执行失败 (总耗时: {_time_exec.time() - _exec_start:.1f}s): {e}", exc_info=True)
+            # P1: 记录异常
+            if recorder:
+                try:
+                    recorder.record_error(e)
+                except Exception:
+                    pass
             # 返回错误状态（只返回新增的字段）
             output_key = self.output_field or f"{self.researcher_type}_report"
             return {
@@ -237,6 +254,13 @@ class ResearcherAgent(BaseAgent):
                     "success": False
                 }
             }
+        finally:
+            # P1: 完成轨迹采集并写入 MongoDB（非阻塞）
+            if recorder:
+                try:
+                    recorder.finish()
+                except Exception:
+                    pass
     
     def _collect_reports(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """

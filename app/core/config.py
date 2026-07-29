@@ -170,8 +170,8 @@ class Settings(BaseSettings):
 
     # Agent 执行轨迹采集（P1: 机器可读执行轨迹）
     AGENT_EXECUTION_TRACE_ENABLED: bool = Field(
-        default=True,
-        description="启用 Agent 执行轨迹采集（写入 MongoDB agent_execution_traces 集合）"
+        default=False,
+        description="启用 Agent 执行轨迹采集（写入 MongoDB agent_execution_traces 集合）。默认关闭，排查问题时可开启，或通过分析任务的 enable_trace 参数单次开启。"
     )
 
     # Agent 断言执行（P2: 反思 lesson 升级为可执行断言）

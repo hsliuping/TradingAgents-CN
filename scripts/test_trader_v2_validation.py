@@ -27,7 +27,7 @@ def test_validate_passes_with_compliant_output():
     text = """## 一句话结论
 当前研究判断为审慎，主因估值偏高且景气拐点尚未确认。
 
-## 核心依据
+## 为什么这么看
 - 估值处于历史 80% 分位
 - 季度营收增速放缓
 
@@ -77,7 +77,7 @@ def test_validate_fails_with_missing_sections():
     result = agent._validate_trader_output(text)
     assert result is not None, "预期校验失败（缺少章节），但校验通过"
     assert "一句话结论" in result, f"警告应包含'一句话结论'，实际: {result}"
-    assert "核心依据" in result, f"警告应包含'核心依据'，实际: {result}"
+    assert "为什么这么看" in result, f"警告应包含'为什么这么看'，实际: {result}"
     print("✅ test_validate_fails_with_missing_sections 通过")
 
 
@@ -100,14 +100,14 @@ def test_validate_passes_with_neutral_terms():
     text = """## 一句话结论
 当前研究判断为中性，多空因素较为平衡。
 
-## 核心依据
+## 为什么这么看
 - 估值合理
 - 景气平稳
 
 ## 当前判断的限制
 信息缺口待补。
 
-## 后续观察事项
+## 后续关注
 - 政策落地
 """
     result = agent._validate_trader_output(text)
@@ -151,7 +151,7 @@ def test_execute_reports_validation_status():
     compliant_text = """## 一句话结论
 当前审慎。
 
-## 核心依据
+## 为什么这么看
 - 估值偏高
 """
     with patch.object(

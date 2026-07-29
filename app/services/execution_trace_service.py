@@ -78,37 +78,58 @@ class ExecutionTraceService:
             logger.warning(f"⚠️ 校验结果回填失败（不影响 agent 执行）: {e}")
             return False
 
-    def get_traces_sync(
-        self,
+    @staticmethod
+    def _build_query(
         agent_id: Optional[str] = None,
         workflow_id: Optional[str] = None,
+        task_id: Optional[str] = None,
         validation_status: Optional[str] = None,
         success: Optional[bool] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """构建查询条件（同步/异步/计数复用）"""
+        query: Dict[str, Any] = {}
+        if agent_id:
+            query["agent_id"] = agent_id
+        if workflow_id:
+            query["workflow_id"] = workflow_id
+        if task_id:
+            query["task_id"] = task_id
+        if validation_status:
+            query["validation.validation_status"] = validation_status
+        if success is not None:
+            query["success"] = success
+        if start_date or end_date:
+            query["started_at"] = {}
+            if start_date:
+                query["started_at"]["$gte"] = start_date
+            if end_date:
+                query["started_at"]["$lte"] = end_date
+        return query
+
+    def get_traces_sync(
+        self,
+        agent_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        validation_status: Optional[str] = None,
+        success: Optional[bool] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        skip: int = 0,
         limit: int = 100,
     ) -> List[AgentExecutionTrace]:
         """同步查询轨迹（供独立脚本/回归测试使用，无需 async 上下文）。"""
         try:
             db = get_mongo_db_sync()
             collection = db[self.COLLECTION_NAME]
-            query: Dict[str, Any] = {}
-            if agent_id:
-                query["agent_id"] = agent_id
-            if workflow_id:
-                query["workflow_id"] = workflow_id
-            if validation_status:
-                query["validation.validation_status"] = validation_status
-            if success is not None:
-                query["success"] = success
-            if start_date or end_date:
-                query["started_at"] = {}
-                if start_date:
-                    query["started_at"]["$gte"] = start_date
-                if end_date:
-                    query["started_at"]["$lte"] = end_date
-
-            cursor = collection.find(query).sort("started_at", -1).limit(limit)
+            query = self._build_query(
+                agent_id=agent_id, workflow_id=workflow_id, task_id=task_id,
+                validation_status=validation_status, success=success,
+                start_date=start_date, end_date=end_date,
+            )
+            cursor = collection.find(query).sort("started_at", -1).skip(skip).limit(limit)
             traces: List[AgentExecutionTrace] = []
             for doc in cursor:
                 doc.pop("_id", None)
@@ -147,33 +168,24 @@ class ExecutionTraceService:
         self,
         agent_id: Optional[str] = None,
         workflow_id: Optional[str] = None,
+        task_id: Optional[str] = None,
         validation_status: Optional[str] = None,
         success: Optional[bool] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
+        skip: int = 0,
         limit: int = 100,
     ) -> List[AgentExecutionTrace]:
-        """查询轨迹（P2 反思扫描用）"""
+        """查询轨迹（前端查看 / P2 反思扫描用）"""
         try:
             db = get_mongo_db()
             collection = db[self.COLLECTION_NAME]
-            query: Dict[str, Any] = {}
-            if agent_id:
-                query["agent_id"] = agent_id
-            if workflow_id:
-                query["workflow_id"] = workflow_id
-            if validation_status:
-                query["validation.validation_status"] = validation_status
-            if success is not None:
-                query["success"] = success
-            if start_date or end_date:
-                query["started_at"] = {}
-                if start_date:
-                    query["started_at"]["$gte"] = start_date
-                if end_date:
-                    query["started_at"]["$lte"] = end_date
-
-            cursor = collection.find(query).sort("started_at", -1).limit(limit)
+            query = self._build_query(
+                agent_id=agent_id, workflow_id=workflow_id, task_id=task_id,
+                validation_status=validation_status, success=success,
+                start_date=start_date, end_date=end_date,
+            )
+            cursor = collection.find(query).sort("started_at", -1).skip(skip).limit(limit)
             traces = []
             async for doc in cursor:
                 doc.pop("_id", None)
@@ -182,6 +194,44 @@ class ExecutionTraceService:
         except Exception as e:
             logger.error(f"❌ 查询轨迹失败: {e}")
             return []
+
+    async def get_trace_by_id(self, trace_id: str) -> Optional[AgentExecutionTrace]:
+        """按 trace_id 查单条详情（含全文，供前端详情页）"""
+        try:
+            db = get_mongo_db()
+            collection = db[self.COLLECTION_NAME]
+            doc = await collection.find_one({"trace_id": trace_id})
+            if not doc:
+                return None
+            doc.pop("_id", None)
+            return AgentExecutionTrace(**doc)
+        except Exception as e:
+            logger.error(f"❌ 查询单条轨迹失败: {e}")
+            return None
+
+    async def count_traces(
+        self,
+        agent_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        validation_status: Optional[str] = None,
+        success: Optional[bool] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> int:
+        """统计轨迹总数（分页用）"""
+        try:
+            db = get_mongo_db()
+            collection = db[self.COLLECTION_NAME]
+            query = self._build_query(
+                agent_id=agent_id, workflow_id=workflow_id, task_id=task_id,
+                validation_status=validation_status, success=success,
+                start_date=start_date, end_date=end_date,
+            )
+            return await collection.count_documents(query)
+        except Exception as e:
+            logger.error(f"❌ 统计轨迹失败: {e}")
+            return 0
 
     async def get_failure_patterns(
         self,
@@ -227,10 +277,14 @@ class ExecutionTraceService:
             await collection.create_index([("agent_id", 1), ("started_at", -1)])
             await collection.create_index([("workflow_id", 1), ("started_at", -1)])
             await collection.create_index([("execution_id", 1), ("started_at", -1)])
+            # 前端按 task_id 查询（任务中心跳转核心索引）
+            await collection.create_index([("task_id", 1), ("started_at", -1)])
             # P2 反思扫描：按校验失败/执行失败检索
             await collection.create_index([("validation.validation_status", 1), ("started_at", -1)])
             await collection.create_index([("success", 1), ("started_at", -1)])
-            await collection.create_index([("started_at", -1)])  # TTL/清理
+            await collection.create_index([("started_at", -1)])  # 排序查询用
+            # TTL 清理：90 天自动过期（全文存储后避免数据膨胀）
+            await collection.create_index([("started_at", 1)], expireAfterSeconds=90 * 24 * 3600)
             logger.info(f"✅ {self.COLLECTION_NAME} 索引创建完成")
         except Exception as e:
             logger.warning(f"⚠️ {self.COLLECTION_NAME} 索引创建失败: {e}")

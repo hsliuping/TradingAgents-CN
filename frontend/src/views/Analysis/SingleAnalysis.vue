@@ -182,6 +182,19 @@
 
               <!-- 操作按钮 -->
               <div class="form-section">
+                <!-- 执行轨迹开关 -->
+                <div style="display: flex; justify-content: center; margin-bottom: 12px;">
+                  <el-tooltip
+                    content="开启后，系统会记录每个 Agent 的完整执行过程（Prompt全文、LLM原始返回、校验结果），用于排查分析问题。数据量较大，平时不需要时建议关闭。"
+                    placement="top"
+                  >
+                    <el-checkbox v-model="analysisForm.enableTrace" size="small">
+                      <el-icon style="margin-right: 4px;"><View /></el-icon>
+                      记录执行轨迹（排查问题时开启）
+                    </el-checkbox>
+                  </el-tooltip>
+                </div>
+
                 <div class="action-buttons" style="display: flex; justify-content: center; align-items: center; width: 100%; text-align: center;">
                   <el-button
                     v-if="analysisStatus === 'idle'"
@@ -831,6 +844,7 @@ import {
   ArrowDown,
   Plus,
   DocumentChecked,
+  View,
 } from '@element-plus/icons-vue'
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
 import { workflowApi, type WorkflowSummary } from '@/api/workflow'
@@ -874,6 +888,7 @@ interface AnalysisForm {
   includeRisk: boolean
   language: 'zh-CN' | 'en-US'
   engine: AnalysisEngineType  // 分析引擎: 固定使用 v2.0 引擎
+  enableTrace: boolean  // 执行轨迹开关：默认关闭，排查问题时可开启
 }
 
 // 使用store
@@ -1033,7 +1048,8 @@ const analysisForm = reactive<AnalysisForm>({
   includeSentiment: true,
   includeRisk: true,
   language: 'zh-CN',
-  engine: 'v2'  // 固定使用 v2.0 引擎
+  engine: 'v2',  // 固定使用 v2.0 引擎
+  enableTrace: false  // 执行轨迹：默认关闭，排查问题时可开启
 })
 
 // 股票代码验证相关
@@ -1610,7 +1626,8 @@ const submitAnalysis = async () => {
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
         deep_analysis_model: modelSettings.value.deepAnalysisModel,
         engine: 'v2',  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
-        workflow_id: selectedWorkflowId.value
+        workflow_id: selectedWorkflowId.value,
+        enable_trace: analysisForm.enableTrace  // 执行轨迹开关
       }
     }
 

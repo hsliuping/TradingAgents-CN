@@ -5,7 +5,7 @@
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -27,11 +27,19 @@ class TokenUsage(BaseModel):
 
 
 class PromptSnapshot(BaseModel):
-    """提示词快照（只存哈希和长度，不存全文）"""
+    """提示词快照
+
+    设计说明：同时存哈希/长度（用于 P2 反思扫描的 hash 聚类，体积小）和全文
+    （用于前端查看、Prompt 优化对比、回归测试）。旧数据只有 hash/length 字段，
+    新数据同时写入，向后兼容。
+    """
     system_prompt_hash: Optional[str] = None    # SHA256 前 16 位
     system_prompt_length: int = 0
     user_prompt_hash: Optional[str] = None
     user_prompt_length: int = 0
+    # 全文（前端查看 / Prompt 优化对比 / 回归测试重放用）
+    system_prompt_full: Optional[str] = None
+    user_prompt_full: Optional[str] = None
 
 
 class InputSnapshot(BaseModel):
@@ -41,12 +49,28 @@ class InputSnapshot(BaseModel):
 
 
 class OutputSnapshot(BaseModel):
-    """输出快照"""
+    """输出快照
+
+    设计说明：output_raw_preview 存前 500 字符（列表页快速展示），output_raw_full
+    存完整 LLM 原始返回（详情页查看、回归测试重放、失败模式定位）。
+    """
     output_raw_length: int = 0
-    output_raw_preview: Optional[str] = None  # 前 500 字符，调试用
+    output_raw_preview: Optional[str] = None  # 前 500 字符，列表页快速展示
+    output_raw_full: Optional[str] = None     # 完整 LLM 原始返回，详情页查看
     output_parsed_keys: List[str] = Field(default_factory=list)
     output_parsed_success: Optional[bool] = None
     output_parsed_type: Optional[str] = None  # dict / str / etc.
+
+
+class ToolCallRecord(BaseModel):
+    """单次工具调用记录"""
+    tool_name: str
+    tool_args: Dict[str, Any] = Field(default_factory=dict)
+    success: bool = True
+    error: Optional[str] = None
+    result_length: int = 0
+    result_preview: Optional[str] = None  # 前 200 字符
+    duration_ms: Optional[int] = None
 
 
 class ValidationResult(BaseModel):
@@ -85,7 +109,7 @@ class AgentExecutionTrace(BaseModel):
 
     # 分析目标
     ticker: Optional[str] = None
-    analysis_date: Optional[str] = None
+    analysis_date: Optional[Union[str, datetime]] = None
 
     # LLM 配置
     llm_config: LLMConfigSnapshot = Field(default_factory=LLMConfigSnapshot)
@@ -98,6 +122,9 @@ class AgentExecutionTrace(BaseModel):
 
     # LLM 输出
     output: OutputSnapshot = Field(default_factory=OutputSnapshot)
+
+    # 工具调用详情（每次工具调用的名称、参数、结果摘要、耗时）
+    tool_calls: List[ToolCallRecord] = Field(default_factory=list)
 
     # Token 用量
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
@@ -115,6 +142,7 @@ class AgentExecutionTrace(BaseModel):
     finished_at: Optional[datetime] = None
     execution_duration_ms: Optional[int] = None
     llm_duration_ms: Optional[int] = None
+    llm_call_count: int = 0  # LLM 被调用的次数（含工具调用循环中的多次调用）
 
     # 扩展（P2 预留）
     metadata: Dict[str, Any] = Field(default_factory=dict)

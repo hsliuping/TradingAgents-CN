@@ -77,6 +77,10 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         growth_source_type="analysis_report",
     )
 
+    # 🔑 类级别属性（与其他适配器保持一致，供执行轨迹分类使用）
+    analyst_type = "fundamentals"
+    output_field = "fundamentals_report"
+
     def __init__(
         self,
         config: Optional[Any] = None,
@@ -115,71 +119,116 @@ class FundamentalsAnalystAgentV2(BaseAgent):
                 - fundamentals_report: 基本面分析报告
                 - messages: 更新的消息历史
         """
-        ticker = state.get("ticker") or state.get("company_of_interest")
-        trade_date = state.get("trade_date") or state.get("end_date")
-        context = state.get("context")
-
-        # 支持提示词覆盖（用于调试）
-        overrides = state.get("prompt_overrides") or {}
-        system_override = overrides.get("system")
-        user_override = overrides.get("user")
-        analysis_override = overrides.get("analysis")
-
-        if not ticker:
-            raise ValueError("缺少必需参数: ticker 或 company_of_interest")
-
-        logger.info(f"开始基本面分析: {ticker} (日期: {trade_date})")
-
-        # 构建系统提示词（优先级：覆盖 > 模板 > 默认）
-        system_prompt = system_override
-        if not system_prompt:
-            system_prompt = self._build_system_prompt(state)
-
-        # 构建用户提示词（优先级：覆盖 > 默认）
-        user_prompt = user_override
-        if not user_prompt:
-            user_prompt = self._build_user_prompt(ticker, trade_date, state)
-
-        system_prompt = self._apply_global_trading_advice_guard(system_prompt)
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt)
-        ]
-
-        # 使用 BaseAgent 标准化的工具调用方法
-        if self._llm:
-            analysis_prompt = analysis_override or self._build_analysis_prompt(ticker)
-            prefetched_message, prefetched_tool_names = self._build_prefetched_tool_message(ticker, trade_date, state)
-            if prefetched_message:
-                messages.append(prefetched_message)
-
-            original_tools = list(self._langchain_tools)
-            if prefetched_tool_names:
-                self._langchain_tools = [
-                    tool for tool in original_tools
-                    if getattr(tool, "name", "") not in prefetched_tool_names
-                ]
-
-            # 使用默认提示词（模板中已包含详细的分析要求和输出格式）
-            # 除非用户通过 prompt_overrides 覆盖
+        # P1: 启动执行轨迹采集
+        from core.agents.execution_trace_recorder import (
+            start_execution_trace, is_trace_enabled
+        )
+        recorder = None
+        if is_trace_enabled():
             try:
-                analysis = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
-            finally:
-                self._langchain_tools = original_tools
-        else:
-            # 降级：没有 LLM 或工具
-            logger.warning("没有配置 LLM 或工具，返回模拟结果")
-            analysis = self._generate_mock_report(ticker, trade_date)
+                recorder = start_execution_trace(self, state)
+                self._last_trace_id = recorder.trace_id
+            except Exception as e:
+                logger.warning(f"⚠️ [{self.agent_id}] 启动轨迹采集失败（不影响 agent）: {e}")
+                self._last_trace_id = None
 
-        logger.info(f"✅ 基本面分析完成，报告长度: {len(analysis)} 字符")
+        try:
+            ticker, trade_date = self._extract_common_params(state)
+            context = state.get("context")
 
-        # 只返回新增的字段，避免覆盖并行节点的更新
-        result = {"fundamentals_report": analysis}
-        # 🆕 附带工具调用摘要
-        tool_summary = self._format_tool_call_summary()
-        if tool_summary:
-            result["tool_call_summaries"] = {self.agent_id: tool_summary}
-        return result
+            # 支持提示词覆盖（用于调试）
+            overrides = state.get("prompt_overrides") or {}
+            system_override = overrides.get("system")
+            user_override = overrides.get("user")
+            analysis_override = overrides.get("analysis")
+
+            if not ticker:
+                raise ValueError("缺少必需参数: ticker 或 company_of_interest")
+
+            logger.info(f"开始基本面分析: {ticker} (日期: {trade_date})")
+
+            # 构建系统提示词（优先级：覆盖 > 模板 > 默认）
+            system_prompt = system_override
+            if not system_prompt:
+                system_prompt = self._build_system_prompt(state)
+
+            # 构建用户提示词（优先级：覆盖 > 默认）
+            user_prompt = user_override
+            if not user_prompt:
+                user_prompt = self._build_user_prompt(ticker, trade_date, state)
+
+            system_prompt = self._apply_global_trading_advice_guard(system_prompt)
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ]
+
+            # P1: 记录 Prompt
+            if recorder:
+                try:
+                    recorder.record_inputs({"ticker": ticker, "trade_date": trade_date})
+                    recorder.record_prompts(system_prompt, user_prompt)
+                except Exception as e:
+                    logger.debug(f"[{self.agent_id}] 记录 Prompt 失败（不影响 agent）: {e}")
+
+            # 使用 BaseAgent 标准化的工具调用方法
+            if self._llm:
+                analysis_prompt = analysis_override or self._build_analysis_prompt(ticker)
+                prefetched_message, prefetched_tool_names = self._build_prefetched_tool_message(ticker, trade_date, state)
+                if prefetched_message:
+                    messages.append(prefetched_message)
+
+                original_tools = list(self._langchain_tools)
+                if prefetched_tool_names:
+                    self._langchain_tools = [
+                        tool for tool in original_tools
+                        if getattr(tool, "name", "") not in prefetched_tool_names
+                    ]
+
+                # 使用默认提示词（模板中已包含详细的分析要求和输出格式）
+                # 除非用户通过 prompt_overrides 覆盖
+                try:
+                    analysis = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
+                finally:
+                    self._langchain_tools = original_tools
+            else:
+                # 降级：没有 LLM 或工具
+                logger.warning("没有配置 LLM 或工具，返回模拟结果")
+                analysis = self._generate_mock_report(ticker, trade_date)
+
+            # P1: 记录解析后的输出
+            if recorder:
+                try:
+                    recorder.record_parsed_output({"report": analysis[:500] if isinstance(analysis, str) else str(analysis)[:500]})
+                except Exception as e:
+                    logger.debug(f"[{self.agent_id}] 记录解析输出失败（不影响 agent）: {e}")
+
+            logger.info(f"✅ 基本面分析完成，报告长度: {len(analysis)} 字符")
+
+            # 只返回新增的字段，避免覆盖并行节点的更新
+            result = {"fundamentals_report": analysis}
+            # 🆕 附带工具调用摘要
+            tool_summary = self._format_tool_call_summary()
+            if tool_summary:
+                result["tool_call_summaries"] = {self.agent_id: tool_summary}
+            return result
+
+        except Exception as e:
+            logger.error(f"基本面分析执行失败: {e}", exc_info=True)
+            # P1: 记录异常
+            if recorder:
+                try:
+                    recorder.record_error(e)
+                except Exception:
+                    pass
+            raise
+        finally:
+            # P1: 完成轨迹采集并写入 MongoDB（非阻塞）
+            if recorder:
+                try:
+                    recorder.finish()
+                except Exception:
+                    pass
 
     def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:
         """

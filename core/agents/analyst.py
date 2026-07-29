@@ -105,22 +105,22 @@ class AnalystAgent(BaseAgent):
         logger.info(f"开始执行分析师Agent: {self.agent_id}")
         self._current_state = state
 
+        # P1: 启动执行轨迹采集
+        from core.agents.execution_trace_recorder import (
+            start_execution_trace, is_trace_enabled
+        )
+        recorder = None
+        if is_trace_enabled():
+            try:
+                recorder = start_execution_trace(self, state)
+                self._last_trace_id = recorder.trace_id
+            except Exception as e:
+                logger.warning(f"⚠️ [{self.agent_id}] 启动轨迹采集失败（不影响 agent）: {e}")
+                self._last_trace_id = None
+
         try:
-            # 1. 提取输入参数（兼容多种参数名）
-            ticker = state.get("ticker") or state.get("company_of_interest")
-
-            # 🆕 支持交易复盘场景：从 trade_info 中提取 code
-            if not ticker and "trade_info" in state:
-                trade_info = state.get("trade_info", {})
-                if isinstance(trade_info, dict):
-                    ticker = trade_info.get("code")
-
-            analysis_date = state.get("analysis_date") or state.get("trade_date") or state.get("end_date")
-
-            # 🆕 支持交易复盘场景：使用当前日期作为分析日期
-            if not analysis_date:
-                from datetime import datetime
-                analysis_date = datetime.now().strftime("%Y-%m-%d")
+            # 1. 提取输入参数（统一使用基类方法，兼容多种字段名与场景兜底）
+            ticker, analysis_date = self._extract_common_params(state)
 
             market_type = state.get("market_type", "A股")
 
@@ -168,6 +168,14 @@ class AnalystAgent(BaseAgent):
             # 🔥 详细日志：打印系统提示词的完整内容和长度
             logger.info(f"系统提示词 (长度: {len(system_prompt)}): {system_prompt}")
             logger.info(f"用户提示词 (长度: {len(user_prompt)}): {user_prompt}")
+
+            # P1: 记录 Prompt
+            if recorder:
+                try:
+                    recorder.record_inputs({"ticker": ticker, "analysis_date": analysis_date, "market_type": market_type})
+                    recorder.record_prompts(system_prompt, user_prompt)
+                except Exception as e:
+                    logger.debug(f"[{self.agent_id}] 记录 Prompt 失败（不影响 agent）: {e}")
             
             # 🔥 验证：检查发送给LLM的SystemMessage内容是否与system_prompt一致
             actual_system_content = messages[0].content if messages and hasattr(messages[0], 'content') else None
@@ -190,14 +198,32 @@ class AnalystAgent(BaseAgent):
                     analysis_prompt = self._build_post_tool_analysis_prompt()
 
                     report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
+                    # 🔑 LLM 响应已由 invoke_with_tools 内部的 _record_llm_response_to_trace 自动记录
                 else:
                     # 没有工具，直接调用LLM
                     logger.warning(f"[{self.agent_id}] 没有配置工具，使用普通模式")
+                    import time as _time_llm
+                    _llm_start = _time_llm.time()
                     response = self._llm.invoke(messages)
+                    _llm_duration_ms = int((_time_llm.time() - _llm_start) * 1000)
                     # 直接返回字符串内容，与 invoke_with_tools 保持一致
                     report = response.content if hasattr(response, 'content') else str(response)
+
+                    # P1: 记录 LLM 响应
+                    if recorder:
+                        try:
+                            recorder.record_llm_response(response, llm_duration_ms=_llm_duration_ms)
+                        except Exception as e:
+                            logger.debug(f"[{self.agent_id}] 记录 LLM 响应失败（不影响 agent）: {e}")
             else:
                 raise ValueError("LLM not initialized")
+
+            # P1: 记录解析后的输出
+            if recorder:
+                try:
+                    recorder.record_parsed_output({"report": report[:500] if isinstance(report, str) else str(report)[:500]})
+                except Exception as e:
+                    logger.debug(f"[{self.agent_id}] 记录解析输出失败（不影响 agent）: {e}")
 
             # 🆕 v3.5.0 质量门禁：检查报告完整性，失败时重试1次，仍失败标记 low_quality
             quality_flag = self._check_and_retry_quality(
@@ -263,6 +289,12 @@ class AnalystAgent(BaseAgent):
 
         except Exception as e:
             logger.error(f"分析师Agent {self.agent_id} 执行失败: {e}", exc_info=True)
+            # P1: 记录异常
+            if recorder:
+                try:
+                    recorder.record_error(e)
+                except Exception:
+                    pass
             # 返回错误状态（只返回新增的字段）
             output_key = self.output_field or f"{self.analyst_type}_report"
             return {
@@ -273,6 +305,12 @@ class AnalystAgent(BaseAgent):
             }
         finally:
             self._current_state = None
+            # P1: 完成轨迹采集并写入 MongoDB（非阻塞）
+            if recorder:
+                try:
+                    recorder.finish()
+                except Exception:
+                    pass
 
     def _check_and_retry_quality(
         self,

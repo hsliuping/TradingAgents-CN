@@ -9,6 +9,7 @@
 
 import hashlib
 import logging
+import threading
 import uuid
 from typing import Any, Dict, Optional
 
@@ -20,12 +21,41 @@ from app.models.execution_trace import (
     OutputSnapshot,
     PromptSnapshot,
     TokenUsage,
+    ToolCallRecord,
     ValidationResult,
 )
 from app.services.execution_trace_service import execution_trace_service
 from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
+
+# 线程本地变量：支持单次分析任务临时开启轨迹采集
+# 当全局开关关闭时，可通过 enable_trace_for_current_thread() 在当前线程临时开启
+_trace_thread_local = threading.local()
+
+
+def enable_trace_for_current_thread() -> None:
+    """为当前线程临时开启轨迹采集（单次分析任务级别）"""
+    _trace_thread_local.enabled = True
+
+
+def disable_trace_for_current_thread() -> None:
+    """关闭当前线程的临时轨迹采集"""
+    _trace_thread_local.enabled = False
+
+
+def is_trace_enabled() -> bool:
+    """检查是否启用轨迹采集
+
+    优先级：线程本地临时标记 > 全局配置
+    - 全局配置 AGENT_EXECUTION_TRACE_ENABLED 默认关闭
+    - 分析任务可通过 enable_trace=true 参数临时开启（仅对本次执行生效）
+    """
+    # 线程本地标记优先
+    if getattr(_trace_thread_local, "enabled", False):
+        return True
+    # 全局配置
+    return getattr(settings, "AGENT_EXECUTION_TRACE_ENABLED", False)
 
 
 class ExecutionTraceRecorder:
@@ -117,36 +147,59 @@ class ExecutionTraceRecorder:
             logger.debug(f"记录输入快照失败: {e}")
 
     def record_prompts(self, system_prompt: str, user_prompt: str) -> None:
-        """记录提示词快照（哈希 + 长度）"""
+        """记录提示词快照（哈希 + 长度 + 全文）
+
+        全文存储用于：前端查看、Prompt 优化对比、回归测试重放。
+        哈希/长度保留用于 P2 反思扫描的 hash 聚类（体积小，扫描快）。
+        """
         try:
             self._trace.prompts = PromptSnapshot(
                 system_prompt_hash=hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()[:16] if system_prompt else None,
                 system_prompt_length=len(system_prompt) if system_prompt else 0,
                 user_prompt_hash=hashlib.sha256(user_prompt.encode("utf-8")).hexdigest()[:16] if user_prompt else None,
                 user_prompt_length=len(user_prompt) if user_prompt else 0,
+                system_prompt_full=system_prompt if system_prompt else None,
+                user_prompt_full=user_prompt if user_prompt else None,
             )
         except Exception as e:
             logger.debug(f"记录提示词快照失败: {e}")
 
     def record_llm_response(self, response: Any, llm_duration_ms: Optional[int] = None) -> None:
-        """记录 LLM 响应"""
+        """记录 LLM 响应
+
+        支持多次调用累加：
+        - 工具调用模式下，LLM 会被调用多次（每次循环 + 最终报告）
+        - 每次调用的 Token 用量累加到总用量
+        - 输出快照只保留最后一次（最终报告），但 LLM 调用次数 +1
+        """
         try:
-            self._llm_duration_ms = llm_duration_ms
+            # 🔑 累加 LLM 调用次数
+            self._trace.llm_call_count += 1
 
-            # 输出快照
+            # 累加 LLM 耗时
+            if llm_duration_ms is not None:
+                prev = self._llm_duration_ms or 0
+                self._llm_duration_ms = prev + llm_duration_ms
+
+            # 输出快照（覆盖式，保留最终报告）
             content = getattr(response, "content", "") or ""
-            self._trace.output = OutputSnapshot(
-                output_raw_length=len(content),
-                output_raw_preview=content[:500] if content else None,
-            )
+            if content:
+                self._trace.output = OutputSnapshot(
+                    output_raw_length=len(content),
+                    output_raw_preview=content[:500] if content else None,
+                    output_raw_full=content if content else None,
+                )
 
-            # Token 用量（兼容 LangChain AIMessage）
+            # Token 用量累加（兼容 LangChain AIMessage）
             usage_meta = getattr(response, "usage_metadata", None)
             if isinstance(usage_meta, dict):
+                prev_input = self._trace.token_usage.input_tokens or 0
+                prev_output = self._trace.token_usage.output_tokens or 0
+                prev_total = self._trace.token_usage.total_tokens or 0
                 self._trace.token_usage = TokenUsage(
-                    input_tokens=usage_meta.get("input_tokens"),
-                    output_tokens=usage_meta.get("output_tokens"),
-                    total_tokens=usage_meta.get("total_tokens"),
+                    input_tokens=prev_input + (usage_meta.get("input_tokens") or 0),
+                    output_tokens=prev_output + (usage_meta.get("output_tokens") or 0),
+                    total_tokens=prev_total + (usage_meta.get("total_tokens") or 0),
                 )
 
             # 从 response_metadata 补全 model_name
@@ -157,6 +210,30 @@ class ExecutionTraceRecorder:
                     self._trace.llm_config.model_name = model_from_resp
         except Exception as e:
             logger.debug(f"记录 LLM 响应失败: {e}")
+
+    def record_tool_call(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        success: bool = True,
+        error: Optional[str] = None,
+        result_length: int = 0,
+        result_preview: Optional[str] = None,
+        duration_ms: Optional[int] = None,
+    ) -> None:
+        """记录一次工具调用"""
+        try:
+            self._trace.tool_calls.append(ToolCallRecord(
+                tool_name=tool_name,
+                tool_args=tool_args,
+                success=success,
+                error=error[:500] if error else None,
+                result_length=result_length,
+                result_preview=result_preview[:200] if result_preview else None,
+                duration_ms=duration_ms,
+            ))
+        except Exception as e:
+            logger.debug(f"记录工具调用失败: {e}")
 
     def record_parsed_output(self, parsed: Any) -> None:
         """记录解析后的输出"""
@@ -251,14 +328,26 @@ def start_execution_trace(
     Returns:
         ExecutionTraceRecorder 实例
     """
+    # 🔑 防重复：如果 agent 已经有活跃的 recorder，直接返回（避免 builder 层与适配器层重复创建）
+    existing = getattr(agent, "_execution_recorder", None)
+    if existing is not None and not existing._finished:
+        return existing
+
     metadata = agent.get_metadata() if hasattr(agent, "get_metadata") else None
     agent_version = getattr(metadata, "version", "unknown") if metadata else "unknown"
     manager_type = getattr(agent, "manager_type", None)
 
-    # 判断 agent_type
-    agent_type = "manager"
-    if manager_type is None and hasattr(agent, "output_field"):
+    # 判断 agent_type（按基类类型标识属性区分）
+    if manager_type is not None:
+        agent_type = "manager"
+    elif getattr(agent, "analyst_type", None) is not None:
+        agent_type = "analyst"
+    elif getattr(agent, "researcher_type", None) is not None:
+        agent_type = "researcher"
+    elif hasattr(agent, "output_field"):
         agent_type = "trader"
+    else:
+        agent_type = "manager"  # 默认兜底
 
     recorder = ExecutionTraceRecorder(
         agent_id=agent.agent_id,
@@ -272,12 +361,14 @@ def start_execution_trace(
     if hasattr(agent, "_llm") and agent._llm is not None:
         recorder.record_llm_config(agent._llm)
 
+    # 🔑 自动绑定 recorder 到 agent，使 invoke_with_tools 能自动记录 LLM 响应
+    # 这样所有继承 BaseAgent 的适配器（如 fundamentals_analyst_v2 等）都会自动记录 Token 用量
+    try:
+        agent._execution_recorder = recorder
+    except Exception:
+        pass
+
     return recorder
-
-
-def is_trace_enabled() -> bool:
-    """检查是否启用轨迹采集"""
-    return getattr(settings, "AGENT_EXECUTION_TRACE_ENABLED", True)
 
 
 def record_trace_validation(
