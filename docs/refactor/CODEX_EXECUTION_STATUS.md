@@ -5460,3 +5460,114 @@ blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
 已知限制仅按事实保留：正式 `npm run build` 仍被34个存量类型错误阻断；真实环境没有完整
 Normal→Top→Consensus→HardRisk→Order→Fill案例，因此完整流程只在明确隔离的 Demo 展示；
 Challenger 与 live 继续关闭。本阶段未开始 PR-010。
+
+## 20. Frontend Type Safety Cleanup（完成）
+
+本阶段从 `alphaguard-frontend-acceptance-v1`（`a0d7434`）开始，只清理旧前端表格的
+`DefaultRow TS2345`。没有新增业务功能，没有修改路由、API 地址、认证、权限、数据来源、
+排序、筛选、分页、交易逻辑、后端 Schema、交易参数或 Champion。
+
+### 20.1 精确基线和根因
+
+开始时 `npm run type-check` 与正式 `npm run build` 均以 exit 2 返回下列34个错误；
+独立 `npx vite build` 当时可以通过，但不作为正式构建成功：
+
+| 文件 | 基线行号 | 数量 | 表格 data 的实际类型 | 处理函数期望类型 | 根因 |
+| --- | --- | ---: | --- | --- | --- |
+| `Dashboard/index.vue` | 125, 132 | 2 | `AnalysisTask[]` | `AnalysisTask` | Element Plus slot 推断为 `DefaultRow` |
+| `Favorites/index.vue` | 191 | 1 | `FavoriteItem[]` | `FavoriteItem` | 同上 |
+| `Reports/index.vue` | 79, 130, 136, 161 | 4 | `ReportListItem[]` | `ReportListItem` | 同上 |
+| `Reports/TokenStatistics.vue` | 217 | 1 | `TokenRecord[]` | `TokenRecord` | 同上 |
+| `Screening/index.vue` | 250, 322, 325 | 3 | `StockInfo[]` | `StockInfo` | 同上 |
+| `Settings/components/MarketCategoryManagement.vue` | 50, 57, 64 | 3 | `MarketCategory[]` | `MarketCategory` | 同上 |
+| `Settings/ConfigManagement.vue` | 165, 173, 181, 188 | 4 | `LLMProvider[]` | `LLMProvider` | 同上 |
+| `Settings/ConfigManagement.vue` | 348, 354, 361, 368 | 4 | `LLMConfig[]` | `LLMConfig` | 同上 |
+| `Settings/ConfigManagement.vue` | 493, 494 | 2 | `DatabaseConfig[]` | `DatabaseConfig` | 同上 |
+| `System/LogManagement.vue` | 76, 79, 84 | 3 | `LogFileInfo[]` | `LogFileInfo` | 同上 |
+| `System/SchedulerManagement.vue` | 148, 157, 167, 176, 184 | 5 | `Job[]` | `Job` | 同上 |
+| `System/SchedulerManagement.vue` | 337, 470 | 2 | executions 响应 / `JobExecution[]` | `JobExecution` | slot 为 `DefaultRow`；手动历史另被错误标成 `JobHistory[]` |
+
+Element Plus 2.4.4 的 table slot 声明将 `scope.row` 暴露为
+`DefaultRow = Record<PropertyKey, any>`，不会从强类型 `data` 反推页面 DTO。因此即使页面的
+`ref` / `computed` 已经是明确数组类型，直接把 slot row 传给强类型函数仍会产生 TS2345。
+这不是后端字段变化。
+
+### 20.2 修复方式和文件
+
+新增 `frontend/src/utils/tableRows.ts`。`invokeTableRowAction` 只有在 slot row 与当前表格
+强类型 data 数组中的对象满足引用身份相等时才调用处理函数；该检查构成运行时类型证明，
+不使用 `any`、`as any`、`unknown as T`、`ts-ignore` 或类型配置降级。合法 Element Plus
+行仍按原事件、原参数和原顺序执行，外来行安全不调用。
+
+九个旧页面只将34个受影响的事件入口接到该守卫。Scheduler 的手动历史实际读取
+`getJobExecutions` / `getSingleJobExecutions`，返回和展示的字段均为 `JobExecution`；
+页面局部列表改为 `JobExecution[]` 并删除原先扩展对象后强制伪装成 `JobHistory` 的断言。
+没有修改 `frontend/src/api/scheduler.ts` 或后端 Scheduler Schema。
+
+实际代码修改范围：
+
+```text
+frontend/src/utils/tableRows.ts
+frontend/src/views/Dashboard/index.vue
+frontend/src/views/Favorites/index.vue
+frontend/src/views/Reports/index.vue
+frontend/src/views/Reports/TokenStatistics.vue
+frontend/src/views/Screening/index.vue
+frontend/src/views/Settings/components/MarketCategoryManagement.vue
+frontend/src/views/Settings/ConfigManagement.vue
+frontend/src/views/System/LogManagement.vue
+frontend/src/views/System/SchedulerManagement.vue
+```
+
+### 20.3 构建、回归和浏览器结果
+
+```text
+npm run type-check=PASS（DefaultRow TS2345 34→0，其他错误0）
+npm run build=PASS（vue-tsc + Vite）
+npx vite build=PASS
+AlphaGuard前端/API/安全专项=55 passed, 85 warnings
+Demo隔离测试=8 passed, 85 warnings
+默认离线CI=505 passed, 89 warnings
+```
+
+浏览器实际检查正式登录页及未认证路由重定向；隔离 Demo 中受影响的旧 Dashboard 正常
+打开，表格、空状态和操作按钮可见，无无限 loading、字面 `undefined` 或行处理
+`TypeError`。该旧页请求 Demo 未实现的 legacy API 时仍按既定边界返回404，不属于新增
+错误。AlphaGuard Overview、Candidates、Decisions、Paper、Evaluations、Experiments、
+Operations 均完成加载，短暂 loading 正常消失，控制台新增错误为0，Demo Overview 永久
+显示 `DEMO ENVIRONMENT`。未自动读取或输入正式环境密码。
+
+### 20.4 隔离、安全和 Readiness
+
+只读核验保持：
+
+```text
+生产 Candidate=5
+生产 EvidenceSnapshot=6
+生产 QuantProposal=12
+生产 EvaluationSubject=762
+生产 OrderIntent/Outbox/Order/Fill/Position/Lot/Reservation/Ledger=0
+三个正式自动账户 initial/cash_available=1000000.00，cash_reserved=0
+Demo 数据库集合=ag_ui_demo_scenarios，记录=1
+Docker FastAPI/MongoDB/Redis/queue-worker/analysis-worker=healthy
+FastAPI live=true=exit 3
+queue-worker live=true=exit 1
+analysis-worker live=true=exit 1
+```
+
+最终 Readiness 仍由现有服务计算：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=true
+PAPER_READY=true
+EVALUATION_READY=true
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+overall=DEGRADED_PAPER
+blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
+```
+
+业务显示和操作行为未改变。本阶段没有运行2026-07-29生产观察链，也没有开始 PR-010。

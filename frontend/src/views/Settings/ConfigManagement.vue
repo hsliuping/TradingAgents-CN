@@ -162,7 +162,7 @@
                   <div class="provider-row-actions">
                     <el-button
                       size="small"
-                      @click.stop="editProvider(row)"
+                      @click.stop="invokeTableRowAction(providers, row, editProvider)"
                     >
                       编辑
                     </el-button>
@@ -170,7 +170,7 @@
                       v-if="row.extra_config?.has_api_key"
                       size="small"
                       type="info"
-                      @click.stop="testProviderAPI(row)"
+                      @click.stop="invokeTableRowAction(providers, row, testProviderAPI)"
                       :loading="testingProviders[row.id]"
                     >
                       测试
@@ -178,14 +178,14 @@
                     <el-button
                       size="small"
                       :type="row.is_active ? 'warning' : 'success'"
-                      @click.stop="toggleProvider(row)"
+                      @click.stop="invokeTableRowAction(providers, row, toggleProvider)"
                     >
                       {{ row.is_active ? '禁用' : '启用' }}
                     </el-button>
                     <el-button
                       size="small"
                       type="danger"
-                      @click.stop="deleteProvider(row)"
+                      @click.stop="invokeTableRowAction(providers, row, deleteProvider)"
                     >
                       删除
                     </el-button>
@@ -345,27 +345,30 @@
                   <!-- 操作 -->
                   <el-table-column label="操作" width="260" fixed="right">
                     <template #default="{ row }">
-                      <el-button size="small" @click="editLLMConfig(row)">
+                      <el-button
+                        size="small"
+                        @click="invokeTableRowAction(group.models, row, editLLMConfig)"
+                      >
                         编辑
                       </el-button>
                       <el-button
                         size="small"
                         type="primary"
-                        @click="testLLMConfig(row)"
+                        @click="invokeTableRowAction(group.models, row, testLLMConfig)"
                       >
                         测试
                       </el-button>
                       <el-button
                         size="small"
                         :type="row.enabled ? 'warning' : 'success'"
-                        @click="toggleLLMConfig(row)"
+                        @click="invokeTableRowAction(group.models, row, toggleLLMConfig)"
                       >
                         {{ row.enabled ? '禁用' : '启用' }}
                       </el-button>
                       <el-button
                         size="small"
                         type="danger"
-                        @click="deleteLLMConfig(row)"
+                        @click="invokeTableRowAction(group.models, row, deleteLLMConfig)"
                       >
                         删除
                       </el-button>
@@ -490,8 +493,17 @@
               </el-table-column>
               <el-table-column label="操作" width="200">
                 <template #default="{ row }">
-                  <el-button size="small" @click="editDatabaseConfig(row)">编辑</el-button>
-                  <el-button size="small" type="primary" @click="testDatabase(row)">
+                  <el-button
+                    size="small"
+                    @click="invokeTableRowAction(databaseConfigs, row, editDatabaseConfig)"
+                  >
+                    编辑
+                  </el-button>
+                  <el-button
+                    size="small"
+                    type="primary"
+                    @click="invokeTableRowAction(databaseConfigs, row, testDatabase)"
+                  >
                     测试连接
                   </el-button>
                 </template>
@@ -1122,6 +1134,7 @@ import DataSourceConfigDialog from './components/DataSourceConfigDialog.vue'
 import MarketCategoryManagement from './components/MarketCategoryManagement.vue'
 import DataSourceGroupingDialog from './components/DataSourceGroupingDialog.vue'
 import SortableDataSourceList from './components/SortableDataSourceList.vue'
+import { invokeTableRowAction } from '@/utils/tableRows'
 
 type ProviderInfoSummary = {
   display_name: string

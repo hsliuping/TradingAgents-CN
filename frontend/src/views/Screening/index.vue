@@ -247,7 +247,10 @@
 
         <el-table-column prop="code" label="股票代码" width="120">
           <template #default="{ row }">
-            <el-link type="primary" @click="viewStockDetail(row)">
+            <el-link
+              type="primary"
+              @click="invokeTableRowAction(paginatedResults, row, viewStockDetail)"
+            >
               {{ row.code }}
             </el-link>
           </template>
@@ -319,10 +322,18 @@
 
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button type="text" size="small" @click="analyzeSingle(row)">
+            <el-button
+              type="text"
+              size="small"
+              @click="invokeTableRowAction(paginatedResults, row, analyzeSingle)"
+            >
               分析
             </el-button>
-            <el-button type="text" size="small" @click="toggleFavorite(row)">
+            <el-button
+              type="text"
+              size="small"
+              @click="invokeTableRowAction(paginatedResults, row, toggleFavorite)"
+            >
               <el-icon><Star /></el-icon>
               {{ isFavorited(row.code) ? '取消自选' : '加入自选' }}
             </el-button>
@@ -367,6 +378,7 @@ import { screeningApi, type FieldConfigResponse } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import { getCurrentDataSource } from '@/api/sync'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
+import { invokeTableRowAction } from '@/utils/tableRows'
 
 // 响应式数据
 const screeningLoading = ref(false)

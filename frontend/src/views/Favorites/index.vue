@@ -188,7 +188,7 @@
               v-if="row.market === 'A股'"
               type="text"
               size="small"
-              @click="showSingleSyncDialog(row)"
+                @click="invokeTableRowAction(filteredFavorites, row, showSingleSyncDialog)"
               style="color: #409EFF;"
             >
               同步
@@ -517,6 +517,7 @@ import { ApiClient } from '@/api/request'
 
 import type { FavoriteItem } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
+import { invokeTableRowAction } from '@/utils/tableRows'
 
 
 // 颜色可选项（20种预设颜色）

@@ -47,21 +47,21 @@
         <template #default="{ row }">
           <el-button
             size="small"
-            @click="editCategory(row)"
+            @click="invokeTableRowAction(categories, row, editCategory)"
           >
             编辑
           </el-button>
           <el-button
             size="small"
             :type="row.enabled ? 'warning' : 'success'"
-            @click="toggleCategory(row)"
+            @click="invokeTableRowAction(categories, row, toggleCategory)"
           >
             {{ row.enabled ? '禁用' : '启用' }}
           </el-button>
           <el-button
             size="small"
             type="danger"
-            @click="deleteCategory(row)"
+            @click="invokeTableRowAction(categories, row, deleteCategory)"
             :disabled="getDataSourceCount(row.id) > 0"
           >
             删除
@@ -84,6 +84,7 @@ import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { configApi, type MarketCategory, type DataSourceGrouping } from '@/api/config'
 import MarketCategoryDialog from './MarketCategoryDialog.vue'
+import { invokeTableRowAction } from '@/utils/tableRows'
 
 // Refs
 const loading = ref(false)

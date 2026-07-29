@@ -122,14 +122,18 @@
             </el-table-column>
             <el-table-column label="操作">
               <template #default="{ row }">
-                <el-button type="text" size="small" @click="viewAnalysis(row)">
+                <el-button
+                  type="text"
+                  size="small"
+                  @click="invokeTableRowAction(recentAnalyses, row, viewAnalysis)"
+                >
                   查看
                 </el-button>
                 <el-button
                   v-if="row.status === 'completed'"
                   type="text"
                   size="small"
-                  @click="downloadReport(row)"
+                  @click="invokeTableRowAction(recentAnalyses, row, downloadReport)"
                 >
                   下载
                 </el-button>
@@ -319,6 +323,7 @@ import { favoritesApi } from '@/api/favorites'
 import { analysisApi } from '@/api/analysis'
 import { newsApi } from '@/api/news'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
+import { invokeTableRowAction } from '@/utils/tableRows'
 
 const router = useRouter()
 const authStore = useAuthStore()

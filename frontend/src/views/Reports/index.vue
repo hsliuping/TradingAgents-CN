@@ -76,7 +76,10 @@
         <el-table-column prop="title" label="报告标题" min-width="200">
           <template #default="{ row }">
             <div class="report-title">
-              <el-link type="primary" @click="viewReport(row)">
+              <el-link
+                type="primary"
+                @click="invokeTableRowAction(filteredReports, row, viewReport)"
+              >
                 {{ row.title }}
               </el-link>
               <div class="report-subtitle">
@@ -127,13 +130,17 @@
 
         <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
-            <el-button type="text" size="small" @click="viewReport(row)">
+            <el-button
+              type="text"
+              size="small"
+              @click="invokeTableRowAction(filteredReports, row, viewReport)"
+            >
               查看
             </el-button>
             <el-dropdown
               v-if="row.status === 'completed'"
               trigger="click"
-              @command="(format) => downloadReport(row, format)"
+              @command="(format) => invokeTableRowAction(filteredReports, row, downloadReport, format)"
             >
               <el-button type="text" size="small">
                 下载 <el-icon class="el-icon--right"><arrow-down /></el-icon>
@@ -158,7 +165,7 @@
             <el-button
               type="text"
               size="small"
-              @click="deleteReport(row)"
+              @click="invokeTableRowAction(filteredReports, row, deleteReport)"
               style="color: var(--el-color-danger)"
             >
               删除
@@ -195,6 +202,7 @@ import {
   ArrowDown
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { invokeTableRowAction } from '@/utils/tableRows'
 
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 

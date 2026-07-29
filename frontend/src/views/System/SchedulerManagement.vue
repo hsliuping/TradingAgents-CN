@@ -145,7 +145,7 @@
               <el-button
                 size="small"
                 :icon="Edit"
-                @click="showEditDialog(row)"
+                @click="invokeTableRowAction(filteredJobs, row, showEditDialog)"
               >
                 编辑
               </el-button>
@@ -154,7 +154,7 @@
                 size="small"
                 type="warning"
                 :icon="VideoPause"
-                @click="handlePause(row)"
+                @click="invokeTableRowAction(filteredJobs, row, handlePause)"
                 :loading="actionLoading[row.id]"
               >
                 暂停
@@ -164,7 +164,7 @@
                 size="small"
                 type="success"
                 :icon="VideoPlay"
-                @click="handleResume(row)"
+                @click="invokeTableRowAction(filteredJobs, row, handleResume)"
                 :loading="actionLoading[row.id]"
               >
                 恢复
@@ -173,7 +173,7 @@
                 size="small"
                 type="primary"
                 :icon="Promotion"
-                @click="handleTrigger(row)"
+                @click="invokeTableRowAction(filteredJobs, row, handleTrigger)"
                 :loading="actionLoading[row.id]"
               >
                 立即执行
@@ -181,7 +181,7 @@
               <el-button
                 size="small"
                 :icon="View"
-                @click="showJobDetail(row)"
+                @click="invokeTableRowAction(filteredJobs, row, showJobDetail)"
               >
                 详情
               </el-button>
@@ -334,7 +334,7 @@
                   link
                   type="primary"
                   size="small"
-                  @click="showExecutionDetail(row)"
+                  @click="invokeTableRowAction(historyList, row, showExecutionDetail)"
                 >
                   详情
                 </el-button>
@@ -467,7 +467,7 @@
                   link
                   type="primary"
                   size="small"
-                  @click="showExecutionDetail(row)"
+                  @click="invokeTableRowAction(executionList, row, showExecutionDetail)"
                 >
                   详情
                 </el-button>
@@ -602,11 +602,11 @@ import {
   markExecutionFailed,
   deleteExecution,
   type Job,
-  type JobHistory,
   type JobExecution,
   type SchedulerStats
 } from '@/api/scheduler'
 import { formatDateTime, formatRelativeTime } from '@/utils/datetime'
+import { invokeTableRowAction } from '@/utils/tableRows'
 
 // 数据
 const loading = ref(false)
@@ -635,7 +635,7 @@ const currentJob = ref<Job | null>(null)
 // 执行历史
 const historyDialogVisible = ref(false)
 const historyLoading = ref(false)
-const historyList = ref<JobHistory[]>([])
+const historyList = ref<JobExecution[]>([])
 const historyTotal = ref(0)
 const historyPage = ref(1)
 const historyPageSize = ref(20)
@@ -845,13 +845,9 @@ const loadHistory = async () => {
       ? await getSingleJobExecutions(currentHistoryJobId.value, params)
       : await getJobExecutions(params)
 
-    // 直接使用执行记录，不需要转换格式
+    // The executions endpoint already returns every field rendered by this table.
     const executions = Array.isArray(res.data?.items) ? res.data.items : []
-    // 手动历史需要 JobHistory 类型，包含 action 字段，因此将 JobExecution 转换为兼容格式
-    historyList.value = executions.map((ex: JobExecution) => ({
-      ...ex,
-      action: '手动触发' // 补充缺失的 action 字段
-    } as JobHistory))
+    historyList.value = executions
     historyTotal.value = res.data?.total || 0
   } catch (error: any) {
     ElMessage.error(error.message || '加载执行历史失败')
@@ -1184,4 +1180,3 @@ onMounted(() => {
   }
 }
 </style>
-

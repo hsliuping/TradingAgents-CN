@@ -73,15 +73,25 @@
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" size="small" :icon="View" @click="viewLog(row)">
+            <el-button
+              type="primary"
+              size="small"
+              :icon="View"
+              @click="invokeTableRowAction(logFiles, row, viewLog)"
+            >
               查看
             </el-button>
-            <el-button type="success" size="small" :icon="Download" @click="downloadLog(row)">
+            <el-button
+              type="success"
+              size="small"
+              :icon="Download"
+              @click="invokeTableRowAction(logFiles, row, downloadLog)"
+            >
               下载
             </el-button>
             <el-popconfirm
               title="确定要删除这个日志文件吗？"
-              @confirm="deleteLog(row)"
+              @confirm="invokeTableRowAction(logFiles, row, deleteLog)"
             >
               <template #reference>
                 <el-button type="danger" size="small" :icon="Delete">
@@ -198,6 +208,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Download, Search, View, Delete } from '@element-plus/icons-vue'
 import { LogsApi, type LogFileInfo, type LogContentResponse, type LogStatistics } from '@/api/logs'
+import { invokeTableRowAction } from '@/utils/tableRows'
 
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
@@ -435,4 +446,3 @@ onMounted(() => {
   }
 }
 </style>
-

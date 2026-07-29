@@ -214,7 +214,10 @@
         <el-table-column prop="duration" label="耗时(ms)" width="100" sortable />
         <el-table-column label="操作" width="100">
           <template #default="{ row }">
-            <el-button size="small" @click="viewDetails(row)">
+            <el-button
+              size="small"
+              @click="invokeTableRowAction(filteredRecords, row, viewDetails)"
+            >
               详情
             </el-button>
           </template>
@@ -268,6 +271,7 @@ import {
   Search
 } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
+import { invokeTableRowAction } from '@/utils/tableRows'
 
 type TokenRecord = {
   timestamp: string
