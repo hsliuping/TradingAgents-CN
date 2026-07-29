@@ -121,6 +121,25 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
+    async loginDemo() {
+      if (import.meta.env.VITE_ALPHAGUARD_DEMO !== 'true') return false
+      try {
+        this.loginLoading = true
+        const response = await authApi.demoLogin()
+        if (!response.success) return false
+        const { access_token, refresh_token, user } = response.data
+        this.setAuthInfo(access_token, refresh_token, user)
+        this.permissions = user.is_admin ? ['*'] : []
+        this.roles = user.is_admin ? ['admin'] : ['user']
+        return true
+      } catch (error: any) {
+        console.error('演示会话启动失败:', safeAuthErrorForLog(error))
+        return false
+      } finally {
+        this.loginLoading = false
+      }
+    },
+
     // 设置认证信息
     setAuthInfo(token: string, refreshToken?: string, user?: User) {
       this.token = token

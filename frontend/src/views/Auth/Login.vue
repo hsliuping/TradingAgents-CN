@@ -8,6 +8,14 @@
       </div>
 
       <el-card class="login-card" shadow="always">
+        <el-alert
+          v-if="isDemo"
+          type="warning"
+          :closable="false"
+          show-icon
+          title="DEMO ENVIRONMENT：演示数据，不是正式模拟账户，不是实际投资结果。"
+          class="demo-alert"
+        />
         <el-form
           :model="loginForm"
           :rules="loginRules"
@@ -15,7 +23,7 @@
           label-position="top"
           size="large"
         >
-          <el-form-item label="用户名" prop="username">
+          <el-form-item v-if="!isDemo" label="用户名" prop="username">
             <el-input
               v-model="loginForm.username"
               placeholder="请输入用户名"
@@ -23,7 +31,7 @@
             />
           </el-form-item>
 
-          <el-form-item label="密码" prop="password">
+          <el-form-item v-if="!isDemo" label="密码" prop="password">
             <el-input
               v-model="loginForm.password"
               type="password"
@@ -34,7 +42,7 @@
             />
           </el-form-item>
 
-          <el-form-item>
+          <el-form-item v-if="!isDemo">
             <div class="form-options">
               <el-checkbox v-model="loginForm.rememberMe">
                 记住我
@@ -42,7 +50,7 @@
             </div>
           </el-form-item>
 
-          <el-form-item>
+          <el-form-item v-if="!isDemo">
             <el-button
               type="primary"
               size="large"
@@ -54,10 +62,22 @@
             </el-button>
           </el-form-item>
 
+          <el-form-item v-else>
+            <el-button
+              type="warning"
+              size="large"
+              style="width: 100%"
+              :loading="loginLoading"
+              @click="handleDemoLogin"
+            >
+              进入隔离演示
+            </el-button>
+          </el-form-item>
+
           <el-form-item>
             <div class="login-tip">
               <el-text type="info" size="small">
-                开源版使用默认账号：admin / admin123
+                使用已创建的本地账号登录；不要在文档、脚本或截图中保存密码。
               </el-text>
             </div>
           </el-form-item>
@@ -82,6 +102,7 @@ import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 
 const loginFormRef = ref()
 const loginLoading = ref(false)
@@ -145,6 +166,21 @@ const handleLogin = async () => {
   }
 }
 
+const handleDemoLogin = async () => {
+  loginLoading.value = true
+  try {
+    const success = await authStore.loginDemo()
+    if (!success) {
+      ElMessage.error('隔离演示服务不可用')
+      return
+    }
+    ElMessage.success('已进入隔离演示环境')
+    await router.push('/alphaguard/overview')
+  } finally {
+    loginLoading.value = false
+  }
+}
+
 
 </script>
 
@@ -188,6 +224,10 @@ const handleLogin = async () => {
 }
 
 .login-card {
+  .demo-alert {
+    margin-bottom: 16px;
+  }
+
   .form-options {
     display: flex;
     justify-content: space-between;

@@ -1,5 +1,12 @@
 <template>
   <div v-loading="loading" class="page-grid">
+    <el-result v-if="loadError" icon="warning" title="运维状态加载失败" :sub-title="loadError"><template #extra><el-button @click="load">重试</el-button></template></el-result>
+    <template v-else>
+    <section class="safety-strip">
+      <div><span>SYSTEM_MODE</span><strong>{{ readiness?.system_mode || 'UNKNOWN' }}</strong></div>
+      <div><span>LIVE_TRADING_ENABLED</span><el-tag type="danger">{{ readiness?.live_trading_enabled ?? false }}</el-tag></div>
+      <div><span>LIVE_EXECUTION_ALLOWED</span><el-tag type="danger">{{ readiness?.live_execution_allowed ?? false }}</el-tag></div>
+    </section>
     <el-card shadow="never">
       <template #header><div class="header-row"><strong>系统准备度</strong><el-button @click="load">刷新</el-button></div></template>
       <div class="status-line">
@@ -39,7 +46,7 @@
           <el-table-column prop="backlog_count" label="积压" width="80" />
           <el-table-column prop="error_code" label="错误" min-width="170" />
         </el-table>
-        <div v-if="authStore.isAdmin" class="admin-actions">
+        <div v-if="authStore.isAdmin && !isDemo" class="admin-actions">
           <span>管理员受控任务：</span>
           <el-button v-for="name in manualJobs" :key="name" size="small" @click="runJob(name)">{{ name }}</el-button>
         </div>
@@ -51,7 +58,7 @@
           <el-table-column prop="sanitized_message" label="脱敏摘要" min-width="280" />
           <el-table-column prop="occurrence_count" label="次数" width="80" />
           <el-table-column prop="status" label="状态" width="130" />
-          <el-table-column v-if="authStore.isAdmin" label="操作" width="150">
+          <el-table-column v-if="authStore.isAdmin && !isDemo" label="操作" width="150">
             <template #default="{ row }">
               <el-button link :disabled="row.status !== 'OPEN'" @click="ack(row)">确认</el-button>
               <el-button link type="success" :disabled="row.status === 'RESOLVED'" @click="resolve(row)">解决</el-button>
@@ -65,6 +72,7 @@
         <h4>版本（已脱敏）</h4><pre>{{ pretty(versions) }}</pre>
       </el-tab-pane>
     </el-tabs>
+    </template>
   </div>
 </template>
 
@@ -82,7 +90,9 @@ import {
 } from '@/api/alphaguardOperations'
 
 const authStore = useAuthStore()
+const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 const loading = ref(false)
+const loadError = ref('')
 const readiness = ref<SystemReadiness | null>(null)
 const services = ref<ServiceHealth[]>([])
 const dataStatuses = ref<DataReadiness[]>([])
@@ -97,6 +107,7 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2)
 
 async function load() {
   loading.value = true
+  loadError.value = ''
   try {
     const [r, s, d, j, a, v, i] = await Promise.all([
       alphaguardOperationsApi.readiness(),
@@ -115,6 +126,8 @@ async function load() {
     alerts.value = a.data.items
     versions.value = v.data
     integrity.value = i.data
+  } catch (error: any) {
+    loadError.value = `${error?.message || '未知错误'}；页面不会用缓存状态伪装服务健康。`
   } finally {
     loading.value = false
   }
@@ -139,7 +152,11 @@ onMounted(load)
 
 <style scoped>
 .page-grid { display: grid; gap: 16px; }
+.safety-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.safety-strip > div { min-height: 58px; padding: 10px 14px; border: 1px solid var(--el-border-color-light); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.safety-strip span { color: var(--el-text-color-secondary); font-size: 12px; }
 .header-row, .status-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--el-border-color-light); }
 pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--el-fill-color-light); border-radius: 6px; white-space: pre-wrap; }
+@media (max-width: 700px) { .safety-strip { grid-template-columns: 1fr; } }
 </style>

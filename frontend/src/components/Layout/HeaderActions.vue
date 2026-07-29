@@ -77,6 +77,7 @@ import {
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const notifStore = useNotificationStore()
+const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 const { unreadCount, items } = storeToRefs(notifStore)
 const drawerVisible = ref(false)
 const filter = ref<'all' | 'unread'>('all')
@@ -101,6 +102,7 @@ function toLocal(iso: string) { try { return new Date(iso).toLocaleString() } ca
 function go(n: any) { if (n.link) window.open(n.link, '_blank') }
 
 onMounted(() => {
+  if (isDemo) return
   notifStore.refreshUnreadCount()
   // 🔥 建立 WebSocket 连接（优先），失败自动降级到 SSE
   notifStore.connect()
@@ -127,7 +129,7 @@ onUnmounted(() => {
   if (timerCount) clearInterval(timerCount)
   if (timerList) clearInterval(timerList)
   // 🔥 断开所有连接（WebSocket 和 SSE）
-  notifStore.disconnect()
+  if (!isDemo) notifStore.disconnect()
 })
 
 function showHelp() {

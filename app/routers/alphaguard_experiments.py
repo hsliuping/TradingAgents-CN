@@ -176,6 +176,20 @@ async def list_experiments(
     return ok({"items": jsonable_encoder(items)})
 
 
+@router.get("/experiments/promotion-policy", response_model=dict)
+async def promotion_policy(
+    current_user: dict = Depends(get_current_user),
+):
+    policy = clean_document(
+        await get_mongo_db()["ag_exp_promotion_policies"].find_one(
+            {}, sort=[("created_at", -1)]
+        )
+    )
+    if policy is None:
+        return ok({"policy": None, "status": "NOT_CONFIGURED"})
+    return ok({"policy": jsonable_encoder(policy), "status": "READY"})
+
+
 @router.post("/experiments", response_model=dict)
 async def create_experiment(
     body: ExperimentCreateRequest,

@@ -2,6 +2,10 @@ import { ApiClient } from './request'
 
 export interface EvaluationOverview {
   evaluated_subjects: number
+  historical_research_subjects: number
+  production_subjects: number
+  actual_trade_subjects: number
+  horizon_status: Record<string, number>
   pending_horizon_labels: number
   insufficient_data_labels: number
   traded_subjects: number
@@ -69,9 +73,35 @@ interface ItemsResponse<T> {
   items: T[]
 }
 
+export interface ResearchSummary {
+  status: string
+  report: null | {
+    report_id: string
+    status: string
+    created_at: string
+    run_mode: string
+    research_only: boolean
+    factor_summary: Record<string, Record<string, unknown>>
+    regime_summary: Record<string, unknown>
+    strategy_summary: Record<string, unknown>
+    model_summary: Record<string, unknown>
+    risk_execution_summary: Record<string, unknown>
+    evaluation_summary: Record<string, unknown>
+    caveats: string[]
+  }
+  boundary?: {
+    research_only: boolean
+    formal_account_performance: boolean
+    version_discontinuity_code: string
+  }
+}
+
 export const alphaguardEvaluationApi = {
   overview() {
     return ApiClient.get<EvaluationOverview>('/api/alphaguard/evaluations/overview')
+  },
+  researchSummary() {
+    return ApiClient.get<ResearchSummary>('/api/alphaguard/evaluations/research-summary')
   },
   accounts() {
     return ApiClient.get<ItemsResponse<AccountEvaluation>>('/api/alphaguard/evaluations/accounts')

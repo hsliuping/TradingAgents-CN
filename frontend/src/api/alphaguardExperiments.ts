@@ -45,6 +45,20 @@ interface Items<T> {
   items: T[]
 }
 
+export interface PromotionPolicy {
+  policy_id: string
+  policy_version: string
+  required_run_types: string[]
+  minimum_sample_rules: Record<string, string | number>
+  require_leakage_pass: boolean
+  require_robustness_pass: boolean
+  require_shadow: boolean
+  require_paper_challenger: boolean
+  require_top_risk_review: boolean
+  require_human_approval: boolean
+  immutable_hash: string
+}
+
 export const alphaguardExperimentApi = {
   champions() {
     return ApiClient.get<Items<ChampionAssignment>>('/api/alphaguard/champions')
@@ -56,6 +70,11 @@ export const alphaguardExperimentApi = {
   },
   experiments() {
     return ApiClient.get<Items<ExperimentDefinition>>('/api/alphaguard/experiments')
+  },
+  promotionPolicy() {
+    return ApiClient.get<{ policy: PromotionPolicy | null; status: string }>(
+      '/api/alphaguard/experiments/promotion-policy'
+    )
   },
   experiment(experimentId: string) {
     return ApiClient.get<ExperimentDetail>(

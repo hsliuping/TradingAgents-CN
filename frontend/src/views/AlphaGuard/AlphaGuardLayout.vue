@@ -1,11 +1,16 @@
 <template>
   <section class="alphaguard-shell">
+    <div v-if="isDemo" class="demo-banner">
+      <strong>DEMO ENVIRONMENT</strong>
+      <span>演示数据 · 不是正式模拟账户 · 不是实际投资结果</span>
+    </div>
     <header class="product-header">
       <div>
         <h1>AlphaGuard</h1>
         <p>可追溯的多智能体研究、硬风控与自动模拟交易</p>
       </div>
       <div class="safety-badges">
+        <el-tag :type="isDemo ? 'warning' : 'info'">{{ isDemo ? '隔离演示环境' : '真实本地环境' }}</el-tag>
         <el-tag type="success">SIM_AUTONOMOUS</el-tag>
         <el-tag type="danger">实盘永久关闭</el-tag>
       </div>
@@ -32,6 +37,7 @@
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
+const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 const navItems = [
   { path: '/alphaguard/overview', label: '总览' },
   { path: '/alphaguard/candidates', label: '候选池' },
@@ -45,6 +51,7 @@ const navItems = [
 
 <style scoped>
 .alphaguard-shell { display: grid; gap: 16px; }
+.demo-banner { position: sticky; top: 0; z-index: 20; display: flex; justify-content: center; gap: 12px; padding: 10px 16px; color: #3b2b00; background: #f7c948; border: 1px solid #d8a800; }
 .product-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .product-header h1 { margin: 0 0 4px; }
 .product-header p { margin: 0; color: var(--el-text-color-secondary); }
@@ -55,4 +62,3 @@ const navItems = [
   .product-nav { overflow-x: auto; }
 }
 </style>
-

@@ -7,6 +7,31 @@
       title="实验不会自动晋升或回退；真实样本不足时晋升会被后端阻断。"
     />
 
+    <div class="lab-status">
+      <div><span>Champion</span><strong>{{ champions.length }}</strong></div>
+      <div><span>实验</span><strong>{{ experiments.length }}</strong></div>
+      <div><span>Shadow</span><strong>{{ shadowCount }}</strong></div>
+      <div><span>Challenger</span><strong>0</strong><el-tag :type="challengerReady ? 'success' : 'info'" size="small">{{ challengerReady ? 'READY' : 'NOT READY' }}</el-tag></div>
+    </div>
+
+    <el-card class="section" shadow="never">
+      <template #header><div class="header-row"><strong>PromotionPolicy</strong><el-tag :type="policy ? 'success' : 'warning'">{{ policy ? policy.policy_id + '@' + policy.policy_version : 'NOT CONFIGURED' }}</el-tag></div></template>
+      <template v-if="policy">
+        <el-descriptions :column="3" border>
+          <el-descriptions-item label="历史样本">{{ policy.minimum_sample_rules.historical_samples }}</el-descriptions-item>
+          <el-descriptions-item label="样本外">{{ policy.minimum_sample_rules.out_of_sample_samples }}</el-descriptions-item>
+          <el-descriptions-item label="配对样本">{{ policy.minimum_sample_rules.paired_samples }}</el-descriptions-item>
+          <el-descriptions-item label="Shadow交易日">{{ policy.minimum_sample_rules.shadow_trade_days }}</el-descriptions-item>
+          <el-descriptions-item label="Challenger交易日">{{ policy.minimum_sample_rules.challenger_trade_days }}</el-descriptions-item>
+          <el-descriptions-item label="人工批准">{{ policy.require_human_approval ? '必须' : '未要求' }}</el-descriptions-item>
+        </el-descriptions>
+        <div class="policy-gates">
+          <el-tag v-for="gate in policyGates" :key="gate" type="info">{{ gate }}</el-tag>
+        </div>
+      </template>
+      <el-alert type="warning" :closable="false" show-icon title="当前实验样本为0且完整 Challenger 链未就绪，所有晋升操作保持禁用。" />
+    </el-card>
+
     <el-card class="section">
       <template #header>
         <div class="header-row">
@@ -28,7 +53,7 @@
             <el-button
               link
               type="danger"
-              :disabled="!row.previous_version_ref"
+              :disabled="isDemo || !row.previous_version_ref"
               @click="openRollback(row)"
             >
               回退
@@ -111,8 +136,8 @@
           <el-table-column prop="required_confirmation_text" label="确认文本" min-width="220" />
           <el-table-column label="操作" width="150">
             <template #default="{ row }">
-              <el-button link type="primary" @click="openApproval(row)">审阅批准</el-button>
-              <el-button link type="danger" @click="reject(row)">拒绝</el-button>
+              <el-button link type="primary" :disabled="isDemo" @click="openApproval(row)">审阅批准</el-button>
+              <el-button link type="danger" :disabled="isDemo" @click="reject(row)">拒绝</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -164,15 +189,20 @@ import {
   alphaguardExperimentApi,
   type ChampionAssignment,
   type ExperimentDefinition,
-  type ExperimentDetail
+  type ExperimentDetail,
+  type PromotionPolicy
 } from '@/api/alphaguardExperiments'
+import { alphaguardOperationsApi } from '@/api/alphaguardOperations'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
+const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 const loading = ref(false)
 const submitting = ref(false)
 const champions = ref<ChampionAssignment[]>([])
 const experiments = ref<ExperimentDefinition[]>([])
+const policy = ref<PromotionPolicy | null>(null)
+const challengerReady = ref(false)
 const detail = ref<ExperimentDetail | null>(null)
 const selectedChampion = ref<ChampionAssignment | null>(null)
 const approvalVisible = ref(false)
@@ -188,6 +218,14 @@ const rollbackConfirmation = ref('')
 const pendingPromotions = computed(() =>
   (detail.value?.promotion_requests || []).filter(item => item.status === 'PENDING_APPROVAL')
 )
+const shadowCount = computed(() => detail.value?.shadow_runs.length || 0)
+const policyGates = computed(() => policy.value ? [
+  policy.value.require_leakage_pass ? '泄漏审计 PASS' : '泄漏审计未要求',
+  policy.value.require_robustness_pass ? '稳健性 PASS' : '稳健性未要求',
+  policy.value.require_shadow ? 'Shadow 必须' : 'Shadow 未要求',
+  policy.value.require_paper_challenger ? 'PAPER_CHALLENGER 必须' : 'Challenger 未要求',
+  policy.value.require_top_risk_review ? '顶尖模型风险审查' : '风险审查未要求'
+] : [])
 const rollbackPrompt = computed(() =>
   rollbackTarget.value ? `ROLLBACK ${rollbackTarget.value.champion_slot_id}` : ''
 )
@@ -199,12 +237,16 @@ function pretty(value: unknown) {
 async function refresh() {
   loading.value = true
   try {
-    const [championResponse, experimentResponse] = await Promise.all([
+    const [championResponse, experimentResponse, policyResponse, readinessResponse] = await Promise.all([
       alphaguardExperimentApi.champions(),
-      alphaguardExperimentApi.experiments()
+      alphaguardExperimentApi.experiments(),
+      alphaguardExperimentApi.promotionPolicy(),
+      alphaguardOperationsApi.readiness()
     ])
     champions.value = championResponse.data.items || []
     experiments.value = experimentResponse.data.items || []
+    policy.value = policyResponse.data.policy
+    challengerReady.value = readinessResponse.data.challenger_ready
   } finally {
     loading.value = false
   }
@@ -292,6 +334,9 @@ onMounted(refresh)
 
 <style scoped>
 .experiment-lab { display: grid; gap: 16px; }
+.lab-status { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.lab-status > div { min-height: 74px; padding: 12px 16px; border: 1px solid var(--el-border-color-light); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lab-status span { color: var(--el-text-color-secondary); }.lab-status strong { font-size: 24px; }
 .section { margin-top: 0; }
 .header-row { display: flex; align-items: center; justify-content: space-between; }
 .detail-tabs { margin-top: 16px; }
@@ -305,4 +350,6 @@ onMounted(refresh)
 }
 .approval-panel { margin-top: 18px; }
 .dialog-form { margin-top: 16px; }
+.policy-gates { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+@media (max-width: 700px) { .lab-status { grid-template-columns: repeat(2, 1fr); } }
 </style>

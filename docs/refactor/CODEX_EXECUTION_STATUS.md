@@ -5384,3 +5384,79 @@ overall=DEGRADED_PAPER
 下一持久化开市日为 2026-07-29；完成时尚无该日完整收盘数据，因此未运行下一日观察链。
 回退代码使用本阶段提交的父提交；数据库历史证据默认保留，若需移除必须先做引用审计，
 并仅按历史 normalization 和精确日期范围处理。未开始 PR-010。
+
+## 19. Frontend Product Acceptance & Guided Demo（完成）
+
+本阶段只完成前端产品验收、只读演示环境和用户文档，没有修改 Factor、Regime、Strategy、
+Prompt、模型、Consensus、HardRisk、Matching、Fee、Champion 或任何交易参数。完成检查点为
+本节所在提交，标签 `alphaguard-frontend-acceptance-v1`，父检查点为
+`alphaguard-production-history-v1`（`6bea71e`）。
+
+### 19.1 真实环境与隔离演示
+
+真实前端/API 继续使用 `http://localhost:3000` 和 `http://localhost:8000`。新增独立演示
+API `http://127.0.0.1:8010` 与前端 `http://localhost:3001`；演示 API 只允许数据库
+`alphaguard_ui_demo`、显式 database scope 和 `ALPHAGUARD_UI_DEMO=true`，并同时关闭旧
+ConfigManager Mongo storage、Scheduler、Worker、backfill 和 live execution。
+
+演示数据库只有集合 `ag_ui_demo_scenarios` 和一条确定性不可变 fixture；页面永久显示
+`DEMO ENVIRONMENT`，写操作、晋升和回退入口均禁用。演示覆盖 DataQuality FAIL、WATCH、
+Top 拒绝、HardRisk 拒绝、完整 OrderIntent、T+1 Fill/PositionLot/费用、成熟评价、泄漏
+失败和晋升样本不足十个场景。演示 OrderIntent、Fill、收益及实验结果不属于正式生产数据。
+
+### 19.2 页面和浏览器验收
+
+实际浏览器逐页验证总览、候选池、决策链、自动模拟、评价中心、实验室和运维中心；同时
+验证登录/退出、未认证路由重定向、候选详情、阶段详情、三个账户切换、T+1 lot、费用、
+评价筛选、实验泄漏失败、禁用写操作、告警、404 和 API 不可用提示。决策时间线明确区分
+`NOT_REACHED`、`INSUFFICIENT_DATA`、`MODEL_FAILED`、拒绝和通过，不再把未到达状态补成
+HOLD/PASS。总览将 `DEGRADED_PAPER` 解释为部分能力安全关闭，而不是系统崩溃。
+
+12 张实际浏览器截图保存在 `docs/ux/screenshots/`，均为真实 PNG，不含密码、Token、
+Cookie、Authorization 或管理员邮箱。真实生产登录密码未被读取、重置、记录或自动化输入。
+用户已完成实际产品体验并接受当前页面和业务流程。
+
+### 19.3 测试、隔离和资产
+
+```text
+默认离线CI=505 passed, 89 warnings
+AlphaGuard前端/API/安全专项=55 passed, 85 warnings
+Demo隔离测试=8 passed, 85 warnings
+Python编译=passed
+独立Vite生产bundle=passed（2610 modules，50.82s）
+git diff --check=passed
+敏感信息扫描=passed
+```
+
+`npm run type-check` 和正式 `npm run build` 仍准确报告 34 个存量 `DefaultRow TS2345` 并
+以 exit 2 结束；错误只位于未触达的 Dashboard、Favorites、Reports、Screening、Settings
+和 System 页面。本阶段 AlphaGuard、认证、API 与 Demo 新增/修改文件类型错误为0。没有
+关闭 TypeScript 检查，也没有使用全局 `any` 消除基线。
+
+演示运行前后生产数据保持：Candidate=5、EvidenceSnapshot=6、QuantProposal=12、
+EvaluationSubject=762，OrderIntent/Outbox/Order/Fill/Position/Lot/Reservation/Ledger 全部为0。
+三个自动模拟账户各 initial/cash_available=1,000,000.00 CNY、cash_reserved=0，资产守恒。
+Demo 数据库只有一条 fixture，未写入任何生产集合。
+
+FastAPI、MongoDB、Redis、Scheduler、queue-worker 和 analysis-worker 均健康，两个 Worker
+heartbeat TTL 为13/31秒。将 `ALPHAGUARD_LIVE_TRADING_ENABLED=true` 后，FastAPI、
+queue-worker、analysis-worker 分别以 exit 3/1/1 拒绝启动。
+
+### 19.4 Readiness 与已知限制
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=true
+PAPER_READY=true
+EVALUATION_READY=true
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+overall=DEGRADED_PAPER
+blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
+```
+
+已知限制仅按事实保留：正式 `npm run build` 仍被34个存量类型错误阻断；真实环境没有完整
+Normal→Top→Consensus→HardRisk→Order→Fill案例，因此完整流程只在明确隔离的 Demo 展示；
+Challenger 与 live 继续关闭。本阶段未开始 PR-010。

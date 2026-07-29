@@ -71,6 +71,7 @@
             <template #default="{ row }">¥{{ money(row.realized_pnl) }}</template>
           </el-table-column>
         </el-table>
+        <el-empty v-if="!positions.length" description="当前账户无持仓" />
       </el-tab-pane>
 
       <el-tab-pane label="持仓批次 / T+1" name="lots">
@@ -85,6 +86,7 @@
           </el-table-column>
           <el-table-column prop="status" label="状态" />
         </el-table>
+        <el-empty v-if="!lots.length" description="当前账户无持仓批次" />
       </el-tab-pane>
 
       <el-tab-pane label="订单" name="orders">
@@ -115,6 +117,7 @@
                 v-if="cancellableStatuses.has(row.status)"
                 type="danger"
                 link
+                :disabled="isDemo"
                 @click="cancel(row)"
               >
                 取消
@@ -122,6 +125,7 @@
             </template>
           </el-table-column>
         </el-table>
+        <el-empty v-if="!orders.length" description="当前账户无订单；决策链没有产生合法 OrderIntent" />
       </el-tab-pane>
 
       <el-tab-pane label="成交与费用" name="fills">
@@ -147,6 +151,7 @@
           </el-table-column>
           <el-table-column prop="matching_engine_version" label="撮合版本" />
         </el-table>
+        <el-empty v-if="!fills.length" description="当前账户无成交或费用" />
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -177,6 +182,7 @@ const snapshots = ref<AutomaticAccountSnapshot[]>([])
 const activeAccountId = ref('')
 const activeTab = ref('positions')
 const loading = ref(false)
+const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 
 const accountLabels: Record<AutomaticAccountType, string> = {
   PAPER_QUANT: '量化基准',

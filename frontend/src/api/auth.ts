@@ -9,6 +9,13 @@ import type {
 } from '@/types/auth'
 
 export const authApi = {
+  // Available only from the isolated AlphaGuard UI demo API.
+  demoLogin: () =>
+    ApiClient.post<LoginResponse>('/api/auth/demo-login', undefined, {
+      skipAuth: true,
+      skipAuthError: true
+    }),
+
   // 登录
   login: (data: LoginForm) =>
     ApiClient.post<LoginResponse>('/api/auth/login', data, {

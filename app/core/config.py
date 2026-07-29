@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     PORT: int = Field(default=8000)
     ALLOWED_ORIGINS: List[str] = Field(default_factory=lambda: ["*"])
     ALLOWED_HOSTS: List[str] = Field(default_factory=lambda: ["*"])
+    # Explicit guard for the isolated AlphaGuard UI acceptance environment.
+    # It is consumed by the standalone demo app and is false by default.
+    ALPHAGUARD_UI_DEMO: bool = Field(default=False)
 
     # MongoDB配置
     MONGODB_HOST: str = Field(default="localhost")

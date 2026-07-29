@@ -86,8 +86,26 @@ async def evaluation_overview(
             {"subject_id": {"$in": subject_ids}}
         ).to_list(length=None)
     )
+    production_source_ids = {
+        str(item["proposal_id"])
+        for item in await db["ag_quant_proposals"].find(
+            {"user_id": str(current_user["id"])}, {"proposal_id": 1}
+        ).to_list(length=None)
+    }
+    production_subjects = sum(
+        str(item.get("source_object_id")) in production_source_ids
+        for item in subjects
+    )
+    horizon_status: dict[str, int] = {}
+    for item in labels:
+        key = f"{item.get('horizon', 'UNKNOWN')}:{item.get('status', 'UNKNOWN')}"
+        horizon_status[key] = horizon_status.get(key, 0) + 1
     data = {
         "evaluated_subjects": len(subjects),
+        "historical_research_subjects": len(subjects) - production_subjects,
+        "production_subjects": production_subjects,
+        "actual_trade_subjects": sum(item["actual_execution_exists"] for item in subjects),
+        "horizon_status": horizon_status,
         "pending_horizon_labels": sum(item["status"] == "PENDING" for item in labels),
         "insufficient_data_labels": sum(
             item["status"] in {"INSUFFICIENT_DATA", "INVALID_SOURCE"}
@@ -107,6 +125,36 @@ async def evaluation_overview(
         "diagnostic_notice": "规则化诊断，不代表严格因果",
     }
     return ok(jsonable_encoder(data))
+
+
+@router.get("/evaluations/research-summary", response_model=dict)
+async def research_summary(
+    current_user: dict = Depends(get_current_user),
+):
+    """Expose the immutable historical report as a read-only UI contract.
+
+    The report is intentionally read from the research collection rather than
+    recomputed here.  This keeps the UI deterministic and preserves the
+    research-only boundary from formal account performance.
+    """
+    report = await get_mongo_db()["ag_research_backfill_reports"].find_one(
+        {"run_mode": "RESEARCH_BACKFILL", "research_only": True},
+        sort=[("created_at", -1)],
+    )
+    if report is None:
+        return ok({"status": "NO_REPORT", "report": None})
+    cleaned = clean_document(report)
+    return ok(
+        {
+            "status": str(cleaned.get("status") or "UNKNOWN"),
+            "report": jsonable_encoder(cleaned),
+            "boundary": {
+                "research_only": True,
+                "formal_account_performance": False,
+                "version_discontinuity_code": "PENDING_VERSION_DISCONTINUITY",
+            },
+        }
+    )
 
 
 @router.get("/evaluations/subjects", response_model=dict)

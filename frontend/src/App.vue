@@ -40,9 +40,13 @@ const keepAliveComponents = computed(() => [
 
 // 配置向导
 const showConfigWizard = ref(false)
+const isAlphaGuardDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 
 // 检查是否需要显示配置向导
 const checkFirstTimeSetup = async () => {
+  // The isolated acceptance demo has no mutable system-configuration API.
+  if (isAlphaGuardDemo) return
+
   try {
     // 检查是否已经完成过配置向导
     const wizardCompleted = localStorage.getItem('config_wizard_completed')
