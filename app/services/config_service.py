@@ -2580,6 +2580,14 @@ class ConfigService:
                 "provider_name": "DeepSeek",
                 "models": [
                     {
+                        "name": "deepseek-v4-flash",
+                        "display_name": "DeepSeek V4 Flash - 快速版",
+                        "input_price_per_1k": 0.0,
+                        "output_price_per_1k": 0.0,
+                        "context_length": 32768,
+                        "currency": "CNY"
+                    },
+                    {
                         "name": "deepseek-chat",
                         "display_name": "DeepSeek Chat - 通用对话",
                         "input_price_per_1k": 0.0001,

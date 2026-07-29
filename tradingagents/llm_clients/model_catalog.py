@@ -53,10 +53,12 @@ MODEL_OPTIONS: ProviderModeOptions = {
     },
     "deepseek": {
         "quick": [
+            ("DeepSeek V4 Flash", "deepseek-v4-flash"),
             ("DeepSeek Chat", "deepseek-chat"),
             ("Custom model ID", "custom"),
         ],
         "deep": [
+            ("DeepSeek V4 Pro", "deepseek-v4-pro"),
             ("DeepSeek Chat", "deepseek-chat"),
             ("DeepSeek Reasoner", "deepseek-reasoner"),
             ("Custom model ID", "custom"),
