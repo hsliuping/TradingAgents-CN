@@ -35,6 +35,7 @@ class ResolvedSnapshotData(BaseModel):
     orders: list[dict[str, Any]] = Field(default_factory=list)
     instruments: list[dict[str, Any]] = Field(default_factory=list)
     market_context: list[dict[str, Any]] = Field(default_factory=list)
+    market_context_window: list[dict[str, Any]] = Field(default_factory=list)
     trading_calendar: list[dict[str, Any]] = Field(default_factory=list)
     input_refs: list[str]
     excluded_refs: list[str]
@@ -109,6 +110,7 @@ class SnapshotDataResolver:
             "orders": [],
             "instruments": [],
             "market_context": [],
+            "market_context_window": [],
             "trading_calendar": [],
         }
         excluded: list[str] = []
@@ -135,6 +137,7 @@ class SnapshotDataResolver:
             "instrument": "instruments",
             "market_context": "market_context",
             "market_breadth": "market_context",
+            "market_context_window": "market_context_window",
             "trading_calendar": "trading_calendar",
             "calendar": "trading_calendar",
         }
@@ -199,7 +202,20 @@ class SnapshotDataResolver:
             "instruments",
         } and not SnapshotDataResolver._matches_target(snapshot, document):
             return False
-        if category in {"prices", "benchmark_prices", "market_context"}:
+        if category in {
+            "prices",
+            "benchmark_prices",
+            "market_context",
+            "market_context_window",
+        }:
+            if category == "market_context_window":
+                as_of = _first_datetime(document, ("as_of_trade_date",))
+                if as_of is None or as_of.date() != snapshot.trade_date:
+                    return False
+                observed = _first_datetime(
+                    document, ("created_at", "available_at")
+                )
+                return _on_or_before(observed, snapshot.price_cutoff_at)
             if not _date_on_or_before(document, snapshot.trade_date):
                 return False
             observed = _first_datetime(

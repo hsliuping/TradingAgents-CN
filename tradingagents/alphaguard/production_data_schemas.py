@@ -177,6 +177,58 @@ class ProductionMarketContext(ProductionDataSchema):
         return self
 
 
+class MarketContextWindowManifest(ProductionDataSchema):
+    """Create-only lock over the ordered production context input window."""
+
+    manifest_id: str = Field(min_length=1)
+    ref_id: str = Field(min_length=1)
+    market: Literal["CN"] = "CN"
+    as_of_trade_date: date
+    required_count: int = Field(gt=0)
+    actual_count: int = Field(gt=0)
+    ordered_trade_dates: list[date] = Field(min_length=1)
+    ordered_context_ids: list[str] = Field(min_length=1)
+    ordered_context_hashes: list[str] = Field(min_length=1)
+    context_version: str = Field(min_length=1)
+    window_start: date
+    window_end: date
+    source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    available_at: datetime
+    created_at: datetime
+    schema_version: str = PRODUCTION_DATA_SCHEMA_VERSION
+
+    @model_validator(mode="after")
+    def validate_window(self) -> "MarketContextWindowManifest":
+        lengths = {
+            len(self.ordered_trade_dates),
+            len(self.ordered_context_ids),
+            len(self.ordered_context_hashes),
+        }
+        if (
+            lengths != {self.required_count}
+            or self.actual_count != self.required_count
+        ):
+            raise ValueError(
+                "MarketContext window must contain exactly required_count rows"
+            )
+        if self.ordered_trade_dates != sorted(set(self.ordered_trade_dates)):
+            raise ValueError("MarketContext window dates must be unique and ordered")
+        if self.window_start != self.ordered_trade_dates[0]:
+            raise ValueError("window_start does not match the first context date")
+        if self.window_end != self.ordered_trade_dates[-1]:
+            raise ValueError("window_end does not match the last context date")
+        if self.window_end != self.as_of_trade_date:
+            raise ValueError("MarketContext window must include the as-of trade date")
+        if any(
+            len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+            for value in self.ordered_context_hashes
+        ):
+            raise ValueError("ordered context hashes must be lowercase SHA-256 values")
+        return self
+
+
 class SecurityTradingStatus(ProductionDataSchema):
     trading_status_id: str = Field(min_length=1)
     ref_id: str = Field(min_length=1)

@@ -14,6 +14,10 @@ from app.services.alphaguard.evidence_snapshot_service import (
     EvidenceSnapshotService,
 )
 from app.services.alphaguard.factor_registry import FactorRegistry
+from app.services.alphaguard.horizon_label_service import HorizonLabelService
+from app.services.alphaguard.market_context_window_service import (
+    MarketContextWindowService,
+)
 from app.services.alphaguard.paper_storage import clean_document, mongo_date
 from app.services.alphaguard.production_data_config import (
     cn_price_limit_policy,
@@ -175,6 +179,10 @@ class ProductionObservationService:
             raise ProductionObservationError(
                 "exact-date READY production MarketContext is missing"
             )
+        context_window = await MarketContextWindowService(self.db).get_ready(
+            as_of_trade_date=trade_date,
+            cutoff_at=cutoff_at,
+        )
         trading_policy = cn_price_limit_policy()
         trading_statuses = await self.db["ag_security_trading_statuses"].find(
             {
@@ -233,12 +241,19 @@ class ProductionObservationService:
                 raise ProductionObservationError(
                     f"{symbol} precheck did not resolve exact production MarketContext"
                 )
+            raw_refs = {
+                key: list(value)
+                for key, value in precheck["raw_refs"].items()
+            }
+            raw_refs["market_context_window"] = [
+                f"market_context_window:{context_window.manifest_id}"
+            ]
             snapshot = await self._existing_snapshot(
                 user_id=str(user_id),
                 symbol=symbol,
                 trade_date=trade_date,
                 market_context_id=str(context["context_id"]),
-                raw_refs=precheck["raw_refs"],
+                raw_refs=raw_refs,
             )
             snapshot_action = "REUSED" if snapshot else "WOULD_CREATE"
             proposals = []
@@ -267,13 +282,14 @@ class ProductionObservationService:
                                 "news_data_version"
                             ],
                             "market_context_id": str(context["context_id"]),
-                            "raw_refs": precheck["raw_refs"],
+                            "raw_refs": raw_refs,
                             "factor_version_set": factor_versions,
                             "strategy_version": STRATEGY_SET_VERSION,
                             "required_sources": [
                                 "prices",
                                 "benchmark_prices",
                                 "market_context",
+                                "market_context_window",
                                 "trading_calendar",
                             ],
                         },
@@ -352,14 +368,35 @@ class ProductionObservationService:
                     }
                 )
         subjects_created = subjects_reused = 0
+        horizon_label_distribution: dict[str, int] = {}
         if execute:
-            _, subjects_created, subjects_reused = (
+            subjects, subjects_created, subjects_reused = (
                 await EvaluationSubjectBuilder(self.db).discover(
                     user_id=str(user_id),
                     decision_trade_date_lte=trade_date,
                     trace_id=trace_id,
                 )
             )
+            current_proposal_ids = {
+                str(proposal_id)
+                for result in results
+                for proposal_id in result.get("proposal_ids", [])
+            }
+            label_service = HorizonLabelService(self.db)
+            for subject in subjects:
+                if (
+                    subject.decision_trade_date != trade_date
+                    or subject.source_object_id not in current_proposal_ids
+                ):
+                    continue
+                for label in await label_service.calculate_all(
+                    subject,
+                    as_of_trade_date=trade_date,
+                    trace_id=trace_id,
+                ):
+                    horizon_label_distribution[label.status] = (
+                        horizon_label_distribution.get(label.status, 0) + 1
+                    )
         after_state = await self._state()
         if not triggered_proposals and before_state != after_state:
             raise ProductionObservationError(
@@ -373,11 +410,15 @@ class ProductionObservationService:
             "cutoff_at": cutoff_at,
             "market_context_id": str(context["context_id"]),
             "market_context_data_version": str(context["data_version"]),
+            "context_window_manifest_id": context_window.manifest_id,
+            "context_window_manifest_hash": context_window.manifest_hash,
+            "context_window_count": context_window.actual_count,
             "results": results,
             "triggered_count": len(triggered_proposals),
             "decisions": decisions,
             "evaluation_subjects_created": subjects_created,
             "evaluation_subjects_reused": subjects_reused,
+            "horizon_label_distribution": horizon_label_distribution,
             "formal_trading_state_before": before_state,
             "formal_trading_state_after": after_state,
             "live_execution_allowed": False,

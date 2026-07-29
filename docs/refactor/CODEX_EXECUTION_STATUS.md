@@ -5571,3 +5571,165 @@ blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
 ```
 
 业务显示和操作行为未改变。本阶段没有运行2026-07-29生产观察链，也没有开始 PR-010。
+
+## 21. First Complete Production Decision Cycle（完成）
+
+本阶段从 `alphaguard-frontend-type-safe`（`959104f`）开始，只执行2026-07-29正式收盘
+数据门禁、增量生产数据、不可变 MarketContext 窗口、正式观察链和完整性验证。没有重新
+初始化账户、Champion 或索引，没有重跑历史回放，也没有修改 Factor、Strategy、模型、
+Prompt、Consensus、HardRisk、Matching、Fee、交易参数或 Champion。
+
+### 21.1 收盘门禁、行情和交易状态
+
+持久化交易日历确认 `CN / 2026-07-29 / is_open=true`。只读 Provider 探测在收盘后通过：
+600519、601318、000333、002594、300750 和000300均由 BaoStock 00.9.30 的正式历史日线
+接口返回精确2026-07-29数据；AKShare/Eastmoney 与 AKShare/Tencent只作交叉验证。所有
+主记录均具备合法 OHLC、非缺失 volume/amount、明确 RAW/QFQ 版本、来源身份、采集时间和
+稳定 content hash，不是盘中快照、分钟线聚合、前一交易日替代或测试数据。
+
+增量同步只新增6条 `stock_daily_quotes`，没有覆盖旧记录。五只股票保存独立 RAW 与 QFQ
+版本；000300按既有指数无复权等价模式保存。重复身份执行遵循相同内容 `REUSED`、不同内容
+`INTEGRITY_CONFLICT`。五只股票新增5条版本化交易状态：
+
+```text
+000333 previous_close=85.37 upper/lower=93.91/76.83 SZSE_MAIN NORMAL_10
+002594 previous_close=93.35 upper/lower=102.69/84.02 SZSE_MAIN NORMAL_10
+300750 previous_close=390.86 upper/lower=469.03/312.69 CHINEXT NORMAL_20
+600519 previous_close=1320.00 upper/lower=1452.00/1188.00 SSE_MAIN NORMAL_10
+601318 previous_close=54.20 upper/lower=59.62/48.78 SSE_MAIN NORMAL_10
+```
+
+五只股票均为非ST、非停牌、非无涨跌幅限制特殊日，tick size=0.01、lot size=100。主板
+10%与创业板20%按既有版本化规则分别计算，没有统一套用10%。
+
+### 21.2 Production MarketContext 和不可变历史窗口
+
+Production MarketContext v1.1基于5,201只正式全市场日线及10个行业指数生成，未使用五只
+候选代表市场，也未复制研究对象或以0填充缺失值：
+
+```text
+context_id=141788c5-6496-5d1e-a99d-8ebc64337efe
+trade_date=2026-07-29
+benchmark_close=4600.2624
+benchmark_ma20=4725.588030
+benchmark_ma60=4834.844225
+benchmark_ma20_slope=-0.0156666
+benchmark_volatility_20d=0.2975646
+market_amount=2295838601573.85
+advance/decline/unchanged=3967/1173/61
+market_breadth=0.5435798
+new_high/new_low=604/479
+industry_diffusion=0.8
+extreme_risk=false
+universe_coverage=1
+missing_fields=[]
+quality_status=READY
+content_hash=891a9d1df22db2966800b49eb35795d3023712478778c8f5b8f15c7f24590e3a
+```
+
+新增 create-only `MarketContextWindowManifest` 和服务，锁定121个连续开市日的生产
+MarketContext（120个历史输入加当日）：
+
+```text
+manifest_id=965c1bc0-b78e-5f2a-a946-06e130d50561
+window=2026-01-27..2026-07-29
+required_count=121
+actual_count=121
+context_version=production-market-context-calculation-v1.1
+manifest_hash=d286c5165100c4c4936a02f05f644221084ea285e1ecaacd2210fc416c4d2c36
+```
+
+Manifest只引用生产集合，按日期、context id和content hash有序锁定；未来日期、日期断点、
+歧义身份、版本不兼容或数量不足均返回 `REGIME_INPUT_NOT_READY`。dry-run不写库，首次
+execute为 `CREATED`，相同输入复跑为 `REUSED`；不在运行时用“最新120根”替代Manifest。
+Production MarketContext本身也完成跨执行时刻的正式Provider复跑：全市场5,201/5,201、
+行业指数10/10、失败0，source和context两层均返回 `REUSED`。一次额外只读会话曾阻塞在
+BaoStock socket并被安全终止，未进入写路径；新会话完整复跑后通过，不影响正式对象。
+
+### 21.3 Snapshot、Factor、Regime 和 Proposal
+
+五只候选DataQuality均为PASS，各创建1个2026-07-29正式EvidenceSnapshot；Snapshot锁定
+RAW/QFQ、财务披露、新闻、公告、交易状态、涨跌停、当日MarketContext、窗口Manifest、
+Champion集合、数据版本、cutoff和immutable hash。幂等复跑复用同一Snapshot身份，没有
+覆盖2026-07-28或研究对象。
+
+每只Snapshot生成21个FactorResult，共105个，其中15个有效、90个因已锁定输入不足保持
+缺失/UNKNOWN。五个RegimeResult均安全返回 `INSUFFICIENT_DATA`：当前Snapshot只锁定2个
+基准价格引用，而既有MarketRegimeEngine要求61个
+`benchmark_prices.close`。窗口Manifest本身完整且版本兼容，但不能替代Engine明确要求的
+基准价格序列，因此：
+
+```text
+REGIME_READY=false
+missing=benchmark_prices.close[61]
+actual locked benchmark refs=2
+```
+
+没有修改Regime规则或为完成演示追加第二Snapshot身份。既有Strategy仍为每只候选生成
+2个QuantProposal，共10个：
+
+```text
+POSITION_EXIT_V1 REJECTED=5
+SWING_TREND_PULLBACK_V1 INSUFFICIENT_DATA=5
+TRIGGERED=0
+```
+
+由于没有自然产生TRIGGERED，NormalTradePlan、TopReview、Consensus和HardRisk均未调用；
+OrderIntent、ExecutionOutbox、Order和Fill保持0。这是合法安全结果，不需要下一交易日
+撮合验证。
+
+### 21.4 Evaluation、幂等和生产完整性
+
+新增10个QUANT_PROPOSAL EvaluationSubject，并按既有服务为1D/5D/10D/20D各创建10个
+`PENDING` HorizonLabel，共40个；没有读取未来行情。历史canonical run的10个
+`PENDING_VERSION_DISCONTINUITY` 20D标签保持不变，未跨QFQ版本拼接。
+
+dry-run前后19个相关集合计数完全一致。正式复跑复用五个Snapshot、相同Proposal和Subject
+身份，HorizonLabel不增长；Quote、交易状态、MarketContext和Manifest均使用create-only
+身份与内容哈希，未发生静默覆盖。重复身份聚合为0，生产Snapshot引用研究集合为0，没有
+未来数据泄漏、死信、卡住Saga、负现金、负持仓、异常冻结或账本失衡。
+
+三个自动模拟账户保持：
+
+```text
+PAPER_QUANT initial/cash_available=1000000.00 cash_reserved=0
+PAPER_NORMAL initial/cash_available=1000000.00 cash_reserved=0
+PAPER_TOP_CONFIRMED initial/cash_available=1000000.00 cash_reserved=0
+```
+
+### 21.5 测试、健康和 Readiness
+
+```text
+本阶段新增测试=4 passed
+默认离线CI=509 passed, 89 warnings
+PR-001～PR-009及AlphaGuard精确回归=506 passed, 89 warnings
+Production Data/History/MarketContext Window专项=25 passed
+Regime/Evaluation/Paper专项=54 passed, 85 warnings
+frontend type-check=PASS
+正式 npm run build=PASS
+npx vite build=PASS
+Python编译=PASS
+MongoDB/Redis/Scheduler/FastAPI/queue-worker/analysis-worker=HEALTHY
+FastAPI live=true=exit 3
+queue-worker live=true=exit 1
+analysis-worker live=true=exit 1
+```
+
+最终Readiness继续由现有服务计算：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=true
+PAPER_READY=true
+EVALUATION_READY=true
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+overall=DEGRADED_PAPER
+blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
+```
+
+已知限制：本阶段得到明确、安全、可审计的Regime输入不足结果，尚无真实
+Normal→Top→Consensus→HardRisk生产案例，也没有订单需要下一交易日撮合。完整生产决策
+周期验证完成到合法安全终点；未开始PR-010。

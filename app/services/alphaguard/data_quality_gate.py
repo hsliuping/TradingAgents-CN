@@ -36,6 +36,7 @@ _REFERENCE_COLLECTIONS = {
     "index_daily": "stock_daily_quotes",
     "market_context": "ag_market_contexts",
     "market_breadth": "ag_market_contexts",
+    "market_context_window": "ag_market_context_window_manifests",
     "trading_calendar": "trading_calendar",
     "sync_status": "sync_status",
 }
@@ -54,6 +55,7 @@ _IDENTITY_FIELDS = (
     "ref_id",
     "calendar_id",
     "context_id",
+    "manifest_id",
     "order_id",
 )
 _COLON_PRESERVING_IDENTITIES = {
@@ -279,6 +281,10 @@ class DataQualityGate:
                 missing.append(category)
                 if category == "prices":
                     blocking.append("required price source is unavailable")
+                elif category == "market_context_window":
+                    blocking.append(
+                        "required production MarketContext window is unavailable"
+                    )
                 else:
                     stale.append(category)
 
