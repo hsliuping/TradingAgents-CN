@@ -67,6 +67,7 @@ def _snapshot(
         "strategy_version": "strategy-demo-v1",
         "immutable_hash": _hash(snapshot_id),
         "created_at": "2026-07-28T15:36:00+08:00",
+        "schema_version": "evidence-snapshot-v1",
     }
 
 

@@ -16,6 +16,7 @@ from app.core.database import get_mongo_db
 from tradingagents.alphaguard.evidence_schemas import (
     ALPHAGUARD_CODE_VERSION,
     EVIDENCE_SNAPSHOT_SCHEMA_VERSION,
+    EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
     DataQualityReport,
     EvidenceSnapshot,
 )
@@ -73,11 +74,22 @@ def _canonical_value(value: Any) -> Any:
     if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, dict):
+        v2_optional_fields = {
+            "market_context_hash",
+            "market_context_window_manifest_id",
+            "market_context_window_manifest_hash",
+            "benchmark_price_window_manifest_id",
+            "benchmark_price_window_manifest_hash",
+            "required_benchmark_count",
+            "actual_benchmark_count",
+            "evidence_contract_status",
+        }
         return {
             str(key): _canonical_value(item)
             for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
             if key not in {"_id", "immutable_hash"}
             and not (key == "champion_version_refs" and not item)
+            and not (key in v2_optional_fields and item is None)
         }
     if isinstance(value, (set, frozenset)):
         return sorted(_canonical_value(item) for item in value)
@@ -114,9 +126,20 @@ def _snapshot_document(snapshot: EvidenceSnapshot) -> dict[str, Any]:
 class EvidenceSnapshotService:
     """Create-only EvidenceSnapshot persistence boundary."""
 
-    def __init__(self, db=None, gate: DataQualityGate | None = None):
+    def __init__(
+        self,
+        db=None,
+        gate: DataQualityGate | None = None,
+        *,
+        snapshot_collection: str = "ag_evidence_snapshots",
+        quality_collection: str = "ag_data_quality_reports",
+        enable_shadow_hook: bool = True,
+    ):
         self._db = db
         self.gate = gate or DataQualityGate()
+        self.snapshot_collection = snapshot_collection
+        self.quality_collection = quality_collection
+        self.enable_shadow_hook = enable_shadow_hook
 
     @property
     def db(self):
@@ -149,6 +172,30 @@ class EvidenceSnapshotService:
         trade_date = data["trade_date"]
         if isinstance(trade_date, str):
             trade_date = date.fromisoformat(trade_date)
+        schema_version = str(
+            data.get("schema_version") or EVIDENCE_SNAPSHOT_SCHEMA_VERSION
+        )
+        required_source_counts = dict(
+            data.pop("required_source_counts", {}) or {}
+        )
+        expected_manifest_hashes = dict(
+            data.pop("expected_manifest_hashes", {}) or {}
+        )
+        if schema_version == EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2:
+            required_count = int(data.get("required_benchmark_count") or 0)
+            required_source_counts["benchmark_prices"] = required_count
+            required_source_counts["benchmark_price_window"] = 1
+            required_source_counts["market_context_window"] = 1
+            expected_manifest_hashes.update(
+                {
+                    "benchmark_price_window": str(
+                        data.get("benchmark_price_window_manifest_hash") or ""
+                    ),
+                    "market_context_window": str(
+                        data.get("market_context_window_manifest_hash") or ""
+                    ),
+                }
+            )
         report = await self.gate.evaluate(
             db=self.db,
             symbol=symbol,
@@ -159,11 +206,13 @@ class EvidenceSnapshotService:
             announcement_cutoff_at=data["announcement_cutoff_at"],
             raw_refs=data["raw_refs"],
             required_sources=data.pop("required_sources", None),
+            required_source_counts=required_source_counts,
+            expected_manifest_hashes=expected_manifest_hashes,
         )
         report = DataQualityReport.model_validate(
             _bson_stable_value(report.model_dump(mode="python"))
         )
-        await self.db["ag_data_quality_reports"].insert_one(
+        await self.db[self.quality_collection].insert_one(
             to_mongo_value(report.model_dump(mode="python"))
         )
         if report.status == "FAIL":
@@ -200,6 +249,22 @@ class EvidenceSnapshotService:
             "news_data_version": data["news_data_version"],
             "account_snapshot_id": data.get("account_snapshot_id"),
             "market_context_id": data.get("market_context_id"),
+            "market_context_hash": data.get("market_context_hash"),
+            "market_context_window_manifest_id": data.get(
+                "market_context_window_manifest_id"
+            ),
+            "market_context_window_manifest_hash": data.get(
+                "market_context_window_manifest_hash"
+            ),
+            "benchmark_price_window_manifest_id": data.get(
+                "benchmark_price_window_manifest_id"
+            ),
+            "benchmark_price_window_manifest_hash": data.get(
+                "benchmark_price_window_manifest_hash"
+            ),
+            "required_benchmark_count": data.get("required_benchmark_count"),
+            "actual_benchmark_count": data.get("actual_benchmark_count"),
+            "evidence_contract_status": data.get("evidence_contract_status"),
             "data_quality": report.model_dump(mode="python"),
             "raw_refs": data["raw_refs"],
             # Version selection is immutable and hashed before any PR-004
@@ -211,7 +276,7 @@ class EvidenceSnapshotService:
             "top_model_version": data.get("top_model_version"),
             "prompt_versions": data.get("prompt_versions", {}),
             "created_at": datetime.utcnow(),
-            "schema_version": EVIDENCE_SNAPSHOT_SCHEMA_VERSION,
+            "schema_version": schema_version,
             "code_version": ALPHAGUARD_CODE_VERSION,
         }
         snapshot_data = _bson_stable_value(snapshot_data)
@@ -224,11 +289,13 @@ class EvidenceSnapshotService:
         snapshot_data = normalized.model_dump(mode="python")
         snapshot_data["immutable_hash"] = calculate_immutable_hash(normalized)
         snapshot = EvidenceSnapshot.model_validate(snapshot_data)
-        await self.db["ag_evidence_snapshots"].insert_one(
+        await self.db[self.snapshot_collection].insert_one(
             _snapshot_document(snapshot)
         )
         # PR-008 Shadow is best-effort and fully isolated.  A failure to enqueue
         # experiment work must never roll back or pause the production snapshot.
+        if not self.enable_shadow_hook:
+            return snapshot
         try:
             from app.services.alphaguard.experiment_task_service import (
                 ExperimentTaskService,
@@ -278,7 +345,7 @@ class EvidenceSnapshotService:
         query: dict[str, Any] = {"snapshot_id": snapshot_id}
         if user_id is not None:
             query["user_id"] = str(user_id)
-        document = await self.db["ag_evidence_snapshots"].find_one(query)
+        document = await self.db[self.snapshot_collection].find_one(query)
         cleaned = _clean_document(document)
         if cleaned is None:
             return None
@@ -302,7 +369,7 @@ class EvidenceSnapshotService:
             normalized_market, normalized_symbol = normalize_instrument(symbol, market)
             query.update(market=normalized_market, symbol=normalized_symbol)
         cursor = (
-            self.db["ag_evidence_snapshots"]
+            self.db[self.snapshot_collection]
             .find(query)
             .sort("created_at", -1)
             .limit(limit)

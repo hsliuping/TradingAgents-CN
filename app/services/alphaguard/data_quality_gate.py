@@ -37,6 +37,8 @@ _REFERENCE_COLLECTIONS = {
     "market_context": "ag_market_contexts",
     "market_breadth": "ag_market_contexts",
     "market_context_window": "ag_market_context_window_manifests",
+    "benchmark_price_window": "ag_benchmark_price_window_manifests",
+    "trading_status": "ag_security_trading_statuses",
     "trading_calendar": "trading_calendar",
     "sync_status": "sync_status",
 }
@@ -56,6 +58,7 @@ _IDENTITY_FIELDS = (
     "calendar_id",
     "context_id",
     "manifest_id",
+    "trading_status_id",
     "order_id",
 )
 _COLON_PRESERVING_IDENTITIES = {
@@ -136,6 +139,9 @@ class DataQualityGate:
         invalid: list[str] = []
         for category, references in raw_refs.items():
             resolved[category] = []
+            parsed_references: list[
+                tuple[str, str, str | None, str]
+            ] = []
             for reference in references:
                 parts = str(reference).split(":")
                 if len(parts) < 2:
@@ -150,17 +156,60 @@ class DataQualityGate:
                 if collection_name is None or not identifier:
                     invalid.append(reference)
                     continue
+                reference_date = (
+                    ":".join(parts[2:])
+                    if len(parts) >= 3 and not preserves_colons
+                    else None
+                )
+                parsed_references.append(
+                    (
+                        collection_name,
+                        identifier,
+                        reference_date,
+                        str(reference),
+                    )
+                )
+            by_collection: dict[
+                str, list[tuple[str, str | None, str]]
+            ] = {}
+            for collection_name, identifier, reference_date, reference in (
+                parsed_references
+            ):
+                by_collection.setdefault(collection_name, []).append(
+                    (identifier, reference_date, reference)
+                )
+            for collection_name, items in by_collection.items():
+                identifiers = sorted({item[0] for item in items})
                 clauses: list[dict[str, Any]] = [
-                    {field: identifier} for field in _IDENTITY_FIELDS
+                    {field: {"$in": identifiers}}
+                    for field in _IDENTITY_FIELDS
                 ]
-                if ObjectId.is_valid(identifier):
-                    clauses.append({"_id": ObjectId(identifier)})
-                clauses.append({"_id": identifier})
-                candidates = await db[collection_name].find(
+                object_ids = [
+                    ObjectId(identifier)
+                    for identifier in identifiers
+                    if ObjectId.is_valid(identifier)
+                ]
+                if object_ids:
+                    clauses.append({"_id": {"$in": object_ids}})
+                clauses.append({"_id": {"$in": identifiers}})
+                documents = await db[collection_name].find(
                     {"$or": clauses}
                 ).to_list(length=None)
-                if len(parts) >= 3 and not preserves_colons:
-                    reference_date = _as_datetime(":".join(parts[2:]))
+                for identifier, reference_date_text, reference in items:
+                    candidates = [
+                        document
+                        for document in documents
+                        if any(
+                            str(document.get(field)) == identifier
+                            for field in _IDENTITY_FIELDS
+                            if document.get(field) is not None
+                        )
+                        or str(document.get("_id")) == identifier
+                    ]
+                    if reference_date_text is not None:
+                        reference_date = _as_datetime(reference_date_text)
+                    else:
+                        reference_date = None
                     if reference_date is not None:
                         candidates = [
                             document
@@ -171,15 +220,15 @@ class DataQualityGate:
                                 and document_date.date() == reference_date.date()
                             )
                         ]
-                if len(candidates) != 1:
-                    invalid.append(reference)
-                    continue
-                document = candidates[0]
-                cleaned = dict(document)
-                cleaned["_reference"] = reference
-                if len(parts) >= 3 and not preserves_colons:
-                    cleaned["_reference_date"] = ":".join(parts[2:])
-                resolved[category].append(cleaned)
+                    if len(candidates) != 1:
+                        invalid.append(reference)
+                        continue
+                    document = candidates[0]
+                    cleaned = dict(document)
+                    cleaned["_reference"] = reference
+                    if reference_date_text is not None:
+                        cleaned["_reference_date"] = reference_date_text
+                    resolved[category].append(cleaned)
         return resolved, invalid
 
     def evaluate_documents(
@@ -194,6 +243,8 @@ class DataQualityGate:
         resolved: dict[str, list[dict[str, Any]]],
         invalid_refs: list[str],
         required_sources: list[str] | None = None,
+        required_source_counts: dict[str, int] | None = None,
+        expected_manifest_hashes: dict[str, str] | None = None,
     ) -> DataQualityReport:
         normalized_market, normalized_symbol = normalize_instrument(symbol, market)
         missing: list[str] = []
@@ -201,6 +252,8 @@ class DataQualityGate:
         anomalies: list[str] = []
         blocking: list[str] = []
         required_sources = required_sources or ["prices"]
+        required_source_counts = required_source_counts or {}
+        expected_manifest_hashes = expected_manifest_hashes or {}
 
         price_documents = list(resolved.get("prices", []))
         if not price_documents:
@@ -287,6 +340,29 @@ class DataQualityGate:
                     )
                 else:
                     stale.append(category)
+        for category, required_count in sorted(required_source_counts.items()):
+            actual_count = len(resolved.get(category, []))
+            if actual_count < int(required_count):
+                missing.append(
+                    f"{category}[{actual_count}/{int(required_count)}]"
+                )
+                blocking.append(
+                    f"required {category} evidence count is "
+                    f"{actual_count}/{int(required_count)}"
+                )
+        for category, expected_hash in sorted(expected_manifest_hashes.items()):
+            documents = resolved.get(category, [])
+            if len(documents) != 1:
+                blocking.append(
+                    f"required {category} manifest is missing or ambiguous"
+                )
+                continue
+            actual_hash = str(documents[0].get("manifest_hash") or "")
+            if actual_hash != expected_hash:
+                anomalies.append(f"{category} manifest hash mismatch")
+                blocking.append(
+                    f"required {category} manifest hash does not match"
+                )
 
         if not resolved.get("financials"):
             missing.append("financials")
@@ -347,6 +423,8 @@ class DataQualityGate:
         announcement_cutoff_at: datetime,
         raw_refs: dict[str, list[str]],
         required_sources: list[str] | None = None,
+        required_source_counts: dict[str, int] | None = None,
+        expected_manifest_hashes: dict[str, str] | None = None,
     ) -> DataQualityReport:
         resolved, invalid_refs = await self.resolve_references(db, raw_refs)
         return self.evaluate_documents(
@@ -359,4 +437,6 @@ class DataQualityGate:
             resolved=resolved,
             invalid_refs=invalid_refs,
             required_sources=required_sources,
+            required_source_counts=required_source_counts,
+            expected_manifest_hashes=expected_manifest_hashes,
         )

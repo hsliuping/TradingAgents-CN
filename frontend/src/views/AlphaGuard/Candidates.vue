@@ -38,8 +38,14 @@
         <el-descriptions v-else :column="1" border>
           <el-descriptions-item label="对象 ID">{{ selected.snapshot.snapshot_id }}</el-descriptions-item>
           <el-descriptions-item label="交易日">{{ dateOnly(selected.snapshot.trade_date) }}</el-descriptions-item>
+          <el-descriptions-item label="Snapshot Schema">{{ selected.snapshot.schema_version }}</el-descriptions-item>
           <el-descriptions-item label="价格版本">{{ selected.snapshot.price_data_version }}</el-descriptions-item>
           <el-descriptions-item label="MarketContext">{{ selected.snapshot.market_context_id || '未引用' }}</el-descriptions-item>
+          <el-descriptions-item label="Benchmark Window">{{ benchmarkWindow(selected.snapshot) }}</el-descriptions-item>
+          <el-descriptions-item label="Benchmark Manifest">{{ selected.snapshot.benchmark_price_window_manifest_id || 'v1 未锁定' }}</el-descriptions-item>
+          <el-descriptions-item label="MarketContext Window">{{ marketContextWindow(selected.snapshot) }}</el-descriptions-item>
+          <el-descriptions-item label="MarketContext Manifest">{{ selected.snapshot.market_context_window_manifest_id || 'v1 未锁定' }}</el-descriptions-item>
+          <el-descriptions-item label="Evidence Contract"><el-tag :type="evidenceContractStatus(selected.snapshot) === 'COMPLETE' ? 'success' : 'warning'">{{ evidenceContractStatus(selected.snapshot) }}</el-tag></el-descriptions-item>
           <el-descriptions-item label="Immutable Hash">{{ selected.snapshot.immutable_hash }}</el-descriptions-item>
           <el-descriptions-item label="证据引用">{{ evidenceCount(selected.snapshot.raw_refs) }} 条</el-descriptions-item>
         </el-descriptions>
@@ -107,6 +113,13 @@ async function reconcile() { const result = await alphaguardApi.reconcileCandida
 function shortId(value?: string) { return value ? `${value.slice(0, 8)}…` : '未生成' }
 function dateOnly(value?: string) { return value?.slice(0, 10) || '—' }
 function evidenceCount(refs: Record<string, string[]>) { return Object.values(refs).reduce((total, items) => total + items.length, 0) }
+function benchmarkCount(snapshot: EvidenceSnapshotSummary) { return snapshot.actual_benchmark_count ?? snapshot.raw_refs.benchmark_prices?.length ?? 0 }
+function benchmarkWindow(snapshot: EvidenceSnapshotSummary) { return `${benchmarkCount(snapshot)}/${snapshot.required_benchmark_count ?? 61}` }
+function marketContextWindow(snapshot: EvidenceSnapshotSummary) { return snapshot.market_context_window_manifest_id ? '121/121' : '未锁定' }
+function evidenceContractStatus(snapshot: EvidenceSnapshotSummary) {
+  if (snapshot.evidence_contract_status) return snapshot.evidence_contract_status
+  return benchmarkCount(snapshot) < 61 ? 'LEGACY_EVIDENCE_INCOMPLETE' : 'LEGACY_CONTRACT_UNVERIFIED'
+}
 function qualityType(status: string) { return status === 'PASS' ? 'success' : status === 'FAIL' ? 'danger' : 'warning' }
 function proposalType(status: string) { return status === 'TRIGGERED' ? 'success' : status === 'INSUFFICIENT_DATA' ? 'warning' : status === 'REJECTED' ? 'danger' : 'info' }
 onMounted(load)

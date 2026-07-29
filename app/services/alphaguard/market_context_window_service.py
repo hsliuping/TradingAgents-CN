@@ -50,6 +50,17 @@ class MarketContextWindowService:
         self.context_policy = production_market_context_policy()
         self.history_policy = production_market_context_history_policy()
 
+    @staticmethod
+    def verify_integrity(manifest: MarketContextWindowManifest) -> bool:
+        payload = manifest.model_dump(mode="python")
+        stored_hash = payload.pop("manifest_hash")
+        # schema_version is a model default added after the create-time hash.
+        payload.pop("schema_version", None)
+        return production_data_hash(
+            payload,
+            exclude={"created_at"},
+        ) == stored_hash
+
     async def build(
         self,
         *,
@@ -199,7 +210,10 @@ class MarketContextWindowService:
         existing = clean_document(existing_raw)
         if existing is not None:
             stored = MarketContextWindowManifest.model_validate(existing)
-            if stored.manifest_hash != manifest.manifest_hash:
+            if (
+                not self.verify_integrity(stored)
+                or stored.manifest_hash != manifest.manifest_hash
+            ):
                 raise MarketContextWindowConflict(
                     "INTEGRITY_CONFLICT: immutable context window changed"
                 )
@@ -241,6 +255,10 @@ class MarketContextWindowService:
         manifest = MarketContextWindowManifest.model_validate(
             clean_document(rows[0])
         )
+        if not self.verify_integrity(manifest):
+            raise MarketContextWindowConflict(
+                "INTEGRITY_CONFLICT: context manifest content hash mismatch"
+            )
         expected_version = str(self.context_policy["calculation_version"])
         if manifest.context_version != expected_version:
             raise MarketContextWindowError(

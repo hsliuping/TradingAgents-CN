@@ -12,6 +12,7 @@ from .instruments import Market, normalize_instrument
 
 DATA_QUALITY_SCHEMA_VERSION = "data-quality-report-v1"
 EVIDENCE_SNAPSHOT_SCHEMA_VERSION = "evidence-snapshot-v1"
+EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2 = "evidence-snapshot-v2"
 ALPHAGUARD_CODE_VERSION = "alphaguard-pr004-v1"
 
 
@@ -87,6 +88,26 @@ class EvidenceSnapshot(EvidenceSchema):
     news_data_version: str = Field(min_length=1)
     account_snapshot_id: str | None = None
     market_context_id: str | None = None
+    # v2 locks the complete evidence-window identities and hashes.  These
+    # remain optional solely so immutable v1 documents continue to parse and
+    # verify without migration or hash changes.
+    market_context_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    market_context_window_manifest_id: str | None = None
+    market_context_window_manifest_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    benchmark_price_window_manifest_id: str | None = None
+    benchmark_price_window_manifest_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    required_benchmark_count: int | None = Field(default=None, ge=61)
+    actual_benchmark_count: int | None = Field(default=None, ge=0)
+    evidence_contract_status: Literal[
+        "COMPLETE",
+        "LEGACY_EVIDENCE_INCOMPLETE",
+    ] | None = None
     data_quality: DataQualityReport
     raw_refs: dict[str, list[str]]
     factor_version_set: dict[str, str] = Field(default_factory=dict)
@@ -151,5 +172,51 @@ class EvidenceSnapshot(EvidenceSchema):
         ):
             raise ValueError(
                 "Champion version refs must use explicit non-latest identifiers"
+            )
+        if self.schema_version == EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2:
+            required_v2 = (
+                self.market_context_id,
+                self.market_context_hash,
+                self.market_context_window_manifest_id,
+                self.market_context_window_manifest_hash,
+                self.benchmark_price_window_manifest_id,
+                self.benchmark_price_window_manifest_hash,
+                self.required_benchmark_count,
+                self.actual_benchmark_count,
+            )
+            if any(value is None for value in required_v2):
+                raise ValueError(
+                    "evidence-snapshot-v2 requires all evidence-window identities"
+                )
+            if self.evidence_contract_status != "COMPLETE":
+                raise ValueError("evidence-snapshot-v2 requires COMPLETE contract")
+            assert self.required_benchmark_count is not None
+            assert self.actual_benchmark_count is not None
+            if self.actual_benchmark_count < self.required_benchmark_count:
+                raise ValueError("benchmark evidence window is incomplete")
+            if len(self.raw_refs.get("benchmark_prices", [])) != (
+                self.actual_benchmark_count
+            ):
+                raise ValueError(
+                    "benchmark raw reference count does not match v2 contract"
+                )
+            expected_manifest_refs = {
+                "market_context_window": (
+                    f"market_context_window:"
+                    f"{self.market_context_window_manifest_id}"
+                ),
+                "benchmark_price_window": (
+                    f"benchmark_price_window:"
+                    f"{self.benchmark_price_window_manifest_id}"
+                ),
+            }
+            for category, reference in expected_manifest_refs.items():
+                if self.raw_refs.get(category) != [reference]:
+                    raise ValueError(
+                        f"{category} reference does not match v2 contract"
+                    )
+        elif self.schema_version != EVIDENCE_SNAPSHOT_SCHEMA_VERSION:
+            raise ValueError(
+                f"unsupported EvidenceSnapshot schema: {self.schema_version}"
             )
         return self

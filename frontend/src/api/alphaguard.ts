@@ -70,6 +70,14 @@ export interface EvidenceSnapshotSummary {
   financial_data_version: string
   news_data_version: string
   market_context_id?: string | null
+  market_context_hash?: string | null
+  market_context_window_manifest_id?: string | null
+  market_context_window_manifest_hash?: string | null
+  benchmark_price_window_manifest_id?: string | null
+  benchmark_price_window_manifest_hash?: string | null
+  required_benchmark_count?: number | null
+  actual_benchmark_count?: number | null
+  evidence_contract_status?: 'COMPLETE' | 'LEGACY_EVIDENCE_INCOMPLETE' | null
   data_quality: {
     status: string
     blocking_reasons: string[]
@@ -83,6 +91,7 @@ export interface EvidenceSnapshotSummary {
   strategy_version?: string | null
   immutable_hash: string
   created_at: string
+  schema_version: string
 }
 
 export interface FactorResultSummary {

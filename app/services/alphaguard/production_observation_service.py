@@ -5,6 +5,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
+from app.services.alphaguard.benchmark_price_window_service import (
+    BenchmarkPriceWindowService,
+)
 from app.services.alphaguard.candidate_pool_service import CandidatePoolService
 from app.services.alphaguard.decision_pipeline import DecisionPipeline
 from app.services.alphaguard.evaluation_subject_builder import (
@@ -29,8 +32,14 @@ from app.services.alphaguard.real_data_candidate_service import (
 )
 from app.services.alphaguard.strategy_registry import STRATEGY_SET_VERSION
 from tradingagents.alphaguard.backfill_schemas import backfill_hash
-from tradingagents.alphaguard.evidence_schemas import EvidenceSnapshot
+from tradingagents.alphaguard.evidence_schemas import (
+    EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+    EvidenceSnapshot,
+)
 from tradingagents.alphaguard.instruments import normalize_instrument
+from tradingagents.alphaguard.production_data_schemas import (
+    BenchmarkPriceWindowManifest,
+)
 
 
 class ProductionObservationError(RuntimeError):
@@ -183,6 +192,16 @@ class ProductionObservationService:
             as_of_trade_date=trade_date,
             cutoff_at=cutoff_at,
         )
+        benchmark_window_result = await BenchmarkPriceWindowService(
+            self.db
+        ).build(
+            as_of_trade_date=trade_date,
+            cutoff_at=cutoff_at,
+            execute=execute,
+        )
+        benchmark_window = BenchmarkPriceWindowManifest.model_validate(
+            benchmark_window_result["manifest"]
+        )
         trading_policy = cn_price_limit_policy()
         trading_statuses = await self.db["ag_security_trading_statuses"].find(
             {
@@ -245,8 +264,23 @@ class ProductionObservationService:
                 key: list(value)
                 for key, value in precheck["raw_refs"].items()
             }
+            raw_refs["benchmark_prices"] = [
+                f"index_daily:{quote_id}"
+                for quote_id in benchmark_window.ordered_quote_ids
+            ]
             raw_refs["market_context_window"] = [
                 f"market_context_window:{context_window.manifest_id}"
+            ]
+            raw_refs["benchmark_price_window"] = [
+                f"benchmark_price_window:{benchmark_window.manifest_id}"
+            ]
+            trading_status = next(
+                item
+                for item in trading_statuses
+                if str(item.get("symbol")) == symbol
+            )
+            raw_refs["trading_status"] = [
+                f"trading_status:{trading_status['trading_status_id']}"
             ]
             snapshot = await self._existing_snapshot(
                 user_id=str(user_id),
@@ -282,6 +316,28 @@ class ProductionObservationService:
                                 "news_data_version"
                             ],
                             "market_context_id": str(context["context_id"]),
+                            "market_context_hash": str(
+                                context["content_hash"]
+                            ),
+                            "market_context_window_manifest_id": (
+                                context_window.manifest_id
+                            ),
+                            "market_context_window_manifest_hash": (
+                                context_window.manifest_hash
+                            ),
+                            "benchmark_price_window_manifest_id": (
+                                benchmark_window.manifest_id
+                            ),
+                            "benchmark_price_window_manifest_hash": (
+                                benchmark_window.manifest_hash
+                            ),
+                            "required_benchmark_count": (
+                                benchmark_window.required_count
+                            ),
+                            "actual_benchmark_count": (
+                                benchmark_window.actual_count
+                            ),
+                            "evidence_contract_status": "COMPLETE",
                             "raw_refs": raw_refs,
                             "factor_version_set": factor_versions,
                             "strategy_version": STRATEGY_SET_VERSION,
@@ -290,8 +346,13 @@ class ProductionObservationService:
                                 "benchmark_prices",
                                 "market_context",
                                 "market_context_window",
+                                "benchmark_price_window",
+                                "trading_status",
                                 "trading_calendar",
                             ],
+                            "schema_version": (
+                                EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2
+                            ),
                         },
                     )
                     snapshot_action = "CREATED"

@@ -229,6 +229,69 @@ class MarketContextWindowManifest(ProductionDataSchema):
         return self
 
 
+class BenchmarkPriceWindowManifest(ProductionDataSchema):
+    """Create-only lock over the ordered benchmark daily-price evidence."""
+
+    manifest_id: str = Field(min_length=1)
+    ref_id: str = Field(min_length=1)
+    market: Literal["CN"] = "CN"
+    benchmark_symbol: str = Field(pattern=r"^\d{6}$")
+    as_of_trade_date: date
+    required_count: int = Field(ge=61)
+    actual_count: int = Field(ge=61)
+    adjustment_mode: Literal["INDEX_UNADJUSTED_EQUIVALENT"]
+    provider: str = Field(min_length=1)
+    provider_version: str = Field(min_length=1)
+    price_data_versions: list[str] = Field(min_length=1)
+    ordered_price_data_versions: list[str] = Field(min_length=61)
+    version_compatibility_policy: str = Field(min_length=1)
+    version_compatibility_status: Literal["COMPATIBLE"]
+    ordered_trade_dates: list[date] = Field(min_length=61)
+    ordered_quote_ids: list[str] = Field(min_length=61)
+    ordered_quote_hashes: list[str] = Field(min_length=61)
+    start_trade_date: date
+    end_trade_date: date
+    source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    available_at: datetime
+    created_at: datetime
+    schema_version: str = "alphaguard-benchmark-price-window-v1"
+
+    @model_validator(mode="after")
+    def validate_window(self) -> "BenchmarkPriceWindowManifest":
+        lengths = {
+            len(self.ordered_trade_dates),
+            len(self.ordered_quote_ids),
+            len(self.ordered_quote_hashes),
+            len(self.ordered_price_data_versions),
+        }
+        if lengths != {self.required_count} or self.actual_count != self.required_count:
+            raise ValueError(
+                "benchmark window must contain exactly required_count rows"
+            )
+        if self.ordered_trade_dates != sorted(set(self.ordered_trade_dates)):
+            raise ValueError("benchmark window dates must be unique and ordered")
+        if self.start_trade_date != self.ordered_trade_dates[0]:
+            raise ValueError("start_trade_date does not match first benchmark date")
+        if self.end_trade_date != self.ordered_trade_dates[-1]:
+            raise ValueError("end_trade_date does not match final benchmark date")
+        if self.end_trade_date != self.as_of_trade_date:
+            raise ValueError("benchmark window must include the as-of trade date")
+        if sorted(set(self.ordered_price_data_versions)) != sorted(
+            self.price_data_versions
+        ):
+            raise ValueError("price_data_versions do not match ordered versions")
+        if any(not value for value in self.ordered_quote_ids):
+            raise ValueError("ordered quote identities must be non-empty")
+        if any(
+            len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+            for value in self.ordered_quote_hashes
+        ):
+            raise ValueError("ordered quote hashes must be lowercase SHA-256 values")
+        return self
+
+
 class SecurityTradingStatus(ProductionDataSchema):
     trading_status_id: str = Field(min_length=1)
     ref_id: str = Field(min_length=1)

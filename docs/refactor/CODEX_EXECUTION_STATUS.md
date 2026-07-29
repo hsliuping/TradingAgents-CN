@@ -5733,3 +5733,247 @@ blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
 已知限制：本阶段得到明确、安全、可审计的Regime输入不足结果，尚无真实
 Normal→Top→Consensus→HardRisk生产案例，也没有订单需要下一交易日撮合。完整生产决策
 周期验证完成到合法安全终点；未开始PR-010。
+
+## 22. Snapshot Evidence Window Contract & Full Path Validation（完成）
+
+本阶段从 `alphaguard-first-production-cycle`（`836c0e8`）开始，只修复
+EvidenceSnapshot 与 MarketRegimeEngine 的证据窗口契约，并在研究隔离集合验证完整代码
+路径。没有修改 Factor、Strategy、Regime 规则、Prompt、模型职责、Consensus、HardRisk、
+Matching、Fee、交易参数或 Champion。
+
+### 22.1 根因、原两根引用和 Engine 契约
+
+`CandidateRealDataService.precheck_candidate` 原先用当日记录的精确
+`price_data_version` 查询全部历史。2026-07-29 的 normalization-v1 身份只存在于
+2026-07-28 和 2026-07-29，因此五个正式 v1 Snapshot 各只锁定：
+
+```text
+index_daily:index-000300-2026-07-28 close=4569.5235
+index_daily:index-000300-2026-07-29 close=4600.2624
+```
+
+它们分别是前一开市日和 Snapshot 当日的沪深300日线，用于通用收益/基准证据；不是完整
+趋势窗口。查询已改为同一 provider、provider_version 和 adjustment semantics 下的连续
+历史，允许同一规范化规则演进产生多个明确 `price_data_version`，但不允许跨 Provider 或
+复权语义拼接。
+
+`config/alphaguard/regimes/market_regime_v1.yaml` 明确配置
+`required_benchmark_sessions=61`；`market_regime_engine._market_metrics` 只读取
+`benchmark_prices.close`，用最后20/60根计算 MA20、MA60、5日 MA20 slope 和20日波动率。
+Regime 不需要基准 OHLC/volume，但正式 Quote 记录仍由行情入口保持完整日线门禁。
+
+既有 `MarketContextWindowManifest` 锁定121条有序生产 MarketContext ID/hash，不包含
+基准 Quote ID/hash。它已是 create-only 对象，不能原地扩展；把两类不同证据混入同一
+Manifest也会扩大职责。因此新增独立 `BenchmarkPriceWindowManifest`，没有建立第二套
+行情 Repository 或集合。
+
+原 DataQuality 只验证引用存在、截止时间和至少一条必需来源，没有表达 Regime 所需的
+`benchmark_prices=61` 和 Manifest hash，因此2根也可 PASS。v2 创建前现在同时验证：
+
+```text
+benchmark_prices >= required_benchmark_count
+benchmark_price_window = 1且manifest_hash匹配
+market_context_window = 1且manifest_hash匹配
+trading_status = 1
+```
+
+不足时 DataQuality FAIL 或 Snapshot build blocked，不能再出现必需 Regime 证据2/61但
+Snapshot DataQuality PASS。
+
+### 22.2 Benchmark Manifest 与 Snapshot v2
+
+create-only `BenchmarkPriceWindowManifest` 锁定：
+
+```text
+manifest_id=739886d2-4e17-52fa-bef0-9312cad1f0c4
+market=CN
+benchmark_symbol=000300
+as_of=2026-07-29
+required/actual=61/61
+window=2026-04-30..2026-07-29
+provider/version=baostock/00.9.30
+adjustment=INDEX_UNADJUSTED_EQUIVALENT
+manifest_hash=0fbd423021f7840e866670c2d1097501a4a6ddaae572e806e1355f8e27cc2eb7
+```
+
+Manifest包含有序 trade date、Quote ID、Quote content hash 和逐根 data version；只引用
+持久化正式行情且不含未来日期。61根的 Provider、Provider version 和复权语义连续；
+59条历史规范化身份与2条新规范化身份由版本化兼容策略明确记录，未混合字段。相同身份
+和内容返回 `REUSED`，相同身份不同内容返回 `INTEGRITY_CONFLICT`。Manifest 可在源数据
+cutoff 后组装，其时间资格取锁定源记录 `available_at`，而不是 Manifest 插入时间。
+
+`evidence-snapshot-v2` 新增并纳入 `immutable_hash`：
+
+```text
+market_context_id/hash
+market_context_window_manifest_id/hash
+benchmark_price_window_manifest_id/hash
+required_benchmark_count/actual_benchmark_count
+evidence_contract_status=COMPLETE
+```
+
+v1字段保持可选兼容；旧文档不迁移、不回填。canonical hash仅在这些v2字段为`None`时忽略
+它们，因此所有旧v1 hash继续逐个验证通过，新v2 hash则强制包含Manifest ID和hash。
+
+### 22.3 Resolver 与不可变生产历史
+
+`SnapshotDataResolver` 仍先读取 Snapshot 的显式 `raw_refs`，然后对v2执行以下校验：
+
+```text
+Manifest内容重算hash并与Snapshot锁定ID/hash匹配
+Quote ID/hash/date/version逐项匹配
+日期有序且截止于Snapshot trade_date
+required/actual数量匹配且>=61
+当前MarketContext ID/hash匹配
+MarketContext Manifest ID/hash匹配
+```
+
+Resolver没有按 symbol 查询最新61根的路径，也不访问网络。任一引用缺失、篡改、版本不兼容
+或未来日期均 fail-closed。MarketRegimeEngine只接收 Resolver 形成的
+`ResolvedSnapshotData`。
+
+2026-07-29 的5个正式v1 Snapshot、105个FactorResult、5个RegimeResult、10个Proposal、
+10个EvaluationSubject和40个PENDING Label全部保持原样。五个旧 Snapshot ID/hash均与阶段
+开始基线一致，hash校验为true，benchmark仍为2/61；旧正式 Regime继续代表当时的
+`INSUFFICIENT_DATA`，没有被研究结果覆盖。
+
+### 22.4 2026-07-29研究隔离验证
+
+运行：
+
+```text
+run_mode=EVIDENCE_CONTRACT_VALIDATION
+research_only=true
+automated_execution_allowed=false
+validation_run_id=1d2b5226-35e7-59f2-a30c-80e4cbe01f5e
+result_hash=89b8a2afe27aed53e1ce16e6254c7d725c913797ff437d0169675ce506b73c1b
+```
+
+五个v2验证 Snapshot只写 `ag_research_evidence_contract_*`：
+
+| symbol | validation_snapshot_id | benchmark | context | Factor | Regime | Proposal |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| 000333 | `cb1549fe-7fdc-490e-95d9-a6563218025b` | 61 | 121 | 21 | RANGE_WEAK | REJECTED×2 |
+| 002594 | `dee60ba0-1376-4171-88f7-dce186c2670c` | 61 | 121 | 21 | RANGE_WEAK | REJECTED×2 |
+| 300750 | `19ca771b-ef4d-4409-8bc5-8c54682e74fe` | 61 | 121 | 21 | RANGE_WEAK | REJECTED×2 |
+| 600519 | `b0a9f7d9-1fc0-4a0d-b0c6-e1a375e65136` | 61 | 121 | 21 | RANGE_WEAK | REJECTED×2 |
+| 601318 | `df053e0e-fb20-4066-bff9-73ae85912761` | 61 | 121 | 21 | RANGE_WEAK | REJECTED×2 |
+
+五个 Regime 均为正式 Engine 代码对冻结 Snapshot 证据计算出的研究隔离结果：
+
+```text
+benchmark_close_vs_ma20=-0.026521
+benchmark_close_vs_ma60=-0.048519
+benchmark_ma20_slope_5d=-0.015667
+benchmark_volatility20=0.297565
+market_breadth=0.543580
+industry_diffusion=0.800000
+regime=RANGE_WEAK
+```
+
+POSITION_EXIT因`NO_POSITION`拒绝，SWING因`REGIME_DISALLOWS_NEW_POSITION`拒绝；没有
+TRIGGERED，因此2026-07-29验证没有调用Normal、Top、Consensus或HardRisk。相同输入复跑
+Snapshot/Factor/Regime/Proposal/Run均为 `REUSED`，result hash不变。
+
+### 22.5 历史TRIGGERED与完整决策路径
+
+canonical run `9b921ffa-71a5-578b-85e8-252b2f9cfca9` 的4个自然TRIGGERED样本为：
+
+```text
+300750 2026-04-30
+000333 2026-06-12
+300750 2026-05-08
+601318 2026-01-09
+```
+
+四个历史研究 Snapshot hash均有效且各有至少61根基准引用，没有未来价格引用；但对应日期
+均缺版本化 `SecurityTradingStatus` 和明确涨跌停价。因此真实模型调用资格为0，
+`real_model_status=NOT_CALLED_NO_EVIDENCE_COMPLETE_SAMPLE`。没有把缺失交易状态解释成
+可成交，也没有用默认HOLD代替模型失败。
+
+为验证代码结构，使用第一条自然Proposal作为锚点，运行明确标记的
+`STRUCTURAL_STUB_VALIDATION`。确定性节点通过既有
+`ExistingProviderDecisionModelRunner.run_normal/run_top` 入口执行，覆盖状态组装、线程
+调用和结构化输出校验，再交给真实Consensus/HardRisk代码：
+
+```text
+validation_id=b3d3287a-4197-5808-ad06-1352c9fa210c
+result_hash=76172b137447bac1b8e1eec8227977921fe841d15bd8b1afc8ab6f769bd39c89
+Normal=PROPOSE_TRADE（deterministic structural stub）
+Top=CONFIRM（deterministic structural stub，material changes=0）
+Consensus=CONSENSUS_PASS（真实ConsensusEngine代码）
+HardRisk=PASS（真实HardRiskEngine代码）
+OrderIntent created=false
+Research Shadow=NOT_RUN_EVIDENCE_INCOMPLETE
+```
+
+这只证明Schema、状态机、Consensus和HardRisk调用路径，不是模型效果验证、真实模型结果、
+交易建议或正式决策。因自然样本证据不完整，没有进入Matching/Fee影子成交。
+
+### 22.6 前端、索引、完整性和回退
+
+Candidates详情与Decisions时间线新增最小只读字段：Snapshot Schema、Benchmark Window、
+Benchmark Manifest、MarketContext Window/Manifest和Evidence Contract Status。旧v1显示
+`Benchmark Window 2/61`、`LEGACY_EVIDENCE_INCOMPLETE`，不会显示成篡改；v2完整契约显示
+`COMPLETE`。TypeScript和组件契约测试覆盖旧/新显示。
+
+本轮应用内浏览器因本地 `localhost:3001` URL安全策略在读取页面前拒绝访问，未绕过该
+策略；因此本轮实际浏览器冒烟记为受限。此前验收阶段的真实浏览器页面基线保持，且本阶段
+前端类型检查、正式构建、独立Vite构建均通过。为重建Schema更新后的确定性Demo fixture，
+仅删除并重建隔离数据库 `alphaguard_ui_demo` 的一条可再生场景；生产数据库未受影响，
+最终Demo仍只有 `ag_ui_demo_scenarios=1`。
+
+新增Manifest、研究验证集合的唯一索引均create-only；最终索引复核
+`created=0, unchanged=56, failed=0`。正式库保持：
+
+```text
+Candidate=5
+EvidenceSnapshot=11
+FactorResult=231
+RegimeResult=11
+QuantProposal=22
+EvaluationSubject=772
+OrderIntent/Outbox/Order/Fill/Position/Lot/Reservation/Ledger=0
+重复Snapshot/Factor/Regime/Proposal/Subject身份组=0
+三个账户initial/cash_available=1000000.00，cash_reserved=0
+```
+
+回退代码可回到父检查点 `836c0e8`。正式v1历史对象、Benchmark Manifest和研究隔离验证
+对象默认保留用于审计；旧代码不会读取新增研究集合。禁止为回退删除或改写旧正式对象。
+
+### 22.7 测试、健康、Readiness与限制
+
+```text
+Evidence Window + Decision Path新增测试=11 passed
+AlphaGuard/PR-001～PR-009精确回归=500 passed, 85 warnings
+默认离线CI=520 passed, 89 warnings
+frontend type-check=PASS
+正式 npm run build=PASS
+npx vite build=PASS（2611 modules）
+Python编译=PASS
+MongoDB/Redis/Scheduler/FastAPI/queue-worker/analysis-worker=HEALTHY
+queue-worker heartbeat TTL=13秒
+analysis-worker heartbeat TTL=51秒
+FastAPI live=true=exit 3
+queue-worker live=true=exit 1
+analysis-worker live=true=exit 1
+```
+
+最终Readiness仍由现有服务计算：
+
+```text
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=true
+PAPER_READY=true
+EVALUATION_READY=true
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+overall=DEGRADED_PAPER
+blocking=EXPERIMENT_SAMPLES_EMPTY,FULL_CHALLENGER_PIPELINE_NOT_READY
+```
+
+已知限制：旧正式2026-07-29结果仍是2/61的安全停止；完整v2结果只属于研究隔离验证；4个
+历史TRIGGERED均缺版本化交易状态和明确涨跌停价，故没有真实模型调用或研究影子成交；
+真实Normal→Top→Consensus→HardRisk生产案例仍不存在。未开始PR-010。

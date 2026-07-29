@@ -7,11 +7,20 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from tradingagents.alphaguard.evidence_schemas import EvidenceSnapshot
+from tradingagents.alphaguard.evidence_schemas import (
+    EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+    EvidenceSnapshot,
+)
 from tradingagents.alphaguard.instruments import normalize_instrument
+from tradingagents.alphaguard.production_data_schemas import (
+    BenchmarkPriceWindowManifest,
+    MarketContextWindowManifest,
+)
 
+from .benchmark_price_window_service import BenchmarkPriceWindowService
 from .data_quality_gate import DataQualityGate, _as_datetime
 from .evidence_snapshot_service import EvidenceSnapshotService
+from .market_context_window_service import MarketContextWindowService
 from .paper_storage import clean_document
 from .quant_config import sha256_value
 
@@ -36,6 +45,8 @@ class ResolvedSnapshotData(BaseModel):
     instruments: list[dict[str, Any]] = Field(default_factory=list)
     market_context: list[dict[str, Any]] = Field(default_factory=list)
     market_context_window: list[dict[str, Any]] = Field(default_factory=list)
+    benchmark_price_window: list[dict[str, Any]] = Field(default_factory=list)
+    trading_status: list[dict[str, Any]] = Field(default_factory=list)
     trading_calendar: list[dict[str, Any]] = Field(default_factory=list)
     input_refs: list[str]
     excluded_refs: list[str]
@@ -111,6 +122,8 @@ class SnapshotDataResolver:
             "instruments": [],
             "market_context": [],
             "market_context_window": [],
+            "benchmark_price_window": [],
+            "trading_status": [],
             "trading_calendar": [],
         }
         excluded: list[str] = []
@@ -138,6 +151,8 @@ class SnapshotDataResolver:
             "market_context": "market_context",
             "market_breadth": "market_context",
             "market_context_window": "market_context_window",
+            "benchmark_price_window": "benchmark_price_window",
+            "trading_status": "trading_status",
             "trading_calendar": "trading_calendar",
             "calendar": "trading_calendar",
         }
@@ -169,6 +184,7 @@ class SnapshotDataResolver:
                     or ""
                 )
             )
+        self._validate_evidence_contract(snapshot, accepted)
         refs = sorted(
             str(document["_reference"])
             for documents in accepted.values()
@@ -200,6 +216,7 @@ class SnapshotDataResolver:
             "announcements",
             "positions",
             "instruments",
+            "trading_status",
         } and not SnapshotDataResolver._matches_target(snapshot, document):
             return False
         if category in {
@@ -207,14 +224,20 @@ class SnapshotDataResolver:
             "benchmark_prices",
             "market_context",
             "market_context_window",
+            "benchmark_price_window",
         }:
-            if category == "market_context_window":
+            if category in {
+                "market_context_window",
+                "benchmark_price_window",
+            }:
                 as_of = _first_datetime(document, ("as_of_trade_date",))
                 if as_of is None or as_of.date() != snapshot.trade_date:
                     return False
-                observed = _first_datetime(
-                    document, ("created_at", "available_at")
-                )
+                # A create-only manifest may be assembled after the evidence
+                # cutoff; its locked source rows must have been available by
+                # the cutoff.  Use source availability, never manifest
+                # insertion time, for temporal eligibility.
+                observed = _first_datetime(document, ("available_at",))
                 return _on_or_before(observed, snapshot.price_cutoff_at)
             if not _date_on_or_before(document, snapshot.trade_date):
                 return False
@@ -277,7 +300,121 @@ class SnapshotDataResolver:
             # Future sessions are public calendar facts, but the calendar itself
             # must have existed at the snapshot cutoff.
             return _on_or_before(published, snapshot.price_cutoff_at)
+        if category == "trading_status":
+            observed = _first_datetime(
+                document, ("available_at", "collected_at", "created_at")
+            )
+            return (
+                _date_on_or_before(document, snapshot.trade_date)
+                and _on_or_before(observed, snapshot.price_cutoff_at)
+            )
         return False
+
+    @staticmethod
+    def _validate_evidence_contract(
+        snapshot: EvidenceSnapshot,
+        accepted: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        if snapshot.schema_version != EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2:
+            return
+        if len(accepted["benchmark_price_window"]) != 1:
+            raise SnapshotResolutionError(
+                "benchmark price window manifest is missing or ambiguous"
+            )
+        if len(accepted["market_context_window"]) != 1:
+            raise SnapshotResolutionError(
+                "MarketContext window manifest is missing or ambiguous"
+            )
+        if len(accepted["market_context"]) != 1:
+            raise SnapshotResolutionError(
+                "exact MarketContext evidence is missing or ambiguous"
+            )
+        benchmark_payload = dict(accepted["benchmark_price_window"][0])
+        benchmark_payload.pop("_reference", None)
+        benchmark_payload.pop("_reference_date", None)
+        context_payload = dict(accepted["market_context_window"][0])
+        context_payload.pop("_reference", None)
+        context_payload.pop("_reference_date", None)
+        benchmark_manifest = BenchmarkPriceWindowManifest.model_validate(
+            benchmark_payload
+        )
+        context_manifest = MarketContextWindowManifest.model_validate(
+            context_payload
+        )
+        if not BenchmarkPriceWindowService.verify_integrity(
+            benchmark_manifest
+        ):
+            raise SnapshotResolutionError(
+                "benchmark manifest content hash mismatch"
+            )
+        if not MarketContextWindowService.verify_integrity(context_manifest):
+            raise SnapshotResolutionError(
+                "MarketContext manifest content hash mismatch"
+            )
+        if (
+            benchmark_manifest.manifest_id
+            != snapshot.benchmark_price_window_manifest_id
+            or benchmark_manifest.manifest_hash
+            != snapshot.benchmark_price_window_manifest_hash
+        ):
+            raise SnapshotResolutionError(
+                "benchmark price window identity/hash mismatch"
+            )
+        if (
+            context_manifest.manifest_id
+            != snapshot.market_context_window_manifest_id
+            or context_manifest.manifest_hash
+            != snapshot.market_context_window_manifest_hash
+        ):
+            raise SnapshotResolutionError(
+                "MarketContext window identity/hash mismatch"
+            )
+        if (
+            benchmark_manifest.required_count
+            != snapshot.required_benchmark_count
+            or benchmark_manifest.actual_count
+            != snapshot.actual_benchmark_count
+            or benchmark_manifest.as_of_trade_date != snapshot.trade_date
+            or context_manifest.as_of_trade_date != snapshot.trade_date
+        ):
+            raise SnapshotResolutionError(
+                "evidence window count or as-of date mismatch"
+            )
+        quotes = accepted["benchmark_prices"]
+        quote_dates = [
+            _first_datetime(item, ("trade_date", "date"))
+            for item in quotes
+        ]
+        if any(item is None for item in quote_dates):
+            raise SnapshotResolutionError("benchmark quote date is missing")
+        ordered_dates = [item.date() for item in quote_dates if item is not None]
+        quote_ids = [str(item.get("ref_id") or "") for item in quotes]
+        quote_hashes = [str(item.get("content_hash") or "") for item in quotes]
+        quote_versions = [
+            str(item.get("price_data_version") or item.get("data_version") or "")
+            for item in quotes
+        ]
+        if (
+            ordered_dates != benchmark_manifest.ordered_trade_dates
+            or quote_ids != benchmark_manifest.ordered_quote_ids
+            or quote_hashes != benchmark_manifest.ordered_quote_hashes
+            or quote_versions
+            != benchmark_manifest.ordered_price_data_versions
+        ):
+            raise SnapshotResolutionError(
+                "benchmark quote identities, hashes, dates, or versions "
+                "do not match the locked manifest"
+            )
+        current_context = accepted["market_context"][0]
+        if (
+            str(current_context.get("context_id") or "")
+            != snapshot.market_context_id
+            or str(current_context.get("content_hash") or "")
+            != snapshot.market_context_hash
+        ):
+            raise SnapshotResolutionError(
+                "exact MarketContext identity/hash mismatch"
+            )
 
     @staticmethod
     def _matches_target(

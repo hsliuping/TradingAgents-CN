@@ -161,6 +161,43 @@ ALPHAGUARD_INDEX_SPECS = {
             "name": "idx_market_context_status_date",
         },
     ],
+    "ag_market_context_window_manifests": [
+        {
+            "keys": [("manifest_id", 1)],
+            "name": "uniq_market_context_window_manifest",
+            "unique": True,
+        },
+        {
+            "keys": [("market", 1), ("as_of_trade_date", 1)],
+            "name": "uniq_market_context_window_as_of",
+            "unique": True,
+        },
+        {
+            "keys": [("manifest_hash", 1)],
+            "name": "idx_market_context_window_hash",
+        },
+    ],
+    "ag_benchmark_price_window_manifests": [
+        {
+            "keys": [("manifest_id", 1)],
+            "name": "uniq_benchmark_price_window_manifest",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("market", 1),
+                ("benchmark_symbol", 1),
+                ("as_of_trade_date", 1),
+                ("required_count", 1),
+            ],
+            "name": "uniq_benchmark_price_window_as_of",
+            "unique": True,
+        },
+        {
+            "keys": [("manifest_hash", 1)],
+            "name": "idx_benchmark_price_window_hash",
+        },
+    ],
     "ag_security_master_sources": [
         {
             "keys": [("source_id", 1)],
@@ -1027,6 +1064,120 @@ ALPHAGUARD_INDEX_SPECS = {
         {"keys": [("research_snapshot_id", 1)], "name": "uniq_research_snapshot", "unique": True},
         {"keys": [("sample_id", 1)], "name": "uniq_research_snapshot_sample", "unique": True},
         {"keys": [("backfill_run_id", 1), ("source_trade_date", 1)], "name": "idx_research_snapshot_run_date"},
+    ],
+    "ag_research_evidence_contract_snapshots": [
+        {
+            "keys": [("snapshot_id", 1)],
+            "name": "uniq_research_evidence_contract_snapshot",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("user_id", 1),
+                ("symbol", 1),
+                ("trade_date", 1),
+                ("schema_version", 1),
+            ],
+            "name": "uniq_research_evidence_contract_identity",
+            "unique": True,
+        },
+        {
+            "keys": [("immutable_hash", 1)],
+            "name": "idx_research_evidence_contract_hash",
+        },
+    ],
+    "ag_research_evidence_contract_quality": [
+        {
+            "keys": [("quality_report_id", 1)],
+            "name": "uniq_research_evidence_contract_quality",
+            "unique": True,
+        },
+        {
+            "keys": [("symbol", 1), ("trade_date", 1)],
+            "name": "idx_research_evidence_contract_quality_identity",
+        },
+    ],
+    "ag_research_evidence_contract_factor_results": [
+        {
+            "keys": [
+                ("snapshot_id", 1),
+                ("factor_id", 1),
+                ("factor_version", 1),
+            ],
+            "name": "uniq_research_evidence_contract_factor",
+            "unique": True,
+        },
+    ],
+    "ag_research_evidence_contract_regime_results": [
+        {
+            "keys": [("regime_result_id", 1)],
+            "name": "uniq_research_evidence_contract_regime",
+            "unique": True,
+        },
+        {
+            "keys": [("snapshot_id", 1), ("regime_version", 1)],
+            "name": "uniq_research_evidence_contract_regime_identity",
+            "unique": True,
+        },
+    ],
+    "ag_research_evidence_contract_proposals": [
+        {
+            "keys": [("proposal_id", 1)],
+            "name": "uniq_research_evidence_contract_proposal",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("snapshot_id", 1),
+                ("strategy_id", 1),
+                ("strategy_version", 1),
+            ],
+            "name": "uniq_research_evidence_contract_proposal_identity",
+            "unique": True,
+        },
+    ],
+    "ag_research_evidence_contract_events": [
+        {
+            "keys": [("event_id", 1)],
+            "name": "uniq_research_evidence_contract_event",
+            "unique": True,
+        },
+        {
+            "keys": [("snapshot_id", 1), ("created_at", -1)],
+            "name": "idx_research_evidence_contract_event_snapshot",
+        },
+    ],
+    "ag_research_evidence_contract_runs": [
+        {
+            "keys": [("validation_run_id", 1)],
+            "name": "uniq_research_evidence_contract_run",
+            "unique": True,
+        },
+        {
+            "keys": [("source_trade_date", 1), ("run_mode", 1)],
+            "name": "uniq_research_evidence_contract_run_date",
+            "unique": True,
+        },
+        {
+            "keys": [("result_hash", 1)],
+            "name": "idx_research_evidence_contract_run_hash",
+        },
+    ],
+    "ag_research_decision_path_validations": [
+        {
+            "keys": [("validation_id", 1)],
+            "name": "uniq_research_decision_path_validation",
+            "unique": True,
+        },
+        {
+            "keys": [("backfill_run_id", 1), ("run_mode", 1)],
+            "name": "uniq_research_decision_path_run",
+            "unique": True,
+        },
+        {
+            "keys": [("result_hash", 1)],
+            "name": "idx_research_decision_path_hash",
+        },
     ],
     "ag_research_factor_results": [
         {"keys": [("result_id", 1)], "name": "uniq_research_factor_result", "unique": True},

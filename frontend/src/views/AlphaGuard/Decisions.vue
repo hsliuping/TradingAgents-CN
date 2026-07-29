@@ -74,6 +74,11 @@ function stage(key: string, label: string, status: string, reason: string, paylo
   return { key, label, status, reason, payload, objectIds: [], hashes: [], versions: [], traceIds: [], createdAt: '', evidenceCount: 0, ...options }
 }
 function countRefs(refs: Record<string, string[]> = {}) { return Object.values(refs).reduce((n, items) => n + items.length, 0) }
+function benchmarkCount(snapshot: EvidenceSnapshotSummary) { return snapshot.actual_benchmark_count ?? snapshot.raw_refs.benchmark_prices?.length ?? 0 }
+function evidenceContractStatus(snapshot: EvidenceSnapshotSummary) {
+  if (snapshot.evidence_contract_status) return snapshot.evidence_contract_status
+  return benchmarkCount(snapshot) < 61 ? 'LEGACY_EVIDENCE_INCOMPLETE' : 'LEGACY_CONTRACT_UNVERIFIED'
+}
 function proposalCounts(items: QuantProposalSummary[]) { const counts: Record<string, number> = {}; for (const item of items) counts[item.status] = (counts[item.status] || 0) + 1; return Object.entries(counts).map(([status,count]) => ({status,count})) }
 function missingReason(proposals: QuantProposalSummary[]) { const reasons = [...new Set(proposals.flatMap(item => item.reason_codes || []))]; return reasons.join('；') || '没有可进入模型链的 Proposal' }
 function eventOptions(event: DecisionEvent | undefined, objectId: string | null | undefined): Partial<Stage> {
@@ -116,6 +121,7 @@ function buildTimeline(snapshot: EvidenceSnapshotSummary, factors: FactorResultS
   const stages: Stage[] = [
     stage('quality','DataQuality',snapshot.data_quality.status,snapshot.data_quality.blocking_reasons.join('；') || '完整性、时效性与一致性检查通过',snapshot.data_quality,{objectIds:[],createdAt:snapshot.data_quality.checked_at}),
     stage('snapshot','EvidenceSnapshot','CREATED','使用持久化版本与正式引用创建',snapshot,{objectIds:[snapshot.snapshot_id],hashes:[snapshot.immutable_hash],versions:[snapshot.price_data_version,snapshot.financial_data_version,snapshot.news_data_version],createdAt:snapshot.created_at,evidenceCount:countRefs(snapshot.raw_refs)}),
+    stage('evidence-contract','Evidence Contract',evidenceContractStatus(snapshot),`Snapshot ${snapshot.schema_version}；Benchmark Window ${benchmarkCount(snapshot)}/${snapshot.required_benchmark_count ?? 61}；MarketContext Window ${snapshot.market_context_window_manifest_id ? '121/121' : '未锁定'}`,{schema_version:snapshot.schema_version,benchmark_price_window_manifest_id:snapshot.benchmark_price_window_manifest_id,market_context_window_manifest_id:snapshot.market_context_window_manifest_id,evidence_contract_status:evidenceContractStatus(snapshot)},{objectIds:[snapshot.benchmark_price_window_manifest_id,snapshot.market_context_window_manifest_id].filter((value): value is string => Boolean(value)),hashes:[snapshot.benchmark_price_window_manifest_hash,snapshot.market_context_window_manifest_hash].filter((value): value is string => Boolean(value))}),
     stage('factor','Factor',factors.length ? 'CALCULATED' : 'NOT_REACHED',factors.length ? `${factors.length} 个版本锁定 FactorResult` : '没有 FactorResult',factors,{objectIds:factors.map(item => item.factor_result_id),hashes:factors.map(item => item.input_hash),versions:[...new Set(factors.map(item => `${item.factor_id}@${item.factor_version}`))],createdAt:factors[0]?.calculated_at || ''}),
     stage('context','MarketContext',snapshot.market_context_id ? 'REFERENCED' : 'NOT_REACHED',snapshot.market_context_id ? 'Snapshot 已锁定生产 MarketContext' : 'Snapshot 未引用 MarketContext',{market_context_id:snapshot.market_context_id},{objectIds:snapshot.market_context_id ? [snapshot.market_context_id] : []}),
     stage('regime','MarketRegime',regime.calculation_status,regime.evidence.join('；') || String(regime.regime || '没有可用 Regime'),regime,{objectIds:[regime.regime_result_id],hashes:[regime.input_hash],versions:[regime.regime_version],createdAt:regime.calculated_at}),
@@ -130,7 +136,7 @@ function buildTimeline(snapshot: EvidenceSnapshotSummary, factors: FactorResultS
 }
 function selectTimeline(row: Timeline) { selected.value = row }
 function inspectStage(value: Stage) { stageDetail.value = value; detailVisible.value = true }
-function stageType(status: string) { if (['PASS','CREATED','CALCULATED','REFERENCED','TRIGGERED'].includes(status)) return 'success'; if (['FAIL','REJECTED','MODEL_FAILED','HARD_RISK_REJECT'].includes(status)) return 'danger'; if (status === 'INSUFFICIENT_DATA') return 'warning'; return 'info' }
+function stageType(status: string) { if (['PASS','CREATED','CALCULATED','REFERENCED','TRIGGERED','COMPLETE'].includes(status)) return 'success'; if (['FAIL','REJECTED','MODEL_FAILED','HARD_RISK_REJECT'].includes(status)) return 'danger'; if (['INSUFFICIENT_DATA','LEGACY_EVIDENCE_INCOMPLETE','LEGACY_CONTRACT_UNVERIFIED'].includes(status)) return 'warning'; return 'info' }
 function timelineType(status: string) { return stageType(status) === 'success' ? 'success' : stageType(status) === 'danger' ? 'danger' : stageType(status) === 'warning' ? 'warning' : 'info' }
 onMounted(load)
 </script>

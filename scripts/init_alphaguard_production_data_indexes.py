@@ -21,6 +21,8 @@ COLLECTIONS = (
     "ag_security_master_sources",
     "ag_market_context_sources",
     "ag_market_contexts",
+    "ag_market_context_window_manifests",
+    "ag_benchmark_price_window_manifests",
     "ag_security_trading_statuses",
     "ag_production_data_events",
 )

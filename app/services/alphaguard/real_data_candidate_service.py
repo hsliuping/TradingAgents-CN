@@ -933,6 +933,15 @@ class CandidateRealDataService:
             }
         )
         price_version = str((target or {}).get("price_data_version") or "")
+        price_provider = str((target or {}).get("provider") or "")
+        price_provider_version = str(
+            (target or {}).get("provider_version") or ""
+        )
+        price_adjustment_mode = str(
+            (target or {}).get("price_adjustment_mode")
+            or (target or {}).get("adjustment_mode")
+            or ""
+        )
         prices = (
             await self.db["stock_daily_quotes"]
             .find(
@@ -940,7 +949,9 @@ class CandidateRealDataService:
                     "symbol": symbol,
                     "market": "CN",
                     "period": "daily",
-                    "price_data_version": price_version,
+                    "provider": price_provider,
+                    "provider_version": price_provider_version,
+                    "price_adjustment_mode": price_adjustment_mode,
                     "trade_date": {"$lte": _business_timestamp(trade_date)},
                 }
             )
@@ -963,6 +974,17 @@ class CandidateRealDataService:
         benchmark_version = str(
             (benchmark_target or {}).get("price_data_version") or ""
         )
+        benchmark_provider = str(
+            (benchmark_target or {}).get("provider") or ""
+        )
+        benchmark_provider_version = str(
+            (benchmark_target or {}).get("provider_version") or ""
+        )
+        benchmark_adjustment_mode = str(
+            (benchmark_target or {}).get("price_adjustment_mode")
+            or (benchmark_target or {}).get("adjustment_mode")
+            or ""
+        )
         benchmark = (
             await self.db["stock_daily_quotes"]
             .find(
@@ -970,7 +992,9 @@ class CandidateRealDataService:
                     "symbol": "000300",
                     "market": "CN",
                     "period": "daily",
-                    "price_data_version": benchmark_version,
+                    "provider": benchmark_provider,
+                    "provider_version": benchmark_provider_version,
+                    "price_adjustment_mode": benchmark_adjustment_mode,
                     "trade_date": {"$lte": _business_timestamp(trade_date)},
                 }
             )
