@@ -1119,8 +1119,9 @@ class DataSourceManager:
 
                 # 数据质量异常时也尝试降级到其他数据源
                 fallback_result = self._try_fallback_sources(symbol, start_date, end_date)
+                fallback_result, fallback_source = self._unpack_data_result(fallback_result)
                 if fallback_result and "❌" not in fallback_result and "错误" not in fallback_result:
-                    logger.info(f"✅ [数据来源: 备用数据源] 降级成功获取数据: {symbol}")
+                    logger.info(f"✅ [数据来源: {fallback_source or '备用数据源'}] 降级成功获取数据: {symbol}")
                     return fallback_result
                 else:
                     logger.error(f"❌ [数据来源: 所有数据源失败] 所有数据源都无法获取有效数据: {symbol}")
@@ -1138,7 +1139,56 @@ class DataSourceManager:
                             'error': str(e),
                             'event_type': 'data_fetch_exception'
                         }, exc_info=True)
-            return self._try_fallback_sources(symbol, start_date, end_date)
+            fallback_result, _ = self._unpack_data_result(
+                self._try_fallback_sources(symbol, start_date, end_date)
+            )
+            return fallback_result
+
+    @staticmethod
+    def _unpack_data_result(result) -> tuple[str, str | None]:
+        """Normalize fallback results to the public string-returning API."""
+        if isinstance(result, tuple):
+            data = result[0] if len(result) > 0 else ""
+            source = result[1] if len(result) > 1 else None
+            return str(data or ""), source
+        return str(result or ""), None
+
+    @staticmethod
+    def _run_async_provider_call(async_func, *args, **kwargs):
+        """
+        Run an async provider method from this synchronous manager.
+
+        FastAPI analysis runs already have an event loop, so run_until_complete()
+        would fail there. In that case, isolate the provider call in a short-lived
+        thread with its own event loop while preserving this sync API.
+        """
+        import asyncio
+
+        try:
+            asyncio.get_running_loop()
+            has_running_loop = True
+        except RuntimeError:
+            has_running_loop = False
+
+        if has_running_loop:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def runner():
+                return asyncio.run(async_func(*args, **kwargs))
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(runner).result()
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        return loop.run_until_complete(async_func(*args, **kwargs))
 
     def _get_mongodb_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> tuple[str, str | None]:
         """
@@ -1282,26 +1332,14 @@ class DataSourceManager:
             from .providers.china.akshare import get_akshare_provider
             provider = get_akshare_provider()
 
-            # 使用异步方法获取历史数据
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_closed():
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-            except RuntimeError:
-                # 在线程池中没有事件循环，创建新的
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
-            data = loop.run_until_complete(provider.get_historical_data(symbol, start_date, end_date, period))
+            data = self._run_async_provider_call(provider.get_historical_data, symbol, start_date, end_date, period)
 
             duration = time.time() - start_time
 
             if data is not None and not data.empty:
                 # 🔧 修复：使用统一的格式化方法，包含技术指标计算
                 # 获取股票基本信息
-                stock_info = loop.run_until_complete(provider.get_stock_basic_info(symbol))
+                stock_info = self._run_async_provider_call(provider.get_stock_basic_info, symbol)
                 stock_name = stock_info.get('name', f'股票{symbol}') if stock_info else f'股票{symbol}'
 
                 # 调用统一的格式化方法（包含技术指标计算）
