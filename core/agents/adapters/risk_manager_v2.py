@@ -1,7 +1,7 @@
 """
-风险管理者 v2.0
+风险评估师 v2.0
 
-基于ManagerAgent基类实现的风险管理者
+基于ManagerAgent基类实现的风险评估师
 """
 
 import logging
