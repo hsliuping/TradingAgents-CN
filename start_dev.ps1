@@ -116,9 +116,31 @@ if (-not $pythonExe) {
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUTF8 = "1"
 $env:PYTHONUNBUFFERED = "1"  # Disable output buffering
+try {
+    [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    chcp 65001 > $null
+} catch {
+    Write-Host "[WARN] Failed to switch console code page to UTF-8: $_" -ForegroundColor Yellow
+}
 
 Write-Host "[OK] UTF-8 encoding enabled" -ForegroundColor Green
 Write-Host ""
+
+function Start-DevJob {
+    param(
+        [string]$Name,
+        [scriptblock]$ScriptBlock,
+        [object[]]$ArgumentList
+    )
+
+    if (Get-Command Start-ThreadJob -ErrorAction SilentlyContinue) {
+        return Start-ThreadJob -Name $Name -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+    }
+
+    Write-Host "[WARN] Start-ThreadJob not available; falling back to Start-Job. Console logs may show mojibake on Windows." -ForegroundColor Yellow
+    return Start-Job -Name $Name -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList
+}
 
 # Check required files
 $backendMain = Join-Path $root "app\main.py"
@@ -147,12 +169,17 @@ try {
         Write-Host ""
 
         # Start Backend using Uvicorn
-        $backendJob = Start-Job -ScriptBlock {
+        $backendJob = Start-DevJob -Name "TradingAgentsBackend" -ScriptBlock {
             param($pythonExe, $backendPort, $root)
             Set-Location $root
             $env:PYTHONIOENCODING = "utf-8"
             $env:PYTHONUTF8 = "1"
             $env:PYTHONUNBUFFERED = "1"
+            try {
+                [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+                [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+                chcp 65001 > $null
+            } catch {}
             & $pythonExe -m uvicorn app.main:app --host 127.0.0.1 --port $backendPort --log-level info
         } -ArgumentList $pythonExe, $BackendPort, $root
 
@@ -171,12 +198,17 @@ try {
         Write-Host ""
 
         # Start Worker using Uvicorn (same as Backend)
-        $workerJob = Start-Job -ScriptBlock {
+        $workerJob = Start-DevJob -Name "TradingAgentsWorker" -ScriptBlock {
             param($pythonExe, $workerPort, $root)
             Set-Location $root
             $env:PYTHONIOENCODING = "utf-8"
             $env:PYTHONUTF8 = "1"
             $env:PYTHONUNBUFFERED = "1"
+            try {
+                [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+                [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+                chcp 65001 > $null
+            } catch {}
             & $pythonExe -m uvicorn app.worker.worker_app:app --host 127.0.0.1 --port $workerPort --log-level info
         } -ArgumentList $pythonExe, $WorkerPort, $root
 
