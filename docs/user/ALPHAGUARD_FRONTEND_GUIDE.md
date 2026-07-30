@@ -143,14 +143,71 @@ Fill、费用和日快照。
 ## 运维中心
 
 遇到页面加载失败、数据不足、Worker stale、评价未成熟或完整性告警时进入运维中心。
-依次查看服务、数据准备、任务、告警、模型运行、完整性与版本。只允许登记白名单幂等
+依次查看服务、数据准备、任务、告警、Models & API、完整性与版本。只允许登记白名单幂等
 任务；页面不提供环境变量编辑、任意 Shell、任意 Mongo 查询或 live 开关。
 
-“模型运行”显示三个受控角色及其固定Profile、Prompt版本、Credential状态、Provider
-能力、预算状态和最近运行摘要。管理员可以显式触发受控能力探测，但不能提交任意模型名、
-Prompt或凭证。能力探测可能访问供应商并产生费用，提交前必须确认；普通用户只能查看。
-前端不会显示、修改或传输API Key。凭证只能通过本机安全环境、Keychain映射或容器Secret
-提供，不能写入数据库配置、日志或截图。
+“Models & API”包含服务商、API凭证、模型目录、模型Profile、Prompt版本、价格、预算、
+能力检查和调用记录。管理员可以登记OpenAI-Compatible服务地址、模型与独立价格，再在
+API凭证页签输入该Endpoint的新API Key并保存到macOS Keychain；普通用户只能查看配置与
+健康状态。已保存Key永远显示固定占位符`••••••••`，不提供回显功能，也不会根据Key长度
+生成占位符。
+
+API Key输入框为password、不自动填充；组件状态在网络请求开始前清空，请求完成后再次
+清空。前端不会将Key写入localStorage、sessionStorage、Cookie、错误提示或诊断日志，
+浏览器也不会直接访问OpenAI或第三方Provider。后端使用数据库中的`is_admin`执行最终
+权限判断，接收Secret后只在请求和Provider传输内存中短暂使用。
+
+### 使用本机Keychain配置模型Provider
+
+完整Compose后端在容器中运行，无法访问宿主macOS Keychain，所以容器入口会显示
+`SECRET_STORE_UNAVAILABLE`并禁用凭证写入。这是安全阻断，不要将Key改写进`.env`或
+MongoDB。需要配置时，保留MongoDB与Redis容器运行，并在项目根目录启动本机API：
+
+```bash
+.venv/bin/python scripts/run_alphaguard_credential_host.py --execute
+```
+
+该入口复用同一认证、API、MongoDB和安全启动门禁，但不启动Scheduler、Worker、启动回填
+或数据同步；它不是第二套业务后端，也不会并行执行生产任务。
+
+另开终端启动只代理到该API的前端：
+
+```bash
+cd frontend
+VITE_DEV_PORT=3002 \
+VITE_API_PROXY_TARGET=http://127.0.0.1:8011 \
+VITE_ALPHAGUARD_CREDENTIAL_HOST=true \
+npm run dev -- --host 127.0.0.1
+```
+
+打开 `http://localhost:3002/login`，手工登录管理员账号，进入
+`AlphaGuard -> 运维中心 -> Models & API`。官方OpenAI的Base URL由系统固定；第三方服务
+必须按以下顺序配置：
+
+1. “服务商”添加OpenAI-Compatible服务名称、HTTPS Base URL、API模式和认证方式；
+2. 明确确认将研究数据发送给该第三方，并执行URL安全验证；
+3. “模型目录”执行受控`/models`发现，或在不支持发现时手工登记模型和能力；
+4. “价格”登记属于该Endpoint/模型版本的输入、缓存输入、输出价格、货币和来源；
+5. “API凭证”选择已验证Endpoint，只在password输入框粘贴新的Key并保存验证；
+6. “模型Profile”分别绑定Normal和Top的Endpoint、模型、凭证、Prompt与价格；
+7. “能力检查”查看两个真实角色schema、Token usage、费用和预算结果。
+
+不要把API Key发送到聊天、Codex提示词、终端命令、文档或截图；已经暴露过的Key不可恢复
+或复用。验证失败时Key不会写入Keychain；替换失败时旧凭证继续生效。撤销会从Keychain
+删除Secret，但保留历史能力检查和审计。价格未核验、currency不兼容或usage不可审计时，
+状态分别保持`PRICE_NOT_VERIFIED/BUDGET_BLOCKED/USAGE_UNAVAILABLE`，不会进行付费生产
+调用，也不代表PR-010 Level B完成。
+
+### 第三方Endpoint安全边界
+
+Base URL必须是HTTPS且解析到公网地址。后端会检查输入URL、DNS结果、实际连接目标、TLS
+主机名和重定向，拒绝localhost、私网、链路本地、元数据地址、跨Origin跳转和编码路径
+穿越。页面不允许任意Header、HTTP方法、请求Body或Prompt代理。每个Key精确绑定Provider
+类型、Endpoint ID/版本、origin和认证方式，Endpoint升级后不会自动继承旧Key。
+
+第三方模型不会按名称继承官方模型能力，第三方价格也不会继承官方价格。Endpoint、模型、
+价格与Profile assignment均为create-only版本对象；修改配置需要创建新版本。Normal和Top
+可以使用同一Endpoint，但必须分别建立Profile；若选择同一模型，页面要求管理员显式确认。
 
 ## 常见问题
 

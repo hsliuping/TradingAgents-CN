@@ -408,3 +408,37 @@ async def demo_model_status(_user: dict[str, Any] = Depends(current_demo_user)):
             )
         ],
     })
+
+
+@app.get("/api/alphaguard/models/credentials")
+async def demo_model_credentials(
+    _user: dict[str, Any] = Depends(current_demo_user),
+):
+    return ok({"items": [], "secret_store_status": "UNAVAILABLE"})
+
+
+@app.get("/api/alphaguard/models/prompts")
+async def demo_model_prompts(
+    _user: dict[str, Any] = Depends(current_demo_user),
+):
+    return ok(
+        {
+            "items": [
+                {
+                    "prompt_id": "demo-structural-prompt",
+                    "prompt_version": "demo-v1",
+                    "role": "DEMO",
+                    "schema_target": "STRUCTURAL_FIXTURE_ONLY",
+                    "template_hash": _data()["fixture_hash"],
+                    "enabled": False,
+                }
+            ]
+        }
+    )
+
+
+@app.get("/api/alphaguard/models/runs")
+async def demo_model_runs(
+    _user: dict[str, Any] = Depends(current_demo_user),
+):
+    return ok({"items": []})

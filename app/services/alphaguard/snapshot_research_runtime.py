@@ -139,15 +139,14 @@ class SnapshotResearchRuntime:
         run_mode: str,
         llm: Any | None = None,
     ) -> list[ResearchAgentResult]:
-        profile = await self.profiles.persisted(
-            self.profiles.for_role("RESEARCH_AGENT").profile_id,
-            self.profiles.for_role("RESEARCH_AGENT").profile_version,
-        )
+        profile = await self.profiles.persisted_for_role("RESEARCH_AGENT")
         prompt = await self.prompts.persisted(
             profile.prompt_profile_id,
             self.prompts.definition(profile.prompt_profile_id).prompt_version,
         )
-        model = llm or self.provider_runtime.create(profile)
+        model = llm or await self.provider_runtime.create_registered(
+            profile, db=self.db
+        )
         results: list[ResearchAgentResult] = []
         for agent_name, agent_role in RESEARCH_ROLES:
             rendered = prompt.template.format(
@@ -220,6 +219,7 @@ class SnapshotResearchRuntime:
                 prompt_id=prompt.prompt_id,
                 input_cost_per_million=profile.input_cost_per_million,
                 output_cost_per_million=profile.output_cost_per_million,
+                cost_currency=profile.cost_currency,
                 max_retries=max(0, budget.permitted_attempts - 1),
                 retry_backoff_seconds=profile.retry_backoff_seconds,
             )

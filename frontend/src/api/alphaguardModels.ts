@@ -5,6 +5,11 @@ export interface ModelProfileStatus {
   profile_id: string
   profile_version: string
   provider: string
+  provider_type?: 'OPENAI_OFFICIAL' | 'OPENAI_COMPATIBLE'
+  endpoint_profile_id?: string | null
+  endpoint_profile_version?: string | null
+  endpoint_model_id?: string | null
+  price_version_id?: string | null
   model_name: string
   model_version?: string | null
   prompt_id?: string
@@ -34,6 +39,115 @@ export interface ModelRuntimeStatus {
   status: 'READY' | 'NOT_CONFIGURED' | 'DEGRADED'
   profiles: ModelProfileStatus[]
   budget?: ModelBudgetStatus
+}
+
+export interface ModelCredentialStatus {
+  credential_id: string
+  provider: string
+  provider_type: 'OPENAI_OFFICIAL' | 'OPENAI_COMPATIBLE'
+  endpoint_profile_id?: string | null
+  endpoint_profile_version?: string | null
+  normalized_origin?: string | null
+  auth_scheme?: 'BEARER' | 'X_API_KEY' | null
+  configured: boolean
+  status: 'CONFIGURED' | 'NOT_CONFIGURED' | 'READY' | 'DEGRADED' | 'REVOKED'
+  last_verified_at?: string | null
+  last_error_code?: string | null
+  sanitized_message?: string | null
+  secret_store_status: 'READY' | 'UNAVAILABLE'
+}
+
+export interface CredentialCapabilitySummary {
+  provider: string
+  authentication_status: string
+  provider_access_status: string
+  normal_model_status: string
+  top_model_status: string
+  structured_output_status: string
+  price_status: string
+  budget_status: string
+  checked_at: string
+}
+
+export interface ModelCredentialMutationResult {
+  credential_id: string
+  provider: string
+  provider_type: 'OPENAI_OFFICIAL' | 'OPENAI_COMPATIBLE'
+  endpoint_profile_id?: string | null
+  endpoint_profile_version?: string | null
+  configured: boolean
+  stored: boolean
+  replaced: boolean
+  status: string
+  secret_store_status: string
+  capability: CredentialCapabilitySummary
+  last_error_code?: string | null
+  sanitized_message?: string | null
+}
+
+export interface ProviderEndpointProfile {
+  endpoint_profile_id: string
+  profile_version: string
+  provider_type: 'OPENAI_OFFICIAL' | 'OPENAI_COMPATIBLE'
+  display_name: string
+  base_url?: string
+  normalized_origin?: string
+  api_mode?: 'OPENAI_CHAT_COMPLETIONS' | 'OPENAI_RESPONSES' | 'AUTO_DETECT'
+  auth_scheme?: 'BEARER' | 'X_API_KEY'
+  models_endpoint_enabled?: boolean
+  structured_output_mode: 'NATIVE_JSON_SCHEMA' | 'TOOL_CALL' | 'JSON_ONLY' | 'UNKNOWN'
+  state: 'DRAFT' | 'URL_VALIDATED' | 'CAPABILITY_CHECKED' | 'READY' | 'DEGRADED' | 'DISABLED' | 'REJECTED'
+  enabled: boolean
+  validation_allowed?: boolean
+  production_allowed: boolean
+  url_validation_status: 'NOT_CHECKED' | 'PASS' | 'REJECTED'
+  data_transmission_confirmed?: boolean
+  last_error_code?: string | null
+  system_managed?: boolean
+}
+
+export interface EndpointModelDefinition {
+  endpoint_model_id: string
+  model_version: string
+  endpoint_profile_id: string
+  endpoint_profile_version: string
+  remote_model_name: string
+  display_name: string
+  role_capabilities: Array<'RESEARCH_AGENT' | 'NORMAL_TRADER' | 'TOP_RISK_REVIEWER'>
+  supports_json_schema: boolean
+  supports_tool_call: boolean
+  supports_reasoning?: boolean | null
+  max_context_tokens?: number | null
+  max_output_tokens?: number | null
+  discovery_mode: 'MODELS_ENDPOINT' | 'MANUAL'
+  status: 'UNVERIFIED' | 'READY' | 'UNSUPPORTED' | 'NOT_FOUND' | 'DISABLED'
+  content_hash: string
+}
+
+export interface EndpointPriceVersion {
+  price_version_id: string
+  price_version: string
+  endpoint_profile_id: string
+  endpoint_profile_version: string
+  endpoint_model_id: string
+  endpoint_model_version: string
+  input_price_per_million: string
+  cached_input_price_per_million?: string | null
+  output_price_per_million: string
+  currency: string
+  effective_at: string
+  source_description: string
+  verified: boolean
+  content_hash: string
+}
+
+export interface PromptProfileSummary {
+  prompt_id: string
+  prompt_version: string
+  role: string
+  schema_target: string
+  template_hash: string
+  enabled: boolean
 }
 
 export interface ModelRunSummary {
@@ -69,6 +183,164 @@ export interface ResearchResultSummary {
 export const alphaguardModelsApi = {
   status() {
     return ApiClient.get<ModelRuntimeStatus>('/api/alphaguard/models/status')
+  },
+  credentials() {
+    return ApiClient.get<{
+      items: ModelCredentialStatus[]
+      secret_store_status: 'READY' | 'UNAVAILABLE'
+    }>(
+      '/api/alphaguard/models/credentials'
+    )
+  },
+  createCredential(payload: {
+    provider: string
+    provider_type?: 'OPENAI_OFFICIAL' | 'OPENAI_COMPATIBLE'
+    endpoint_profile_id?: string
+    endpoint_profile_version?: string
+    api_key: string
+    base_url?: string
+    credential_name: string
+  }) {
+    return ApiClient.post<ModelCredentialMutationResult>(
+      '/api/alphaguard/models/credentials',
+      payload
+    )
+  },
+  replaceCredential(
+    credentialId: string,
+    payload: { api_key: string; base_url?: string }
+  ) {
+    return ApiClient.put<ModelCredentialMutationResult>(
+      `/api/alphaguard/models/credentials/${encodeURIComponent(credentialId)}`,
+      payload
+    )
+  },
+  verifyCredential(credentialId: string) {
+    return ApiClient.post<ModelCredentialMutationResult>(
+      `/api/alphaguard/models/credentials/${encodeURIComponent(credentialId)}/verify`,
+      {}
+    )
+  },
+  revokeCredential(credentialId: string) {
+    return ApiClient.delete<Record<string, unknown>>(
+      `/api/alphaguard/models/credentials/${encodeURIComponent(credentialId)}`
+    )
+  },
+  prompts() {
+    return ApiClient.get<{ items: PromptProfileSummary[] }>(
+      '/api/alphaguard/models/prompts'
+    )
+  },
+  endpoints() {
+    return ApiClient.get<{ items: ProviderEndpointProfile[] }>(
+      '/api/alphaguard/models/endpoints'
+    )
+  },
+  createEndpoint(payload: {
+    display_name: string
+    provider_type: 'OPENAI_COMPATIBLE'
+    base_url: string
+    api_mode: 'OPENAI_CHAT_COMPLETIONS' | 'OPENAI_RESPONSES' | 'AUTO_DETECT'
+    auth_scheme: 'BEARER' | 'X_API_KEY'
+    models_endpoint_enabled: boolean
+    structured_output_mode: 'NATIVE_JSON_SCHEMA' | 'TOOL_CALL' | 'JSON_ONLY' | 'UNKNOWN'
+    notes?: string
+  }) {
+    return ApiClient.post<{ item: ProviderEndpointProfile; result: 'CREATED' | 'REUSED' }>(
+      '/api/alphaguard/models/endpoints', payload
+    )
+  },
+  validateEndpoint(endpointId: string, payload: {
+    profile_version: string
+    confirm_data_transmission: boolean
+  }) {
+    return ApiClient.post<ProviderEndpointProfile>(
+      `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/validate`,
+      payload
+    )
+  },
+  disableEndpoint(endpointId: string, profileVersion: string) {
+    return ApiClient.post<ProviderEndpointProfile>(
+      `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/disable`,
+      { profile_version: profileVersion }
+    )
+  },
+  endpointModels(endpointId: string, profileVersion?: string) {
+    const query = profileVersion ? `?profile_version=${encodeURIComponent(profileVersion)}` : ''
+    return ApiClient.get<{ items: EndpointModelDefinition[] }>(
+      `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/models${query}`
+    )
+  },
+  createEndpointModel(endpointId: string, payload: {
+    endpoint_profile_version: string
+    remote_model_name: string
+    display_name: string
+    role_capabilities: Array<'RESEARCH_AGENT' | 'NORMAL_TRADER' | 'TOP_RISK_REVIEWER'>
+    supports_json_schema: boolean
+    supports_tool_call: boolean
+    supports_reasoning?: boolean
+    max_context_tokens?: number
+    max_output_tokens?: number
+  }) {
+    return ApiClient.post<{ item: EndpointModelDefinition; result: 'CREATED' | 'REUSED' }>(
+      `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/models`,
+      payload
+    )
+  },
+  discoverEndpointModels(endpointId: string, payload: {
+    endpoint_profile_version: string
+    credential_id?: string
+  }) {
+    return ApiClient.post<{ items: EndpointModelDefinition[] }>(
+      `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/models/discover`,
+      payload
+    )
+  },
+  prices(endpointId?: string) {
+    const query = endpointId ? `?endpoint_profile_id=${encodeURIComponent(endpointId)}` : ''
+    return ApiClient.get<{ items: EndpointPriceVersion[] }>(
+      `/api/alphaguard/models/prices${query}`
+    )
+  },
+  createPrice(payload: {
+    endpoint_profile_id: string
+    endpoint_profile_version: string
+    endpoint_model_id: string
+    endpoint_model_version: string
+    input_price_per_million: string
+    cached_input_price_per_million?: string
+    output_price_per_million: string
+    currency: string
+    effective_at: string
+    source_description: string
+    verified: boolean
+  }) {
+    return ApiClient.post<{ item: EndpointPriceVersion; result: 'CREATED' | 'REUSED' }>(
+      '/api/alphaguard/models/prices', payload
+    )
+  },
+  assignCompatibleProfile(payload: {
+    role: 'NORMAL_TRADER' | 'TOP_RISK_REVIEWER'
+    profile_id: string
+    profile_version: string
+    endpoint_profile_id: string
+    endpoint_profile_version: string
+    endpoint_model_id: string
+    endpoint_model_version: string
+    credential_id: string
+    price_version_id: string
+    price_version: string
+    prompt_profile_id: string
+    explicit_same_model_confirmation: boolean
+  }) {
+    return ApiClient.post<Record<string, unknown>>(
+      '/api/alphaguard/models/profiles/compatible', payload
+    )
+  },
+  runs(limit = 100) {
+    return ApiClient.get<{ items: ModelRunSummary[] }>(
+      `/api/alphaguard/models/runs?limit=${limit}`
+    )
   },
   capabilityCheck(payload: {
     profile_id: string

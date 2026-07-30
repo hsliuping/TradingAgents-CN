@@ -41,11 +41,15 @@ const keepAliveComponents = computed(() => [
 // 配置向导
 const showConfigWizard = ref(false)
 const isAlphaGuardDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
+const isAlphaGuardCredentialHost =
+  import.meta.env.VITE_ALPHAGUARD_CREDENTIAL_HOST === 'true'
 
 // 检查是否需要显示配置向导
 const checkFirstTimeSetup = async () => {
-  // The isolated acceptance demo has no mutable system-configuration API.
-  if (isAlphaGuardDemo) return
+  // Demo and the Keychain-only host deliberately exclude the legacy
+  // configuration bridge, whose GET validation endpoint has write side
+  // effects unrelated to credential management.
+  if (isAlphaGuardDemo || isAlphaGuardCredentialHost) return
 
   try {
     // 检查是否已经完成过配置向导

@@ -247,15 +247,19 @@ def bridge_config_to_env():
             mongodb_conn = os.getenv("MONGODB_CONNECTION_STRING", "未设置")
             mongodb_db = os.getenv("MONGODB_DATABASE_NAME", "tradingagentscn")
             logger.info(f"  📋 USE_MONGODB_STORAGE: {use_mongodb}")
-            logger.info(f"  📋 MONGODB_CONNECTION_STRING: {mongodb_conn[:30]}..." if len(mongodb_conn) > 30 else f"  📋 MONGODB_CONNECTION_STRING: {mongodb_conn}")
+            logger.info(
+                "  📋 MONGODB_CONNECTION_STRING: %s",
+                "已设置" if mongodb_conn != "未设置" else "未设置",
+            )
             logger.info(f"  📋 MONGODB_DATABASE_NAME: {mongodb_db}")
 
             # 直接创建 MongoDBStorage 实例，而不是调用 _init_mongodb_storage()
             # 这样可以捕获更详细的错误信息
             if use_mongodb.lower() == "true":
                 try:
-                    # 🔍 详细日志：显示完整的连接字符串（用于调试）
-                    logger.info(f"  🔍 实际传入的连接字符串: {mongodb_conn}")
+                    # Connection strings can contain usernames and passwords.
+                    # Never emit the value, prefix, suffix, or length.
+                    logger.info("  🔍 MongoDB连接字符串已安全传入")
                     logger.info(f"  🔍 实际传入的数据库名称: {mongodb_db}")
 
                     config_manager.mongodb_storage = MongoDBStorage(
@@ -744,4 +748,3 @@ __all__ = [
     'reload_bridged_config',
     'sync_pricing_config_now',
 ]
-

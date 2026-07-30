@@ -1311,4 +1311,116 @@ ALPHAGUARD_INDEX_SPECS = {
         {"keys": [("status", 1), ("created_at", -1)], "name": "idx_model_validation_status"},
         {"keys": [("snapshot_id", 1), ("created_at", -1)], "name": "idx_model_validation_snapshot"},
     ],
+    "ag_model_credentials": [
+        {
+            "keys": [("credential_id", 1)],
+            "name": "uniq_model_credential_id",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("provider_type", 1),
+                ("endpoint_profile_id", 1),
+                ("endpoint_profile_version", 1),
+                ("normalized_origin", 1),
+                ("auth_scheme", 1),
+            ],
+            "name": "uniq_model_credential_endpoint_binding",
+            "unique": True,
+            "sparse": True,
+        },
+        {"keys": [("provider", 1)], "name": "idx_model_credential_provider"},
+        {
+            "keys": [("status", 1), ("updated_at", -1)],
+            "name": "idx_model_credential_status",
+        },
+    ],
+    "ag_model_credential_events": [
+        {
+            "keys": [("credential_id", 1), ("created_at", -1)],
+            "name": "idx_model_credential_event_credential",
+        },
+        {
+            "keys": [("provider", 1), ("action", 1), ("created_at", -1)],
+            "name": "idx_model_credential_event_action",
+        },
+        {
+            "keys": [("status", 1), ("created_at", -1)],
+            "name": "idx_model_credential_event_status",
+        },
+    ],
+    "ag_model_provider_endpoints": [
+        {
+            "keys": [("endpoint_profile_id", 1), ("profile_version", 1)],
+            "name": "uniq_model_endpoint_version",
+            "unique": True,
+        },
+        {
+            "keys": [("normalized_origin", 1), ("profile_version", 1)],
+            "name": "idx_model_endpoint_origin_version",
+        },
+        {"keys": [("state", 1), ("created_at", -1)], "name": "idx_model_endpoint_state"},
+        {"keys": [("config_hash", 1)], "name": "idx_model_endpoint_hash"},
+    ],
+    "ag_model_endpoint_models": [
+        {
+            "keys": [("endpoint_model_id", 1), ("model_version", 1)],
+            "name": "uniq_endpoint_model_version",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("endpoint_profile_id", 1),
+                ("endpoint_profile_version", 1),
+                ("remote_model_name", 1),
+                ("model_version", 1),
+            ],
+            "name": "uniq_endpoint_remote_model_version",
+            "unique": True,
+        },
+        {"keys": [("content_hash", 1)], "name": "idx_endpoint_model_hash"},
+    ],
+    "ag_model_endpoint_prices": [
+        {
+            "keys": [("price_version_id", 1)],
+            "name": "uniq_endpoint_price_id",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("endpoint_model_id", 1),
+                ("endpoint_model_version", 1),
+                ("effective_at", 1),
+                ("price_version", 1),
+            ],
+            "name": "uniq_endpoint_model_effective_price",
+            "unique": True,
+        },
+        {"keys": [("content_hash", 1)], "name": "idx_endpoint_price_hash"},
+    ],
+    "ag_model_profile_assignments": [
+        {
+            "keys": [("assignment_id", 1)],
+            "name": "uniq_model_profile_assignment",
+            "unique": True,
+        },
+        {"keys": [("role", 1), ("assigned_at", -1)], "name": "idx_model_assignment_role"},
+        {"keys": [("assignment_hash", 1)], "name": "idx_model_assignment_hash"},
+    ],
+    "ag_model_endpoint_events": [
+        {
+            "keys": [("validation_event_id", 1)],
+            "name": "uniq_model_endpoint_event",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("endpoint_profile_id", 1),
+                ("endpoint_profile_version", 1),
+                ("created_at", -1),
+            ],
+            "name": "idx_model_endpoint_event_endpoint",
+        },
+        {"keys": [("status", 1), ("created_at", -1)], "name": "idx_model_endpoint_event_status"},
+    ],
 }

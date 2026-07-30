@@ -77,7 +77,6 @@ class ModelProfileRegistry:
     ) -> ModelProfile:
         if self.db is None:
             raise RuntimeError("database is required for production resolution")
-        defined = self.definition(profile_id, profile_version)
         raw = await ModelRuntimeRepository(self.db).get(
             "profiles",
             {
@@ -90,9 +89,35 @@ class ModelProfileRegistry:
                 f"ModelProfile is not persisted: {profile_id}@{profile_version}"
             )
         stored = ModelProfile.model_validate(raw)
-        if stored.config_hash != defined.config_hash:
-            raise ModelProfileNotRegistered(
-                f"ModelProfile hash differs from registered definition: "
-                f"{profile_id}@{profile_version}"
-            )
+        try:
+            defined = self.definition(profile_id, profile_version)
+        except ModelProfileNotRegistered:
+            if stored.provider_type != "OPENAI_COMPATIBLE":
+                raise ModelProfileNotRegistered(
+                    f"dynamic ModelProfile is not compatible: "
+                    f"{profile_id}@{profile_version}"
+                )
+        else:
+            if stored.config_hash != defined.config_hash:
+                raise ModelProfileNotRegistered(
+                    f"ModelProfile hash differs from registered definition: "
+                    f"{profile_id}@{profile_version}"
+                )
         return stored
+
+    async def persisted_for_role(self, role: str) -> ModelProfile:
+        if self.db is None:
+            raise RuntimeError("database is required for production resolution")
+        assignment = await self.db["ag_model_profile_assignments"].find_one(
+            {"role": role, "status": "ACTIVE"},
+            sort=[("assigned_at", -1)],
+        )
+        if assignment is not None:
+            return await self.persisted(
+                str(assignment["profile_id"]),
+                str(assignment["profile_version"]),
+            )
+        defined = self.for_role(role)
+        return await self.persisted(
+            defined.profile_id, defined.profile_version
+        )

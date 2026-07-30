@@ -20,7 +20,7 @@ from app.schemas.alphaguard.model_runtime import (
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG_PATH = (
-    ROOT / "config" / "alphaguard" / "models" / "model_runtime_v1.yaml"
+    ROOT / "config" / "alphaguard" / "models" / "model_runtime_v2.yaml"
 )
 
 

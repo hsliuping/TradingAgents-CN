@@ -54,11 +54,44 @@ Top 拒绝或 HardRisk 拒绝。时间线中的“TradingAgents 研究”与 Nor
 进入“评价中心”，切换期限成熟、Factor、Regime、Strategy 和归因页签。历史研究回放与
 实际模拟成交始终分开展示。
 
-## 8. 查看系统健康
+## 8. 查看系统健康与配置模型凭证
 
-进入“运维中心”，依次查看服务、数据准备、任务、告警、模型运行、完整性与版本。
-“模型运行”只展示已登记的 Profile、Prompt、能力状态、预算和脱敏错误，不展示或接收
-API Key。真实环境也可运行：
+进入“运维中心”，依次查看服务、数据准备、任务、告警、Models & API、完整性与版本。
+“Models & API”展示服务商、API凭证、模型目录、模型Profile、Prompt版本、价格、预算、
+能力检查和调用记录。普通用户只能查看状态；管理员可以登记OpenAI-Compatible Endpoint，
+再把对应API Key直接提交给本机后端并写入macOS Keychain。页面不会显示已保存Key，输入
+在提交开始时立即清空，浏览器不保存Key或直接访问任何模型Provider。
+
+Compose后端运行在容器内，不能访问宿主Keychain，因此凭证表单会安全禁用。配置凭证时在
+项目根目录启动本机API：
+
+```bash
+.venv/bin/python scripts/run_alphaguard_credential_host.py --execute
+```
+
+另开一个终端启动对应前端：
+
+```bash
+cd frontend
+VITE_DEV_PORT=3002 \
+VITE_API_PROXY_TARGET=http://127.0.0.1:8011 \
+VITE_ALPHAGUARD_CREDENTIAL_HOST=true \
+npm run dev -- --host 127.0.0.1
+```
+
+打开 `http://localhost:3002/login`，手工登录后进入
+`AlphaGuard -> 运维中心 -> Models & API`。第三方服务按以下顺序登记：
+
+1. 在“服务商”添加OpenAI-Compatible HTTPS Base URL并确认第三方数据发送；
+2. 通过URL安全验证；
+3. 在“模型目录”受控探测`/models`或手工登记模型及实际能力；
+4. 在“价格”登记该Endpoint独立的Decimal价格版本；
+5. 在“API凭证”选择已验证Endpoint，填写新Key并保存验证；
+6. 在“模型Profile”分别分配Normal与Top；使用同一模型时必须显式确认；
+7. 在“能力检查”查看Normal/Top结构化输出、usage、费用和预算状态。
+
+不要把Key发到聊天、终端参数、文档或截图中；已经暴露过的Key不可恢复或复用。真实环境
+健康检查仍可运行：
 
 ```bash
 curl --fail http://localhost:8000/health/live
@@ -76,9 +109,11 @@ curl --fail http://localhost:8000/health/ready
 - 前端类型安全检查点 `alphaguard-frontend-type-safe` 已清除原34个
   `DefaultRow TS2345`；`npm run type-check`、正式 `npm run build` 和
   `npx vite build` 均可通过；
-- 模型运行时目前只达到 Level A：三个登记Profile的真实供应商访问探测均因认证失败而
-  fail-closed，未产生模型结果、订单或账户变动。不要在页面、文档或命令行参数中输入
-  API Key。
+- 模型运行时目前完成兼容Provider注册层，但`MODEL_PROVIDER=NOT_CONFIGURED`；安全凭证
+  页面和最小能力检查完成不等于Level B完成。Endpoint、模型、价格、凭证与两个Profile
+  全部READY后，仍需用户确认再继续真实Normal、Top、Consensus和HardRisk验证；
+- API Key只能在本机安全后端对应的“API凭证”表单中手工输入，不要发送到聊天、终端参数、
+  文档或截图中。
 
 验收截图位于 [`docs/ux/screenshots`](../ux/screenshots/)，完整说明见
 [`ALPHAGUARD_FRONTEND_GUIDE.md`](ALPHAGUARD_FRONTEND_GUIDE.md)。

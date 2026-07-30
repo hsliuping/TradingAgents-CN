@@ -12,6 +12,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.alphaguard.decision import canonical_hash
 from app.schemas.alphaguard.model_runtime import ModelCapabilityCheck
+from tradingagents.alphaguard.decision_schemas import (
+    NormalTradePlan,
+    TopReviewDecision,
+)
 from tradingagents.alphaguard.structured_output import invoke_json_object
 
 from .model_audit_service import ModelAuditService, sanitize_model_message
@@ -54,10 +58,108 @@ class ModelCapabilityService:
         self.budget = ModelBudgetService(db)
         self.audit = ModelAuditService(db)
 
+    @staticmethod
+    def _capability_contract(profile) -> tuple[str, type[BaseModel]]:
+        if profile.role == "NORMAL_TRADER":
+            return "normal_trade_plan_capability_prompt", NormalTradePlan
+        if profile.role == "TOP_RISK_REVIEWER":
+            return "top_review_capability_prompt", TopReviewDecision
+        return "model_capability_prompt", CapabilityEcho
+
     async def _provider_access_probe(
         self, profile
     ) -> tuple[str, str | None, float]:
         """Use a no-generation provider endpoint before any paid schema call."""
+
+        if profile.provider_type == "OPENAI_COMPATIBLE":
+            from .compatible_provider_registry import (
+                CompatibleProviderRegistryService,
+            )
+            from .model_endpoint_security import (
+                EndpointSecurityError,
+                build_pinned_client,
+                parse_registered_endpoint,
+            )
+
+            try:
+                endpoint, model, _price, credential = (
+                    await CompatibleProviderRegistryService(
+                        self.db,
+                        secret_store=self.credentials.secret_store,
+                    ).resolve_profile_binding(profile)
+                )
+                secret = self.credentials.resolve(
+                    str(credential["credential_ref"])
+                )
+            except Exception as exc:
+                return (
+                    "PROVIDER_ERROR",
+                    f"compatible profile binding failed: {exc.__class__.__name__}",
+                    0.0,
+                )
+
+            def compatible_probe() -> None:
+                with build_pinned_client(
+                    endpoint=parse_registered_endpoint(endpoint.base_url),
+                    resolved_ips=endpoint.resolved_ips,
+                    timeout_seconds=profile.timeout_seconds,
+                    secret=secret,
+                    auth_scheme=endpoint.auth_scheme,
+                ) as client:
+                    if endpoint.models_endpoint_enabled:
+                        response = client.get(
+                            f"{endpoint.base_url.rstrip('/')}/models"
+                        )
+                        if 300 <= response.status_code < 400:
+                            raise EndpointSecurityError(
+                                "REDIRECT_FORBIDDEN",
+                                "credential-bearing provider access cannot redirect",
+                            )
+                        if response.status_code >= 400:
+                            error = RuntimeError("provider model access failed")
+                            error.status_code = response.status_code
+                            raise error
+                        payload = response.json()
+                        names = {
+                            str(item["id"])
+                            for item in payload.get("data", [])
+                            if isinstance(item, dict)
+                            and isinstance(item.get("id"), str)
+                        }
+                        if model.remote_model_name not in names:
+                            error = RuntimeError("registered model was not found")
+                            error.status_code = 404
+                            raise error
+                    # Endpoints without /models are proven by the paid,
+                    # schema-specific capability invocation that follows.
+
+            started = time.perf_counter()
+            try:
+                await asyncio.to_thread(compatible_probe)
+                return "READY", None, (time.perf_counter() - started) * 1000
+            except Exception as exc:
+                latency = (time.perf_counter() - started) * 1000
+                text = f"{exc.__class__.__name__} {exc}".lower()
+                status_code = getattr(exc, "status_code", None)
+                if status_code == 401:
+                    return "UNAUTHORIZED", "provider authentication failed", latency
+                if status_code == 403:
+                    return (
+                        "PROJECT_ACCESS_DENIED",
+                        "provider project access was denied",
+                        latency,
+                    )
+                if status_code == 404:
+                    return "MODEL_NOT_FOUND", "registered model was not found", latency
+                if status_code == 429:
+                    return "RATE_LIMITED", "provider rate limit reached", latency
+                if "timeout" in text:
+                    return "TIMEOUT", "provider access probe timed out", latency
+                return (
+                    "PROVIDER_ERROR",
+                    f"provider access probe failed: {exc.__class__.__name__}",
+                    latency,
+                )
 
         if profile.provider.lower() != "openai":
             return "READY", None, 0.0
@@ -81,10 +183,16 @@ class ModelCapabilityService:
             latency = (time.perf_counter() - started) * 1000
             text = f"{exc.__class__.__name__} {exc}".lower()
             status_code = getattr(exc, "status_code", None)
-            if status_code in {401, 403} or "authentication" in text:
+            if status_code == 401 or "authentication" in text:
                 return (
                     "UNAUTHORIZED",
                     "provider authentication failed; details redacted",
+                    latency,
+                )
+            if status_code == 403:
+                return (
+                    "PROJECT_ACCESS_DENIED",
+                    "provider project access was denied",
                     latency,
                 )
             if status_code == 404 or "model_not_found" in text:
@@ -157,14 +265,15 @@ class ModelCapabilityService:
                 prompt_defined.prompt_version,
             )
             prompt_registered = True
-            capability_prompt_defined = self.prompts.definition(
-                "model_capability_prompt"
+            capability_prompt_id, capability_schema = self._capability_contract(
+                profile
             )
+            capability_prompt_defined = self.prompts.definition(capability_prompt_id)
             capability_prompt = await self.prompts.persisted(
                 capability_prompt_defined.prompt_id,
                 capability_prompt_defined.prompt_version,
             )
-            CapabilityEcho.model_json_schema()
+            capability_schema.model_json_schema()
             schema_serializable = True
             if not profile.enabled:
                 status = "DISABLED"
@@ -210,12 +319,14 @@ class ModelCapabilityService:
                         error_code = budget.reason_code or "BUDGET_BLOCKED"
                         message = "capability call blocked by configured budget"
                     else:
-                        model = self.provider_runtime.create(profile)
+                        model = await self.provider_runtime.create_registered(
+                            profile, db=self.db
+                        )
                         request_hash = canonical_hash(
                             {
                                 "profile_hash": profile.config_hash,
                                 "prompt_hash": capability_prompt.template_hash,
-                                "schema": CapabilityEcho.model_json_schema(),
+                                "schema": capability_schema.model_json_schema(),
                             }
                         )
                         invocation = invoke_json_object(
@@ -226,7 +337,7 @@ class ModelCapabilityService:
                                     "content": capability_prompt.template,
                                 }
                             ],
-                            schema_model=CapabilityEcho,
+                            schema_model=capability_schema,
                             provider=profile.provider,
                             configured_model_name=profile.model_name,
                             prompt_name=capability_prompt.prompt_id,
@@ -239,6 +350,7 @@ class ModelCapabilityService:
                             prompt_id=capability_prompt.prompt_id,
                             input_cost_per_million=profile.input_cost_per_million,
                             output_cost_per_million=profile.output_cost_per_million,
+                            cost_currency=profile.cost_currency,
                             max_retries=max(
                                 0, budget.permitted_attempts - 1
                             ),
@@ -272,8 +384,10 @@ class ModelCapabilityService:
                                 if category
                                 in {
                                     "UNAUTHORIZED",
+                                    "PROJECT_ACCESS_DENIED",
                                     "MODEL_NOT_FOUND",
                                     "STRUCTURED_OUTPUT_UNSUPPORTED",
+                                    "USAGE_UNAVAILABLE",
                                     "TIMEOUT",
                                     "RATE_LIMITED",
                                     "PROVIDER_ERROR",
@@ -284,8 +398,27 @@ class ModelCapabilityService:
                             error_code = category
                             message = invocation.error_message
                         else:
-                            CapabilityEcho.model_validate(invocation.payload)
-                            status = "READY"
+                            payload = dict(invocation.payload or {})
+                            payload["model_meta"] = invocation.model_meta.model_dump(
+                                mode="json"
+                            )
+                            capability_schema.model_validate(payload)
+                            usage = (
+                                invocation.model_meta.input_tokens,
+                                invocation.model_meta.output_tokens,
+                                invocation.model_meta.total_tokens,
+                                invocation.model_meta.estimated_cost,
+                            )
+                            if any(value is None for value in usage):
+                                status = "USAGE_UNAVAILABLE"
+                                error_category = "USAGE_UNAVAILABLE"
+                                error_code = "USAGE_UNAVAILABLE"
+                                message = (
+                                    "provider response did not expose complete token "
+                                    "usage and auditable cost"
+                                )
+                            else:
+                                status = "READY"
         except CredentialNotConfigured as exc:
             status = "NOT_CONFIGURED"
             error_category = error_category or "MODEL_NOT_CONFIGURED"

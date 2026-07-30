@@ -20,7 +20,13 @@ class ModelRuntimeStatusService:
 
     async def status(self, *, admin: bool) -> dict:
         items = []
-        for defined in self.profiles.definitions():
+        selected = []
+        for role in ("RESEARCH_AGENT", "NORMAL_TRADER", "TOP_RISK_REVIEWER"):
+            try:
+                selected.append(await self.profiles.persisted_for_role(role))
+            except Exception:
+                selected.append(self.profiles.for_role(role))
+        for defined in selected:
             persisted = await self.repository.get(
                 "profiles",
                 {
@@ -77,6 +83,11 @@ class ModelRuntimeStatusService:
                 "profile_id": defined.profile_id,
                 "profile_version": defined.profile_version,
                 "provider": defined.provider,
+                "provider_type": defined.provider_type,
+                "endpoint_profile_id": defined.endpoint_profile_id,
+                "endpoint_profile_version": defined.endpoint_profile_version,
+                "endpoint_model_id": defined.endpoint_model_id,
+                "price_version_id": defined.price_version_id,
                 "model_name": defined.model_name,
                 "model_version": defined.model_version,
                 "prompt_id": prompt.prompt_id,

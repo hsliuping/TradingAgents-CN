@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -10,19 +11,50 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ModelRole = Literal["RESEARCH_AGENT", "NORMAL_TRADER", "TOP_RISK_REVIEWER"]
 StructuredOutputMode = Literal["NATIVE_SCHEMA", "TOOL_CALL", "JSON_SCHEMA"]
+ProviderType = Literal["OPENAI_OFFICIAL", "OPENAI_COMPATIBLE"]
+EndpointApiMode = Literal[
+    "OPENAI_CHAT_COMPLETIONS",
+    "OPENAI_RESPONSES",
+    "AUTO_DETECT",
+]
+EndpointAuthScheme = Literal["BEARER", "X_API_KEY"]
+EndpointState = Literal[
+    "DRAFT",
+    "URL_VALIDATED",
+    "CAPABILITY_CHECKED",
+    "READY",
+    "DEGRADED",
+    "DISABLED",
+    "REJECTED",
+]
+EndpointStructuredOutputMode = Literal[
+    "NATIVE_JSON_SCHEMA",
+    "TOOL_CALL",
+    "JSON_ONLY",
+    "UNKNOWN",
+]
 CapabilityStatus = Literal[
     "UNVERIFIED",
     "READY",
     "NOT_CONFIGURED",
     "UNAUTHORIZED",
+    "PROJECT_ACCESS_DENIED",
     "MODEL_NOT_FOUND",
     "STRUCTURED_OUTPUT_UNSUPPORTED",
+    "USAGE_UNAVAILABLE",
     "TIMEOUT",
     "RATE_LIMITED",
     "PROVIDER_ERROR",
+    "PRICE_NOT_VERIFIED",
+    "BUDGET_BLOCKED",
     "UNSUPPORTED",
     "DEGRADED",
     "DISABLED",
+]
+CredentialStatus = Literal[
+    "CONFIGURED",
+    "DEGRADED",
+    "REVOKED",
 ]
 ModelRunMode = Literal[
     "MODEL_CAPABILITY_CHECK",
@@ -60,8 +92,18 @@ class ModelProfile(_StrictFrozenModel):
     retry_backoff_seconds: float = Field(ge=0, le=60)
     credential_ref: str = Field(min_length=1)
     prompt_profile_id: str = Field(min_length=1)
+    provider_type: ProviderType = "OPENAI_OFFICIAL"
+    endpoint_profile_id: str | None = None
+    endpoint_profile_version: str | None = None
+    endpoint_model_id: str | None = None
+    endpoint_model_version: str | None = None
+    credential_id: str | None = None
+    price_version_id: str | None = None
+    normalized_origin: str | None = None
+    auth_scheme: EndpointAuthScheme | None = None
     input_cost_per_million: float | None = Field(default=None, ge=0)
     output_cost_per_million: float | None = Field(default=None, ge=0)
+    cost_currency: str = Field(default="USD", min_length=3, max_length=8)
     enabled: bool
     production_allowed: bool
     research_allowed: bool
@@ -73,6 +115,160 @@ class ModelProfile(_StrictFrozenModel):
     config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     created_at: datetime
     schema_version: str = "model_profile_v1"
+
+    @model_validator(mode="after")
+    def validate_registered_compatible_binding(self) -> "ModelProfile":
+        binding = (
+            self.endpoint_profile_id,
+            self.endpoint_profile_version,
+            self.endpoint_model_id,
+            self.endpoint_model_version,
+            self.credential_id,
+            self.price_version_id,
+            self.normalized_origin,
+            self.auth_scheme,
+        )
+        if self.provider_type == "OPENAI_COMPATIBLE":
+            if not all(binding):
+                raise ValueError(
+                    "compatible ModelProfile requires an exact endpoint, "
+                    "model, credential, price, origin and auth binding"
+                )
+            if self.provider != "openai_compatible":
+                raise ValueError(
+                    "compatible ModelProfile provider must be openai_compatible"
+                )
+        elif any(binding):
+            raise ValueError(
+                "official ModelProfile cannot carry compatible endpoint binding"
+            )
+        return self
+
+
+class ProviderEndpointProfile(_StrictFrozenModel):
+    endpoint_profile_id: str = Field(min_length=1, max_length=100)
+    profile_version: str = Field(min_length=1, max_length=50)
+    provider_type: ProviderType
+    display_name: str = Field(min_length=1, max_length=120)
+    base_url: str = Field(min_length=1, max_length=2048)
+    normalized_origin: str = Field(min_length=1, max_length=512)
+    api_mode: EndpointApiMode
+    auth_scheme: EndpointAuthScheme
+    models_endpoint_enabled: bool
+    structured_output_mode: EndpointStructuredOutputMode
+    state: EndpointState
+    enabled: bool
+    validation_allowed: bool
+    production_allowed: bool
+    resolved_ips: list[str] = Field(default_factory=list, max_length=32)
+    url_validation_status: Literal[
+        "NOT_CHECKED", "PASS", "REJECTED"
+    ] = "NOT_CHECKED"
+    last_error_code: str | None = Field(default=None, max_length=100)
+    notes: str | None = Field(default=None, max_length=500)
+    data_transmission_confirmed: bool = False
+    data_transmission_confirmed_by: str | None = None
+    data_transmission_confirmed_at: datetime | None = None
+    created_by: str = Field(min_length=1, max_length=200)
+    created_at: datetime
+    config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    schema_version: str = "provider_endpoint_profile_v1"
+
+    @model_validator(mode="after")
+    def validate_official_endpoint(self) -> "ProviderEndpointProfile":
+        if self.provider_type == "OPENAI_OFFICIAL" and (
+            self.base_url.rstrip("/") != "https://api.openai.com/v1"
+            or self.normalized_origin != "https://api.openai.com"
+        ):
+            raise ValueError("official OpenAI endpoint URL is system-fixed")
+        if self.production_allowed and (
+            not self.enabled
+            or self.state != "READY"
+            or self.url_validation_status != "PASS"
+        ):
+            raise ValueError("production endpoint must be enabled and READY")
+        if self.data_transmission_confirmed and (
+            not self.data_transmission_confirmed_by
+            or not self.data_transmission_confirmed_at
+        ):
+            raise ValueError("third-party data transmission confirmation is incomplete")
+        return self
+
+
+class EndpointModelDefinition(_StrictFrozenModel):
+    endpoint_model_id: str = Field(min_length=1, max_length=160)
+    model_version: str = Field(min_length=1, max_length=50)
+    endpoint_profile_id: str = Field(min_length=1, max_length=100)
+    endpoint_profile_version: str = Field(min_length=1, max_length=50)
+    remote_model_name: str = Field(min_length=1, max_length=200)
+    display_name: str = Field(min_length=1, max_length=200)
+    role_capabilities: list[ModelRole] = Field(default_factory=list)
+    supports_json_schema: bool
+    supports_tool_call: bool
+    supports_reasoning: bool | None = None
+    max_context_tokens: int | None = Field(default=None, gt=0)
+    max_output_tokens: int | None = Field(default=None, gt=0)
+    discovery_mode: Literal["MODELS_ENDPOINT", "MANUAL"]
+    status: Literal[
+        "UNVERIFIED",
+        "READY",
+        "UNSUPPORTED",
+        "NOT_FOUND",
+        "DISABLED",
+    ]
+    content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_by: str = Field(min_length=1, max_length=200)
+    created_at: datetime
+    schema_version: str = "endpoint_model_definition_v1"
+
+
+class EndpointPriceVersion(_StrictFrozenModel):
+    price_version_id: str = Field(min_length=1, max_length=160)
+    price_version: str = Field(min_length=1, max_length=50)
+    endpoint_profile_id: str = Field(min_length=1, max_length=100)
+    endpoint_profile_version: str = Field(min_length=1, max_length=50)
+    endpoint_model_id: str = Field(min_length=1, max_length=160)
+    endpoint_model_version: str = Field(min_length=1, max_length=50)
+    pricing_mode: Literal["FIXED_PER_1M"] = "FIXED_PER_1M"
+    input_price_per_million: Decimal = Field(gt=0)
+    cached_input_price_per_million: Decimal | None = Field(default=None, ge=0)
+    output_price_per_million: Decimal = Field(gt=0)
+    currency: str = Field(min_length=3, max_length=8)
+    effective_at: datetime
+    source_description: str = Field(min_length=1, max_length=500)
+    verified: bool
+    content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_by: str = Field(min_length=1, max_length=200)
+    created_at: datetime
+    schema_version: str = "endpoint_price_version_v1"
+
+
+class ModelProfileAssignment(_StrictFrozenModel):
+    assignment_id: str = Field(min_length=1, max_length=160)
+    role: Literal["NORMAL_TRADER", "TOP_RISK_REVIEWER"]
+    profile_id: str = Field(min_length=1, max_length=100)
+    profile_version: str = Field(min_length=1, max_length=50)
+    supersedes_assignment_id: str | None = None
+    status: Literal["ACTIVE"] = "ACTIVE"
+    explicit_same_model_confirmation: bool = False
+    assigned_by: str = Field(min_length=1, max_length=200)
+    assigned_at: datetime
+    assignment_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    schema_version: str = "model_profile_assignment_v1"
+
+
+class EndpointValidationEvent(_StrictFrozenModel):
+    validation_event_id: str = Field(min_length=1, max_length=160)
+    endpoint_profile_id: str = Field(min_length=1, max_length=100)
+    endpoint_profile_version: str = Field(min_length=1, max_length=50)
+    action: str = Field(min_length=1, max_length=100)
+    status: str = Field(min_length=1, max_length=100)
+    error_code: str | None = Field(default=None, max_length=100)
+    operator_user_id: str = Field(min_length=1, max_length=200)
+    trace_id: str = Field(min_length=1, max_length=200)
+    created_at: datetime
+    event_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    schema_version: str = "endpoint_validation_event_v1"
 
 
 class PromptProfile(_StrictFrozenModel):
@@ -128,6 +324,67 @@ class ModelCapabilityCheck(_StrictFrozenModel):
     input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     result_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     schema_version: str = "model_capability_check_v1"
+
+
+class ModelCredentialMetadata(_StrictFrozenModel):
+    """Mongo-safe metadata; no Secret or Secret-derived attributes."""
+
+    credential_id: str = Field(min_length=1, max_length=100)
+    provider: str = Field(min_length=1, max_length=50)
+    credential_ref: str = Field(min_length=1, max_length=300)
+    provider_type: ProviderType = "OPENAI_OFFICIAL"
+    endpoint_profile_id: str | None = None
+    endpoint_profile_version: str | None = None
+    normalized_origin: str | None = None
+    auth_scheme: EndpointAuthScheme | None = None
+    status: CredentialStatus
+    created_by: str = Field(min_length=1, max_length=200)
+    created_at: datetime
+    updated_at: datetime
+    last_verified_at: datetime | None = None
+    schema_version: str = "model_credential_metadata_v1"
+
+    @model_validator(mode="after")
+    def validate_endpoint_binding(self) -> "ModelCredentialMetadata":
+        binding = (
+            self.endpoint_profile_id,
+            self.endpoint_profile_version,
+            self.normalized_origin,
+            self.auth_scheme,
+        )
+        if self.provider_type == "OPENAI_COMPATIBLE" and not all(binding):
+            raise ValueError("compatible credential requires exact endpoint binding")
+        if self.provider_type == "OPENAI_OFFICIAL" and any(binding):
+            raise ValueError("official credential cannot bind a compatible endpoint")
+        return self
+
+
+class CredentialCapabilitySummary(_StrictFrozenModel):
+    provider: str
+    authentication_status: str
+    provider_access_status: str
+    normal_model_status: str
+    top_model_status: str
+    structured_output_status: str
+    price_status: str
+    budget_status: str
+    checked_at: datetime
+
+
+class ModelCredentialMutationResult(_StrictFrozenModel):
+    credential_id: str
+    provider: str
+    provider_type: ProviderType = "OPENAI_OFFICIAL"
+    endpoint_profile_id: str | None = None
+    endpoint_profile_version: str | None = None
+    configured: bool
+    stored: bool
+    replaced: bool
+    status: str
+    secret_store_status: str
+    capability: CredentialCapabilitySummary
+    last_error_code: str | None = None
+    sanitized_message: str | None = None
 
 
 class ModelRunRecord(_StrictFrozenModel):

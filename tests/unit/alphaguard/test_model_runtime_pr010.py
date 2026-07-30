@@ -50,7 +50,11 @@ from tests.unit.alphaguard.test_structured_nodes import (
 )
 from tradingagents.agents.managers.risk_manager import create_risk_manager
 from tradingagents.agents.trader.trader import create_trader
-from tradingagents.alphaguard.decision_schemas import ModelExecutionMeta
+from tradingagents.alphaguard.decision_schemas import (
+    ModelExecutionMeta,
+    NormalTradePlan,
+    TopReviewDecision,
+)
 from tradingagents.alphaguard.mongo_indexes import ALPHAGUARD_INDEX_SPECS
 from tradingagents.alphaguard.structured_output import invoke_json_object
 
@@ -174,7 +178,11 @@ async def test_profile_and_prompt_registries_are_exact_create_only():
         item.role for item in config["profiles"]
     } == {"RESEARCH_AGENT", "NORMAL_TRADER", "TOP_RISK_REVIEWER"}
     assert all(item.model_name for item in config["profiles"])
-    assert all(item.profile_version == "v1" for item in config["profiles"])
+    assert all(item.profile_version == "v2" for item in config["profiles"])
+    assert all(
+        item.credential_ref == "keychain-alias:openai-primary"
+        for item in config["profiles"]
+    )
     profiles = ModelProfileRegistry(db)
     prompts = PromptProfileRegistry(db)
     first_profiles = await profiles.seed()
@@ -190,6 +198,20 @@ async def test_profile_and_prompt_registries_are_exact_create_only():
     )
     with pytest.raises(LookupError):
         profiles.definition("unknown-profile", "latest")
+
+
+def test_capability_checks_use_exact_role_decision_contracts():
+    profiles = ModelProfileRegistry()
+    normal_prompt, normal_schema = ModelCapabilityService._capability_contract(
+        profiles.for_role("NORMAL_TRADER")
+    )
+    top_prompt, top_schema = ModelCapabilityService._capability_contract(
+        profiles.for_role("TOP_RISK_REVIEWER")
+    )
+    assert normal_prompt == "normal_trade_plan_capability_prompt"
+    assert normal_schema is NormalTradePlan
+    assert top_prompt == "top_review_capability_prompt"
+    assert top_schema is TopReviewDecision
 
 
 @pytest.mark.asyncio
@@ -682,9 +704,9 @@ def test_model_indexes_frontend_modes_and_secret_boundary():
             ROOT / "tradingagents/alphaguard/model_runtime_schemas.py"
         ).read_text(encoding="utf-8")
     assert "TradingAgents 研究" in decisions
-    assert "模型运行" in operations
+    assert "Models & API" in operations
     assert "credential_ref" not in router
-    assert "api_key" not in router.lower()
+    assert "api_key: SecretStr" in router
 
 
 def test_model_api_is_authenticated_admin_controlled_and_strict(monkeypatch):

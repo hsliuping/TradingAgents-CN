@@ -7,6 +7,13 @@ MODEL_RUNTIME_COLLECTIONS = {
     "runs": "ag_model_runs",
     "research_results": "ag_model_research_results",
     "validation_runs": "ag_model_validation_runs",
+    "credentials": "ag_model_credentials",
+    "credential_events": "ag_model_credential_events",
+    "endpoints": "ag_model_provider_endpoints",
+    "endpoint_models": "ag_model_endpoint_models",
+    "endpoint_prices": "ag_model_endpoint_prices",
+    "profile_assignments": "ag_model_profile_assignments",
+    "endpoint_events": "ag_model_endpoint_events",
 }
 
 MODEL_RUNTIME_WRITE_COLLECTIONS = frozenset(MODEL_RUNTIME_COLLECTIONS.values())

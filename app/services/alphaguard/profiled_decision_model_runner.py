@@ -69,14 +69,27 @@ class ProfiledDecisionModelRunner:
     ) -> "ProfiledDecisionModelRunner":
         profiles = ModelProfileRegistry(db)
         prompts = PromptProfileRegistry(db)
-        normal_defined = profiles.for_role("NORMAL_TRADER")
-        top_defined = profiles.for_role("TOP_RISK_REVIEWER")
-        normal = await profiles.persisted(
-            normal_defined.profile_id, normal_defined.profile_version
-        )
-        top = await profiles.persisted(
-            top_defined.profile_id, top_defined.profile_version
-        )
+        normal = await profiles.persisted_for_role("NORMAL_TRADER")
+        top = await profiles.persisted_for_role("TOP_RISK_REVIEWER")
+        if run_mode in {"PRODUCTION", "PRODUCTION_REPROCESS"}:
+            for profile in (normal, top):
+                if not profile.production_allowed:
+                    raise RuntimeError(
+                        "selected ModelProfile is not production allowed"
+                    )
+                latest_check = await db["ag_model_capability_checks"].find_one(
+                    {
+                        "profile_id": profile.profile_id,
+                        "profile_version": profile.profile_version,
+                    },
+                    sort=[("checked_at", -1)],
+                )
+                if profile.provider_type == "OPENAI_COMPATIBLE" and (
+                    not latest_check or latest_check.get("status") != "READY"
+                ):
+                    raise RuntimeError(
+                        "compatible ModelProfile capability is not READY"
+                    )
         normal_prompt_defined = prompts.definition(normal.prompt_profile_id)
         top_prompt_defined = prompts.definition(top.prompt_profile_id)
         normal_prompt = await prompts.persisted(
@@ -93,8 +106,10 @@ class ProfiledDecisionModelRunner:
             revision_defined.prompt_version,
         )
         runtime = provider_runtime or ModelProviderRuntime()
-        normal_llm = runtime.create(normal)
-        top_llm = runtime.create(top)
+        if normal.cost_currency != top.cost_currency:
+            raise RuntimeError("Normal and Top model price currencies differ")
+        normal_llm = await runtime.create_registered(normal, db=db)
+        top_llm = await runtime.create_registered(top, db=db)
         config = {
             "quick_provider": normal.provider,
             "deep_provider": top.provider,
@@ -122,7 +137,7 @@ class ProfiledDecisionModelRunner:
             "top_output_cost_per_million": top.output_cost_per_million,
             "top_max_retries": top.max_retries,
             "top_retry_backoff_seconds": top.retry_backoff_seconds,
-            "cost_currency": "USD",
+            "cost_currency": normal.cost_currency,
         }
         return cls(
             db=db,
@@ -196,7 +211,7 @@ class ProfiledDecisionModelRunner:
             model_profile_version=profile.profile_version,
             prompt_id=prompt.prompt_id,
             structured_output_mode=profile.structured_output_mode,
-            cost_currency="USD",
+            cost_currency=profile.cost_currency,
         )
 
     @classmethod

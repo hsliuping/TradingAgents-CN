@@ -80,6 +80,7 @@ class ModelBudgetService:
         if (
             profile.input_cost_per_million is not None
             and profile.output_cost_per_million is not None
+            and profile.cost_currency == self.policy.currency
         ):
             estimated_cost = (
                 estimated_input * profile.input_cost_per_million
@@ -103,6 +104,8 @@ class ModelBudgetService:
             status = "SNAPSHOT_TOKEN_BUDGET_EXCEEDED"
         elif len(daily_rows) >= self.policy.max_daily_calls:
             status = "DAILY_CALL_BUDGET_EXCEEDED"
+        elif profile.cost_currency != self.policy.currency:
+            status = "BUDGET_CURRENCY_MISMATCH"
         elif estimated_cost is None:
             status = "BUDGET_PRICING_UNAVAILABLE"
         elif daily_cost + estimated_cost > self.policy.max_daily_cost:

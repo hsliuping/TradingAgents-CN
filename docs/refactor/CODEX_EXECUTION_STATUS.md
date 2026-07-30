@@ -6301,3 +6301,123 @@ REAL_DUAL_MODEL_LEVEL_B=false
 代码回退到父检查点`ff26668`时，create-only的Profile、Prompt、能力检查和验证run保留为
 审计历史，旧代码不会读取这些集合；不得删除或改写它们。配置回退通过切回旧代码完成，
 不清除Mongo、不重置账户、不修改Champion。
+
+### 24.9 Secure API Credential Settings
+
+为避免管理员通过终端设置模型凭证，Operations的“模型运行”已扩展为“Models & API”，
+包含服务商、API凭证、模型目录、模型Profile、Prompt版本、价格、预算、能力检查和调用记录
+九个只读/受控页签。
+管理员可以在页面输入OpenAI API Key并执行保存、替换、撤销与验证；普通用户只能查看
+`CONFIGURED/NOT_CONFIGURED`及`READY/DEGRADED`状态，Demo完全禁用凭证写操作。后端继续
+依据数据库中的`is_admin`执行最终权限判断并审计拒绝事件。
+
+macOS使用系统Keychain作为Secret Store。OpenAI Secret写入固定Service
+`AlphaGuard OpenAI API`，运行时Profile v2通过
+`keychain-alias:openai-primary`解析当前版本；Key通过Security.framework原生API以进程内
+字节缓冲区写入，不启动含Secret参数的子进程，也不出现在进程参数、Mongo、API响应、
+结构化日志或异常中。Mongo的`ag_model_credentials`只保存凭证ID、Provider、Keychain引用、
+状态、操作者和时间；`ag_model_credential_events`只保存凭证ID、Provider、操作者、动作、
+状态、错误代码、trace和时间。不会保存Secret明文、密文副本、hash、前后缀、长度或
+Authorization Header。
+
+Profile v1保持不可变并继续可读；新增三套v2 Profile，模型、参数和Prompt关系与v1相同，
+唯一生产配置差异是`credential_ref`切换到Keychain别名。数据库现有六个Profile：
+
+```text
+alphaguard_research_openai@v1/v2
+alphaguard_normal_openai@v1/v2
+alphaguard_top_openai@v1/v2
+```
+
+创建与替换均先在请求内存中执行认证、Provider、Normal和Top模型访问检查。新凭证验证失败
+时不会写Keychain；替换失败时旧别名和旧Secret保持不变。验证成功后才写入新Keychain项、
+原子切换别名和Mongo引用，再删除旧项。撤销会删除别名和Secret并将元数据标记为
+`REVOKED`，历史能力检查和凭证审计保留。GET接口只返回固定非Secret投影；页面中的
+`••••••••`是固定占位符，不反映Key长度，也不存在显示已保存Key的入口。
+
+能力检查分类为`UNAUTHORIZED`、`PROJECT_ACCESS_DENIED`、`MODEL_NOT_FOUND`、
+`RATE_LIMITED`、`TIMEOUT`、`PROVIDER_ERROR`、`PRICE_NOT_VERIFIED`和
+`BUDGET_BLOCKED`。当前Profile v2价格仍为空，因此即使管理员凭证认证和模型访问成功，
+价格会保持`NOT_VERIFIED`、预算保持`BLOCKED`，不会执行付费结构化输出，也不能据此宣称
+Level B完成。价格核验与真实Normal、Top、Consensus和HardRisk验证仍是后续PR-010 Level B
+步骤；不得绕过预算门禁。
+
+容器后端不能直接访问宿主macOS Keychain，因此Compose入口只读显示
+`SECRET_STORE_UNAVAILABLE`并禁用凭证表单。管理员配置时需使用本机FastAPI入口，由本机
+后端访问Keychain；专用`run_alphaguard_credential_host.py`复用同一认证、路由、Mongo和
+安全门禁，但不启动Scheduler、Worker、启动回填或数据同步。浏览器仍只请求AlphaGuard
+后端，不直接访问OpenAI；该入口还阻断旧配置桥接和模型/认证以外的写操作。索引已为
+`ag_model_credentials`和`ag_model_credential_events`建立，当前两集合记录数均为0，
+确认尚未替用户创建、模拟或迁移任何凭证。
+
+专项安全测试覆盖普通用户拒绝、管理员保存、Keychain原生写入、Mongo无Secret、GET和
+异常无Secret、前端提交前清空、替换失败保留旧凭证、成功切换引用、撤销阻断运行时、
+401分类、浏览器不直连Provider以及浏览器存储无Key。该变更未修改Factor、Regime、
+Strategy、Prompt内容、Consensus、HardRisk、Fee、Matching、Champion或交易状态。
+
+### 24.10 Third-Party Model Provider Registry
+
+模型运行时现正式区分`OPENAI_OFFICIAL`与`OPENAI_COMPATIBLE`。官方Endpoint继续由系统
+固定且不可编辑；兼容Endpoint由管理员在Operations的`Models & API -> 服务商`登记，
+随后依次完成URL验证、模型发现或手工登记、独立价格版本、Keychain凭证和Normal/Top
+Profile分配。Endpoint、模型、价格与Profile assignment均为版本化create-only对象：
+同身份同内容返回`REUSED`，同身份不同内容返回`INTEGRITY_CONFLICT`，运行时不读取
+`latest`、不自动切换服务商，也不继承官方模型能力或官方价格。
+
+兼容Endpoint不是任意HTTP代理。后端拒绝HTTP、userinfo、fragment、localhost、私网、
+链路本地、云元数据、非公网DNS结果和编码/双重编码路径穿越；连接固定到已验证公网IP，
+继续校验TLS主机名，不使用系统代理，不自动跨Origin重定向。Bearer与`X-API-Key`分别
+构造且仅发送到登记的精确origin/path。凭证同时绑定provider type、Endpoint ID、
+Endpoint version、normalized origin和auth scheme；Endpoint新版本不会继承旧Key。
+`AUTO_DETECT`只可登记，未升级为明确API模式前保持fail-closed。
+
+兼容模型必须在对应Endpoint版本下登记；价格必须绑定同一Endpoint、模型与版本，使用
+Decimal/Decimal128保存每百万Token价格和货币。缺价格、货币与预算策略不兼容、或响应
+缺少可审计usage/cost时分别阻断为`PRICE_NOT_VERIFIED`、`BUDGET_BLOCKED`或
+`USAGE_UNAVAILABLE`，不会用0价格绕过。Normal与Top是两个独立Profile；选择同一模型时
+必须由管理员显式确认。运行时通过统一`ModelRunner`读取精确Profile、Endpoint、模型、
+价格和Keychain Secret，不存在第二套业务调用链。
+
+能力检查使用真实角色契约`NormalTradePlan`与`TopReviewDecision`，分别锁定不可变能力
+Prompt，验证结构化输出、Pydantic schema、token usage、费用、超时和错误分类。能力API
+只返回脱敏状态与消息，不返回请求/响应hash；兼容Provider返回401时不会回退到官方
+OpenAI。真实Endpoint、模型、价格和新Key均尚未由用户登记，因此本阶段没有发起第三方
+网络能力调用，也没有宣称PR-010 Level B完成。
+
+Mongo索引迁移已删除与Endpoint绑定冲突的旧`uniq_model_credential_provider`索引，并
+create-only创建18个索引、复用2个；再次dry-run确认无需变更。配置seed首次新增2个仅用于
+能力检查的Prompt并复用3个Profile，未修改原有Profile、Prompt或失败审计。生产库检查为：
+
+```text
+compatible credentials=0
+compatible endpoints=0
+endpoint models=0
+endpoint prices=0
+profile assignments=0
+endpoint events=0
+OrderIntent/Outbox/Order/Fill/Position/Reservation/Ledger=0
+PAPER_QUANT/PAPER_NORMAL/PAPER_TOP_CONFIRMED cash_available=1000000.00
+cash_reserved=0
+```
+
+专项合并测试为`45 passed, 22 warnings`，默认离线CI为`579 passed, 89 warnings`，
+live/safety回归为`22 passed, 85 warnings`；前端`npm run type-check`、正式
+`npm run build`和`npx vite build`均PASS，所有本阶段Python文件可编译。全仓Python编译
+仍被阶段前已有的`scripts/补充行业信息_akshare.py:81`语法错误阻断，本阶段未修改该旧脚本。
+浏览器验收确认九个Models & API页签、兼容Endpoint表单、第三方数据发送确认、安全提示和
+password输入属性正常；凭证Host模式下没有新增API错误，只有Element Plus存量弃用警告。
+
+当前真实状态保持：
+
+```text
+MODEL_PROVIDER=NOT_CONFIGURED
+overall_status=DEGRADED_PAPER
+CODE_COMPLETE=true
+RUNTIME_READY=true
+DATA_READY=false
+PAPER_READY=true
+EVALUATION_READY=true
+EXPERIMENT_READY=true
+CHALLENGER_READY=false
+LIVE_READY=false
+```
