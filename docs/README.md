@@ -20,6 +20,11 @@
 
 ## 快速导航
 
+### 完整使用手册
+
+- [v3.0 完整使用手册（标准版）](./02-user-guide/user-manual-v3.0.md)
+- [v3.0 京东云合作版使用手册](./02-user-guide/jdyun-user-manual-v3.0.md) ⭐ 京东云版用户专用
+
 ### 新用户入门
 0. [v3.0 系统介绍（技术文档版）](./01-product/v3.0-system-introduction.md)
    - [v3.0 系统介绍（公众号传播版）](./01-product/v3.0-system-introduction-for-wechat.md)
