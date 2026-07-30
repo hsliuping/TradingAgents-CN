@@ -195,19 +195,19 @@ def test_analysis_stages():
                 "description": "多角度深度研究和辩论"
             },
             {
-                "name": "交易团队阶段",
-                "analysts": ["💼 交易员"],
-                "description": "制定具体投资计划"
+                "name": "研究整合阶段",
+                "analysts": ["💼 研究整合员"],
+                "description": "生成研究观察汇总"
             },
             {
                 "name": "风险管理阶段",
-                "analysts": ["⚠️ 风险分析师", "🛡️ 安全分析师", "⚖️ 中性分析师", "📊 投资组合经理"],
-                "description": "评估和管理投资风险"
+                "analysts": ["⚡ 高弹性情景研究员", "🛡️ 防御情景研究员", "⚖️ 基准情景研究员", "👔 风险评估师"],
+                "description": "评估风险和形成审阅结论"
             },
             {
-                "name": "决策生成阶段",
+                "name": "研究结论生成阶段",
                 "analysts": ["🤖 信号处理器"],
-                "description": "生成最终分析结果"
+                "description": "生成最终研究结论"
             }
         ]
         

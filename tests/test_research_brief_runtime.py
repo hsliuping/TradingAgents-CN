@@ -42,8 +42,8 @@ def test_sanitize_analysis_payload_strips_legacy_execution_fields() -> None:
     assert sanitized["reports"] == {
         "market_report": "公司订单回暖，盈利能力改善，后续仍需跟踪原材料波动。"
     }
-    assert sanitized["decision"]["action"] == "看涨"
-    assert sanitized["decision"]["analysis_view"] == "看涨"
+    assert sanitized["decision"]["action"] == "乐观"
+    assert sanitized["decision"]["analysis_view"] == "乐观"
     assert sanitized["decision"]["confidence"] == 0.82
     assert sanitized["decision"]["risk_score"] == 0.65
     assert sanitized["decision"]["core_evidence"] == ["订单回暖", "毛利率修复"]
@@ -54,7 +54,7 @@ def test_sanitize_analysis_payload_strips_legacy_execution_fields() -> None:
     assert "price_analysis_range" not in sanitized["decision"]
     assert "risk_exposure_ratio" not in sanitized["decision"]
     assert "stop_loss" not in sanitized["decision"]
-    assert sanitized["recommendation"].startswith("研究判断：看涨；")
+    assert sanitized["recommendation"].startswith("研究判断：乐观；")
     assert "目标价" not in sanitized["recommendation"]
     assert "仓位" not in sanitized["recommendation"]
 
@@ -68,7 +68,7 @@ def test_format_decision_keeps_research_brief_fields_only() -> None:
             "target_price": 120,
             "position_ratio": "15%",
             "reasoning": "需求改善带动盈利预期上修。",
-            "summary": "当前证据偏向看涨，但需继续跟踪兑现节奏。",
+            "summary": "当前证据偏向乐观，但需继续跟踪兑现节奏。",
             "risk_warning": "若需求复苏不及预期，判断可能转弱。",
             "core_evidence": ["需求改善", "盈利预期上修"],
             "uncertainties": ["兑现节奏"],
@@ -78,12 +78,12 @@ def test_format_decision_keeps_research_brief_fields_only() -> None:
     )
 
     assert decision == {
-        "action": "看涨",
-        "analysis_view": "看涨",
+        "action": "乐观",
+        "analysis_view": "乐观",
         "confidence": 0.78,
         "risk_score": 0.32,
         "reasoning": "需求改善带动盈利预期上修。",
-        "summary": "当前证据偏向看涨，但需继续跟踪兑现节奏。",
+        "summary": "当前证据偏向乐观，但需继续跟踪兑现节奏。",
         "risk_warning": "若需求复苏不及预期，判断可能转弱。",
         "core_evidence": ["需求改善", "盈利预期上修"],
         "uncertainties": ["兑现节奏"],
@@ -132,7 +132,7 @@ def test_convert_final_decision_json_to_markdown_uses_research_brief_sections() 
     )
 
     assert "# 🎯 综合研究结论" in markdown
-    assert "- **研究观点**: 🟡 中性" in markdown
+    assert "- **研究观点**: ⚪ 中性" in markdown
     assert "## 🔍 核心依据" in markdown
     assert "## ❓ 关键不确定性" in markdown
     assert "## 🔄 判断调整条件" in markdown
@@ -259,7 +259,7 @@ def test_convert_json_report_to_markdown_downgrades_error_payload_dict() -> None
         report_type="risk",
     )
 
-    assert markdown == "风险治理模块执行未完成，当前风险结论仍待验证。"
+    assert markdown == "风险审阅模块执行未完成，当前风险结论仍待验证。"
 
 
 def test_convert_json_report_to_markdown_downgrades_execution_failure_text() -> None:
