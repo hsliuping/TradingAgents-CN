@@ -54,7 +54,7 @@ GOOGLE_API_KEY=your_google_api_key_here
 #### Gemini 2.5 Flash
 - **模型名称**: `gemini-2.5-flash`
 - **特点**: 最新快速模型，平衡了速度和性能
-- **适用场景**: 实时市场分析、快速交易决策、日常投资咨询
+- **适用场景**: 实时市场分析、快速操作决策、日常投资咨询
 - **优势**: 响应迅速，成本效益高
 
 #### Gemini 2.5 Flash Lite

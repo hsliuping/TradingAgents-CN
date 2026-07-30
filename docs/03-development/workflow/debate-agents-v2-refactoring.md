@@ -82,16 +82,16 @@
 
 ```python
 risk_debate_state = {
-    "history": "",                    # 完整辩论历史
-    "risky_history": "",              # 激进分析师历史
-    "safe_history": "",               # 保守分析师历史
-    "neutral_history": "",            # 中性分析师历史
+    "history": "",                    # 完整讨论历史
+    "risky_history": "",              # 高弹性情景研究员历史
+    "safe_history": "",               # 防御情景研究员历史
+    "neutral_history": "",            # 基准情景研究员历史
     "latest_speaker": "Risky",        # 最后发言者
-    "current_risky_response": "",     # 当前激进观点
-    "current_safe_response": "",      # 当前保守观点
-    "current_neutral_response": "",   # 当前中性观点
-    "count": 0,                       # 辩论轮数
-    "judge_decision": ""              # 主持人决策（仅 RiskManager 输出）
+    "current_risky_response": "",     # 当前高弹性情景观点
+    "current_safe_response": "",      # 当前防御情景观点
+    "current_neutral_response": "",   # 当前基准情景观点
+    "count": 0,                       # 讨论轮数
+    "judge_decision": ""              # 风险评估师审阅（仅 RiskManager 输出）
 }
 ```
 
