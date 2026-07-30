@@ -1,661 +1,135 @@
-<template>
-  <div class="stock-detail">
-    <!-- 顶部：代码 / 名称 / 操作 -->
-    <div class="header">
-      <div class="title">
-        <div class="title-main">
-          <div class="code">{{ code }}</div>
-          <div class="name">{{ stockName || '-' }}</div>
-          <el-tag size="small">{{ marketLabel }}</el-tag>
-        </div>
-        <div v-if="isEtf" class="title-meta">
-          <el-tag v-if="etfBasics.fundType" size="small" effect="plain" type="success">{{ etfBasics.fundType }}</el-tag>
-          <el-tag v-if="etfBasics.trackIndex" size="small" effect="plain" type="info">跟踪 {{ etfBasics.trackIndex }}</el-tag>
-          <span v-if="etfBasics.management" class="meta-text">管理人：{{ etfBasics.management }}</span>
-        </div>
-      </div>
-      <div class="actions">
-        <el-button @click="onToggleFavorite">
-          <el-icon><Star /></el-icon> {{ favoriteButtonText }}
-        </el-button>
-        <el-button
-          type="primary"
-          @click="showSyncDialog"
-          :loading="syncLoading"
-        >
-          <el-icon><Refresh /></el-icon> {{ syncButtonText }}
-        </el-button>
-        <el-button type="warning" @click="clearCache" :loading="clearCacheLoading">
-          <el-icon><Delete /></el-icon> 清除缓存
-        </el-button>
-        <el-button type="success" @click="goPaperTrading">
-          <el-icon><CreditCard /></el-icon> 模拟交易
-        </el-button>
-      </div>
+﻿<template>
+  <div class="stock-detail-redesign">
+
+    <!-- ════════ 1. 顶部：股票概览 + 操作入口 ════════ -->
+    <StockOverview
+      :code="code"
+      :stock-name="stockName"
+      :market-label="marketLabel"
+      :is-etf="isEtf"
+      :quote="quote"
+      :etf-basics="etfBasics"
+      :is-fav="isFav"
+      :refresh-text="refreshText"
+      :sync-status="syncStatus"
+      :sync-loading="syncLoading"
+      :clear-cache-loading="clearCacheLoading"
+      @refresh="refreshMockQuote"
+      @analyze="onAnalyze"
+      @sync="showSyncDialog"
+      @paper-trading="goPaperTrading"
+      @toggle-favorite="onToggleFavorite"
+      @clear-cache="clearCache"
+      @go-position-analysis="goToPositionAnalysis"
+      @go-trade-review="goToTradeReview"
+      @go-trade-review-history="goToReviewHistory"
+      @go-api-guide="goToApiGuide"
+    />
+
+    <!-- ════════ 2. 智能助手主入口（紧接顶部，突出显示） ════════ -->
+    <AssistantHero
+      :code="code"
+      :stock-name="stockName"
+      :has-analysis="assistantHasAnalysis"
+      :has-position="assistantHasPosition"
+      :has-review="assistantHasReview"
+      :has-fundamentals="assistantHasFundamentals"
+      :has-kline="assistantHasKline"
+      @ask="handleAssistantHeroAsk"
+    />
+
+    <!-- ════════ 3. 研究路径（sticky 导航） ════════ -->
+    <ResearchFlow
+      :steps="researchFlowSteps"
+      :active-key="activeFlowKey"
+      @step-click="handleFlowStepClick"
+    />
+
+    <!-- ════════ 4. K线 + 核心指标 ════════ -->
+    <div class="main-grid" id="kline-section">
+      <KlineChart
+        :title="klineCardTitle"
+        :category="klineCategory"
+        :values="klineValues"
+        :volumes="klineVolumes"
+        :period="period"
+        :period-options="periodOptions"
+        :kline-source="klineSource"
+        :last-k-time="lastKTime"
+        :last-k-close="lastKClose"
+        @update-period="handlePeriodChange"
+      />
+      <CoreMetrics
+        :basics="basics"
+        :financial-snapshot="financialSnapshot"
+        :factor-warning-entries="detailFactorWarningEntries"
+        :factor-diagnostic-entries="detailFactorDiagnosticEntries"
+      />
     </div>
 
-    <!-- 报价条 -->
-    <el-card class="quote-card" shadow="hover">
-      <div class="quote">
-        <div class="price-row">
-          <div class="price" :class="changeClass">{{ fmtPrice(quote.price) }}</div>
-          <div class="change" :class="changeClass">
-            <span>{{ fmtPercent(quote.changePercent) }}</span>
-          </div>
-          <el-tag type="info" size="small">{{ refreshText }}</el-tag>
-          <el-button text size="small" @click="refreshMockQuote" :icon="Refresh">刷新</el-button>
-        </div>
-        <div class="stats">
-          <div class="item"><span>今开</span><b>{{ fmtPrice(quote.open) }}</b></div>
-          <div class="item"><span>最高</span><b>{{ fmtPrice(quote.high) }}</b></div>
-          <div class="item"><span>最低</span><b>{{ fmtPrice(quote.low) }}</b></div>
-          <div class="item"><span>昨收</span><b>{{ fmtPrice(quote.prevClose) }}</b></div>
-          <div class="item">
-            <span>成交量</span>
-            <b>
-              {{ fmtVolume(quote.volume) }}
-              <el-tooltip v-if="quote.tradeDate && !isToday(quote.tradeDate)" :content="`数据日期: ${quote.tradeDate}`" placement="top">
-                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.tradeDate) }}</el-tag>
-              </el-tooltip>
-            </b>
-          </div>
-          <div class="item">
-            <span>成交额</span>
-            <b>
-              {{ fmtAmount(quote.amount) }}
-              <el-tooltip v-if="quote.tradeDate && !isToday(quote.tradeDate)" :content="`数据日期: ${quote.tradeDate}`" placement="top">
-                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.tradeDate) }}</el-tag>
-              </el-tooltip>
-            </b>
-          </div>
-          <div class="item">
-            <span>换手率</span>
-            <b>
-              {{ fmtPercent(quote.turnover) }}
-              <el-tooltip v-if="quote.turnoverDate && !isToday(quote.turnoverDate)" :content="`数据日期: ${quote.turnoverDate}`" placement="top">
-                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.turnoverDate) }}</el-tag>
-              </el-tooltip>
-            </b>
-          </div>
-          <div class="item">
-            <span>振幅</span>
-            <b>
-              {{ Number.isFinite(quote.amplitude) ? quote.amplitude.toFixed(2) + '%' : '-' }}
-              <el-tooltip v-if="quote.amplitudeDate && !isToday(quote.amplitudeDate)" :content="`数据日期: ${quote.amplitudeDate}`" placement="top">
-                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.amplitudeDate) }}</el-tag>
-              </el-tooltip>
-            </b>
-          </div>
-        </div>
-        <!-- 同步状态提示 -->
-        <div class="sync-status" v-if="quote.updatedAt || syncStatus">
-          <el-icon><Clock /></el-icon>
-          <span class="sync-info">
-            <!-- 🔥 优先显示股票自己的更新时间 -->
-            <template v-if="quote.updatedAt">
-              数据更新: {{ formatQuoteUpdateTime(quote.updatedAt) }}
-            </template>
-            <template v-else-if="syncStatus">
-              后端同步: {{ formatSyncTime(syncStatus.last_sync_time) }}
-              <span v-if="syncStatus.interval_seconds">{{ formatSyncInterval(syncStatus.interval_seconds) }}</span>
-            </template>
-            <el-tag
-              v-if="syncStatus?.data_source"
-              size="small"
-              type="success"
-              style="margin-left: 4px"
-            >
-              {{ syncStatus.data_source }}
-            </el-tag>
-          </span>
-        </div>
-      </div>
-    </el-card>
+    <!-- ════════ 5. 单股分析结果 ════════ -->
+    <AnalysisResultCard
+      :analysis-status="analysisStatus"
+      :analysis-progress="analysisProgress"
+      :analysis-message="analysisMessage"
+      :last-analysis="lastAnalysis"
+      :last-task-info="lastTaskInfo"
+      :one-sentence-conclusion="oneSentenceConclusion"
+      :report-keys="reportKeys"
+      :history-count="analysisHistoryCount"
+      @analyze="onAnalyze"
+      @view-reports="showReportsDialog = true"
+      @open-report="openReport"
+      @view-history="goToAnalysisHistory"
+    />
 
-    <el-row :gutter="16" class="body">
-      <el-col :span="18">
-        <!-- K线蜡烛图 -->
-        <el-card shadow="hover">
-          <template #header>
-            <div class="card-hd">
-              <div>{{ klineCardTitle }}</div>
-              <div class="periods">
-                <el-segmented v-model="period" :options="periodOptions" size="small" />
-              </div>
-            </div>
-          </template>
-          <div class="kline-container">
-            <v-chart class="k-chart" :option="kOption" autoresize />
-            <div class="legend">当前周期：{{ period }} · 数据源：{{ klineSource || '-' }} · 最近：{{ lastKTime || '-' }} · 收：{{ fmtPrice(lastKClose) }}</div>
-          </div>
-        </el-card>
+    <!-- ════════ 6. 持仓分析 + 交易复盘（标签页切换） ════════ -->
+    <PositionReviewTabs
+      :position-summary="positionSummary"
+      :review-summary="reviewSummary"
+      :position-data="positionData"
+      :review-history="reviewHistory"
+      :position-history-count="positionHistoryCount"
+      @go-position-analysis="goToPositionAnalysis"
+      @go-trade-review="goToTradeReview"
+      @view-position-task-detail="viewPositionTaskDetail"
+      @view-review-task-detail="viewReviewTaskDetail"
+      @view-position-history="goToPositionHistory"
+      @view-review-history="goToReviewHistory"
+      @select-review-item="selectReviewItem"
+    />
 
-        <!-- 详细分析结果（方案B）：仅在进行中或有结果时显示 -->
-        <el-card v-if="analysisStatus==='running' || lastAnalysis" shadow="hover" class="analysis-detail-card" id="analysis-detail">
-          <template #header><div class="card-hd">详细分析结果</div></template>
-          <div v-if="analysisStatus==='running'" class="running">
-            <el-progress :percentage="analysisProgress" :text-inside="true" style="width:100%" />
-            <div class="hint">{{ analysisMessage || '正在生成分析报告…' }}</div>
-          </div>
-          <div v-else class="detail">
-            <!-- 分析时间和信心度 -->
-            <div class="analysis-meta">
-              <span class="analysis-time">
-                <el-icon><Clock /></el-icon>
-                分析时间：{{ formatAnalysisTime(lastTaskInfo?.end_time) }}
-              </span>
-              <span class="confidence">
-                <el-icon><TrendCharts /></el-icon>
-                信心度：{{ fmtConf(lastAnalysis?.confidence_score ?? lastAnalysis?.overall_score) }}
-              </span>
-            </div>
+    <!-- ════════ 7. 智能助手对话区 ════════ -->
+    <AssistantChat
+      ref="assistantChatRef"
+      v-model:messages="assistantMessages"
+      :code="code"
+      :stock-name="stockName"
+      :loaded-modules="assistantLoadedModules"
+      :initial-prompt="assistantInitialPrompt"
+      :loading="assistantLoading"
+      input-placeholder="输入问题，例如：结合分析和持仓，我下一步应该重点跟踪什么？"
+      @ask="handleAssistantAsk"
+    />
 
-            <!-- 一句话分析 -->
-            <div class="recommendation-box">
-              <div class="recommendation-header">
-                <el-icon class="icon"><TrendCharts /></el-icon>
-                <span class="title">一句话分析</span>
-              </div>
-              <div class="recommendation-content">
-                <div class="recommendation-text markdown-body" v-html="renderMarkdown(oneSentenceConclusion)"></div>
-              </div>
-            </div>
+    <!-- ════════ 8. 基本面 + 新闻 ════════ -->
+    <BottomSection
+      :is-etf="isEtf"
+      :basics="basics"
+      :financial-snapshot="financialSnapshot"
+      :etf-basics="etfBasics"
+      :financial-raw-sections="financialRawSections"
+      :news-items="newsItems"
+      :news-filter="newsFilter"
+      :news-loading="newsLoading"
+      :news-source="newsSource"
+      @news-filter-change="(v: string) => newsFilter = v"
+    />
 
-            <!-- 详细报告展示 -->
-            <div v-if="lastAnalysis?.reports && Object.keys(lastAnalysis.reports).length > 0" class="reports-section">
-              <el-divider />
-              <div class="reports-header">
-                <span class="reports-title">📊 详细分析报告 ({{ Object.keys(lastAnalysis.reports).length }})</span>
-                <el-button
-                  type="primary"
-                  plain
-                  @click="showReportsDialog = true"
-                  :icon="Document"
-                >
-                  查看完整报告
-                </el-button>
-              </div>
+    <!-- 回到顶部 -->
+    <BackToTop :show-after="600" />
 
-              <!-- 报告列表预览 -->
-              <div class="reports-preview">
-                <el-tag
-                  v-for="key in reportKeys"
-                  :key="key"
-                  size="small"
-                  effect="plain"
-                  class="report-tag"
-                  @click="openReport(key)"
-                >
-                  {{ formatReportName(key) }}
-                </el-tag>
-              </div>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 持仓分析摘要：仅在该股有持仓分析记录时显示 -->
-        <el-card v-if="positionSummary.has" shadow="hover" class="position-analysis-card">
-          <template #header>
-            <div class="card-hd">
-              <div class="card-hd-title">
-                <el-icon><PieChart /></el-icon>
-                <span>持仓分析摘要</span>
-                <el-tag size="small" type="info" effect="plain" class="card-hd-tag">
-                  {{ formatAnalysisTime(positionSummary.completedAt) }}
-                </el-tag>
-              </div>
-              <div class="card-hd-actions">
-                <el-button text size="small" @click="goToPositionAnalysis">
-                  <el-icon><Plus /></el-icon> 重新分析
-                </el-button>
-                <el-button text size="small" @click="viewPositionTaskDetail">
-                  <el-icon><View /></el-icon> 查看详情
-                </el-button>
-              </div>
-            </div>
-          </template>
-          <div class="position-summary">
-            <!-- 持仓快照 -->
-            <div v-if="positionSummary.snapshot" class="snapshot-grid">
-              <div class="snap-item">
-                <span class="snap-label">成本价</span>
-                <b class="snap-value">¥{{ fmtPrice(positionSummary.snapshot.cost_price) }}</b>
-              </div>
-              <div class="snap-item">
-                <span class="snap-label">现价</span>
-                <b class="snap-value">¥{{ fmtPrice(positionSummary.snapshot.current_price) }}</b>
-              </div>
-              <div class="snap-item">
-                <span class="snap-label">持仓</span>
-                <b class="snap-value">{{ positionSummary.snapshot.quantity }} 股</b>
-              </div>
-              <div class="snap-item">
-                <span class="snap-label">浮动盈亏</span>
-                <b class="snap-value" :class="pnlClass(positionSummary.snapshot.unrealized_pnl)">
-                  {{ formatPnl(positionSummary.snapshot.unrealized_pnl, positionSummary.snapshot.unrealized_pnl_pct) }}
-                </b>
-              </div>
-              <div class="snap-item">
-                <span class="snap-label">持仓天数</span>
-                <b class="snap-value">{{ positionSummary.snapshot.holding_days || '-' }} 天</b>
-              </div>
-              <div class="snap-item">
-                <span class="snap-label">仓位占比</span>
-                <b class="snap-value">{{ formatPercent(positionSummary.snapshot.position_pct) }}</b>
-              </div>
-            </div>
-
-            <!-- AI 建议 -->
-            <div class="ai-advice">
-              <div class="advice-row">
-                <span class="advice-label">AI 建议</span>
-                <el-tag :type="actionTagType(positionSummary.action)" effect="dark" size="small">
-                  {{ actionLabel(positionSummary.action) }}
-                </el-tag>
-                <span class="advice-confidence">信心度 {{ positionSummary.confidence || '-' }}%</span>
-              </div>
-              <div v-if="positionSummary.conclusion" class="advice-conclusion">
-                <el-icon class="advice-icon"><InfoFilled /></el-icon>
-                <span>{{ positionSummary.conclusion }}</span>
-              </div>
-              <div v-if="positionSummary.keyPoints?.length" class="advice-keypoints">
-                <div class="keypoints-title">⚠ 关键风险点</div>
-                <ul class="keypoints-list">
-                  <li v-for="(point, idx) in positionSummary.keyPoints.slice(0, 3)" :key="idx">{{ point }}</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 交易复盘摘要：仅在该股有复盘记录时显示 -->
-        <el-card v-if="reviewSummary.has" shadow="hover" class="trade-review-card">
-          <template #header>
-            <div class="card-hd">
-              <div class="card-hd-title">
-                <el-icon><TrendCharts /></el-icon>
-                <span>交易复盘摘要</span>
-                <el-tag size="small" type="info" effect="plain" class="card-hd-tag">
-                  {{ formatAnalysisTime(reviewSummary.completedAt) }}
-                </el-tag>
-              </div>
-              <div class="card-hd-actions">
-                <!-- 历史复盘选择器 -->
-                <el-select 
-                  v-if="reviewHistory.items.length > 1" 
-                  v-model="reviewHistory.selectedIndex" 
-                  size="small" 
-                  placeholder="选择历史复盘"
-                  style="width: 160px; margin-right: 8px"
-                  @change="selectReviewItem"
-                >
-                  <el-option 
-                    v-for="(item, idx) in reviewHistory.items" 
-                    :key="item.review_id || item.task_id || idx"
-                    :label="formatAnalysisTime(item.completed_at || item.created_at)"
-                    :value="idx"
-                  />
-                </el-select>
-                <el-button text size="small" @click="goToTradeReview">
-                  <el-icon><Plus /></el-icon> 重新复盘
-                </el-button>
-                <el-button text size="small" @click="viewReviewTaskDetail">
-                  <el-icon><View /></el-icon> 查看详情
-                </el-button>
-              </div>
-            </div>
-          </template>
-          <div class="review-summary">
-            <!-- 复盘评分 -->
-            <div class="review-meta">
-              <div class="meta-item">
-                <span class="meta-label">交易次数</span>
-                <b class="meta-value">{{ reviewSummary.tradeCount || '-' }} 次</b>
-              </div>
-            </div>
-            <!-- 复盘结论 -->
-            <div v-if="reviewSummary.summary" class="review-conclusion">
-              <div class="conclusion-title">
-                <el-icon><Document /></el-icon>
-                <span>复盘结论</span>
-              </div>
-              <div class="conclusion-text markdown-body" v-html="renderMarkdown(reviewSummary.summary)"></div>
-            </div>
-            <!-- 建议 -->
-            <div v-if="reviewSummary.recommendation" class="review-recommendation">
-              <div class="conclusion-title">
-                <el-icon><Opportunity /></el-icon>
-                <span>操作建议</span>
-              </div>
-              <div class="conclusion-text markdown-body" v-html="renderMarkdown(reviewSummary.recommendation)"></div>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 复盘详情弹窗 -->
-        <el-dialog 
-          v-model="reviewDetailVisible" 
-          title="复盘详情" 
-          width="800px"
-          :close-on-click-modal="false"
-          destroy-on-close
-        >
-          <div v-if="reviewDetailLoading" class="detail-loading">
-            <el-icon class="is-loading"><Loading /></el-icon>
-            <span>加载中...</span>
-          </div>
-          <div v-else-if="currentReviewDetail" class="review-detail-content">
-            <!-- 交易摘要 -->
-            <el-descriptions title="交易摘要" :column="3" border size="small" class="section">
-              <el-descriptions-item label="股票代码">{{ currentReviewDetail.trade_info?.code }}</el-descriptions-item>
-              <el-descriptions-item label="持仓天数">{{ currentReviewDetail.trade_info?.holding_days }}天</el-descriptions-item>
-              <el-descriptions-item label="盈亏金额">
-                <span :class="getTotalPnl() >= 0 ? 'positive' : 'negative'">
-                  {{ formatPnlValue(getTotalPnl()) }}
-                </span>
-              </el-descriptions-item>
-              <el-descriptions-item label="买入均价">{{ currentReviewDetail.trade_info?.avg_buy_price?.toFixed(2) }}</el-descriptions-item>
-              <el-descriptions-item label="卖出均价">{{ currentReviewDetail.trade_info?.avg_sell_price?.toFixed(2) }}</el-descriptions-item>
-              <el-descriptions-item label="收益率">
-                <span :class="getTotalPnlPct() >= 0 ? 'positive' : 'negative'">
-                  {{ formatPct(getTotalPnlPct()) }}
-                </span>
-              </el-descriptions-item>
-              <el-descriptions-item label="手续费" :span="3">{{ currentReviewDetail.trade_info?.total_commission?.toFixed(2) }}元</el-descriptions-item>
-            </el-descriptions>
-
-            <!-- 复盘结论 -->
-            <div class="section">
-              <h4 class="section-title">复盘结论</h4>
-              <div class="summary markdown-content" v-html="renderMarkdown(currentReviewDetail.ai_review?.summary)"></div>
-            </div>
-
-            <!-- 优缺点 -->
-            <el-row :gutter="16" class="section">
-              <el-col :span="12">
-                <div class="analysis-card strengths">
-                  <h4><el-icon><CircleCheck /></el-icon> 做得好的地方</h4>
-                  <div class="markdown-content" v-html="renderMarkdown((currentReviewDetail.ai_review?.strengths || []).join('\n\n'))"></div>
-                </div>
-              </el-col>
-              <el-col :span="12">
-                <div class="analysis-card weaknesses">
-                  <h4><el-icon><Warning /></el-icon> 暴露的问题</h4>
-                  <div class="markdown-content" v-html="renderMarkdown((currentReviewDetail.ai_review?.weaknesses || []).join('\n\n'))"></div>
-                </div>
-              </el-col>
-            </el-row>
-
-            <!-- 复盘改进项 -->
-            <div class="section" v-if="currentReviewDetail.ai_review?.suggestions?.length">
-              <h4 class="section-title"><el-icon><Pointer /></el-icon> 后续改进重点</h4>
-              <div class="suggestions markdown-content" v-html="renderMarkdown((currentReviewDetail.ai_review?.suggestions || []).join('\n\n'))"></div>
-            </div>
-
-            <!-- 详细分析 -->
-            <el-collapse class="section">
-              <el-collapse-item title="时机复盘" name="timing" v-if="currentReviewDetail.ai_review?.timing_analysis">
-                <div class="markdown-content" v-html="renderMarkdown(currentReviewDetail.ai_review?.timing_analysis)"></div>
-              </el-collapse-item>
-              <el-collapse-item title="仓位复盘" name="position" v-if="currentReviewDetail.ai_review?.position_analysis">
-                <div class="markdown-content" v-html="renderMarkdown(currentReviewDetail.ai_review?.position_analysis)"></div>
-              </el-collapse-item>
-              <el-collapse-item title="情绪复盘" name="emotion" v-if="currentReviewDetail.ai_review?.emotion_analysis">
-                <div class="markdown-content" v-html="renderMarkdown(currentReviewDetail.ai_review?.emotion_analysis)"></div>
-              </el-collapse-item>
-              <el-collapse-item title="归因复盘" name="attribution" v-if="currentReviewDetail.ai_review?.attribution_analysis">
-                <div class="markdown-content" v-html="renderMarkdown(currentReviewDetail.ai_review?.attribution_analysis)"></div>
-              </el-collapse-item>
-            </el-collapse>
-          </div>
-          <template #footer>
-            <el-button @click="reviewDetailVisible = false">关闭</el-button>
-          </template>
-        </el-dialog>
-
-        <!-- 持仓信息：显示实盘和模拟持仓 -->
-        <el-card v-if="positionData.real.has || positionData.paper.has" shadow="hover" class="position-card" v-loading="positionData.loading">
-          <template #header>
-            <div class="card-hd">
-              <div class="card-hd-title">
-                <el-icon><CreditCard /></el-icon>
-                <span>持仓信息</span>
-              </div>
-            </div>
-          </template>
-          <div class="position-info">
-            <!-- 实盘持仓 -->
-            <div v-if="positionData.real.has" class="position-section">
-              <div class="position-section-title">
-                <el-tag type="danger" size="small">实盘</el-tag>
-              </div>
-              <div class="position-grid">
-                <div class="pos-item">
-                  <span class="pos-label">持仓数量</span>
-                  <b class="pos-value">{{ positionData.real.quantity }} 股</b>
-                </div>
-                <div class="pos-item">
-                  <span class="pos-label">成本价</span>
-                  <b class="pos-value">¥{{ positionData.real.cost_price.toFixed(2) }}</b>
-                </div>
-                <div class="pos-item">
-                  <span class="pos-label">现价</span>
-                  <b class="pos-value">¥{{ (positionData.real.current_price || 0).toFixed(2) }}</b>
-                </div>
-                <div class="pos-item">
-                  <span class="pos-label">市值</span>
-                  <b class="pos-value">¥{{ (positionData.real.market_value || 0).toFixed(2) }}</b>
-                </div>
-                <div class="pos-item">
-                  <span class="pos-label">浮动盈亏</span>
-                  <b class="pos-value" :class="positionData.real.unrealized_pnl >= 0 ? 'positive' : 'negative'">
-                    {{ formatPnl(positionData.real.unrealized_pnl, positionData.real.unrealized_pnl_pct) }}
-                  </b>
-                </div>
-              </div>
-            </div>
-
-            <!-- 模拟持仓 -->
-            <div v-if="positionData.paper.has" class="position-section">
-              <div class="position-section-title">
-                <el-tag type="warning" size="small">模拟</el-tag>
-              </div>
-              <div class="position-grid">
-                <div class="pos-item">
-                  <span class="pos-label">持仓数量</span>
-                  <b class="pos-value">{{ positionData.paper.quantity }} 股</b>
-                </div>
-                <div class="pos-item">
-                  <span class="pos-label">成本价</span>
-                  <b class="pos-value">¥{{ positionData.paper.cost_price.toFixed(2) }}</b>
-                </div>
-                <div class="pos-item">
-                  <span class="pos-label">现价</span>
-                  <b class="pos-value">¥{{ (positionData.paper.current_price || 0).toFixed(2) }}</b>
-                </div>
-                <div class="pos-item">
-                  <span class="pos-label">市值</span>
-                  <b class="pos-value">¥{{ (positionData.paper.market_value || 0).toFixed(2) }}</b>
-                </div>
-                <div class="pos-item">
-                  <span class="pos-label">浮动盈亏</span>
-                  <b class="pos-value" :class="positionData.paper.unrealized_pnl >= 0 ? 'positive' : 'negative'">
-                    {{ formatPnl(positionData.paper.unrealized_pnl, positionData.paper.unrealized_pnl_pct) }}
-                  </b>
-                </div>
-              </div>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 新闻与公告：位于详细分析结果下方 -->
-        <el-card shadow="hover" class="news-card">
-          <template #header>
-            <div class="card-hd">
-              <div>{{ newsCardTitle }}</div>
-              <el-select v-model="newsFilter" size="small" style="width: 160px">
-                <el-option label="全部" value="all" />
-                <el-option label="新闻" value="news" />
-                <el-option label="公告" value="announcement" />
-              </el-select>
-            </div>
-          </template>
-          <div v-if="newsLoading" v-loading="true" style="min-height: 120px" />
-          <el-empty v-else-if="newsItems.length === 0" description="暂无新闻" />
-          <div v-else class="news-list">
-            <div v-for="(n, i) in filteredNews" :key="i" class="news-item">
-              <div class="row">
-                <div class="left">
-                  <el-tag size="small" effect="plain" :type="n.type==='announcement' ? 'warning' : 'info'" class="tag">{{ n.type==='announcement' ? '公告' : '新闻' }}</el-tag>
-                  <div class="title">
-                    <template v-if="n.url && n.url !== '#'">
-                      <a :href="n.url" target="_blank" rel="noopener">{{ n.title || '查看详情' }}</a>
-                      <el-icon class="ext"><Link /></el-icon>
-                    </template>
-                    <template v-else>
-                      <span>{{ n.title || '（无标题）' }}</span>
-                    </template>
-                  </div>
-                </div>
-                <div class="right">{{ formatNewsTime(n.time) }}</div>
-              </div>
-              <div class="meta">{{ n.source || '-' }} · {{ newsSource || '-' }}</div>
-            </div>
-          </div>
-        </el-card>
-
-
-
-
-      </el-col>
-
-      <el-col :span="6">
-        <!-- 基础快照 -->
-        <el-card shadow="hover">
-          <template #header><div class="card-hd">{{ isEtf ? 'ETF基础快照' : '基本面快照' }}</div></template>
-          <div v-if="isEtf" class="facts">
-            <div class="fact"><span>基金类型</span><b>{{ etfBasics.fundType || '-' }}</b></div>
-            <div class="fact"><span>跟踪指数</span><b>{{ etfBasics.trackIndex || '-' }}</b></div>
-            <div class="fact"><span>基金规模</span><b>{{ fmtText(etfBasics.fundScale) }}</b></div>
-            <div class="fact"><span>基金份额</span><b>{{ fmtText(etfBasics.fundShare) }}</b></div>
-            <div class="fact"><span>份额日期</span><b>{{ formatDateValue(etfBasics.fundShareDate) }}</b></div>
-            <div class="fact"><span>管理人</span><b>{{ etfBasics.management || '-' }}</b></div>
-            <div class="fact"><span>托管人</span><b>{{ etfBasics.custodian || '-' }}</b></div>
-            <div class="fact"><span>管理费</span><b>{{ fmtLoosePercent(etfBasics.managementFee) }}</b></div>
-            <div class="fact"><span>托管费</span><b>{{ fmtLoosePercent(etfBasics.custodianFee) }}</b></div>
-            <div class="fact"><span>数据更新时间</span><b>{{ formatDateValue(etfBasics.updatedAt) }}</b></div>
-          </div>
-          <div v-else class="facts">
-            <div class="fact"><span>行业</span><b>{{ basics.industry }}</b></div>
-            <div class="fact"><span>板块</span><b>{{ basics.sector }}</b></div>
-            <div class="fact"><span>总市值</span><b>{{ fmtAmount(basics.marketCap) }}</b></div>
-            <div class="fact">
-              <span>PE(TTM)</span>
-              <b>
-                {{ Number.isFinite(basics.pe) ? basics.pe.toFixed(2) : '-' }}
-                <el-tag v-if="basics.peIsRealtime" type="success" size="small" style="margin-left: 4px">实时</el-tag>
-              </b>
-            </div>
-            <div class="fact">
-              <span>PB(市净率)</span>
-              <b>
-                {{ Number.isFinite(basics.pb) ? basics.pb.toFixed(2) : '-' }}
-                <el-tag v-if="basics.peIsRealtime" type="success" size="small" style="margin-left: 4px">实时</el-tag>
-              </b>
-            </div>
-            <div class="fact"><span>PS(TTM)</span><b>{{ Number.isFinite(basics.ps) ? basics.ps.toFixed(2) : '-' }}</b></div>
-            <div class="fact"><span>ROE</span><b>{{ fmtPercent(basics.roe) }}</b></div>
-            <div class="fact"><span>负债率</span><b>{{ fmtPercent(basics.debtRatio) }}</b></div>
-            <div class="fact"><span>股息率</span><b>{{ fmtPercent(basics.dividendYield) }}</b></div>
-            <div class="fact"><span>流动比率</span><b>{{ fmtRatio(basics.currentRatio) }}</b></div>
-            <div class="fact"><span>最新财报期</span><b>{{ basics.reportPeriod || '-' }}</b></div>
-          </div>
-          <div v-if="!isEtf && (detailFactorWarningEntries.length || detailFactorDiagnosticEntries.length)" class="factor-hints">
-            <div class="factor-hints-title">提示信息</div>
-            <div class="factor-hints-list">
-              <el-popover
-                v-for="warning in detailFactorWarningEntries"
-                :key="warning.key"
-                placement="top-start"
-                width="320"
-                trigger="hover"
-              >
-                <template #reference>
-                  <el-tag :type="warning.tagType" effect="plain" class="factor-hint-tag">{{ warning.label }}</el-tag>
-                </template>
-                <div class="factor-hint-popover">
-                  <div class="factor-hint-popover-title">{{ warning.label }}</div>
-                  <div v-for="condition in warning.conditions" :key="condition" class="factor-hint-line">{{ condition }}</div>
-                </div>
-              </el-popover>
-              <el-popover
-                v-for="diagnostic in detailFactorDiagnosticEntries"
-                :key="diagnostic.key"
-                placement="top-start"
-                width="340"
-                trigger="hover"
-              >
-                <template #reference>
-                  <el-tag :type="diagnostic.tagType" effect="plain" class="factor-hint-tag">{{ diagnostic.label }}</el-tag>
-                </template>
-                <div class="factor-hint-popover">
-                  <div class="factor-hint-popover-title">{{ diagnostic.label }}</div>
-                  <div class="factor-hint-line">状态：{{ diagnostic.state }}</div>
-                  <div v-if="diagnostic.reason" class="factor-hint-line">原因：{{ diagnostic.reason }}</div>
-                  <div v-if="diagnostic.missingInputs.length" class="factor-hint-line">缺失输入：{{ diagnostic.missingInputs.join('、') }}</div>
-                </div>
-              </el-popover>
-            </div>
-          </div>
-        </el-card>
-
-        <el-card shadow="hover" class="financial-card">
-          <template #header><div class="card-hd">{{ isEtf ? 'ETF估值快照' : '财务明细快照' }}</div></template>
-          <div v-if="isEtf" class="facts">
-            <div class="fact"><span>场内价格</span><b>{{ fmtPrice(etfBasics.marketPrice ?? quote.price) }}</b></div>
-            <div class="fact"><span>单位净值</span><b>{{ fmtPrice(etfBasics.unitNav) }}</b></div>
-            <div class="fact"><span>累计净值</span><b>{{ fmtPrice(etfBasics.accumNav) }}</b></div>
-            <div class="fact"><span>净值增长率</span><b>{{ fmtLoosePercent(etfBasics.navGrowthRate) }}</b></div>
-            <div class="fact"><span>折溢价率</span><b>{{ fmtLoosePercent(etfBasics.premiumDiscountRate) }}</b></div>
-            <div class="fact"><span>净值日期</span><b>{{ formatDateValue(etfBasics.latestNavDate) }}</b></div>
-            <div class="fact"><span>申购状态</span><b>{{ etfBasics.purchaseStatus || '-' }}</b></div>
-            <div class="fact"><span>赎回状态</span><b>{{ etfBasics.redemptionStatus || '-' }}</b></div>
-          </div>
-          <div v-else class="facts">
-            <div class="fact"><span>公告日期</span><b>{{ financialSnapshot.annDate || '-' }}</b></div>
-            <div class="fact"><span>数据源</span><b>{{ financialSnapshot.dataSource || '-' }}</b></div>
-            <div class="fact"><span>毛利率</span><b>{{ fmtPercent(financialSnapshot.grossMargin) }}</b></div>
-            <div class="fact"><span>净利率</span><b>{{ fmtPercent(financialSnapshot.netprofitMargin) }}</b></div>
-            <div class="fact"><span>营收</span><b>{{ fmtAmount(financialSnapshot.revenue) }}</b></div>
-            <div class="fact"><span>净利润</span><b>{{ fmtAmount(financialSnapshot.netProfit) }}</b></div>
-            <div class="fact"><span>经营现金流</span><b>{{ fmtAmount(financialSnapshot.nCashflowAct) }}</b></div>
-            <div class="fact"><span>总资产</span><b>{{ fmtAmount(financialSnapshot.totalAssets) }}</b></div>
-            <div class="fact"><span>总负债</span><b>{{ fmtAmount(financialSnapshot.totalLiab) }}</b></div>
-          </div>
-          <div v-if="!isEtf && financialRawSections.length" class="raw-section-summary">
-            <div class="raw-title">raw_data 分组</div>
-            <div class="raw-tags">
-              <el-tag v-for="section in financialRawSections" :key="section.key" size="small" type="info" effect="plain">
-                {{ section.label }} {{ section.count }} 条
-              </el-tag>
-            </div>
-            <div class="raw-hint">这些原始分组已经通过主股票接口暴露，后续页面或智能工具可以直接下钻调用。</div>
-          </div>
-        </el-card>
-
-
-
-        <!-- 快捷操作 -->
-        <el-card shadow="hover" class="actions-card">
-          <template #header><div class="card-hd">{{ quickActionTitle }}</div></template>
-          <div class="quick-actions">
-            <el-button type="primary" @click="onAnalyze" :icon="TrendCharts" plain>{{ analyzeButtonText }}</el-button>
-            <el-button @click="onToggleFavorite" :icon="Star">{{ quickFavoriteButtonText }}</el-button>
-            <el-button type="success" :icon="CreditCard" @click="goPaperTrading">模拟交易</el-button>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <!-- ════════ 对话框（保留原有逻辑） ════════ -->
 
     <!-- 详细报告对话框 -->
     <el-dialog
@@ -711,7 +185,7 @@
           <el-radio-group v-model="syncForm.dataSource">
             <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
             <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
-            <el-radio v-if="!isJdyunMode()" label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
+            <el-radio label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="syncForm.syncTypes.includes('historical')">
@@ -729,18 +203,100 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 复盘详情对话框 -->
+    <el-dialog
+      v-model="reviewDetailVisible"
+      title="复盘详情"
+      width="800px"
+      :close-on-click-modal="false"
+      destroy-on-close
+    >
+      <div v-if="reviewDetailLoading" class="detail-loading">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span>加载中...</span>
+      </div>
+      <div v-else-if="currentReviewDetail" class="review-detail-content">
+        <!-- 交易摘要 -->
+        <el-descriptions title="交易摘要" :column="3" border size="small" class="section">
+          <el-descriptions-item label="股票代码">{{ currentReviewDetail.trade_info?.code }}</el-descriptions-item>
+          <el-descriptions-item label="持仓天数">{{ currentReviewDetail.trade_info?.holding_days }}天</el-descriptions-item>
+          <el-descriptions-item label="盈亏金额">
+            <span :class="getTotalPnl() >= 0 ? 'positive' : 'negative'">
+              {{ formatPnlValue(getTotalPnl()) }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="买入均价">{{ currentReviewDetail.trade_info?.avg_buy_price?.toFixed(2) }}</el-descriptions-item>
+          <el-descriptions-item label="卖出均价">{{ currentReviewDetail.trade_info?.avg_sell_price?.toFixed(2) }}</el-descriptions-item>
+          <el-descriptions-item label="收益率">
+            <span :class="getTotalPnlPct() >= 0 ? 'positive' : 'negative'">
+              {{ formatPct(getTotalPnlPct()) }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="手续费" :span="3">{{ currentReviewDetail.trade_info?.total_commission?.toFixed(2) }}元</el-descriptions-item>
+        </el-descriptions>
+
+        <!-- 复盘结论 -->
+        <div class="section">
+          <h4 class="section-title">复盘结论</h4>
+          <div class="summary markdown-content" v-html="renderMarkdown(currentReviewDetail.ai_review?.summary)"></div>
+        </div>
+
+        <!-- 优缺点 -->
+        <el-row :gutter="16" class="section">
+          <el-col :span="12">
+            <div class="analysis-card strengths">
+              <h4><el-icon><CircleCheck /></el-icon> 做得好的地方</h4>
+              <div class="markdown-content" v-html="renderMarkdown((currentReviewDetail.ai_review?.strengths || []).join('\n\n'))"></div>
+            </div>
+          </el-col>
+          <el-col :span="12">
+            <div class="analysis-card weaknesses">
+              <h4><el-icon><Warning /></el-icon> 暴露的问题</h4>
+              <div class="markdown-content" v-html="renderMarkdown((currentReviewDetail.ai_review?.weaknesses || []).join('\n\n'))"></div>
+            </div>
+          </el-col>
+        </el-row>
+
+        <!-- 复盘改进项 -->
+        <div class="section" v-if="currentReviewDetail.ai_review?.suggestions?.length">
+          <h4 class="section-title"><el-icon><Pointer /></el-icon> 后续改进重点</h4>
+          <div class="suggestions markdown-content" v-html="renderMarkdown((currentReviewDetail.ai_review?.suggestions || []).join('\n\n'))"></div>
+        </div>
+
+        <!-- 详细分析 -->
+        <el-collapse class="section">
+          <el-collapse-item title="时机复盘" name="timing" v-if="currentReviewDetail.ai_review?.timing_analysis">
+            <div class="markdown-content" v-html="renderMarkdown(currentReviewDetail.ai_review?.timing_analysis)"></div>
+          </el-collapse-item>
+          <el-collapse-item title="仓位复盘" name="position" v-if="currentReviewDetail.ai_review?.position_analysis">
+            <div class="markdown-content" v-html="renderMarkdown(currentReviewDetail.ai_review?.position_analysis)"></div>
+          </el-collapse-item>
+          <el-collapse-item title="情绪复盘" name="emotion" v-if="currentReviewDetail.ai_review?.emotion_analysis">
+            <div class="markdown-content" v-html="renderMarkdown(currentReviewDetail.ai_review?.emotion_analysis)"></div>
+          </el-collapse-item>
+          <el-collapse-item title="归因复盘" name="attribution" v-if="currentReviewDetail.ai_review?.attribution_analysis">
+            <div class="markdown-content" v-html="renderMarkdown(currentReviewDetail.ai_review?.attribution_analysis)"></div>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+      <template #footer>
+        <el-button @click="reviewDetailVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
+
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { isJdyunMode } from '@/utils/config'
-import { TrendCharts, Star, Refresh, Link, Document, Clock, CreditCard, Delete, Loading } from '@element-plus/icons-vue'
-import { PieChart, Plus, View, InfoFilled, Opportunity, CircleCheck, Warning, Pointer } from '@element-plus/icons-vue'
+import { Loading, CircleCheck, Warning, Pointer } from '@element-plus/icons-vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { stocksApi } from '@/api/stocks'
+import { assistantApi, type AssistantThreadItem } from '@/api/assistant'
 import { ApiClient } from '@/api/request'
 import {
   stockSyncApi,
@@ -753,7 +309,6 @@ import { CandlestickChart } from 'echarts/charts'
 
 import { GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import { favoritesApi } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
@@ -764,6 +319,18 @@ import { getReportName } from '@/utils/reportPresentation'
 import { getTaskList, getTaskDetail, TaskType, TaskStatus } from '@/api/unifiedTasks'
 import { reviewApi } from '@/api/review'
 import { portfolioApi } from '@/api/portfolio'
+
+// 新版股票详情页子组件
+import StockOverview from './components/StockOverview.vue'
+import AssistantHero from './components/AssistantHero.vue'
+import ResearchFlow from './components/ResearchFlow.vue'
+import KlineChart from './components/KlineChart.vue'
+import CoreMetrics from './components/CoreMetrics.vue'
+import AnalysisResultCard from './components/AnalysisResultCard.vue'
+import PositionReviewTabs from './components/PositionReviewTabs.vue'
+import AssistantChat from './components/AssistantChat.vue'
+import BottomSection from './components/BottomSection.vue'
+import BackToTop from './components/BackToTop.vue'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -825,18 +392,6 @@ const marketLabel = computed(() => isEtf.value ? 'ETF' : (market.value || '-'))
 const securityName = computed(() => isEtf.value ? 'ETF' : '股票')
 const securityCodeLabel = computed(() => `${securityName.value}代码`)
 const syncDialogTitle = computed(() => `同步${securityName.value}数据`)
-const syncButtonText = computed(() => isEtf.value ? '同步ETF数据' : '同步数据')
-const favoriteButtonText = computed(() => {
-  if (isEtf.value) return isFav.value ? '已关注ETF' : '关注ETF'
-  return isFav.value ? '已关注' : '加入关注列表'
-})
-const quickFavoriteButtonText = computed(() => {
-  if (isEtf.value) return isFav.value ? '取消ETF关注' : '加入ETF关注'
-  return isFav.value ? '移出关注' : '加入关注列表'
-})
-const analyzeButtonText = computed(() => isEtf.value ? '发起ETF分析' : '发起分析')
-const quickActionTitle = computed(() => isEtf.value ? 'ETF快捷操作' : '快捷操作')
-const newsCardTitle = computed(() => isEtf.value ? 'ETF新闻与公告' : '近期新闻与公告')
 const klineCardTitle = computed(() => isEtf.value ? 'ETF价格走势' : '价格K线')
 
 // ECharts K线配置
@@ -898,25 +453,6 @@ const quote = reactive({
 
 const lastRefreshAt = ref<Date | null>(null)
 const refreshText = computed(() => lastRefreshAt.value ? `已刷新 ${lastRefreshAt.value.toLocaleTimeString()}` : '未刷新')
-const changeClass = computed(() => quote.changePercent > 0 ? 'up' : quote.changePercent < 0 ? 'down' : '')
-
-// 🔥 日期判断和格式化函数
-function isToday(dateStr: string | null): boolean {
-  if (!dateStr) return false
-  const today = new Date().toISOString().split('T')[0].replace(/-/g, '')
-  const targetDate = dateStr.replace(/-/g, '')
-  return today === targetDate
-}
-
-function formatDateTag(dateStr: string | null): string {
-  if (!dateStr) return ''
-  // 将 YYYYMMDD 或 YYYY-MM-DD 格式转换为 MM-DD
-  const cleaned = dateStr.replace(/-/g, '')
-  if (cleaned.length === 8) {
-    return `${cleaned.substring(4, 6)}-${cleaned.substring(6, 8)}`
-  }
-  return dateStr
-}
 
 // 同步状态
 const syncStatus = ref<any>(null)
@@ -961,7 +497,7 @@ async function loadPreferredSyncDataSource() {
       return
     }
 
-    if (!isJdyunMode() && availableSyncSources.qmt) {
+    if (availableSyncSources.qmt) {
       syncForm.dataSource = 'qmt'
     } else if (availableSyncSources.akshare) {
       syncForm.dataSource = 'akshare'
@@ -1377,6 +913,10 @@ onMounted(async () => {
   ])
   // 每30秒刷新一次报价
   timer = setInterval(fetchQuote, 30000)
+
+  // 初始化股票主题（依赖上面的报告数据，放在 Promise.all 之后）
+  // 异步执行不阻塞页面渲染；失败时降级为默认主题
+  void initStockAssistantThread()
 })
 onUnmounted(() => {
   stockDetailDisposed = true
@@ -1390,6 +930,10 @@ const periodOptions = ['日K','周K','月K']
 const period = ref('日K')
 
 const klineSource = ref<string | undefined>(undefined)
+// 🔥 K线原始数据（供新版 KlineChart 组件使用，含 MA5/MA20 + 成交量）
+const klineCategory = ref<string[]>([])
+const klineValues = ref<number[][]>([])   // [open, close, low, high]
+const klineVolumes = ref<number[]>([])
 
 function periodLabelToParam(p: string): string {
   if (p.includes('5')) return '5m'
@@ -1432,6 +976,13 @@ async function fetchKline() {
       lastKTime.value = category[category.length - 1]
       lastKClose.value = values[values.length - 1][1]
     }
+
+    // 🔥 填充新版 KlineChart 组件所需原始数据（含成交量）
+    klineCategory.value = category
+    klineValues.value = values
+    klineVolumes.value = items
+      .map((it: any) => Number(it.volume ?? it.vol ?? 0))
+      .filter((_v: number, idx: number) => idx < values.length)
 
     kOption.value = {
       ...kOption.value,
@@ -1488,12 +1039,6 @@ async function fetchNews() {
     newsLoading.value = false
   }
 }
-
-const filteredNews = computed(() => {
-  if (newsFilter.value === 'news') return newsItems.value.filter(x => x.type === 'news')
-  if (newsFilter.value === 'announcement') return newsItems.value.filter(x => x.type === 'announcement')
-  return newsItems.value
-})
 
 // 基本面（mock）
 const basics = reactive({
@@ -1957,24 +1502,7 @@ function viewReviewTaskDetail() {
   viewReviewDetail()
 }
 
-// 持仓分析相关格式化函数
-function formatPnl(pnl: any, pct: any): string {
-  const n = Number(pnl)
-  const p = Number(pct)
-  if (!Number.isFinite(n)) return '-'
-  const sign = n > 0 ? '+' : ''
-  const pnlStr = `${sign}¥${n.toFixed(2)}`
-  if (Number.isFinite(p)) {
-    return `${pnlStr} (${sign}${p.toFixed(2)}%)`
-  }
-  return pnlStr
-}
-
-function pnlClass(pnl: any): string {
-  const n = Number(pnl)
-  if (!Number.isFinite(n) || n === 0) return ''
-  return n > 0 ? 'pnl-positive' : 'pnl-negative'
-}
+// 持仓分析相关格式化函数（仅保留对话框所需）
 
 // 格式化盈亏数值
 function formatPnlValue(pnl: any): string {
@@ -2006,158 +1534,7 @@ function formatPct(pct: any): string {
   return `${sign}${(n * 100).toFixed(2)}%`
 }
 
-function actionLabel(action: string): string {
-  const map: Record<string, string> = {
-    hold: '持有观望',
-    buy: '加仓',
-    sell: '清仓',
-    reduce: '减仓',
-    add: '加仓',
-    wait: '观望',
-    stop_loss: '止损'
-  }
-  return map[action?.toLowerCase()] || action || '-'
-}
-
-function actionTagType(action: string): 'success' | 'warning' | 'danger' | 'info' | 'primary' {
-  switch (action?.toLowerCase()) {
-    case 'buy':
-    case 'add':
-      return 'success'
-    case 'sell':
-      return 'danger'
-    case 'reduce':
-    case 'stop_loss':
-      return 'warning'
-    case 'hold':
-      return 'primary'
-    default:
-      return 'info'
-  }
-}
-
-function formatPercent(v: any): string {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '-'
-  return `${n.toFixed(2)}%`
-}
-
-// 格式化
-function fmtPrice(v: any) { const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : '-' }
-function fmtPercent(v: any) { const n = Number(v); return Number.isFinite(n) ? `${n>0?'+':''}${n.toFixed(2)}%` : '-' }
-function fmtRatio(v: any) { const n = Number(v); return Number.isFinite(n) ? n.toFixed(2) : '-' }
-function fmtText(v: any) {
-  if (v === null || v === undefined || v === '') return '-'
-  return String(v)
-}
-function fmtLoosePercent(v: any) {
-  if (v === null || v === undefined || v === '') return '-'
-  if (typeof v === 'string' && v.includes('%')) return v
-  const n = Number(v)
-  return Number.isFinite(n) ? `${n > 0 ? '+' : ''}${n.toFixed(2)}%` : String(v)
-}
-function formatDateValue(v: any) {
-  if (v === null || v === undefined || v === '') return '-'
-  return String(v)
-}
-function fmtVolume(v: any) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '-'
-
-  // 🔥 数据库存储的是"股"，直接显示为"万股"或"亿股"
-  if (n >= 1e8) return (n/1e8).toFixed(2) + '亿股'
-  if (n >= 1e4) return (n/1e4).toFixed(2) + '万股'
-  return n.toFixed(0) + '股'
-}
-function fmtAmount(v: any) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '-'
-  if (n >= 1e12) return (n/1e12).toFixed(2) + '万亿'
-  if (n >= 1e8) return (n/1e8).toFixed(2) + '亿'
-  if (n >= 1e4) return (n/1e4).toFixed(2) + '万'
-  return n.toFixed(0)
-}
-// 🔥 新增：格式化同步时间（添加时区标识）
-function formatSyncTime(timeStr: string | null | undefined): string {
-  if (!timeStr) return '未同步'
-  // 后端返回的时间已经是 UTC+8 时区，添加时区标识
-  return `${timeStr} (UTC+8)`
-}
-
-// 🔥 新增：格式化股票更新时间
-function formatQuoteUpdateTime(timeStr: string | null | undefined): string {
-  if (!timeStr) return '未更新'
-  try {
-    // 后端返回的时间已经是 UTC+8 时区，但没有时区标识
-    // 需要手动添加 +08:00 时区标识，然后转换为本地时间显示
-    let isoString = timeStr
-    if (!timeStr.includes('+') && !timeStr.includes('Z')) {
-      // 如果没有时区标识，添加 +08:00
-      isoString = timeStr.replace(/(\.\d+)?$/, '+08:00')
-    }
-    const date = new Date(isoString)
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    const hours = String(date.getHours()).padStart(2, '0')
-    const minutes = String(date.getMinutes()).padStart(2, '0')
-    const seconds = String(date.getSeconds()).padStart(2, '0')
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
-  } catch (e) {
-    return timeStr
-  }
-}
-
-// 🔥 新增：格式化同步间隔
-function formatSyncInterval(seconds: number): string {
-  if (!seconds || seconds <= 0) return ''
-
-  if (seconds < 60) {
-    // 小于60秒，显示秒数
-    return `(每${seconds}秒)`
-  } else if (seconds < 3600) {
-    // 小于1小时，显示分钟数
-    const minutes = Math.round(seconds / 60)
-    return `(每${minutes}分钟)`
-  } else {
-    // 大于等于1小时，显示小时数
-    const hours = Math.round(seconds / 3600)
-    return `(每${hours}小时)`
-  }
-}
-function fmtConf(v: any) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '-'
-  const pct = n <= 1 ? n * 100 : n
-  return `${Math.round(pct)}%`
-}
-
-import { formatDateTimeWithRelative, formatDateTime } from '@/utils/datetime'
-
-// 格式化分析时间（处理UTC时间转换为中国本地时间）
-function formatAnalysisTime(dateStr: any): string {
-  return formatDateTimeWithRelative(dateStr)
-}
-
-// 格式化新闻时间（简洁格式：MM-DD HH:mm）
-function formatNewsTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return '-'
-
-  try {
-    // 使用 formatDateTime 工具函数，自定义格式
-    return formatDateTime(dateStr, {
-      timeZone: 'Asia/Shanghai',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    }).replace(/\//g, '-').replace(/,/g, '')  // 移除逗号和斜杠
-  } catch (e) {
-    console.error('新闻时间格式化错误:', e, dateStr)
-    return String(dateStr)
-  }
-}
+// fmtConf 已移除：合规要求不展示信心度
 
 // 格式化报告名称
 function formatReportName(key: string): string {
@@ -2217,9 +1594,10 @@ function exportReport() {
   // 生成Markdown格式的完整报告
   let fullReport = `# ${code.value} 股票分析报告\n\n`
 
-  // 格式化分析时间用于报告
-  const reportTime = lastTaskInfo.value?.end_time
-    ? new Date(lastTaskInfo.value.end_time).toLocaleString('zh-CN', {
+  // 格式化分析时间用于报告（兼容 completed_at / created_at / end_time）
+  const reportTimeSrc = lastTaskInfo.value?.completed_at || lastTaskInfo.value?.created_at || lastTaskInfo.value?.end_time
+  const reportTime = reportTimeSrc
+    ? new Date(reportTimeSrc).toLocaleString('zh-CN', {
         timeZone: 'Asia/Shanghai',
         year: 'numeric',
         month: '2-digit',
@@ -2231,8 +1609,7 @@ function exportReport() {
     : lastAnalysis.value?.analysis_date
 
   fullReport += `**分析时间**: ${reportTime}\n`
-  fullReport += `**投资建议**: ${lastAnalysis.value.recommendation}\n`
-  fullReport += `**信心度**: ${fmtConf(lastAnalysis.value.confidence_score)}\n\n`
+  fullReport += `**研究观察**: ${lastAnalysis.value.recommendation}\n\n`
   fullReport += `---\n\n`
 
   for (const [key, content] of Object.entries(lastAnalysis.value.reports)) {
@@ -2258,11 +1635,477 @@ function exportReport() {
   ElMessage.success('报告已导出')
 }
 
+// ============================================================================
+// 新版详情页：研究路径 / 智能助手 / 历史导航
+// ============================================================================
+
+// 研究路径步骤（根据已加载数据动态计算状态）
+const researchFlowSteps = computed<{ key: string; title: string; desc: string; status: 'done' | 'active' | 'pending' }[]>(() => {
+  return [
+    {
+      key: 'kline',
+      title: '行情走势',
+      desc: 'K线 + 核心指标',
+      status: klineValues.value.length > 0 ? 'done' : 'pending',
+    },
+    {
+      key: 'analysis',
+      title: '单股分析',
+      desc: 'AI 研究报告',
+      status: lastAnalysis.value ? 'done' : (analysisStatus.value === 'running' ? 'active' : 'pending'),
+    },
+    {
+      key: 'position-review',
+      title: '持仓与复盘',
+      desc: '持仓状态 + 交易回顾',
+      status: (positionSummary.has || reviewSummary.has) ? 'done' : 'pending',
+    },
+    {
+      key: 'fundamentals',
+      title: '基本面',
+      desc: '财务数据 + 新闻',
+      status: Number.isFinite(basics.pe) || Number.isFinite(financialSnapshot.revenue) ? 'done' : 'pending',
+    },
+    {
+      key: 'assistant',
+      title: '智能助手解读',
+      desc: '全景涵盖以上所有模块',
+      status: 'active',
+    },
+  ]
+})
+
+// 研究路径当前激活步骤（用于 ResearchFlow 高亮）
+const activeFlowKey = ref<string>('')
+
+function handleFlowStepClick(key: string) {
+  activeFlowKey.value = key
+  const idMap: Record<string, string> = {
+    kline: 'kline-section',
+    analysis: 'analysis-result-section',
+    'position-review': 'position-review-section',
+    fundamentals: 'bottom-section',
+    assistant: 'assistant-chat',
+  }
+  const targetId = idMap[key]
+  if (targetId) {
+    const el = document.getElementById(targetId)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
+}
+
+// 智能助手聊天状态
+const assistantMessages = ref<Array<{ role: 'user' | 'bot'; content: string }>>([])
+const assistantLoading = ref(false)
+const assistantInitialPrompt = ref('')
+const assistantChatRef = ref<any>(null)
+
+// 股票主题（thread）状态
+const stockAssistantThreadId = ref<string>('')
+const stockAssistantThreadReady = ref(false)
+const stockAssistantStreamController = ref<AbortController | null>(null)
+
+// 已加载模块（用于助手头部展示）
+const assistantLoadedModules = computed(() => {
+  const mods: string[] = []
+  if (klineValues.value.length) mods.push('K线')
+  if (lastAnalysis.value) mods.push('单股分析')
+  if (positionSummary.has) mods.push('持仓')
+  if (reviewSummary.has) mods.push('复盘')
+  if (Number.isFinite(basics.pe) || Number.isFinite(financialSnapshot.revenue)) mods.push('基本面')
+  return mods
+})
+
+// 助手是否已加载各模块（用于 AssistantHero 展示）
+const assistantHasAnalysis = computed(() => !!lastAnalysis.value)
+const assistantHasPosition = computed(() => positionSummary.has)
+const assistantHasReview = computed(() => reviewSummary.has)
+const assistantHasFundamentals = computed(() => Number.isFinite(basics.pe) || Number.isFinite(financialSnapshot.revenue))
+const assistantHasKline = computed(() => klineValues.value.length > 0)
+
+// 处理助手快捷问题（来自 AssistantHero）
+function handleAssistantHeroAsk(prompt: string) {
+  assistantInitialPrompt.value = prompt
+}
+
+// ════════ 股票主题初始化（对接现有智能助手模块） ════════
+
+const STALE_THRESHOLD_HOURS = 24
+
+// 单股分析报告可用模块目录（用于注入 stock_scope，供 LLM 按需调工具获取完整内容）
+// 与后端 core/tools/implementations/assistant_ops/report_query.py 的 _ANALYST_LABELS 保持一致
+const STOCK_REPORT_MODULES = [
+  { key: 'market_report', title: '市场技术分析', desc: 'K线形态、技术指标、支撑压力位' },
+  { key: 'fundamentals_report', title: '基本面研究', desc: '财务数据、估值、行业地位' },
+  { key: 'news_report', title: '新闻研究', desc: '近期公告、行业新闻、事件驱动' },
+  { key: 'sentiment_report', title: '情绪分析', desc: '社交媒体舆情、机构观点' },
+  { key: 'trader_investment_plan', title: '研究整合意见', desc: '多情景研究结论 + 研究观察' },
+  { key: 'research_team_decision', title: '研究团队结论', desc: '多情景研究后的团队研究观察汇总' },
+  { key: 'risk_management_decision', title: '风险审阅结论', desc: '风险边界 + 后续观察' },
+  { key: 'final_trade_decision', title: '综合研究结论', desc: '最终研究观察汇总' },
+]
+
+/** 初始化股票主题：创建/获取主题 + 加载历史消息 + 自动关联报告 */
+async function initStockAssistantThread() {
+  if (!code.value) return
+  try {
+    const title = `股票研究 · ${code.value} ${stockName.value || ''}`.trim()
+    const thread = await assistantApi.createThread(title)
+    stockAssistantThreadId.value = thread.thread_id
+
+    // 加载历史消息（若之前已有对话）
+    const historyRes = await assistantApi.getThreadMessages(thread.thread_id)
+    const hasHistory = !!(historyRes.messages && historyRes.messages.length > 0)
+    if (hasHistory) {
+      assistantMessages.value = historyRes.messages.map(m => ({
+        role: m.role === 'user' ? 'user' as const : 'bot' as const,
+        content: m.content,
+      }))
+    }
+
+    // 自动关联报告（不阻塞主流程）
+    void autoLinkReports(thread)
+    stockAssistantThreadReady.value = true
+
+    // 仅当首次进入（无历史消息）时，检查报告时效性并主动提醒用户
+    if (!hasHistory) {
+      checkStaleReportsAndRemind()
+    }
+  } catch (e) {
+    console.warn('初始化股票助手主题失败', e)
+    // 失败时降级：仍然允许用户发消息，conversation_id 为空走默认主题
+  }
+}
+
+/** 检查报告时效性，若有过期报告则主动推一条 bot 消息提醒用户重新分析 */
+function checkStaleReportsAndRemind() {
+  const scope = buildStockScopeContext()
+  const staleItems: string[] = []
+
+  const stockReport = scope.reports?.stock_report
+  if (stockReport?.is_stale) {
+    staleItems.push(`单股分析报告（${stockReport.completed_at || '未知时间'} 生成，已过期约 ${stockReport.stale_hours} 小时）`)
+  }
+
+  const positionReport = scope.reports?.position_report
+  if (positionReport?.is_stale) {
+    staleItems.push(`持仓分析报告（${positionReport.completed_at || '未知时间'} 生成，已过期约 ${positionReport.stale_hours} 小时）`)
+  }
+
+  const reviewData = scope.review_summary
+  if (reviewData?.is_stale) {
+    staleItems.push(`交易复盘报告（${reviewData.completed_at || '未知时间'} 生成，已过期约 ${reviewData.stale_hours} 小时）`)
+  }
+
+  if (staleItems.length === 0) return
+
+  const reminder = [
+    `⚠️ 检测到以下报告已过期（超过 ${STALE_THRESHOLD_HOURS} 小时），我不会基于旧报告给出结论：`,
+    '',
+    ...staleItems.map(s => `• ${s}`),
+    '',
+    '如果你希望我基于最新数据解读，请点击对应模块的「重新分析」按钮；或在下方回复「重新分析」，我会引导你发起。'
+  ].join('\n')
+
+  assistantMessages.value.push({ role: 'bot', content: reminder })
+}
+
+/** 自动关联单股分析报告、持仓分析报告、交易复盘报告到主题 */
+async function autoLinkReports(thread: AssistantThreadItem) {
+  const threadId = thread.thread_id
+  const existingKeys = new Set(
+    (thread.report_refs || []).map(r => `${r.ref_type}:${r.report_key}`),
+  )
+
+  // 关联单股分析报告
+  if (lastTaskInfo.value?.task_id) {
+    const key = `stock_report:${lastTaskInfo.value.task_id}`
+    if (!existingKeys.has(key)) {
+      try {
+        await assistantApi.attachThreadReport(threadId, 'stock_report', lastTaskInfo.value.task_id)
+      } catch (e) {
+        console.warn('关联单股分析报告失败', e)
+      }
+    }
+  }
+
+  // 关联持仓分析报告（需要先搜索 candidates 拿到 analysis_id）
+  if (positionSummary.has) {
+    try {
+      const candidates = await assistantApi.getThreadReportCandidates(
+        threadId,
+        'position_report',
+        code.value,
+        5,
+      )
+      const matched = candidates.items.find(
+        item => (item.symbol || '').toUpperCase() === code.value.toUpperCase(),
+      )
+      if (matched) {
+        const key = `position_report:${matched.report_key}`
+        if (!existingKeys.has(key)) {
+          await assistantApi.attachThreadReport(threadId, 'position_report', matched.report_key)
+        }
+      }
+    } catch (e) {
+      console.warn('关联持仓分析报告失败', e)
+    }
+  }
+
+  // 关联交易复盘报告（task_id 即 review_id，直接用 task_id 作为 report_key）
+  if (reviewSummary.has && reviewSummary.taskId) {
+    const key = `review_report:${reviewSummary.taskId}`
+    if (!existingKeys.has(key)) {
+      try {
+        await assistantApi.attachThreadReport(threadId, 'review_report', reviewSummary.taskId)
+      } catch (e) {
+        console.warn('关联交易复盘报告失败', e)
+      }
+    }
+  }
+}
+
+/** 构建股票上下文（通过 user_context.stock_scope 注入到后端 system prompt） */
+function buildStockScopeContext() {
+  const now = Date.now()
+  const parseTime = (s: string) => (s ? new Date(s).getTime() : 0)
+  const calcStale = (ts: number) => {
+    if (!ts) return { is_stale: false }
+    const hours = Math.round((now - ts) / 3_600_000)
+    return { is_stale: hours > STALE_THRESHOLD_HOURS, stale_hours: hours }
+  }
+
+  const scope: Record<string, any> = {
+    code: code.value,
+    stock_name: stockName.value,
+    thread_id: stockAssistantThreadId.value,
+    reports: {},
+  }
+
+  if (lastTaskInfo.value?.task_id) {
+    const ts = parseTime(lastTaskInfo.value.completed_at || lastTaskInfo.value.created_at || '')
+    // 注入报告目录而非截断摘要正文，LLM 通过 get_report_detail(task_id, module_key) 按需获取完整内容
+    const existingKeys = Object.keys(lastAnalysis.value?.reports || {})
+    scope.reports.stock_report = {
+      task_id: lastTaskInfo.value.task_id,
+      completed_at: lastTaskInfo.value.completed_at || lastTaskInfo.value.created_at || '',
+      ...calcStale(ts),
+      available_modules: STOCK_REPORT_MODULES,
+      existing_modules: existingKeys,
+    }
+  }
+
+  if (positionSummary.has && positionSummary.taskId) {
+    const ts = parseTime(positionSummary.completedAt)
+    // 持仓报告不注入正文，LLM 通过 get_position_analysis(code, market) 获取完整内容
+    scope.reports.position_report = {
+      analysis_id: positionSummary.taskId,
+      completed_at: positionSummary.completedAt,
+      ...calcStale(ts),
+    }
+  }
+
+  if (reviewSummary.has) {
+    const ts = parseTime(reviewSummary.completedAt)
+    // 复盘报告不注入正文，LLM 通过 get_trade_review_detail(review_id) 获取完整内容
+    // 注意：后端 task_id 即 review_id（见 trade_review_service.py:1908 注释）
+    scope.review_summary = {
+      task_id: reviewSummary.taskId,
+      review_id: reviewSummary.taskId,  // task_id 即 review_id
+      completed_at: reviewSummary.completedAt,
+      ...calcStale(ts),
+      trade_count: reviewSummary.tradeCount ?? undefined,
+    }
+  }
+
+  if (Number.isFinite(quote.price)) {
+    scope.current_quote = {
+      price: quote.price,
+      change_percent: quote.changePercent,
+    }
+  }
+
+  return scope
+}
+
+// 处理助手发送问题（流式 LLM 对话，对接现有智能助手模块）
+async function handleAssistantAsk(prompt: string) {
+  if (!prompt.trim() || assistantLoading.value) return
+
+  const conversationId = stockAssistantThreadId.value || undefined
+  const stockScope = buildStockScopeContext()
+
+  assistantLoading.value = true
+
+  // 占位一条空的 bot 消息，用于流式追加
+  const botMsgIdx = assistantMessages.value.push({ role: 'bot', content: '' }) - 1
+  let firstTokenReceived = false
+
+  stockAssistantStreamController.value = assistantApi.chatStream(
+    prompt,
+    conversationId,
+    undefined, // model，使用系统默认
+    undefined, // model_config_id
+    {
+      onToken(content: string) {
+        if (!firstTokenReceived) firstTokenReceived = true
+        assistantMessages.value[botMsgIdx].content += content
+      },
+      onDone(data) {
+        assistantLoading.value = false
+        stockAssistantStreamController.value = null
+        // 若服务端返回了 conversation_id（首次创建主题），更新本地
+        if (data.conversation_id && !stockAssistantThreadId.value) {
+          stockAssistantThreadId.value = data.conversation_id
+        }
+        // 若回复为空（罕见），给一个友好提示
+        if (!assistantMessages.value[botMsgIdx].content.trim()) {
+          assistantMessages.value[botMsgIdx].content =
+            '抱歉，我暂时无法回答这个问题。请稍后重试。'
+        }
+      },
+      onError(msg: string) {
+        assistantLoading.value = false
+        stockAssistantStreamController.value = null
+        if (!firstTokenReceived) {
+          assistantMessages.value[botMsgIdx].content =
+            `抱歉，处理您的请求时出错：${msg}\n\n你可以稍后重试，或前往「智能助手」主页面继续对话。`
+        } else {
+          assistantMessages.value[botMsgIdx].content +=
+            `\n\n---\n⚠️ 响应中断：${msg}`
+        }
+      },
+    },
+    {
+      // extraPayload: 通过 user_context 注入股票上下文
+      assistant_role: 'general',
+      user_context: {
+        stock_scope: stockScope,
+      },
+    },
+  )
+}
+
+// 历史记录导航
+function goToAnalysisHistory() {
+  router.push({ path: '/tasks/unified', query: { type: 'stock_analysis', symbol: code.value } })
+}
+
+function goToPositionHistory() {
+  router.push({ path: '/tasks/unified', query: { type: 'position_analysis', symbol: code.value } })
+}
+
+function goToReviewHistory() {
+  router.push({ path: '/tasks/unified', query: { type: 'trade_review', symbol: code.value } })
+}
+
+function goToApiGuide() {
+  router.push({ name: 'StockDataApiGuide', query: { code: code.value } })
+}
+
+// 分析历史记录数量（简化：基于已有报告推断）
+const analysisHistoryCount = computed(() => {
+  // 实际可从后端获取，这里先用 lastAnalysis 是否存在作为提示
+  return lastAnalysis.value ? 1 : 0
+})
+
+// 持仓分析历史数量
+const positionHistoryCount = computed(() => {
+  return positionSummary.has ? 1 : 0
+})
+
+// K线周期切换
+function handlePeriodChange(p: string) {
+  // 仅更新 period，由 watch(period) 自动触发 fetchKline，避免重复请求
+  period.value = p
+}
+
 </script>
 
 <style scoped lang="scss">
 .stock-detail {
   display: flex; flex-direction: column; gap: 16px;
+}
+
+/* ════════ 新版详情页布局 ════════ */
+.stock-detail-redesign {
+  display: flex;
+  flex-direction: column;
+  gap: 0; /* 子组件自带 margin-bottom */
+  padding: 0;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.main-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .main-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 复盘详情对话框样式（保留） */
+.review-detail-content {
+  .section {
+    margin-bottom: 16px;
+  }
+  .section-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--el-text-color-primary);
+  }
+  .summary {
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--el-text-color-regular);
+  }
+  .analysis-card {
+    padding: 12px;
+    border-radius: 8px;
+    background: var(--el-fill-color-light);
+    h4 {
+      font-size: 14px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    &.strengths h4 { color: #16a34a; }
+    &.weaknesses h4 { color: #ef4444; }
+  }
+  .suggestions {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--el-text-color-regular);
+  }
+  .positive { color: #ef4444; font-weight: 600; }
+  .negative { color: #16a34a; font-weight: 600; }
+}
+
+.detail-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px;
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+}
+
+.reports-dialog {
+  .report-content {
+    min-height: 500px;
+  }
 }
 
 .header { display: flex; justify-content: space-between; align-items: center; }
@@ -2510,8 +2353,7 @@ function exportReport() {
   color: var(--el-text-color-secondary);
 }
 
-.analysis-meta .analysis-time,
-.analysis-meta .confidence {
+.analysis-meta .analysis-time {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2519,52 +2361,6 @@ function exportReport() {
 
 .analysis-meta .el-icon {
   font-size: 14px;
-}
-
-/* 投资建议盒子 - 重点突出 */
-.recommendation-box {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 12px;
-  padding: 20px 24px;
-  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.25);
-  transition: all 0.3s ease;
-  margin: 16px 0;
-}
-
-.recommendation-box:hover {
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.35);
-  transform: translateY(-2px);
-}
-
-.recommendation-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-  color: rgba(255, 255, 255, 0.95);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.recommendation-header .icon {
-  font-size: 20px;
-}
-
-.recommendation-content {
-  background: rgba(255, 255, 255, 0.98);
-  border-radius: 8px;
-  padding: 16px 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.recommendation-text {
-  color: #1f2937;
-  font-size: 15px;
-  line-height: 1.8;
-  font-weight: 500;
-  word-wrap: break-word;
-  word-break: break-word;
-  white-space: pre-wrap;
 }
 
 /* 同步状态提示 */
@@ -2679,11 +2475,6 @@ function exportReport() {
 
   .advice-label {
     color: var(--el-text-color-secondary);
-  }
-
-  .advice-confidence {
-    color: var(--el-text-color-secondary);
-    font-size: 13px;
   }
 
   .advice-conclusion {
@@ -3014,4 +2805,3 @@ function exportReport() {
   }
 }
 </style>
-

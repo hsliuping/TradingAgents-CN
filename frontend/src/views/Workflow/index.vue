@@ -103,12 +103,12 @@
                   </div>
                 </div>
 
-                <!-- 辩论层 -->
+                <!-- 多情景研究层 -->
                 <div class="flow-layer" v-if="getResearcherNodes(template).length > 0">
-                  <span class="layer-label">多空辩论</span>
+                  <span class="layer-label">多情景研究</span>
                   <div class="flow-nodes debate">
                     <div class="flow-node researcher bull">
-                      <el-tooltip content="看多研究员">
+                      <el-tooltip content="积极证据研究员">
                         <span>🐂</span>
                       </el-tooltip>
                     </div>
@@ -117,7 +117,7 @@
                       <span class="debate-rounds">{{ getDebateRounds(template, 'debate') }}</span>
                     </div>
                     <div class="flow-node researcher bear">
-                      <el-tooltip content="看空研究员">
+                      <el-tooltip content="谨慎证据研究员">
                         <span>🐻</span>
                       </el-tooltip>
                     </div>
@@ -129,25 +129,25 @@
                   <span class="layer-label">决策</span>
                   <div class="flow-nodes decision">
                     <div class="flow-node manager">
-                      <el-tooltip content="研究经理">
+                      <el-tooltip content="研究整合员">
                         <span>👔</span>
                       </el-tooltip>
                     </div>
                     <span class="flow-arrow">→</span>
                     <div class="flow-node trader">
-                      <el-tooltip content="交易员">
+                      <el-tooltip content="研究整合员">
                         <span>💰</span>
                       </el-tooltip>
                     </div>
                   </div>
                 </div>
 
-                <!-- 风险辩论层 -->
+                <!-- 风险多情景研究层 -->
                 <div class="flow-layer" v-if="template.nodes?.some(n => n.id === 'risk_debate')">
-                  <span class="layer-label">风险辩论</span>
+                  <span class="layer-label">风险多情景研究</span>
                   <div class="flow-nodes debate">
                     <div class="flow-node risk risky">
-                      <el-tooltip content="激进分析师">
+                      <el-tooltip content="高弹性情景分析师">
                         <span>🔥</span>
                       </el-tooltip>
                     </div>
@@ -156,7 +156,7 @@
                       <span class="debate-rounds">{{ getDebateRounds(template, 'risk') }}</span>
                     </div>
                     <div class="flow-node risk safe">
-                      <el-tooltip content="保守分析师">
+                      <el-tooltip content="防御情景分析师">
                         <span>🛡️</span>
                       </el-tooltip>
                     </div>
@@ -164,19 +164,19 @@
                       <span class="debate-arrows">⚔️</span>
                     </div>
                     <div class="flow-node risk neutral">
-                      <el-tooltip content="中性分析师">
+                      <el-tooltip content="基准情景分析师">
                         <span>⚖️</span>
                       </el-tooltip>
                     </div>
                   </div>
                 </div>
 
-                <!-- 风险裁决 -->
+                <!-- 风险审阅 -->
                 <div class="flow-layer">
-                  <span class="layer-label">风险裁决</span>
+                  <span class="layer-label">风险审阅</span>
                   <div class="flow-nodes decision">
                     <div class="flow-node manager">
-                      <el-tooltip content="风险经理">
+                      <el-tooltip content="风险评估师">
                         <span>👨‍⚖️</span>
                       </el-tooltip>
                     </div>
@@ -696,10 +696,10 @@ const getFlowSteps = (template: WorkflowDefinition) => {
 
   if (researchers.length > 0) {
     steps.push({
-      title: hasDebate ? `⚔️ 阶段二：多空辩论（${debateRounds}轮）` : '📝 阶段二：研究分析',
+      title: hasDebate ? `⚔️ 阶段二：多情景研究（${debateRounds}轮）` : '📝 阶段二：研究分析',
       desc: hasDebate
-        ? `看多研究员和看空研究员基于所有分析报告进行${debateRounds}轮辩论。每轮中双方针对对方观点进行反驳和论证，最终形成更全面的投资观点`
-        : '研究员综合分析师报告形成投资观点',
+        ? `积极证据研究员和谨慎证据研究员基于所有分析报告进行${debateRounds}轮多情景研究。每轮中双方针对对方观点进行反驳和论证，最终形成更全面的研究观察`
+        : '研究员综合分析师报告形成研究观察',
       agents: researchers.map(n => n.label)
     })
   }
@@ -716,34 +716,34 @@ const getFlowSteps = (template: WorkflowDefinition) => {
   if (researchManager) {
     steps.push({
       title: '👔 阶段三：综合评估',
-      desc: '研究经理综合看多和看空双方的辩论结果，权衡各方观点，形成最终投资建议',
+      desc: '研究整合员综合积极和谨慎双方的多情景研究结果，权衡各方观点，形成平衡的研究观察汇总',
       agents: [researchManager.label]
     })
   }
 
   if (trader) {
     steps.push({
-      title: '💰 阶段四：交易决策',
-      desc: '交易员根据研究经理的建议，制定具体的交易策略，包括买入/卖出信号和目标仓位',
+      title: '💰 阶段四：研究简报',
+      desc: '研究整合员根据研究整合员的综合观察，整理用户可读的研究简报，不输出具体操作建议、目标价或仓位安排',
       agents: [trader.label]
     })
   }
 
-  // 风险辩论阶段
+  // 风险多情景研究阶段
   if (riskAnalysts.length > 0 || hasRiskDebate) {
     steps.push({
-      title: hasRiskDebate ? `⚔️ 阶段五：风险辩论（${riskRounds}轮）` : '🛡️ 阶段五：风险评估',
+      title: hasRiskDebate ? `⚔️ 阶段五：风险多情景研究（${riskRounds}轮）` : '🛡️ 阶段五：风险评估',
       desc: hasRiskDebate
-        ? `激进、保守、中性三个风险分析师从不同角度评估交易计划，进行${riskRounds}轮辩论讨论`
-        : '风险分析师评估交易方案的风险敞口',
+        ? `高弹性、防御、基准情景三个风险分析师从不同角度评估研究结论，进行${riskRounds}轮多情景研究讨论`
+        : '风险分析师评估研究结论的风险敞口',
       agents: riskAnalysts.length > 0 ? riskAnalysts.map(n => n.label) : ['风险分析师']
     })
   }
 
   if (riskManager) {
     steps.push({
-      title: '👨‍⚖️ 阶段六：风险裁决',
-      desc: '风险经理综合三方风险分析师的辩论观点，做出最终风险调整决策，设置止损止盈',
+      title: '👨‍⚖️ 阶段六：风险审阅',
+      desc: '风险评估师综合三方风险分析师的多情景研究观点，形成风险审阅结论与后续观察',
       agents: [riskManager.label]
     })
   }
@@ -755,12 +755,12 @@ const getNodeTypeName = (type: string) => {
   const names: Record<string, string> = {
     analyst: '分析师',
     researcher: '研究员',
-    manager: '经理',
-    trader: '交易员',
+    manager: '管理',
+    trader: '研究整合员',
     risk: '风控',
     parallel: '并行',
     merge: '合并',
-    debate: '辩论'
+    debate: '多情景研究'
   }
   return names[type] || type
 }

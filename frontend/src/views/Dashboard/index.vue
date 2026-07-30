@@ -722,9 +722,9 @@ const jdyunMoreFeatures = ref([
   { path: '/screening', title: '智能选股', description: '多维度筛选符合条件的股票', icon: Search },
   { path: '/workflow', title: '流程管理', description: '管理工作流和自定义流程', icon: Tools },
   { path: '/workflow/agent-workshop', title: 'Agent 工坊', description: '可视化构建专属 Agent', icon: EditPen },
-  { path: '/review', title: '操作复盘', description: '对交易决策进行 AI 复盘分析', icon: DataAnalysis },
+  { path: '/review', title: '操作复盘', description: '对操作记录进行 AI 复盘分析', icon: DataAnalysis },
   { path: '/settings/sync', title: '数据同步', description: '同步股票基础和行情数据', icon: Refresh },
-  { path: '/paper', title: '模拟交易', description: 'AI 辅助下的模拟交易账户', icon: PieChart },
+  { path: '/paper', title: '模拟交易', description: '使用虚拟资金练习模拟交易', icon: PieChart },
   { path: '/learning', title: '学习中心', description: '24 节 AI 股票分析系统课程', icon: Reading }
 ])
 

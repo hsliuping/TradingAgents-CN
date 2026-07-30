@@ -16,10 +16,10 @@ export const v1AgentTypes = [
 
 export const agentTypeMap: Record<string, string> = {
   analysts_v2: '独立分析师 v2.0',
-  researchers_v2: '看涨看跌研究员 v2.0',
-  debators_v2: '风险分析 v2.0',
-  managers_v2: '研究/风险管理者 v2.0',
-  trader_v2: '交易员 v2.0',
+  researchers_v2: '积极/谨慎证据研究员 v2.0',
+  debators_v2: '风险多情景研究 v2.0',
+  managers_v2: '研究/风险评估师 v2.0',
+  trader_v2: '研究整合员 v2.0',
   reviewers_v2: '复盘分析 v2.0',
   position_analysis_v2: '仓位分析 v2.0',
   post_processors_v2: '后处理器 v2.0',
