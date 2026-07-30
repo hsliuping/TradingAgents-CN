@@ -31,7 +31,7 @@
 
 ### 功能使用
 - [个股分析](./02-user-guide/features/stock-analysis.md)
-- [模拟交易](./02-user-guide/features/paper-trading.md)
+- [模拟交易（虚拟学习环境）](./02-user-guide/features/paper-trading.md)
 - [持仓分析](./02-user-guide/features/portfolio-analysis.md)
 - [定时分析](./02-user-guide/features/scheduled-analysis.md)
 - [报告导出](./02-user-guide/features/report-export.md)
