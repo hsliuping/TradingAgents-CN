@@ -91,18 +91,18 @@ class TestDebateContextBuilding:
         
         state = {
             "investment_debate_state": {
-                "history": "Bull: 看涨\nBear: 看跌",
-                "bull_history": "Bull: 看涨",
-                "bear_history": "Bear: 看跌",
-                "current_response": "Bear: 看跌",
+                "history": "Bull: 乐观\nBear: 审慎",
+                "bull_history": "Bull: 乐观",
+                "bear_history": "Bear: 审慎",
+                "current_response": "Bear: 审慎",
             }
         }
         
         context = agent._get_debate_context(state)
         
         assert "【完整辩论历史】" in context
-        assert "Bull: 看涨" in context
-        assert "Bear: 看跌" in context
+        assert "Bull: 乐观" in context
+        assert "Bear: 审慎" in context
         assert "【对方最新观点】" in context
     
     def test_get_debate_context_empty(self):
@@ -127,16 +127,16 @@ class TestDebateContextBuilding:
         
         state = {
             "investment_debate_state": {
-                "history": "Bull: 看涨\nBear: 看跌",
-                "bear_history": "Bear: 看跌",
-                "current_response": "Bear: 看跌",
+                "history": "Bull: 乐观\nBear: 审慎",
+                "bear_history": "Bear: 审慎",
+                "current_response": "Bear: 审慎",
             }
         }
         
         context = agent._get_debate_context(state)
         
         # 对方历史应该包含在上下文中（如果与完整历史不同）
-        assert "Bear: 看跌" in context
+        assert "Bear: 审慎" in context
 
 
 class TestDebateStateUpdate:
@@ -155,7 +155,7 @@ class TestDebateStateUpdate:
             }
         }
         
-        response = {"content": "我认为应该买入"}
+        response = {"content": "我认为当前研究结论倾向乐观"}
         result = {}
         
         updated_result = agent._update_debate_state(state, response, result)
@@ -163,9 +163,9 @@ class TestDebateStateUpdate:
         assert "investment_debate_state" in updated_result
         debate_state = updated_result["investment_debate_state"]
         
-        assert "Bull Analyst: 我认为应该买入" in debate_state["history"]
-        assert "Bull Analyst: 我认为应该买入" in debate_state["bull_history"]
-        assert debate_state["current_response"] == "Bull Analyst: 我认为应该买入"
+        assert "Bull Analyst: 我认为当前研究结论倾向乐观" in debate_state["history"]
+        assert "Bull Analyst: 我认为当前研究结论倾向乐观" in debate_state["bull_history"]
+        assert debate_state["current_response"] == "Bull Analyst: 我认为当前研究结论倾向乐观"
 
     def test_update_debate_state_preserves_count(self):
         """测试更新辩论状态时保留 count（由工作流层管理）"""
@@ -214,14 +214,14 @@ class TestSpeakerLabel:
     """测试发言者标签"""
 
     def test_get_speaker_label_bull(self):
-        """测试看涨研究员标签"""
+        """测试乐观情景研究员标签"""
         agent = MockResearcherAgent()
         agent.stance = "bull"
 
         assert agent._get_speaker_label() == "Bull Analyst"
 
     def test_get_speaker_label_bear(self):
-        """测试看跌研究员标签"""
+        """测试审慎情景研究员标签"""
         agent = MockResearcherAgent()
         agent.stance = "bear"
 

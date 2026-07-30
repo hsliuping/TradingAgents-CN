@@ -23,11 +23,11 @@ def mock_llm():
     
     # 模拟不同的响应
     responses = [
-        "看涨观点：基于强劲的财报，我认为应该买入",
-        "看跌观点：但是估值过高，存在回调风险",
-        "看涨反驳：高估值反映了市场对未来增长的预期",
-        "看跌反驳：市场预期过于乐观，风险被低估",
-        "综合决策：建议谨慎买入，设置止损",
+        "乐观观点：基于强劲的财报，公司业绩具备研究吸引力",
+        "审慎观点：但是估值过高，存在回调风险",
+        "乐观反驳：高估值反映了市场对未来增长的预期",
+        "审慎反驳：市场预期过于乐观，风险被低估",
+        "综合研究观察：当前倾向审慎，需持续跟踪",
     ]
     
     llm.invoke = Mock(side_effect=[Mock(content=r) for r in responses])
@@ -69,7 +69,7 @@ class TestDebateWorkflowIntegration:
         
         state = initial_state.copy()
         
-        # 第 1 轮：看涨研究员发言
+        # 第 1 轮：乐观情景研究员发言
         result1 = bull_agent.execute(state)
         state.update(result1)
         
@@ -77,18 +77,18 @@ class TestDebateWorkflowIntegration:
         assert "investment_debate_state" in state
         debate_state = state["investment_debate_state"]
         assert "Bull Analyst:" in debate_state["history"]
-        assert "看涨观点" in debate_state["bull_history"]
+        assert "乐观观点" in debate_state["bull_history"]
         
-        # 第 1 轮：看跌研究员发言
+        # 第 1 轮：审慎情景研究员发言
         result2 = bear_agent.execute(state)
         state.update(result2)
         
         # 验证辩论状态更新
         debate_state = state["investment_debate_state"]
         assert "Bear Analyst:" in debate_state["history"]
-        assert "看跌观点" in debate_state["bear_history"]
+        assert "审慎观点" in debate_state["bear_history"]
         
-        # 第 2 轮：看涨研究员反驳
+        # 第 2 轮：乐观情景研究员反驳
         result3 = bull_agent.execute(state)
         state.update(result3)
         
@@ -96,7 +96,7 @@ class TestDebateWorkflowIntegration:
         debate_state = state["investment_debate_state"]
         assert debate_state["history"].count("Bull Analyst:") == 2
         
-        # 第 2 轮：看跌研究员反驳
+        # 第 2 轮：审慎情景研究员反驳
         result4 = bear_agent.execute(state)
         state.update(result4)
         
@@ -111,7 +111,7 @@ class TestDebateWorkflowIntegration:
         # 验证最终决策
         assert "investment_plan" in state
         assert "judge_decision" in state["investment_debate_state"]
-        assert "综合决策" in state["investment_debate_state"]["judge_decision"]
+        assert "综合研究观察" in state["investment_debate_state"]["judge_decision"]
     
     def test_debate_context_propagation(self, mock_llm, initial_state):
         """测试辩论上下文在多轮中传递"""
@@ -125,7 +125,7 @@ class TestDebateWorkflowIntegration:
         result1 = bull_agent.execute(state)
         state.update(result1)
         
-        # 第 2 轮：看跌研究员应该能看到看涨研究员的观点
+        # 第 2 轮：审慎情景研究员应该能看到乐观情景研究员的观点
         with patch.object(bear_agent, '_get_debate_context') as mock_get_context:
             mock_get_context.return_value = "Mock context"
             

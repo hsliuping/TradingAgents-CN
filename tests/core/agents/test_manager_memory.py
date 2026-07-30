@@ -63,6 +63,11 @@ class _Registry:
             return _TestManagerAgent
         return None
 
+    def get_metadata(self, agent_id):
+        if agent_id == "test_manager_agent":
+            return _TestManagerAgent.metadata
+        return None
+
 
 def test_manager_agent_reads_history_from_mem0_style_memory():
     memory = _Mem0StyleMemory()
@@ -89,8 +94,8 @@ def test_manager_agent_execute_reads_and_writes_memory():
         {
             "ticker": "300750",
             "analysis_date": "2026-04-08",
-            "bull_report": "看涨理由",
-            "bear_report": "看跌理由",
+            "bull_report": "积极证据",
+            "bear_report": "谨慎证据",
         }
     )
 
@@ -121,4 +126,4 @@ def test_risk_manager_system_prompt_falls_back_when_template_missing():
 
     prompt = agent._build_system_prompt({"ticker": "300750", "analysis_date": "2026-04-08"})
 
-    assert "你是一位中性的风险管理者" in prompt
+    assert "你是一位风险评估师" in prompt

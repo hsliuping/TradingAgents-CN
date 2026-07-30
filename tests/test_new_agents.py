@@ -31,8 +31,8 @@ def test_report_generator_v2():
             "ticker": "000001",
             "market_report": "市场分析报告内容...",
             "fundamentals_report": "基本面分析报告内容...",
-            "bull_report": "看涨观点...",
-            "bear_report": "看跌观点...",
+            "bull_report": "积极证据观点...",
+            "bear_report": "谨慎证据观点...",
         }
         
         result = agent.execute(test_state)
