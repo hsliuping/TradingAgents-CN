@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>TradingAgents v4.0 · Prototype v2</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus@2.4.4/dist/index.css" />
+  <link rel="stylesheet" href="./assets/theme.css?v=4" />
+  <style>
+    body { padding: 48px; max-width: 880px; margin: 0 auto; }
+    .hero {
+      background: var(--brand-gradient);
+      color: #fff; padding: 32px 36px; border-radius: 12px; margin-bottom: 32px;
+    }
+    .hero h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; }
+    .hero p { margin: 0; opacity: 0.9; }
+    .page-card {
+      display: block; padding: 20px 24px; margin-bottom: 12px;
+      background: #fff; border: 1px solid var(--border-light);
+      border-radius: 8px; transition: all 0.15s;
+    }
+    .page-card:hover {
+      border-color: var(--el-color-primary-light-5);
+      box-shadow: var(--shadow-card-hover);
+      text-decoration: none;
+    }
+    .page-card .pc-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+    .page-card .pc-desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>TradingAgents v4.0 · Prototype v2</h1>
+    <p>面向真实落地的高保真原型 · Vue 3 + Element Plus · 蓝紫品牌色 · 红涨灰跌</p>
+  </div>
+
+  <h2 style="margin-bottom:12px;">已完成的核心页（生产级布局）</h2>
+  <a class="page-card" href="./workspace.html">
+    <div class="pc-title">今日工作台</div>
+    <div class="pc-desc">L0 入口聚合层 · 优先级 Hero + 进行中任务 + 系统状态 + 候选/沉淀双栏</div>
+  </a>
+  <a class="page-card" href="./discover.html">
+    <div class="pc-title">候选发现</div>
+    <div class="pc-desc">L0.5 研究前漏斗 · 汇总规则命中 / 事件异动 / 主题联动 / 方法筛选，并把候选分流到研究、初筛、监控、暂缓</div>
+  </a>
+  <a class="page-card" href="./object.html">
+    <div class="pc-title">研究对象（列表页）</div>
+    <div class="pc-desc">L1 对象层入口 · 按类型分组（股票 / ETF / 主题 / 组合 / 复盘对象）· 支持视图切换、筛选、批量动作</div>
+  </a>
+  <a class="page-card" href="./object-detail.html">
+    <div class="pc-title">研究对象 · 档案页（招商银行 600036.SH）</div>
+    <div class="pc-desc">L1 对象层核心 · 6 Tab 严格分层：概览 / 事实 / 概念关系 / 系统观点 / 我的研究 / 时间线</div>
+  </a>
+  <a class="page-card" href="./task.html">
+    <div class="pc-title">任务详情页（#4823 招行 Q1 财报深度分析）</div>
+    <div class="pc-desc">L2 动作层核心 · 阶段进度图 + 结构化结论 + 沉淀对话框（草稿默认不入库）</div>
+  </a>
+  <a class="page-card" href="./library.html">
+    <div class="pc-title">研究库</div>
+    <div class="pc-desc">L3 资产层核心 · 只存已确认、可复用的观点 / 规则 / 提醒 / 研究卡片，不混入原始资料和未确认草稿</div>
+  </a>
+  <a class="page-card" href="./control.html">
+    <div class="pc-title">系统控制台</div>
+    <div class="pc-desc">方法与系统操作面 · 汇总模型 / 数据源 / 执行通道 / 存储健康、告警与任务队列，让你快速判断当前研究链路是否可靠</div>
+  </a>
+
+  <h2 style="margin: 36px 0 12px;">设计原则（从前序讨论沉淀）</h2>
+  <ul style="line-height: 1.9; color: var(--text-regular);">
+    <li>事实 / 观点 / 规则 严格分层，每条信息都带 <code>来源 + 时间</code> 三元组</li>
+    <li>AI 介入按阶段分档：跟踪深 / 计划中 / 执行浅 / 复盘深</li>
+    <li>智能助手是<b>全局抽屉</b>，不是一级模块；产生草稿、不直接修改资产</li>
+    <li>A 股语义色：<span style="color:var(--stock-up)">红涨</span> / <span style="color:var(--stock-down)">灰跌</span> · 不使用绿色</li>
+    <li>密度克制：24px gutter + 32px 区块间距 + 16-20px 卡内 padding</li>
+  </ul>
+</body>
+</html>

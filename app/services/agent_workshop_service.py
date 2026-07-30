@@ -4264,10 +4264,18 @@ class AgentWorkshopService:
 
         import asyncio
 
-        if llm_provider.lower() == "ollama":
-            result = await asyncio.wait_for(asyncio.to_thread(agent, inputs), timeout=timeout + 60)
-        else:
-            result = await asyncio.to_thread(agent, inputs)
+        # 🔑 临时开启执行轨迹记录（Workshop 调试也记录轨迹）
+        from app.core.config import settings as _settings
+        _orig_trace_enabled = _settings.AGENT_EXECUTION_TRACE_ENABLED
+        _settings.AGENT_EXECUTION_TRACE_ENABLED = True
+
+        try:
+            if llm_provider.lower() == "ollama":
+                result = await asyncio.wait_for(asyncio.to_thread(agent, inputs), timeout=timeout + 60)
+            else:
+                result = await asyncio.to_thread(agent, inputs)
+        finally:
+            _settings.AGENT_EXECUTION_TRACE_ENABLED = _orig_trace_enabled
 
         await _emit_progress("report", "Agent 分析完成，正在提取报告...")
         output_field_raw = str(version.agent_metadata.get("output_field") or "analysis_result")

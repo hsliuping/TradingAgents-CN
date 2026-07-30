@@ -471,6 +471,11 @@ export const configApi = {
     return ApiClient.post('/api/config/llm/set-default', { name }) as any
   },
 
+  // 一键导入大模型配置（按厂家）
+  batchImportLLMConfigs(providers?: string[]): Promise<{ success: boolean; message: string; imported: number; skipped: number; errors: string[] }> {
+    return ApiClient.post('/api/config/llm/batch-import', { providers: providers || [] }) as any
+  },
+
   // 获取所有数据源配置
   getDataSourceConfigs(): Promise<DataSourceConfig[]> {
     return ApiClient.get('/api/config/datasource').then((response: any) => response.data ?? response)

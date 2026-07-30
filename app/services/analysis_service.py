@@ -107,7 +107,20 @@ class AnalysisService:
             return "neutral"
     
     def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
-        """获取或创建TradingAgents图实例（带缓存）- 与单股分析保持一致"""
+        """获取或创建TradingAgents图实例（带缓存）— 已停用
+
+        v3.0 起旧版 TradingAgentsGraph 引擎已停用。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
+        """
+        raise RuntimeError(
+            "[已停用] AnalysisService._get_trading_graph 已停用，"
+            "TradingAgentsGraph 不再实例化。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         config_key = json.dumps(config, sort_keys=True)
 
         if config_key not in self._trading_graph_cache:
@@ -124,7 +137,21 @@ class AnalysisService:
         return self._trading_graph_cache[config_key]
 
     def _execute_analysis_sync_with_progress(self, task: AnalysisTask, progress_tracker: RedisProgressTracker) -> AnalysisResult:
-        """同步执行分析任务（在线程池中运行，带进度跟踪）"""
+        """同步执行分析任务（在线程池中运行，带进度跟踪）— 已停用
+
+        v3.0 起旧版 legacy 引擎已停用。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
+        """
+        raise RuntimeError(
+            "[已停用] AnalysisService._execute_analysis_sync_with_progress 已停用，"
+            "task_id=%s 应改用 v2 引擎。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+            % getattr(task, "task_id", "<unknown>")
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         try:
             # 在线程中重新初始化日志系统
             from tradingagents.utils.logging_init import init_logging, get_logger
@@ -270,7 +297,21 @@ class AnalysisService:
             raise
 
     def _execute_analysis_sync(self, task: AnalysisTask) -> AnalysisResult:
-        """同步执行分析任务（在线程池中运行）"""
+        """同步执行分析任务（在线程池中运行）— 已停用
+
+        v3.0 起旧版 legacy 引擎已停用。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
+        """
+        raise RuntimeError(
+            "[已停用] AnalysisService._execute_analysis_sync 已停用，"
+            "task_id=%s 应改用 v2 引擎。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+            % getattr(task, "task_id", "<unknown>")
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         try:
             logger.info(f"🔄 [线程池] 开始执行分析任务: {task.task_id} - {task.symbol}")
 
@@ -672,11 +713,25 @@ class AnalysisService:
             raise
     
     async def execute_analysis_task(
-        self, 
+        self,
         task: AnalysisTask,
         progress_callback: Optional[Callable[[int, str], None]] = None
     ) -> AnalysisResult:
-        """执行单个分析任务"""
+        """执行单个分析任务 — 已停用
+
+        v3.0 起旧版 legacy 引擎已停用。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
+        """
+        raise RuntimeError(
+            "[已停用] AnalysisService.execute_analysis_task 已停用，"
+            "task_id=%s 请改用 UnifiedAnalysisEngine.execute_task。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+            % getattr(task, "task_id", "<unknown>")
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         try:
             logger.info(f"开始执行分析任务: {task.task_id} - {task.symbol}")
             

@@ -249,6 +249,155 @@ async def recover_gap_resolution_dead_letters(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ================================================================
+# v3.6.0 项6 路径B/C：Skill 生成 HITL 审核接口
+#
+# 路径B（Agent 工坊自动补齐）和路径C（AI 工作流批量生成）生成的 Skill
+# 不再自动绑定到 Agent，而是写入 skill_review_queue 集合等待用户审核。
+# 用户通过以下接口确认或拒绝绑定。
+# 参考: docs/05-design/v3.0/architecture-optimization-reflection.md §6.1
+# ================================================================
+
+
+class SkillReviewActionRequest(BaseModel):
+    """Skill 审核动作请求体（confirm / reject 通用）。"""
+    note: str = Field(default="", description="审核备注（拒绝原因/确认说明）")
+    user_id: str = Field(default="", description="操作用户 ID（用于审计）")
+
+
+@router.get("/skill-review/{session_id}")
+async def list_skill_reviews(
+    session_id: str,
+    source_path: Optional[str] = Query(
+        None,
+        description="过滤来源：agent_workshop(路径B) / ai_workflow(路径C)，留空返回全部",
+    ),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """列出指定会话的待审核 Skill（路径B/C 共用）。
+
+    session_id 可以是：
+    - Agent 工坊会话 ID（路径B）
+    - AI 工作流生成会话 ID（路径C）
+
+    返回每个 Skill 的代码片段、测试结果摘要、来源上下文，供前端展示审核卡片。
+    """
+    try:
+        from app.services.skill_review_service import SkillReviewService
+        svc = SkillReviewService(db=db)
+        items = await svc.list_pending(session_id, source_path=source_path)
+        return ok({
+            "session_id": session_id,
+            "source_path_filter": source_path,
+            "pending_count": len(items),
+            "items": items,
+        })
+    except Exception as e:
+        logger.error(f"❌ 列出 Skill 待审核记录失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/skill-review/{session_id}/{tool_id}")
+async def get_skill_review_detail(
+    session_id: str,
+    tool_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """获取单个 Skill 的审核详情（含完整代码片段）。
+
+    供前端"查看代码"按钮调用。
+    """
+    try:
+        from app.services.skill_review_service import SkillReviewService
+        svc = SkillReviewService(db=db)
+        review = await svc.find_pending_by_tool_id(session_id, tool_id)
+        if not review:
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到会话 {session_id} 中 tool_id={tool_id} 的待审核记录",
+            )
+        return ok(review)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 获取 Skill 审核详情失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/skill-review/{session_id}/{tool_id}/confirm")
+async def confirm_skill_review(
+    session_id: str,
+    tool_id: str,
+    req: SkillReviewActionRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """确认绑定 Skill 到 Agent（路径B/C 共用）。
+
+    路径B：触发 `AgentWorkshopService.build_version()` 构建包含该 Skill 的 Agent 版本。
+    路径C：调用 `SkillOrchestrator._bind_one()` 绑定到 target_agent_id，并把 Skill 状态从 draft 切换为 active。
+
+    若该 Skill 已被拒绝或不存在，返回 404。
+    若绑定过程中出错，返回 500 但不删除审核记录（用户可重试）。
+    """
+    try:
+        from app.services.skill_review_service import SkillReviewService
+        svc = SkillReviewService(db=db)
+        result = await svc.confirm(
+            session_id=session_id,
+            tool_id=tool_id,
+            user_id=req.user_id,
+            note=req.note,
+        )
+        if result.get("status") == "not_found":
+            raise HTTPException(
+                status_code=404,
+                detail=result.get("message", "未找到待审核记录"),
+            )
+        # binding_failed 也返回 200，让前端可以展示 binding_result.error 并允许用户重试
+        return ok(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 确认 Skill 审核失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/skill-review/{session_id}/{tool_id}/reject")
+async def reject_skill_review(
+    session_id: str,
+    tool_id: str,
+    req: SkillReviewActionRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """拒绝绑定 Skill（路径B/C 共用）。
+
+    - 标记审核记录为 `rejected_unbound`
+    - 把 `external_skills` 中对应 Skill 状态改为 `unbound`（不删除，可后续复用）
+    - 路径B：同步清理 workshop_session.gap_report 的 generated_skill_id，避免后续 build_version 时仍绑定
+    - 路径C：Skill 留在 `external_skills` 集合，用户可后续在 Skill 工坊手动复用
+    """
+    try:
+        from app.services.skill_review_service import SkillReviewService
+        svc = SkillReviewService(db=db)
+        result = await svc.reject(
+            session_id=session_id,
+            tool_id=tool_id,
+            user_id=req.user_id,
+            note=req.note,
+        )
+        if result.get("status") == "not_found":
+            raise HTTPException(
+                status_code=404,
+                detail=result.get("message", "未找到待审核记录"),
+            )
+        return ok(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 拒绝 Skill 审核失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/sessions/{session_id}")
 async def get_session(
     session_id: str,

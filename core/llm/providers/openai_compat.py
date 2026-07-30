@@ -69,11 +69,14 @@ class OpenAICompatAdapter(BaseAdapter):
                 LLMProvider.OLLAMA: "OLLAMA_API_KEY",
                 LLMProvider.OPENROUTER: "OPENROUTER_API_KEY",
             }
-            expected_env_key = provider_env_map.get(self.config.provider, "API_KEY")
+            # 兼容 use_enum_values=True：config.provider 可能是字符串
+            provider_val = self.config.provider
+            provider_key = provider_val.value if hasattr(provider_val, "value") else provider_val
+            expected_env_key = provider_env_map.get(provider_key, "API_KEY")
             raise ValueError(
                 f"The api_key client option must be set either by passing api_key to the client "
                 f"or by setting the {expected_env_key} environment variable. "
-                f"Provider: {self.config.provider.value}, Model: {self.config.model}"
+                f"Provider: {provider_key}, Model: {self.config.model}"
             )
         
         client_kwargs = {

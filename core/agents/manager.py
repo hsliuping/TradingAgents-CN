@@ -85,7 +85,9 @@ class ManagerAgent(BaseAgent):
         self.memory = memory
         self.debate_rounds = debate_rounds
         self.debate_history = []
-        
+        self._last_trace_id = None  # P1: 执行轨迹 ID（供子类回填校验结果）
+        self._last_assertion_result = None  # P2: 最近一次断言执行结果（供子类参考）
+
         logger.debug(f"ManagerAgent '{self.agent_id}' 初始化完成")
 
     def delegate_to_agent(
@@ -127,10 +129,20 @@ class ManagerAgent(BaseAgent):
         """
         logger.info(f"开始执行管理者Agent: {self.agent_id}")
 
-        try:
-            # 1. 提取输入参数（兼容多种参数名）
-            ticker = state.get("ticker") or state.get("company_of_interest")
+        # P1: 启动执行轨迹采集
+        from core.agents.execution_trace_recorder import (
+            start_execution_trace, is_trace_enabled
+        )
+        recorder = None
+        if is_trace_enabled():
+            try:
+                recorder = start_execution_trace(self, state)
+                self._last_trace_id = recorder.trace_id
+            except Exception as e:
+                logger.warning(f"⚠️ 启动轨迹采集失败（不影响 agent）: {e}")
+                self._last_trace_id = None
 
+        try:
             # 🔍 调试日志：排查 ticker 丢失问题
             logger.error(
                 f"🔍 [{self.agent_id}] state keys: {list(state.keys())[:20]}, "
@@ -138,31 +150,17 @@ class ManagerAgent(BaseAgent):
                 f"trade_info存在={('trade_info' in state)}, code={state.get('trade_info', {}).get('code') if isinstance(state.get('trade_info'), dict) else 'N/A'}"
             )
 
-            # 🆕 支持交易复盘场景：从 trade_info 中提取 code
-            if not ticker and "trade_info" in state:
-                trade_info = state.get("trade_info", {})
-                if isinstance(trade_info, dict):
-                    ticker = trade_info.get("code")
-            
-            # 🆕 支持持仓分析场景：从 position_info 中提取 code
-            if not ticker and "position_info" in state:
-                position_info = state.get("position_info", {})
-                if isinstance(position_info, dict):
-                    ticker = position_info.get("code")
-
-            analysis_date = state.get("analysis_date") or state.get("trade_date") or state.get("end_date")
-
-            # 🆕 支持交易复盘场景：使用当前日期作为分析日期
-            if not analysis_date:
-                from datetime import datetime
-                analysis_date = datetime.now().strftime("%Y-%m-%d")
+            # 1. 提取输入参数（统一使用基类方法，兼容多种字段名与场景兜底）
+            ticker, analysis_date = self._extract_common_params(state)
 
             if not ticker:
                 raise ValueError("Missing required parameters: ticker")
             
             # 2. 收集所需的输入
             inputs = self._collect_inputs(state)
-            
+            if recorder:
+                recorder.record_inputs(inputs)
+
             if not inputs:
                 raise ValueError("No inputs available for decision making")
             
@@ -193,6 +191,8 @@ class ManagerAgent(BaseAgent):
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
+            if recorder:
+                recorder.record_prompts(system_prompt, user_prompt)
 
             logger.info(f"系统提示词: {system_prompt}")
             logger.info(f"用户提示词: {user_prompt}")
@@ -216,12 +216,19 @@ class ManagerAgent(BaseAgent):
             logger.info(f"🤖 [{self.agent_id}] LLM 类型: {type(self._llm).__name__}")
 
             if self._llm:
+                import time as _time
+                _t0 = _time.time()
                 response = self._llm.invoke(messages)
+                _llm_duration_ms = int((_time.time() - _t0) * 1000)
+                if recorder:
+                    recorder.record_llm_response(response, llm_duration_ms=_llm_duration_ms)
                 logger.info(f"✅ [{self.agent_id}] LLM 调用成功")
                 logger.info(f"📝 [{self.agent_id}] LLM 响应长度: {len(response.content)} 字符")
                 logger.info(f"📝 [{self.agent_id}] 完整 LLM 响应:\n{'='*80}\n{response.content}\n{'='*80}")
 
                 decision = self._parse_response(response.content)
+                if recorder:
+                    recorder.record_parsed_output(decision)
                 logger.info(f"✅ [{self.agent_id}] 响应解析成功")
                 logger.info(f"📝 [{self.agent_id}] 解析结果类型: {type(decision)}")
                 logger.info(f"📝 [{self.agent_id}] llm返回的解析结果: {decision}")
@@ -256,6 +263,8 @@ class ManagerAgent(BaseAgent):
             return result
 
         except Exception as e:
+            if recorder:
+                recorder.record_error(e)
             logger.error(f"管理者Agent {self.agent_id} 执行失败: {e}", exc_info=True)
             # 返回错误状态（只返回新增的字段）
             output_key = self.output_field or f"{self.manager_type}_decision"
@@ -265,6 +274,54 @@ class ManagerAgent(BaseAgent):
                     "success": False
                 }
             }
+        finally:
+            if recorder:
+                recorder.finish()
+
+    def _record_trace_validation(
+        self,
+        validation_status: str,
+        validation_error: Optional[str] = None,
+        validation_details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """P1: 回填校验结果到执行轨迹（供子类调用，非阻塞）"""
+        from core.agents.execution_trace_recorder import record_trace_validation
+        record_trace_validation(
+            trace_id=self._last_trace_id,
+            validation_status=validation_status,
+            validation_error=validation_error,
+            validation_details=validation_details,
+        )
+
+    def _run_assertions(
+        self,
+        raw_text: str,
+        parsed: Optional[Dict[str, Any]] = None,
+    ):
+        """P2: 执行召回的断言（非阻塞）。
+
+        供子类在 _validate_* 完成后调用。返回 AssertionRunResult，
+        由子类决定如何合并到 validation_status。
+
+        全程 try/except，失败返回 AssertionRunResult(ran=False)，
+        不影响 agent 主流程。
+        """
+        from app.core.config import settings
+        from app.models.agent_assertion import AssertionRunResult
+        if not getattr(settings, "AGENT_ASSERTION_ENABLED", True):
+            return AssertionRunResult(ran=False)
+        try:
+            from core.agents.assertion_executor import assertion_executor
+            result = assertion_executor.run_assertions_sync(
+                agent_id=self.agent_id,
+                raw_text=raw_text,
+                parsed=parsed,
+            )
+            self._last_assertion_result = result
+            return result
+        except Exception as e:
+            logger.warning(f"⚠️ [{self.agent_id}] 断言执行失败（不影响 agent）: {e}")
+            return AssertionRunResult(ran=False)
     
     def _collect_inputs(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """

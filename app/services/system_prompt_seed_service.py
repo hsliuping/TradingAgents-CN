@@ -224,8 +224,8 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
                 "user_prompt": "",
                 "tool_guidance": "请根据可用工具自行决定数据获取方式",
                 "analysis_requirements": "客观、专业、基于数据进行分析",
-                "output_format": "请使用结构化的方式输出分析报告",
-                "constraints": "",
+                "output_format": "必须输出 JSON 对象，包含 analysis_view/confidence/risk_score/summary/reasoning/core_evidence/uncertainties/invalidation_conditions/watch_items/risk_warning 字段。analysis_view 只能取值\"乐观\"/\"审慎\"/\"中性\"，禁止使用\"看涨\"/\"看跌\"/\"买入\"/\"卖出\"等交易指令或市场观点术语。confidence 与 risk_score 为 0-1 浮点数。只输出 JSON，不要 markdown 代码块包裹。",
+                "constraints": "禁止输出买卖、加减仓、目标价、价格区间、止损止盈或执行节奏；禁止使用\"看涨/看跌/买入/卖出\"等术语，统一使用\"乐观/审慎/中性\"表达研究结论倾向。",
             },
         },
         {
@@ -260,8 +260,8 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
                 "user_prompt": "",
                 "tool_guidance": "请根据可用工具自行决定数据获取方式",
                 "analysis_requirements": "客观、专业、基于数据进行分析",
-                "output_format": "请使用结构化的方式输出分析报告",
-                "constraints": "",
+                "output_format": "必须按 Markdown 结构输出用户版研究简报，包含以下章节：## 一句话结论（使用\"乐观/审慎/中性\"表达倾向）、## 核心依据、## 当前判断的限制、## 后续观察事项、## 资料边界说明、## 免责声明。禁止使用\"看涨/看跌/买入/卖出\"等交易指令术语，统一使用\"乐观/审慎/中性\"表达研究结论倾向。",
+                "constraints": "禁止输出买卖、加减仓、目标价、价格区间、止损止盈或执行节奏；禁止使用\"看涨/看跌/买入/卖出\"等术语，统一使用\"乐观/审慎/中性\"表达研究结论倾向。",
             },
         },
         {
@@ -406,8 +406,8 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
                 "user_prompt": "",
                 "tool_guidance": "请根据可用工具自行决定数据获取方式",
                 "analysis_requirements": "客观、专业、基于数据进行分析",
-                "output_format": "请使用结构化的方式输出分析报告",
-                "constraints": "",
+                "output_format": "必须输出 JSON 对象，包含 risk_level/risk_score/reasoning/key_risks/risk_control/investment_adjustment/final_trade_decision 字段。investment_adjustment 与 action 只能取值\"乐观\"/\"审慎\"/\"中性\"，禁止使用\"看涨\"/\"看跌\"/\"买入\"/\"卖出\"等交易指令或市场观点术语。只输出 JSON，不要 markdown 代码块包裹。",
+                "constraints": "禁止输出买卖、加减仓、目标价、价格区间、止损止盈或执行节奏；禁止使用\"看涨/看跌/买入/卖出\"等术语，统一使用\"乐观/审慎/中性\"表达研究结论倾向。",
             },
         },
         {

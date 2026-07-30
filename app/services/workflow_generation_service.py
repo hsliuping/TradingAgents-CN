@@ -282,16 +282,32 @@ class WorkflowGenerationService:
         except Exception as e:
             logger.error(f"[WorkflowGen] Skill 创建异常: {e}", exc_info=True)
 
-        # 5c. Skill 绑定（将新创建的 Skill 绑定到 Agent 级别）
-        bindings_created = 0
+        # 5c. v3.6.0 项6 路径C：Skill 绑定改为待用户审核
+        # 原来：bind_skills_to_agents 自动绑定到 Agent 级别
+        # 现在：写入 skill_review_queue，等待用户调用 confirm/reject API
+        # 用户确认后才绑定到 Agent；拒绝则 Skill 留在工坊（status=unbound）
+        pending_skill_reviews: List[Dict[str, Any]] = []
         try:
-            bindings_created = await self._skill_orch.bind_skills_to_agents(
-                workflow_id=workflow_id, blueprint=blueprint
+            from app.services.skill_review_service import SkillReviewService
+            review_service = SkillReviewService(db=self._db)
+            pending_skill_reviews = await review_service.create_pending_reviews_for_workflow(
+                workflow_session_id=session_id,
+                workflow_id=workflow_id,
+                user_id=session.user_id,
+                skill_results=skill_results,
+                blueprint=blueprint,
             )
+            if pending_skill_reviews:
+                logger.info(
+                    f"[WorkflowGen] ✅ 已写入 {len(pending_skill_reviews)} 条 Skill 待审核记录，"
+                    f"等待用户审核后才绑定"
+                )
         except Exception as e:
-            logger.error(f"[WorkflowGen] Skill 绑定异常: {e}", exc_info=True)
+            logger.error(f"[WorkflowGen] Skill 待审核记录写入异常: {e}", exc_info=True)
 
         # 5d. 节点级工具绑定（将 agent_reshaping.additional_tools 绑定到对应节点）
+        # 注意：这是已有工具的节点级绑定，不是新生成 Skill 的绑定，不受路径C HITL 影响
+        bindings_created = 0
         try:
             node_bindings = await self._skill_orch.bind_additional_tools_to_nodes(
                 workflow_id=workflow_id, blueprint=blueprint, is_active=False
@@ -338,13 +354,19 @@ class WorkflowGenerationService:
         # 自动发布：将提示词、Skill、绑定、工作流从 draft 激活为 active
         # 用户在对话阶段已确认方案，confirm_and_create 即为最终确认，
         # 无需额外手动点击"发布"按钮
+        # v3.6.0 项6 路径C：如果有待审核的 Skill，跳过 Skill 自动发布，等待用户审核
+        has_pending_skill_reviews = bool(pending_skill_reviews)
         publish_result = {}
         try:
-            publish_result = await self.publish(session_id)
+            publish_result = await self.publish(
+                session_id,
+                skip_skill_publishing=has_pending_skill_reviews,
+            )
             logger.info(
                 f"[WorkflowGen] ✅ 自动发布完成: "
                 f"prompts={publish_result.get('published_prompts', 0)}, "
-                f"skills={publish_result.get('published_skills', 0)}, "
+                f"skills={publish_result.get('published_skills', 0)}"
+                f"{'(skipped, pending review)' if has_pending_skill_reviews else ''}, "
                 f"bindings={publish_result.get('published_bindings', 0)}, "
                 f"workflow={publish_result.get('workflow_published', False)}"
             )
@@ -359,6 +381,18 @@ class WorkflowGenerationService:
             "creation_report": creation_report,
             "published": True,
             "publish_result": publish_result,
+            # v3.6.0 项6 路径C：待用户审核的 Skill 列表
+            "pending_user_review": {
+                "count": len(pending_skill_reviews),
+                "tool_ids": [r.get("tool_id") for r in pending_skill_reviews if r.get("tool_id")],
+                "review_ids": [r.get("review_id") for r in pending_skill_reviews if r.get("review_id")],
+                "next_action": (
+                    "用户审核后调用 "
+                    "/api/agent-workshop/skill-review/{session_id}/{tool_id}/confirm 或 /reject"
+                    if pending_skill_reviews
+                    else ""
+                ),
+            },
         }
 
     # ================================================================
@@ -554,12 +588,22 @@ class WorkflowGenerationService:
         )
         return result.deleted_count > 0
 
-    async def publish(self, session_id: str) -> Dict[str, Any]:
+    async def publish(
+        self,
+        session_id: str,
+        skip_skill_publishing: bool = False,
+    ) -> Dict[str, Any]:
         """
         发布草稿资源为正式版本
 
         将 AI 生成的提示词、Skill、绑定和工作流从 draft 状态激活为 active，
         使其在生产环境中生效。
+
+        Args:
+            session_id: 会话 ID
+            skip_skill_publishing: v3.6.0 项6 路径C：是否跳过 Skill 发布。
+                True 时 Skill 保持 draft 状态，等待用户审核后再发布。
+                默认 False（保持向后兼容）。
         """
         session = await self._load_session(session_id)
         if not session:
@@ -601,18 +645,25 @@ class WorkflowGenerationService:
                 published_counts["prompts"] = r.modified_count
 
         # 2. 发布 Skill draft → active
-        if skill_ids:
+        # v3.6.0 项6 路径C：skip_skill_publishing=True 时跳过，Skill 保持 draft 等待用户审核
+        if skill_ids and not skip_skill_publishing:
             r = await self._db.external_skills.update_many(
                 {"tool_id": {"$in": skill_ids}, "status": "draft"},
                 {"$set": {"status": "active", "updated_at": now.isoformat()}},
             )
             published_counts["skills"] = r.modified_count
+        elif skip_skill_publishing and skill_ids:
+            logger.info(
+                f"[WorkflowGen] 跳过 {len(skill_ids)} 个 Skill 的自动发布，"
+                f"等待用户审核后再发布（路径C HITL）"
+            )
 
         # 3. 激活工具绑定 is_active: false → true
         # 包含两类绑定：
         #   a) 新创建 Skill 的 Agent 级别绑定（通过 tool_id 过滤）
+        #      v3.6.0 项6 路径C：skip_skill_publishing=True 时也跳过此步（绑定由 confirm API 触发）
         #   b) agent_reshaping.additional_tools 的节点级别绑定（通过 workflow_id 过滤）
-        if skill_ids:
+        if skill_ids and not skip_skill_publishing:
             r = await self._db.tool_agent_bindings.update_many(
                 {"tool_id": {"$in": skill_ids}, "is_active": False},
                 {"$set": {"is_active": True, "updated_at": now.isoformat()}},
@@ -642,7 +693,7 @@ class WorkflowGenerationService:
         logger.info(
             f"[WorkflowGen] ✅ 会话 {session_id} 已发布: "
             f"prompts={published_counts['prompts']}, "
-            f"skills={published_counts['skills']}, "
+            f"skills={published_counts['skills']}{'(skipped)' if skip_skill_publishing else ''}, "
             f"bindings={published_counts['bindings']}, "
             f"workflow={published_counts['workflow']}"
         )
@@ -654,7 +705,9 @@ class WorkflowGenerationService:
             "published_skills": published_counts["skills"],
             "published_bindings": published_counts["bindings"],
             "workflow_published": published_counts["workflow"],
-            "message": "工作流及关联资源已发布为正式版本",
+            "skill_publishing_skipped": skip_skill_publishing,
+            "message": "工作流及关联资源已发布为正式版本"
+            + ("（Skill 待用户审核后发布）" if skip_skill_publishing else ""),
         }
 
     async def _cleanup_draft_resources(

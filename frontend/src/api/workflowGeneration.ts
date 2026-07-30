@@ -25,6 +25,7 @@ export interface WfConfirmResult {
   creation_report?: WfCreationReport
   published?: boolean
   error?: string
+  published?: boolean
 }
 
 /** 工作流结构信息 */

@@ -1,9 +1,9 @@
 ﻿{
-    "build_type":  "installer",
+    "build_type":  "portable",
     "version":  "3.0.0-beta.4",
-    "build_timestamp":  "20260711-082844",
-    "build_date":  "2026-07-11T00:28:44Z",
-    "build_unix":  1783758524,
-    "git_commit":  "10f3a2cc5",
-    "full_version":  "3.0.0-beta.4-build20260711-082844"
+    "build_timestamp":  "20260726-191759",
+    "build_date":  "2026-07-26T11:17:59Z",
+    "build_unix":  1785093479,
+    "git_commit":  "7f1388ff7",
+    "full_version":  "3.0.0-beta.4-build20260726-191759"
 }

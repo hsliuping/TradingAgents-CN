@@ -96,13 +96,13 @@ class TraderAgent(BaseAgent):
         logger.info(f"开始执行研究整合员Agent: {self.agent_id}")
         
         try:
-            # 1. 提取输入参数（兼容多种参数名）
-            ticker = state.get("ticker") or state.get("company_of_interest")
-            analysis_date = state.get("analysis_date") or state.get("trade_date") or state.get("end_date")
+            # 1. 提取输入参数（统一使用基类方法，兼容多种字段名与场景兜底）
+            ticker, analysis_date = self._extract_common_params(state)
+
             investment_plan = state.get("investment_plan")
 
-            if not ticker or not analysis_date:
-                raise ValueError("Missing required parameters: ticker or analysis_date")
+            if not ticker:
+                raise ValueError("Missing required parameters: ticker")
             
             if not investment_plan:
                 raise ValueError("Missing investment_plan")
@@ -139,7 +139,8 @@ class TraderAgent(BaseAgent):
             logger.info(f"🔍 [TraderAgent] 用户提示词前500字符:\n{user_prompt[:500]}")
 
             if self._llm:
-                response = self._llm.invoke(messages)
+                response = self._invoke_llm_with_trace(messages)
+                self._last_llm_response = response  # P1: stash 供子类采集 token_usage
 
                 # 🔍 调试日志：打印 LLM 响应
                 logger.info(f"🔍 [TraderAgent] LLM 响应长度: {len(response.content)}")

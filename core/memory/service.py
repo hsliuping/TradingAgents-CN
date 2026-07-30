@@ -94,7 +94,7 @@ class MemoryService:
 
             try:
                 from mem0 import AsyncMemory
-                from .config import build_mem0_config
+                from .config import build_mem0_config, _ensure_qdrant_collection_dimension
 
                 resolved_config = config or build_mem0_config(self._db)
                 if not resolved_config.get("llm", {}).get("config", {}).get("api_key"):
@@ -107,6 +107,14 @@ class MemoryService:
                     self._init_error = f"{embedder_error}，mem0 记忆层不可用"
                     logger.warning("[MemoryService] %s", self._init_error)
                     return False
+
+                # 在 mem0 初始化前确保 Qdrant collection 维度匹配。
+                # 此时无 QdrantClient 持有文件锁，可安全检查/重建。
+                # 若维度不匹配，会先备份 payload 再删除旧集合，mem0 随后按正确维度创建。
+                vector_store_cfg = (resolved_config.get("vector_store") or {}).get("config") or {}
+                embedder_cfg = (resolved_config.get("embedder") or {}).get("config") or {}
+                expected_dims = int(embedder_cfg.get("embedding_dims") or 1024)
+                _ensure_qdrant_collection_dimension(vector_store_cfg, expected_dims)
 
                 env_backup = {
                     "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY"),
@@ -145,7 +153,7 @@ class MemoryService:
                 return True
             except Exception as e:
                 self._init_error = str(e)
-                logger.warning("[MemoryService] mem0 初始化失败（已降级）: %s", e)
+                logger.warning("[MemoryService] mem0 初始化失败（已降级）: %s", e, exc_info=True)
                 return False
 
     # ------------------------------------------------------------------

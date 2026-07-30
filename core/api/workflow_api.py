@@ -742,6 +742,7 @@ class WorkflowAPI:
         inputs: Dict[str, Any],
         legacy_config: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable] = None,
+        task_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         执行工作流
@@ -751,6 +752,7 @@ class WorkflowAPI:
             inputs: 输入参数
             legacy_config: 遗留智能体配置（LLM、模型等）
             progress_callback: 进度回调函数
+            task_id: 任务 ID（任务中心的 task_id，用于执行轨迹关联。不传则随机生成）
 
         Returns:
             执行结果
@@ -778,8 +780,8 @@ class WorkflowAPI:
 
             logger.info(f"[工作流执行] 输入参数: ticker={prepared_inputs.get('ticker')}, trade_date={prepared_inputs.get('trade_date')}")
 
-            # 创建带配置的引擎
-            task_id = str(uuid.uuid4())
+            # 创建带配置的引擎（优先用传入的 task_id，用于执行轨迹关联）
+            task_id = task_id or str(uuid.uuid4())
             engine = WorkflowEngine(legacy_config=legacy_config, task_id=task_id)
             engine.load(definition)
             result = engine.execute(prepared_inputs, progress_callback=progress_callback)

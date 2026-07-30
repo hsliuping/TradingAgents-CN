@@ -1263,9 +1263,14 @@ const renderMarkdown = (text: string) => {
 const getDecisionColor = (action: string) => {
   if (!action) return 'info'
   const a = action.toLowerCase()
-  if (a.includes('buy') || a.includes('做多') || a.includes('买入')) return 'success'
-  if (a.includes('sell') || a.includes('做空') || a.includes('卖出')) return 'danger'
-  return 'warning'
+  // 新合规术语"乐观/审慎/中性"优先匹配（语义为研究结论倾向，非交易指令）
+  if (a.includes('乐观')) return 'success'   // 绿色：积极倾向
+  if (a.includes('审慎')) return 'warning'   // 黄色：需要谨慎
+  if (a.includes('中性')) return 'info'      // 灰色：无明显倾向
+  // 旧市场观点术语"看涨/看跌" + 旧交易指令"买入/卖出"（兼容存量数据）
+  if (a.includes('buy') || a.includes('做多') || a.includes('买入') || a.includes('看涨')) return 'success'
+  if (a.includes('sell') || a.includes('做空') || a.includes('卖出') || a.includes('看跌')) return 'danger'
+  return 'info'
 }
 
 // ==================== 生命周期 ====================

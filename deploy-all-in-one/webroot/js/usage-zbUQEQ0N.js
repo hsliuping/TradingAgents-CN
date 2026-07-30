@@ -1,0 +1,1 @@
+import{A as t,r as s}from"./index-CrA_uZYV.js";function a(e){return t.get("/api/usage/records",e)}function i(e){return t.get("/api/usage/statistics",e)}function o(e=90){return s({url:"/api/usage/records/old",method:"delete",params:{days:e}})}export{a,o as d,i as g};

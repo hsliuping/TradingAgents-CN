@@ -21,6 +21,8 @@
 ## 快速导航
 
 ### 新用户入门
+0. [v3.0 系统介绍（技术文档版）](./01-product/v3.0-system-introduction.md)
+   - [v3.0 系统介绍（公众号传播版）](./01-product/v3.0-system-introduction-for-wechat.md)
 1. [快速开始](./02-user-guide/getting-started/quick-start.md)
 2. [安装指南](./02-user-guide/getting-started/installation.md)
 3. [数据库配置](./02-user-guide/getting-started/database-setup.md)

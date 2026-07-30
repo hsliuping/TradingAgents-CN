@@ -98,10 +98,21 @@ class ResearcherAgent(BaseAgent):
 
         import time as _time_exec
         _exec_start = _time_exec.time()
-        try:
-            # 1. 提取输入参数（兼容多种参数名）
-            ticker = state.get("ticker") or state.get("company_of_interest")
 
+        # P1: 启动执行轨迹采集
+        from core.agents.execution_trace_recorder import (
+            start_execution_trace, is_trace_enabled
+        )
+        recorder = None
+        if is_trace_enabled():
+            try:
+                recorder = start_execution_trace(self, state)
+                self._last_trace_id = recorder.trace_id
+            except Exception as e:
+                logger.warning(f"⚠️ [{self.agent_id}] 启动轨迹采集失败（不影响 agent）: {e}")
+                self._last_trace_id = None
+
+        try:
             # 🔍 调试日志：排查 ticker 丢失问题
             logger.error(
                 f"🔍 [{self.agent_id}] state keys: {list(state.keys())[:20]}, "
@@ -109,24 +120,8 @@ class ResearcherAgent(BaseAgent):
                 f"trade_info存在={('trade_info' in state)}, code={state.get('trade_info', {}).get('code') if isinstance(state.get('trade_info'), dict) else 'N/A'}"
             )
 
-            # 🆕 支持交易复盘场景：从 trade_info 中提取 code
-            if not ticker and "trade_info" in state:
-                trade_info = state.get("trade_info", {})
-                if isinstance(trade_info, dict):
-                    ticker = trade_info.get("code")
-            
-            # 🆕 支持持仓分析场景：从 position_info 中提取 code
-            if not ticker and "position_info" in state:
-                position_info = state.get("position_info", {})
-                if isinstance(position_info, dict):
-                    ticker = position_info.get("code")
-
-            analysis_date = state.get("analysis_date") or state.get("trade_date") or state.get("end_date")
-
-            # 🆕 支持交易复盘场景：使用当前日期作为分析日期
-            if not analysis_date:
-                from datetime import datetime
-                analysis_date = datetime.now().strftime("%Y-%m-%d")
+            # 1. 提取输入参数（统一使用基类方法，兼容多种字段名与场景兜底）
+            ticker, analysis_date = self._extract_common_params(state)
 
             if not ticker:
                 logger.error(f"❌ [{self.agent_id}] ticker 未找到！state 全部 keys: {list(state.keys())}")
@@ -162,6 +157,19 @@ class ResearcherAgent(BaseAgent):
                 historical_context = self._get_memory_context(ticker, reports) if self.memory else None
                 logger.info(f"[单次分析模式] {self.agent_id} 使用向量缓存")
 
+            # v3.5.0 项1 闭环：检查质量门禁标记，低质量报告在 prompt 中提示
+            # 让研究员感知哪些分析师报告质量存疑，从而降低结论权重
+            quality_flags = state.get("quality_flags") or []
+            if quality_flags:
+                quality_hint = self._build_quality_hint(quality_flags)
+                if quality_hint:
+                    historical_context = (
+                        quality_hint + "\n" + (historical_context or "")
+                    ).strip()
+                    logger.info(
+                        f"[Researcher] 检测到 {len(quality_flags)} 条质量标记，已注入质量提示"
+                    )
+
             # 4. 构建提示词
             # 传递 state 参数（子类可以从 state 中提取变量如 company_name, ticker 等）
             system_prompt = self._build_system_prompt(self.stance, state)
@@ -177,6 +185,14 @@ class ResearcherAgent(BaseAgent):
 
             logger.info(f"系统提示词: {system_prompt}")
             logger.info(f"用户提示词: {user_prompt}")
+
+            # P1: 记录 Prompt
+            if recorder:
+                try:
+                    recorder.record_inputs({"ticker": ticker, "analysis_date": analysis_date, "reports_keys": list(reports.keys()) if isinstance(reports, dict) else []})
+                    recorder.record_prompts(system_prompt, user_prompt)
+                except Exception as e:
+                    logger.debug(f"[{self.agent_id}] 记录 Prompt 失败（不影响 agent）: {e}")
             
             if self._llm:
                 import time
@@ -191,13 +207,22 @@ class ResearcherAgent(BaseAgent):
                     logger.error(f"❌ [{self.agent_id}] LLM 调用失败, 耗时: {_llm_elapsed:.1f}s, 错误: {_llm_err}", exc_info=True)
                     raise
                 report = self._parse_response(response.content)
+
+                # P1: 记录 LLM 响应和解析输出
+                if recorder:
+                    try:
+                        recorder.record_llm_response(response, llm_duration_ms=int(_llm_elapsed * 1000))
+                        recorder.record_parsed_output({"report": report[:500] if isinstance(report, str) else str(report)[:500]})
+                    except Exception as e:
+                        logger.debug(f"[{self.agent_id}] 记录 LLM 响应失败（不影响 agent）: {e}")
             else:
                 raise ValueError("LLM not initialized")
             
             # 6. 保存到记忆系统（如果有）
             if self.memory:
                 # 🔥 v2.0: 辩论模式下也保存到向量缓存，以便后续使用
-                self._save_to_memory(ticker, report)
+                # v3.5.0 项3：同时触发反思提炼，把报告提炼为结构化教训
+                self._save_to_memory(ticker, report, state=state)
                 if is_debate_mode:
                     logger.info(f"[辩论模式] {self.agent_id} 已保存到向量缓存")
 
@@ -215,6 +240,12 @@ class ResearcherAgent(BaseAgent):
 
         except Exception as e:
             logger.error(f"研究员Agent {self.agent_id} 执行失败 (总耗时: {_time_exec.time() - _exec_start:.1f}s): {e}", exc_info=True)
+            # P1: 记录异常
+            if recorder:
+                try:
+                    recorder.record_error(e)
+                except Exception:
+                    pass
             # 返回错误状态（只返回新增的字段）
             output_key = self.output_field or f"{self.researcher_type}_report"
             return {
@@ -223,6 +254,13 @@ class ResearcherAgent(BaseAgent):
                     "success": False
                 }
             }
+        finally:
+            # P1: 完成轨迹采集并写入 MongoDB（非阻塞）
+            if recorder:
+                try:
+                    recorder.finish()
+                except Exception:
+                    pass
     
     def _collect_reports(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -240,8 +278,49 @@ class ResearcherAgent(BaseAgent):
         for report_key in required_reports:
             if report_key in state:
                 reports[report_key] = state[report_key]
-        
+
         return reports
+
+    def _build_quality_hint(self, quality_flags: List[Dict[str, Any]]) -> str:
+        """构建质量提示文本（v3.5.0 项1 闭环）。
+
+        将分析师报告的质量门禁标记转化为 prompt 提示，
+        让研究员感知哪些分析师报告质量存疑，从而降低结论权重。
+
+        Args:
+            quality_flags: 质量标记列表，每项包含 agent_id/severity/reason
+
+        Returns:
+            质量提示文本，或空字符串
+        """
+        if not quality_flags:
+            return ""
+
+        hints: List[str] = []
+        for flag in quality_flags:
+            if not isinstance(flag, dict):
+                continue
+            agent_id = flag.get("agent_id", "未知分析师")
+            severity = flag.get("severity", "")
+            reason = flag.get("reason", "")
+            retried = flag.get("retried", False)
+
+            if severity == "critical":
+                retry_note = "（已重试仍失败）" if retried else ""
+                hints.append(
+                    f"⚠️ {agent_id} 报告质量不合格{retry_note}：{reason}。"
+                    f"请谨慎参考该分析师的结论，建议以其他分析师报告为主。"
+                )
+            elif severity == "warning":
+                hints.append(
+                    f"⚠️ {agent_id} 报告质量存疑：{reason}。"
+                    f"建议降低该结论的参考权重。"
+                )
+
+        if not hints:
+            return ""
+
+        return "【质量提示】\n" + "\n".join(hints)
     
     def _get_historical_context(self, ticker: str) -> Optional[str]:
         """
@@ -264,13 +343,14 @@ class ResearcherAgent(BaseAgent):
             logger.warning(f"获取历史上下文失败: {e}")
             return None
 
-    def _save_to_memory(self, ticker: str, report: Dict[str, Any]) -> None:
+    def _save_to_memory(self, ticker: str, report: Dict[str, Any], state: Optional[Dict[str, Any]] = None) -> None:
         """
         保存到记忆系统
 
         Args:
             ticker: 股票代码
             report: 研究报告
+            state: 工作流状态（用于提取 user_id 等上下文，v3.5.0 项3 反思节点需要）
         """
         if not self.memory:
             return
@@ -301,6 +381,12 @@ class ResearcherAgent(BaseAgent):
             )
             if success:
                 logger.info(f"✅ 保存到记忆系统: {ticker}, stance={self.stance}")
+
+            # v3.5.0 项3：研究员报告反思提炼
+            # 在原文写入后追加结构化教训节点，把报告提炼为 4 维度经验
+            # 写入 ANALYSIS_INSIGHT scope，memory_kind=analysis_lesson
+            # 失败时 helper 内部已降级，不阻塞主流程
+            self._reflect_on_analysis(ticker, report, content, state=state)
 
         except Exception as e:
             logger.warning(f"保存到记忆系统失败: {e}")
@@ -776,7 +862,34 @@ class ResearcherAgent(BaseAgent):
                 if similarity > 0.7:
                     memory_str += f"[相似度: {similarity:.2f}] {content}\n\n"
 
-            if memory_str:
+            # v3.5.0 闭环 L2/L3：优先召回 mem0 中的反思教训
+            # 反思教训通过 reflection_helper.run_reflection 写入 mem0，
+            # 这里通过 recall_lessons_sync 召回并注入 prompt，形成完整闭环。
+            lessons_str = ""
+            try:
+                from core.agents.reflection_helper import recall_lessons_sync
+                db = self._get_db_handle()
+                if db is not None:
+                    user_id = self._get_user_id() or "default_user"
+                    lessons_str = recall_lessons_sync(
+                        db=db,
+                        user_id=user_id,
+                        query=curr_situation,
+                        agent_id=self.agent_id,
+                        limit=3,
+                        max_chars=1500,
+                    )
+                    if lessons_str:
+                        logger.info(f"🧠 从 mem0 召回反思教训（闭环 L2/L3）")
+            except Exception as lessons_exc:
+                logger.debug(f"[Researcher] 召回反思教训失败（不阻塞）: {lessons_exc}")
+
+            # 教训放在前面（优先参考），原文放在后面
+            if lessons_str and memory_str:
+                return f"\n{lessons_str}\n【历史经验】\n{memory_str}"
+            elif lessons_str:
+                return f"\n{lessons_str}"
+            elif memory_str:
                 logger.info(f"🧠 从记忆系统检索到 {len(past_memories)} 条相关经验")
                 return f"\n【历史经验】\n{memory_str}"
 

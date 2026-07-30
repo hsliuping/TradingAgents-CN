@@ -77,16 +77,15 @@ class ChipDistributionAnalystV2(AnalystAgent):
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """执行筹码分布分析"""
         try:
-            ticker = state.get("ticker") or state.get("company_of_interest")
-            analysis_date = state.get("analysis_date") or state.get("trade_date")
+            ticker, analysis_date = self._extract_common_params(state)
             context = state.get("context")
             overrides = state.get("prompt_overrides") or {}
             system_override = overrides.get("system")
             user_override = overrides.get("user")
             analysis_override = overrides.get("analysis")
 
-            if not ticker or not analysis_date:
-                raise ValueError("缺少必要参数: ticker 或 analysis_date")
+            if not ticker:
+                raise ValueError("Missing required parameters: ticker")
 
             # 构建系统提示词
             system_prompt = system_override
@@ -143,7 +142,7 @@ class ChipDistributionAnalystV2(AnalystAgent):
                     if self._chip_tool_unavailable():
                         report = self._build_unavailable_report(ticker, analysis_date)
                 else:
-                    response = self._llm.invoke(messages)
+                    response = self._invoke_llm_with_trace(messages)
                     report = response.content if hasattr(response, "content") else str(response)
                     tool_summary = ""
             else:

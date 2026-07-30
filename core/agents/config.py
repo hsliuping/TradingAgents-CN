@@ -371,121 +371,121 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
     ),
     "bull_researcher": AgentMetadata(
         id="bull_researcher",
-        name="看涨研究员",
-        description="从乐观角度分析投资机会",
+        name="积极证据研究员",
+        description="从积极角度整理支持乐观解读的研究证据（输出研究观察，不构成投资建议）",
         category=AgentCategory.RESEARCHER,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="🐂",
         color="#27ae60",
-        tags=["看涨", "机会"],
+        tags=["积极", "证据"],
         tools=[],  # 研究员不直接调用工具，基于分析师报告
         max_tool_calls=0,
         workflow_stage="research",  # 🔥 新增：研究阶段
     ),
     "bear_researcher": AgentMetadata(
         id="bear_researcher",
-        name="看跌研究员",
-        description="从谨慎角度分析投资风险",
+        name="谨慎证据研究员",
+        description="从谨慎角度整理支持审慎解读的研究证据（输出研究观察，不构成投资建议）",
         category=AgentCategory.RESEARCHER,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="🐻",
         color="#c0392b",
-        tags=["看跌", "风险"],
+        tags=["谨慎", "证据"],
         tools=[],
         max_tool_calls=0,
         workflow_stage="research",  # 🔥 新增：研究阶段
     ),
     "trader": AgentMetadata(
         id="trader",
-        name="交易员",
-        description="综合分析结果做出交易决策",
+        name="研究整合员",
+        description="综合各维度研究证据，整理形成研究观察汇总（不构成投资建议）",
         category=AgentCategory.TRADER,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="💰",
         color="#f1c40f",
-        tags=["交易", "决策"],
+        tags=["整合", "观察"],
         tools=[],
         max_tool_calls=0,
-        workflow_stage="trader",  # 🔥 新增：交易决策阶段
+        workflow_stage="trader",  # 🔥 新增：研究整合阶段
     ),
     "position_advisor": AgentMetadata(
         id="position_advisor",
-        name="持仓分析师",
-        description="基于单股分析报告和持仓信息，提供个性化的持仓操作建议",
+        name="持仓研究师",
+        description="基于单股分析报告和持仓信息，整理持仓研究观察事项（不构成投资建议）",
         category=AgentCategory.TRADER,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="💼",
         color="#2980b9",
-        tags=["持仓", "操作建议", "风险评估"],
+        tags=["持仓", "研究观察", "风险评估"],
         tools=[],
         max_tool_calls=0,
         requires_tools=False,
-        workflow_stage="trader",  # 🔥 新增：交易决策阶段
+        workflow_stage="trader",  # 🔥 新增：研究整合阶段
     ),
     "risky_analyst": AgentMetadata(
         id="risky_analyst",
-        name="激进风险分析师",
-        description="从激进角度评估交易计划，关注高收益机会，容忍较高风险",
+        name="高弹性情景分析师",
+        description="整理高弹性情景下的研究证据，关注潜在收益空间（输出研究观察，不构成投资建议）",
         category=AgentCategory.RISK,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="🔥",
         color="#e74c3c",
-        tags=["风险", "激进", "收益"],
+        tags=["情景", "高弹性", "研究"],
         tools=[],
         max_tool_calls=0,
-        workflow_stage="risk",  # 🔥 新增：风险阶段
+        workflow_stage="risk",  # 🔥 新增：风险研究阶段
     ),
     "safe_analyst": AgentMetadata(
         id="safe_analyst",
-        name="保守风险分析师",
-        description="从保守角度评估交易计划，优先资本保护，规避潜在风险",
+        name="防御情景分析师",
+        description="整理防御情景下的研究证据，关注资本保护因素（输出研究观察，不构成投资建议）",
         category=AgentCategory.RISK,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="🛡️",
         color="#27ae60",
-        tags=["风险", "保守", "保护"],
+        tags=["情景", "防御", "研究"],
         tools=[],
         max_tool_calls=0,
-        workflow_stage="risk",  # 🔥 新增：风险阶段
+        workflow_stage="risk",  # 🔥 新增：风险研究阶段
     ),
     "neutral_analyst": AgentMetadata(
         id="neutral_analyst",
-        name="中性风险分析师",
-        description="从中性角度评估交易计划，平衡收益与风险，寻求最优解",
+        name="基准情景分析师",
+        description="整理基准情景下的研究证据，平衡多种视角（输出研究观察，不构成投资建议）",
         category=AgentCategory.RISK,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="⚖️",
         color="#3498db",
-        tags=["风险", "中性", "平衡"],
+        tags=["情景", "基准", "平衡"],
         tools=[],
         max_tool_calls=0,
-        workflow_stage="risk",  # 🔥 新增：风险阶段
+        workflow_stage="risk",  # 🔥 新增：风险研究阶段
     ),
     "risk_manager": AgentMetadata(
         id="risk_manager",
-        name="风险经理",
-        description="综合三方风险分析师观点，做出最终风险调整决策",
+        name="风险评估师",
+        description="综合各情景研究证据，整理风险研究观察汇总（不构成投资建议）",
         category=AgentCategory.MANAGER,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="👨‍⚖️",
         color="#9b59b6",
-        tags=["风险", "裁决", "决策"],
+        tags=["风险", "研究", "评估"],
         tools=[],
         max_tool_calls=0,
-        workflow_stage="manager",  # 🔥 新增：经理阶段
+        workflow_stage="manager",  # 🔥 新增：评估阶段
     ),
     "research_manager": AgentMetadata(
         id="research_manager",
-        name="研究经理",
-        description="综合多空研究员观点，形成投资建议",
+        name="研究整合员",
+        description="综合多视角研究证据，整理形成研究观察汇总（不构成投资建议）",
         category=AgentCategory.MANAGER,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="👔",
         color="#9b59b6",
-        tags=["管理", "综合", "决策"],
+        tags=["整合", "研究", "观察"],
         tools=[],
         max_tool_calls=0,
-        workflow_stage="manager",  # 🔥 新增：经理阶段
+        workflow_stage="manager",  # 🔥 新增：评估阶段
     ),
     # ==================== 交易复盘 Agent ====================
     "timing_analyst": AgentMetadata(
@@ -496,7 +496,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="⏰",
         color="#e67e22",
-        tags=["复盘", "时机", "买卖点"],
+        tags=["复盘", "时机", "研究"],
         tools=[
             "get_stock_market_data_unified",
             "get_stockstats_indicators_report",
@@ -684,23 +684,23 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
     ),
     "pa_advisor": AgentMetadata(
         id="pa_advisor",
-        name="持仓操作建议师",
-        description="综合技术面、基本面、风险评估，给出持仓操作建议",
+        name="持仓研究整合师",
+        description="综合技术面、基本面、风险评估，整理持仓研究观察汇总（不构成投资建议）",
         category=AgentCategory.MANAGER,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="💡",
         color="#9b59b6",
-        tags=["持仓分析", "建议", "决策"],
+        tags=["持仓分析", "研究", "观察"],
         tools=[],
         max_tool_calls=0,
         requires_tools=False,
         output_field="action_advice",
-        report_label="【操作建议】",
-        node_name="操作建议师",
+        report_label="【持仓研究观察】",
+        node_name="持仓研究整合师",
         execution_order=100,
         # 🆕 读取其他 Agent 的输出
         reads_from=["technical_analysis", "fundamental_analysis", "risk_analysis"],
-        workflow_stage="manager",  # 🔥 新增：经理阶段（持仓分析流程）
+        workflow_stage="manager",  # 🔥 新增：研究阶段（持仓分析流程）
     ),
     # 🆕 v2.0 架构的 Agent
     "market_analyst_v2": AgentMetadata(
@@ -1025,8 +1025,8 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
 
     "research_manager_v2": AgentMetadata(
         id="research_manager_v2",
-        name="研究经理 v2.0",
-        description="综合乐观与审慎情景研究，形成平衡研究结论与观察重点",
+        name="研究整合员 v2.0",
+        description="综合乐观与审慎情景研究，整理形成平衡的研究观察汇总（不构成投资建议）",
         category=AgentCategory.MANAGER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -1038,19 +1038,19 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
             AgentInput(name="bear_report", type="string", description="审慎情景研究报告"),
         ],
         outputs=[
-            AgentOutput(name="investment_advice", type="string", description="平衡研究结论"),
+            AgentOutput(name="investment_advice", type="string", description="平衡研究观察汇总"),
         ],
         requires_tools=False,
         output_field="investment_advice",
-        report_label="【平衡研究结论 v2】",
-        node_name="研究经理 v2",
+        report_label="【平衡研究观察 v2】",
+        node_name="研究整合员 v2",
         execution_order=90,
     ),
 
     "trader_v2": AgentMetadata(
         id="trader_v2",
         name="研究整合员 v2.0",
-        description="根据风险审阅后的综合研究结论生成用户版研究简报",
+        description="根据风险审阅后的综合研究证据，整理形成用户版研究简报（不构成投资建议）",
         category=AgentCategory.TRADER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -1058,7 +1058,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_plan", type="string", description="综合研究结论"),
+            AgentInput(name="investment_plan", type="string", description="综合研究观察汇总"),
             AgentInput(name="market_report", type="string", description="市场分析报告", required=False),
             AgentInput(name="fundamentals_report", type="string", description="基本面分析报告", required=False),
             AgentInput(name="news_report", type="string", description="新闻分析报告", required=False),
@@ -1069,7 +1069,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
             AgentInput(name="bear_report", type="string", description="审慎情景研究报告", required=False),
         ],
         outputs=[
-            AgentOutput(name="trader_investment_plan", type="string", description="用户版研究简报"),
+            AgentOutput(name="trader_investment_plan", type="string", description="用户版研究简报（研究观察汇总，不构成投资建议）"),
         ],
         requires_tools=False,
         output_field="trader_investment_plan",
@@ -1157,8 +1157,8 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
 
     "risk_manager_v2": AgentMetadata(
         id="risk_manager_v2",
-        name="风险管理者 v2.0",
-        description="主持稳健性审阅，综合多方观点，形成风险审阅后的综合研究结论",
+        name="风险评估师 v2.0",
+        description="主持稳健性审阅，综合多方观点，形成风险审阅后的综合研究结论（输出研究观察，不构成投资建议）",
         category=AgentCategory.MANAGER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -1172,12 +1172,12 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
             AgentInput(name="neutral_opinion", type="string", description="基准情景观点", required=False),
         ],
         outputs=[
-            AgentOutput(name="risk_assessment", type="string", description="稳健性审阅与风险治理报告"),
+            AgentOutput(name="risk_assessment", type="string", description="稳健性审阅与风险研究观察"),
         ],
         requires_tools=False,
         output_field="risk_assessment",
-        report_label="【风险治理结论 v2】",
-        node_name="风险管理者 v2",
+        report_label="【风险研究结论 v2】",
+        node_name="风险评估师 v2",
         execution_order=120,
     ),
 
@@ -1249,7 +1249,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
     "pa_advisor_v2": AgentMetadata(
         id="pa_advisor_v2",
         name="持仓研究整合师 v2.0",
-        description="综合各维度分析，形成持仓研究判断与观察事项",
+        description="综合各维度分析，整理形成持仓研究观察与关注事项（不构成投资建议）",
         category=AgentCategory.MANAGER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -1261,7 +1261,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
             AgentInput(name="risk_analysis", type="string", description="风险评估结果", required=False),
         ],
         outputs=[
-            AgentOutput(name="action_advice", type="string", description="持仓操作建议"),
+            AgentOutput(name="action_advice", type="string", description="持仓研究观察汇总"),
         ],
         requires_tools=False,
         output_field="action_advice",

@@ -161,11 +161,13 @@ class EmbeddingManager:
                 api_key = provider_doc.get("api_key", "")
                 base_url = provider_doc.get("default_base_url") or provider_doc.get("base_url", "")
                 embedding_model = provider_doc.get("embedding_model", "")
-                
-                if not api_key:
+
+                # 🔥 本地模型（local/ollama/localai）不需要 API Key
+                is_local_provider = provider_name in ["local", "ollama", "localai"]
+                if not api_key and not is_local_provider:
                     logger.debug(f"⚠️ {provider_name} 未配置 API Key，跳过")
                     continue
-                
+
                 # 🔥 如果系统配置了该厂商的模型，优先使用系统配置
                 if preferred_provider_name == provider_name and preferred_model:
                     embedding_model = preferred_model
@@ -395,6 +397,9 @@ class EmbeddingManager:
         try:
             if provider_name == "dashscope":
                 return self._call_dashscope(provider, text)
+            elif provider_name == "local":
+                # 🔥 本地 sentence-transformers 模型，无需联网
+                return self._call_local(provider, text)
             elif provider_name in ["openai", "deepseek", "zhipu", "ollama", "localai", "jdyun"]:
                 # 🔥 OpenAI 兼容的 API（包括智谱AI、DeepSeek、京东云、本地模型等）
                 # 智谱AI 使用 OpenAI 兼容的 API，base_url: https://open.bigmodel.cn/api/paas/v4
@@ -409,6 +414,42 @@ class EmbeddingManager:
                 return self._call_openai_compatible(provider, text)
         except Exception as e:
             logger.error(f"❌ {provider['display_name']} Embedding 调用失败: {e}")
+            return None
+
+    def _call_local(self, provider: Dict[str, Any], text: str) -> Optional[List[float]]:
+        """
+        调用本地 sentence-transformers 模型（无需联网）
+
+        使用 HuggingFace sentence-transformers 库直接在本地加载模型，
+        支持 Qwen/Qwen3-Embedding-0.6B 等模型。
+        """
+        model_name = provider.get('model', 'Qwen/Qwen3-Embedding-0.6B')
+
+        try:
+            # 缓存已加载的模型，避免重复加载
+            if not hasattr(self, '_local_model_cache'):
+                self._local_model_cache = {}
+
+            if model_name not in self._local_model_cache:
+                logger.info(f"📦 正在加载本地 Embedding 模型: {model_name}")
+                # 离线模式，不联网验证模型文件
+                os.environ.setdefault("HF_HUB_OFFLINE", "1")
+                os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+                from sentence_transformers import SentenceTransformer
+                self._local_model_cache[model_name] = SentenceTransformer(model_name)
+                logger.info(f"✅ 本地 Embedding 模型加载成功: {model_name}")
+
+            model = self._local_model_cache[model_name]
+            embedding = model.encode(text)
+            embedding = embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
+            logger.debug(f"✅ 本地 Embedding 成功，维度: {len(embedding)}")
+            return embedding
+
+        except ImportError:
+            logger.error(f"❌ sentence-transformers 未安装，请运行: pip install sentence-transformers")
+            return None
+        except Exception as e:
+            logger.error(f"❌ 本地 Embedding 调用失败: {e}")
             return None
 
     def _call_dashscope(self, provider: Dict[str, Any], text: str) -> Optional[List[float]]:

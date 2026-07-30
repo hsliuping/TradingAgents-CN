@@ -343,6 +343,26 @@
                   <p v-if="!report.skills_created?.length && !report.skills_failed?.length" class="empty-hint">无需创建 Skill</p>
                 </el-collapse-item>
 
+                <!-- v3.6.0 项6 路径C：Skill 生成 HITL 审核面板 -->
+                <el-collapse-item v-if="sessionId && report.skills_created?.length" name="skill_review">
+                  <template #title>
+                    <span class="collapse-title">⚠️ Skill 待审核</span>
+                    <el-tag size="small" type="warning" class="collapse-badge">
+                      需人工确认绑定
+                    </el-tag>
+                  </template>
+                  <p class="review-hint">
+                    以下 Skill 已生成但尚未绑定到 Agent。请审核代码后确认或拒绝绑定。
+                  </p>
+                  <SkillReviewCard
+                    :session-id="sessionId"
+                    source-path="ai_workflow"
+                    @confirmed="handleSkillReviewUpdated"
+                    @rejected="handleSkillReviewUpdated"
+                    @updated="handleSkillReviewUpdated"
+                  />
+                </el-collapse-item>
+
                 <!-- 绑定关系 -->
                 <el-collapse-item v-if="report.bindings_info?.length" name="bindings">
                   <template #title>
@@ -395,6 +415,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { workflowGenerationApi } from '@/api/workflowGeneration'
 import type { WfConfirmResult, WfSessionItem } from '@/api/workflowGeneration'
+import SkillReviewCard from '@/components/Workflow/SkillReviewCard.vue'
 
 // marked 配置已由 @/utils/markdown 统一管理
 const renderMarkdown = (content: string): string => {
@@ -631,6 +652,13 @@ const handleCancelOptimize = () => {
   isOptimizeMode.value = false
   optimizeProposed.value = false
   step.value = 4
+}
+
+// v3.6.0 项6 路径C：Skill 审核状态变更后的回调
+// SkillReviewCard 内部已自行刷新状态，这里仅触发成果面板更新
+const handleSkillReviewUpdated = () => {
+  // 成果面板的 Skill 列表来自 confirmResult，无需重新拉取
+  // SkillReviewCard 内部会自行刷新待审核列表
 }
 
 /** 确认并应用优化 */
@@ -1073,6 +1101,15 @@ onMounted(() => {
 .default-item { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .default-reason { font-size: 12px; color: var(--el-text-color-placeholder); }
 .empty-hint { font-size: 12px; color: var(--el-text-color-placeholder); padding: 8px 0; }
+
+.review-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin: 4px 0 8px;
+  padding: 6px 10px;
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+}
 
 /* Skill */
 .skill-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }

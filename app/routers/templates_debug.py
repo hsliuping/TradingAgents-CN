@@ -543,8 +543,16 @@ async def debug_analyst(
             # 使用v2.0的新统一引擎
             return await _debug_v2_agent(req, ctx, cfg, user)
         else:
-            # 使用v1.0的旧引擎
-            return await _debug_v1_agent(req, ctx, cfg, user)
+            # v1.0 旧引擎已停用
+            import logging
+            logging.getLogger("webapi").warning(
+                f"[已停用] v1.0 agent 调试已停用，agent_version={agent_version}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="[已停用] v1.0 agent 调试已停用，请指定 agent_version='v2'。"
+                "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+            )
 
 
     except HTTPException:

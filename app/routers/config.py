@@ -1522,6 +1522,41 @@ async def set_default_llm(
         )
 
 
+class BatchImportRequest(BaseModel):
+    providers: List[str] = Field(default=[], description="要导入的厂家列表，为空则导入所有已配置API密钥的厂家")
+
+
+@router.post("/llm/batch-import", response_model=dict)
+async def batch_import_llm_configs(
+    request: BatchImportRequest = BatchImportRequest(),
+    current_user: User = Depends(get_current_user)
+):
+    """一键导入：从模型目录和厂家配置批量创建大模型配置（按厂家）"""
+    try:
+        result = await config_service.batch_import_llm_configs(request.providers)
+
+        # 审计日志
+        try:
+            await log_operation(
+                user_id=str(getattr(current_user, "id", "")),
+                username=getattr(current_user, "username", "unknown"),
+                action_type=ActionType.CONFIG_MANAGEMENT,
+                action="batch_import_llm_configs",
+                details=result,
+                success=True,
+            )
+        except Exception:
+            pass
+
+        return result
+    except Exception as e:
+        logger.error(f"批量导入大模型配置失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"批量导入失败: {str(e)}"
+        )
+
+
 @router.get("/datasource", response_model=List[DataSourceConfig])
 async def get_data_source_configs(
     current_user: User = Depends(get_current_user)

@@ -363,45 +363,52 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  京东云配置初始化失败: {e}")
 
     # 启动期同步能力索引：工具元数据变更后，重启即可增量写入向量库。
-    try:
-        from app.core.database import get_mongo_db
-        from app.services.capability_index_service import CapabilityIndexService
+    # 改为后台异步任务，避免 Embedding 模型加载阻塞项目启动
+    async def _sync_capability_index_background():
+        """后台异步同步能力索引，不阻塞启动"""
+        try:
+            from app.core.database import get_mongo_db
+            from app.services.capability_index_service import CapabilityIndexService
 
-        result = await CapabilityIndexService(get_mongo_db()).ensure_index()
-        logger.info(
-            "✅ 能力索引同步完成: %s %d/%d backend=%s",
-            result.sync_mode,
-            result.indexed_documents,
-            result.total_documents,
-            result.vector_backend,
-        )
+            result = await CapabilityIndexService(get_mongo_db()).ensure_index()
+            logger.info(
+                "✅ 能力索引同步完成: %s %d/%d backend=%s",
+                result.sync_mode,
+                result.indexed_documents,
+                result.total_documents,
+                result.vector_backend,
+            )
 
-        # 索引跳过时，向所有管理员发送系统通知
-        if result.sync_mode.startswith("skipped_"):
-            try:
-                from app.services.user_service import UserService
-                from app.services.notifications_service import get_notifications_service
-                from app.models.notification import NotificationCreate
+            # 索引跳过时，向所有管理员发送系统通知
+            if result.sync_mode.startswith("skipped_"):
+                try:
+                    from app.services.user_service import UserService
+                    from app.services.notifications_service import get_notifications_service
+                    from app.models.notification import NotificationCreate
 
-                user_svc = UserService()
-                users = await user_svc.list_users(limit=100)
-                notif_svc = get_notifications_service()
+                    user_svc = UserService()
+                    users = await user_svc.list_users(limit=100)
+                    notif_svc = get_notifications_service()
 
-                skip_reason = "Embedding API 不可用" if "embedding" in result.sync_mode else "未配置 Embedding"
-                for u in users:
-                    await notif_svc.create_and_publish(NotificationCreate(
-                        user_id=u.id,
-                        type="system",
-                        title="能力索引未构建",
-                        content=f"系统启动时能力索引构建被跳过（{skip_reason}）。请先在系统设置中配置有效的 Embedding API Key，然后在「系统设置 → 工具能力索引」中手动重建索引。",
-                        source="capability_index",
-                        severity="warning",
-                    ))
-                logger.info("📢 已向 %d 位用户发送能力索引跳过通知", len(users))
-            except Exception as ne:
-                logger.warning(f"⚠️ 发送能力索引通知失败: {ne}")
-    except Exception as e:
-        logger.error(f"❌ 能力索引同步失败: {e}", exc_info=True)
+                    skip_reason = "Embedding API 不可用" if "embedding" in result.sync_mode else "未配置 Embedding"
+                    for u in users:
+                        await notif_svc.create_and_publish(NotificationCreate(
+                            user_id=u.id,
+                            type="system",
+                            title="能力索引未构建",
+                            content=f"系统启动时能力索引构建被跳过（{skip_reason}）。请先在系统设置中配置有效的 Embedding API Key，然后在「系统设置 -> 工具能力索引」中手动重建索引。",
+                            source="capability_index",
+                            severity="warning",
+                        ))
+                    logger.info("📢 已向 %d 位用户发送能力索引跳过通知", len(users))
+                except Exception as ne:
+                    logger.warning(f"⚠️ 发送能力索引通知失败: {ne}")
+        except Exception as e:
+            logger.error(f"❌ 能力索引同步失败: {e}", exc_info=True)
+
+    # 创建后台任务，不阻塞启动
+    asyncio.create_task(_sync_capability_index_background())
+    logger.info("📋 能力索引同步已在后台启动")
 
     # 启动期同步系统默认提示词模板：将代码中的 fallback 提示词写入数据库统一管理
     try:
@@ -891,6 +898,50 @@ async def lifespan(app: FastAPI):
         )
         logger.info("🗓️ 交易日历缓存刷新任务已配置（每日 18:30 执行）")
 
+        # v3.5.0 项4 / v3.6.0 项6：HITL 待确认操作过期清理（每 30 分钟执行一次）
+        async def _expire_stale_hitl_operations():
+            try:
+                from app.core.database import get_mongo_db
+                from core.hitl.checkpoint_store import HITLCheckpointService
+                db = get_mongo_db()
+                if db is not None:
+                    svc = HITLCheckpointService(db)
+                    cleaned = await svc.expire_stale()
+                    if cleaned:
+                        logger.info(f"[HITL·定时] 已清理 {cleaned} 条过期待确认操作")
+            except Exception as _e:
+                logger.warning(f"[HITL·定时] 过期清理失败: {_e}")
+
+        scheduler.add_job(
+            _expire_stale_hitl_operations,
+            IntervalTrigger(minutes=30, timezone=settings.TIMEZONE),
+            id="hitl_expire_stale",
+            name="HITL 待确认操作过期清理（每30分钟）"
+        )
+        logger.info("🔄 HITL 待确认操作过期清理已配置（每 30 分钟）")
+
+        # v3.6.0：Skill 审核过期清理（每 30 分钟执行一次）
+        async def _expire_stale_skill_reviews():
+            try:
+                from app.core.database import get_mongo_db
+                from app.services.skill_review_service import SkillReviewService
+                db = get_mongo_db()
+                if db is not None:
+                    svc = SkillReviewService(db=db)
+                    cleaned = await svc.expire_stale_reviews()
+                    if cleaned:
+                        logger.info(f"[SkillReview·定时] 已过期 {cleaned} 条待审核 Skill 记录")
+            except Exception as _e:
+                logger.warning(f"[SkillReview·定时] 过期清理失败: {_e}")
+
+        scheduler.add_job(
+            _expire_stale_skill_reviews,
+            IntervalTrigger(minutes=30, timezone=settings.TIMEZONE),
+            id="skill_review_expire_stale",
+            name="Skill 审核过期清理（每30分钟）"
+        )
+        logger.info("🔄 Skill 审核过期清理已配置（每 30 分钟）")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
@@ -1255,6 +1306,8 @@ from app.routers import skill_gaps as skill_gaps_router
 from app.routers import skill_center as skill_center_router
 from app.routers import agent_workshop as agent_workshop_router
 from app.routers import workflow_generation as workflow_generation_router
+from app.routers import agent_assertions as agent_assertions_router
+from app.routers import execution_trace as execution_trace_router
 register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
 register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
 register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
@@ -1264,6 +1317,8 @@ register_router_with_log(app, skill_gaps_router.router, "Skill 缺口路由 (ski
 register_router_with_log(app, skill_center_router.router, "Skill 中心聚合路由 (skill-center)", tags=["skill-center"])
 register_router_with_log(app, agent_workshop_router.router, "Agent 工坊路由 (agent-workshop)", tags=["agent-workshop"])
 register_router_with_log(app, workflow_generation_router.router, "AI 工作流创建路由 (workflow-generation)", tags=["workflow-generation"])
+register_router_with_log(app, agent_assertions_router.router, "Agent 断言管理路由 (agent-assertions)", tags=["agent-assertions"])
+register_router_with_log(app, execution_trace_router.router, "执行轨迹路由 (execution-traces)", tags=["execution-traces"])
 
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router
@@ -1276,10 +1331,14 @@ register_router_with_log(app, unified_tasks_router.router, "统一任务中心�
 # MCP 路由
 from app.routers import mcp as mcp_router
 from app.routers import capability_index as capability_index_router
+from app.routers import quality_metrics as quality_metrics_router
 app.include_router(mcp_router.router)
 
 # 能力索引路由
 app.include_router(capability_index_router.router, prefix="/api", tags=["capability-index"])
+
+# 报告质量指标路由（v3.6.0 项5）
+app.include_router(quality_metrics_router.router)
 
 # 路由注册完成，打印总结
 logger.info("=" * 70)

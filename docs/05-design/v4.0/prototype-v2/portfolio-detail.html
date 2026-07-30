@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>稳健成长组合 · 持仓分析 · TradingAgents v4.0</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus@2.4.4/dist/index.css" />
+  <link rel="stylesheet" href="./assets/theme.css?v=4" />
+  <style>
+    .pf-stat-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin: 16px 0; }
+    .pf-stat-card { background: #fff; border: 1px solid var(--border-light); border-radius: 8px; padding: 14px 16px; }
+    .pf-stat-label { font-size: 12px; color: var(--text-tertiary); margin-bottom: 6px; }
+    .pf-stat-value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .pf-stat-delta { font-size: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+    .pf-stat-delta.up { color: var(--stock-up); }
+    .pf-stat-delta.down { color: var(--stock-down); }
+
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .data-table thead th {
+      text-align: left; font-weight: 500; color: var(--text-secondary); font-size: 12px;
+      padding: 10px 12px; background: var(--bg-2); border-bottom: 1px solid var(--border-light);
+    }
+    .data-table thead th.num { text-align: right; }
+    .data-table tbody td { padding: 12px; border-bottom: 1px solid var(--border-light); color: var(--text-primary); }
+    .data-table tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .data-table tbody tr:last-child td { border-bottom: none; }
+    .data-table tbody tr:hover { background: var(--bg-2); }
+
+    .stack-bar { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: var(--bg-2); margin: 6px 0; }
+    .stack-bar > div { display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; font-weight: 500; }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--text-secondary); }
+    .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+    .plan-card { padding: 14px; border: 1px solid var(--border-light); border-radius: 8px; margin-bottom: 12px; }
+    .plan-card .pc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .plan-card .pc-name { font-weight: 600; font-size: 14px; }
+    .plan-card .pc-cond { font-size: 13px; color: var(--text-regular); margin-bottom: 4px; }
+    .plan-card .pc-meta { font-size: 12px; color: var(--text-tertiary); }
+
+    .review-card { padding: 14px; border: 1px solid var(--border-light); border-radius: 8px; margin-bottom: 12px; }
+    .review-card .rv-head { display: flex; justify-content: space-between; margin-bottom: 8px; }
+    .review-card .rv-title { font-weight: 600; font-size: 14px; }
+    .review-card .rv-tags { display: flex; gap: 6px; margin-bottom: 8px; }
+    .review-card .rv-conclusion { font-size: 13px; color: var(--text-regular); line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <app-shell
+      active="objects"
+      page-title="稳健成长组合"
+      :breadcrumb="[{label:'研究对象', href:'./object.html'}, {label:'组合', href:'./object.html?type=portfolio'}]"
+    >
+      <!-- 组合头 -->
+      <div class="obj-header">
+        <div class="obj-mark" style="background: #F0EBFE; color: #6B48E3;">PF</div>
+        <div style="flex: 1; min-width: 0;">
+          <div class="obj-title-row">
+            <h1>稳健成长组合</h1>
+            <span class="obj-code">12 只持仓 · 沪深 + 港股 · 中长期</span>
+          </div>
+          <div class="muted text-sm">
+            创建于 2024-03-08 · 当前规模 ¥182.6 万 · 累计收益 +34.8% · 基准：沪深 300
+          </div>
+          <div class="obj-tags">
+            <span class="tag-soft tag-primary">中长期</span>
+            <span class="tag-soft">高股息底仓 + 成长卫星</span>
+            <span class="tag-soft">月度调仓</span>
+            <span class="tag-soft">规则命中：分散度 ≥ 8</span>
+          </div>
+          <div class="obj-actions">
+            <el-button type="primary"><el-icon><Operation /></el-icon>&nbsp;发起组合分析</el-button>
+            <el-button plain><el-icon><EditPen /></el-icon>&nbsp;记录调仓</el-button>
+            <el-button plain><el-icon><Histogram /></el-icon>&nbsp;归因分析</el-button>
+            <el-button plain><el-icon><DocumentAdd /></el-icon>&nbsp;制定调仓计划</el-button>
+            <el-button plain><el-icon><Refresh /></el-icon>&nbsp;发起复盘</el-button>
+          </div>
+        </div>
+        <div style="text-align: right;">
+          <div class="stock-up" style="font-size: 28px; font-weight: 600;">¥1,826,432</div>
+          <div class="stock-up text-sm">+¥4,213 (+0.23%) 今日</div>
+          <div class="text-xs muted" style="margin-top: 4px;">截至 2026-04-28 收盘</div>
+        </div>
+      </div>
+
+      <!-- 顶部 6 指标 -->
+      <div class="pf-stat-grid">
+        <div class="pf-stat-card"><div class="pf-stat-label">总市值</div><div class="pf-stat-value">¥182.6 万</div><div class="pf-stat-delta up">+¥4,213 今日</div></div>
+        <div class="pf-stat-card"><div class="pf-stat-label">累计收益</div><div class="pf-stat-value stock-up">+34.8%</div><div class="pf-stat-delta">vs 沪深300 +18.4%</div></div>
+        <div class="pf-stat-card"><div class="pf-stat-label">年化收益</div><div class="pf-stat-value stock-up">+15.2%</div><div class="pf-stat-delta">运行 2.1 年</div></div>
+        <div class="pf-stat-card"><div class="pf-stat-label">最大回撤</div><div class="pf-stat-value stock-down">-12.4%</div><div class="pf-stat-delta">2024-09 至 2024-11</div></div>
+        <div class="pf-stat-card"><div class="pf-stat-label">夏普比率</div><div class="pf-stat-value">1.42</div><div class="pf-stat-delta">优于基准</div></div>
+        <div class="pf-stat-card"><div class="pf-stat-label">持仓集中度</div><div class="pf-stat-value">前 5 占 58%</div><div class="pf-stat-delta">建议 ≤ 60%</div></div>
+      </div>
+
+      <el-tabs v-model="activeTab" class="obj-tabs" lazy>
+
+        <!-- ======== 持仓总览 ======== -->
+        <el-tab-pane label="持仓总览" name="holdings">
+          <div class="section-title">
+            <h2>当前持仓</h2>
+            <span class="section-meta">事实层 · 来自 QMT 实盘账户 · 12:36 同步</span>
+          </div>
+          <el-card shadow="never">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>标的</th>
+                  <th class="num">持仓量</th>
+                  <th class="num">现价</th>
+                  <th class="num">市值(万)</th>
+                  <th class="num">权重</th>
+                  <th class="num">成本</th>
+                  <th class="num">浮盈亏</th>
+                  <th class="num">今日</th>
+                  <th>策略角色</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="h in holdings" :key="h.code">
+                  <td>
+                    <div style="font-weight: 500;"><a :href="h.href" style="color: inherit;">{{ h.name }}</a></div>
+                    <div style="font-size: 12px; color: var(--text-tertiary);">{{ h.code }} · {{ h.sector }}</div>
+                  </td>
+                  <td class="num">{{ h.qty }}</td>
+                  <td class="num">{{ h.price }}</td>
+                  <td class="num">{{ h.value }}</td>
+                  <td class="num">{{ h.weight }}</td>
+                  <td class="num">{{ h.cost }}</td>
+                  <td class="num" :class="h.pnl.startsWith('-') ? 'stock-down' : 'stock-up'">{{ h.pnl }}</td>
+                  <td class="num" :class="h.today.startsWith('-') ? 'stock-down' : 'stock-up'">{{ h.today }}</td>
+                  <td><el-tag size="small" :type="h.roleType" effect="light">{{ h.role }}</el-tag></td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="source-line"><el-icon><Link /></el-icon>实盘 · QMT 资金账户 9527XXXX · 价格 15 分钟延迟</div>
+          </el-card>
+
+          <div class="section-title">
+            <h2>结构分布</h2>
+            <span class="section-meta">派生事实 · 按行业 / 市场 / 风格三个维度切分</span>
+          </div>
+          <el-row :gutter="16">
+            <el-col :span="8">
+              <el-card shadow="never">
+                <template #header><span class="fw-600">行业分布</span></template>
+                <div v-for="r in sectorBreakdown" :key="r.label" style="margin-bottom: 10px;">
+                  <div class="flex-between text-sm" style="margin-bottom: 4px;">
+                    <span>{{ r.label }}</span><span class="tnum muted">{{ r.value }}</span>
+                  </div>
+                  <div class="stack-bar"><div :style="{ width: r.value, background: r.color }"></div></div>
+                </div>
+              </el-card>
+            </el-col>
+            <el-col :span="8">
+              <el-card shadow="never">
+                <template #header><span class="fw-600">市场分布</span></template>
+                <div v-for="r in marketBreakdown" :key="r.label" style="margin-bottom: 10px;">
+                  <div class="flex-between text-sm" style="margin-bottom: 4px;">
+                    <span>{{ r.label }}</span><span class="tnum muted">{{ r.value }}</span>
+                  </div>
+                  <div class="stack-bar"><div :style="{ width: r.value, background: r.color }"></div></div>
+                </div>
+              </el-card>
+            </el-col>
+            <el-col :span="8">
+              <el-card shadow="never">
+                <template #header><span class="fw-600">风格分布</span></template>
+                <div v-for="r in styleBreakdown" :key="r.label" style="margin-bottom: 10px;">
+                  <div class="flex-between text-sm" style="margin-bottom: 4px;">
+                    <span>{{ r.label }}</span><span class="tnum muted">{{ r.value }}</span>
+                  </div>
+                  <div class="stack-bar"><div :style="{ width: r.value, background: r.color }"></div></div>
+                </div>
+              </el-card>
+            </el-col>
+          </el-row>
+        </el-tab-pane>
+
+        <!-- ======== 收益归因 ======== -->
+        <el-tab-pane label="收益归因" name="attribution">
+          <div class="section-title">
+            <h2>本月收益拆解</h2>
+            <span class="section-meta">派生事实 · 按个股贡献排序</span>
+          </div>
+          <el-card shadow="never">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>标的</th>
+                  <th class="num">期初权重</th>
+                  <th class="num">收益率</th>
+                  <th class="num">贡献(pp)</th>
+                  <th class="num">超额(vs 基准)</th>
+                  <th>归因</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="a in attribution" :key="a.code">
+                  <td><div style="font-weight: 500;">{{ a.name }}</div><div style="font-size: 12px; color: var(--text-tertiary);">{{ a.code }}</div></td>
+                  <td class="num">{{ a.weight }}</td>
+                  <td class="num" :class="a.ret.startsWith('-') ? 'stock-down' : 'stock-up'">{{ a.ret }}</td>
+                  <td class="num" :class="a.contrib.startsWith('-') ? 'stock-down' : 'stock-up'">{{ a.contrib }}</td>
+                  <td class="num" :class="a.alpha.startsWith('-') ? 'stock-down' : 'stock-up'">{{ a.alpha }}</td>
+                  <td>{{ a.reason }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </el-card>
+
+          <div class="section-title"><h2>收益曲线（vs 基准）</h2></div>
+          <el-card shadow="never">
+            <div ref="curveChart" style="width: 100%; height: 280px;"></div>
+          </el-card>
+
+          <div class="section-title"><h2>Brinson 三因子归因</h2><span class="section-meta">观点层 · 由系统按 Brinson-Fachler 模型分解</span></div>
+          <el-card shadow="never">
+            <table class="data-table">
+              <thead><tr><th>因子</th><th class="num">贡献(pp)</th><th>说明</th></tr></thead>
+              <tbody>
+                <tr v-for="b in brinson" :key="b.factor">
+                  <td class="seg-name">{{ b.factor }}</td>
+                  <td class="num" :class="b.value.startsWith('-') ? 'stock-down' : 'stock-up'">{{ b.value }}</td>
+                  <td>{{ b.note }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </el-card>
+        </el-tab-pane>
+
+        <!-- ======== 风险敞口 ======== -->
+        <el-tab-pane label="风险敞口" name="risk">
+          <div class="section-title">
+            <h2>风险指标</h2>
+            <span class="section-meta">派生事实 · 60 日滚动窗口</span>
+          </div>
+          <el-card shadow="never">
+            <div class="kv-grid">
+              <div class="kv-item"><div class="kv-label">波动率(年化)</div><div class="kv-value tnum">18.4%</div></div>
+              <div class="kv-item"><div class="kv-label">下行波动</div><div class="kv-value tnum">11.2%</div></div>
+              <div class="kv-item"><div class="kv-label">Beta(沪深300)</div><div class="kv-value tnum">0.86</div></div>
+              <div class="kv-item"><div class="kv-label">追踪误差</div><div class="kv-value tnum">7.4%</div></div>
+              <div class="kv-item"><div class="kv-label">95% VaR(日)</div><div class="kv-value tnum stock-down">-1.62%</div></div>
+              <div class="kv-item"><div class="kv-label">Calmar</div><div class="kv-value tnum">1.23</div></div>
+            </div>
+          </el-card>
+
+          <div class="section-title">
+            <h2>预警与异常</h2>
+            <span class="section-meta">观点层 · 系统自动提示，需你确认是否处置</span>
+          </div>
+          <el-card shadow="never">
+            <div v-for="(a, i) in alerts" :key="a.id"
+                 :style="{ padding: '12px 0', borderTop: i ? '1px solid var(--border-light)' : 'none' }">
+              <div class="flex-between mb-2">
+                <div class="flex-row gap-2">
+                  <el-tag size="small" :type="a.level" effect="light">{{ a.levelText }}</el-tag>
+                  <span class="fw-500">{{ a.title }}</span>
+                </div>
+                <span class="text-xs muted">{{ a.time }}</span>
+              </div>
+              <div class="text-sm muted">{{ a.detail }}</div>
+              <div class="source-line"><el-icon><Link /></el-icon>触发规则：{{ a.rule }}</div>
+            </div>
+          </el-card>
+        </el-tab-pane>
+
+        <!-- ======== 调仓计划 ======== -->
+        <el-tab-pane label="调仓计划" name="rebalance">
+          <div class="section-title">
+            <h2>当前生效的调仓计划</h2>
+            <span class="section-meta">用户层 · 你制定的规则与触发条件，命中即提示</span>
+          </div>
+
+          <div v-for="p in rebalancePlans" :key="p.id" class="plan-card">
+            <div class="pc-head">
+              <div class="flex-row gap-2">
+                <el-tag :type="p.hit ? 'success' : 'info'" size="small" effect="light">
+                  {{ p.hit ? '当前命中' : '当前不触发' }}
+                </el-tag>
+                <span class="pc-name">{{ p.name }}</span>
+              </div>
+              <div class="flex-row gap-2">
+                <el-button link size="small">编辑</el-button>
+                <el-button link size="small" type="danger">停用</el-button>
+              </div>
+            </div>
+            <div class="pc-cond">
+              <strong>触发条件：</strong>{{ p.trigger }}
+            </div>
+            <div class="pc-cond">
+              <strong>执行动作：</strong>{{ p.action }}
+            </div>
+            <div class="pc-meta">
+              形成于 {{ p.createdAt }} · 关联任务 {{ p.taskRef || '无' }} · 历史触发 {{ p.history }} 次
+            </div>
+          </div>
+
+          <el-button type="primary" plain style="margin-top: 8px;">
+            <el-icon><Plus /></el-icon>&nbsp;新增调仓计划
+          </el-button>
+
+          <div class="section-title" style="margin-top: 24px;">
+            <h2>历史调仓记录</h2>
+            <span class="section-meta">事实层 · 已执行的调仓动作</span>
+          </div>
+          <el-card shadow="never">
+            <table class="data-table">
+              <thead><tr><th>日期</th><th>动作</th><th>标的</th><th class="num">变化</th><th>原因</th><th>关联任务</th></tr></thead>
+              <tbody>
+                <tr v-for="r in rebalanceHistory" :key="r.id">
+                  <td class="tnum">{{ r.date }}</td>
+                  <td><el-tag size="small" :type="r.actionType" effect="light">{{ r.action }}</el-tag></td>
+                  <td>{{ r.target }}</td>
+                  <td class="num">{{ r.change }}</td>
+                  <td>{{ r.reason }}</td>
+                  <td><a href="./task.html" class="text-sm">{{ r.taskRef }}</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </el-card>
+        </el-tab-pane>
+
+        <!-- ======== 复盘 ======== -->
+        <el-tab-pane label="复盘" name="review">
+          <div class="section-title">
+            <h2>复盘记录</h2>
+            <span class="section-meta">用户层 · 每次决策回头检视，是规则优化的源头</span>
+          </div>
+
+          <div v-for="r in reviews" :key="r.id" class="review-card">
+            <div class="rv-head">
+              <div class="rv-title">{{ r.title }}</div>
+              <span class="text-xs muted">{{ r.time }} · {{ r.kind }}</span>
+            </div>
+            <div class="rv-tags">
+              <el-tag size="small" :type="r.verdict === '兑现' ? 'success' : (r.verdict === '部分兑现' ? 'warning' : 'danger')" effect="light">
+                {{ r.verdict }}
+              </el-tag>
+              <el-tag size="small" effect="light">{{ r.scope }}</el-tag>
+            </div>
+            <div class="rv-conclusion">{{ r.conclusion }}</div>
+            <div class="source-line">
+              <el-icon><Link /></el-icon>关联任务 {{ r.taskRef }} · 沉淀规则 {{ r.ruleRef || '未沉淀' }}
+            </div>
+          </div>
+
+          <el-button type="primary" plain>
+            <el-icon><Plus /></el-icon>&nbsp;发起新复盘
+          </el-button>
+        </el-tab-pane>
+
+        <!-- ======== 我的资料 ======== -->
+        <el-tab-pane label="我的资料" name="materials">
+          <div class="section-title">
+            <h2>组合相关的原始资料</h2>
+            <span class="section-meta">原始资料层 · 调仓决议截图、月报草稿、外部研报等</span>
+          </div>
+          <el-card shadow="never">
+            <el-empty description="此组合还没有上传资料 · 在个股档案的「我的资料」可上传文档/图片/URL，并标记关联到此组合" />
+          </el-card>
+        </el-tab-pane>
+
+      </el-tabs>
+    </app-shell>
+    <assistant-drawer />
+  </div>
+
+  <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/element-plus@2.4.4/dist/index.full.min.js"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+  <script src="https://unpkg.com/echarts@5.4.3/dist/echarts.min.js"></script>
+  <script src="./assets/shared.js?v=7"></script>
+  <script>
+    const { createApp } = Vue;
+    const app = createApp({
+      data() {
+        return {
+          activeTab: "holdings",
+          holdings: [
+            { name: "招商银行", code: "600036.SH", sector: "银行", qty: "8,000", price: "38.42", value: "30.74", weight: "16.8%", cost: "32.10", pnl: "+19.7%", today: "+1.6%", role: "底仓·分红", roleType: "primary", href: "./object-detail.html" },
+            { name: "贵州茅台", code: "600519.SH", sector: "白酒", qty: "120", price: "1,632", value: "19.58", weight: "10.7%", cost: "1,520", pnl: "+7.4%", today: "+0.8%", role: "底仓·消费", roleType: "primary", href: "#" },
+            { name: "宁德时代", code: "300750.SZ", sector: "电池", qty: "1,000", price: "238.4", value: "23.84", weight: "13.1%", cost: "182.0", pnl: "+31.0%", today: "+2.4%", role: "卫星·成长", roleType: "warning", href: "#" },
+            { name: "中际旭创", code: "300308.SZ", sector: "光模块", qty: "1,400", price: "138.4", value: "19.38", weight: "10.6%", cost: "108.5", pnl: "+27.5%", today: "+3.2%", role: "卫星·成长", roleType: "warning", href: "#" },
+            { name: "腾讯控股", code: "00700.HK", sector: "互联网", qty: "400", price: "412.0", value: "16.48", weight: "9.0%", cost: "352.0", pnl: "+17.0%", today: "+0.6%", role: "底仓·港股", roleType: "primary", href: "#" },
+            { name: "美团-W", code: "03690.HK", sector: "本地生活", qty: "1,200", price: "132.0", value: "15.84", weight: "8.7%", cost: "118.0", pnl: "+11.9%", today: "+1.85%", role: "卫星·消费", roleType: "warning", href: "#" },
+            { name: "长江电力", code: "600900.SH", sector: "公用事业", qty: "5,000", price: "30.40", value: "15.20", weight: "8.3%", cost: "26.80", pnl: "+12.7%", today: "-0.2%", role: "底仓·防御", roleType: "info", href: "#" },
+            { name: "中国神华", code: "601088.SH", sector: "煤炭", qty: "3,000", price: "42.80", value: "12.84", weight: "7.0%", cost: "38.60", pnl: "+10.9%", today: "+0.4%", role: "底仓·分红", roleType: "primary", href: "#" },
+            { name: "比亚迪", code: "002594.SZ", sector: "汽车", qty: "500", price: "242.0", value: "12.10", weight: "6.6%", cost: "212.0", pnl: "+14.2%", today: "-0.8%", role: "卫星·成长", roleType: "warning", href: "#" },
+            { name: "海康威视", code: "002415.SZ", sector: "安防", qty: "2,500", price: "38.20", value: "9.55", weight: "5.2%", cost: "32.40", pnl: "+17.9%", today: "+0.3%", role: "卫星·成长", roleType: "warning", href: "#" },
+            { name: "邮储银行", code: "601658.SH", sector: "银行", qty: "10,000", price: "5.85", value: "5.85", weight: "3.2%", cost: "5.20", pnl: "+12.5%", today: "+0.5%", role: "底仓·分红", roleType: "primary", href: "#" },
+            { name: "现金及货币基金", code: "—", sector: "现金", qty: "—", price: "—", value: "1.20", weight: "0.7%", cost: "—", pnl: "—", today: "—", role: "缓冲", roleType: "info", href: "#" },
+          ],
+          sectorBreakdown: [
+            { label: "银行", value: "20.0%", color: "#409EFF" },
+            { label: "电池/新能源", value: "19.7%", color: "#67C23A" },
+            { label: "消费", value: "19.4%", color: "#E6A23C" },
+            { label: "互联网", value: "17.7%", color: "#6B48E3" },
+            { label: "公用事业", value: "8.3%", color: "#909399" },
+            { label: "煤炭", value: "7.0%", color: "#909399" },
+            { label: "其他", value: "7.9%", color: "#C0C4CC" },
+          ],
+          marketBreakdown: [
+            { label: "沪深主板", value: "62.4%", color: "#409EFF" },
+            { label: "创业板/科创板", value: "19.7%", color: "#67C23A" },
+            { label: "港股通", value: "17.9%", color: "#6B48E3" },
+          ],
+          styleBreakdown: [
+            { label: "底仓·分红", value: "35.3%", color: "#409EFF" },
+            { label: "底仓·防御", value: "8.3%", color: "#909399" },
+            { label: "卫星·成长", value: "45.5%", color: "#E6A23C" },
+            { label: "卫星·消费", value: "8.7%", color: "#67C23A" },
+            { label: "现金", value: "0.7%", color: "#C0C4CC" },
+          ],
+          attribution: [
+            { name: "宁德时代", code: "300750.SZ", weight: "12.1%", ret: "+18.2%", contrib: "+2.21", alpha: "+12.4", reason: "Q1 业绩超预期 + 储能放量" },
+            { name: "中际旭创", code: "300308.SZ", weight: "9.8%", ret: "+22.4%", contrib: "+2.20", alpha: "+16.6", reason: "AI 算力链景气延续" },
+            { name: "招商银行", code: "600036.SH", weight: "16.4%", ret: "+5.8%", contrib: "+0.95", alpha: "+1.4", reason: "高股息防御 + 财报稳定" },
+            { name: "美团-W", code: "03690.HK", weight: "8.5%", ret: "+8.1%", contrib: "+0.69", alpha: "+3.2", reason: "外卖单量回升" },
+            { name: "比亚迪", code: "002594.SZ", weight: "7.0%", ret: "-3.4%", contrib: "-0.24", alpha: "-7.8", reason: "渗透率边际放缓 + 价格战" },
+            { name: "中国神华", code: "601088.SH", weight: "7.2%", ret: "-1.2%", contrib: "-0.09", alpha: "-3.4", reason: "煤价回落" },
+          ],
+          brinson: [
+            { factor: "选股效应", value: "+3.84", note: "组合内主要个股相对所在行业有显著超额（中际旭创 / 宁德 / 招行）" },
+            { factor: "行业配置", value: "+1.42", note: "超配 AI 算力链 + 银行底仓，相对基准贡献正向" },
+            { factor: "交互效应", value: "-0.18", note: "微小负贡献，可忽略" },
+          ],
+          alerts: [
+            { id: 1, level: "warning", levelText: "提示", title: "行业集中度边际上升", time: "今日 12:30", detail: "电池+光模块合计权重升至 23.7%，逼近你设定的 25% 上限。", rule: "单赛道权重 ≤ 25%" },
+            { id: 2, level: "info", levelText: "观察", title: "比亚迪相对收益走弱", time: "本周", detail: "近 20 日相对沪深300 -7.8pp，且跌破成本线 -3.4%。", rule: "卫星仓持有理由复检" },
+            { id: 3, level: "danger", levelText: "重要", title: "美团-W 仓位接近止盈线", time: "今日 11:20", detail: "持仓收益 +11.9%，距离你制定的 +15% 减持触发点剩 3.1pp。", rule: "卫星·消费仓位 +15% 减半" },
+          ],
+          rebalancePlans: [
+            { id: 1, hit: false, name: "底仓·分红：股息率回落到 4% 以下减仓", trigger: "对应标的最新 TTM 股息率 < 4%", action: "减仓至原仓位的 50%，资金转入货币基金", createdAt: "2025-08-12", taskRef: "T-3210", history: 2 },
+            { id: 2, hit: true, name: "卫星·成长：单只持仓 +25% 加仓暂停", trigger: "单只标的累计浮盈 > 25%", action: "停止加仓，触发再平衡时优先减持至 10% 权重", createdAt: "2025-11-04", taskRef: "T-4012", history: 4 },
+            { id: 3, hit: false, name: "卫星·消费：+15% 部分止盈", trigger: "持仓收益 ≥ 15%", action: "减半仓位，资金保留作为下次再平衡缓冲", createdAt: "2026-01-20", taskRef: "T-4523", history: 1 },
+            { id: 4, hit: false, name: "组合层：单赛道权重 > 25% 启动再平衡", trigger: "任一赛道总权重 > 25% 且持续 5 日", action: "提示重新评估，必要时减持权重最高的 1 只", createdAt: "2025-08-12", taskRef: "T-3211", history: 0 },
+          ],
+          rebalanceHistory: [
+            { id: 1, date: "2026-04-15", action: "加仓", actionType: "primary", target: "中际旭创 300308.SZ", change: "+400 股", reason: "Q1 业绩预告超预期，且未触发加仓暂停规则", taskRef: "T-4789" },
+            { id: 2, date: "2026-03-08", action: "减仓", actionType: "info", target: "比亚迪 002594.SZ", change: "-300 股", reason: "渗透率边际放缓，对卫星仓位降权", taskRef: "T-4612" },
+            { id: 3, date: "2026-02-12", action: "加仓", actionType: "primary", target: "招商银行 600036.SH", change: "+2,000 股", reason: "估值低位 + 股息率回到 5% 以上", taskRef: "T-4521" },
+            { id: 4, date: "2026-01-20", action: "新建", actionType: "warning", target: "美团-W 03690.HK", change: "+1,200 股", reason: "外卖业务复苏，符合卫星·消费定位", taskRef: "T-4490" },
+            { id: 5, date: "2025-12-08", action: "止盈", actionType: "success", target: "海康威视 002415.SZ", change: "-1,000 股", reason: "触发 +30% 部分止盈规则", taskRef: "T-4388" },
+          ],
+          reviews: [
+            { id: 1, title: "2026Q1 季度复盘：AI 算力链超配是否还成立", time: "2026-04-15", kind: "季度复盘", verdict: "兑现", scope: "卫星·成长", conclusion: "假设：AI 算力链在 Q1 仍是主线 → 兑现。中际旭创 / 宁德合计贡献 +4.41pp，超额 alpha 显著。但需警惕 Q2 业绩兑现后的拥挤交易，下一步把单只 25% 加仓暂停规则保留。", taskRef: "T-4810", ruleRef: "卫星·成长 v2.1" },
+            { id: 2, title: "2026-03 月度复盘：比亚迪持仓理由失效？", time: "2026-04-02", kind: "月度复盘", verdict: "部分兑现", scope: "卫星·成长", conclusion: "假设：比亚迪是新能源汽车基本盘 → 部分兑现。渗透率仍在提升但增速放缓，价格战压制估值。已减仓 30%，并把持仓理由从「龙头 alpha」改为「估值修复」，需在月度盯。", taskRef: "T-4720", ruleRef: "—" },
+            { id: 3, title: "2025 全年复盘：底仓·分红策略的有效性", time: "2026-01-08", kind: "年度复盘", verdict: "兑现", scope: "底仓·分红", conclusion: "假设：高股息底仓在波动市能提供 alpha → 兑现。底仓贡献 +12.3pp，最大回撤期间(-12%)拖累显著小于成长仓。沉淀为新规则：股息率 ≥ 4.5% 且分红连续 5 年作为底仓筛选条件。", taskRef: "T-4012", ruleRef: "底仓·分红 v3" },
+            { id: 4, title: "2024-09 至 11 回撤复盘", time: "2024-12-10", kind: "事件复盘", verdict: "未兑现", scope: "组合层", conclusion: "回撤主因：对地产链风险预判不足，海康+万科合计拖累 -8.2pp。教训：行业层面的政策风险不应只由个股触发器决定，需在组合层增加「高政策敏感度赛道权重 ≤ 15%」规则。", taskRef: "T-2810", ruleRef: "组合·政策敏感度 v1" },
+          ],
+        };
+      },
+      mounted() {
+        this.$nextTick(() => this.initCurve());
+        window.addEventListener("resize", this.handleResize);
+      },
+      beforeUnmount() {
+        window.removeEventListener("resize", this.handleResize);
+        if (this.curveInst) this.curveInst.dispose();
+      },
+      methods: {
+        handleResize() { if (this.curveInst) this.curveInst.resize(); },
+        initCurve() {
+          if (!this.$refs.curveChart) return;
+          const inst = echarts.init(this.$refs.curveChart);
+          this.curveInst = inst;
+          const dates = []; const pf = []; const bm = [];
+          let p = 100, b = 100;
+          for (let i = 0; i < 90; i++) {
+            const d = new Date(2026, 0, 30 + i);
+            dates.push(`${d.getMonth() + 1}/${d.getDate()}`);
+            p = +(p * (1 + (Math.random() - 0.45) * 0.012)).toFixed(2);
+            b = +(b * (1 + (Math.random() - 0.48) * 0.01)).toFixed(2);
+            pf.push(p); bm.push(b);
+          }
+          inst.setOption({
+            animation: false,
+            grid: { left: 50, right: 16, top: 30, bottom: 30 },
+            tooltip: { trigger: "axis" },
+            legend: { data: ["组合", "沪深300"], right: 16, top: 4 },
+            xAxis: { type: "category", data: dates, axisLine: { lineStyle: { color: "#DCDFE6" } }, axisLabel: { color: "#909399", fontSize: 11 } },
+            yAxis: { scale: true, splitLine: { lineStyle: { color: "#F2F3F5" } }, axisLabel: { color: "#909399", fontSize: 11 } },
+            series: [
+              { name: "组合", type: "line", data: pf, smooth: true, symbol: "none", lineStyle: { color: "#6B48E3", width: 2 }, areaStyle: { color: "rgba(107,72,227,0.1)" } },
+              { name: "沪深300", type: "line", data: bm, smooth: true, symbol: "none", lineStyle: { color: "#909399", width: 1.5, type: "dashed" } },
+            ],
+          });
+        },
+      },
+    });
+    app.use(ElementPlus);
+    for (const [k, v] of Object.entries(ElementPlusIconsVue)) app.component(k, v);
+    registerPrototypeComponents(app);
+    app.mount("#app");
+  </script>
+</body>
+</html>

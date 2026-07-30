@@ -732,6 +732,15 @@ class IterationController:
             f"   总耗时: {total_time}s\n"
             f"{'='*60}"
         )
+        # v3.6.0 项6 路径A：失败后写入 skill_iteration_alerts 集合，等待人工决策
+        self._write_iteration_alert(
+            spec=spec,
+            run_id=run_id,
+            iterations=iterations,
+            failure_summary=failure_summary,
+            total_time=total_time,
+            engine="legacy_pipeline",
+        )
         return PipelineResult(
             success=False,
             tool_id=spec.tool_id,
@@ -1038,6 +1047,100 @@ class IterationController:
         """异步版本的 run"""
         import asyncio
         return await asyncio.get_event_loop().run_in_executor(None, self.run, spec)
+
+    # ==================== 失败告警（v3.6.0 项6 路径A） ====================
+
+    def _write_iteration_alert(
+        self,
+        *,
+        spec: SkillSpec,
+        run_id: str,
+        iterations: List[IterationRound],
+        failure_summary: str,
+        total_time: float,
+        engine: str = "legacy_pipeline",
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """迭代失败后写入 skill_iteration_alerts 集合，供前端展示并等待人工决策。
+
+        v3.6.0 项6 路径A：原本迭代失败后直接放弃，用户只能查看日志；
+        现在写入 MongoDB 集合，前端可展示失败原因，用户可选择：
+        - 手动调整 spec 后重新生成
+        - 直接放弃
+        - 标记为已解决（不再提示）
+
+        失败处理策略：
+        - MongoDB 不可用 → 只记日志，不阻塞返回
+        - 写入异常 → 只记日志，不阻塞返回
+        """
+        try:
+            from app.core.database import get_mongo_db_sync
+            from datetime import datetime
+
+            db = get_mongo_db_sync()
+            if db is None:
+                logger.warning("[IterationAlert] db 句柄为空，跳过写入告警")
+                return
+
+            # 从 spec.metadata 提取关联上下文（session_id / user_id 等）
+            spec_metadata = getattr(spec, "metadata", None) or {}
+            if not isinstance(spec_metadata, dict):
+                spec_metadata = {}
+
+            session_id = str(spec_metadata.get("session_id") or spec_metadata.get("skill_session_id") or "")
+            user_id = str(spec_metadata.get("user_id") or "")
+            workshop_session_id = str(spec_metadata.get("workshop_session_id") or "")
+            agent_spec_id = str(spec_metadata.get("agent_spec_id") or "")
+
+            # 收集每轮失败摘要（最多 5 轮，避免文档过大）
+            round_summaries = []
+            for it in iterations[-5:]:
+                round_summaries.append({
+                    "round": it.round_number,
+                    "decision": it.decision or "",
+                    "validation_passed": bool(it.validation.passed) if it.validation else None,
+                    "sandbox_success": bool(it.sandbox.success) if it.sandbox else None,
+                    "eval_total": float(it.eval_score.total) if it.eval_score else None,
+                    "business_passed": bool(it.business_verification.passed) if it.business_verification else None,
+                    "root_cause": it.reflection.root_cause if it.reflection else "",
+                })
+
+            alert_doc = {
+                "alert_id": f"alert_{run_id}_{spec.tool_id}",
+                "tool_id": spec.tool_id,
+                "display_name": getattr(spec, "display_name", "") or "",
+                "description": (getattr(spec, "description", "") or "")[:500],
+                "session_id": session_id,
+                "workshop_session_id": workshop_session_id,
+                "agent_spec_id": agent_spec_id,
+                "user_id": user_id,
+                "engine": engine,
+                "run_id": run_id,
+                "total_rounds": len(iterations),
+                "total_time_seconds": total_time,
+                "failure_summary": failure_summary[:5000],
+                "round_summaries": round_summaries,
+                "status": "pending_human_review",  # pending_human_review / resolved_give_up / resolved_retry / resolved_manual
+                "created_at": datetime.utcnow().isoformat(),
+                "extra_metadata": extra_metadata or {},
+            }
+
+            result = db.skill_iteration_alerts.update_one(
+                {"alert_id": alert_doc["alert_id"]},
+                {"$set": alert_doc},
+                upsert=True,
+            )
+            logger.info(
+                "[IterationAlert] 已写入告警 alert_id=%s tool_id=%s rounds=%d matched=%d modified=%d upserted=%s",
+                alert_doc["alert_id"],
+                spec.tool_id,
+                len(iterations),
+                result.matched_count,
+                result.modified_count,
+                result.upserted_id is not None,
+            )
+        except Exception as exc:
+            logger.warning("[IterationAlert] 写入告警失败（不阻塞主流程）: %s", exc)
 
     # ==================== Agentic Loop / pipeline_tool ====================
 
@@ -1348,6 +1451,19 @@ class IterationController:
             len(self._agentic_trace),
             len(verified_facts),
             error[:500],
+        )
+        # v3.6.0 项6 路径A：失败后写入 skill_iteration_alerts 集合，等待人工决策
+        self._write_iteration_alert(
+            spec=spec,
+            run_id=run_id,
+            iterations=iterations,
+            failure_summary=error,
+            total_time=total_time,
+            engine="agentic_loop",
+            extra_metadata={
+                "agentic_trace": self._public_agentic_trace(self._agentic_trace),
+                "verified_facts": verified_facts,
+            },
         )
         return PipelineResult(
             success=False,

@@ -367,7 +367,7 @@ class NeutralAnalystV2(ResearcherAgent):
             llm_start_time = time.time()
 
             if self._llm:
-                response = self._llm.invoke(messages)
+                response = self._invoke_llm_with_trace(messages)
                 opinion = response.content
             else:
                 raise ValueError("LLM not initialized")

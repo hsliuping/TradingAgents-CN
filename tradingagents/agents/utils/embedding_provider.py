@@ -183,7 +183,7 @@ class EmbeddingProviderManager:
 
         model = os.getenv("EMBEDDING_MODEL", "").strip()
         if not model:
-            model = "Qwen3-Embedding-8B"
+            model = "text-embedding-3-small"
 
         logger.info(f"✅ 使用专用 Embedding 配置: base={base_url[:30]}, model={model}")
         return EmbeddingProviderConfig(

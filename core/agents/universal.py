@@ -92,6 +92,19 @@ class UniversalAgent(BaseAgent):
         """
         logger.info(f"[UniversalAgent:{self.agent_id}] 🚀 开始执行")
 
+        # P1: 启动执行轨迹采集
+        from core.agents.execution_trace_recorder import (
+            start_execution_trace, is_trace_enabled
+        )
+        recorder = None
+        if is_trace_enabled():
+            try:
+                recorder = start_execution_trace(self, state)
+                self._last_trace_id = recorder.trace_id
+            except Exception as e:
+                logger.warning(f"⚠️ [UniversalAgent:{self.agent_id}] 启动轨迹采集失败（不影响 agent）: {e}")
+                self._last_trace_id = None
+
         try:
             context = state.get("context")
             prompt_variables = self._build_prompt_variables(state)
@@ -185,6 +198,14 @@ class UniversalAgent(BaseAgent):
             logger.info(f"[UniversalAgent:{self.agent_id}] System prompt length: {len(system_prompt)}")
             logger.info(f"[UniversalAgent:{self.agent_id}] User prompt length: {len(user_prompt)}")
 
+            # P1: 记录 Prompt
+            if recorder:
+                try:
+                    recorder.record_inputs({"ticker": state.get("ticker"), "workflow_id": state.get("workflow_id")})
+                    recorder.record_prompts(system_prompt, user_prompt)
+                except Exception as e:
+                    logger.debug(f"[UniversalAgent:{self.agent_id}] 记录 Prompt 失败（不影响 agent）: {e}")
+
             if not self._llm:
                 raise ValueError("LLM not initialized")
 
@@ -202,7 +223,10 @@ class UniversalAgent(BaseAgent):
                 }
             else:
                 logger.warning(f"[UniversalAgent:{self.agent_id}] 无工具，直接调用 LLM")
+                import time as _time_llm
+                _llm_start = _time_llm.time()
                 response = self._llm.invoke(messages)
+                _llm_duration_ms = int((_time_llm.time() - _llm_start) * 1000)
                 report = response.content if hasattr(response, "content") else str(response)
                 self._last_llm_debug = {
                     "response_type": type(response).__name__,
@@ -210,6 +234,19 @@ class UniversalAgent(BaseAgent):
                     "tool_mode": False,
                     "tool_trace": list(self._last_tool_debug),
                 }
+                # P1: 记录 LLM 响应
+                if recorder:
+                    try:
+                        recorder.record_llm_response(response, llm_duration_ms=_llm_duration_ms)
+                    except Exception as e:
+                        logger.debug(f"[UniversalAgent:{self.agent_id}] 记录 LLM 响应失败（不影响 agent）: {e}")
+
+            # P1: 记录解析后的输出
+            if recorder:
+                try:
+                    recorder.record_parsed_output({"report": report[:500] if isinstance(report, str) else str(report)[:500]})
+                except Exception as e:
+                    logger.debug(f"[UniversalAgent:{self.agent_id}] 记录解析输出失败（不影响 agent）: {e}")
 
             is_debug_mode = bool(getattr(context, 'is_debug_mode', False)) if context else False
             if is_debug_mode:
@@ -232,7 +269,20 @@ class UniversalAgent(BaseAgent):
 
         except Exception as e:
             logger.error(f"[UniversalAgent:{self.agent_id}] ❌ 执行失败: {e}", exc_info=True)
+            # P1: 记录异常
+            if recorder:
+                try:
+                    recorder.record_error(e)
+                except Exception:
+                    pass
             return {self._output_field: f"执行失败: {str(e)}"}
+        finally:
+            # P1: 完成轨迹采集并写入 MongoDB（非阻塞）
+            if recorder:
+                try:
+                    recorder.finish()
+                except Exception:
+                    pass
 
     def _build_execution_plan_guidance(self, state: Dict[str, Any]) -> str:
         """把 Agent Workshop execution_plan 注入运行时提示词。

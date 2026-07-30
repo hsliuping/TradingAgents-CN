@@ -138,8 +138,8 @@ class MarketAnalystV2(AnalystAgent):
         覆盖执行逻辑以支持模板调试与提示词覆盖
         """
         try:
-            ticker = state.get("ticker") or state.get("company_of_interest")
-            analysis_date = state.get("analysis_date") or state.get("trade_date")
+            ticker, analysis_date = self._extract_common_params(state)
+
             market_type = state.get("market_type", "A股")
             context = state.get("context")
             overrides = state.get("prompt_overrides") or {}
@@ -147,8 +147,8 @@ class MarketAnalystV2(AnalystAgent):
             user_override = overrides.get("user")
             analysis_override = overrides.get("analysis")
 
-            if not ticker or not analysis_date:
-                raise ValueError("Missing required parameters: ticker or analysis_date")
+            if not ticker:
+                raise ValueError("Missing required parameters: ticker")
 
             system_prompt = system_override
             if not system_prompt:
@@ -214,7 +214,7 @@ class MarketAnalystV2(AnalystAgent):
                 if self._langchain_tools:
                     report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
                 else:
-                    response = self._llm.invoke(messages)
+                    response = self._invoke_llm_with_trace(messages)
                     report = response.content if hasattr(response, 'content') else str(response)
             else:
                 raise ValueError("LLM not initialized")

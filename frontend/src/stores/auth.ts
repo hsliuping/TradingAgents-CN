@@ -19,9 +19,13 @@ export interface AuthState {
   
   // 登录状态
   loginLoading: boolean
-  
+
   // 重定向路径
   redirectPath: string
+
+  // 认证初始化状态
+  authInitialized: boolean
+  authInitPromise: Promise<void> | null
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -63,7 +67,10 @@ export const useAuthStore = defineStore('auth', {
       roles: [],
 
       loginLoading: false,
-      redirectPath: '/'
+      redirectPath: '/',
+
+      authInitialized: false,
+      authInitPromise: null
     }
   },
 
@@ -439,8 +446,28 @@ export const useAuthStore = defineStore('auth', {
       return path
     },
     
-    // 检查认证状态
+    // 检查认证状态（带单例 Promise，防止并发初始化）
     async checkAuthStatus() {
+      // 如果已经初始化完成，直接返回
+      if (this.authInitialized) {
+        return
+      }
+
+      // 如果正在初始化中，复用同一个 Promise
+      if (this.authInitPromise) {
+        return this.authInitPromise
+      }
+
+      // 启动初始化并缓存 Promise
+      this.authInitPromise = this._doCheckAuthStatus().finally(() => {
+        this.authInitialized = true
+      })
+
+      return this.authInitPromise
+    },
+
+    // 实际的认证状态检查逻辑
+    async _doCheckAuthStatus() {
       if (this.token) {
         try {
           console.log('🔍 检查token有效性...')

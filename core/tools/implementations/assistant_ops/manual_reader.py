@@ -63,7 +63,7 @@ def _truncate_to_next_level(body: str, current_level: int) -> str:
 @register_tool(
     tool_id="read_user_manual_section",
     name="读取用户手册章节",
-    description="按章节名读取用户手册内容。支持模糊匹配，如输入'安装'可匹配'安装部署'章节。当用户问'怎么配置 Token''模拟交易怎么开通''怎么加入关注列表'等操作流程问题时使用。",
+    description="按章节名读取用户手册内容。支持模糊匹配，如输入'安装'可匹配'安装部署'章节。当用户问'怎么配置 Token''模拟交易怎么开通''怎么加自选股'等操作流程问题时使用。",
     category="assistant_ops",
     is_online=False,
     auto_register=True,
@@ -72,7 +72,7 @@ def _truncate_to_next_level(body: str, current_level: int) -> str:
     capability_tags=["usage_helper", "manual", "documentation", "user_guide", "operation_flow"],
     tool_role_hint="primary",
     output_shape="text",
-    preferred_for=["怎么配置 Token", "模拟交易怎么开通", "怎么加入关注列表", "License 怎么激活", "操作流程"],
+    preferred_for=["怎么配置 Token", "模拟交易怎么开通", "怎么加自选股", "License 怎么激活", "操作流程"],
     when_to_use="当用户问到具体操作流程、功能配置步骤或系统使用方法时使用，应优先调用本工具查文档而非凭记忆回答。",
     returns="返回文本格式的用户手册章节内容。如未匹配，返回可选章节列表。",
 )

@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>学习中心 · TradingAgents v4.0</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus@2.4.4/dist/index.css" />
+  <link rel="stylesheet" href="./assets/theme.css?v=4" />
+  <style>
+    .learn-layout { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+    .learn-list { background: #fff; border: 1px solid var(--border-light); border-radius: 8px; padding: 8px; position: sticky; top: 16px; }
+    .learn-item { padding: 12px 14px; border-radius: 6px; cursor: pointer; margin-bottom: 4px; }
+    .learn-item:hover { background: var(--bg-2); }
+    .learn-item.active { background: rgba(64,158,255,0.08); }
+    .learn-item .li-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+    .learn-item .li-meta { font-size: 12px; color: var(--text-tertiary); }
+    .learn-detail { background: #fff; border: 1px solid var(--border-light); border-radius: 8px; padding: 24px; }
+    .learn-detail h1 { margin: 0 0 4px 0; font-size: 22px; }
+    .learn-detail .author { color: var(--text-tertiary); font-size: 13px; margin-bottom: 16px; }
+    .pillar-card { padding: 14px 16px; border: 1px solid var(--border-light); border-radius: 8px; margin-bottom: 10px; }
+    .pillar-card .pc-title { font-weight: 600; margin-bottom: 6px; }
+    .pillar-card .pc-body { font-size: 13px; color: var(--text-regular); line-height: 1.7; }
+    .question-list { counter-reset: q; padding-left: 0; list-style: none; }
+    .question-list li { counter-increment: q; padding: 10px 0 10px 36px; border-bottom: 1px dashed var(--border-light); position: relative; font-size: 13.5px; line-height: 1.6; }
+    .question-list li::before {
+      content: counter(q); position: absolute; left: 0; top: 10px;
+      width: 24px; height: 24px; border-radius: 50%; background: var(--bg-2);
+      color: var(--el-color-primary); font-size: 12px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <app-shell active="learning" page-title="学习中心" :breadcrumb="[{label:'方法与系统'},{label:'学习中心'}]">
+      <div style="margin-bottom: 16px;">
+        <el-alert type="info" :closable="false" show-icon>
+          <template #title>
+            <span class="fw-500">「读」是这里的关键。</span>
+            <span class="muted">学习中心收纳投资经典方法论与读书笔记，重点是理解原理；要把方法论变成可执行模板，请前往
+              <a href="./studio.html">方法工坊</a>，要在某只标的上应用，请在
+              <a href="./object.html">研究对象</a> 详情页打开「方法论评估」Tab。
+            </span>
+          </template>
+        </el-alert>
+      </div>
+
+      <div class="learn-layout">
+        <!-- 左：方法论列表 -->
+        <div class="learn-list">
+          <div style="padding: 8px 14px;">
+            <el-input placeholder="搜索方法论 / 大师 / 关键词" :prefix-icon="searchIcon" size="default" />
+          </div>
+          <div style="padding: 6px 14px 4px 14px; font-size: 12px; color: var(--text-tertiary);">
+            共 {{ items.length }} 篇 · 按使用频率排序
+          </div>
+          <div v-for="it in items" :key="it.id"
+               class="learn-item" :class="{ active: it.id === current.id }"
+               @click="current = it">
+            <div class="li-title">{{ it.title }}</div>
+            <div class="li-meta">{{ it.author }} · {{ it.tag }}</div>
+          </div>
+        </div>
+
+        <!-- 右：详情 -->
+        <div class="learn-detail">
+          <div class="flex-between">
+            <div>
+              <h1>{{ current.title }}</h1>
+              <div class="author">{{ current.author }} · {{ current.bookRef }}</div>
+            </div>
+            <div class="flex-row gap-2">
+              <el-tag size="small" effect="light">{{ current.tag }}</el-tag>
+              <el-tag size="small" effect="light" type="info">使用 {{ current.usage }} 次</el-tag>
+            </div>
+          </div>
+
+          <div class="section-title"><h2>核心理念</h2></div>
+          <p class="text-sm" style="line-height: 1.8; color: var(--text-regular);">{{ current.idea }}</p>
+
+          <div class="section-title"><h2>核心支柱</h2></div>
+          <div v-for="p in current.pillars" :key="p.title" class="pillar-card">
+            <div class="pc-title">{{ p.title }}</div>
+            <div class="pc-body">{{ p.body }}</div>
+          </div>
+
+          <div class="section-title"><h2>关键问题清单</h2><span class="section-meta">把这套问题逐一回答，就完成了一次方法论评估</span></div>
+          <ol class="question-list">
+            <li v-for="q in current.questions" :key="q">{{ q }}</li>
+          </ol>
+
+          <div class="section-title"><h2>适用场景与边界</h2></div>
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-card shadow="never">
+                <template #header><span class="fw-600 stock-up">✓ 适用</span></template>
+                <ul style="margin: 0; padding-left: 18px; line-height: 1.9;">
+                  <li v-for="s in current.fit" :key="s" class="text-sm">{{ s }}</li>
+                </ul>
+              </el-card>
+            </el-col>
+            <el-col :span="12">
+              <el-card shadow="never">
+                <template #header><span class="fw-600 stock-down">✗ 不适用 / 警惕</span></template>
+                <ul style="margin: 0; padding-left: 18px; line-height: 1.9;">
+                  <li v-for="s in current.unfit" :key="s" class="text-sm">{{ s }}</li>
+                </ul>
+              </el-card>
+            </el-col>
+          </el-row>
+
+          <div class="section-title"><h2>下一步</h2></div>
+          <el-row :gutter="12">
+            <el-col :span="8">
+              <el-card shadow="never" class="link-card">
+                <a href="./studio.html" class="block-link">
+                  <div class="fw-600">把它变成可执行模板</div>
+                  <div class="text-sm muted" style="margin-top: 6px;">前往方法工坊，调用 / 改造此方法对应的研究模板</div>
+                </a>
+              </el-card>
+            </el-col>
+            <el-col :span="8">
+              <el-card shadow="never" class="link-card">
+                <a href="./object.html" class="block-link">
+                  <div class="fw-600">在研究对象上评估</div>
+                  <div class="text-sm muted" style="margin-top: 6px;">在某个个股 / ETF / 组合的「方法论评估」Tab 应用</div>
+                </a>
+              </el-card>
+            </el-col>
+            <el-col :span="8">
+              <el-card shadow="never" class="link-card">
+                <a href="#" class="block-link">
+                  <div class="fw-600">写读书笔记</div>
+                  <div class="text-sm muted" style="margin-top: 6px;">把你的批注沉淀回研究库（敬请期待）</div>
+                </a>
+              </el-card>
+            </el-col>
+          </el-row>
+        </div>
+      </div>
+    </app-shell>
+    <assistant-drawer />
+  </div>
+
+  <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/element-plus@2.4.4/dist/index.full.min.js"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+  <script src="./assets/shared.js?v=7"></script>
+  <script>
+    const { createApp } = Vue;
+    const items = [
+      { id: 1, title: "巴菲特 · 经济护城河", author: "Warren Buffett", bookRef: "致股东信汇编 / 《巴菲特的护城河》",
+        tag: "价值投资", usage: 28,
+        idea: "好生意比好价格更重要，好生意的核心是「持久的竞争优势」——也就是经济护城河。护城河决定企业 10 年后还能不能赚到现在这样的钱。",
+        pillars: [
+          { title: "无形资产（品牌、专利、监管牌照）", body: "可口可乐的品牌、银行的金融牌照都是无形资产护城河。它们让客户在认知和制度层面绑定一家企业。" },
+          { title: "转换成本", body: "客户从你的产品换到对手产品要付出的成本越高，护城河越深。SaaS、企业 IT 系统是典型。" },
+          { title: "网络效应", body: "用户越多产品价值越高（微信、信用卡网络）；这是数字时代最强护城河。" },
+          { title: "成本优势 / 规模", body: "通过规模、地理、流程优势获得不可复制的低成本（开市客、好市多、宁德规模制造）。" },
+        ],
+        questions: [
+          "这家企业 10 年后还存在吗？业务还会被人们需要吗？",
+          "客户为什么选它而不是对手？这种偏好可持续多久？",
+          "竞争对手如果带着 100 亿现金进来，能复制它的优势吗？",
+          "管理层是否在持续加宽护城河，还是在透支它？",
+          "ROIC 是否长期高于 WACC？这是护城河的财务证据。",
+        ],
+        fit: ["有持续高 ROE / ROIC 历史的成熟企业", "需要长期持有（≥ 3 年）的核心仓位", "消费、银行、互联网平台等行业"],
+        unfit: ["处于剧烈技术变革期的行业（半导体设备、AI 应用早期）", "周期股 / 重资产追赶者", "纯主题驱动的短期博弈"] },
+
+      { id: 2, title: "费雪 · 15 个问题", author: "Philip Fisher", bookRef: "《Common Stocks and Uncommon Profits》(1958)",
+        tag: "成长投资", usage: 22,
+        idea: "找到少数几家「卓越成长股」并长期持有。判断卓越的标准不是数字，而是 15 个关于产品、管理、研发与坦诚度的问题。",
+        pillars: [
+          { title: "产品与市场潜力", body: "前 4 个问题：产品是否有足够大的市场？管理层是否有意愿持续扩张？" },
+          { title: "研发与创新效率", body: "中间几问：研发投入是否有效？销售组织是否高效？利润率与成本控制如何？" },
+          { title: "管理层质量与坦诚度", body: "最后几问：管理层是否本分？是否对股东坦诚？是否持续创新？" },
+        ],
+        questions: [
+          "这家公司的产品/服务，是否有足够潜力支撑未来几年大幅增长？",
+          "管理层是否决心在当前主力产品潜力耗尽后，继续开发新产品？",
+          "研发投入相对规模来看是否高效？",
+          "销售组织是否在行业中具备显著竞争力？",
+          "毛利率是否合理且可持续？",
+          "公司有什么在做来维持/提升毛利率？",
+          "劳资关系如何？",
+          "管理层与员工的关系如何？",
+          "管理层有足够深度吗？",
+          "公司的成本分析与会计控制如何？",
+          "在行业内的特定方面，有什么是这家公司比对手做得更好的？",
+          "公司对短期与长期利润的态度如何？",
+          "如果增长需要融资，会稀释现有股东吗？",
+          "管理层是否在好时坦诚，在坏时也坦诚？",
+          "管理层是否毫无疑问地正直？",
+        ],
+        fit: ["可调研、可触达管理层的成长型企业", "毛利率有改善空间的行业领导者", "希望长期持有（≥ 5 年）的卫星仓位"],
+        unfit: ["管理层频繁更迭", "重周期 / 重大宗商品的企业（数字判断更可靠）", "信息披露不充分的小盘股"] },
+
+      { id: 3, title: "格雷厄姆 · 安全边际", author: "Benjamin Graham", bookRef: "《聪明的投资者》/《证券分析》",
+        tag: "价值投资", usage: 19,
+        idea: "永远不亏钱的方法是只买打折的资产。计算保守的内在价值，要求买价比内在价值低 30%~50%。下行保护比上行想象更重要。",
+        pillars: [
+          { title: "内在价值是保守估的", body: "用最保守的盈利、最严苛的折现率估，再要求一个 30% 以上的折扣。" },
+          { title: "防御型 vs 进取型投资者", body: "防御型用 NCAV / 严格的财务标准筛选；进取型可以承担更多分析成本。" },
+          { title: "市场先生", body: "市场每天报价，但你不必交易。把市场当成情绪化的合伙人，只在他给极端价时回应。" },
+        ],
+        questions: [
+          "用 5~10 年平均盈利估算的 PE 是多少？",
+          "PB 是否低于 1.5？PB × PE 是否低于 22.5？",
+          "公司是否连续 10 年盈利、连续 20 年分红？",
+          "净流动资产（NCAV）相对市值是多少？",
+          "当前价距离我估的保守内在价值，折扣有多大？",
+        ],
+        fit: ["熊市 / 估值底部区域", "高分红、低估值、稳健现金流的成熟企业", "防御型仓位 / 底仓"],
+        unfit: ["高速成长但当前不盈利的企业", "纯靠未来想象的科技股", "重资产周期股的顶部区域"] },
+
+      { id: 4, title: "段永平 · 商业模式与本分", author: "段永平", bookRef: "网易/雪球访谈精选",
+        tag: "实战派", usage: 17,
+        idea: "投资就是 stop doing list。先看生意好不好（商业模式 + 企业文化），再看人对不对（管理层本分），最后才看估值。最重要的是「不懂不做」。",
+        pillars: [
+          { title: "商业模式：生意本身好不好", body: "10 年后这家公司还在吗？客户为什么离不开它？这是判断生意的根本。" },
+          { title: "企业文化：本分", body: "管理层是不是不忽悠用户、不忽悠股东？老板是不是把公司当自家事？" },
+          { title: "Stop Doing List", body: "明确什么不做：不懂的不做、贵的不做、人不对的不做。" },
+        ],
+        questions: [
+          "10 年后这家公司还在吗？业务还会有人买吗？",
+          "客户为什么选这家公司？换到对手要付出什么？",
+          "竞争对手为什么打不进来？有什么是他们做不到的？",
+          "管理层是不是本分？看他们怎么对待用户、员工、股东。",
+          "财报上的现金流是不是真实的？营收增长有没有伴随经营性现金流增长？",
+        ],
+        fit: ["可长期跟踪的消费品 / 互联网平台", "商业模式简单、能用一句话说清楚的企业", "希望「拿得住」的核心仓位"],
+        unfit: ["商业模式自己也讲不清的公司", "管理层有过明显诚信问题", "纯靠政策红利或资源垄断的企业"] },
+
+      { id: 5, title: "邓普顿 · 逆向投资", author: "John Templeton", bookRef: "《邓普顿教你逆向投资》",
+        tag: "全球宏观", usage: 11,
+        idea: "牛市在悲观中诞生，在怀疑中成长，在乐观中成熟，在亢奋中死亡。最好的买点是「最大悲观点」，最好的卖点是市场普遍欢呼时。",
+        pillars: [
+          { title: "情绪极值是最好的指南针", body: "极端悲观（恐慌、清盘、ETF 大幅折价）往往对应底部；极端乐观对应顶部。" },
+          { title: "全球视野与跨市场对比", body: "邓普顿强调跨国、跨币种比较，避免本国偏见。" },
+          { title: "用便宜价换时间", body: "不预测市场，只在便宜时下注，并给自己足够时间等待价值回归。" },
+        ],
+        questions: [
+          "市场情绪现在处于哪个阶段（悲观/怀疑/乐观/亢奋）？",
+          "全球范围内，还有比当前市场更便宜的同类资产吗？",
+          "如果价格再跌 30%，我是否敢继续买入？",
+          "我的买入理由，是基于估值还是基于「故事」？",
+          "如果这只股票停牌 5 年，我能否安心持有？",
+        ],
+        fit: ["市场极端恐慌的危机时点", "被广泛唱空的国家 / 行业 / 风格", "可承受较长持有期（≥ 3 年）"],
+        unfit: ["仍处于上行情绪的强势赛道", "基本面正在恶化但只是「便宜」的价值陷阱", "对短期回撤敏感的资金"] },
+    ];
+
+    const app = createApp({
+      data() { return { items, current: items[0], searchIcon: null }; },
+      mounted() { this.searchIcon = ElementPlusIconsVue.Search; },
+    });
+    app.use(ElementPlus);
+    for (const [k, v] of Object.entries(ElementPlusIconsVue)) app.component(k, v);
+    registerPrototypeComponents(app);
+    app.mount("#app");
+  </script>
+  <style>
+    .link-card .block-link { display: block; color: inherit; text-decoration: none; }
+    .link-card:hover { border-color: var(--el-color-primary); }
+  </style>
+</body>
+</html>

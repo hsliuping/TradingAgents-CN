@@ -153,6 +153,81 @@ def _build_tool_descriptions(tool_ids: Set[str]) -> str:
     return "\n".join(lines)
 
 
+def _build_simplified_tool_descriptions(tool_ids: Set[str]) -> str:
+    """构建简化版工具描述（仅 ID + 描述，用于修正重试 prompt）
+
+    修正重试场景下，过详细的参数描述可能让 LLM 再次陷入"参数选择困难"，
+    因此只暴露工具 ID 和一句话描述，让 LLM 先把"用哪些工具"这一层选对。
+    """
+    registry = get_tool_registry()
+    lines = []
+    for meta in registry.list_all():
+        if meta.id not in tool_ids:
+            continue
+        # 只保留参数名列表（不展开描述），降低 prompt 复杂度
+        param_names = ", ".join(p.name for p in meta.parameters) if meta.parameters else "无"
+        lines.append(f"- {meta.id}: {meta.description}（参数: {param_names}）")
+    return "\n".join(lines)
+
+
+def _build_correction_plan_prompt(
+    question: str,
+    simplified_tool_desc: str,
+    curr_date: str,
+    trade_date: str,
+    failure_hint: str = "",
+) -> str:
+    """构建修正重试 prompt（v3.6.0 项7）
+
+    与 _build_plan_prompt 的差异：
+    1. 步骤数量限制从 2-5 收紧到 1-3（降低复杂度）
+    2. 去掉金融知识段落（避免 LLM 在分类上浪费 token）
+    3. 显式提示"上一次规划失败"，鼓励 LLM 用最简单方式重新规划
+    4. 工具描述使用简化版（仅 ID + 描述 + 参数名）
+    """
+    hint_section = f"\n## 上次失败原因\n{failure_hint}\n" if failure_hint else ""
+
+    return f"""上一次规划失败，请用更简单的方式重新规划。{hint_section}
+## 可用工具（简化版）
+
+{simplified_tool_desc}
+
+## 当前日期信息
+- 当前日期: {curr_date}
+- 最近交易日: {trade_date}
+
+## 用户问题
+{question}
+
+## 要求
+1. 生成一个 JSON 格式的分析计划
+2. 步骤数量控制在 **1-3 个**（最多 3 个，越简单越好）
+3. 优先使用最常见的工具组合：基本面/行情/技术面/新闻
+4. 每个步骤必须指定具体的 tool（工具 ID）和 args（参数）
+5. args 中只能使用上面工具定义中列出的参数名
+6. 使用 depends_on 标记步骤间的依赖关系（无依赖的步骤可并行执行）
+7. intent 字段简要说明该步骤的目的
+8. 所有需要日期的参数使用当前日期 {curr_date} 或交易日 {trade_date}
+9. ticker 必须是 6 位数字的股票代码（如 601012）
+
+## 输出格式（严格 JSON）
+```json
+{{
+  "steps": [
+    {{
+      "id": 1,
+      "tool": "工具ID",
+      "args": {{"参数名": "参数值"}},
+      "intent": "步骤意图",
+      "depends_on": []
+    }}
+  ]
+}}
+```
+
+只返回 JSON，不要其他文字。"""
+
+
 # ============================================================
 # Planner 类
 # ============================================================
@@ -215,8 +290,15 @@ class Planner:
             logger.info(f"[Planner] LLM 自主规划成功，{len(llm_plan.steps)} 个步骤")
             return llm_plan
 
+        # 第二级补丁：规划失败修正重试1次（v3.6.0 项7）
+        # 用更简单的 prompt 重新尝试生成有效计划，避免直接降级 ReAct
+        corrected_plan = await self._try_llm_plan_with_correction(question, context_messages)
+        if corrected_plan is not None:
+            logger.info(f"[Planner] 修正重试规划成功，{len(corrected_plan.steps)} 个步骤")
+            return corrected_plan
+
         # 第三级：标记 ReAct 回退
-        logger.warning("[Planner] 规划失败，标记 ReAct 回退")
+        logger.warning("[Planner] 规划失败（含修正重试），标记 ReAct 回退")
         return AnalysisPlan(
             question=question,
             source=PlanSource.REACT_FALLBACK,
@@ -485,6 +567,65 @@ class Planner:
 
         except Exception as e:
             logger.warning(f"[Planner] LLM 规划失败: {e}")
+            return None
+
+    async def _try_llm_plan_with_correction(
+        self,
+        question: str,
+        context_messages: Optional[List[Message]] = None,
+        failure_hint: str = "",
+    ) -> Optional[AnalysisPlan]:
+        """修正重试规划（v3.6.0 项7）
+
+        在 _try_llm_plan 返回 None 后调用，使用更简单的 prompt 再试一次：
+        - 步骤数限制 1-3 个
+        - 工具描述只保留 ID + 描述 + 参数名
+        - 显式提示"上一次规划失败"
+
+        失败 hint 可选，用于帮助 LLM 理解上次为何失败（如"未返回有效 JSON"、"步骤为空"）。
+        """
+        simplified_tool_desc = _build_simplified_tool_descriptions(self._valid_tool_ids)
+        prompt = _build_correction_plan_prompt(
+            question=question,
+            simplified_tool_desc=simplified_tool_desc,
+            curr_date=self._curr_date,
+            trade_date=self._trade_date,
+            failure_hint=failure_hint,
+        )
+
+        messages: List[Message] = [
+            Message(
+                role=MessageRole.SYSTEM,
+                content="你是股票分析规划器，上一次规划失败，请用最简单的方式重新规划，只输出 JSON。",
+            ),
+        ]
+        if context_messages:
+            messages.extend(context_messages)
+        messages.append(Message(role=MessageRole.USER, content=prompt))
+
+        try:
+            resp = await self._llm.achat(messages)
+            raw = resp.content or ""
+            plan_data = self._parse_plan_json(raw)
+            if plan_data is None:
+                # _parse_plan_json 已记录具体原因（未找到JSON/JSON解析异常/结构无效）
+                return None
+
+            steps = self._validate_steps(plan_data.get("steps", []))
+            if not steps:
+                logger.warning("[Planner] 修正重试：步骤为空或全部无效")
+                return None
+
+            # 标记来源为 LLM_PLAN（修正重试成功的计划与正常 LLM 规划等价对待）
+            return AnalysisPlan(
+                question=question,
+                template_id=None,
+                source=PlanSource.LLM_PLAN,
+                steps=steps,
+            )
+
+        except Exception as e:
+            logger.warning(f"[Planner] 修正重试规划失败: {e}")
             return None
 
     @staticmethod

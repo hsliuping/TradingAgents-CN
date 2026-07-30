@@ -130,9 +130,10 @@
             {{ row.execution_time > 0 ? row.execution_time.toFixed(2) + 's' : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="350" fixed="right">
           <template #default="{ row }">
             <el-button type="text" size="small" @click="viewDetail(row)">详情</el-button>
+            <el-button type="text" size="small" @click="viewTraces(row)">执行轨迹</el-button>
             <el-button
               v-if="row.status === 'pending' || row.status === 'processing'"
               type="text"
@@ -199,6 +200,12 @@
       :task-id="selectedTaskId"
       :task-detail="selectedTaskDetail"
     />
+
+    <!-- 执行轨迹对话框 -->
+    <ExecutionTraceDialog
+      v-model="traceDialogVisible"
+      :task-id="traceTaskId"
+    />
   </div>
 </template>
 
@@ -221,6 +228,7 @@ import {
 } from '@/api/unifiedTasks'
 import { analysisApi } from '@/api/analysis'
 import TaskDetailDialog from './components/TaskDetailDialog.vue'
+import ExecutionTraceDialog from './components/ExecutionTraceDialog.vue'
 
 // ==================== 状态管理 ====================
 
@@ -271,6 +279,15 @@ const getTaskStatusColor = (status: unknown) => {
 const detailDialogVisible = ref(false)
 const selectedTaskId = ref<string>()
 const selectedTaskDetail = ref<TaskDetail | null>(null)
+
+// 执行轨迹对话框
+const traceDialogVisible = ref(false)
+const traceTaskId = ref<string>('')
+
+const viewTraces = (row: TaskListItem) => {
+  traceTaskId.value = row.task_id
+  traceDialogVisible.value = true
+}
 
 // 定时刷新
 let refreshTimer: any = null

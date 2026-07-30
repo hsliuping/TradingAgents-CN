@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>候选发现 · TradingAgents v4.0</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus@2.4.4/dist/index.css" />
+  <link rel="stylesheet" href="./assets/theme.css?v=4" />
+  <style>
+    .discover-page .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+    .discover-page .page-header h1 { margin: 0 0 6px; font-size: 22px; font-weight: 600; color: var(--text-primary); }
+    .discover-page .page-subtitle { font-size: 13px; color: var(--text-secondary); line-height: 1.7; max-width: 760px; }
+    .discover-page .header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .purpose-panel {
+      background: linear-gradient(135deg, rgba(107,72,227,.08), rgba(64,158,255,.08));
+      border: 1px solid rgba(64,158,255,.18); border-radius: 12px; padding: 20px 22px; margin-bottom: 20px;
+    }
+    .purpose-panel h2 { margin: 0 0 10px; font-size: 18px; font-weight: 600; color: var(--text-primary); }
+    .purpose-panel .purpose-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 16px; }
+    .purpose-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .purpose-card { background: #fff; border: 1px solid var(--border-light); border-radius: 10px; padding: 14px; }
+    .purpose-card .pc-step { font-size: 12px; color: var(--el-color-primary); font-weight: 600; margin-bottom: 6px; }
+    .purpose-card .pc-title { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px; }
+    .purpose-card .pc-body { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+
+    .discover-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .discover-stat { background: #fff; border: 1px solid var(--border-light); border-radius: 10px; padding: 14px 16px; }
+    .discover-stat .label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+    .discover-stat .value { font-size: 24px; line-height: 1.1; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+    .discover-stat .meta { margin-top: 6px; font-size: 12px; color: var(--text-tertiary); }
+
+    .discover-toolbar {
+      display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+      background: #fff; border: 1px solid var(--border-light); border-radius: 10px; padding: 14px 16px; margin-bottom: 20px;
+    }
+    .discover-toolbar .toolbar-spacer { flex: 1; }
+
+    .candidate-card { background: #fff; border: 1px solid var(--border-light); border-radius: 12px; padding: 18px; margin-bottom: 16px; }
+    .candidate-card:hover { border-color: var(--el-color-primary-light-5); box-shadow: var(--shadow-card-hover); }
+    .candidate-top { display: flex; gap: 18px; justify-content: space-between; align-items: flex-start; }
+    .candidate-main { flex: 1; min-width: 0; }
+    .candidate-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    .candidate-name { font-size: 17px; font-weight: 600; color: var(--text-primary); }
+    .candidate-code { font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+    .candidate-reason { font-size: 14px; line-height: 1.7; color: var(--text-regular); margin-bottom: 12px; }
+    .signal-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .signal-chip {
+      display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);
+      background: var(--bg-page); border: 1px solid var(--border-light); border-radius: 999px; padding: 6px 10px;
+    }
+    .risk-line { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+    .risk-line strong { color: var(--text-primary); }
+
+    .candidate-side {
+      min-width: 126px; text-align: right; border-left: 1px solid var(--border-light); padding-left: 16px;
+      font-variant-numeric: tabular-nums;
+    }
+    .candidate-side .score-label { font-size: 12px; color: var(--text-secondary); }
+    .candidate-side .score-value { font-size: 28px; font-weight: 600; line-height: 1.05; color: var(--el-color-primary); margin: 4px 0 10px; }
+    .candidate-side .price { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+    .candidate-side .change.up { color: var(--stock-up); }
+    .candidate-side .change.down { color: var(--stock-down); }
+    .candidate-side .change { font-size: 12px; margin-top: 4px; }
+
+    .candidate-footer { display: flex; gap: 12px; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-light); }
+    .candidate-meta { font-size: 12px; color: var(--text-tertiary); line-height: 1.7; }
+    .candidate-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+    .side-card + .side-card { margin-top: 16px; }
+    .mini-list-item { padding: 10px 0; border-top: 1px solid var(--border-light); }
+    .mini-list-item:first-child { border-top: none; padding-top: 0; }
+    .funnel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+    .funnel-bar { flex: 1; height: 8px; border-radius: 999px; background: var(--bg-page); overflow: hidden; }
+    .funnel-fill { height: 100%; background: linear-gradient(90deg, #6B48E3, #409EFF); }
+    .activity-line { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border-light); }
+    .activity-line:first-child { border-top: none; padding-top: 0; }
+    .activity-line .time { flex: 0 0 44px; font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+    .empty-state {
+      background: #fff; border: 1px dashed var(--border-base); border-radius: 12px; padding: 48px 16px;
+      text-align: center; color: var(--text-tertiary);
+    }
+
+    @media (max-width: 1180px) {
+      .purpose-grid, .discover-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 900px) {
+      .candidate-top, .candidate-footer, .discover-page .page-header { flex-direction: column; }
+      .candidate-side { min-width: 0; width: 100%; border-left: none; border-top: 1px solid var(--border-light); padding-left: 0; padding-top: 12px; text-align: left; }
+      .candidate-actions { justify-content: flex-start; }
+      .purpose-grid, .discover-stats { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <app-shell active="discover" page-title="候选发现">
+      <div class="discover-page">
+        <div class="page-header">
+          <div>
+            <h1>候选发现</h1>
+            <div class="page-subtitle">
+              这个模块不是对象档案，也不是任务执行页。它主要做的是：把规则命中、事件异动、主题联动、方法筛选产生的噪音线索压缩成一个“今天值得花时间看”的候选池，再把候选分流到加入研究、发起初筛、加入监控或暂缓观察。
+            </div>
+          </div>
+          <div class="header-actions">
+            <el-button plain @click="showRuleDialog = true">
+              <el-icon><Reading /></el-icon>&nbsp;查看触发规则
+            </el-button>
+            <el-button type="primary" @click="showScanDialog = true">
+              <el-icon><Search /></el-icon>&nbsp;发起一次新扫描
+            </el-button>
+          </div>
+        </div>
+
+        <div class="purpose-panel">
+          <h2>这个模块主要做什么</h2>
+          <div class="purpose-desc">
+            先发现，再初筛，最后才进入正式研究。你可以把它理解成“研究前台漏斗”：左边是市场线索，右边是你准备投入时间的对象，中间靠规则和方法把无效噪音压缩掉。
+          </div>
+          <div class="purpose-grid">
+            <div class="purpose-card" v-for="step in purposeSteps" :key="step.step">
+              <div class="pc-step">{{ step.step }}</div>
+              <div class="pc-title">{{ step.title }}</div>
+              <div class="pc-body">{{ step.body }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="discover-stats">
+          <div class="discover-stat" v-for="stat in stats" :key="stat.label">
+            <div class="label">{{ stat.label }}</div>
+            <div class="value">{{ stat.value }}</div>
+            <div class="meta">{{ stat.meta }}</div>
+          </div>
+        </div>
+
+        <div class="discover-toolbar">
+          <el-input v-model="search" clearable placeholder="搜索名称、代码、主题、触发依据" style="width: 260px;">
+            <template #prefix><el-icon><Search /></el-icon></template>
+          </el-input>
+          <el-select v-model="sourceFilter" clearable placeholder="来源" style="width: 150px;">
+            <el-option label="规则命中" value="规则命中" />
+            <el-option label="事件驱动" value="事件驱动" />
+            <el-option label="主题联动" value="主题联动" />
+            <el-option label="方法筛选" value="方法筛选" />
+          </el-select>
+          <el-select v-model="marketFilter" clearable placeholder="市场" style="width: 130px;">
+            <el-option label="A股" value="A股" />
+            <el-option label="港股" value="港股" />
+          </el-select>
+          <el-select v-model="statusFilter" clearable placeholder="状态" style="width: 150px;">
+            <el-option label="待初筛" value="待初筛" />
+            <el-option label="初筛中" value="初筛中" />
+            <el-option label="监控中" value="监控中" />
+            <el-option label="已加入研究" value="已加入研究" />
+            <el-option label="暂缓观察" value="暂缓观察" />
+          </el-select>
+          <div class="toolbar-spacer"></div>
+          <el-select v-model="sortBy" style="width: 180px;">
+            <el-option label="按发现分排序" value="score" />
+            <el-option label="按最新触发排序" value="fresh" />
+            <el-option label="按触发次数排序" value="hits" />
+          </el-select>
+        </div>
+
+        <el-row :gutter="24">
+          <el-col :span="16">
+            <div v-if="filteredCandidates.length">
+              <div class="candidate-card" v-for="candidate in filteredCandidates" :key="candidate.id">
+                <div class="candidate-top">
+                  <div class="candidate-main">
+                    <div class="candidate-head">
+                      <span class="candidate-name">{{ candidate.name }}</span>
+                      <span class="candidate-code">{{ candidate.code }}</span>
+                      <el-tag size="small" :type="priorityTagType(candidate.priority)" effect="light">{{ candidate.priority }}</el-tag>
+                      <el-tag size="small" :type="statusTagType(candidate.status)" effect="plain">{{ candidate.status }}</el-tag>
+                      <el-tag size="small" effect="plain">{{ candidate.market }}</el-tag>
+                      <el-tag v-for="source in candidate.sources" :key="source" size="small" :type="sourceTagType(source)" effect="light">{{ source }}</el-tag>
+                    </div>
+                    <div class="candidate-reason">{{ candidate.reason }}</div>
+                    <div class="signal-strip">
+                      <span class="signal-chip" v-for="signal in candidate.signals" :key="signal">{{ signal }}</span>
+                    </div>
+                    <div class="risk-line"><strong>注意：</strong>{{ candidate.risk }}</div>
+                  </div>
+                  <div class="candidate-side">
+                    <div class="score-label">发现分</div>
+                    <div class="score-value">{{ candidate.score }}</div>
+                    <div class="price">{{ candidate.price }}</div>
+                    <div class="change" :class="candidate.changeDir">{{ candidate.change }}</div>
+                  </div>
+                </div>
+                <div class="candidate-footer">
+                  <div class="candidate-meta">
+                    来源 {{ candidate.sources.join(' + ') }} · 触发 {{ candidate.triggerCount }} 次 · 更新于 {{ candidate.updatedAt }} · 下一步 {{ candidate.nextStep }}
+                  </div>
+                  <div class="candidate-actions">
+                    <el-button size="small" type="primary" @click="openResearchDialog(candidate)" :disabled="candidate.status === '已加入研究'">{{ candidate.status === '监控中' ? '转入研究' : '加入研究' }}</el-button>
+                    <el-button size="small" plain @click="openScreenDialog(candidate)" :disabled="candidate.status === '初筛中'">发起初筛</el-button>
+                    <el-button size="small" text @click="candidate.status === '暂缓观察' ? restoreCandidate(candidate) : markCandidateWatched(candidate)">{{ candidate.status === '暂缓观察' ? '恢复候选' : '加入监控' }}</el-button>
+                    <el-button size="small" text @click="candidate.status === '暂缓观察' ? restoreCandidate(candidate) : snoozeCandidate(candidate)">{{ candidate.status === '暂缓观察' ? '恢复处理' : '忽略 7 天' }}</el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-state">
+              当前筛选下没有候选。可以放宽来源/状态条件，或手动发起一次新扫描。
+            </div>
+          </el-col>
+
+          <el-col :span="8">
+            <el-card shadow="never" class="side-card">
+              <template #header><span class="title">发现引擎</span></template>
+              <div class="mini-list-item" v-for="engine in discoveryEngines" :key="engine.name">
+                <div class="flex-between mb-1">
+                  <span class="fw-500 text-sm">{{ engine.name }}</span>
+                  <el-tag size="small" effect="plain">{{ countBySource(engine.source) }} 条</el-tag>
+                </div>
+                <div class="text-xs muted" style="line-height: 1.6;">{{ engine.desc }}</div>
+              </div>
+            </el-card>
+
+            <el-card shadow="never" class="side-card">
+              <template #header><span class="title">今日触发规则</span></template>
+              <div class="mini-list-item" v-for="rule in ruleTriggers" :key="rule.name">
+                <div class="flex-between mb-1">
+                  <span class="fw-500 text-sm">{{ rule.name }}</span>
+                  <span class="text-xs muted">命中 {{ rule.hits }} 次</span>
+                </div>
+                <div class="text-xs muted">覆盖候选：{{ rule.objects }}</div>
+                <div class="text-xs muted" style="margin-top: 2px;">建议动作：{{ rule.next }}</div>
+              </div>
+            </el-card>
+
+            <el-card shadow="never" class="side-card">
+              <template #header><span class="title">处置漏斗</span></template>
+              <div class="funnel-row" v-for="row in funnelRows" :key="row.label">
+                <span class="text-sm" style="width: 72px;">{{ row.label }}</span>
+                <div class="funnel-bar"><div class="funnel-fill" :style="{ width: row.percent + '%' }"></div></div>
+                <span class="text-xs muted" style="width: 24px; text-align:right;">{{ row.value }}</span>
+              </div>
+            </el-card>
+
+            <el-card shadow="never" class="side-card">
+              <template #header><span class="title">最近动作</span></template>
+              <div class="activity-line" v-for="log in activityLog" :key="log.id">
+                <span class="time">{{ log.time }}</span>
+                <div style="flex:1; min-width:0;">
+                  <el-tag size="small" :type="log.tagType" effect="light">{{ log.kind }}</el-tag>
+                  <div class="text-sm" style="margin-top: 6px; line-height: 1.6;">{{ log.text }}</div>
+                </div>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
+      </div>
+    </app-shell>
+
+    <el-dialog v-model="showRuleDialog" title="今日触发规则" width="560px">
+      <div class="mini-list-item" v-for="rule in ruleTriggers" :key="rule.name">
+        <div class="flex-between mb-1">
+          <span class="fw-500 text-sm">{{ rule.name }}</span>
+          <el-tag size="small" :type="rule.tagType" effect="light">{{ rule.hits }} 次命中</el-tag>
+        </div>
+        <div class="text-xs muted" style="line-height: 1.7;">{{ rule.desc }}</div>
+        <div class="text-xs muted" style="margin-top: 4px;">候选：{{ rule.objects }}</div>
+      </div>
+      <template #footer>
+        <el-button @click="showRuleDialog = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showScanDialog" title="发起一次新扫描" width="520px" :close-on-click-modal="false">
+      <el-form :model="scanForm" label-width="88px">
+        <el-form-item label="扫描范围">
+          <el-select v-model="scanForm.scope" style="width: 100%;">
+            <el-option label="全市场" value="全市场" />
+            <el-option label="A股核心资产" value="A股核心资产" />
+            <el-option label="我的主题篮" value="我的主题篮" />
+            <el-option label="高股息 + 银行" value="高股息 + 银行" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="扫描来源">
+          <el-select v-model="scanForm.source" style="width: 100%;">
+            <el-option label="规则 + 事件 + 方法" value="规则 + 事件 + 方法" />
+            <el-option label="只跑规则命中" value="只跑规则命中" />
+            <el-option label="只跑事件驱动" value="只跑事件驱动" />
+            <el-option label="只跑方法筛选" value="只跑方法筛选" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="scanForm.note" type="textarea" :rows="3" placeholder="例如：最近想补消费和高股息方向，请优先返回 P0/P1 候选。" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showScanDialog = false">取消</el-button>
+        <el-button type="primary" @click="runScan">开始扫描</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showResearchDialog" title="加入研究" width="520px" :close-on-click-modal="false">
+      <template v-if="selectedCandidate">
+        <div class="text-sm muted" style="margin-bottom: 14px; line-height: 1.6;">
+          选择如何接住候选 {{ selectedCandidate.name }} ({{ selectedCandidate.code }})。候选发现的职责是把线索分流，不直接把所有候选都变成正式对象。
+        </div>
+        <el-form :model="joinForm" label-width="88px">
+          <el-form-item label="去向">
+            <el-radio-group v-model="joinForm.dest">
+              <el-radio label="research">正式研究</el-radio>
+              <el-radio label="monitor">监控列表</el-radio>
+              <el-radio label="theme">主题候选篮</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="备注">
+            <el-input v-model="joinForm.note" type="textarea" :rows="3" placeholder="为什么现在要接住这个候选？比如：估值+业绩双触发，值得进入正式研究。" />
+          </el-form-item>
+        </el-form>
+      </template>
+      <template #footer>
+        <el-button @click="showResearchDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitJoinResearch">确认</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="showScreenDialog" title="发起初筛" width="520px" :close-on-click-modal="false">
+      <template v-if="selectedCandidate">
+        <div class="text-sm muted" style="margin-bottom: 14px; line-height: 1.6;">
+          对候选 {{ selectedCandidate.name }} 发起一个轻量任务，先判断“值不值得升格成正式研究对象”。
+        </div>
+        <el-form :model="screenForm" label-width="88px">
+          <el-form-item label="任务类型">
+            <el-radio-group v-model="screenForm.kind">
+              <el-radio label="事件追踪">事件追踪</el-radio>
+              <el-radio label="横向对比">横向对比</el-radio>
+              <el-radio label="方法论研究">方法论研究</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="焦点问题">
+            <el-input v-model="screenForm.focus" type="textarea" :rows="3" placeholder="例如：这次业绩拐点是真拐点还是一次性波动？" />
+          </el-form-item>
+        </el-form>
+      </template>
+      <template #footer>
+        <el-button @click="showScreenDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitScreenTask">发起</el-button>
+      </template>
+    </el-dialog>
+  </div>
+
+  <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/element-plus@2.4.4/dist/index.full.min.js"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+  <script src="./assets/shared.js?v=7"></script>
+  <script>
+    const DISCOVER_STORAGE_KEY = 'ta.v4.prototype.discover.state';
+    const SCAN_TEMPLATES = [
+      {
+        id: 901, name: '东方雨虹', code: '002271.SZ', market: 'A股', priority: 'P1', score: 81,
+        status: '待初筛', price: '¥15.84', change: '+1.42%', changeDir: 'up',
+        sources: ['方法筛选', '事件驱动'],
+        reason: '地产链里少数同时出现现金流修复与估值压缩的对象，最近又触发了“盈利质量改善”筛选条件。',
+        signals: ['自由现金流转正', '渠道库存去化', '方法模板：现金流修复'],
+        risk: '行业 beta 仍偏弱，适合做候选而不宜直接升级成正式结论。',
+        triggerCount: 2, updatedAt: '刚刚', nextStep: '建议先做一次事件追踪', sortRank: 81,
+      },
+      {
+        id: 902, name: '华测导航', code: '300627.SZ', market: 'A股', priority: 'P0', score: 88,
+        status: '待初筛', price: '¥34.62', change: '+2.88%', changeDir: 'up',
+        sources: ['规则命中', '方法筛选'],
+        reason: '你保存的“高 ROIC + 海外扩张”规则再次命中，且方法工坊里的成长质量模板给出高分。',
+        signals: ['ROIC 连续 6 季 > 15%', '海外收入占比提升', '成长质量模板 84 分'],
+        risk: '流动性不如核心白马，适合放进候选池等你决定是否深挖。',
+        triggerCount: 3, updatedAt: '刚刚', nextStep: '建议先横向对比行业龙头', sortRank: 88,
+      },
+    ];
+
+    function deepClone(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function readDiscoverState(fallback) {
+      try {
+        const raw = localStorage.getItem(DISCOVER_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch {
+        return fallback;
+      }
+    }
+
+    function writeDiscoverState(value) {
+      localStorage.setItem(DISCOVER_STORAGE_KEY, JSON.stringify(value));
+    }
+
+    function nowTimeLabel() {
+      const d = new Date();
+      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    }
+
+    const { createApp } = Vue;
+    const app = createApp({
+      data() {
+        return {
+          search: '',
+          sourceFilter: '',
+          marketFilter: '',
+          statusFilter: '',
+          sortBy: 'score',
+          showRuleDialog: false,
+          showScanDialog: false,
+          showResearchDialog: false,
+          showScreenDialog: false,
+          selectedCandidate: null,
+          joinForm: { dest: 'research', note: '' },
+          screenForm: { kind: '事件追踪', focus: '' },
+          scanForm: { scope: '全市场', source: '规则 + 事件 + 方法', note: '' },
+          purposeSteps: [
+            { step: '01', title: '收集线索', body: '从规则命中、事件异动、主题联动和方法筛选里抓取“今天值得看”的标的。' },
+            { step: '02', title: '合并去重', body: '同一对象如果被多个来源同时命中，不重复堆列表，而是合并成一个候选并提高优先级。' },
+            { step: '03', title: '初步排序', body: '按确定性、时效性、可执行性给出发现分，帮助你先看最值得研究的 20%。' },
+            { step: '04', title: '分流处置', body: '候选只做分流：加入研究、发起初筛、加入监控、暂缓观察，而不是直接形成结论。' },
+          ],
+          discoveryEngines: [
+            { name: '规则命中引擎', source: '规则命中', desc: '读取你已保存的规则，自动发现重新回到触发区间的对象。' },
+            { name: '事件驱动引擎', source: '事件驱动', desc: '围绕财报、公告、政策与异动，找出今天需要即时重看的对象。' },
+            { name: '主题联动引擎', source: '主题联动', desc: '从主题、产业链和概念关系图中，补出“顺着线索往外扩”的候选。' },
+            { name: '方法筛选引擎', source: '方法筛选', desc: '调用方法工坊模板做轻量筛选，把适合某种方法论的问题对象捞出来。' },
+          ],
+          ruleTriggers: [
+            { name: '业绩拐点 v2', hits: 3, tagType: 'success', objects: '中际旭创、神州泰岳、华测导航', next: '先做事件追踪，确认拐点质量', desc: '核心看利润环比改善 + 订单验证 + 估值仍未完全修复。' },
+            { name: '估值分位回归 v3', hits: 2, tagType: 'warning', objects: '贵州茅台、海天味业', next: '适合加到监控列表，等待第二触发', desc: '用于高质量白马，要求估值回到 5 年低分位。' },
+            { name: '主题热度外扩', hits: 2, tagType: 'primary', objects: '美团-W、同程旅行', next: '优先横向对比，不急着升格对象', desc: '主题端有热度，但需要业务侧二次验证，避免只看故事。' },
+          ],
+          candidates: [
+            {
+              id: 1, name: '中际旭创', code: '300308.SZ', market: 'A股', priority: 'P0', score: 92,
+              status: '待初筛', price: '¥138.42', change: '+3.21%', changeDir: 'up',
+              sources: ['规则命中', '主题联动'],
+              reason: 'Q1 净利环比 +42%，同时命中你保存的「业绩拐点 v2」和「AI 算力链景气延续」两条线索，适合排在今日候选池最前面。',
+              signals: ['净利环比 +42%', '800G 光模块订单延续', '北向资金 3 日净流入'],
+              risk: '估值已回到 3 年 71% 分位，更适合先做初筛，不适合直接形成结论。',
+              triggerCount: 2, updatedAt: '10:42', nextStep: '建议先发起事件追踪', sortRank: 92,
+            },
+            {
+              id: 2, name: '美团-W', code: '03690.HK', market: '港股', priority: 'P1', score: 83,
+              status: '监控中', price: 'HK$132.00', change: '+1.85%', changeDir: 'up',
+              sources: ['主题联动', '事件驱动'],
+              reason: '消费复苏主题重新抬头，本周订单与到店数据出现边际改善，和你跟踪的“消费修复”主题强相关。',
+              signals: ['即时零售单量回升', '补贴收缩影响可控', '主题篮热度回升'],
+              risk: '港股情绪波动较大，建议继续监控而不是直接拉入正式研究。',
+              triggerCount: 2, updatedAt: '09:56', nextStep: '等待下一次经营数据确认', sortRank: 83,
+            },
+            {
+              id: 3, name: '贵州茅台', code: '600519.SH', market: 'A股', priority: 'P1', score: 80,
+              status: '待初筛', price: '¥1,488.00', change: '-0.42%', changeDir: 'down',
+              sources: ['规则命中'],
+              reason: 'PE-TTM 跌至 5 年 18% 分位，触发你保存的「白马股回归」规则，是典型该重新拿起来看但不一定立刻行动的对象。',
+              signals: ['PE 分位 18%', '批价波动收敛', '机构预期分歧扩大'],
+              risk: '估值触发不等于基本面拐点，先做初筛再决定是否升格研究。',
+              triggerCount: 1, updatedAt: '09:20', nextStep: '建议先加入监控或做轻量方法筛选', sortRank: 80,
+            },
+            {
+              id: 4, name: '海天味业', code: '603288.SH', market: 'A股', priority: 'P2', score: 74,
+              status: '暂缓观察', price: '¥39.76', change: '+0.88%', changeDir: 'up',
+              sources: ['方法筛选'],
+              reason: '费雪 15 问模板里供应链和渠道两项有改善，但增长弹性仍偏弱，更像中长期候选而非短期任务。',
+              signals: ['渠道库存回归正常', '费雪模板 72 分', '成本端改善'],
+              risk: '缺少即时催化，放在候选池会占用注意力，适合暂缓 7 天后再看。',
+              triggerCount: 1, updatedAt: '昨天', nextStep: '7 天后自动回到待处理池', sortRank: 74,
+            },
+            {
+              id: 5, name: '同程旅行', code: '00780.HK', market: '港股', priority: 'P1', score: 79,
+              status: '初筛中', price: 'HK$18.26', change: '+2.31%', changeDir: 'up',
+              sources: ['事件驱动', '主题联动'],
+              reason: '五一前夕旅游链订单再起量，且 OTA 与酒店链数据出现共振，是典型适合做一次短平快事件追踪的候选。',
+              signals: ['五一预订量提升', '酒店 ADR 企稳', '旅游主题篮热度上行'],
+              risk: '季节性噪音大，任务要限定为“事件追踪”而不是上来做深度研究。',
+              triggerCount: 2, updatedAt: '11:08', nextStep: '事件追踪已排队', sortRank: 79,
+            },
+            {
+              id: 6, name: '金山办公', code: '688111.SH', market: 'A股', priority: 'P0', score: 87,
+              status: '已加入研究', price: '¥286.40', change: '+1.27%', changeDir: 'up',
+              sources: ['规则命中', '方法筛选'],
+              reason: '你保存的“高质量软件”规则再次命中，同时段永平模板里用户黏性与付费率两个维度分数都偏高，已经值得进入正式研究。',
+              signals: ['高质量软件规则命中', '付费率维持高位', '模板评分 86'],
+              risk: '交易拥挤度偏高，正式研究里需要专门看估值消化速度。',
+              triggerCount: 3, updatedAt: '今天', nextStep: '等待你发起首个正式任务', sortRank: 87,
+            },
+          ],
+          activityLog: [
+            { id: 1, time: '10:42', kind: '规则命中', tagType: 'success', text: '中际旭创同时命中「业绩拐点 v2」与 AI 算力链主题联动，自动升至 P0。' },
+            { id: 2, time: '10:18', kind: '方法筛选', tagType: 'warning', text: '海天味业被费雪 15 问模板拉入候选池，但因缺少催化暂时放入观察。' },
+            { id: 3, time: '09:56', kind: '人工处置', tagType: 'primary', text: '你把美团-W 从“待初筛”切到“监控中”，等待下一次经营数据再决定。' },
+          ],
+        };
+      },
+      computed: {
+        stats() {
+          return [
+            { label: '候选总数', value: this.candidates.length, meta: '今天被发现或仍待处理的线索' },
+            { label: '待初筛', value: this.candidates.filter((item) => item.status === '待初筛').length, meta: '值得今天先看的对象' },
+            { label: '高优先级', value: this.candidates.filter((item) => item.priority === 'P0' && item.status !== '暂缓观察').length, meta: 'P0 候选建议优先投入时间' },
+            { label: '已转研究', value: this.candidates.filter((item) => item.status === '已加入研究').length, meta: '已经从候选池升格为正式研究' },
+            { label: '监控/暂缓', value: this.candidates.filter((item) => item.status === '监控中' || item.status === '暂缓观察').length, meta: '先留在边上，等下一次信号' },
+          ];
+        },
+        filteredCandidates() {
+          let items = this.candidates.filter((item) => {
+            const searchHit = !this.search || [item.name, item.code, item.reason, item.sources.join(' '), item.signals.join(' ')].join(' ').toLowerCase().includes(this.search.toLowerCase());
+            const sourceHit = !this.sourceFilter || item.sources.includes(this.sourceFilter);
+            const marketHit = !this.marketFilter || item.market === this.marketFilter;
+            const statusHit = !this.statusFilter || item.status === this.statusFilter;
+            return searchHit && sourceHit && marketHit && statusHit;
+          });
+
+          const sorters = {
+            score: (a, b) => b.score - a.score,
+            fresh: (a, b) => b.sortRank - a.sortRank,
+            hits: (a, b) => b.triggerCount - a.triggerCount,
+          };
+          items = items.slice().sort(sorters[this.sortBy] || sorters.score);
+          return items;
+        },
+        funnelRows() {
+          const total = Math.max(this.candidates.length, 1);
+          const rows = [
+            { label: '待初筛', value: this.candidates.filter((item) => item.status === '待初筛').length },
+            { label: '初筛中', value: this.candidates.filter((item) => item.status === '初筛中').length },
+            { label: '已转研究', value: this.candidates.filter((item) => item.status === '已加入研究').length },
+            { label: '监控中', value: this.candidates.filter((item) => item.status === '监控中').length },
+            { label: '暂缓', value: this.candidates.filter((item) => item.status === '暂缓观察').length },
+          ];
+          return rows.map((row) => ({ ...row, percent: (row.value / total) * 100 }));
+        },
+      },
+      mounted() {
+        const saved = readDiscoverState(null);
+        if (saved) {
+          if (Array.isArray(saved.candidates)) this.candidates = saved.candidates;
+          if (Array.isArray(saved.activityLog)) this.activityLog = saved.activityLog;
+        }
+      },
+      methods: {
+        persistState() {
+          writeDiscoverState({ candidates: this.candidates, activityLog: this.activityLog });
+        },
+        addActivity(kind, text, tagType) {
+          this.activityLog.unshift({ id: Date.now() + Math.random(), time: nowTimeLabel(), kind, text, tagType });
+          this.activityLog = this.activityLog.slice(0, 8);
+        },
+        countBySource(source) {
+          return this.candidates.filter((item) => item.sources.includes(source)).length;
+        },
+        priorityTagType(priority) {
+          return ({ P0: 'danger', P1: 'warning', P2: 'info' })[priority] || 'info';
+        },
+        sourceTagType(source) {
+          return ({ '规则命中': 'success', '事件驱动': 'primary', '主题联动': 'warning', '方法筛选': 'danger' })[source] || 'info';
+        },
+        statusTagType(status) {
+          return ({ '待初筛': 'warning', '初筛中': 'primary', '监控中': 'info', '已加入研究': 'success', '暂缓观察': 'info' })[status] || 'info';
+        },
+        touchCandidate(candidate, nextStatus, nextStep) {
+          candidate.status = nextStatus;
+          candidate.nextStep = nextStep;
+          candidate.updatedAt = '刚刚';
+          candidate.sortRank = Date.now();
+        },
+        openResearchDialog(candidate) {
+          this.selectedCandidate = candidate;
+          this.joinForm = { dest: candidate.status === '监控中' ? 'research' : 'research', note: '' };
+          this.showResearchDialog = true;
+        },
+        submitJoinResearch() {
+          if (!this.selectedCandidate) return;
+          const candidate = this.selectedCandidate;
+          const destMap = {
+            research: { status: '已加入研究', nextStep: '等待你发起首个正式任务', action: '加入正式研究' },
+            monitor: { status: '监控中', nextStep: '等待下一次规则或事件触发', action: '加入监控列表' },
+            theme: { status: '监控中', nextStep: '等待主题批量比较任务', action: '加入主题候选篮' },
+          };
+          const target = destMap[this.joinForm.dest] || destMap.research;
+          this.touchCandidate(candidate, target.status, target.nextStep);
+          if (this.joinForm.note) candidate.reason = this.joinForm.note;
+          this.addActivity('人工处置', `${candidate.name} 已${target.action}。`, target.status === '已加入研究' ? 'success' : 'primary');
+          this.persistState();
+          this.showResearchDialog = false;
+          ElementPlus.ElMessage.success(`${candidate.name} 已${target.action}`);
+        },
+        openScreenDialog(candidate) {
+          this.selectedCandidate = candidate;
+          this.screenForm = { kind: '事件追踪', focus: '' };
+          this.showScreenDialog = true;
+        },
+        submitScreenTask() {
+          if (!this.selectedCandidate) return;
+          const candidate = this.selectedCandidate;
+          this.touchCandidate(candidate, '初筛中', `${this.screenForm.kind} 已排队`);
+          this.addActivity('任务排队', `${candidate.name} 已发起 ${this.screenForm.kind}，焦点问题：${this.screenForm.focus || '未额外填写'}`,'warning');
+          this.persistState();
+          this.showScreenDialog = false;
+          ElementPlus.ElMessage.success(`${candidate.name} 的${this.screenForm.kind}已排队（演示）`);
+        },
+        markCandidateWatched(candidate) {
+          this.touchCandidate(candidate, '监控中', '等待下一次信号或规则命中');
+          this.addActivity('人工处置', `${candidate.name} 已加入监控列表。`, 'primary');
+          this.persistState();
+          ElementPlus.ElMessage.info(`${candidate.name} 已加入监控列表`);
+        },
+        snoozeCandidate(candidate) {
+          this.touchCandidate(candidate, '暂缓观察', '7 天后自动回到待处理池');
+          this.addActivity('人工处置', `${candidate.name} 已暂缓 7 天，避免占用注意力。`, 'info');
+          this.persistState();
+          ElementPlus.ElMessage.info(`${candidate.name} 已忽略 7 天`);
+        },
+        restoreCandidate(candidate) {
+          this.touchCandidate(candidate, '待初筛', '重新回到待处理池');
+          this.addActivity('人工处置', `${candidate.name} 已恢复到待处理池。`, 'success');
+          this.persistState();
+          ElementPlus.ElMessage.success(`${candidate.name} 已恢复处理`);
+        },
+        runScan() {
+          const template = SCAN_TEMPLATES.find((item) => !this.candidates.some((candidate) => candidate.code === item.code)) || {
+            id: Date.now(), name: '神州泰岳', code: '300002.SZ', market: 'A股', priority: 'P1', score: 78,
+            status: '待初筛', price: '¥12.48', change: '+1.96%', changeDir: 'up',
+            sources: ['规则命中', '事件驱动'],
+            reason: '扫描从你偏好的“景气回升 + 估值仍低”的组合条件里新增捞出一只候选。',
+            signals: ['收入增速回升', '主题热度增强', '资金回流'],
+            risk: '缺少第二证据链，建议先初筛。', triggerCount: 2, updatedAt: '刚刚', nextStep: '建议先发起事件追踪', sortRank: Date.now(),
+          };
+          this.candidates.unshift(deepClone({ ...template, sortRank: Date.now(), updatedAt: '刚刚' }));
+          this.addActivity('扫描结果', `新扫描新增候选 ${template.name}，来源 ${template.sources.join(' + ')}。`, 'success');
+          this.persistState();
+          this.showScanDialog = false;
+          ElementPlus.ElMessage.success(`扫描完成，新增候选 ${template.name}`);
+        },
+      },
+    });
+
+    app.use(ElementPlus);
+    for (const [k, v] of Object.entries(ElementPlusIconsVue)) app.component(k, v);
+    registerPrototypeComponents(app);
+    app.mount('#app');
+  </script>
+</body>
+</html>

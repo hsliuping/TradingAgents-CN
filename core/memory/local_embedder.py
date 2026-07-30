@@ -40,12 +40,65 @@ def _get_model(model_name: str):
 
 
 class _EmbeddingHandler(BaseHTTPRequestHandler):
-    """Ollama /api/embeddings 兼容处理器"""
+    """Ollama 兼容处理器（同时支持新版 /api/embed 和旧版 /api/embeddings）"""
+
+    def do_GET(self):
+        """支持 Ollama 标准 GET 接口（/api/tags），用于健康检查和服务发现。
+
+        mem0/Ollama 客户端在初始化时会 GET /api/tags 检测服务可用性，
+        若不实现则 BaseHTTPRequestHandler 默认返回 501，导致 mem0 初始化失败。
+        """
+        if self.path in ("/api/tags", "/v1/models", "/api/version"):
+            # 返回已加载的模型列表，兼容 Ollama 客户端探测
+            try:
+                from datetime import datetime, timezone
+                model_name = _DEFAULT_MODEL
+                resp = {
+                    "models": [
+                        {
+                            "name": model_name,
+                            "model": model_name,
+                            "modified_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000000Z"),
+                            "size": 0,
+                            "digest": "sha256:local",
+                            "details": {
+                                "format": "gguf",
+                                "family": "embedding",
+                                "families": ["embedding"],
+                                "parameter_size": "0.6B",
+                                "quantization_level": "Q4_0",
+                            },
+                        }
+                    ],
+                    "version": "local-embedder",
+                }
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(resp).encode("utf-8"))
+            except Exception as e:
+                logger.warning("本地 Embedding GET 响应失败: %s", e)
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+            return
+
+        # 其他 GET 路径返回 404（而不是 501）
+        self.send_response(404)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"error": "not found"}).encode("utf-8"))
 
     def do_POST(self):
-        if self.path != "/api/embeddings":
+        # 同时支持新版 /api/embed（ollama SDK 0.4+）和旧版 /api/embeddings
+        is_new_api = self.path == "/api/embed"
+        is_old_api = self.path == "/api/embeddings"
+        if not is_new_api and not is_old_api:
             self.send_response(404)
+            self.send_header("Content-Type", "application/json")
             self.end_headers()
+            self.wfile.write(json.dumps({"error": "not found"}).encode("utf-8"))
             return
 
         try:
@@ -54,20 +107,36 @@ class _EmbeddingHandler(BaseHTTPRequestHandler):
             req = json.loads(body)
 
             model_name = req.get("model") or _DEFAULT_MODEL
-            prompt = req.get("prompt") or req.get("input") or ""
-            if isinstance(prompt, list):
-                prompt = " ".join(str(p) for p in prompt)
-            if not prompt:
+            # 新版 API 用 input（字符串或数组），旧版用 prompt（字符串）
+            raw_input = req.get("input") if is_new_api else req.get("prompt")
+            if raw_input is None:
+                raw_input = req.get("input") or req.get("prompt") or ""
+
+            is_batch = isinstance(raw_input, list)
+            if is_batch:
+                texts = [str(p) for p in raw_input]
+            elif not raw_input:
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": "empty prompt"}).encode("utf-8"))
+                self.wfile.write(json.dumps({"error": "empty input"}).encode("utf-8"))
                 return
+            else:
+                texts = [str(raw_input)]
 
             model = _get_model(model_name)
-            embedding = model.encode(prompt, normalize_embeddings=True).tolist()
+            vectors = model.encode(texts, normalize_embeddings=True).tolist()
+            # sentence-transformers 对单条输入返回 1D 数组，对多条返回 2D 数组
+            if len(texts) == 1 and not isinstance(vectors[0], list):
+                vectors = [vectors]
 
-            resp = {"embedding": embedding}
+            if is_new_api:
+                # 新版 /api/embed 响应格式：{"embeddings": [[...], ...]}
+                resp = {"embeddings": vectors, "model": model_name, "total_duration": 0}
+            else:
+                # 旧版 /api/embeddings 响应格式：{"embedding": [...]}（单条）
+                resp = {"embedding": vectors[0]}
+
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()

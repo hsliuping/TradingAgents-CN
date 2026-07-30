@@ -422,8 +422,24 @@ class UnifiedAnalysisEngine:
 
         Returns:
             实际使用的引擎类型
+
+        Raises:
+            RuntimeError: 当请求 legacy 引擎时（已停用）
         """
+        # v3.0 起旧版 legacy 引擎已停用
+        if requested_engine == "legacy":
+            raise RuntimeError(
+                "[已停用] UnifiedAnalysisEngine._select_engine 拒绝 legacy 引擎，"
+                "请改用 workflow 或 auto。"
+                "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+            )
         if requested_engine == "auto":
+            # 防御：若注册表默认引擎被改成 legacy，强制改为 workflow
+            if default_engine == "legacy":
+                self.logger.warning(
+                    "⚠️ 注册表默认引擎为 legacy，已强制改为 workflow（legacy 已停用）"
+                )
+                return "workflow"
             return default_engine
         return requested_engine
     
@@ -550,7 +566,10 @@ class UnifiedAnalysisEngine:
 
         # 通用兜底参数（当 input_config 不存在或未定义对应字段时）
         from datetime import datetime
-        workflow_inputs.setdefault("analysis_date", datetime.now().strftime("%Y-%m-%d"))
+        # 🔑 注意：不能用 setdefault，因为 API 请求可能传入 analysis_date=None，
+        # setdefault 不会覆盖已存在但值为 None 的 key，导致下游 Agent 报错
+        if not workflow_inputs.get("analysis_date"):
+            workflow_inputs["analysis_date"] = datetime.now().strftime("%Y-%m-%d")
         workflow_inputs.setdefault("research_depth", "标准")
         workflow_inputs.setdefault("lookback_days", 30)
         workflow_inputs.setdefault("max_debate_rounds", 3)
@@ -653,13 +672,26 @@ class UnifiedAnalysisEngine:
 
         # 执行工作流（WorkflowAPI.execute 是同步方法，需要在线程中运行）
         import asyncio
-        result = await asyncio.to_thread(
-            workflow_api.execute,
-            workflow_id=workflow_id,
-            inputs=workflow_inputs,
-            legacy_config=legacy_config,
-            progress_callback=wrapped_progress_callback  # 使用包装的回调
-        )
+
+        # 🔑 执行轨迹单次开启：如果任务输入指定 enable_trace=true，临时全局开启
+        # 注意：不能用线程本地变量，因为分析师在并行子线程执行，读不到主线程的标记
+        def _execute_with_trace_context():
+            from app.core.config import settings
+            old_value = settings.AGENT_EXECUTION_TRACE_ENABLED
+            if task.task_params.get("enable_trace"):
+                settings.AGENT_EXECUTION_TRACE_ENABLED = True
+            try:
+                return workflow_api.execute(
+                    workflow_id=workflow_id,
+                    inputs=workflow_inputs,
+                    legacy_config=legacy_config,
+                    progress_callback=wrapped_progress_callback,
+                    task_id=task.task_id,
+                )
+            finally:
+                settings.AGENT_EXECUTION_TRACE_ENABLED = old_value
+
+        result = await asyncio.to_thread(_execute_with_trace_context)
 
         # 检查执行结果
         if not result.get("success"):
@@ -674,7 +706,10 @@ class UnifiedAnalysisEngine:
         config,
         progress_callback: Optional[Callable] = None
     ) -> Dict[str, Any]:
-        """通过旧引擎执行（TradingAgentsGraph）
+        """通过旧引擎执行（TradingAgentsGraph）— 已停用
+
+        v3.0 起旧版 legacy 引擎已停用，所有入口已封堵。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
 
         Args:
             task: 任务对象
@@ -683,7 +718,17 @@ class UnifiedAnalysisEngine:
 
         Returns:
             执行结果
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
         """
+        raise RuntimeError(
+            "[已停用] UnifiedAnalysisEngine._execute_via_legacy 已停用，"
+            "任务 %s 应改用 workflow 引擎执行。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+            % getattr(task, "task_id", "<unknown>")
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         self.logger.info(f"🔄 使用旧引擎执行: TradingAgentsGraph")
 
         # 只支持股票分析任务
