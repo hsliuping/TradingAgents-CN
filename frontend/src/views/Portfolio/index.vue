@@ -21,6 +21,16 @@
       </div>
     </div>
 
+    <!-- 合规免责声明 -->
+    <el-alert
+      title="本功能仅为个人持仓管理工具"
+      type="info"
+      description="持仓数据、盈亏统计和操作建议均由您自行录入或同步，系统仅做记录与展示，不构成任何投资建议。实际投资决策请结合多方信息独立判断。"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 16px;"
+    />
+
     <!-- 主 Tab 页：用户持仓 vs 模拟持仓 -->
     <el-tabs v-model="activeTab" type="card" class="main-tabs" @tab-change="handleTabChange">
       <!-- ==================== 用户持仓 Tab ==================== -->

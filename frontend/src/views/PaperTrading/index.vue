@@ -25,7 +25,7 @@
       </template>
       <div style="font-size: 13px; line-height: 1.8;">
         <p style="margin: 0 0 8px 0;">
-          <strong>1. 模拟性质：</strong>本功能为模拟交易工具，使用虚拟资金，不涉及真实资金交易，仅供学习和练习使用。
+          <strong>1. 模拟性质：</strong>本功能为模拟交易工具，使用虚拟资金，不涉及真实资金交易，仅供学习和练习使用，不构成任何投资建议。
         </p>
         <p style="margin: 0 0 8px 0;">
           <strong>2. 数据延迟：</strong>模拟交易使用的行情数据可能存在延迟，与实际市场行情存在差异，成交价格和时机仅供参考。

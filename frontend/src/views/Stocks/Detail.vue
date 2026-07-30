@@ -1741,10 +1741,10 @@ const STOCK_REPORT_MODULES = [
   { key: 'fundamentals_report', title: '基本面研究', desc: '财务数据、估值、行业地位' },
   { key: 'news_report', title: '新闻研究', desc: '近期公告、行业新闻、事件驱动' },
   { key: 'sentiment_report', title: '情绪分析', desc: '社交媒体舆情、机构观点' },
-  { key: 'trader_investment_plan', title: '研究整合意见', desc: '多空辩论结论 + 操作观点' },
-  { key: 'research_team_decision', title: '研究团队结论', desc: '多空研究员辩论后的团队决策' },
-  { key: 'risk_management_decision', title: '风险治理结论', desc: '风险边界 + 仓位建议' },
-  { key: 'final_trade_decision', title: '综合研究结论', desc: '最终研究观点汇总' },
+  { key: 'trader_investment_plan', title: '研究整合意见', desc: '多情景研究结论 + 研究观察' },
+  { key: 'research_team_decision', title: '研究团队结论', desc: '多情景研究后的团队研究观察汇总' },
+  { key: 'risk_management_decision', title: '风险审阅结论', desc: '风险边界 + 后续观察' },
+  { key: 'final_trade_decision', title: '综合研究结论', desc: '最终研究观察汇总' },
 ]
 
 /** 初始化股票主题：创建/获取主题 + 加载历史消息 + 自动关联报告 */

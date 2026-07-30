@@ -726,7 +726,7 @@
                   </el-option>
                 </el-option-group>
               </el-select>
-              <div class="setting-description">用于研究管理者综合决策、风险管理者最终评估，推理能力强。可从所有已启用供应商的模型中选择</div>
+              <div class="setting-description">用于研究整合员综合决策、风险评估师最终评估，推理能力强。可从所有已启用供应商的模型中选择</div>
             </el-form-item>
 
             <el-form-item label="深度推理模型">

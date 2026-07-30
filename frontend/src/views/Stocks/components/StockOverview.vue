@@ -96,8 +96,8 @@
       </button>
       <button class="action-btn" @click="$emit('goTradeReview')">
         <span class="icon">📈</span>
-        <span class="title">交易复盘</span>
-        <span class="desc">回顾历史交易决策</span>
+        <span class="title">操作复盘</span>
+        <span class="desc">回顾历史操作决策</span>
       </button>
       <button class="action-btn" @click="$emit('paperTrading')">
         <span class="icon">📊</span>

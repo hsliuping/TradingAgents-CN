@@ -90,7 +90,7 @@ export const advancedCourseCategories: CourseCategory[] = [
       },
       { 
         id: 'lesson-8', 
-        title: '第8课：多空辩论的阅读与研究分歧整理', 
+        title: '第8课：多情景研究的阅读与研究分歧整理', 
         file: 'lesson-08-timing-multi-agent-debate.md', 
         order: 8 
       }

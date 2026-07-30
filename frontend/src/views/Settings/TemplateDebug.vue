@@ -1034,8 +1034,8 @@ const formatAgentCategory = (value?: DebugAgentInfo['category']): string => {
     analyst: '分析师',
     researcher: '研究员',
     risk: '风险',
-    manager: '经理',
-    trader: '交易员',
+    manager: '管理',
+    trader: '研究整合员',
     post_processor: '后处理'
   }
   return labels[value || 'analyst'] || (value || 'analyst')

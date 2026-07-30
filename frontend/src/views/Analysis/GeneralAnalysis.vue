@@ -630,16 +630,16 @@
             </el-collapse>
           </el-card>
 
-          <!-- 决策信息 -->
+          <!-- 研究结论信息 -->
           <el-card v-if="detailData.result?.decision" shadow="never" class="detail-section">
             <template #header>
               <div class="detail-card-header">
                 <el-icon><Tickets /></el-icon>
-                <span>决策信息</span>
+                <span>研究结论信息</span>
               </div>
             </template>
             <el-descriptions :column="2" border>
-              <el-descriptions-item label="操作建议">
+              <el-descriptions-item label="研究结论倾向">
                 <el-tag :type="getDecisionColor(detailData.result.decision.action)">
                   {{ detailData.result.decision.action || '—' }}
                 </el-tag>
@@ -652,7 +652,7 @@
               </el-descriptions-item>
               <el-descriptions-item
                 v-if="detailData.result.decision.reasoning"
-                label="决策理由"
+                label="研究依据"
                 :span="2"
               >
                 {{ detailData.result.decision.reasoning }}

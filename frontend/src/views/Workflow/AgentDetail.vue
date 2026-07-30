@@ -759,9 +759,9 @@ const createWorkflowTemplateFromDefault = async () => {
 const categoryMap: Record<string, string> = {
   analyst: '分析师',
   researcher: '研究员',
-  trader: '交易员',
+  trader: '研究整合员',
   risk: '风控管理',
-  manager: '管理者',
+  manager: '管理',
   post_processor: '后处理器'
 }
 

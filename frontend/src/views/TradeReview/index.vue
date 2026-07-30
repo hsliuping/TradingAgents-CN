@@ -11,6 +11,16 @@
       </div>
     </div>
 
+    <!-- 合规免责声明 -->
+    <el-alert
+      title="本功能仅为学习研究与个人复盘工具"
+      type="info"
+      description="复盘结论基于您自己的交易记录生成，用于反思和学习，不构成任何投资建议。未来操作请结合多方信息独立判断。"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 16px;"
+    />
+
     <!-- 复盘类型切换 -->
     <el-tabs v-model="reviewSource" type="card" class="source-tabs" @tab-change="handleSourceChange">
       <el-tab-pane label="持仓操作复盘" name="position">

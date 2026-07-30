@@ -7,9 +7,9 @@
             <el-option-group label="v2.0 Agents">
               <el-option label="分析师 v2.0" value="analysts_v2" />
               <el-option label="研究员 v2.0" value="researchers_v2" />
-              <el-option label="辩手 v2.0" value="debators_v2" />
-              <el-option label="管理者 v2.0" value="managers_v2" />
-              <el-option label="交易员 v2.0" value="trader_v2" />
+              <el-option label="风险多情景研究 v2.0" value="debators_v2" />
+              <el-option label="研究/风险评估师 v2.0" value="managers_v2" />
+              <el-option label="研究整合员 v2.0" value="trader_v2" />
               <el-option label="复盘分析师 v2.0" value="reviewers_v2" />
               <el-option label="仓位分析 v2.0" value="position_analysis_v2" />
               <el-option label="后处理器 v2.0" value="post_processors_v2" />
@@ -303,19 +303,12 @@ const editAgentMeta = ref<{ agent_type?: string; agent_name?: string }>({})
 
 const agentTypeMap: Record<string, string> = {
   // v1.0
-  //analysts: '分析师 v1.0',
-  //researchers: '研究员 v1.0',
-  //debators: '辩手 v1.0',
-  //managers: '管理者 v1.0',
-  //trader: '交易员 v1.0',
-  //reviewers: '复盘分析师 v1.0',
-  //position_analysis: '仓位分析 v1.0',
   // v2.0
   analysts_v2: '独立分析师 v2.0',
-  researchers_v2: '看涨看跌研究员 v2.0',
-  debators_v2: '风险分析 v2.0',
-  managers_v2: '研究/风险管理者 v2.0',
-  trader_v2: '交易员 v2.0',
+  researchers_v2: '积极/谨慎证据研究员 v2.0',
+  debators_v2: '风险多情景研究 v2.0',
+  managers_v2: '研究/风险评估师 v2.0',
+  trader_v2: '研究整合员 v2.0',
   reviewers_v2: '复盘分析 v2.0',
   position_analysis_v2: '仓位分析 v2.0',
   post_processors_v2: '后处理器 v2.0',
@@ -345,14 +338,14 @@ const agentNameMap: Record<string, string> = {
   social_analyst_v2: '社交媒体分析师 v2.0',
   sector_analyst_v2: '板块分析师 v2.0',
   index_analyst_v2: '大盘分析师 v2.0',
-  bull_researcher_v2: '看涨研究员 v2.0',
-  bear_researcher_v2: '看跌研究员 v2.0',
-  research_manager_v2: '研究经理 v2.0',
-  risk_manager_v2: '风险管理者 v2.0',
-  trader_v2: '交易员 v2.0',
-  risky_analyst_v2: '激进风险分析师 v2.0',
-  safe_analyst_v2: '保守风险分析师 v2.0',
-  neutral_analyst_v2: '中性风险分析师 v2.0',
+  bull_researcher_v2: '积极证据研究员 v2.0',
+  bear_researcher_v2: '谨慎证据研究员 v2.0',
+  research_manager_v2: '研究整合员 v2.0',
+  risk_manager_v2: '风险评估师 v2.0',
+  trader_v2: '研究整合员 v2.0',
+  risky_analyst_v2: '高弹性情景分析师 v2.0',
+  safe_analyst_v2: '防御情景分析师 v2.0',
+  neutral_analyst_v2: '基准情景分析师 v2.0',
   timing_analyst_v2: '时机分析师 v2.0',
   position_analyst_v2: '仓位分析师 v2.0',
   emotion_analyst_v2: '情绪分析师 v2.0',
@@ -361,7 +354,7 @@ const agentNameMap: Record<string, string> = {
   pa_technical_v2: '技术面分析师 v2.0',
   pa_fundamental_v2: '基本面分析师 v2.0',
   pa_risk_v2: '风险评估师 v2.0',
-  pa_advisor_v2: '操作建议师 v2.0',
+  pa_advisor_v2: '持仓研究观察员 v2.0',
   // 筹码分布 v2.0
   chip_distribution_analyst_v2: '筹码分布分析师 v2.0',
   // 后处理器 v2.0
