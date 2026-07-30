@@ -430,12 +430,16 @@ def _convert_investment_json_to_markdown(json_obj: Dict[str, Any]) -> str:
     logger.info(f"🔄 [研究结论转换] action: {action}")
     if action:
         action_map = {
-            "买入": "🟢 看多",
-            "持有": "🟡 中性",
-            "卖出": "🔴 看空",
-            "看涨": "🟢 看多",
-            "中性": "🟡 中性",
-            "看跌": "🔴 看空",
+            # 新合规术语（乐观/审慎/中性）优先
+            "乐观": "🟢 乐观",
+            "审慎": "🟡 审慎",
+            "中性": "⚪ 中性",
+            # 旧市场观点术语 + 旧交易指令（兼容存量数据，映射为新合规表述）
+            "买入": "🟢 乐观",
+            "持有": "⚪ 中性",
+            "卖出": "🟡 审慎",
+            "看涨": "🟢 乐观",
+            "看跌": "🟡 审慎",
         }
         action_display = action_map.get(action, action)
         lines.append(f"## 💡 研究观点\n\n**观点**: {action_display}\n\n")
@@ -578,12 +582,16 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         logger.info(f"🔄 [最终研究结论转换] action: {action}")
         if action:
             action_map = {
-                "买入": "🟢 看多",
-                "持有": "🟡 中性",
-                "卖出": "🔴 看空",
-                "看涨": "🟢 看多",
-                "中性": "🟡 中性",
-                "看跌": "🔴 看空",
+                # 新合规术语（乐观/审慎/中性）优先
+                "乐观": "🟢 乐观",
+                "审慎": "🟡 审慎",
+                "中性": "⚪ 中性",
+                # 旧市场观点术语 + 旧交易指令（兼容存量数据，映射为新合规表述）
+                "买入": "🟢 乐观",
+                "持有": "⚪ 中性",
+                "卖出": "🟡 审慎",
+                "看涨": "🟢 乐观",
+                "看跌": "🟡 审慎",
             }
             action_display = action_map.get(action, action)
             lines.append(f"- **研究观点**: {action_display}\n")
