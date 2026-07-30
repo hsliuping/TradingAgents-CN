@@ -5,7 +5,7 @@
 - pa_technical: 技术面分析师 (v1 & v2)
 - pa_fundamental: 基本面分析师 (v1 & v2)
 - pa_risk: 风险评估师 (v1 & v2)
-- pa_advisor: 操作建议师 (v1 & v2)
+- pa_advisor: 持仓研究观察员 (v1 & v2)
 """
 
 # v1.0 Agents (基于BaseAgent)

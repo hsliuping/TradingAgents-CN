@@ -1437,7 +1437,7 @@ class WorkflowBuilder:
             investment_plan: Annotated[str, keep_non_empty]
             trader_investment_plan: Annotated[str, keep_non_empty]
 
-            # 最终决策
+            # 最终研究结论
             final_decision: Annotated[str, keep_non_empty]
             risk_assessment: Annotated[str, keep_non_empty]
             final_trade_decision: Annotated[str, keep_non_empty]
@@ -2211,7 +2211,7 @@ class WorkflowBuilder:
             # 研究员
             "bull_researcher": ("tradingagents.agents.researchers.bull_researcher", "create_bull_researcher", "bull_memory"),
             "bear_researcher": ("tradingagents.agents.researchers.bear_researcher", "create_bear_researcher", "bear_memory"),
-            # 交易员
+            # 研究整合员
             "trader": ("tradingagents.agents.trader.trader", "create_trader", "trader_memory"),
             # 管理者
             "research_manager": ("tradingagents.agents.managers.research_manager", "create_research_manager", "invest_judge_memory"),

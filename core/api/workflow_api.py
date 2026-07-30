@@ -308,7 +308,7 @@ def _build_stock_analysis_input_config(allow_etf: bool = False) -> Dict[str, Any
                 "type": "number",
                 "required": False,
                 "default": 2,
-                "description": "看涨/看跌分析师辩论的最大轮数",
+                "description": "积极/谨慎情景研究的最大轮数",
                 "placeholder": "",
                 "options": None, "option_labels": None,
                 "min": 1, "max": 10, "group": "高级参数", "order": 7,

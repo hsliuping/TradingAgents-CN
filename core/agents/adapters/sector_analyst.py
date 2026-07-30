@@ -55,7 +55,7 @@ class SectorAnalystAgent(BaseAgent):
 - 板块热度评估：热门/一般/冷门
 - 轮动方向：资金流入/流出/稳定
 - 个股位置：龙头/第二梯队/跟风
-- 投资建议：结合板块趋势给出建议
+- 研究观察：结合板块趋势给出研究观察
 """
     
     def __init__(self, config: Optional[AgentConfig] = None):

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 TRADER_COMPLIANCE_PROMPT = """【合规性约束·必须严格遵守】
 1. 禁止使用 "看涨" / "看跌" / "买入" / "卖出" / "加仓" / "减仓" / "持有" / "清仓" 等交易指令或市场观点术语。
 2. 统一使用 "乐观" / "审慎" / "中性" 表达研究结论倾向（"乐观/审慎/中性" 表达的是研究倾向，不构成交易建议）。
-3. 禁止给出具体目标价或止损价，不得延伸为价格区间、上涨/下跌空间、风险收益比或操作建议。
+3. 禁止给出具体目标价或风险关注价，不得延伸为价格区间、上涨/下跌空间、风险收益比或操作建议。
 4. 禁止承诺收益或保证盈利，必须提示风险。
 5. 所有结论必须严格基于提供的报告内容，不得补造信息或引入模型内部知识。
 
@@ -127,7 +127,7 @@ class TraderV2(TraderAgent):
         category=AgentCategory.TRADER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
-        default_tools=[],  # 交易员不需要工具
+        default_tools=[],  # 研究整合员不需要工具
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
@@ -211,7 +211,7 @@ class TraderV2(TraderAgent):
         if prompt:
             prompt = TRADER_COMPLIANCE_PROMPT + prompt
             logger.info(f"📝 系统提示词长度: {len(prompt)} 字符（含合规约束）")
-            logger.debug("✅ 从模板系统获取交易员系统提示词（已前置合规约束）")
+            logger.debug("✅ 从模板系统获取研究整合员系统提示词（已前置合规约束）")
             return prompt
 
         logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
@@ -228,15 +228,15 @@ class TraderV2(TraderAgent):
 
 ## 分析原则
 
-    - **基于研究结论**：以研究经理的综合研究结论和风险治理结论为主线组织内容
-    - **不扩展为交易计划**：不得输出买卖、加减仓、仓位比例、目标价、价格区间、止损止盈或执行节奏
+    - **基于研究结论**：以研究经理的综合研究结论和风险审阅结论为主线组织内容
+    - **不扩展为交易计划**：不得输出买卖、加减仓、仓位比例、目标价、价格区间、风险关注与收益关注价位或执行节奏
     - **客观呈现证据**：清晰说明支持判断的依据、关键不确定性与后续观察事项
     - **保持用户可读性**：使用简洁中文，不堆叠术语，不制造未提供的信息
 
 ## 重要说明
 
     - **基于已有数据**：你只能使用提供的分析报告与上游研究结论生成用户版研究简报
-    - **风险治理已在上游完成**：本阶段负责整合表达，不再重新生成交易计划或风险控制方案
+    - **风险审阅已在上游完成**：本阶段负责整合表达，不再重新生成交易计划或风险控制方案
     - **不引入外部推断**：不得使用模型内部知识、材料外信息或额外价格推演补足结论
 
 **免责声明**：
@@ -476,7 +476,7 @@ class TraderV2(TraderAgent):
             return str(report) if report else ""
         
         # 准备模板变量（参考 research_manager_v2 的实现）
-        # 🔑 注意：风险治理已在上游完成，本阶段负责整合呈现综合研究结论
+        # 🔑 注意：风险审阅已在上游完成，本阶段负责整合呈现综合研究结论
         template_variables = {
             "ticker": ticker,
             "company_name": company_name,
@@ -515,7 +515,7 @@ class TraderV2(TraderAgent):
         )
         
         if prompt:
-            logger.info(f"✅ 从模板系统获取交易员 v2.0 用户提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取研究整合员 v2.0 用户提示词 (长度: {len(prompt)})")
             logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
             return prompt
         
@@ -577,7 +577,7 @@ class TraderV2(TraderAgent):
 5. **资料边界说明**：如果报告未提供关键信息，必须明确指出。
 
 **重要提示**：
-- 不得输出买卖、加减仓、仓位比例、目标价、价格区间、止损止盈或执行节奏
+- 不得输出买卖、加减仓、仓位比例、目标价、价格区间、风险关注与收益关注价位或执行节奏
 - 可以解释价格、估值和财务数据如何影响研究判断，但不得扩展成操作建议
 - 必须使用 {currency_name}（{currency_symbol}）作为货币单位
 - 语言要让普通用户看得懂，不得补造材料外信息

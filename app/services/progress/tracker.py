@@ -150,25 +150,25 @@ class RedisProgressTracker:
         rounds = self._get_debate_rounds()
         debate_weight = 0.25 / (3 + rounds)
         steps.extend([
-            AnalysisStep("🐂 看涨研究员", "基于分析师报告构建买入论据", "pending", debate_weight),
-            AnalysisStep("🐻 看跌研究员", "识别潜在风险和问题", "pending", debate_weight),
+            AnalysisStep("🐂 积极证据研究员", "基于分析师报告构建乐观解读的研究证据", "pending", debate_weight),
+            AnalysisStep("🐻 谨慎证据研究员", "基于分析师报告构建审慎解读的研究证据", "pending", debate_weight),
         ])
         for i in range(rounds):
-            steps.append(AnalysisStep(f"🎯 研究辩论 第{i+1}轮", "多头空头研究员深度辩论", "pending", debate_weight))
-        steps.append(AnalysisStep("👔 研究经理", "综合辩论结果，形成研究共识", "pending", debate_weight))
+            steps.append(AnalysisStep(f"🎯 多情景研究 第{i+1}轮", "多情景研究视角深度对比", "pending", debate_weight))
+        steps.append(AnalysisStep("👔 研究整合员", "综合多情景研究，形成研究观察汇总", "pending", debate_weight))
         # 4) 研究整合阶段 (8%)
         steps.append(AnalysisStep("🧩 研究整合员汇总", "基于研究结果整理研究整合意见与观察清单", "pending", 0.08))
         # 5) 风险管理团队阶段 (15%)
         risk_weight = 0.15 / 4
         steps.extend([
-            AnalysisStep("🔥 激进风险评估", "从激进角度评估投资风险", "pending", risk_weight),
-            AnalysisStep("🛡️ 保守风险评估", "从保守角度评估投资风险", "pending", risk_weight),
-            AnalysisStep("⚖️ 中性风险评估", "从中性角度评估投资风险", "pending", risk_weight),
-            AnalysisStep("🎯 风险经理", "综合风险评估，制定风险控制策略", "pending", risk_weight),
+            AnalysisStep("🔥 高弹性情景研究", "从高弹性情景视角研究潜在收益空间", "pending", risk_weight),
+            AnalysisStep("🛡️ 防御情景研究", "从防御情景视角研究资本保护因素", "pending", risk_weight),
+            AnalysisStep("⚖️ 基准情景研究", "从基准情景视角平衡多种研究视角", "pending", risk_weight),
+            AnalysisStep("🎯 风险评估师", "综合风险研究观察，形成风险审阅结论", "pending", risk_weight),
         ])
-        # 6) 最终决策阶段 (7%)
+        # 6) 最终研究结论阶段 (7%)
         steps.extend([
-            AnalysisStep("📡 信号处理", "处理所有分析结果，生成交易信号", "pending", 0.04),
+            AnalysisStep("📡 结果处理", "整理所有研究观察，生成研究报告", "pending", 0.04),
             AnalysisStep("📊 生成报告", "整理分析结果，生成完整报告", "pending", 0.03),
         ])
         return steps

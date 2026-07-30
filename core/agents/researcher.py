@@ -1,7 +1,7 @@
 """
 研究员Agent基类
 
-用于实现研究员Agent（看涨研究员、看跌研究员等）
+用于实现研究员Agent（积极证据研究员、谨慎证据研究员等）
 v2.0 新增：基于配置的研究员Agent架构
 """
 
@@ -484,15 +484,15 @@ class ResearcherAgent(BaseAgent):
     ) -> None:
         """辩论反思提炼（v3.6.0 项8）。
 
-        在多空辩论 / 风险辩论达到最大轮数后触发，把辩论历史和最终裁决
+        在多情景研究 / 风险审阅达到最大轮数后触发，把多情景研究历史和最终裁决
         提炼为结构化教训（reasoning/improvement/summary/query），写入
         AGENT_EXPERIENCE scope，memory_kind=debate_lesson。
 
-        下次同股票分析时，_get_memory_context 可召回辩论教训，
-        让辩论从"对抗"升级为"积累"。
+        下次同股票分析时，_get_memory_context 可召回多情景研究教训，
+        让多视角对比从"对抗"升级为"积累"。
 
         降级策略：
-        - LLM 超时/返回非 JSON → fallback 写入辩论历史摘要（reflection_success=False）
+        - LLM 超时/返回非 JSON → fallback 写入研究历史摘要（reflection_success=False）
         - mem0 不可用 → 跳过
         - 任何异常 → 不阻塞主流程
         """

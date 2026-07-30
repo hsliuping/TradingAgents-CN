@@ -36,22 +36,22 @@ class ProgressLogHandler(logging.Handler):
             r"社交媒体分析师.*开始|开始.*社交媒体分析|情绪.*分析": "💬 社交媒体分析师正在分析",
 
             # 研究团队阶段
-            r"看涨研究员|多头研究员|bull.*researcher": "🐂 看涨研究员构建论据",
-            r"看跌研究员|空头研究员|bear.*researcher": "🐻 看跌研究员识别风险",
-            r"研究.*辩论|辩论.*开始|debate.*start": "🎯 研究辩论进行中",
-            r"研究经理|research.*manager": "👔 研究经理形成共识",
+            r"看涨研究员|多头研究员|bull.*researcher|积极证据研究员": "🐂 积极证据研究员构建论据",
+            r"看跌研究员|空头研究员|bear.*researcher|谨慎证据研究员": "🐻 谨慎证据研究员识别风险",
+            r"研究.*辩论|辩论.*开始|debate.*start|多情景研究": "🎯 多情景研究进行中",
+            r"研究经理|research.*manager|研究整合员": "👔 研究整合员汇总",
 
             # 研究整合阶段
             r"交易员.*决策|trader.*decision|制定.*交易策略|研究整合员.*汇总|研究整合.*意见": "🧩 研究整合员汇总",
 
             # 风险管理阶段
-            r"激进.*风险|risky.*risk": "🔥 激进风险评估",
-            r"保守.*风险|conservative.*risk": "🛡️ 保守风险评估",
-            r"中性.*风险|neutral.*risk": "⚖️ 中性风险评估",
-            r"风险经理|risk.*manager": "🎯 风险经理制定策略",
+            r"激进.*风险|risky.*risk|高弹性情景": "🔥 高弹性情景研究",
+            r"保守.*风险|conservative.*risk|防御情景": "🛡️ 防御情景研究",
+            r"中性.*风险|neutral.*risk|基准情景": "⚖️ 基准情景研究",
+            r"风险经理|risk.*manager|风险评估师": "🎯 风险评估师形成结论",
 
             # 最终阶段
-            r"信号处理|signal.*process": "📡 信号处理",
+            r"信号处理|signal.*process|结果处理": "📡 结果处理",
             r"生成.*报告|report.*generat": "📊 生成研究报告",
             r"分析.*完成|analysis.*complet": "✅ 研究完成",
         }

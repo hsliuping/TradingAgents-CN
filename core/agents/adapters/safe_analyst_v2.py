@@ -98,7 +98,7 @@ class SafeAnalystV2(ResearcherAgent):
         ],
         requires_tools=False,
         output_field="safe_opinion",
-        report_label="【保守风险评估】",
+        report_label="【防御情景研究】",
         workflow_stage="risk",
         growth_role="reviewer",
         growth_outputs=["safe_opinion"],

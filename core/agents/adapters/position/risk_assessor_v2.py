@@ -404,10 +404,10 @@ class RiskAssessorV2(ResearcherAgent):
             "fundamental_analysis": (fundamental_analysis[:800] if isinstance(fundamental_analysis, str) and len(fundamental_analysis) > 800 else fundamental_analysis) if fundamental_analysis else "",
         }
         
-        # 如果有缓存，添加风险经理的决策报告（risk_management_decision）
+        # 如果有缓存，添加风险评估师的决策报告（risk_management_decision）
         if has_cache:
             reports_data = stock_report.get("reports", {})
-            # 🔧 修复：使用正确的字段名 risk_management_decision（风险经理的决策报告）
+            # 🔧 修复：使用正确的字段名 risk_management_decision（风险评估师的决策报告）
             risk_management_decision = reports_data.get("risk_management_decision", "")
             variables["risk_report"] = risk_management_decision  # 模板中使用 risk_report 变量名
             variables["risk_management_decision"] = risk_management_decision  # 同时提供完整字段名

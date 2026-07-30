@@ -11,7 +11,7 @@ class AgentCategory(str, Enum):
     """智能体类别"""
     ANALYST = "analyst"       # 分析师
     RESEARCHER = "researcher"  # 研究员
-    TRADER = "trader"         # 交易员
+    TRADER = "trader"         # 研究整合员
     RISK = "risk"             # 风险评估
     MANAGER = "manager"       # 管理者
     POST_PROCESSOR = "post_processor"  # 后处理器
@@ -491,7 +491,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
     "timing_analyst": AgentMetadata(
         id="timing_analyst",
         name="时机研究师",
-        description="分析入场与退出时机，评估交易时机选择的合理性（不构成投资建议）",
+        description="分析入场与退出时机，评估交易时机选择的研究观察（不构成投资建议）",
         category=AgentCategory.ANALYST,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="⏰",
@@ -519,7 +519,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
     "position_analyst": AgentMetadata(
         id="position_analyst",
         name="仓位分析师",
-        description="分析仓位控制和加减仓策略的合理性",
+        description="分析仓位管理的研究观察，不输出加减仓等执行建议",
         category=AgentCategory.ANALYST,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="📊",
@@ -667,7 +667,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
     "pa_risk": AgentMetadata(
         id="pa_risk",
         name="持仓风险评估师",
-        description="评估持仓风险、设置止损止盈、分析仓位合理性",
+        description="评估持仓风险、分析仓位合理性、提供风险关注与收益关注参考",
         category=AgentCategory.ANALYST,
         maintenance_status=AgentMaintenanceStatus.DEPRECATED,  # 🔥 v1 已废弃，请使用 v2 版本
         icon="⚠️",

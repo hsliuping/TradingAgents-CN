@@ -173,7 +173,7 @@ async def trigger_batch_analysis(
     output_shape="text",
     preferred_for=["分析任务状态查询", "分析进度跟踪", "任务完成确认", "异步分析结果检查"],
     when_to_use="当用户想了解之前发起的分析任务是否完成、当前进度或失败原因时使用。",
-    returns="返回文本消息，包含任务状态、进度百分比、当前步骤和（如已完成）投资建议摘要。",
+    returns="返回文本消息，包含任务状态、进度百分比、当前步骤和（如已完成）研究结论倾向摘要。",
 )
 async def get_analysis_status(
     task_id: Annotated[str, "分析任务ID"],
@@ -200,7 +200,7 @@ async def get_analysis_status(
     if task.status == "completed" and task.result:
         recommendation = task.result.get("recommendation", "")
         if recommendation:
-            lines.append(f"- 投资建议: {recommendation[:200]}")
+            lines.append(f"- 研究结论倾向: {recommendation[:200]}")
     if task.status == "failed" and task.error_message:
         lines.append(f"- 错误: {task.error_message[:200]}")
     if task.execution_time > 0:

@@ -555,7 +555,7 @@ class WorkflowEngine:
             "risky_analyst_v2": (72, "⚡ 高弹性情景分析师正在审阅结论上修条件...", "高弹性情景分析师"),
             "safe_analyst_v2": (78, "🛡️ 防御情景分析师正在审阅脆弱点与关键风险...", "防御情景分析师"),
             "neutral_analyst_v2": (84, "⚖️ 基准情景分析师正在审阅基准情景与证据完整性...", "基准情景分析师"),
-            "risk_manager_v2": (90, "👔 风险管理者正在审阅研究结论稳健性...", "风险管理者"),
+            "risk_manager_v2": (90, "👔 风险评估师正在审阅研究结论稳健性...", "风险评估师"),
 
             # === v1.0 分析师节点（向后兼容）===
             "market_analyst": (15, "📈 市场分析师正在分析技术指标和市场趋势...", "市场分析师"),
@@ -565,20 +565,20 @@ class WorkflowEngine:
             "sentiment_analyst": (40, "💭 情绪分析师正在分析市场情绪...", "情绪分析师"),
 
             # === v1.0 研究团队 ===
-            "bull_researcher": (50, "🐂 多头研究员正在构建看多观点...", "多头研究员"),
-            "bear_researcher": (55, "🐻 空头研究员正在构建看空观点...", "空头研究员"),
+            "bull_researcher": (50, "🐂 乐观情景研究员正在构建偏乐观论证...", "乐观情景研究员"),
+            "bear_researcher": (55, "🐻 审慎情景研究员正在构建偏审慎论证...", "审慎情景研究员"),
             "research_manager": (60, "🔬 研究经理正在综合研究观点...", "研究经理"),
 
             # === v1.0 研究整合阶段 ===
             "trader": (70, "🧩 研究整合员正在汇总研究结论...", "研究整合员"),
 
             # === v1.0 风险管理团队 ===
-            "risky_analyst": (75, "⚡ 激进分析师正在评估高风险机会...", "激进分析师"),
-            "safe_analyst": (80, "🛡️ 保守分析师正在评估风险因素...", "保守分析师"),
+            "risky_analyst": (75, "⚡ 高弹性情景研究员正在评估上行空间...", "高弹性情景研究员"),
+            "safe_analyst": (80, "🛡️ 防御情景研究员正在评估下行风险...", "防御情景研究员"),
             "neutral_analyst": (82, "⚖️ 中性分析师正在平衡风险收益...", "中性分析师"),
-            "risk_manager": (90, "👔 风险管理者正在做最终决策...", "风险管理者"),
-            "risk_judge": (90, "👔 风险管理者正在做最终决策...", "风险管理者"),
-            "portfolio_manager": (90, "👔 投资组合经理正在做最终决策...", "投资组合经理"),
+            "risk_manager": (90, "👔 风险评估师正在形成最终研究结论...", "风险评估师"),
+            "risk_judge": (90, "👔 风险评估师正在形成最终研究结论...", "风险评估师"),
+            "portfolio_manager": (90, "👔 风险评估师正在做最终研究审阅...", "风险评估师"),
 
             # === 工作流控制节点 ===
             "start": (5, "🚀 开始分析...", "开始"),
@@ -593,15 +593,15 @@ class WorkflowEngine:
             "Fundamentals Analyst": (25, "💰 基本面分析师正在分析财务数据...", "基本面分析师"),
             "News Analyst": (35, "📰 新闻分析师正在分析相关新闻和事件...", "新闻分析师"),
             "Social Analyst": (40, "💬 社媒分析师正在分析社交媒体情绪...", "社媒分析师"),
-            "Bull Researcher": (50, "🐂 多头研究员正在构建看多观点...", "多头研究员"),
-            "Bear Researcher": (55, "🐻 空头研究员正在构建看空观点...", "空头研究员"),
+            "Bull Researcher": (50, "🐂 乐观情景研究员正在构建偏乐观论证...", "乐观情景研究员"),
+            "Bear Researcher": (55, "🐻 审慎情景研究员正在构建偏审慎论证...", "审慎情景研究员"),
             "Research Manager": (60, "🔬 研究经理正在综合研究观点...", "研究经理"),
             "Trader": (70, "🧩 研究整合员正在汇总研究结论...", "研究整合员"),
-            "Risky Analyst": (75, "⚡ 激进分析师正在评估高风险机会...", "激进分析师"),
-            "Safe Analyst": (80, "🛡️ 保守分析师正在评估风险因素...", "保守分析师"),
+            "Risky Analyst": (75, "⚡ 高弹性情景研究员正在评估上行空间...", "高弹性情景研究员"),
+            "Safe Analyst": (80, "🛡️ 防御情景研究员正在评估下行风险...", "防御情景研究员"),
             "Neutral Analyst": (82, "⚖️ 中性分析师正在平衡风险收益...", "中性分析师"),
-            "Risk Judge": (90, "👔 风险管理者正在做最终决策...", "风险管理者"),
-            "Portfolio Manager": (90, "👔 投资组合经理正在做最终决策...", "投资组合经理"),
+            "Risk Judge": (90, "👔 风险评估师正在形成最终研究结论...", "风险评估师"),
+            "Portfolio Manager": (90, "👔 风险评估师正在做最终研究审阅...", "风险评估师"),
         }
 
         # 忽略的节点（工具节点、消息清理节点等）
@@ -1126,8 +1126,8 @@ class WorkflowEngine:
             "risky_opinion": "🔥 高弹性情景观点",
             "safe_opinion": "🛡️ 防御情景观点",
             "neutral_opinion": "⚖️ 基准情景观点",
-            "risk_assessment": "⚠️ 风险治理结论",
-            "risk_management_decision": "⚠️ 风险治理结论",
+            "risk_assessment": "⚠️ 风险审阅结论",
+            "risk_management_decision": "⚠️ 风险审阅结论",
             "final_trade_decision": "📝 综合研究结论",
         }
         
@@ -1222,18 +1222,18 @@ class WorkflowEngine:
 
     def _generate_final_trade_decision(self, state: Dict[str, Any]) -> str:
         """
-        生成最终分析结果
+        生成最终研究结论
 
         综合以下内容：
-        1. investment_plan (研究经理的研究结论)
+        1. investment_plan (研究整合员的研究观察汇总)
         2. trader_investment_plan (研究整合员的整合意见)
-        3. risk_assessment (风险经理的风险治理结论)
+        3. risk_assessment (风险评估师的风险审阅结论)
 
         Args:
             state: 工作流执行状态
 
         Returns:
-            最终分析结果文本（Markdown 格式）
+            最终研究结论文本（Markdown 格式）
         """
         # 🔍 调试：打印 state 中的关键字段
         logger.debug(f"🔍 [WorkflowEngine] state 中的字段: {list(state.keys())}")
@@ -1268,7 +1268,7 @@ class WorkflowEngine:
             sections.append(f"## 🧩 研究整合意见\n\n{trader_plan}")
 
         if risk_assessment:
-            sections.append(f"## 🛡️ 风险治理结论\n\n{risk_assessment}")
+            sections.append(f"## 🛡️ 风险审阅结论\n\n{risk_assessment}")
 
         final_decision = "\n\n".join(sections)
         logger.info(f"✅ [WorkflowEngine] 生成 final_trade_decision，包含 {len(sections)} 个部分")

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class FinalTradeDecision(BaseModel):
-    """最终分析结果 schema"""
+    """最终研究结论 schema"""
     # 合规术语：乐观/审慎/中性（禁止使用"看涨/看跌/买入/卖出"等交易指令或市场观点术语）
     action: Literal["乐观", "审慎", "中性"]
     confidence: float = Field(ge=0, le=1)
@@ -37,7 +37,7 @@ class FinalTradeDecision(BaseModel):
 
 
 class RiskAssessmentOutput(BaseModel):
-    """风险治理结论 schema"""
+    """风险审阅结论 schema"""
     risk_level: Literal["低", "中", "高"]
     risk_score: float = Field(ge=0, le=1)
     reasoning: str
@@ -48,7 +48,7 @@ class RiskAssessmentOutput(BaseModel):
     final_trade_decision: FinalTradeDecision
 
 
-# 风险治理结论输出格式契约。
+# 风险审阅结论输出格式契约。
 # 按硬约束"system prompt 必须将格式要求放在最前面"，此常量会被前置到
 # _build_system_prompt 返回值的最前面，确保 LLM 优先看到格式与合规约束。
 RISK_ASSESSMENT_SCHEMA_PROMPT = """【输出格式契约·必须严格遵守】
@@ -113,18 +113,18 @@ except ImportError:
 @register_agent
 class RiskManagerV2(ManagerAgent):
     """
-    风险管理者 v2.0
+    风险评估师 v2.0
     
     功能：
-    - 主持风险辩论
-    - 综合多方风险观点
-    - 形成最终风险评估
+    - 主持风险稳健性审阅
+    - 综合多方风险研究证据
+    - 形成风险研究观察汇总（不构成投资建议）
     
     工作流程：
-    1. 读取投资计划和各方风险观点
-    2. 主持风险辩论（可选）
+    1. 读取研究计划和各方风险观点
+    2. 主持风险情景审阅（可选）
     3. 综合研判风险
-    4. 生成风险评估报告
+    4. 生成风险研究观察报告
     
     示例:
         from langchain_openai import ChatOpenAI
@@ -145,8 +145,8 @@ class RiskManagerV2(ManagerAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="risk_manager_v2",
-        name="风险管理者 v2.0",
-        description="主持稳健性审阅，综合多方观点，形成风险审阅后的综合研究结论",
+        name="风险评估师 v2.0",
+        description="主持稳健性审阅，综合多方观点，形成风险审阅后的综合研究结论（输出研究观察，不构成投资建议）",
         category=AgentCategory.MANAGER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -155,17 +155,17 @@ class RiskManagerV2(ManagerAgent):
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
             AgentInput(name="investment_plan", type="string", description="综合研究结论", source="state", state_field="investment_plan", producer_hint="research_manager_v2"),
-            AgentInput(name="risky_opinion", type="string", description="激进风险观点", required=False, source="state", state_field="risky_opinion", producer_hint="risky_analyst_v2"),
-            AgentInput(name="safe_opinion", type="string", description="保守风险观点", required=False, source="state", state_field="safe_opinion", producer_hint="safe_analyst_v2"),
-            AgentInput(name="neutral_opinion", type="string", description="中性风险观点", required=False, source="state", state_field="neutral_opinion", producer_hint="neutral_analyst_v2"),
+            AgentInput(name="risky_opinion", type="string", description="高弹性情景研究观察", required=False, source="state", state_field="risky_opinion", producer_hint="risky_analyst_v2"),
+            AgentInput(name="safe_opinion", type="string", description="防御情景研究观察", required=False, source="state", state_field="safe_opinion", producer_hint="safe_analyst_v2"),
+            AgentInput(name="neutral_opinion", type="string", description="基准情景研究观察", required=False, source="state", state_field="neutral_opinion", producer_hint="neutral_analyst_v2"),
         ],
         outputs=[
-            AgentOutput(name="risk_assessment", type="string", description="稳健性审阅与风险治理报告"),
-            AgentOutput(name="risk_debate_state", type="dict", description="风险辩论状态（包含 judge_decision）"),
+            AgentOutput(name="risk_assessment", type="string", description="稳健性审阅与风险审阅报告"),
+            AgentOutput(name="risk_debate_state", type="dict", description="风险多情景研究状态（包含 judge_decision）"),
         ],
         requires_tools=False,
         output_field="risk_assessment",
-        report_label="【风险治理结论 v2】",
+        report_label="【风险审阅结论 v2】",
         workflow_stage="manager",
         growth_role="optimizer",
         growth_outputs=["risk_assessment", "risk_debate_state", "final_trade_decision"],
@@ -244,22 +244,22 @@ class RiskManagerV2(ManagerAgent):
             else:
                 logger.warning("⚠️ 系统提示词可能不包含【输出格式要求】（可能使用旧版提示词）")
 
-            logger.debug(f"✅ 从模板系统获取风险管理者系统提示词")
+            logger.debug(f"✅ 从模板系统获取风险评估师系统提示词")
             return prompt
 
         logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
 
         # 默认提示词（合规版本）— 同样前置 schema 契约，保证 fallback 路径也受约束
-        return RISK_ASSESSMENT_SCHEMA_PROMPT + """你是一位风险管理者，负责综合各方稳健性审阅并形成风险治理结论。
+        return RISK_ASSESSMENT_SCHEMA_PROMPT + """你是一位风险评估师，负责综合各方稳健性审阅并形成风险审阅结论。
 
     **分析风格**: 客观、克制、以稳健性为核心，强调判断边界、约束条件、失效触发与后续观察。
 
 **核心职责**:
-    1. 综合激进、保守、中性三方的稳健性审阅意见。
+    1. 综合高弹性、防御、基准情景三方的稳健性审阅意见。
     2. 识别当前研究结论的关键风险、脆弱点与信息缺口。
     3. 说明哪些条件会支持结论上修、维持或下修。
-    4. 形成风险治理结论与后续观察重点。
-    5. 给出判断约束，而不是交易执行方案。
+    4. 形成风险审阅结论与后续观察重点。
+    5. 给出判断约束，而不是具体操作建议。
 
 **分析原则**:
     - 客观综合三方观点，基于证据说明当前结论是否足够稳健。
@@ -270,11 +270,11 @@ class RiskManagerV2(ManagerAgent):
 
 **工具使用指导**:
 
-    基于提供的风险观点与综合研究结论进行风险治理审阅。
+    基于提供的风险观点与综合研究结论进行风险审阅审阅。
     从稳健性角度评估所有风险信息。
 
 **免责声明**：
-    本风险治理结论仅供信息参考，不构成投资建议或交易承诺。请结合自身情况独立判断。"""
+    本风险审阅结论仅供信息参考，不构成投资建议或交易承诺。请结合自身情况独立判断。"""
 
     def _build_user_prompt(
         self,
@@ -314,9 +314,9 @@ class RiskManagerV2(ManagerAgent):
         neutral_opinion_str = str(neutral_opinion) if neutral_opinion else ""
         investment_plan_str = str(investment_plan) if investment_plan else ""
         
-        logger.info(f"🔥 激进观点类型: {type(risky_opinion)}, 长度: {len(risky_opinion_str)} 字符")
-        logger.info(f"🛡️ 保守观点类型: {type(safe_opinion)}, 长度: {len(safe_opinion_str)} 字符")
-        logger.info(f"⚖️ 中性观点类型: {type(neutral_opinion)}, 长度: {len(neutral_opinion_str)} 字符")
+        logger.info(f"🔥 高弹性情景观点类型: {type(risky_opinion)}, 长度: {len(risky_opinion_str)} 字符")
+        logger.info(f"🛡️ 防御情景观点类型: {type(safe_opinion)}, 长度: {len(safe_opinion_str)} 字符")
+        logger.info(f"⚖️ 基准情景观点类型: {type(neutral_opinion)}, 长度: {len(neutral_opinion_str)} 字符")
         logger.info(f"📋 投资计划类型: {type(investment_plan)}, 长度: {len(investment_plan_str)} 字符")
         
         # 获取公司名称
@@ -335,9 +335,9 @@ class RiskManagerV2(ManagerAgent):
         neutral_opinion_content = extract_content(inputs.get("neutral_opinion"))
         investment_plan_content = extract_content(inputs.get("investment_plan"))
         
-        logger.info(f"🔥 激进观点内容长度: {len(risky_opinion_content)} 字符")
-        logger.info(f"🛡️ 保守观点内容长度: {len(safe_opinion_content)} 字符")
-        logger.info(f"⚖️ 中性观点内容长度: {len(neutral_opinion_content)} 字符")
+        logger.info(f"🔥 高弹性情景观点内容长度: {len(risky_opinion_content)} 字符")
+        logger.info(f"🛡️ 防御情景观点内容长度: {len(safe_opinion_content)} 字符")
+        logger.info(f"⚖️ 基准情景观点内容长度: {len(neutral_opinion_content)} 字符")
         logger.info(f"📋 投资计划内容长度: {len(investment_plan_content)} 字符")
         
         # 准备模板变量
@@ -369,12 +369,12 @@ class RiskManagerV2(ManagerAgent):
         )
         
         if prompt:
-            logger.info(f"✅ 从模板系统获取风险管理者用户提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取风险评估师用户提示词 (长度: {len(prompt)})")
             return prompt
         
         # 降级：使用默认用户提示词
         logger.info("⚠️ 使用降级用户提示词")
-        return f"""请基于 {company_name}（{ticker}）的综合研究结论与三方稳健性审阅意见，形成风险治理结论：
+        return f"""请基于 {company_name}（{ticker}）的综合研究结论与三方稳健性审阅意见，形成风险审阅结论：
 
 📊 **基本信息**：
 - 股票代码：{ticker}
@@ -384,16 +384,16 @@ class RiskManagerV2(ManagerAgent):
     【风险审阅后的综合研究结论】
 {investment_plan_content}
 
-【激进风险观点】
+【高弹性情景研究观察】
 {risky_opinion_content}
 
-【保守风险观点】
+【防御情景研究观察】
 {safe_opinion_content}
 
-【中性风险观点】
+【基准情景研究观察】
 {neutral_opinion_content}
 
-【风险辩论总结】
+【多情景研究总结】
 {debate_summary or ''}
 
 请基于以上信息：
@@ -401,9 +401,9 @@ class RiskManagerV2(ManagerAgent):
 1. 提炼当前研究结论是否足够稳健。
 2. 说明关键风险、判断边界、结论上修或下修的触发条件。
 3. 给出后续观察事项与资料缺口。
-4. 明确不要直接给出交易决策、仓位安排、目标价、价格区间、止损止盈或执行节奏。
+4. 明确不要直接给出具体操作建议、仓位安排、目标价、价格区间、止损止盈或执行节奏。
 
-输出目标是形成风险治理结论，而不是交易建议。"""
+输出目标是形成风险审阅结论，而不是具体操作建议。"""
 
     def _get_required_inputs(self) -> List[str]:
         """
@@ -563,7 +563,7 @@ class RiskManagerV2(ManagerAgent):
         return {
             **result,
             "risk_debate_state": new_risk_state,
-            "final_trade_decision": final_trade_decision,  # ✅ 最终分析结果（含字典字段 + Markdown content）
+            "final_trade_decision": final_trade_decision,  # ✅ 最终研究结论（含字典字段 + Markdown content）
         }
 
     def _validate_risk_assessment(self, text: str) -> tuple:
@@ -773,9 +773,9 @@ class RiskManagerV2(ManagerAgent):
             格式化的 Markdown 字符串，每个字段分行显示
         """
         if not decision:
-            return "## 最终分析结果\n\n数据不足，无法生成交易决策。"
+            return "## 最终研究结论\n\n数据不足，无法生成研究结论。"
         
-        lines = ["## 最终分析结果\n"]
+        lines = ["## 最终研究结论\n"]
         
         # 字段映射（中文名称，合规版本）
         field_names = {
@@ -845,7 +845,7 @@ class RiskManagerV2(ManagerAgent):
         # 添加免责声明
         lines.append("\n**免责声明**：")
         lines.append("本分析报告仅供参考，不构成交易建议。所有市场观点、价格区间、风险评估均为分析参考，")
-        lines.append("不构成交易操作建议。投资有风险，决策需谨慎。投资者应根据自身情况，结合")
-        lines.append("专业投资顾问意见，独立做出投资决策。")
+        lines.append("不构成具体操作建议。投资有风险，决策需谨慎。投资者应根据自身情况，结合")
+        lines.append("专业投资顾问意见，独立做出投资判断。")
         
         return "\n".join(lines)

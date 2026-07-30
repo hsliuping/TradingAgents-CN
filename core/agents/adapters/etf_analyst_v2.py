@@ -119,7 +119,7 @@ class EtfAnalystAgentV2(BaseAgent):
 1. 调用 get_etf_fundamentals 获取 ETF 数据
 2. 分析净值、规模、跟踪指数、涨跌幅
 3. 评估跟踪误差、流动性风险
-4. 提供投资建议
+4. 提供研究观察
 
 禁止使用 PE/PB/ROE 分析 ETF。"""
 
@@ -142,7 +142,7 @@ class EtfAnalystAgentV2(BaseAgent):
 1. 净值与规模
 2. 跟踪指数表现
 3. 流动性评估
-4. 投资建议
+4. 研究观察
 禁止使用 PE/PB/ROE。"""
 
     def _generate_mock_report(self, ticker: str, trade_date: str) -> str:

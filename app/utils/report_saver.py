@@ -107,7 +107,7 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
         if neutral_content and len(neutral_content.strip()) > 10:
             reports['neutral_analyst'] = neutral_content.strip()
         
-        # 提取投资组合经理决策
+        # 提取风险评估师决策
         risk_decision = _extract_field(risk_state, 'judge_decision')
         if not risk_decision:
             risk_decision = str(risk_state) if risk_state else ""

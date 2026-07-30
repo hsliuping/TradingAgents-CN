@@ -105,7 +105,7 @@ class ActionAdvisorV2(ManagerAgent):
             AgentInput(name="risk_analysis", type="string", description="风险评估结果", required=False),
         ],
         outputs=[
-            AgentOutput(name="action_advice", type="string", description="持仓操作建议"),
+            AgentOutput(name="action_advice", type="string", description="持仓研究观察"),
         ],
         growth_role="optimizer",
         growth_outputs=["action_advice"],
@@ -284,10 +284,10 @@ class ActionAdvisorV2(ManagerAgent):
             if not inputs:
                 raise ValueError("No inputs available for decision making")
             
-            # 🔧 操作建议师只需要风格偏好（neutral/aggressive/conservative），不需要考虑缓存场景
+            # 🔧 持仓研究观察员只需要风格偏好（neutral/aggressive/conservative），不需要考虑缓存场景
             # 将 preference_id 设置到 state["context"] 中，确保 _build_system_prompt 和 _build_user_prompt 使用同一个 preference_id
             user_preference = state.get("user_preference", "neutral")
-            preference_id = user_preference  # 操作建议师只需要风格偏好，不需要缓存场景
+            preference_id = user_preference  # 持仓研究观察员只需要风格偏好，不需要缓存场景
             
             # 更新 state["context"] 中的 preference_id
             context = state.get("context")
@@ -304,7 +304,7 @@ class ActionAdvisorV2(ManagerAgent):
             
             # 将更新后的 context 设置回 state，确保后续方法都能使用
             state["context"] = context
-            logger.info(f"🔧 [操作建议师] 在 execute 中生成 preference_id: {preference_id}")
+            logger.info(f"🔧 [持仓研究观察员] 在 execute 中生成 preference_id: {preference_id}")
             
             # 3. 如果启用辩论，进行辩论
             if self.enable_debate:
@@ -328,7 +328,7 @@ class ActionAdvisorV2(ManagerAgent):
             logger.info(f"用户提示词: {user_prompt}")            
             
             if self._llm:
-                logger.info(f"📊 [ActionAdvisorV2] 调用LLM生成持仓分析观点...")
+                logger.info(f"📊 [ActionAdvisorV2] 调用LLM生成持仓研究观察...")
                 
                 # 打印用户提示词，检查是否包含JSON格式要求
                 logger.info(f"📊 [ActionAdvisorV2] 用户提示词长度: {len(user_prompt)}")
@@ -375,11 +375,11 @@ class ActionAdvisorV2(ManagerAgent):
             if self.enable_debate and hasattr(self, 'debate_history') and self.debate_history:
                 result[f"{self.agent_id}_debate_history"] = self.debate_history
 
-            logger.info(f"✅ [ActionAdvisorV2] 持仓分析观点师 {self.agent_id} 执行成功")
+            logger.info(f"✅ [ActionAdvisorV2] 持仓研究观察员 {self.agent_id} 执行成功")
             return result
 
         except Exception as e:
-            logger.error(f"持仓分析观点师 {self.agent_id} 执行失败: {e}", exc_info=True)
+            logger.error(f"持仓研究观察员 {self.agent_id} 执行失败: {e}", exc_info=True)
             # 返回错误状态（只返回新增的字段）
             output_key = self.output_field or f"{self.manager_type}_decision"
             return {
@@ -416,7 +416,7 @@ class ActionAdvisorV2(ManagerAgent):
         code = position_info.get("code", ticker)
         name = position_info.get("name", "N/A")
         
-        # 🔧 操作建议师只需要风格偏好（neutral/aggressive/conservative），不需要考虑缓存场景
+        # 🔧 持仓研究观察员只需要风格偏好（neutral/aggressive/conservative），不需要考虑缓存场景
         # preference_id 已经在 execute 方法中生成并设置到 state["context"] 中
         # 这里直接从 context 中获取，确保与 _build_system_prompt 使用同一个 preference_id
         context = state.get("context")
@@ -429,9 +429,9 @@ class ActionAdvisorV2(ManagerAgent):
             # 降级：如果没有 context，使用默认值（这种情况不应该发生）
             user_preference = state.get("user_preference", "neutral")
             preference_id = user_preference
-            logger.warning(f"⚠️ [操作建议师] context 不存在，使用降级 preference_id: {preference_id}")
+            logger.warning(f"⚠️ [持仓研究观察员] context 不存在，使用降级 preference_id: {preference_id}")
         
-        logger.info(f"🔧 [操作建议师] 从 context 获取 preference_id: {preference_id}")
+        logger.info(f"🔧 [持仓研究观察员] 从 context 获取 preference_id: {preference_id}")
         
         # 提取各维度分析（处理可能是字典的情况）
         def extract_content(value, default: str = "无分析"):
@@ -446,7 +446,7 @@ class ActionAdvisorV2(ManagerAgent):
         
         technical_raw = state.get("technical_analysis", "无技术面分析")
         fundamental_raw = state.get("fundamental_analysis", "无基本面分析")
-        risk_raw = state.get("risk_analysis", "无风险评估")
+        risk_raw = state.get("risk_analysis", "无风险审阅")
         
         # 提取内容并限制长度
         technical = _summarize_position_research_input(
@@ -494,24 +494,24 @@ class ActionAdvisorV2(ManagerAgent):
             # 从 state 中提取 context（已经包含 preference_id）
             context = state.get("context") if state else None
             
-            logger.info(f"🔧 [操作建议师] 传递 preference_id 到模板系统: {preference_id}")
+            logger.info(f"🔧 [持仓研究观察员] 传递 preference_id 到模板系统: {preference_id}")
 
             prompt = self._get_prompt_from_template(
                 agent_type="position_analysis_v2",  # 持仓分析Agent类型 v2.0（与工作流ID一致）
-                agent_name="pa_advisor_v2",    # 持仓操作建议师v2.0
+                agent_name="pa_advisor_v2",    # 持仓研究观察员v2.0
                 variables=variables,
                 context=context,  # context 已经包含 preference_id（只有风格偏好，没有缓存场景）
                 fallback_prompt=None
             )
             if prompt:
-                logger.info(f"✅ [操作建议师] 从数据库加载提示词模板 (风格: {preference_id}, 长度: {len(prompt)})")
+                logger.info(f"✅ [持仓研究观察员] 从数据库加载提示词模板 (风格: {preference_id}, 长度: {len(prompt)})")
                 return prompt
         except Exception as e:
-            logger.warning(f"⚠️ [操作建议师] 从数据库加载提示词失败: {e}，使用降级提示词")
+            logger.warning(f"⚠️ [持仓研究观察员] 从数据库加载提示词失败: {e}，使用降级提示词")
         
         # 🆕 计算各维度分析的权重（持仓分析场景）
-        # 持仓分析中，技术面、基本面、风险评估的权重可以根据持仓类型调整
-        # 默认权重：技术面40%、基本面30%、风险评估30%
+        # 持仓分析中，技术面、基本面、风险审阅的权重可以根据持仓类型调整
+        # 默认权重：技术面40%、基本面30%、风险审阅30%
         analysis_reports = {
             "technical_analysis": technical,
             "fundamental_analysis": fundamental,
@@ -530,7 +530,7 @@ class ActionAdvisorV2(ManagerAgent):
             weights = {
                 "technical_analysis": 0.40,   # 技术面 40%
                 "fundamental_analysis": 0.30,  # 基本面 30%
-                "risk_analysis": 0.30,        # 风险评估 30%
+                "risk_analysis": 0.30,        # 风险审阅 30%
             }
         elif len(selected_analyses) == 2:
             # 如果只有两个维度，平均分配
@@ -548,7 +548,7 @@ class ActionAdvisorV2(ManagerAgent):
         analysis_labels = {
             "technical_analysis": "技术面分析",
             "fundamental_analysis": "基本面分析",
-            "risk_analysis": "风险评估",
+            "risk_analysis": "风险审阅",
         }
         
         # 按权重排序
@@ -622,7 +622,7 @@ class ActionAdvisorV2(ManagerAgent):
         ],
         "risk_reminder": "主要风险提示"
     }},
-    "risk_assessment": "详细风险评估",
+    "risk_assessment": "详细风险审阅",
     "opportunity_assessment": "详细催化与改善条件",
     "specific_plan": {{
         "immediate_step": "下一步应优先核对的事实或披露",

@@ -143,7 +143,7 @@ def build_analysis_reflection_user_prompt(
 
     parts = [f"## 股票：{ticker}，分析日期：{analysis_date or '未知'}"]
     if stance:
-        stance_label = {"bull": "看涨", "bear": "看跌", "risky": "激进", "safe": "防御", "neutral": "中立"}.get(stance, stance)
+        stance_label = {"bull": "乐观", "bear": "审慎", "risky": "高弹性", "safe": "防御", "neutral": "基准情景"}.get(stance, stance)
         parts.append(f"### 研究立场：{stance_label}")
     parts.append(f"### 分析报告\n{content}")
 
@@ -156,34 +156,34 @@ def build_debate_reflection_user_prompt(
     conclusion: str,
     debate_type: str = "",
 ) -> str:
-    """构建辩论反思的 user prompt。
+    """构建多情景研究反思的 user prompt。
 
     Args:
         ticker: 股票代码
-        debate_history: 辩论历史文本
+        debate_history: 多情景研究历史文本
         conclusion: 最终裁决/结论
-        debate_type: 辩论类型（investment_debate / risk_debate）
+        debate_type: 多情景研究类型（investment_debate / risk_debate）
 
     Returns:
         user prompt 文本
     """
-    # 截断过长辩论历史
+    # 截断过多情景研究历史
     max_chars = 3000
     if len(debate_history) > max_chars:
-        debate_history = debate_history[:max_chars] + "\n...(辩论历史已截断)"
+        debate_history = debate_history[:max_chars] + "\n...(多情景研究历史已截断)"
 
     if len(conclusion) > max_chars:
         conclusion = conclusion[:max_chars] + "\n...(结论已截断)"
 
     debate_label = {
-        "investment_debate_state": "多空辩论",
-        "risk_debate_state": "风险三方辩论",
-    }.get(debate_type, debate_type or "辩论")
+        "investment_debate_state": "多情景研究",
+        "risk_debate_state": "风险多情景研究",
+    }.get(debate_type, debate_type or "多情景研究")
 
     parts = [
         f"## 股票：{ticker}",
-        f"### 辩论类型：{debate_label}",
-        f"### 辩论历史\n{debate_history}",
+        f"### 多情景研究类型：{debate_label}",
+        f"### 多情景研究历史\n{debate_history}",
         f"### 最终裁决\n{conclusion}",
     ]
 

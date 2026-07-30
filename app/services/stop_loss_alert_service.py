@@ -129,16 +129,16 @@ class StopLossAlertService:
             )
 
         if notified:
-            logger.info("[止损提醒] 本轮发送 %s 条提醒", notified)
+            logger.info("[价格下限提醒] 本轮发送 %s 条提醒", notified)
         else:
-            logger.info("[止损提醒] 本轮无触发提醒")
+            logger.info("[价格下限提醒] 本轮无触发提醒")
 
     async def _load_watch_items(self) -> List[Dict[str, Any]]:
         """加载提醒监控项。
 
         优先级：
         1) 用户手动设置的 alert_price_low（favorites）
-        2) 持仓分析最新报告里的止损价（position_analysis_reports）
+        2) 持仓分析最新报告里的风险关注价格（position_analysis_reports）
         """
         items: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
 
@@ -189,7 +189,7 @@ class StopLossAlertService:
                         "alert_price_low": float(low),
                     }
 
-        # 对未手动设置提醒的持仓股票：使用最新持仓分析报告里的止损价
+        # 对未手动设置提醒的持仓股票：使用最新持仓分析报告里的风险关注价格
         manual_keys = set(items.keys())
         pipeline = [
             {
@@ -240,7 +240,7 @@ class StopLossAlertService:
 
     @staticmethod
     def _extract_stop_loss(price_targets: Dict[str, Any]) -> float | None:
-        """兼容多种字段名提取止损价。"""
+        """兼容多种字段名提取风险关注价格。"""
         candidates = [
             price_targets.get("stop_loss"),
             price_targets.get("stop_loss_price"),

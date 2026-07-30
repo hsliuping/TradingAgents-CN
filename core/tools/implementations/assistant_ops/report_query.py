@@ -124,7 +124,7 @@ async def search_reports(
 @register_tool(
     tool_id="get_report_detail",
     name="查看报告详情",
-    description="根据任务ID获取分析报告内容。支持两种模式：1) 不传 module_key 返回顶层摘要（投资建议、关键要点、摘要）；2) 传 module_key 返回指定子模块的完整正文内容（如 market_report/fundamentals_report/news_report/sentiment_report/trader_investment_plan/research_team_decision/risk_management_decision/final_trade_decision 等）。推荐根据用户问题按需获取指定模块，避免一次拉取过多内容。",
+    description="根据任务ID获取分析报告内容。支持两种模式：1) 不传 module_key 返回顶层摘要（研究结论倾向、关键要点、摘要）；2) 传 module_key 返回指定子模块的完整正文内容（如 market_report/fundamentals_report/news_report/sentiment_report/trader_investment_plan/research_team_decision/risk_management_decision/final_trade_decision 等）。推荐根据用户问题按需获取指定模块，避免一次拉取过多内容。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -139,7 +139,7 @@ async def search_reports(
 )
 async def get_report_detail(
     task_id: Annotated[str, "分析任务ID"],
-    module_key: Annotated[Optional[str], "指定子模块key获取完整正文。可选值：market_report(市场技术分析)/fundamentals_report(基本面研究)/news_report(新闻研究)/sentiment_report(情绪分析)/trader_investment_plan(研究整合意见)/research_team_decision(研究团队结论)/risk_management_decision(风险治理结论)/final_trade_decision(综合研究结论)/index_report(大盘环境)/sector_report(行业板块)。不传则返回顶层摘要"] = None,
+    module_key: Annotated[Optional[str], "指定子模块key获取完整正文。可选值：market_report(市场技术分析)/fundamentals_report(基本面研究)/news_report(新闻研究)/sentiment_report(情绪分析)/trader_investment_plan(研究整合意见)/research_team_decision(研究团队结论)/risk_management_decision(风险审阅结论)/final_trade_decision(综合研究结论)/index_report(大盘环境)/sector_report(行业板块)。不传则返回顶层摘要"] = None,
 ) -> str:
     """获取指定分析任务的报告内容。传 module_key 返回该模块完整正文，不传返回顶层摘要。"""
     try:
@@ -187,7 +187,7 @@ async def get_report_detail(
         # ── 顶层摘要模式：返回报告整体摘要 ──
         lines = [f"# 📈 {sym} 分析报告"]
         if r.get("recommendation"):
-            lines.append(f"\n## 投资建议\n{r['recommendation']}")
+            lines.append(f"\n## 研究结论倾向\n{r['recommendation']}")
         if r.get("confidence_score"):
             lines.append(f"\n**置信度**: {r['confidence_score']}")
         if r.get("risk_level"):
@@ -241,7 +241,7 @@ _ANALYST_LABELS = {
     # 核心决策类
     "final_trade_decision":   "综合研究结论",
     "research_team_decision": "研究团队结论",
-    "risk_management_decision": "风险治理结论",
+    "risk_management_decision": "风险审阅结论",
     "trader_investment_plan": "研究整合意见",
     "investment_plan":        "投资计划",
     # 研究员辩论类
@@ -290,7 +290,7 @@ _EXCERPT_CHARS = 500      # 每个分析师报告的摘录字数
 @register_tool(
     tool_id="get_latest_report",
     name="获取最新报告",
-    description="读取指定股票最近一次已完成的分析报告摘要（各分析师核心结论+最终决策）。不会创建新任务。symbol 为空时返回用户最近一份报告。",
+    description="读取指定股票最近一次已完成的分析报告摘要（各分析师核心结论+最终研究结论）。不会创建新任务。symbol 为空时返回用户最近一份报告。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,

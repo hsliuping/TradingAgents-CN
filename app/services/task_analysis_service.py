@@ -774,7 +774,7 @@ class TaskAnalysisService:
         import re
 
         # 🔑 关键：优先从 action_advice 中提取结构化决策（v2.0 引擎）
-        # action_advice 是 ActionAdvisorV2 的输出，包含操作建议和 reasoning
+        # action_advice 是 ActionAdvisorV2 的输出，包含研究观察和 reasoning
         # final_trade_decision 是 RiskManagerV2 的输出，包含完整的风险评估报告（不应该用于 reasoning）
         action_advice = raw_result.get("action_advice", "")
         final_trade_decision = raw_result.get("final_trade_decision", "")
@@ -848,8 +848,8 @@ class TaskAnalysisService:
                 except Exception:
                     pass
         
-        # 🔥 优先从 final_trade_decision（风险经理的最终评估结果）中提取 risk_score
-        # 这是风险经理（RiskManagerV2）的最终评估，应该是最权威的风险评分来源
+        # 🔥 优先从 final_trade_decision（风险评估师的最终评估结果）中提取 risk_score
+        # 这是风险评估师（RiskManagerV2）的最终评估，应该是最权威的风险评分来源
         # 🔥🔥🔥 注意：risk_score 现在已经在 final_trade_decision 字典中了（由 risk_manager_v2.py 添加）
         risk_score = None
         
@@ -862,7 +862,7 @@ class TaskAnalysisService:
                     if risk_score > 1:
                         risk_score = risk_score / 100.0
                     risk_score = float(risk_score)
-                    self.logger.info(f"✅✅✅ [TaskAnalysisService] 从 final_trade_decision (风险经理评估) 提取 risk_score: {risk_score}")
+                    self.logger.info(f"✅✅✅ [TaskAnalysisService] 从 final_trade_decision (风险评估师评估) 提取 risk_score: {risk_score}")
         
         # 如果 final_trade_decision 中没有，尝试从 risk_debate_state.judge_decision 中提取（备选方案）
         if risk_score is None:
@@ -901,7 +901,7 @@ class TaskAnalysisService:
             if isinstance(risk_assessment, dict):
                 risk_score = risk_assessment.get("risk_score")
                 if risk_score is not None:
-                    self.logger.info(f"✅ [TaskAnalysisService] 从 risk_assessment (风险经理评估) 提取 risk_score: {risk_score}")
+                    self.logger.info(f"✅ [TaskAnalysisService] 从 risk_assessment (风险评估师评估) 提取 risk_score: {risk_score}")
             elif isinstance(risk_assessment, str):
                 # 如果是字符串，尝试解析 JSON
                 try:
@@ -955,7 +955,7 @@ class TaskAnalysisService:
                             risk_score = float(risk_score)
                         self.logger.info(f"✅✅✅ [TaskAnalysisService] 从 final_trade_decision 提取 risk_score: {risk_score}")
                 
-                # 🔥 如果还是没有，尝试从 investment_plan 中获取（作为兜底，但这不是风险经理的评估）
+                # 🔥 如果还是没有，尝试从 investment_plan 中获取（作为兜底，但这不是风险评估师的评估）
                 if risk_score is None:
                     investment_plan = raw_result.get("investment_plan", {})
                     if isinstance(investment_plan, dict):
@@ -965,7 +965,7 @@ class TaskAnalysisService:
                             if isinstance(plan_risk_score, (int, float)) and plan_risk_score > 1:
                                 plan_risk_score = plan_risk_score / 100.0
                             risk_score = plan_risk_score
-                            self.logger.warning(f"⚠️ [TaskAnalysisService] 从 investment_plan (研究经理评估，非风险经理) 提取 risk_score: {risk_score}")
+                            self.logger.warning(f"⚠️ [TaskAnalysisService] 从 investment_plan (研究整合员评估，非风险评估师) 提取 risk_score: {risk_score}")
                     elif isinstance(investment_plan, str):
                         # 如果是字符串，尝试解析 JSON
                         try:
@@ -981,7 +981,7 @@ class TaskAnalysisService:
                                         if isinstance(plan_risk_score, (int, float)) and plan_risk_score > 1:
                                             plan_risk_score = plan_risk_score / 100.0
                                         risk_score = plan_risk_score
-                                        self.logger.warning(f"⚠️ [TaskAnalysisService] 从 investment_plan (JSON文本，研究经理评估，非风险经理) 提取 risk_score: {risk_score}")
+                                        self.logger.warning(f"⚠️ [TaskAnalysisService] 从 investment_plan (JSON文本，研究整合员评估，非风险评估师) 提取 risk_score: {risk_score}")
                         except Exception as e:
                             self.logger.warning(f"⚠️ [TaskAnalysisService] 从 investment_plan 提取 risk_score 失败: {e}")
                 
@@ -991,7 +991,7 @@ class TaskAnalysisService:
                     self.logger.warning(f"⚠️ [TaskAnalysisService] 未找到 risk_score，使用默认值 0.5")
                 
                 decision_dict = {
-                    "action": final_trade_decision.get("action") or final_trade_decision.get("analysis_view", "持有"),
+                    "action": final_trade_decision.get("action") or final_trade_decision.get("analysis_view", "中性"),
                     "target_price": final_trade_decision.get("target_price"),
                     "price_analysis_range": price_analysis_range,  # 🔥 新增：价格区间
                     "stop_loss": final_trade_decision.get("stop_loss") or final_trade_decision.get("risk_control_reference"),
@@ -1007,7 +1007,7 @@ class TaskAnalysisService:
                 # 如果是字符串，提取所有字段（包括 reasoning）
                 temp_dict = self._extract_decision_from_text(final_trade_decision)
                 decision_dict = {
-                    "action": temp_dict.get("action", "持有"),
+                    "action": temp_dict.get("action", "中性"),
                     "target_price": temp_dict.get("target_price"),
                     "price_analysis_range": temp_dict.get("price_analysis_range"),  # 🔥 新增：价格区间
                     "confidence": temp_dict.get("confidence", 0.5),
@@ -1016,7 +1016,7 @@ class TaskAnalysisService:
                 }
                 self.logger.info(f"✅ [TaskAnalysisService] 从 final_trade_decision (文本) 提取决策: action={decision_dict.get('action')}, target_price={decision_dict.get('target_price')}, risk_score={decision_dict.get('risk_score')}, reasoning长度={len(decision_dict.get('reasoning', ''))}")
         
-        # 🔥 如果 decision_dict 中没有 risk_score，优先从 final_trade_decision 或 risk_assessment（风险经理评估）中提取
+        # 🔥 如果 decision_dict 中没有 risk_score，优先从 final_trade_decision 或 risk_assessment（风险评估师评估）中提取
         if decision_dict and decision_dict.get('risk_score') is None:
             # 🔥🔥🔥 最高优先级：从 final_trade_decision 中提取（如果它是字典且包含 risk_score）
             if isinstance(final_trade_decision, dict):
@@ -1034,7 +1034,7 @@ class TaskAnalysisService:
                 self.logger.info(f"✅ [TaskAnalysisService] 将 risk_assessment 中的 risk_score 赋值给 decision_dict: {risk_score}")
             # 最后：从 investment_plan 中提取（作为兜底）
             if decision_dict.get('risk_score') is None:
-                # 如果还没有，尝试从 investment_plan 中提取（作为兜底，但这不是风险经理的评估）
+                # 如果还没有，尝试从 investment_plan 中提取（作为兜底，但这不是风险评估师的评估）
                 investment_plan = raw_result.get("investment_plan", {})
                 if isinstance(investment_plan, dict):
                     plan_risk_score = investment_plan.get("risk_score")
@@ -1043,7 +1043,7 @@ class TaskAnalysisService:
                         if isinstance(plan_risk_score, (int, float)) and plan_risk_score > 1:
                             plan_risk_score = plan_risk_score / 100.0
                         decision_dict['risk_score'] = plan_risk_score
-                        self.logger.warning(f"⚠️ [TaskAnalysisService] 从 investment_plan (研究经理评估，非风险经理) 提取 risk_score: {plan_risk_score}")
+                        self.logger.warning(f"⚠️ [TaskAnalysisService] 从 investment_plan (研究整合员评估，非风险评估师) 提取 risk_score: {plan_risk_score}")
                 elif isinstance(investment_plan, str):
                     # 如果是字符串，尝试解析 JSON
                     try:
@@ -1059,14 +1059,14 @@ class TaskAnalysisService:
                                     if isinstance(plan_risk_score, (int, float)) and plan_risk_score > 1:
                                         plan_risk_score = plan_risk_score / 100.0
                                     decision_dict['risk_score'] = plan_risk_score
-                                    self.logger.warning(f"⚠️ [TaskAnalysisService] 从 investment_plan (JSON文本，研究经理评估，非风险经理) 提取 risk_score: {plan_risk_score}")
+                                    self.logger.warning(f"⚠️ [TaskAnalysisService] 从 investment_plan (JSON文本，研究整合员评估，非风险评估师) 提取 risk_score: {plan_risk_score}")
                     except Exception as e:
                         self.logger.warning(f"⚠️ [TaskAnalysisService] 从 investment_plan 提取 risk_score 失败: {e}")
         
         # 4. 如果都没有，使用默认值
         if not decision_dict:
             decision_dict = {
-                "action": "持有",
+                "action": "中性",
                 "target_price": None,
                 "price_analysis_range": None,  # 🔥 新增：价格区间
                 "confidence": 0.5,
@@ -1279,7 +1279,7 @@ class TaskAnalysisService:
                     reports["bear_researcher"] = bear_history.strip()
                     self.logger.info(f"📊 [REPORTS] 提取报告: bear_researcher (来自 investment_debate_state.bear_history) - 长度: {len(bear_history.strip())}")
 
-            # 3. 研究经理分析报告
+            # 3. 研究整合员分析报告
             judge_decision = _extract_text(investment_debate.get("judge_decision", ""))
             if judge_decision and len(judge_decision.strip()) > 5:
                 # 🔥 新增：如果是 JSON 格式，转换为 Markdown
@@ -1311,14 +1311,14 @@ class TaskAnalysisService:
         
         # 然后从 risk_debate_state 提取（如果顶层没有）
         if risk_debate and isinstance(risk_debate, dict):
-            # 1. 激进分析师报告
+            # 1. 高弹性情景分析师报告
             if "risky_analyst" not in reports:
                 risky_history = _extract_text(risk_debate.get("risky_history", ""))
                 if risky_history and len(risky_history.strip()) > 5:
                     reports["risky_analyst"] = risky_history.strip()
                     self.logger.info(f"📊 [REPORTS] 提取报告: risky_analyst (来自 risk_debate_state.risky_history) - 长度: {len(risky_history.strip())}")
 
-            # 2. 保守分析师报告
+            # 2. 防御情景分析师报告
             if "safe_analyst" not in reports:
                 safe_history = _extract_text(risk_debate.get("safe_history", ""))
                 if safe_history and len(safe_history.strip()) > 5:
@@ -1332,7 +1332,7 @@ class TaskAnalysisService:
                     reports["neutral_analyst"] = neutral_history.strip()
                     self.logger.info(f"📊 [REPORTS] 提取报告: neutral_analyst (来自 risk_debate_state.neutral_history) - 长度: {len(neutral_history.strip())}")
 
-            # 4. 投资组合经理决策报告
+            # 4. 风险评估师决策报告
             judge_decision = _extract_text(risk_debate.get("judge_decision", ""))
             if judge_decision and len(judge_decision.strip()) > 5:
                 # 🔥 新增：如果是 JSON 格式，转换为 Markdown
@@ -1422,7 +1422,7 @@ class TaskAnalysisService:
         target_price = temp_formatted_decision.get('target_price')
         reasoning = temp_formatted_decision.get('reasoning', '')
 
-        # 构建 recommendation（不包含具体价格和操作建议）
+        # 构建 recommendation（不包含具体价格和研究观察）
         recommendation_parts = []
 
         # 只包含分析观点，不包含具体价格
@@ -1556,7 +1556,7 @@ class TaskAnalysisService:
         Returns:
             格式化后的决策字典
         """
-        # 处理目标价格
+        # 处理验证价位（历史字段 target_price 仅作兼容）
         target_price = decision.get('target_price')
         if target_price is not None and target_price != 'N/A':
             try:
@@ -1573,17 +1573,19 @@ class TaskAnalysisService:
         else:
             target_price = None
 
-        # 🔥 合规修改：将英文操作建议转换为中文合规术语
+        # 🔥 合规修改：将英文/旧操作建议转换为中文合规术语（研究结论倾向）
         action_translation = {
-            'BUY': '看涨',
-            'SELL': '看跌',
+            'BUY': '乐观',
+            'SELL': '审慎',
             'HOLD': '中性',
-            'buy': '看涨',
-            'sell': '看跌',
+            'buy': '乐观',
+            'sell': '审慎',
             'hold': '中性',
-            '买入': '看涨',  # 兼容旧数据
-            '卖出': '看跌',
-            '持有': '中性'
+            '买入': '乐观',  # 兼容旧数据
+            '卖出': '审慎',
+            '持有': '中性',
+            '看涨': '乐观',  # 兼容旧数据
+            '看跌': '审慎',
         }
         action = decision.get('action', '中性')
         chinese_action = action_translation.get(action, action)
@@ -1669,14 +1671,14 @@ class TaskAnalysisService:
         """
         import re
 
-        # 提取动作
-        action = '持有'  # 默认
-        if re.search(r'(强烈)?买入|建议买入|看多|BUY|STRONG_BUY', text, re.IGNORECASE):
-            action = '买入'
-        elif re.search(r'(强烈)?卖出|建议卖出|看空|减持|SELL|STRONG_SELL', text, re.IGNORECASE):
-            action = '卖出'
-        elif re.search(r'持有|观望|等待|HOLD', text, re.IGNORECASE):
-            action = '持有'
+        # 提取动作（统一使用合规研究结论倾向术语）
+        action = '中性'  # 默认
+        if re.search(r'(强烈)?买入|建议买入|看多|BUY|STRONG_BUY|看涨|乐观', text, re.IGNORECASE):
+            action = '乐观'
+        elif re.search(r'(强烈)?卖出|建议卖出|看空|减持|SELL|STRONG_SELL|看跌|审慎', text, re.IGNORECASE):
+            action = '审慎'
+        elif re.search(r'持有|观望|等待|HOLD|中性', text, re.IGNORECASE):
+            action = '中性'
 
         # 提取目标价格
         target_price = None
@@ -1720,7 +1722,7 @@ class TaskAnalysisService:
             except ValueError:
                 pass
 
-        # 🔥 提取决策理由（优先从 JSON 中提取，否则取文本摘要）
+        # 🔥 提取研究依据（优先从 JSON 中提取，否则取文本摘要）
         # 注意：如果 text 是 final_trade_decision（风险评估报告），不应该作为 reasoning
         # 这里只提取简短的推理摘要
         
@@ -1983,7 +1985,7 @@ class TaskAnalysisService:
             reports_dict = result.get("reports", {})
             analysts_list = _get_analysts_from_reports(reports_dict) or result.get("analysts", [])
 
-            # 🔑 从最终决策中提取 recommendation 和 confidence_score
+            # 🔑 从最终研究结论中提取 recommendation 和 confidence_score
             decision = result.get("decision", {})
             recommendation = result.get("recommendation", "")
             if not recommendation and decision.get("action"):

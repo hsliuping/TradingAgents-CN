@@ -46,17 +46,18 @@ def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
     1. recommendation 字段：使用合规术语，不包含具体价格
     2. key_points 字段：转换 JSON 字段名为中文描述
     3. decision 字段：支持新旧字段名
-    4. action 字段：将旧术语（买入/卖出/持有）映射为合规术语（看涨/看跌/中性）
+    4. action 字段：将旧术语（买入/卖出/持有）映射为合规术语（乐观/审慎/中性）
     """
     if not result_data:
         return result_data
 
     # 🔥 术语映射：将旧术语转换为合规术语
     ACTION_TRANSLATION = {
-        'BUY': '看涨', 'SELL': '看跌', 'HOLD': '中性',
-        'buy': '看涨', 'sell': '看跌', 'hold': '中性',
-        '买入': '看涨', '卖出': '看跌', '持有': '中性',  # 兼容旧数据
-        '看涨': '看涨', '看跌': '看跌', '中性': '中性',  # 保持新术语不变
+        'BUY': '乐观', 'SELL': '审慎', 'HOLD': '中性',
+        'buy': '乐观', 'sell': '审慎', 'hold': '中性',
+        '买入': '乐观', '卖出': '审慎', '持有': '中性',  # 兼容旧数据
+        '看涨': '乐观', '看跌': '审慎', '中性': '中性',  # 兼容旧数据
+        '乐观': '乐观', '审慎': '审慎', '中性': '中性',  # 保持新术语不变
     }
 
     # 1. 处理 decision 字段（支持新旧字段名）
@@ -1263,7 +1264,7 @@ async def get_task_result(
                         if isinstance(neutral_content, str) and len(neutral_content.strip()) > 10:
                             reports['neutral_analyst'] = neutral_content.strip()
 
-                        # 提取投资组合经理决策
+                        # 提取风险评估师决策
                         risk_decision = risk_debate_state.get('judge_decision', "")
                         if isinstance(risk_decision, str) and len(risk_decision.strip()) > 10:
                             reports['risk_management_decision'] = risk_decision.strip()

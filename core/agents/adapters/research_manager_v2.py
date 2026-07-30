@@ -1,7 +1,7 @@
 """
-研究经理 v2.0
+研究整合员 v2.0
 
-基于ManagerAgent基类实现的研究经理
+基于ManagerAgent基类实现的研究整合员
 综合乐观与审慎情景研究，形成平衡研究结论
 """
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class ResearchManagerOutput(BaseModel):
-    """研究经理平衡研究结论 schema"""
+    """研究整合员平衡研究结论 schema"""
     # 合规术语：乐观/审慎/中性（禁止使用"看涨/看跌/买入/卖出"等交易指令或市场观点术语）
     analysis_view: Literal["乐观", "审慎", "中性"]
     confidence: float = Field(ge=0, le=1)
@@ -39,7 +39,7 @@ class ResearchManagerOutput(BaseModel):
     risk_warning: str = ""
 
 
-# 研究经理输出格式契约。
+# 研究整合员输出格式契约。
 # 按硬约束"system prompt 必须将格式要求放在最前面"，此常量会被前置到
 # _build_system_prompt 返回值的最前面，确保 LLM 优先看到格式与合规约束。
 RESEARCH_MANAGER_SCHEMA_PROMPT = """【输出格式契约·必须严格遵守】
@@ -98,7 +98,7 @@ except (ImportError, KeyError):
 @register_agent
 class ResearchManagerV2(ManagerAgent):
     """
-    研究经理 v2.0
+    研究整合员 v2.0
     
     功能：
     - 综合乐观与审慎情景研究
@@ -130,7 +130,7 @@ class ResearchManagerV2(ManagerAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="research_manager_v2",
-        name="研究经理 v2.0",
+        name="研究整合员 v2.0",
         description="综合乐观与审慎情景研究，形成平衡研究结论与观察重点",
         category=AgentCategory.MANAGER,
         version="2.0.0",
@@ -190,7 +190,7 @@ class ResearchManagerV2(ManagerAgent):
                 normalized_target,
                 {**state, **delegated_outputs},
                 payload={
-                    "task_description": "补充筹码分布与持仓成本结构上下文，供研究经理做综合投资判断",
+                    "task_description": "补充筹码分布与持仓成本结构上下文，供研究整合员做综合研究判断",
                 },
                 metadata={
                     "delegation_role": "research_enrichment",
@@ -203,7 +203,7 @@ class ResearchManagerV2(ManagerAgent):
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行研究经理分析
+        执行研究整合员分析
 
         重写父类方法以添加 investment_debate_state 输出，
         确保与报告格式化器兼容
@@ -218,22 +218,22 @@ class ResearchManagerV2(ManagerAgent):
         bear_report = state.get("bear_report", "")
 
         logger.info(f"📊 股票代码: {ticker}")
-        logger.info(f"📈 看涨报告类型: {type(bull_report)}, 长度: {len(str(bull_report))} 字符")
-        logger.info(f"📉 看跌报告类型: {type(bear_report)}, 长度: {len(str(bear_report))} 字符")
+        logger.info(f"📈 积极证据报告类型: {type(bull_report)}, 长度: {len(str(bull_report))} 字符")
+        logger.info(f"📉 谨慎证据报告类型: {type(bear_report)}, 长度: {len(str(bear_report))} 字符")
 
         # 转换为字符串（如果不是）
         bull_report_str = str(bull_report) if bull_report else ""
         bear_report_str = str(bear_report) if bear_report else ""
 
         if bull_report_str and len(bull_report_str) > 10:
-            logger.info(f"📈 看涨报告前200字符: {bull_report_str[:200]}...")
+            logger.info(f"📈 积极证据报告前200字符: {bull_report_str[:200]}...")
         else:
-            logger.warning("⚠️ 看涨报告为空或过短！")
+            logger.warning("⚠️ 积极证据报告为空或过短！")
 
         if bear_report_str and len(bear_report_str) > 10:
-            logger.info(f"📉 看跌报告前200字符: {bear_report_str[:200]}...")
+            logger.info(f"📉 谨慎证据报告前200字符: {bear_report_str[:200]}...")
         else:
-            logger.warning("⚠️ 看跌报告为空或过短！")
+            logger.warning("⚠️ 谨慎证据报告为空或过短！")
 
         # 🔥 ETF工作流兜底：若无辩论报告，将三份分析师报告合成为研究材料
         if not bull_report_str and not bear_report_str:
@@ -472,13 +472,13 @@ class ResearchManagerV2(ManagerAgent):
             else:
                 logger.warning("⚠️ 系统提示词不包含【研究简报结构】指导（可能使用旧版提示词）")
 
-            logger.debug(f"✅ 从模板系统获取研究经理系统提示词")
+            logger.debug(f"✅ 从模板系统获取研究整合员系统提示词")
             return prompt
         else:
             logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
 
         # 默认提示词（合规版本）— 同样前置 schema 契约，保证 fallback 路径也受约束
-        return RESEARCH_MANAGER_SCHEMA_PROMPT + """你是一位中性的研究经理，负责把乐观情景研究与审慎情景研究整理成平衡研究结论。
+        return RESEARCH_MANAGER_SCHEMA_PROMPT + """你是一位中性的研究整合员，负责把乐观情景研究与审慎情景研究整理成平衡研究结论。
 
     **分析风格**: 客观、克制、基于证据，强调 strongest case 对比、分歧根源、信息缺口与后续观察。
 
@@ -530,7 +530,7 @@ class ResearchManagerV2(ManagerAgent):
         logger.info(f"📅 分析日期: {analysis_date}")
         logger.info(f"📝 输入字段: {list(inputs.keys())}")
 
-        # 检查看涨和看跌报告
+        # 检查积极和谨慎报告
         bull_report = inputs.get("bull_report", "")
         bear_report = inputs.get("bear_report", "")
 
@@ -538,26 +538,26 @@ class ResearchManagerV2(ManagerAgent):
         bull_report_str = str(bull_report) if bull_report else ""
         bear_report_str = str(bear_report) if bear_report else ""
 
-        logger.info(f"📈 看涨报告类型: {type(bull_report)}, 长度: {len(bull_report_str)} 字符")
-        logger.info(f"📉 看跌报告类型: {type(bear_report)}, 长度: {len(bear_report_str)} 字符")
+        logger.info(f"📈 积极证据报告类型: {type(bull_report)}, 长度: {len(bull_report_str)} 字符")
+        logger.info(f"📉 谨慎证据报告类型: {type(bear_report)}, 长度: {len(bear_report_str)} 字符")
 
         if bull_report_str and len(bull_report_str) > 10:
             # 检查是否包含价格信息
             if "价位" in bull_report_str or "价格" in bull_report_str or "¥" in bull_report_str:
-                logger.info("✅ 看涨报告包含价格信息")
+                logger.info("✅ 积极证据报告包含价格信息")
             else:
-                logger.warning("⚠️ 看涨报告可能不包含价格信息")
+                logger.warning("⚠️ 积极证据报告可能不包含价格信息")
         else:
-            logger.warning("⚠️ 看涨报告为空或过短！")
+            logger.warning("⚠️ 积极证据报告为空或过短！")
 
         if bear_report_str and len(bear_report_str) > 10:
             # 检查是否包含价格信息
             if "价位" in bear_report_str or "价格" in bear_report_str or "¥" in bear_report_str:
-                logger.info("✅ 看跌报告包含价格信息")
+                logger.info("✅ 谨慎证据报告包含价格信息")
             else:
-                logger.warning("⚠️ 看跌报告可能不包含价格信息")
+                logger.warning("⚠️ 谨慎证据报告可能不包含价格信息")
         else:
-            logger.warning("⚠️ 看跌报告为空或过短！")
+            logger.warning("⚠️ 谨慎证据报告为空或过短！")
 
         # 获取公司名称
         if StockUtils:
@@ -580,8 +580,8 @@ class ResearchManagerV2(ManagerAgent):
         bull_report_content = extract_content(inputs.get("bull_report"))
         bear_report_content = extract_content(inputs.get("bear_report"))
 
-        logger.info(f"📈 看涨报告内容长度: {len(bull_report_content)} 字符")
-        logger.info(f"📉 看跌报告内容长度: {len(bear_report_content)} 字符")
+        logger.info(f"📈 积极证据报告内容长度: {len(bull_report_content)} 字符")
+        logger.info(f"📉 谨慎证据报告内容长度: {len(bear_report_content)} 字符")
 
         # 🆕 检测辩论模式并获取辩论历史
         debate_history = ""
@@ -629,7 +629,7 @@ class ResearchManagerV2(ManagerAgent):
             prompt_type="user"  # 🆕 指定获取用户提示词
         )
         if prompt:
-            logger.info(f"✅ 从模板系统获取研究经理用户提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取研究整合员用户提示词 (长度: {len(prompt)})")
             return prompt
         
         market_name = state.get("market_name", "")

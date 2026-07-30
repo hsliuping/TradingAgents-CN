@@ -425,10 +425,10 @@ async def _save_analysis_report(
             ("fundamentals_report", "基本面研究报告"),
             # 风险与辩论相关直出字段（如果存在，直接保存）
             ("risk_assessment", "风险评估结论"),
-            ("bull_report", "看涨研究报告"),
-            ("bear_report", "看跌研究报告"),
-            ("risky_opinion", "激进风险观点"),
-            ("safe_opinion", "保守风险观点"),
+            ("bull_report", "积极证据研究报告"),
+            ("bear_report", "谨慎证据研究报告"),
+            ("risky_opinion", "高弹性情景观点"),
+            ("safe_opinion", "防御情景观点"),
             ("neutral_opinion", "中性风险观点"),
             ("investment_plan", "研究团队研究结论"),
             ("trader_investment_plan", "研究整合意见"),
@@ -498,11 +498,11 @@ async def _save_analysis_report(
                 reports["neutral_analyst"] = neutral_history
                 logger.info(f"[报告保存] 提取报告: 中性分析师 ({len(neutral_history)} 字符)")
 
-            # 4. 投资组合经理决策报告
+            # 4. 风险评估师决策报告
             judge_decision = _extract_text(risk_debate.get("judge_decision", ""))
             if judge_decision and len(judge_decision.strip()) > 5:
                 reports["risk_management_decision"] = judge_decision
-                logger.info(f"[报告保存] 提取报告: 投资组合经理 ({len(judge_decision)} 字符)")
+                logger.info(f"[报告保存] 提取报告: 风险评估师 ({len(judge_decision)} 字符)")
             else:
                 formatted = _format_risk_management_report(risk_debate)
                 if formatted and len(formatted.strip()) > 5:
@@ -536,7 +536,7 @@ async def _save_analysis_report(
         except Exception as e:
             logger.warning(f"[报告保存] 获取股票信息失败: {e}")
 
-        # 从最终决策中提取 recommendation 和 confidence_score
+        # 从最终研究结论中提取 recommendation 和 confidence_score
         recommendation, confidence_score, risk_level = _extract_recommendation_and_confidence(
             workflow_result, reports
         )
@@ -544,7 +544,7 @@ async def _save_analysis_report(
         # 🔥 提取 decision 字段（与单股分析保持一致）
         decision = workflow_result.get("decision", {})
         if not decision:
-            # 如果没有 decision 字段，尝试从最终决策中构建
+            # 如果没有 decision 字段，尝试从最终研究结论中构建
             final_decision_text = _extract_text(workflow_result.get("final_trade_decision", ""))
             if final_decision_text:
                 decision = {
@@ -728,7 +728,7 @@ def _get_analysts_from_reports(reports: Dict[str, Any]) -> List[str]:
         "safe_analyst": "safe_analyst",
         "neutral_analyst": "neutral_analyst",
         "risk_management_decision": "portfolio_manager",
-        # 最终决策（1个）
+        # 最终研究结论（1个）
         "final_trade_decision": "final_decision",
     }
 
@@ -780,38 +780,38 @@ def _format_research_team_report(debate_state: Dict[str, Any]) -> str:
 
 def _format_risk_management_report(debate_state: Dict[str, Any]) -> str:
     """
-    格式化风险治理结论
+    格式化风险审阅结论
 
     从 risk_debate_state 中提取 risky_history, safe_history, neutral_history, judge_decision
     """
     parts = []
-    parts.append("# 👔 风险治理结论\n")
+    parts.append("# 👔 风险审阅结论\n")
 
-    # 激进分析师观点
+    # 高弹性情景分析师观点
     risky_history = debate_state.get("risky_history", "")
     if risky_history:
-        parts.append("## 🔥 激进分析师观点\n")
+        parts.append("## 🔥 高弹性情景分析师观点\n")
         parts.append(risky_history)
         parts.append("\n")
 
-    # 保守分析师观点
+    # 防御情景分析师观点
     safe_history = debate_state.get("safe_history", "")
     if safe_history:
-        parts.append("## 🛡️ 保守分析师观点\n")
+        parts.append("## 🛡️ 防御情景分析师观点\n")
         parts.append(safe_history)
         parts.append("\n")
 
-    # 中性分析师观点
+    # 基准情景分析师观点
     neutral_history = debate_state.get("neutral_history", "")
     if neutral_history:
-        parts.append("## ⚖️ 中性分析师观点\n")
+        parts.append("## ⚖️ 基准情景分析师观点\n")
         parts.append(neutral_history)
         parts.append("\n")
 
-    # 风险经理最终决策
+    # 风险评估师最终结论
     judge_decision = debate_state.get("judge_decision", "")
     if judge_decision:
-        parts.append("## 🎯 风险经理最终决策\n")
+        parts.append("## 🎯 风险评估师最终结论\n")
         parts.append(judge_decision)
         parts.append("\n")
 
@@ -825,8 +825,8 @@ async def _build_legacy_config(data: WorkflowExecuteRequest) -> Dict[str, Any]:
     优先使用新的 ModelConfig，否则从数据库根据模型名称查询
 
     旧代码中的使用方式：
-    - quick_thinking_llm: 用于分析师、研究员(Bull/Bear)、研究整合员、风险辩论者
-    - deep_thinking_llm: 用于研究经理(Research Manager)、风险经理(Risk Judge)
+    - quick_thinking_llm: 用于分析师、研究员(Bull/Bear)、研究整合员、风险情景分析师
+    - deep_thinking_llm: 用于研究整合员(Research Manager)、风险评估师(Risk Manager)
     """
     config = {}
 

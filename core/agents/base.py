@@ -389,9 +389,9 @@ class BaseAgent(ABC):
             return system_prompt
         guard = (
             "\n\n【合规防护·必须遵守】\n"
-            '1. 禁止输出具体买卖指令（如"买入""卖出""加仓""减仓"），'
-            "改用合规术语：看涨 / 看跌 / 中性。\n"
-            '2. 禁止给出具体目标价或止损价，可输出"价格分析区间"并标注不确定性。\n'
+            '1. 禁止输出具体买卖指令（如"买入""卖出""加仓""减仓""持有""清仓"），'
+            "统一使用合规术语：乐观 / 审慎 / 中性 表达研究结论倾向。\n"
+            '2. 禁止给出具体目标价或风险关注价格，可输出"价格分析区间"并标注不确定性。\n'
             "3. 禁止承诺收益或保证盈利，必须提示风险。\n"
             "4. 所有结论必须基于已获取的数据，不得编造数据或指标。\n"
         )
@@ -465,7 +465,7 @@ class BaseAgent(ABC):
     def _invoke_llm_with_trace(self, messages: list) -> Any:
         """🔑 封装 self._llm.invoke(messages)，自动记录 Prompt 和 LLM 响应到执行轨迹
 
-        供不使用 invoke_with_tools 的 Agent（如风险分析师、交易员）调用，
+        供不使用 invoke_with_tools 的 Agent（如风险分析师、研究整合员）调用，
         替代直接调用 self._llm.invoke(messages)。
         """
         # 记录 Prompt

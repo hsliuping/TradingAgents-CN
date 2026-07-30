@@ -40,7 +40,7 @@ class TimingRule(BaseModel):
     """择时规则模型"""
     market_condition: Dict[str, Any] = Field(default_factory=dict, description="大盘条件")
     sector_condition: Dict[str, Any] = Field(default_factory=dict, description="行业条件")
-    entry_signals: List[Dict[str, Any]] = Field(default_factory=list, description="买入信号")
+    entry_signals: List[Dict[str, Any]] = Field(default_factory=list, description="正向研究信号")
     confirmation: List[Dict[str, Any]] = Field(default_factory=list, description="确认条件")
 
 

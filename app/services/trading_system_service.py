@@ -74,10 +74,10 @@ class TradingSystemService:
             levels = take_profit.get("levels", []) if isinstance(take_profit.get("levels"), list) else []
             total_ratio = sum(float(item.get("sell_ratio", 0)) for item in levels)
             if total_ratio > 1.0001:
-                warnings.append(f"当前分批止盈总卖出比例为 {total_ratio * 100:.1f}%，超过了100%上限。")
+                warnings.append(f"当前分批收益关注总减仓比例为 {total_ratio * 100:.1f}%，超过了100%上限。")
 
             warnings.append(
-                "A股普通买卖默认按100股整数倍成交。当前分批止盈规则是按仓位比例描述，实际执行时需要结合持仓股数按整手取整，避免出现30股、60股、80股这类常规无法成交的数量。"
+                "A股普通买卖默认按100股整数倍成交。当前分批收益关注规则是按仓位比例描述，实际执行时需要结合持仓股数按整手取整，避免出现30股、60股、80股这类常规无法成交的数量。"
             )
 
         return warnings
@@ -418,9 +418,9 @@ class TradingSystemService:
         return system
 
     def _sync_risk_rules_to_positions(self, system: TradingSystem, user_id: str) -> None:
-        """将激活的交易计划的风险规则同步到用户持仓的止损/止盈价。
+        """将激活的交易计划的风险规则同步到用户持仓的风险关注/收益关注价格。
 
-        仅同步 percentage 类型的止损/止盈规则（可计算具体价格），
+        仅同步 percentage 类型的风险关注/收益关注规则（可计算具体价格），
         technical/atr/trailing/scaled 类型无法直接计算价格，跳过。
         """
         try:
@@ -476,7 +476,7 @@ class TradingSystemService:
                     synced += 1
 
             if synced > 0:
-                logger.info(f"✅ 已将交易计划风险规则同步到 {synced} 个持仓的止损/止盈价")
+                logger.info(f"✅ 已将交易计划风险规则同步到 {synced} 个持仓的风险关注/收益关注价格")
         except Exception as e:
             logger.warning(f"⚠️ 同步风险规则到持仓失败(不影响激活操作): {e}")
 
@@ -495,7 +495,7 @@ class TradingSystemService:
                 - price: 价格
                 - quantity: 数量
                 - position_ratio: 仓位比例
-                - stop_loss: 止损价（可选）
+                - stop_loss: 风险关注价格（可选）
                 - reason: 交易理由（可选）
 
         Returns:
@@ -593,12 +593,12 @@ class TradingSystemService:
         risk_mgmt = system.risk_management
 
         if trade_data.get("action") == "buy":
-            # 检查止损设置
+            # 检查风险关注设置
             stop_loss_config = risk_mgmt.stop_loss
             if stop_loss_config.get("type") and not trade_data.get("stop_loss"):
-                warnings.append("建议设置止损价格")
+                warnings.append("建议设置风险关注价格")
 
-            # 如果有止损价格，检查止损幅度
+            # 如果有风险关注价格，检查风险关注幅度
             if trade_data.get("stop_loss") and stop_loss_config.get("percentage"):
                 price = trade_data.get("price", 0)
                 stop_loss = trade_data.get("stop_loss", 0)
@@ -607,7 +607,7 @@ class TradingSystemService:
 
                 if actual_stop_pct > expected_stop_pct * 1.5:  # 允许50%的偏差
                     warnings.append(
-                        f"止损幅度 {actual_stop_pct*100:.1f}% 偏离系统设置 {expected_stop_pct*100:.1f}%"
+                        f"风险关注幅度 {actual_stop_pct*100:.1f}% 偏离系统设置 {expected_stop_pct*100:.1f}%"
                     )
 
     def create_version(

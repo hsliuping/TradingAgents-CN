@@ -524,7 +524,7 @@ def _build_stock_scope_block(user_context: Optional[dict]) -> str:
             report_index_lines.append(
                 f"2. 持仓分析报告（analysis_id: {analysis_id}，{completed} 生成，未过期）"
             )
-            report_index_lines.append("   包含：持仓快照、操作建议、目标价位、风险评估、分析详情")
+            report_index_lines.append("   包含：持仓快照、研究观察、关键验证价位、风险审阅、分析详情")
 
     # 3) 交易复盘报告
     review = scope.get("review_summary")
@@ -707,10 +707,10 @@ def _get_system_prompt(
 - **股票关注列表管理**：查看股票关注列表（即股票关注列表）、按标签理解用户关注池，并可添加/移除股票关注列表或管理股票关注列表分组
 - **数据查询**：直接获取个股行情、财务报表（利润表/资产负债表/现金流）、技术指标（MACD/RSI/布林带等）、新闻资讯等原始数据
 - **单股数据同步**：按股票代码同步单只股票的历史行情和财务数据，必要时补充基础数据，便于后续查询或分析使用最新数据
-- **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含操作建议、目标价位、风险评估）
+- **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含研究观察、关键验证价位、风险审阅）
 - **交易复盘**：查看复盘历史，获取复盘报告详情，或对指定交易发起一次新的 AI 复盘分析（评分、总结、改进建议、经验教训）
-- **投资计划**：查看用户创建的个人交易计划（投资纪律），获取当前激活计划的完整规则（选股、择时、仓位、止盈止损等）
-- **风险提醒**：为股票设置/查看/清除止损提醒，当价格接近或跌破止损线时自动发送通知
+- **投资计划**：查看用户创建的个人交易计划（投资纪律），获取当前激活计划的完整规则（选股、择时、仓位、收益关注/风险关注等）
+- **风险提醒**：为股票设置/查看/清除价格下限提醒，当价格接近或跌破价格下限时自动发送通知
 - **Agent 完整能力调用**：对已经沉淀成独立 Agent 的能力，可以直接调用对应 Agent 来完成完整任务，例如估值、研究、风控、复盘，而不是总是拆成多个底层工具重新组装
 你拥有的工具覆盖了上述所有操作，请根据用户意图自主选择合适的工具
 
@@ -2290,7 +2290,7 @@ def _build_position_report_detail_content(report: Dict[str, Any]) -> str:
     if status:
         meta.append(f"- 状态: {status}")
     if action:
-        meta.append(f"- 操作建议: {action}")
+        meta.append(f"- 研究观察: {action}")
     if confidence is not None:
         meta.append(f"- 置信度: {confidence}")
     if meta:
@@ -2313,11 +2313,11 @@ def _build_position_report_detail_content(report: Dict[str, Any]) -> str:
 
     targets = report.get("price_targets") or {}
     target_lines: List[str] = []
-    for label, key in (("目标价", "target_price"), ("止损价", "stop_loss"), ("止盈价", "take_profit_price")):
+    for label, key in (("关键验证价位", "target_price"), ("风险关注价格", "stop_loss"), ("收益关注价格", "take_profit_price")):
         if targets.get(key) is not None:
             target_lines.append(f"- {label}: {targets[key]}")
     if target_lines:
-        lines.append("\n## 目标价位\n" + "\n".join(target_lines))
+        lines.append("\n## 关键价位\n" + "\n".join(target_lines))
 
     action_reason = str(report.get("action_reason") or "").strip()
     if action_reason:
