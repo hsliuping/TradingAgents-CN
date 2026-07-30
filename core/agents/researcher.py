@@ -1,7 +1,7 @@
 """
 研究员Agent基类
 
-用于实现研究员Agent（看涨研究员、看跌研究员等）
+用于实现研究员Agent（积极证据研究员、谨慎证据研究员等）
 v2.0 新增：基于配置的研究员Agent架构
 """
 
@@ -304,6 +304,240 @@ class ResearcherAgent(BaseAgent):
 
         except Exception as e:
             logger.warning(f"保存到记忆系统失败: {e}")
+
+    def _reflect_on_analysis(
+        self,
+        ticker: str,
+        report: Dict[str, Any],
+        original_content: str,
+        state: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """研究员报告反思提炼（v3.5.0 项3）。
+
+        把本次分析报告提炼为结构化教训（reasoning/improvement/summary/query），
+        写入 ANALYSIS_INSIGHT scope，memory_kind=analysis_lesson。
+
+        下次同股票分析时，_get_memory_context 可优先召回结构化教训而非原文。
+
+        降级策略：
+        - LLM 超时/返回非 JSON → fallback 写入原文（reflection_success=False）
+        - mem0 不可用 → 跳过
+        - 任何异常 → 不阻塞主流程
+        """
+        try:
+            from core.agents.reflection_helper import run_reflection_sync
+            from core.agents.reflection_prompts import (
+                ANALYSIS_REFLECTION_SYSTEM_PROMPT,
+                build_analysis_reflection_user_prompt,
+            )
+            from core.memory.models import MemoryScope
+
+            # 提取报告内容用于反思
+            if isinstance(report, dict):
+                stance = report.get("stance", self.stance)
+            else:
+                stance = self.stance
+
+            analysis_date = ""
+            if state:
+                analysis_date = state.get("analysis_date") or state.get("trade_date") or ""
+            if not analysis_date:
+                try:
+                    from datetime import datetime
+                    analysis_date = datetime.now().strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+
+            user_prompt = build_analysis_reflection_user_prompt(
+                ticker=ticker,
+                report=report,
+                analysis_date=analysis_date,
+            )
+            if not user_prompt.strip():
+                return
+
+            # 获取 db 句柄（用于 MemoryService）
+            db = self._get_db_handle(state=state)
+            if db is None:
+                logger.debug("[Researcher] 反思跳过：未获取到 db 句柄")
+                return
+
+            user_id = self._get_user_id(state=state) or "default_user"
+
+            success = run_reflection_sync(
+                db=db,
+                user_id=user_id,
+                agent_id=self.agent_id,
+                scope=MemoryScope.ANALYSIS_INSIGHT,
+                memory_kind="analysis_lesson",
+                system_prompt=ANALYSIS_REFLECTION_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                fallback_content=original_content,
+                fallback_metadata={
+                    "symbol": str(ticker).upper(),
+                    "stance": stance,
+                    "agent_id": self.agent_id,
+                    "analysis_date": analysis_date,
+                    "source": "researcher_reflection",
+                },
+            )
+            if success:
+                logger.info(
+                    f"[Researcher] 已写入 analysis_lesson 教训: ticker={ticker} stance={stance}"
+                )
+        except Exception as e:
+            logger.warning(f"[Researcher] analysis_lesson 反思异常: {e}", exc_info=True)
+
+    def _reflect_on_debate(
+        self,
+        ticker: str,
+        debate_history: str,
+        conclusion: str,
+        debate_type: str,
+        state: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """辩论反思提炼（v3.6.0 项8）。
+
+        在多情景研究 / 风险审阅达到最大轮数后触发，把多情景研究历史和最终裁决
+        提炼为结构化教训（reasoning/improvement/summary/query），写入
+        AGENT_EXPERIENCE scope，memory_kind=debate_lesson。
+
+        下次同股票分析时，_get_memory_context 可召回多情景研究教训，
+        让多视角对比从"对抗"升级为"积累"。
+
+        降级策略：
+        - LLM 超时/返回非 JSON → fallback 写入研究历史摘要（reflection_success=False）
+        - mem0 不可用 → 跳过
+        - 任何异常 → 不阻塞主流程
+        """
+        try:
+            from core.agents.reflection_helper import run_reflection_sync
+            from core.agents.reflection_prompts import (
+                DEBATE_REFLECTION_SYSTEM_PROMPT,
+                build_debate_reflection_user_prompt,
+            )
+            from core.memory.models import MemoryScope
+
+            if not debate_history.strip() and not conclusion.strip():
+                return
+
+            user_prompt = build_debate_reflection_user_prompt(
+                ticker=ticker,
+                debate_history=debate_history,
+                conclusion=conclusion,
+                debate_type=debate_type,
+            )
+            if not user_prompt.strip():
+                return
+
+            db = self._get_db_handle(state=state)
+            if db is None:
+                logger.debug("[Researcher] 辩论反思跳过：未获取到 db 句柄")
+                return
+
+            user_id = self._get_user_id(state=state) or "default_user"
+
+            # fallback 内容：取辩论历史末尾 + 结论（避免空字符串作为 fallback）
+            fallback_parts = [f"辩论反思 {ticker} ({debate_type})"]
+            if debate_history:
+                # 仅保留末尾 800 字，避免 fallback 过长
+                fallback_parts.append(debate_history[-800:])
+            if conclusion:
+                fallback_parts.append(f"最终裁决: {conclusion[:300]}")
+            fallback_content = "\n\n".join(fallback_parts)
+
+            success = run_reflection_sync(
+                db=db,
+                user_id=user_id,
+                agent_id=self.agent_id,
+                scope=MemoryScope.AGENT_EXPERIENCE,
+                memory_kind="debate_lesson",
+                system_prompt=DEBATE_REFLECTION_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
+                fallback_content=fallback_content,
+                fallback_metadata={
+                    "symbol": str(ticker).upper() if ticker else "",
+                    "stance": self.stance or "",
+                    "agent_id": self.agent_id,
+                    "debate_type": debate_type,
+                    "source": "debate_reflection",
+                },
+            )
+            if success:
+                logger.info(
+                    f"[Researcher] 已写入 debate_lesson 教训: ticker={ticker} type={debate_type}"
+                )
+        except Exception as e:
+            logger.warning(f"[Researcher] debate_lesson 反思异常: {e}", exc_info=True)
+
+    def _get_db_handle(self, state: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+        """获取 MongoDB 数据库句柄（用于 MemoryService）。
+
+        ResearcherAgent 可能在不同上下文中被调用（工作流引擎、独立调用等），
+        尝试从多个来源获取 db 句柄。
+        """
+        # 1. 从 state 获取（工作流引擎注入）
+        if state and isinstance(state, dict):
+            db = state.get("_db") or state.get("db")
+            if db is not None:
+                return db
+
+        # 2. 从 self._db 获取（如果存在）
+        if hasattr(self, "_db") and self._db is not None:
+            return self._db
+
+        # 3. 从 self.config.prompt_variables 获取（Pydantic 模型）
+        try:
+            if hasattr(self, "config") and self.config is not None:
+                prompt_vars = getattr(self.config, "prompt_variables", None) or {}
+                if isinstance(prompt_vars, dict):
+                    db = prompt_vars.get("db") or prompt_vars.get("database")
+                    if db is not None:
+                        return db
+        except Exception:
+            pass
+
+        # 4. 从全局 get_mongo_db 获取
+        try:
+            from app.core.database import get_mongo_db_sync
+            return get_mongo_db_sync()
+        except Exception:
+            pass
+
+        # 5. 尝试从 settings 直接构造
+        try:
+            from pymongo import MongoClient
+            from app.core.config import settings
+            client = MongoClient(settings.MONGO_URI)
+            return client[settings.MONGO_DB]
+        except Exception as e:
+            logger.debug(f"[Researcher] 获取 db 句柄失败: {e}")
+            return None
+
+    def _get_user_id(self, state: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """获取当前用户 ID（用于 mem0 元数据）。"""
+        # 1. 从 state 获取
+        if state and isinstance(state, dict):
+            user_id = state.get("user_id") or state.get("userId")
+            if user_id:
+                return str(user_id)
+
+        # 2. 从 self._user_id 获取
+        if hasattr(self, "_user_id") and self._user_id:
+            return str(self._user_id)
+
+        # 3. 从 self.config.prompt_variables 获取
+        try:
+            if hasattr(self, "config") and self.config is not None:
+                prompt_vars = getattr(self.config, "prompt_variables", None) or {}
+                if isinstance(prompt_vars, dict):
+                    user_id = prompt_vars.get("user_id")
+                    if user_id:
+                        return str(user_id)
+        except Exception:
+            pass
+
+        return None
 
     @abstractmethod
     def _build_system_prompt(self, stance: str, state: Dict[str, Any] = None) -> str:

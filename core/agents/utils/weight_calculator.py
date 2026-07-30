@@ -146,7 +146,7 @@ def _calculate_long_term_weights(reports: Dict[str, str]) -> Dict[str, float]:
     中长线权重配置：
     - 基本面分析（fundamentals_report）：50%
     - 板块分析（sector_report）：30%
-    - 风险分析（通过风险辩论体现）：20%
+    - 风险分析（通过风险多情景研究体现）：20%
     - 其他报告：10%或更低
     """
     weights = {}

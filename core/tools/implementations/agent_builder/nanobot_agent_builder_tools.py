@@ -2996,7 +2996,7 @@ def prepare_agent_requirement_intake(
     valuation_method_scope: Annotated[str, "估值方法边界，如 仅PE/PB/PEG，不含DCF 或 综合估值"] = "",
     test_strategy: Annotated[str, "生成后是否允许自动测试；例如 只做配置校验，不跑真实股票样例"] = "",
     preview_mode: Annotated[str, "如果用户在问报告样式，是只看结构骨架，还是允许带占位符示例"] = "",
-    report_section_scope: Annotated[str, "报告章节边界，如 仅估值相关章节，不含技术面/交易计划/多空辩论"] = "",
+    report_section_scope: Annotated[str, "报告章节边界，如 仅估值相关章节，不含技术面/交易执行方案/多情景研究"] = "",
 ) -> str:
     """生成 Agent 创建前的需求采集提纲 —— 自动补全智能默认值，只将最关键决策提升给用户。"""
     try:
@@ -3034,7 +3034,7 @@ def prepare_agent_requirement_intake(
             "valuation_method_scope": "综合估值（行业对比PE/PB + 历史估值分位 + DCF），如用户指定则优先用户",
             "test_strategy": "auto_test",  # 默认允许自动跑样例验证
             "preview_mode": "structure_only",  # 报告样式预览只看结构骨架
-            "report_section_scope": "仅保留估值/分析相关章节，不扩展到技术面、交易计划、多空辩论",
+            "report_section_scope": "仅保留估值/分析相关章节，不扩展到技术面、交易执行方案、多情景研究",
         }
 
         # 确定实际值（用户提供 > 智能默认）
@@ -3207,7 +3207,7 @@ async def prepare_agent_generation_confirmation(
     valuation_method_scope: Annotated[str, "估值方法边界，如 仅PE/PB/PEG，不含DCF 或 综合估值"] = "",
     test_strategy: Annotated[str, "生成后是否允许自动测试；例如 只做配置校验，不跑真实股票样例"] = "",
     preview_mode: Annotated[str, "如果用户在问报告样式，是只看结构骨架，还是允许带占位符示例"] = "",
-    report_section_scope: Annotated[str, "报告章节边界，如 仅估值相关章节，不含技术面/交易计划/多空辩论"] = "",
+    report_section_scope: Annotated[str, "报告章节边界，如 仅估值相关章节，不含技术面/交易执行方案/多情景研究"] = "",
     status: Annotated[str, "目标模板状态，默认 active"] = "active",
 ) -> str:
     """生成 Agent 创建确认稿。"""
@@ -3248,7 +3248,7 @@ async def prepare_agent_generation_confirmation(
         if output_preview_request and _looks_unspecified(preview_mode):
             preview_mode = "structure_only"
         if stock_analysis_request and output_preview_request and _looks_unspecified(report_section_scope):
-            report_section_scope = "仅保留估值/分析相关章节，不扩展到技术面、交易计划、多空辩论"
+            report_section_scope = "仅保留估值/分析相关章节，不扩展到技术面、交易执行方案、多情景研究"
 
         registry = get_tool_registry()
         missing_tools = [tool_id for tool_id in resolved_tools if registry.get(tool_id) is None]
@@ -3297,8 +3297,8 @@ async def prepare_agent_generation_confirmation(
                 "preview_instruction": "确认阶段默认只展示章节骨架/字段模板，不填充真实内容；只有用户明确要求时才允许占位符 mock。",
                 "forbidden_expansions": [
                     "技术分析",
-                    "交易计划",
-                    "多空辩论",
+                    "交易执行方案",
+                    "多情景研究",
                     "目标价或区间",
                     "仓位建议",
                     "其他操作性指令",

@@ -200,9 +200,9 @@ def get_technical_indicators(
                     report_lines.append(f"  - Signal: {macds:.4f}")
                     report_lines.append(f"  - Hist: {macdh:.4f}")
                     if macdh > 0 and stock['macdh'].iloc[-2] <= 0:
-                        report_lines.append(f"  - 信号: 金叉 (看涨) 📈")
+                        report_lines.append(f"  - 信号: 金叉（正向动能信号）📈")
                     elif macdh < 0 and stock['macdh'].iloc[-2] >= 0:
-                        report_lines.append(f"  - 信号: 死叉 (看跌) 📉")
+                        report_lines.append(f"  - 信号: 死叉（负向动能信号）📉")
 
             except Exception as e:
                 report_lines.append(f"- {ind}: 计算失败 ({e})")

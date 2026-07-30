@@ -1,7 +1,7 @@
 """
 管理者Agent基类
 
-用于实现管理者Agent（研究经理、风险经理等）
+用于实现管理者Agent（研究整合员、风险评估师等）
 v2.0 新增：基于配置的管理者Agent架构
 """
 
@@ -33,7 +33,7 @@ class ManagerAgent(BaseAgent):
     """
     管理者Agent基类
     
-    工作模式：主持辩论/决策 → 综合多方意见 → 形成最终决策
+    工作模式：主持辩论/审阅 → 综合多方意见 → 形成最终研究结论
     
     特点：
     - 不调用工具
@@ -45,7 +45,7 @@ class ManagerAgent(BaseAgent):
     1. 从state读取多个观点报告
     2. 主持辩论（可选）
     3. 使用LLM综合研判
-    4. 生成最终决策
+    4. 生成最终研究结论
     5. 输出到state["investment_plan"/"risk_assessment"]
     
     子类需要实现：
@@ -117,8 +117,8 @@ class ManagerAgent(BaseAgent):
             state: 工作流状态字典，包含：
                 - ticker: 股票代码
                 - analysis_date: 分析日期
-                - bull_report: 看涨观点（可选）
-                - bear_report: 看跌观点（可选）
+                - bull_report: 积极证据研究观察（可选）
+                - bear_report: 谨慎证据研究观察（可选）
                 - trade_info: 交易信息（交易复盘场景）
                 - 其他输入...
 

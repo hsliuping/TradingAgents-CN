@@ -3332,7 +3332,7 @@ class PortfolioService:
         1. 检查是否有缓存的单股分析报告（只读取缓存，不创建新任务）
         2. 如果有缓存，使用缓存的报告；如果没有缓存，使用空报告
         3. 将分析报告（或空报告）+ 持仓信息发给持仓分析专用LLM
-        4. 生成个性化的持仓操作建议
+        4. 生成个性化的持仓研究观察（非交易建议）
         """
         analysis_id = str(uuid.uuid4())
 
@@ -4483,7 +4483,7 @@ class PortfolioService:
     ) -> PositionAnalysisResult:
         """调用AI进行单股持仓分析 - 方案2
 
-        基于完整的单股分析报告 + 持仓信息，生成个性化操作建议
+        基于完整的单股分析报告 + 持仓信息，生成个性化持仓研究观察
         使用系统配置的深度分析模型
         """
         import httpx
@@ -4656,16 +4656,16 @@ class PortfolioService:
 ## 分析要求
 请从以下维度分析该持仓，用中文回答：
 
-1. **操作建议** (必须是以下之一: 加仓/减仓/持有/清仓)
-2. **建议理由** (100字以内)
+1. **研究结论倾向** (必须是以下之一: 乐观/审慎/中性，不得输出加仓/减仓/持有/清仓等交易指令)
+2. **研究观察理由** (100字以内)
 3. **置信度** (0-100分)
-4. **止损价建议** (具体价格)
-5. **止盈价建议** (具体价格)
-6. **风险评估** (300-500字，需详细说明主要风险点、风险等级、风险影响等)
-7. **机会评估** (300-500字，需详细说明潜在机会、催化剂、收益空间等)
+4. **风险关注价格** (具体价格，用于用户自行跟踪下行风险)
+5. **收益关注价格** (具体价格，用于用户自行跟踪上行观察价位)
+6. **风险审阅** (300-500字，需详细说明主要风险点、风险等级、风险影响等)
+7. **机会评估** (300-500字，需详细说明潜在机会、催化剂、收益空间等，但不得给出买入/卖出建议)
 8. **详细分析** (200字以内的完整分析)
 
-请直接给出分析结果。"""
+请直接给出分析结果。整体输出仅供学习研究参考，不构成投资建议。"""
 
         return prompt
 
@@ -4678,7 +4678,7 @@ class PortfolioService:
     ) -> str:
         """构建持仓分析专用提示词 - 方案2
 
-        基于完整的单股分析报告 + 持仓信息，生成个性化操作建议
+        基于完整的单股分析报告 + 持仓信息，生成个性化持仓研究观察
         支持模板系统（通过 USE_TEMPLATE_PROMPTS 特性开关控制）
         """
         # 先构建硬编码版本作为降级兜底
@@ -4730,13 +4730,13 @@ class PortfolioService:
         fundamentals_report = reports.get("fundamentals_report", "")[:1500] if reports.get("fundamentals_report") else "暂无"
         news_report = reports.get("news_report", "")[:1000] if reports.get("news_report") else "暂无"
 
-        # 提取交易建议
+        # 提取研究结论倾向
         trade_action = decision.get("action", "未知") if decision else "未知"
         target_price = decision.get("target_price") if decision else None
 
         prompt = f"""# 持仓分析专家任务
 
-你是一位专业的持仓分析师，需要基于完整的股票分析报告和用户的持仓情况，给出个性化的操作建议。
+你是一位专业的持仓研究助理，需要基于完整的股票分析报告和用户的持仓情况，给出个性化的持仓研究观察（非交易建议）。
 
 ## 📊 股票分析报告摘要
 
@@ -4749,11 +4749,11 @@ class PortfolioService:
 ### 新闻面分析
 {news_report}
 
-### 综合建议
+### 综合研究
 - 摘要: {summary or '暂无'}
-- 交易建议: {trade_action}
-- 目标价: {target_price or '未知'}
-- 详细建议: {recommendation or '暂无'}
+- 研究结论倾向: {trade_action}
+- 关键验证价位: {target_price or '未知'}
+- 详细研究观察: {recommendation or '暂无'}
 
 ---
 
@@ -4781,37 +4781,38 @@ class PortfolioService:
 
 ## 📝 分析要求
 
-请综合以上股票分析报告和持仓信息，给出个性化的持仓操作建议。
+请综合以上股票分析报告和持仓信息，给出个性化的持仓研究观察（非交易建议）。
 
 **重要考量因素**：
 1. 当前盈亏状态：{pnl_status} {pnl_pct:.2f}%
 2. 与目标收益率的差距：目标 {params.target_profit_pct}%，当前 {pnl_pct:.2f}%
-3. 股票分析报告中的交易建议：{trade_action}
+3. 股票分析报告中的研究结论倾向：{trade_action}
 4. 技术面、基本面、新闻面的综合判断
 
 **请以JSON格式输出**：
 ```json
 {{
-    "action": "加仓|减仓|持有|清仓",
-    "action_reason": "操作建议的核心理由，需要结合分析报告和持仓情况说明（100字以内）",
+    "action": "乐观|审慎|中性",
+    "action_reason": "研究观察的核心理由，需要结合分析报告和持仓情况说明（100字以内）",
     "confidence": 0-100的整数,
-    "stop_loss_price": 止损价（数字，保留2位小数）,
-    "take_profit_price": 止盈价（数字，保留2位小数）,
-    "risk_assessment": "基于分析报告的详细风险评估（300-500字，需包含主要风险点、风险等级、风险影响等）",
-    "opportunity_assessment": "基于分析报告的详细机会评估（300-500字，需包含潜在机会、催化剂、收益空间等）",
+    "stop_loss_price": 风险关注价格（数字，保留2位小数）,
+    "take_profit_price": 收益关注价格（数字，保留2位小数）,
+    "risk_assessment": "基于分析报告的详细风险审阅（300-500字，需包含主要风险点、风险等级、风险影响等）",
+    "opportunity_assessment": "基于分析报告的详细机会评估（300-500字，需包含潜在机会、催化剂、收益空间等，但不得给出买入/卖出建议）",
     "detailed_analysis": "结合分析报告和持仓情况的详细分析（200字以内）",
-    "suggested_quantity": 建议操作数量（整数，加仓/减仓时填写，可选）,
-    "suggested_amount": 建议操作金额（数字，加仓/减仓时填写，可选）,
-    "position_risk_analysis": "仓位风险分析（如提供了资金总量，分析仓位占比是否合理，50字以内，可选）"
+    "suggested_quantity": 0,
+    "suggested_amount": 0,
+    "position_risk_analysis": "仓位风险分析（如提供了资金总量，分析仓位占比是否合理，50字以内，可选，但不得给出加仓/减仓建议）"
 }}
 ```
 
 **注意事项**：
-- 止损价应低于当前价
-- 止盈价应高于当前价
+- 风险关注价格应低于当前价，用于用户自行跟踪下行风险
+- 收益关注价格应高于当前价，用于用户自行跟踪上行观察价位
 - 所有价格保留2位小数
 - 必须基于提供的分析报告进行判断，不要凭空编造信息
-- 如果用户提供了资金总量，务必在分析中考虑仓位占比和风险敞口
+- 如果用户提供了资金总量，可在分析中说明仓位占比观察，但不得给出加仓/减仓/清仓等交易指令
+- 整体输出仅供学习研究参考，不构成投资建议
 """
 
         return prompt
@@ -4973,15 +4974,15 @@ class PortfolioService:
             try:
                 data = json.loads(json_match.group(1))
 
-                # 解析操作建议
-                action_str = data.get("action", "持有")
+                # 解析研究结论倾向（兼容旧版操作建议术语）
+                action_str = data.get("action", "中性")
                 action = PositionAction.HOLD
-                if "加仓" in action_str:
+                if any(k in action_str for k in ["乐观", "加仓", "买入"]):
                     action = PositionAction.ADD
-                elif "减仓" in action_str:
+                elif any(k in action_str for k in ["审慎", "减仓", "卖出", "清仓"]):
                     action = PositionAction.REDUCE
-                elif "清仓" in action_str:
-                    action = PositionAction.CLEAR
+                elif "中性" in action_str or "持有" in action_str:
+                    action = PositionAction.HOLD
 
                 # 构建价格目标
                 price_targets = PriceTarget(
@@ -5039,14 +5040,14 @@ class PortfolioService:
         snapshot: PositionSnapshot
     ) -> PositionAnalysisResult:
         """解析单股持仓AI响应"""
-        # 确定操作建议
+        # 确定研究结论倾向（兼容旧版操作建议术语）
         action = PositionAction.HOLD
-        if "加仓" in content:
+        if any(k in content for k in ["乐观", "加仓", "买入"]):
             action = PositionAction.ADD
-        elif "减仓" in content:
+        elif any(k in content for k in ["审慎", "减仓", "卖出", "清仓"]):
             action = PositionAction.REDUCE
-        elif "清仓" in content:
-            action = PositionAction.CLEAR
+        elif "中性" in content or "持有" in content:
+            action = PositionAction.HOLD
 
         # 提取置信度
         confidence = 50.0
@@ -5055,17 +5056,17 @@ class PortfolioService:
         if conf_match:
             confidence = float(conf_match.group(1))
 
-        # 提取止损止盈价
+        # 提取风险关注/收益关注价格（兼容旧版止损/止盈表述）
         price_targets = PriceTarget()
-        stop_loss_match = re.search(r'止损价[：:]\s*(\d+\.?\d*)', content)
+        stop_loss_match = re.search(r'(风险关注价格|止损价)[：:]\s*(\d+\.?\d*)', content)
         if stop_loss_match:
-            price_targets.stop_loss_price = float(stop_loss_match.group(1))
+            price_targets.stop_loss_price = float(stop_loss_match.group(2))
             if snapshot.cost_price > 0:
                 price_targets.stop_loss_pct = round((price_targets.stop_loss_price - snapshot.cost_price) / snapshot.cost_price * 100, 2)
 
-        take_profit_match = re.search(r'止盈价[：:]\s*(\d+\.?\d*)', content)
+        take_profit_match = re.search(r'(收益关注价格|止盈价)[：:]\s*(\d+\.?\d*)', content)
         if take_profit_match:
-            price_targets.take_profit_price = float(take_profit_match.group(1))
+            price_targets.take_profit_price = float(take_profit_match.group(2))
             if snapshot.cost_price > 0:
                 price_targets.take_profit_pct = round((price_targets.take_profit_price - snapshot.cost_price) / snapshot.cost_price * 100, 2)
 
@@ -5117,7 +5118,7 @@ class PortfolioService:
         market_value = snapshot.market_value or (snapshot.quantity * (snapshot.current_price or snapshot.cost_price))
         position_pct = (market_value / total_capital) * 100 if total_capital > 0 else 0
 
-        # 计算最大可能亏损（使用止损价或默认10%）
+        # 计算最大可能亏损（使用风险关注价格或默认10%）
         stop_loss_pct = 10.0  # 默认10%
         if price_targets.stop_loss_pct:
             stop_loss_pct = abs(price_targets.stop_loss_pct)
@@ -5294,8 +5295,8 @@ class PortfolioService:
         使用持仓分析工作流，包含：
         1. 持仓技术面分析师 - 分析技术指标和走势
         2. 持仓基本面分析师 - 分析财务数据和估值
-        3. 持仓风险评估师 - 评估风险和止损建议
-        4. 持仓操作建议师 - 综合分析给出操作建议
+        3. 持仓风险评估师 - 评估风险并给出风险关注价格参考
+        4. 持仓研究观察员 - 综合分析给出持仓研究观察
         """
         try:
             from core.api.workflow_api import WorkflowAPI
@@ -5464,7 +5465,7 @@ class PortfolioService:
             risk_assessment_text = risk_analysis  # 默认使用工作流的风险评估
             opportunity_assessment_text = ""
             
-            # 从操作建议中提取具体的操作和理由
+            # 从研究观察中提取研究结论和理由
             # 如果action_advice是JSON格式，先转换为Markdown
             import json
             advice_json = None
@@ -5550,11 +5551,11 @@ class PortfolioService:
 【风险评估】
 {risk_analysis}
 
-【操作建议】
+【研究观察】
 {action_advice_for_summary}
             """.strip()
             
-            # detailed_analysis 只包含技术面、基本面和风险评估，不包含操作建议（避免与action_reason重复）
+            # detailed_analysis 只包含技术面、基本面和风险评估，不包含研究观察（避免与action_reason重复）
             detailed_analysis = f"""
 【技术面分析】
 {technical_analysis}
@@ -5628,13 +5629,13 @@ class PortfolioService:
         return risk_to_preference.get(risk_tolerance, "neutral")
 
     def _convert_action_advice_json_to_markdown(self, advice_json: Dict[str, Any]) -> str:
-        """将JSON格式的操作建议转换为Markdown格式的文本
+        """将JSON格式的研究观察转换为Markdown格式的文本
         
         Args:
-            advice_json: 操作建议的JSON对象
+            advice_json: 研究观察的JSON对象
             
         Returns:
-            Markdown格式的操作建议文本
+            Markdown格式的研究观察文本
         """
         lines = []
         
@@ -5721,7 +5722,7 @@ class PortfolioService:
                         if neutral_view:
                             lines.append(f"**中性观点**: {neutral_view}\n\n")
         
-        # 3. 中性操作建议（最核心的内容）
+        # 3. 中性研究观察（最核心的内容）
         # 支持两种格式：neutral_operation_advice 和 neutral_operation_suggestion
         neutral_advice = None
         if "neutral_operation_advice" in advice_json:
@@ -5730,17 +5731,17 @@ class PortfolioService:
             neutral_advice = advice_json["neutral_operation_suggestion"]
         
         if neutral_advice and isinstance(neutral_advice, dict):
-            lines.append("\n## 💡 操作建议\n\n")
+            lines.append("\n## 💡 研究观察\n\n")
             
             # 核心判断
             core_judgment = neutral_advice.get("core_judgment", "")
             if core_judgment:
                 lines.append(f"### 核心判断\n\n{core_judgment}\n\n")
             
-            # 推荐操作/建议操作（兼容不同字段名）
-            recommended_action = neutral_advice.get("recommended_action", neutral_advice.get("suggested_action", ""))
+            # 研究结论倾向/建议（兼容不同字段名）
+            recommended_action = neutral_advice.get("analysis_view", neutral_advice.get("recommended_action", neutral_advice.get("suggested_action", "")))
             if recommended_action:
-                lines.append(f"**推荐操作**: {recommended_action}\n\n")
+                lines.append(f"**研究结论倾向**: {recommended_action}\n\n")
             
             # 理由说明（reasoning字段，可能是列表或字符串）
             reasoning = neutral_advice.get("reasoning", [])
@@ -5809,15 +5810,15 @@ class PortfolioService:
                 price_monitoring = specific_plan.get("price_monitoring", {})
                 if isinstance(price_monitoring, dict) and price_monitoring:
                     lines.append("### 价格监控\n\n")
-                    stop_loss_ref = price_monitoring.get("止损参考价", "")
+                    stop_loss_ref = price_monitoring.get("风险关注参考价", price_monitoring.get("止损参考价", ""))
                     if stop_loss_ref:
-                        lines.append(f"**止损参考价**: {stop_loss_ref}\n\n")
-                    first_target = price_monitoring.get("第一目标价（减亏/解套）", "")
+                        lines.append(f"**风险关注参考价**: {stop_loss_ref}\n\n")
+                    first_target = price_monitoring.get("第一关键验证价位（减亏/解套）", price_monitoring.get("第一目标价（减亏/解套）", ""))
                     if first_target:
-                        lines.append(f"**第一目标价（减亏/解套）**: {first_target}\n\n")
-                    second_target = price_monitoring.get("第二目标价（达成收益）", "")
+                        lines.append(f"**第一关键验证价位（减亏/解套）**: {first_target}\n\n")
+                    second_target = price_monitoring.get("第二关键验证价位（达成收益）", price_monitoring.get("第二目标价（达成收益）", ""))
                     if second_target:
-                        lines.append(f"**第二目标价（达成收益）**: {second_target}\n\n")
+                        lines.append(f"**第二关键验证价位（达成收益）**: {second_target}\n\n")
                 
                 # 观察因素
                 observation_factors = specific_plan.get("observation_factors", [])
@@ -5893,10 +5894,10 @@ class PortfolioService:
         return "\n".join(lines).strip() if lines else "基于综合分析给出建议"
     
     def _extract_price_targets_from_json(self, advice_json: Dict[str, Any], snapshot: PositionSnapshot, params: Optional[PositionAnalysisRequest] = None) -> PriceTarget:
-        """从JSON中提取价格目标
+        """从JSON中提取风险关注/收益关注价格
         
         Args:
-            advice_json: 操作建议的JSON对象
+            advice_json: 研究观察的JSON对象
             snapshot: 持仓快照
             
         Returns:
@@ -5908,7 +5909,7 @@ class PortfolioService:
         
         logger.info(f"📊 [提取价格目标] JSON字段: {list(advice_json.keys())}")
         
-        # 提取止损价（可能在多个位置）
+        # 提取风险关注价格（可能在多个位置，兼容旧版止损价字段）
         stop_loss_price = None
         
         # 1. 从顶层提取
@@ -5920,15 +5921,15 @@ class PortfolioService:
             if isinstance(specific_plan, dict):
                 price_monitoring = specific_plan.get("price_monitoring", {})
                 if isinstance(price_monitoring, dict):
-                    # 提取"止损参考价"字段（可能是字符串，包含价格）
-                    stop_loss_ref = price_monitoring.get("止损参考价", "")
+                    # 提取"风险关注参考价"字段（兼容旧版"止损参考价"，可能是字符串，包含价格）
+                    stop_loss_ref = price_monitoring.get("风险关注参考价", price_monitoring.get("止损参考价", ""))
                     if stop_loss_ref:
                         # 尝试从字符串中提取价格数字（如"¥4.73"或"4.73"）
                         price_match = re.search(r'[\d.]+', str(stop_loss_ref))
                         if price_match:
                             try:
                                 stop_loss_price = float(price_match.group())
-                                logger.info(f"📊 [提取价格目标] 从specific_plan.price_monitoring提取止损价: {stop_loss_price}")
+                                logger.info(f"📊 [提取价格目标] 从specific_plan.price_monitoring提取风险关注价格: {stop_loss_price}")
                             except (ValueError, TypeError):
                                 pass
         
@@ -5938,7 +5939,7 @@ class PortfolioService:
             if isinstance(neutral, dict):
                 stop_loss_price = neutral.get("stop_loss_price")
         
-        # 处理止损价
+        # 处理风险关注价格
         if stop_loss_price:
             try:
                 price_targets.stop_loss_price = float(stop_loss_price)
@@ -5946,43 +5947,43 @@ class PortfolioService:
                     price_targets.stop_loss_pct = round(
                         (price_targets.stop_loss_price - snapshot.cost_price) / snapshot.cost_price * 100, 2
                     )
-                logger.info(f"📊 [提取价格目标] 止损价: {price_targets.stop_loss_price}, 百分比: {price_targets.stop_loss_pct}")
+                logger.info(f"📊 [提取价格目标] 风险关注价格: {price_targets.stop_loss_price}, 百分比: {price_targets.stop_loss_pct}")
             except (ValueError, TypeError) as e:
-                logger.warning(f"⚠️ [提取价格目标] 止损价转换失败: {e}")
+                logger.warning(f"⚠️ [提取价格目标] 风险关注价格转换失败: {e}")
         else:
             logger.info(f"📊 [提取价格目标] JSON中没有找到stop_loss_price字段")
         
-        # 提取止盈价（可能在多个位置）
+        # 提取收益关注价格（可能在多个位置，兼容旧版止盈价字段）
         take_profit_price = None
         
         # 1. 从顶层提取
         take_profit_price = advice_json.get("take_profit_price")
         
-        # 2. 从specific_plan.price_monitoring中提取（第二目标价通常是止盈价）
+        # 2. 从specific_plan.price_monitoring中提取（第二关键验证价位通常是收益关注价格）
         if not take_profit_price and "specific_plan" in advice_json:
             specific_plan = advice_json["specific_plan"]
             if isinstance(specific_plan, dict):
                 price_monitoring = specific_plan.get("price_monitoring", {})
                 if isinstance(price_monitoring, dict):
-                    # 优先使用"第二目标价（达成收益）"
-                    second_target = price_monitoring.get("第二目标价（达成收益）", "")
+                    # 优先使用"第二关键验证价位（达成收益）"
+                    second_target = price_monitoring.get("第二关键验证价位（达成收益）", price_monitoring.get("第二目标价（达成收益）", ""))
                     if second_target:
                         price_match = re.search(r'[\d.]+', str(second_target))
                         if price_match:
                             try:
                                 take_profit_price = float(price_match.group())
-                                logger.info(f"📊 [提取价格目标] 从specific_plan.price_monitoring提取止盈价: {take_profit_price}")
+                                logger.info(f"📊 [提取价格目标] 从specific_plan.price_monitoring提取收益关注价格: {take_profit_price}")
                             except (ValueError, TypeError):
                                 pass
-                    # 如果没有第二目标价，尝试使用第一目标价
+                    # 如果没有第二关键验证价位，尝试使用第一关键验证价位
                     if not take_profit_price:
-                        first_target = price_monitoring.get("第一目标价（减亏/解套）", "")
+                        first_target = price_monitoring.get("第一关键验证价位（减亏/解套）", price_monitoring.get("第一目标价（减亏/解套）", ""))
                         if first_target:
                             price_match = re.search(r'[\d.]+', str(first_target))
                             if price_match:
                                 try:
                                     take_profit_price = float(price_match.group())
-                                    logger.info(f"📊 [提取价格目标] 从specific_plan.price_monitoring提取止盈价（使用第一目标价）: {take_profit_price}")
+                                    logger.info(f"📊 [提取价格目标] 从specific_plan.price_monitoring提取收益关注价格（使用第一关键验证价位）: {take_profit_price}")
                                 except (ValueError, TypeError):
                                     pass
         
@@ -5992,7 +5993,7 @@ class PortfolioService:
             if isinstance(neutral, dict):
                 take_profit_price = neutral.get("take_profit_price")
         
-        # 处理止盈价
+        # 处理收益关注价格
         if take_profit_price:
             try:
                 price_targets.take_profit_price = float(take_profit_price)
@@ -6000,9 +6001,9 @@ class PortfolioService:
                     price_targets.take_profit_pct = round(
                         (price_targets.take_profit_price - snapshot.cost_price) / snapshot.cost_price * 100, 2
                     )
-                logger.info(f"📊 [提取价格目标] 止盈价: {price_targets.take_profit_price}, 百分比: {price_targets.take_profit_pct}")
+                logger.info(f"📊 [提取价格目标] 收益关注价格: {price_targets.take_profit_price}, 百分比: {price_targets.take_profit_pct}")
             except (ValueError, TypeError) as e:
-                logger.warning(f"⚠️ [提取价格目标] 止盈价转换失败: {e}")
+                logger.warning(f"⚠️ [提取价格目标] 收益关注价格转换失败: {e}")
         else:
             logger.info(f"📊 [提取价格目标] JSON中没有找到take_profit_price字段")
         
@@ -6013,29 +6014,29 @@ class PortfolioService:
         
         # 如果AI没有生成价格目标，根据用户设定的百分比计算（fallback逻辑）
         if not price_targets.stop_loss_price and params and snapshot.cost_price and snapshot.cost_price > 0:
-            # 使用用户设定的最大亏损百分比计算止损价
+            # 使用用户设定的最大亏损百分比计算风险关注价格
             max_loss_pct = params.max_loss_pct if params.max_loss_pct else 10.0  # 默认10%
             price_targets.stop_loss_price = round(snapshot.cost_price * (1 - max_loss_pct / 100), 2)
             price_targets.stop_loss_pct = round(-max_loss_pct, 2)
-            logger.info(f"📊 [提取价格目标] AI未生成止损价，根据用户设定计算: stop_loss={price_targets.stop_loss_price} (基于{max_loss_pct}%亏损)")
+            logger.info(f"📊 [提取价格目标] AI未生成风险关注价格，根据用户设定计算: stop_loss={price_targets.stop_loss_price} (基于{max_loss_pct}%亏损)")
         
         if not price_targets.take_profit_price and params and snapshot.cost_price and snapshot.cost_price > 0:
-            # 使用用户设定的目标收益百分比计算止盈价
+            # 使用用户设定的目标收益百分比计算收益关注价格
             target_profit_pct = params.target_profit_pct if params.target_profit_pct else 10.0  # 默认10%
             price_targets.take_profit_price = round(snapshot.cost_price * (1 + target_profit_pct / 100), 2)
             price_targets.take_profit_pct = round(target_profit_pct, 2)
-            logger.info(f"📊 [提取价格目标] AI未生成止盈价，根据用户设定计算: take_profit={price_targets.take_profit_price} (基于{target_profit_pct}%收益)")
+            logger.info(f"📊 [提取价格目标] AI未生成收益关注价格，根据用户设定计算: take_profit={price_targets.take_profit_price} (基于{target_profit_pct}%收益)")
         
         return price_targets
     
     def _extract_action_from_json(self, advice_json: Dict[str, Any]) -> PositionAction:
-        """从JSON中提取action
+        """从JSON中提取研究结论倾向对应的PositionAction
         
         Args:
-            advice_json: 操作建议的JSON对象
+            advice_json: 研究观察的JSON对象
             
         Returns:
-            PositionAction枚举值
+            PositionAction枚举值（仅供学习研究参考，非交易建议）
         """
         # 优先从neutral_operation_advice.specific_suggestions中提取（新格式）
         if "neutral_operation_advice" in advice_json:
@@ -6049,55 +6050,53 @@ class PortfolioService:
                         action_text = first_suggestion.get("action", "")
                         if action_text:
                             action_lower = action_text.lower()
-                            if "加仓" in action_lower or "买入" in action_lower or "补仓" in action_lower:
+                            if any(k in action_lower for k in ["乐观", "加仓", "买入", "补仓"]):
                                 return PositionAction.ADD
-                            elif "减仓" in action_lower or "减持" in action_lower:
+                            elif any(k in action_lower for k in ["审慎", "减仓", "减持", "卖出", "清仓", "全部卖出"]):
                                 return PositionAction.REDUCE
-                            elif "清仓" in action_lower or "卖出" in action_lower or "全部卖出" in action_lower:
-                                return PositionAction.CLEAR
-                            elif "持有" in action_lower or "继续持有" in action_lower or "观察" in action_lower:
+                            elif any(k in action_lower for k in ["中性", "持有", "继续持有", "观察"]):
                                 return PositionAction.HOLD
                 
-                # 兼容旧格式：从recommended_action中提取
-                recommended = neutral.get("recommended_action", "")
+                # 兼容旧格式：从recommended_action/analysis_view中提取
+                recommended = neutral.get("analysis_view", neutral.get("recommended_action", ""))
                 if recommended:
                     recommended_lower = recommended.lower()
-                    if "加仓" in recommended_lower or "买入" in recommended_lower:
+                    if any(k in recommended_lower for k in ["乐观", "加仓", "买入"]):
                         return PositionAction.ADD
-                    elif "减仓" in recommended_lower:
+                    elif any(k in recommended_lower for k in ["审慎", "减仓", "卖出", "清仓"]):
                         return PositionAction.REDUCE
-                    elif "清仓" in recommended_lower or "卖出" in recommended_lower:
-                        return PositionAction.CLEAR
+                    elif any(k in recommended_lower for k in ["中性", "持有"]):
+                        return PositionAction.HOLD
         
         # 默认持有
         return PositionAction.HOLD
     
     def _parse_workflow_action_advice(self, action_advice: str) -> tuple[PositionAction, str]:
-        """从工作流的操作建议中解析出具体的操作和理由
+        """从工作流的研究观察中解析出研究结论倾向和理由
 
         Args:
-            action_advice: 操作建议师的输出文本
+            action_advice: 研究观察员的输出文本
 
         Returns:
-            tuple: (操作类型, 操作理由)
+            tuple: (PositionAction, 研究观察理由)
         """
         if not action_advice:
-            return PositionAction.HOLD, "未获取到操作建议"
+            return PositionAction.HOLD, "未获取到研究观察"
 
         # 转换为小写便于匹配
         advice_lower = action_advice.lower()
 
-        # 根据关键词判断操作类型（使用正确的枚举值）
-        if any(keyword in advice_lower for keyword in ["买入", "加仓", "增持", "建议买", "推荐买", "add"]):
+        # 根据关键词判断研究结论倾向（兼容合规术语与旧版操作术语）
+        if any(keyword in advice_lower for keyword in ["乐观", "买入", "加仓", "增持", "建议买", "推荐买", "add"]):
             action = PositionAction.ADD
-        elif any(keyword in advice_lower for keyword in ["清仓", "建议卖", "推荐卖", "clear"]):
-            action = PositionAction.CLEAR
-        elif any(keyword in advice_lower for keyword in ["减仓", "卖出", "reduce"]):
+        elif any(keyword in advice_lower for keyword in ["审慎", "清仓", "建议卖", "推荐卖", "clear", "卖出", "减仓", "reduce"]):
             action = PositionAction.REDUCE
+        elif any(keyword in advice_lower for keyword in ["中性", "持有", "观望", "hold"]):
+            action = PositionAction.HOLD
         else:
             action = PositionAction.HOLD
 
-        # 提取操作理由（取前200个字符作为简要理由）
+        # 提取研究观察理由（取前200个字符作为简要理由）
         action_reason = action_advice[:200] + "..." if len(action_advice) > 200 else action_advice
 
         return action, action_reason

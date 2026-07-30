@@ -98,7 +98,7 @@ class RiskyAnalystV2(ResearcherAgent):
         ],
         requires_tools=False,
         output_field="risky_opinion",
-        report_label="【激进风险评估】",
+        report_label="【高弹性情景研究】",
         workflow_stage="risk",
         growth_role="reviewer",
         growth_outputs=["risky_opinion"],
@@ -316,10 +316,10 @@ class RiskyAnalystV2(ResearcherAgent):
                 - bear_opinion: 审慎情景观点（可选）
                 - risk_debate_state: 辩论状态（可选）
                     - history: 完整辩论历史
-                    - risky_history: 激进分析师历史
-                    - safe_history: 保守分析师历史
-                    - neutral_history: 中性分析师历史
-                    - current_safe_response: 保守分析师最新回应
+                    - risky_history: 高弹性情景研究员历史
+                    - safe_history: 防御情景研究员历史
+                    - neutral_history: 基准情景研究员历史
+                    - current_safe_response: 防御情景研究员最新回应
                     - current_neutral_response: 中性分析师最新回应
                     - count: 辩论轮次计数
 

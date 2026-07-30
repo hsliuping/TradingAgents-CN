@@ -1134,15 +1134,20 @@ def sanitize_analysis_payload(result_data: Dict[str, Any]) -> Dict[str, Any]:
         action = decision.get("analysis_view") or decision.get("action")
         if isinstance(action, str) and action.strip():
             action_mapping = {
-                "BUY": "看涨",
-                "SELL": "看跌",
+                "BUY": "乐观",
+                "SELL": "审慎",
                 "HOLD": "中性",
-                "buy": "看涨",
-                "sell": "看跌",
+                "buy": "乐观",
+                "sell": "审慎",
                 "hold": "中性",
-                "买入": "看涨",
-                "卖出": "看跌",
+                "买入": "乐观",
+                "卖出": "审慎",
                 "持有": "中性",
+                "看涨": "乐观",
+                "看跌": "审慎",
+                "乐观": "乐观",
+                "审慎": "审慎",
+                "中性": "中性",
             }
             normalized_action = action_mapping.get(action.strip(), action.strip())
             sanitized_decision["action"] = normalized_action

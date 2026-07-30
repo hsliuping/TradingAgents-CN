@@ -1,8 +1,8 @@
 """
-交易员Agent基类
+研究整合员Agent基类
 
-用于实现交易员Agent
-v2.0 新增：基于配置的交易员Agent架构
+用于实现研究整合员Agent（输出研究观察汇总，不构成投资建议）
+v2.0 新增：基于配置的研究整合员Agent架构
 """
 
 import logging
@@ -31,20 +31,20 @@ def _stringify_trading_plan(value: Any) -> str:
 
 class TraderAgent(BaseAgent):
     """
-    交易员Agent基类
+    研究整合员Agent基类
     
-    工作模式：读取决策 → 生成交易分析计划
+    工作模式：读取决策 → 生成研究观察汇总
     
     特点：
     - 不调用工具
     - 依赖所有前序Agent的输出
-    - 需要记忆系统（历史交易记录）
-    - 输出格式：交易分析计划
+    - 需要记忆系统（历史研究记录）
+    - 输出格式：研究观察汇总
     
     工作流程：
-    1. 从state读取投资计划和所有分析报告
-    2. 使用LLM生成交易分析
-    3. 输出交易分析计划
+    1. 从state读取研究计划和所有分析报告
+    2. 使用LLM生成研究观察汇总
+    3. 输出研究观察汇总
     4. 输出到state["trading_plan"]
     
     子类需要实现：
@@ -63,12 +63,12 @@ class TraderAgent(BaseAgent):
         **kwargs
     ):
         """
-        初始化交易员Agent
+        初始化研究整合员Agent
         
         Args:
             config: Agent配置
             llm: LLM实例
-            memory: 记忆系统实例（用于历史交易记录）
+            memory: 记忆系统实例（用于历史研究记录）
             **kwargs: 其他参数
         """
         super().__init__(config=config, llm=llm, **kwargs)
@@ -79,21 +79,21 @@ class TraderAgent(BaseAgent):
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行交易分析
+        执行研究整合分析
         
         Args:
             state: 工作流状态字典，包含：
                 - ticker: 股票代码
                 - analysis_date: 分析日期
-                - investment_plan: 投资计划
+                - investment_plan: 综合研究结论
                 - market_report: 市场分析报告（可选）
                 - news_report: 新闻分析报告（可选）
                 - 其他报告...
                 
         Returns:
-            更新后的状态字典，包含交易分析计划
+            更新后的状态字典，包含研究观察汇总
         """
-        logger.info(f"开始执行交易员Agent: {self.agent_id}")
+        logger.info(f"开始执行研究整合员Agent: {self.agent_id}")
         
         try:
             # 1. 提取输入参数（兼容多种参数名）
@@ -167,7 +167,7 @@ class TraderAgent(BaseAgent):
             }
 
         except Exception as e:
-            logger.error(f"交易员Agent {self.agent_id} 执行失败: {e}", exc_info=True)
+            logger.error(f"研究整合员Agent {self.agent_id} 执行失败: {e}", exc_info=True)
             # 返回错误状态（只返回新增的字段）
             return {
                 self.output_field: {

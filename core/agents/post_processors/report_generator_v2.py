@@ -177,7 +177,7 @@ class ReportGeneratorV2(AnalystAgent):
 ## 报告样式
 - **简洁版**: 只包含核心结论和关键数据
 - **详细版**: 包含完整的分析过程和详细数据
-- **投资者版**: 面向投资者的专业报告，突出投资建议和风险提示
+- **投资者版**: 面向投资者的专业报告，突出研究观察汇总和风险提示
 """
 
     def _build_user_prompt(self, state: Dict[str, Any]) -> str:
@@ -241,7 +241,7 @@ class ReportGeneratorV2(AnalystAgent):
 2. **市场分析** - 市场行情和技术面
 3. **基本面分析** - 财务数据和估值
 4. **新闻和情绪** - 新闻资讯和市场情绪
-5. **投资建议** - 综合建议和风险提示
+5. **研究观察汇总** - 综合研究观察和风险提示
 6. **关键数据** - 重要指标和数据
 
 请开始生成报告。
@@ -398,10 +398,10 @@ class ReportGeneratorV2(AnalystAgent):
         title_map = {
             "market_report": "市场分析",
             "fundamentals_report": "基本面分析",
-            "bull_report": "看涨观点",
-            "bear_report": "看跌观点",
-            "investment_plan": "投资计划",
-            "risk_assessment": "风险评估",
+            "bull_report": "积极证据研究观察",
+            "bear_report": "谨慎证据研究观察",
+            "investment_plan": "综合研究结论",
+            "risk_assessment": "风险审阅",
         }
         title = title_map.get(field_name, field_name.replace("_", " ").title())
         lines.append(f"## {title}\n")

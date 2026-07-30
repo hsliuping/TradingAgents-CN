@@ -44,7 +44,7 @@ from .adapters import (
     # 管理者
     ResearchManagerV2,
     RiskManagerV2,
-    # 交易员
+    # 研究整合员
     TraderV2,
     # 风险分析师
     RiskyAnalystV2,

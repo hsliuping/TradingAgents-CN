@@ -452,6 +452,145 @@ def _format_user_context_block(user_context: dict) -> str:
     return "\n".join(lines) if lines else "- (前端未传递有效上下文)"
 
 
+def _build_stock_scope_block(user_context: Optional[dict]) -> str:
+    """构建股票详情页上下文块（仅当从详情页进入时存在 user_context.stock_scope）
+
+    设计思路：注入"报告目录"而非截断摘要正文，让 LLM 根据用户问题自主判断
+    需要哪些模块的完整内容，通过工具调用按需获取，避免摘要截断导致分析失真。
+    """
+    if not user_context:
+        return ""
+    scope = user_context.get("stock_scope")
+    if not scope or not isinstance(scope, dict):
+        return ""
+
+    code = (scope.get("code") or "").strip()
+    name = (scope.get("stock_name") or "").strip()
+    if not code:
+        return ""
+
+    lines = ["【当前股票详情页上下文】"]
+    lines.append(f"- 用户正在「股票详情页」查看：{name}({code})")
+    lines.append("- 当前会话被限定在该股票的研究主题内")
+
+    # ── 报告目录（不注入正文，仅列出有哪些报告和模块） ──
+    reports = scope.get("reports") or {}
+    stale_notes = []
+    report_index_lines: List[str] = []
+
+    # 1) 单股分析报告
+    stock_info = reports.get("stock_report")
+    if stock_info:
+        task_id = stock_info.get("task_id") or ""
+        completed = stock_info.get("completed_at") or ""
+        is_stale = stock_info.get("is_stale")
+        stale_hours = stock_info.get("stale_hours")
+        existing_modules = stock_info.get("existing_modules") or []
+        available_modules = stock_info.get("available_modules") or []
+
+        if is_stale:
+            stale_notes.append(
+                f"  • 单股分析报告（{completed} 生成，已过期约 {stale_hours} 小时）"
+            )
+        else:
+            report_index_lines.append(f"1. 单股分析报告（task_id: {task_id}，{completed} 生成，未过期）")
+            if existing_modules:
+                report_index_lines.append("   包含模块：")
+                # 优先展示实际存在的模块，并附上简短描述
+                mod_desc_map = {m.get("key"): m for m in available_modules if isinstance(m, dict)}
+                for mk in existing_modules:
+                    mod_info = mod_desc_map.get(mk) or {}
+                    mod_title = mod_info.get("title") or mk
+                    mod_desc = mod_info.get("desc") or ""
+                    if mod_desc:
+                        report_index_lines.append(f"   • {mk}（{mod_title}：{mod_desc}）")
+                    else:
+                        report_index_lines.append(f"   • {mk}（{mod_title}）")
+            else:
+                report_index_lines.append("   （未提供模块清单，可调用工具获取）")
+
+    # 2) 持仓分析报告
+    position_info = reports.get("position_report")
+    if position_info:
+        analysis_id = position_info.get("analysis_id") or ""
+        completed = position_info.get("completed_at") or ""
+        is_stale = position_info.get("is_stale")
+        stale_hours = position_info.get("stale_hours")
+        if is_stale:
+            stale_notes.append(
+                f"  • 持仓分析报告（{completed} 生成，已过期约 {stale_hours} 小时）"
+            )
+        else:
+            report_index_lines.append(
+                f"2. 持仓分析报告（analysis_id: {analysis_id}，{completed} 生成，未过期）"
+            )
+            report_index_lines.append("   包含：持仓快照、研究观察、关键验证价位、风险审阅、分析详情")
+
+    # 3) 交易复盘报告
+    review = scope.get("review_summary")
+    if review:
+        review_id = review.get("review_id") or review.get("task_id") or ""
+        completed = review.get("completed_at") or ""
+        is_stale = review.get("is_stale")
+        stale_hours = review.get("stale_hours")
+        if is_stale:
+            stale_notes.append(
+                f"  • 交易复盘报告（{completed} 生成，已过期约 {stale_hours} 小时）"
+            )
+        else:
+            report_index_lines.append(
+                f"3. 交易复盘报告（review_id: {review_id}，{completed} 生成，未过期）"
+            )
+            report_index_lines.append("   包含：时机分析、仓位分析、情绪分析、归因分析、收益对比")
+
+    if report_index_lines:
+        lines.append("")
+        lines.append("【已关联报告清单】")
+        lines.extend(report_index_lines)
+
+    # ── 时效性提醒 ──
+    if stale_notes:
+        lines.append("")
+        lines.append("【⚠️ 报告时效性提醒】")
+        lines.append("以下报告已过期（超过 24 小时），不要基于这些旧报告给出结论：")
+        lines.extend(stale_notes)
+        lines.append("- 若用户询问这些维度的分析，请主动告知报告已过期，并询问是否需要重新发起分析。")
+        lines.append("- 用户确认后，可调用「触发股票分析」等工具生成新报告。")
+
+    # ── 行情快照 ──
+    quote = scope.get("current_quote")
+    if quote and quote.get("price") is not None:
+        pct = quote.get("change_percent")
+        pct_str = f"{pct:+.2f}%" if pct is not None else ""
+        lines.append(f"- 当前行情快照：现价 {quote['price']:.2f}（{pct_str}）")
+
+    # ── 按需取用指引（核心：引导 LLM 调工具取完整内容） ──
+    if report_index_lines:
+        lines.append("")
+        lines.append("【按需取用指引】")
+        lines.append("- 根据用户问题判断需要哪些模块的完整内容，不要盲目获取所有模块")
+        lines.append("- 简单问题（如「分析时间」「报告状态」）直接用上方元信息回答，不必调工具")
+        if stock_info and stock_info.get("task_id"):
+            lines.append(f"- 调用 get_report_detail(task_id=\"{stock_info['task_id']}\") 获取单股分析顶层摘要")
+            lines.append(f"- 调用 get_report_detail(task_id=\"{stock_info['task_id']}\", module_key=\"market_report\") 获取单股分析指定模块完整内容")
+            lines.append("  module_key 可选值：market_report/fundamentals_report/news_report/sentiment_report/trader_investment_plan/research_team_decision/risk_management_decision/final_trade_decision")
+        if position_info and position_info.get("analysis_id"):
+            lines.append(f"- 调用 get_position_analysis(code=\"{code}\", market=\"CN\") 获取持仓分析完整报告")
+        if review and (review.get("review_id") or review.get("task_id")):
+            review_id_val = review.get("review_id") or review.get("task_id")
+            lines.append(f"- 调用 get_trade_review_detail(review_id=\"{review_id_val}\") 获取交易复盘完整报告")
+
+    # ── 主题限定指令 ──
+    lines.append("")
+    lines.append("【主题限定】")
+    lines.append(f"- 当前主题仅围绕 {name}({code}) 这只股票")
+    lines.append('- 若用户询问其他股票，请回复：「当前在 XX 股票详情页，无法切换到其他股票。'
+                 '如需咨询其他标的，请前往「智能助手」主页面创建新主题。」')
+    lines.append("- 不要主动调用 search_reports 等工具去查询其他股票，除非用户明确要求并已确认切换主题。")
+
+    return "\n".join(lines)
+
+
 def _build_usage_helper_prompt(user_context: dict) -> str:
     """构建使用问答机器人专用系统提示词"""
     user_context_block = _format_user_context_block(user_context or {})
@@ -563,10 +702,10 @@ def _get_system_prompt(
 - **股票关注列表管理**：查看股票关注列表（即股票关注列表）、按标签理解用户关注池，并可添加/移除股票关注列表或管理股票关注列表分组
 - **数据查询**：直接获取个股行情、财务报表（利润表/资产负债表/现金流）、技术指标（MACD/RSI/布林带等）、新闻资讯等原始数据
 - **单股数据同步**：按股票代码同步单只股票的历史行情和财务数据，必要时补充基础数据，便于后续查询或分析使用最新数据
-- **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含操作建议、目标价位、风险评估）
+- **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含研究观察、关键验证价位、风险审阅）
 - **交易复盘**：查看复盘历史，获取复盘报告详情，或对指定交易发起一次新的 AI 复盘分析（评分、总结、改进建议、经验教训）
-- **投资计划**：查看用户创建的个人交易计划（投资纪律），获取当前激活计划的完整规则（选股、择时、仓位、止盈止损等）
-- **风险提醒**：为股票设置/查看/清除止损提醒，当价格接近或跌破止损线时自动发送通知
+- **投资计划**：查看用户创建的个人交易计划（投资纪律），获取当前激活计划的完整规则（选股、择时、仓位、收益关注/风险关注等）
+- **风险提醒**：为股票设置/查看/清除价格下限提醒，当价格接近或跌破价格下限时自动发送通知
 - **Agent 完整能力调用**：对已经沉淀成独立 Agent 的能力，可以直接调用对应 Agent 来完成完整任务，例如估值、研究、风控、复盘，而不是总是拆成多个底层工具重新组装
 你拥有的工具覆盖了上述所有操作，请根据用户意图自主选择合适的工具
 
@@ -2038,7 +2177,7 @@ def _build_position_report_detail_content(report: Dict[str, Any]) -> str:
     if status:
         meta.append(f"- 状态: {status}")
     if action:
-        meta.append(f"- 操作建议: {action}")
+        meta.append(f"- 研究观察: {action}")
     if confidence is not None:
         meta.append(f"- 置信度: {confidence}")
     if meta:
@@ -2061,11 +2200,11 @@ def _build_position_report_detail_content(report: Dict[str, Any]) -> str:
 
     targets = report.get("price_targets") or {}
     target_lines: List[str] = []
-    for label, key in (("目标价", "target_price"), ("止损价", "stop_loss"), ("止盈价", "take_profit_price")):
+    for label, key in (("关键验证价位", "target_price"), ("风险关注价格", "stop_loss"), ("收益关注价格", "take_profit_price")):
         if targets.get(key) is not None:
             target_lines.append(f"- {label}: {targets[key]}")
     if target_lines:
-        lines.append("\n## 目标价位\n" + "\n".join(target_lines))
+        lines.append("\n## 关键价位\n" + "\n".join(target_lines))
 
     action_reason = str(report.get("action_reason") or "").strip()
     if action_reason:
