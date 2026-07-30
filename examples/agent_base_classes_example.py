@@ -53,9 +53,9 @@ def example_market_analyst():
 
 
 def example_bull_researcher():
-    """示例2: 使用看涨研究员V2"""
+    """示例2: 使用积极证据研究员V2"""
     print("\n" + "="*60)
-    print("示例2: 看涨研究员V2")
+    print("示例2: 积极证据研究员V2")
     print("="*60)
     
     # 创建LLM
@@ -72,7 +72,7 @@ def example_bull_researcher():
     state = {
         "ticker": "AAPL",
         "analysis_date": "2024-12-15",
-        "market_report": "价格上涨，技术指标看涨",
+        "market_report": "价格上涨，技术指标偏乐观",
         "news_report": "公司发布利好消息",
         "fundamentals_report": "业绩增长强劲"
     }
@@ -107,11 +107,11 @@ def example_research_manager():
     state = {
         "ticker": "AAPL",
         "analysis_date": "2024-12-15",
-        "bull_report": "看涨理由：技术面强劲，基本面良好",
-        "bear_report": "看跌理由：估值偏高，市场风险增加"
+        "bull_report": "积极证据：技术面强劲，基本面良好",
+        "bear_report": "谨慎证据：估值偏高，市场风险增加"
     }
     
-    print(f"\n输入: ticker={state['ticker']}, 包含看涨和看跌报告")
+    print(f"\n输入: ticker={state['ticker']}, 包含积极证据和谨慎证据报告")
     print(f"\nAgent类型: {agent.manager_type}")
     print(f"是否启用辩论: {agent.enable_debate}")
     print(f"需要的输入: {agent._get_required_inputs()}")
@@ -122,9 +122,9 @@ def example_research_manager():
 
 
 def example_trader():
-    """示例4: 使用交易员V2"""
+    """示例4: 使用研究整合员V2"""
     print("\n" + "="*60)
-    print("示例4: 交易员V2")
+    print("示例4: 研究整合员V2")
     print("="*60)
     
     # 创建LLM
@@ -142,7 +142,7 @@ def example_trader():
         "ticker": "AAPL",
         "analysis_date": "2024-12-15",
         "investment_plan": {
-            "recommendation": "买入",
+            "recommendation": "乐观",
             "confidence": 0.8,
             "reason": "技术面和基本面均支持"
         },
@@ -150,7 +150,7 @@ def example_trader():
         "risk_assessment": "风险可控"
     }
     
-    print(f"\n输入: ticker={state['ticker']}, 投资建议=买入")
+    print(f"\n输入: ticker={state['ticker']}, 研究结论=乐观")
     print(f"\nAgent类型: Trader")
     print(f"输出字段: {agent.output_field}")
     

@@ -55,7 +55,7 @@ def test_custom_workflow():
     workflow = BLANK_WORKFLOW.model_copy(deep=True)
     workflow.id = "my_simple_analysis"
     workflow.name = "我的简单分析流程"
-    workflow.description = "基于空白模板创建的自定义流程，包含市场分析师和交易员"
+    workflow.description = "基于空白模板创建的自定义流程，包含市场分析师和研究整合员"
     
     print("1. 添加市场分析师节点...")
     workflow.nodes.append(
@@ -71,16 +71,16 @@ def test_custom_workflow():
         )
     )
     
-    print("2. 添加交易员节点...")
+    print("2. 添加研究整合员节点...")
     workflow.nodes.append(
         NodeDefinition(
             id="trader",
             type=NodeType.TRADER,
             agent_id="trader_v2",
-            label="交易员",
+            label="研究整合员",
             position=Position(x=400, y=350),
             config={
-                "description": "根据分析结果给出交易建议",
+                "description": "根据分析结果生成用户版研究简报",
             }
         )
     )
