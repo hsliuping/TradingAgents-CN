@@ -529,10 +529,21 @@
           <el-tab-pane label="价格" name="prices">
             <el-table :data="endpointPrices" size="small">
               <el-table-column prop="endpoint_model_id" label="模型ID" min-width="180" />
+              <el-table-column label="价格类型" min-width="155">
+                <template #default="{ row }">
+                  <el-tag :type="row.pricing_source === 'SELF_HOSTED' ? 'success' : 'info'">
+                    {{ row.pricing_source === 'SELF_HOSTED' ? '自建服务 / 价格0' : '服务商价格' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
               <el-table-column label="输入 / 1M" min-width="130"><template #default="{ row }">{{ row.input_price_per_million }} {{ row.currency }}</template></el-table-column>
               <el-table-column label="缓存输入 / 1M" min-width="150"><template #default="{ row }">{{ row.cached_input_price_per_million ?? '—' }}</template></el-table-column>
               <el-table-column label="输出 / 1M" min-width="130"><template #default="{ row }">{{ row.output_price_per_million }} {{ row.currency }}</template></el-table-column>
-              <el-table-column prop="verified" label="已核验" width="100" />
+              <el-table-column label="状态" width="120">
+                <template #default="{ row }">
+                  {{ row.pricing_source === 'SELF_HOSTED' ? '自建声明已确认' : (row.verified ? '真实价格已核验' : '未核验') }}
+                </template>
+              </el-table-column>
               <el-table-column prop="effective_at" label="生效时间" min-width="190" />
             </el-table>
             <el-form v-if="authStore.isAdmin && !isDemo" class="credential-form" label-position="top" @submit.prevent>
@@ -542,14 +553,22 @@
                     <el-option v-for="item in endpointModels" :key="`${item.endpoint_model_id}@${item.model_version}`" :label="item.remote_model_name" :value="`${item.endpoint_model_id}@${item.model_version}`" />
                   </el-select>
                 </el-form-item>
+                <el-form-item label="价格类型">
+                  <el-select v-model="pricePricingSource">
+                    <el-option label="外部付费服务 / 真实价格" value="PROVIDER_PUBLISHED" />
+                    <el-option label="自建服务 / 价格0" value="SELF_HOSTED" />
+                  </el-select>
+                </el-form-item>
                 <el-form-item label="货币"><el-input v-model="priceCurrency" maxlength="8" /></el-form-item>
-                <el-form-item label="输入价格 / 1M Token"><el-input v-model="priceInput" inputmode="decimal" /></el-form-item>
-                <el-form-item label="缓存输入价格 / 1M Token"><el-input v-model="priceCachedInput" inputmode="decimal" /></el-form-item>
-                <el-form-item label="输出价格 / 1M Token"><el-input v-model="priceOutput" inputmode="decimal" /></el-form-item>
+                <el-form-item label="输入价格 / 1M Token"><el-input v-model="priceInput" inputmode="decimal" :disabled="pricePricingSource === 'SELF_HOSTED'" /></el-form-item>
+                <el-form-item label="缓存输入价格 / 1M Token"><el-input v-model="priceCachedInput" inputmode="decimal" :disabled="pricePricingSource === 'SELF_HOSTED'" /></el-form-item>
+                <el-form-item label="输出价格 / 1M Token"><el-input v-model="priceOutput" inputmode="decimal" :disabled="pricePricingSource === 'SELF_HOSTED'" /></el-form-item>
                 <el-form-item label="生效时间"><el-input v-model="priceEffectiveAt" /></el-form-item>
                 <el-form-item label="价格来源说明"><el-input v-model="priceSource" maxlength="500" /></el-form-item>
                 <el-form-item label="核验">
-                  <el-checkbox v-model="priceVerified">已对照服务商正式价格来源</el-checkbox>
+                  <el-checkbox v-model="priceVerified">
+                    {{ pricePricingSource === 'SELF_HOSTED' ? '确认该Endpoint为自建服务且不按Token计费' : '已对照服务商真实价格来源' }}
+                  </el-checkbox>
                 </el-form-item>
               </div>
               <el-button type="primary" :loading="priceSubmitting" @click="createEndpointPriceVersion">登记价格版本</el-button>
@@ -562,7 +581,7 @@
               <el-descriptions-item label="Daily Cost">{{ modelStatus.budget.daily_cost }} / {{ modelStatus.budget.max_daily_cost }} {{ modelStatus.budget.currency }}</el-descriptions-item>
               <el-descriptions-item label="Budget Policy">{{ modelStatus.budget.policy_id }}@{{ modelStatus.budget.policy_version }}</el-descriptions-item>
             </el-descriptions>
-            <el-alert type="warning" :closable="false" title="价格版本未核验时，预算状态必须保持BLOCKED，不能执行付费模型调用。" />
+            <el-alert type="warning" :closable="false" title="外部付费Provider必须登记真实价格；自建服务可登记价格0，但Token、调用次数、超时和重试资源限制继续生效。" />
           </el-tab-pane>
 
           <el-tab-pane label="能力检查" name="capabilities">
@@ -711,6 +730,7 @@ const modelMaxContext = ref<number | undefined>()
 const modelMaxOutput = ref<number | undefined>()
 const modelSubmitting = ref(false)
 const priceModelIdentity = ref('')
+const pricePricingSource = ref<'PROVIDER_PUBLISHED' | 'SELF_HOSTED'>('PROVIDER_PUBLISHED')
 const priceInput = ref('')
 const priceCachedInput = ref('')
 const priceOutput = ref('')
@@ -784,6 +804,21 @@ watch(activeModelTab, tab => {
   emit('model-tab-change', tab)
   if (tab !== 'credentials') credentialApiKey.value = ''
   if (tab !== 'providers') endpointTransmissionConfirmed.value = false
+})
+watch(pricePricingSource, source => {
+  priceVerified.value = false
+  if (source === 'SELF_HOSTED') {
+    priceInput.value = '0'
+    priceCachedInput.value = '0'
+    priceOutput.value = '0'
+    priceCurrency.value = 'USD'
+    priceSource.value = '用户确认的自建服务，不按Token计费'
+  } else {
+    priceInput.value = ''
+    priceCachedInput.value = ''
+    priceOutput.value = ''
+    priceSource.value = '服务商公开价格页面或账单说明'
+  }
 })
 
 function endpointIdentity(endpoint: ProviderEndpointProfile): string {
@@ -1229,7 +1264,7 @@ async function discoverEndpointModelCatalog() {
 }
 async function createEndpointPriceVersion() {
   if (!selectedEndpoint.value || !selectedPriceModel.value || !priceVerified.value) {
-    ElMessage.error('请选择模型并确认价格来源已核验')
+    ElMessage.error(pricePricingSource.value === 'SELF_HOSTED' ? '请选择模型并确认自建服务声明' : '请选择模型并确认真实价格来源已核验')
     return
   }
   priceSubmitting.value = true
@@ -1240,6 +1275,7 @@ async function createEndpointPriceVersion() {
       endpoint_profile_version: selectedEndpoint.value.profile_version,
       endpoint_model_id: selectedPriceModel.value.endpoint_model_id,
       endpoint_model_version: selectedPriceModel.value.model_version,
+      pricing_source: pricePricingSource.value,
       input_price_per_million: priceInput.value,
       cached_input_price_per_million: priceCachedInput.value || undefined,
       output_price_per_million: priceOutput.value,
@@ -1252,7 +1288,7 @@ async function createEndpointPriceVersion() {
     priceCachedInput.value = ''
     priceOutput.value = ''
     priceVerified.value = false
-    ElMessage.success('Decimal价格版本已create-only登记')
+    ElMessage.success(pricePricingSource.value === 'SELF_HOSTED' ? '自建服务零价格已create-only登记' : 'Decimal价格版本已create-only登记')
     const prices = await alphaguardModelsApi.prices()
     endpointPrices.value = prices.data.items
     await loadSelectedEndpointConfiguration()

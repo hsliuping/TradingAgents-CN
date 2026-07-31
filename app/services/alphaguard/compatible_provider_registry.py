@@ -88,6 +88,14 @@ def _next_version(rows: list[dict[str, Any]], field: str) -> str:
     return f"v{max(values, default=0) + 1}"
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Treat MongoDB's UTC-naive datetimes as UTC for safe comparisons."""
+
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _endpoint_config_signature(value: dict[str, Any]) -> tuple[Any, ...]:
     return tuple(
         value.get(field)
@@ -352,7 +360,7 @@ class CompatibleProviderRegistryService:
                 )
                 in model_ids
                 and bool(price.get("verified"))
-                and price.get("effective_at") <= now
+                and _as_utc(price["effective_at"]) <= now
             ]
 
         assignments = await self.repository.list(
@@ -509,12 +517,20 @@ class CompatibleProviderRegistryService:
                 else "MISSING"
             ),
             "normal_price": (
-                "VERIFIED"
+                "SELF_HOSTED_ZERO"
+                if resolved_role_prices["NORMAL_TRADER"]
+                and resolved_role_prices["NORMAL_TRADER"].get("pricing_source")
+                == "SELF_HOSTED"
+                else "VERIFIED"
                 if resolved_role_prices["NORMAL_TRADER"]
                 else "MISSING"
             ),
             "top_price": (
-                "VERIFIED"
+                "SELF_HOSTED_ZERO"
+                if resolved_role_prices["TOP_RISK_REVIEWER"]
+                and resolved_role_prices["TOP_RISK_REVIEWER"].get("pricing_source")
+                == "SELF_HOSTED"
+                else "VERIFIED"
                 if resolved_role_prices["TOP_RISK_REVIEWER"]
                 else "MISSING"
             ),
@@ -894,6 +910,7 @@ class CompatibleProviderRegistryService:
         source_description: str,
         verified: bool,
         created_by: str,
+        pricing_source: str = "PROVIDER_PUBLISHED",
         price_version_id: str | None = None,
         price_version: str = "v1",
     ) -> tuple[EndpointPriceVersion, bool]:
@@ -927,6 +944,7 @@ class CompatibleProviderRegistryService:
             "endpoint_model_id": endpoint_model_id,
             "endpoint_model_version": endpoint_model_version,
             "pricing_mode": "FIXED_PER_1M",
+            "pricing_source": pricing_source,
             "input_price_per_million": input_price_per_million,
             "cached_input_price_per_million": cached_input_price_per_million,
             "output_price_per_million": output_price_per_million,
@@ -1051,7 +1069,7 @@ class CompatibleProviderRegistryService:
             )
         if not price.verified:
             raise ProviderRegistryNotReady("model price version is not verified")
-        if price.effective_at > datetime.now(timezone.utc):
+        if _as_utc(price.effective_at) > datetime.now(timezone.utc):
             raise ProviderRegistryNotReady("model price version is not yet effective")
         credential = await self.db["ag_model_credentials"].find_one(
             {"credential_id": credential_id, "status": {"$ne": "REVOKED"}}

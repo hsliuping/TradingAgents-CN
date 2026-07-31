@@ -133,9 +133,12 @@ class EndpointPriceCreateBody(_StrictBody):
     endpoint_profile_version: str = Field(min_length=1, max_length=50)
     endpoint_model_id: str = Field(min_length=1, max_length=160)
     endpoint_model_version: str = Field(min_length=1, max_length=50)
-    input_price_per_million: Decimal = Field(gt=0)
+    pricing_source: Literal["PROVIDER_PUBLISHED", "SELF_HOSTED"] = (
+        "PROVIDER_PUBLISHED"
+    )
+    input_price_per_million: Decimal = Field(ge=0)
     cached_input_price_per_million: Decimal | None = Field(default=None, ge=0)
-    output_price_per_million: Decimal = Field(gt=0)
+    output_price_per_million: Decimal = Field(ge=0)
     currency: str = Field(min_length=3, max_length=8)
     effective_at: datetime
     source_description: str = Field(min_length=1, max_length=500)

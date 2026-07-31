@@ -11,7 +11,10 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.routers.auth_db import get_current_user
-from app.schemas.alphaguard.model_runtime import CredentialCapabilitySummary
+from app.schemas.alphaguard.model_runtime import (
+    CredentialCapabilitySummary,
+    EndpointPriceVersion,
+)
 from app.services.alphaguard.compatible_provider_registry import (
     CompatibleProviderRegistryService,
     ProviderRegistryConflict,
@@ -352,6 +355,81 @@ async def test_manual_models_and_decimal_prices_are_endpoint_scoped():
     )
     assert same_created is False
     assert same.content_hash == price.content_hash
+
+
+@pytest.mark.asyncio
+async def test_self_hosted_zero_price_is_endpoint_scoped_and_budget_ready():
+    db, _store, registry, endpoint = await validated_registry()
+    model, _ = await registry.register_model(
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        endpoint_profile_version=endpoint.profile_version,
+        remote_model_name="self-hosted-model",
+        display_name="Self Hosted Model",
+        role_capabilities=["NORMAL_TRADER"],
+        supports_json_schema=True,
+        supports_tool_call=False,
+        supports_reasoning=None,
+        max_context_tokens=64000,
+        max_output_tokens=4000,
+        created_by="admin",
+    )
+    price, created = await registry.register_price(
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        endpoint_profile_version=endpoint.profile_version,
+        endpoint_model_id=model.endpoint_model_id,
+        endpoint_model_version=model.model_version,
+        pricing_source="SELF_HOSTED",
+        input_price_per_million=Decimal("0"),
+        cached_input_price_per_million=Decimal("0"),
+        output_price_per_million=Decimal("0"),
+        currency="USD",
+        effective_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        source_description="administrator attested self-hosted service",
+        verified=True,
+        created_by="admin",
+    )
+    assert created is True
+    assert price.pricing_source == "SELF_HOSTED"
+    assert price.input_price_per_million == 0
+    assert price.cached_input_price_per_million == 0
+    assert price.output_price_per_million == 0
+    assert price.endpoint_profile_id == endpoint.endpoint_profile_id
+    stored = db["ag_model_endpoint_prices"].documents[0]
+    assert stored["pricing_source"] == "SELF_HOSTED"
+    stored["effective_at"] = stored["effective_at"].replace(tzinfo=None)
+    status = await registry.configuration_status(
+        endpoint.endpoint_profile_id, endpoint.profile_version
+    )
+    components = {item["key"]: item for item in status["components"]}
+    assert components["normal_price"]["status"] == "SELF_HOSTED_ZERO"
+    assert components["normal_price"]["complete"] is True
+    assert components["budget"]["reason_code"] == (
+        "BUDGET_PRICING_UNAVAILABLE"
+    )
+
+
+def test_external_provider_price_cannot_use_zero():
+    payload = {
+        "price_version_id": "external-zero",
+        "price_version": "v1",
+        "endpoint_profile_id": "external-endpoint",
+        "endpoint_profile_version": "v1",
+        "endpoint_model_id": "external-model",
+        "endpoint_model_version": "v1",
+        "pricing_source": "PROVIDER_PUBLISHED",
+        "input_price_per_million": Decimal("0"),
+        "cached_input_price_per_million": Decimal("0"),
+        "output_price_per_million": Decimal("0"),
+        "currency": "USD",
+        "effective_at": datetime(2026, 7, 30, tzinfo=timezone.utc),
+        "source_description": "invalid external zero pricing",
+        "verified": True,
+        "content_hash": "0" * 64,
+        "created_by": "admin",
+        "created_at": datetime(2026, 7, 30, tzinfo=timezone.utc),
+    }
+    with pytest.raises(ValueError, match="external provider pricing"):
+        EndpointPriceVersion.model_validate(payload)
 
 
 @pytest.mark.asyncio

@@ -165,6 +165,7 @@ export interface EndpointPriceVersion {
   endpoint_profile_version: string
   endpoint_model_id: string
   endpoint_model_version: string
+  pricing_source: 'PROVIDER_PUBLISHED' | 'SELF_HOSTED'
   input_price_per_million: string
   cached_input_price_per_million?: string | null
   output_price_per_million: string
@@ -356,6 +357,7 @@ export const alphaguardModelsApi = {
     endpoint_profile_version: string
     endpoint_model_id: string
     endpoint_model_version: string
+    pricing_source: 'PROVIDER_PUBLISHED' | 'SELF_HOSTED'
     input_price_per_million: string
     cached_input_price_per_million?: string
     output_price_per_million: string

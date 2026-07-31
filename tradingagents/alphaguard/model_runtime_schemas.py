@@ -230,9 +230,12 @@ class EndpointPriceVersion(_StrictFrozenModel):
     endpoint_model_id: str = Field(min_length=1, max_length=160)
     endpoint_model_version: str = Field(min_length=1, max_length=50)
     pricing_mode: Literal["FIXED_PER_1M"] = "FIXED_PER_1M"
-    input_price_per_million: Decimal = Field(gt=0)
+    pricing_source: Literal["PROVIDER_PUBLISHED", "SELF_HOSTED"] = (
+        "PROVIDER_PUBLISHED"
+    )
+    input_price_per_million: Decimal = Field(ge=0)
     cached_input_price_per_million: Decimal | None = Field(default=None, ge=0)
-    output_price_per_million: Decimal = Field(gt=0)
+    output_price_per_million: Decimal = Field(ge=0)
     currency: str = Field(min_length=3, max_length=8)
     effective_at: datetime
     source_description: str = Field(min_length=1, max_length=500)
@@ -241,6 +244,26 @@ class EndpointPriceVersion(_StrictFrozenModel):
     created_by: str = Field(min_length=1, max_length=200)
     created_at: datetime
     schema_version: str = "endpoint_price_version_v1"
+
+    @model_validator(mode="after")
+    def validate_pricing_source(self) -> "EndpointPriceVersion":
+        if self.pricing_source == "SELF_HOSTED":
+            if (
+                self.input_price_per_million != 0
+                or self.cached_input_price_per_million != 0
+                or self.output_price_per_million != 0
+            ):
+                raise ValueError(
+                    "SELF_HOSTED pricing requires all token prices to be zero"
+                )
+        elif (
+            self.input_price_per_million <= 0
+            or self.output_price_per_million <= 0
+        ):
+            raise ValueError(
+                "external provider pricing requires positive input and output prices"
+            )
+        return self
 
 
 class ModelProfileAssignment(_StrictFrozenModel):

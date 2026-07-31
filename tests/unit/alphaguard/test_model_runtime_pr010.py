@@ -447,6 +447,33 @@ async def test_unpriced_profile_is_budget_blocked_without_truncation():
 
 
 @pytest.mark.asyncio
+async def test_zero_cost_profile_keeps_resource_limits_and_is_budget_ready():
+    db = FakeDB()
+    profile = ModelProfileRegistry().for_role("NORMAL_TRADER").model_copy(
+        update={
+            "input_cost_per_million": 0.0,
+            "output_cost_per_million": 0.0,
+            "cost_currency": "USD",
+            "max_retries": 1,
+            "timeout_seconds": 37,
+        }
+    )
+    decision = await ModelBudgetService(db).check(
+        profile=profile,
+        analysis_id="analysis-self-hosted",
+        snapshot_id="snapshot-self-hosted",
+        rendered_input="complete immutable context",
+    )
+    assert decision.allowed is True
+    assert decision.status == "READY"
+    assert decision.reason_code is None
+    assert decision.estimated_cost == 0
+    assert decision.permitted_attempts == 2
+    assert profile.timeout_seconds == 37
+    assert profile.max_retries == 1
+
+
+@pytest.mark.asyncio
 async def test_budget_caps_retry_attempts_before_the_analysis_limit():
     db = FakeDB()
     profile = ModelProfileRegistry().for_role("NORMAL_TRADER").model_copy(
