@@ -5,9 +5,9 @@
 ## 🎯 学完后能做什么
 
 - 对**单只 A 股**做 5 档深度的全面研究
-- 理解**报告的 12 个子报告**是什么、怎么读
-- 读懂 `decision` 字段(action/target_price/confidence)
-- 区分 v3.0 的**合规术语**(乐观/审慎/中性)
+- 理解报告的 **14 个子报告 Tab** 是什么、怎么读
+- 读懂报告里的"决策"标签(乐观/审慎/中性)
+- 区分 v3.0 的**合规术语**(乐观/审慎/中性,不用"买入/卖出/持有")
 
 ## 📍 入口
 
@@ -48,63 +48,52 @@
 
 ### 步骤 5:选择分析深度(5 档)
 
-| 档位 | 名称 | 耗时 | 包含内容 |
-|------|------|------|---------|
-| 1 | ⚡ 快速 | 2-5 分钟 | 基础数据概览 |
-| 2 | 📈 基础 | 3-6 分钟 | 常规投资决策 |
-| 3 | 🎯 **标准**(推荐) | 4-8 分钟 | 技术+基本面 |
-| 4 | 🔍 深度 | 6-11 分钟 | 多轮辩论 |
-| 5 | 🏆 全面 | 8-16 分钟 | 最全面分析 |
+页面里"分析深度"下拉框的实际展示名(来自 [BatchAnalysis.vue:139-158](file:///c:/TradingAgentsCN/frontend/src/views/Analysis/BatchAnalysis.vue#L139-L158)):
+
+| 档位 | 页面显示名 | 耗时 |
+|------|------|------|
+| 1 | ⚡ **1级 - 快速分析** | 2-4 分钟 |
+| 2 | 📈 **2级 - 基础分析** | 4-6 分钟 |
+| 3 | 🎯 **3级 - 标准分析**(推荐) | 6-10 分钟 |
+| 4 | 🔍 **4级 - 深度分析** | 10-15 分钟 |
+| 5 | 🏆 **5级 - 全面分析** | 15-25 分钟 |
 
 **实战建议**:
-- **第一次研究某只股票** → 选 3(标准)
-- **要写研究报告/做决策** → 选 4-5
-- **跟踪某只已研究的股票** → 选 1-2 快速更新
+- **第一次研究某只股票** → 选 3级 标准分析
+- **要写研究报告/做决策** → 选 4-5 档
+- **跟踪某只已研究的股票** → 选 1-2 档快速更新
 
 ### 步骤 6:选择分析师团队(关键)
 
-系统会列出**所有可用分析师**,你可以多选。常见可选(来自 [agent_configs 集合](file:///c:/TradingAgentsCN/app/services/agent_configs.py)):
+**重要**:页面"分析师团队"里**能勾选的只有 7 个**(A 股场景),来自 [analysts.ts:13-59](file:///c:/TradingAgentsCN/frontend/src/constants/analysts.ts#L13-L59):
 
-#### 基础面分析师(6 个)
-| ID | 中文名 | 作用 |
-|----|--------|------|
-| `market_analyst` | 市场分析师 | 技术面(MA/MACD/RSI/BOLL)+ 盘面 |
-| `fundamentals_analyst` | 基本面分析师 | 财务+估值 |
-| `news_analyst` | 新闻分析师 | 实时新闻 |
-| `social_media_analyst` | 社交媒体分析师 | 舆论情绪 |
-| `sector_analyst` | 行业/板块分析师 | 行业地位 |
-| `index_analyst` | 大盘/指数分析师 | 大盘环境 |
+| 页面显示名 | 实际 ID | 作用 |
+|---------|---------|------|
+| 📈 市场分析师 | `market` | 技术面(MA/MACD/RSI/BOLL)+ 盘面 |
+| 💰 基本面分析师 | `fundamentals` | 财务+估值 |
+| 📰 新闻分析师 | `news` | 实时新闻 |
+| 💬 社媒分析师 | `social` | 舆论情绪 |
+| 📊 大盘分析师 | `index_analyst` | 大盘环境 |
+| 🏭 板块分析师 | `sector_analyst` | 行业地位 |
+| ETF分析师 | `etf` | 仅 ETF 市场时可选 |
 
-#### 辩论角色(3 个) - 4-5 档才有
-| ID | 中文名 | 作用 |
-|----|--------|------|
-| `bull_researcher` | 看涨研究员 | 多头观点 |
-| `bear_researcher` | 看跌研究员 | 空头观点 |
-| `neutral_analyst` | 中性风险分析师 | 中性观点 |
+**系统默认勾选**:`["市场分析师", "基本面分析师"]`(见 [analysts.ts:65](file:///c:/TradingAgentsCN/frontend/src/constants/analysts.ts#L65))
 
-#### 风险角色(3 个) - 4-5 档才有
-| ID | 中文名 | 作用 |
-|----|--------|------|
-| `risky_analyst` | 激进风险分析师 | 激进型视角 |
-| `safe_analyst` | 保守风险分析师 | 保守型视角 |
-| `neutral_analyst` | 中性风险分析师 | 中性视角 |
-
-#### 决策角色(2 个)
-| ID | 中文名 | 作用 |
-|----|--------|------|
-| `research_manager` | 研究经理 | 综合研究决策 |
-| `risk_manager` | 风险经理 | 风险评估决策 |
+**报告里另外出现的"研究角色"**是工作流自动跑出来的,不是手动勾选:
+- 🐂 积极证据研究员 / 🐻 谨慎证据研究员(2 角色辩论)
+- ⚡ 高弹性情景分析师 / 🛡️ 防御情景分析师 / ⚖️ 基准情景分析师(3 风险视角)
+- 🔬 研究整合员 / 👔 风险评估师(综合决策)
 
 **实战选择**(由浅入深):
 
-| 场景 | 推荐选择 |
+| 场景 | 推荐勾选 |
 |------|---------|
-| 快速了解 | 市场 + 基本面 + 研究经理 (3 个) |
-| 日常研究 | 上述 3 个 + 风险经理 (4 个) |
-| 深度研究 | 上述 4 个 + 看涨 + 看跌 (6 个) |
-| 全面尽调 | 全部勾选 (12+ 个) |
+| 快速了解 | 📈 市场 + 💰 基本面(2 个,默认) |
+| 日常研究 | 上述 2 个 + (报告里自动跑出研究整合员+风险评估师) |
+| 深度研究 | 4级/5级 档深度,自动跑出辩论角色 |
+| 全面尽调 | 5级全面,勾全 7 个分析师 + 全部辩论角色 |
 
-> 💡 **机制说明**:深度越深,跑的 Agent 越多,`reports` 字典里的子报告越完整。1 档可能只跑"市场+基本面",3 档加上研究经理,4-5 档才有辩论角色。
+> 💡 **机制说明**:深度越深,工作流跑的研究角色越多。1 档可能只跑"📈 市场+💰 基本面",3 档加上 🔬 研究整合员+👔 风险评估师,4-5 档才有辩论角色。
 
 ### 步骤 7:(可选)开启"执行轨迹"
 
@@ -126,44 +115,57 @@
 
 点"查看结果"显示完整报告(下文重点讲)。
 
-## 📊 报告结构详解(基于真实数据)
+## 📊 报告结构详解(用户能看到的部分)
 
-报告存于 MongoDB `analysis_reports` 集合,每个报告有 28 个顶层字段。**重点关注**:
+### 1. 报告页面顶部的"研究简报"卡片
 
-### 1. 顶层元数据
+报告最上方有一个 **"🧾 研究简报"** 卡片(来自 [ReportDetail.vue:108-119](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L108-L119)),内容是 Markdown 渲染的摘要文本。
 
-| 字段 | 示例 | 说明 |
-|------|------|------|
-| `stock_symbol` | `300750` | 股票代码 |
-| `stock_name` | `宁德时代` | 股票名称 |
-| `analysis_date` | `2026-01-24` | 分析基准日期 |
-| `model_info` | `qwen-flash/qwen-plus` | 使用的 LLM |
-| `engine` | `v2` | 引擎版本(统一 v2) |
-| `research_depth` | `标准` | 研究深度(中文) |
-| `execution_time` | `525.32` 秒 | 总耗时 |
-| `confidence_score` | `0.76` | 信心度(0-1) |
-| `risk_level` | `中等` | 风险等级(低/中/高) |
-| `risk_score` | `0.5` | 风险评分(0-1) |
+### 2. 报告页面底部的"详细研究报告"卡片
 
-### 2. decision 字段(决策结构)
+研究简报下面有一个 **"📄 详细研究报告"** 卡片(来自 [ReportDetail.vue:121-145](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L121-L145)),里面是按阶段的 Tab 列表。
 
-报告的**核心结论**在 `decision` 字典里:
+### 3. 详细研究报告的 14 个 Tab(用户实际看到的名字)
 
-```json
-{
-  "action": "中性",          // 合规术语: 乐观/审慎/中性
-  "target_price": 375.0,    // 目标价
-  "stop_loss": 338.0,       // 止损/支撑价
-  "position_ratio": "40%-60%",  // 建议仓位
-  "confidence": 0.76,       // 信心度
-  "risk_score": 0.5,        // 风险评分
-  "reasoning": "综合..."     // 推理过程(长文本)
-}
-```
+下面这些是用户**在 Tab 上看到的名字**(来自 [ReportDetail.vue:286-312](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L286-L312)):
 
-### 3. ⚠️ 决策术语合规说明
+| 阶段 | 用户看到的 Tab 名(带图标) | 来自 |
+|------|--------|------|
+| **宏观** | 📊 大盘分析师 | index_analyst |
+| | 🏭 板块分析师 | sector_analyst |
+| **个股面** | 📈 市场分析师 | market_analyst |
+| | 💰 基本面分析师 | fundamentals_analyst |
+| | 💬 社交媒体分析师 | social_analyst |
+| | 📰 新闻分析师 | news_analyst |
+| **多情景研究** | 🐂 积极证据研究员 | bull_researcher |
+| | 🐻 谨慎证据研究员 | bear_researcher |
+| | 🔬 研究整合员 | research_manager |
+| **研究整合** | 🧩 研究整合员 | trader |
+| **风险辩论** | ⚡ 高弹性情景分析师 | risky_analyst |
+| | 🛡️ 防御情景分析师 | safe_analyst |
+| | ⚖️ 基准情景分析师 | neutral_analyst |
+| | 👔 风险评估师 | risk_manager |
+| **最终** | 🧾 综合研究结论 | 综合 |
 
-**v3.0 已不用"买入/卖出/持有"**,统一为合规术语:
+> **Tab 显示数和深度的关系**:
+> - 1-2 档(快速/基础):只显示 2-3 个 Tab
+> - 3 档(标准):约 4-5 个 Tab
+> - 4-5 档(深度/全面):全部 14 个 Tab
+
+### 4. "风险审阅" Tab 里的结构化字段
+
+报告里如果包含"⚠️ 风险审阅" Tab(对应 `risk_assessment` / `risk_management_decision`),里面会用以下标签展示(来自 [ReportDetail.vue:707-745](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L707-L745)):
+
+| 页面显示的标签 | 含义 |
+|----------|------|
+| **风险等级** | 低 / 中 / 高 |
+| **风险评分** | 0-1 之间的小数 |
+| **评估结论** | 风险综合判断(长文本) |
+| **核心风险** | 风险点列表(`- ` 开头的项) |
+| **风控建议** | 风险控制建议 |
+| **投资调整建议** | 投资策略调整建议 |
+
+### 5. 决策标签(报告里所有"决策"位置)
 
 | v2.x 老术语 | v3.0 合规术语 | 含义 |
 |------------|------------|------|
@@ -171,60 +173,14 @@
 | SELL / 卖出 / 看跌 | **审慎** | 系统谨慎 |
 | HOLD / 持有 / 中性 | **中性** | 系统中性 |
 
-> 后端代码 [analysis.py:54-61](file:///c:/TradingAgentsCN/app/routers/analysis.py#L54-L61) 有完整的术语映射表,所有老数据自动转换。
-
-### 4. reports 字典 12 个子报告
-
-按角色顺序排列:
-
-| Key | 来自 | 内容 |
-|-----|------|------|
-| `market_report` | market_analyst | 技术面+盘面(MA/MACD/RSI/BOLL) |
-| `fundamentals_report` | fundamentals_analyst | 基本面+估值 |
-| `investment_plan` | research_manager | 投资计划 |
-| `trader_investment_plan` | trader | 交易员实操框架 |
-| `final_trade_decision` | 综合 | 最终交易决策 |
-| `bull_researcher` | bull_researcher | 多头研究报告(4-5 档才有) |
-| `bear_researcher` | bear_researcher | 空头研究报告(4-5 档才有) |
-| `research_team_decision` | research_manager | 研究团队决策 |
-| `risky_analyst` | risky_analyst | 激进风险分析(4-5 档才有) |
-| `safe_analyst` | safe_analyst | 保守风险分析(4-5 档才有) |
-| `neutral_analyst` | neutral_analyst | 中性风险分析(4-5 档才有) |
-| `risk_management_decision` | risk_manager | 风险管理决策 |
-
-**深度对子报告数的影响**:
-- 1-2 档:只跑 2-3 个子报告
-- 3 档(标准):约 4-5 个
-- 4-5 档:全部 12 个
-
-### 5. summary 字段(报告摘要)
-
-`summary` 是 AI 自动生成的报告摘要(长文本,约 500-1500 字),内容包括:
-- 投资建议(基于合规术语)
-- 信心度百分比
-- 目标价格、止损价格
-- 建议仓位比例
-- 决策推理(为什么这么决策)
-
-### 6. key_points 字段(关键要点)
-
-`key_points` 是数组,每项是 1-2 句话的核心结论,例如:
-```json
-[
-  "综合研究经理的中性评估(期望收益+7.8%, 风险回撤-10.2%, RAROC调整后+2.1%)",
-  "交易员的实操框架(¥342-345补仓区、¥338支撑、¥375目标价)",
-  "风险评估结论:风险等级'中'、评分0.42,核心矛盾是年报信息真空而非方向失衡"
-]
-```
-
-**实战用法**:先看 `key_points` 数组 3 句话总结,再看 `decision` 关键决策,最后有疑问再读 `reports` 里对应的子报告。
+> v3.0 不再显示"目标价/止损价/建议仓位"等具体交易指令,统一为"乐观/审慎/中性"+ 评估结论/核心风险/风控建议/投资调整建议。
 
 ## ⚠️ v3.0 重要变化
 
 - ✅ **5 档分析深度**(从 3 档扩展)
 - ✅ **合规术语统一**(乐观/审慎/中性)
-- ✅ **decision 字段结构化**(action/target_price/stop_loss/position_ratio/confidence/risk_score)
-- ✅ **reports 字典包含 12 个子报告**(深度研究时)
+- ✅ **不再输出"目标价/止损/仓位"等交易指令**(符合监管要求)
+- ✅ **风险评估结构化**(风险等级/风险评分/评估结论/核心风险/风控建议/投资调整建议)
 - ⚠️ **平台仅支持 A 股和 ETF**
 
 ## 🛠️ 实操作业
@@ -232,33 +188,29 @@
 1. 打开 `/analysis/single`
 2. 输入 `601919` 中远海控
 3. 点"**数据检验**",看是否缺数据(缺的话去同步)
-4. 选**3 档(标准)**
-5. 分析师勾选:**市场+基本面+研究经理+风险经理**(4 个)
+4. 分析深度选 **3级 - 标准分析**
+5. 分析师勾选:**📈 市场分析师 + 💰 基本面分析师**(就是默认的 2 个)
 6. 提交分析
-7. 等完成后,看以下字段:
-   - `decision.action`: 什么决策?(乐观/审慎/中性)
-   - `confidence_score`: 信心度多少?
-   - `target_price`: 目标价多少?
-   - `reports` 里有哪些子报告?
-   - `key_points` 前 3 条是什么?
+7. 等完成后,重点看:
+   - 顶部 **"🧾 研究简报"** 卡片写了什么?
+   - 底部"📄 详细研究报告"里**出现了几个 Tab**?
+   - **"🧾 综合研究结论"** Tab 里的"决策标签"是 乐观 / 审慎 / 中性 中的哪个?
+   - 4-5 档报告里,有没有"⚠️ 风险审阅"Tab?里面的"风险等级/风险评分"是多少?
 
-**做完这次作业**,你就掌握了 v3.0 单股研究的完整流程和报告结构。
+**做完这次作业**,你就掌握了 v3.0 单股研究的完整流程和报告阅读方法。
 
 ## ❓ FAQ
 
-**Q:为什么我提交的分析报告里只有 5 个子报告,没有辩论角色?**
-A: 1-3 档深度不包含辩论角色(bull/bear/risky/safe/neutral 风险)。要看完整 12 个子报告,选 4 档或 5 档。
+**Q:为什么我提交的分析报告里只有 5 个 Tab,没有辩论角色?**
+A: 1-3 档深度不包含辩论角色(🐂 积极证据研究员 / 🐻 谨慎证据研究员 / ⚡ 高弹性 / 🛡️ 防御 / ⚖️ 基准)。要看完整 14 个 Tab,选 4 档或 5 档。
 
-**Q:`decision.action` 返回"中性",是不是系统没给建议?**
-A: 不是。"中性"是合规术语,意思是"建议持有/观望,无明确加仓或减仓信号"。要看 reasoning 字段了解原因。
+**Q:报告里的"决策"显示"中性",是不是系统没给建议?**
+A: 不是。"中性"是合规术语,意思是"建议持有/观望,无明确加仓或减仓信号"。要看 "⚠️ 风险审阅" Tab 里的"评估结论"了解原因。
 
-**Q:我能不能用 v2.x 的"买入"语义搜历史报告?**
-A: 后端会自动转换(见 [analysis.py:54-61](file:///c:/TradingAgentsCN/app/routers/analysis.py#L54-L61))。但显示统一是"乐观/审慎/中性"。
+**Q:报告里为什么不显示目标价了?**
+A: v3.0 平台定位为**研究辅助工具**,根据合规要求不再提供目标价、止损止盈、买卖时机等具体交易指令。改为"风险等级/风险评分/评估结论/核心风险/风控建议/投资调整建议"等研究参考。
 
-**Q:报告里 target_price 是单个数字,为什么不显示价格区间?**
-A: v3.0 优先用 `price_analysis_range`(价格区间),但部分老数据只有 `target_price`(单个值)。后端会警告提示,前端用 `-` 兜底显示。
-
-**Q:为什么我看到 5 档分析的耗时是 8-16 分钟,实际跑了 25 分钟?**
+**Q:为什么我看到 5 档分析的耗时是 15-25 分钟,实际跑了 40 分钟?**
 A: 耗时是单 Agent 估算,实际 = 所有 Agent 总耗时 + LLM 调用耗时 + 数据查询耗时 + 任务调度耗时。京东云版排队时还会更慢。
 
 **Q:数据检验通过就能保证任务成功吗?**
@@ -266,8 +218,8 @@ A: 不一定,数据检验只查"必备数据是否已同步"。任务还可能�
 
 ## 📚 延伸阅读
 
-- [第 4 课:多角色辩论——怎么读懂 AI 的"看涨 vs 看跌"](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-04-single-analysis-multi-scenario.md)
+- [第 4 课:多角色辩论——怎么读懂 AI 的"🐂 积极 vs 🐻 谨慎"研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-04-single-analysis-multi-scenario.md)
 - [第 5 课:发现阶段的常见错误](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-05-discover-pitfalls.md)
-- 后端代码: [analysis.py](file:///c:/TradingAgentsCN/app/routers/analysis.py) (NormalizeResultData 函数,合规术语映射)
 - 前端代码: [SingleAnalysis.vue](file:///c:/TradingAgentsCN/frontend/src/views/Analysis/SingleAnalysis.vue)
-- MongoDB 集合: `analysis_reports` (28 个字段)
+- 前端代码: [ReportDetail.vue](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue)(报告详情页)
+- 字段参考: [real-frontend-display-names.md](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/real-frontend-display-names.md)

@@ -113,13 +113,13 @@
 
 1. 进入 `/paper`,初始化账户(初始资金 100 万)
 2. 用第 1 课"自然语言筛选"找 1 只"新能源行业 + ROE > 10% + 总市值 > 500 亿"的股票
-3. 先点"分析" → 跑 3 档标准分析
-4. 看 AI 决策:
-   - `decision.action` 是"乐观/审慎/中性"?
-   - `confidence_score` 多少?
-5. 如果 AI 说"乐观" + `confidence > 0.7`,模拟买入 1000 股
+3. 先点"分析" → 跑 3级 - 标准分析
+4. 看 AI 输出:
+   - **决策标签**是 乐观/审慎/中性 中的哪个?(来自 [PositionAnalysisDetailDialog.vue:235-244](file:///c:/TradingAgentsCN/frontend/src/views/Portfolio/components/PositionAnalysisDetailDialog.vue#L235-L244))
+   - **风险审阅** Tab 里的"风险等级/风险评分"是多少?
+5. 如果决策标签是"乐观" + 风险等级较低,模拟买入 1000 股
 6. 等 1 天(或调时间),看浮动盈亏
-7. 隔 3 天后,跑一次 2 档快速分析
+7. 隔 3 天后,跑一次 2级 - 快速分析
 8. AI 说"审慎"或你判断不对,**模拟卖出**
 9. 看"已实现盈亏",这是你的**模拟交易经验**
 
