@@ -8,7 +8,7 @@
           配置管理
         </h1>
         <p class="page-description">
-          统一管理模型服务商、安全凭证、预算与系统配置
+          统一管理模型服务商、API 密钥、模型角色和调用限制
         </p>
       </div>
       <div class="header-right">
@@ -31,41 +31,27 @@
             <el-menu-item-group title="模型接入">
               <el-menu-item index="providers">
                 <el-icon><OfficeBuilding /></el-icon>
-                <span>1. 服务商</span>
+                <span>1. 服务商配置</span>
               </el-menu-item>
               <el-menu-item index="api-keys">
                 <el-icon><Key /></el-icon>
-                <span>2. API凭证</span>
+                <span>2. API 密钥</span>
               </el-menu-item>
               <el-menu-item index="model-catalog">
                 <el-icon><Collection /></el-icon>
-                <span>3. 模型目录</span>
-              </el-menu-item>
-              <el-menu-item index="pricing">
-                <el-icon><Coin /></el-icon>
-                <span>4. 价格</span>
+                <span>3. 模型管理</span>
               </el-menu-item>
               <el-menu-item index="llm">
                 <el-icon><Cpu /></el-icon>
-                <span>5. 模型Profile</span>
+                <span>4. 模型角色</span>
               </el-menu-item>
               <el-menu-item index="capabilities">
                 <el-icon><CircleCheck /></el-icon>
-                <span>6. 能力检查</span>
-              </el-menu-item>
-            </el-menu-item-group>
-            <el-menu-item-group title="治理与审计">
-              <el-menu-item index="prompt-profiles">
-                <el-icon><Collection /></el-icon>
-                <span>Prompt版本</span>
+                <span>5. 能力检测</span>
               </el-menu-item>
               <el-menu-item index="budget">
                 <el-icon><Coin /></el-icon>
-                <span>预算</span>
-              </el-menu-item>
-              <el-menu-item index="model-runs">
-                <el-icon><Collection /></el-icon>
-                <span>调用记录</span>
+                <span>6. 调用限制</span>
               </el-menu-item>
             </el-menu-item-group>
             <el-menu-item-group v-if="!isCredentialHost" title="系统配置">
@@ -110,7 +96,7 @@
           />
         </div>
 
-        <!-- 模型目录管理 -->
+        <!-- 旧模型目录管理，仅保留兼容入口 -->
         <div v-if="activeTab === 'legacy-model-catalog'">
           <ModelCatalogManagement />
         </div>
@@ -1204,15 +1190,23 @@ const secureModelTabByConfigTab: Record<string, ModelSettingsTab> = {
   'api-keys': 'credentials',
   'model-catalog': 'models',
   llm: 'profiles',
-  'prompt-profiles': 'prompts',
-  pricing: 'prices',
+  'prompt-profiles': 'models',
+  pricing: 'models',
   budget: 'budget',
   capabilities: 'capabilities',
-  'model-runs': 'runs'
+  'model-runs': 'budget'
 }
-const configTabBySecureModelTab: Record<ModelSettingsTab, string> = Object.fromEntries(
-  Object.entries(secureModelTabByConfigTab).map(([configTab, modelTab]) => [modelTab, configTab])
-) as Record<ModelSettingsTab, string>
+const configTabBySecureModelTab: Record<ModelSettingsTab, string> = {
+  providers: 'providers',
+  credentials: 'api-keys',
+  models: 'model-catalog',
+  profiles: 'llm',
+  prompts: 'model-catalog',
+  prices: 'model-catalog',
+  budget: 'budget',
+  capabilities: 'capabilities',
+  runs: 'budget'
+}
 
 const isCredentialHost =
   import.meta.env.VITE_ALPHAGUARD_CREDENTIAL_HOST === 'true'

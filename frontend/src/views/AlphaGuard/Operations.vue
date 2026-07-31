@@ -71,12 +71,12 @@
         </el-table>
         <el-empty v-if="!alerts.length" description="暂无持久化告警" />
       </el-tab-pane>
-      <el-tab-pane label="Models & API" name="models">
+      <el-tab-pane label="模型与 API" name="models">
         <div class="status-line">
           <el-tag :type="modelStatus?.status === 'READY' ? 'success' : modelStatus?.status === 'DEGRADED' ? 'warning' : 'danger'">
-            {{ modelStatus?.status || 'NOT_CONFIGURED' }}
+            {{ statusLabel(modelStatus?.status || 'NOT_CONFIGURED') }}
           </el-tag>
-          <span>只有精确登记并通过网络能力检查的 Normal / Top Profile 才能进入生产链。</span>
+          <span>按步骤完成服务商、API 密钥、普通决策模型和风险终审模型配置。</span>
         </div>
         <el-alert
           v-if="lastConfigurationError"
@@ -85,17 +85,36 @@
           :closable="false"
           :title="lastConfigurationError"
         />
+        <el-collapse v-if="lastConfigurationTechnicalError" class="advanced-information">
+          <el-collapse-item title="高级信息（技术错误）" name="error-technical">
+            <code>{{ lastConfigurationTechnicalError }}</code>
+          </el-collapse-item>
+        </el-collapse>
+        <section class="configuration-guide">
+          <el-steps :active="setupActiveStep" finish-status="success" simple>
+            <el-step v-for="step in setupSteps" :key="step.key" :title="step.title" />
+          </el-steps>
+          <div class="next-action-card">
+            <div>
+              <strong>{{ configurationNextAction.complete ? '配置已完成' : `当前缺少：${configurationNextAction.missing}` }}</strong>
+              <span>{{ configurationNextAction.complete ? '所有配置门禁均已通过。' : `下一步：点击“${configurationNextAction.actionLabel}”` }}</span>
+            </div>
+            <el-button
+              v-if="!configurationNextAction.complete"
+              type="primary"
+              @click="goToNextConfigurationStep"
+            >{{ configurationNextAction.actionLabel }}</el-button>
+          </div>
+        </section>
         <section v-if="configurationStatus" class="configuration-completeness">
           <div class="configuration-completeness__header">
             <div>
               <strong>配置完整性</strong>
-              <span>
-                {{ configurationStatus.endpoint_profile_id }}@{{ configurationStatus.endpoint_profile_version }}
-              </span>
+              <span>{{ selectedEndpoint?.display_name || '当前服务商' }}</span>
             </div>
             <div>
               <el-tag :type="configurationStatus.production_allowed ? 'success' : 'warning'">
-                {{ configurationStatus.stage }}
+                {{ statusLabel(configurationStatus.stage) }}
               </el-tag>
               <el-button text @click="loadSelectedEndpointConfiguration">刷新状态</el-button>
             </div>
@@ -106,20 +125,36 @@
               :key="item.key"
               class="configuration-component"
             >
-              <span>{{ item.label }}</span>
+              <span>{{ configurationComponentLabel(item.key) }}</span>
               <el-tag :type="item.complete ? 'success' : 'warning'" size="small">
-                {{ item.status }}
+                {{ statusLabel(item.status) }}
               </el-tag>
-              <small v-if="item.reason_code">{{ item.reason_code }}</small>
+              <small v-if="item.reason_code">{{ reasonLabel(item.reason_code) }}</small>
             </div>
           </div>
+          <el-collapse class="advanced-information">
+            <el-collapse-item title="高级信息（技术状态与版本）" name="configuration-technical">
+              <el-descriptions :column="2" border size="small">
+                <el-descriptions-item label="接口标识">{{ configurationStatus.endpoint_profile_id }}</el-descriptions-item>
+                <el-descriptions-item label="技术版本">{{ configurationStatus.endpoint_profile_version }}</el-descriptions-item>
+                <el-descriptions-item label="显示状态">{{ statusLabel(configurationStatus.stage) }}</el-descriptions-item>
+                <el-descriptions-item label="技术状态">{{ configurationStatus.stage }}</el-descriptions-item>
+              </el-descriptions>
+              <el-table :data="configurationStatus.components" size="small">
+                <el-table-column label="项目"><template #default="{ row }">{{ configurationComponentLabel(row.key) }}</template></el-table-column>
+                <el-table-column label="显示状态"><template #default="{ row }">{{ statusLabel(row.status) }}</template></el-table-column>
+                <el-table-column prop="status" label="技术状态" />
+                <el-table-column prop="reason_code" label="技术原因" />
+              </el-table>
+            </el-collapse-item>
+          </el-collapse>
         </section>
         <el-tabs
           v-model="activeModelTab"
           class="model-tabs"
           :class="{ 'model-tabs--embedded': props.embedded }"
         >
-          <el-tab-pane label="服务商" name="providers">
+          <el-tab-pane label="服务商配置" name="providers">
             <div class="provider-toolbar">
               <div>
                 <strong>模型服务商</strong>
@@ -129,7 +164,7 @@
                 v-if="authStore.isAdmin && !isDemo"
                 type="primary"
                 @click="openCreateProviderEndpoint"
-              >新增服务商</el-button>
+              >添加服务商</el-button>
             </div>
             <el-table
               :data="providerEndpoints"
@@ -138,15 +173,11 @@
               @row-click="continueProviderEndpoint"
             >
               <el-table-column prop="display_name" label="服务商" min-width="170" />
-              <el-table-column prop="provider_type" label="类型" min-width="180" />
-              <el-table-column label="版本" width="100">
-                <template #default="{ row }">{{ row.profile_version }}</template>
-              </el-table-column>
-              <el-table-column prop="state" label="Endpoint状态" min-width="150" />
-              <el-table-column prop="url_validation_status" label="URL安全" min-width="120" />
-              <el-table-column prop="structured_output_mode" label="结构化输出" min-width="180" />
+              <el-table-column label="服务类型" min-width="150"><template #default="{ row }">{{ providerTypeLabel(row.provider_type) }}</template></el-table-column>
+              <el-table-column label="接口状态" min-width="150"><template #default="{ row }">{{ statusLabel(row.state) }}</template></el-table-column>
+              <el-table-column label="地址验证" min-width="140"><template #default="{ row }">{{ statusLabel(row.url_validation_status) }}</template></el-table-column>
               <el-table-column label="生产使用" width="120">
-                <template #default="{ row }">{{ row.production_allowed ? 'ENABLED' : 'DISABLED' }}</template>
+                <template #default="{ row }">{{ row.production_allowed ? '已启用' : '未启用' }}</template>
               </el-table-column>
               <el-table-column label="操作" width="160" fixed="right">
                 <template #default="{ row }">
@@ -168,7 +199,7 @@
               <div class="provider-detail__header">
                 <div>
                   <strong>{{ selectedEndpoint.display_name }}</strong>
-                  <span>{{ selectedEndpoint.profile_version }}</span>
+                  <span>当前版本</span>
                 </div>
                 <div class="provider-detail__actions">
                   <el-button
@@ -179,23 +210,33 @@
                     v-if="selectedEndpoint.url_validation_status === 'PASS'"
                     type="primary"
                     @click="goToCredentialSettings(selectedEndpoint)"
-                  >配置API凭证</el-button>
+                  >添加 API 密钥</el-button>
                 </div>
               </div>
               <el-descriptions :column="2" border size="small">
-                <el-descriptions-item label="Endpoint状态">
-                  <el-tag :type="endpointStateType(selectedEndpoint.state)">{{ selectedEndpoint.state }}</el-tag>
+                <el-descriptions-item label="接口状态">
+                  <el-tag :type="endpointStateType(selectedEndpoint.state)">{{ statusLabel(selectedEndpoint.state) }}</el-tag>
                 </el-descriptions-item>
-                <el-descriptions-item label="URL安全">
+                <el-descriptions-item label="地址验证">
                   <el-tag :type="selectedEndpoint.url_validation_status === 'PASS' ? 'success' : 'warning'">
-                    {{ selectedEndpoint.url_validation_status }}
+                    {{ statusLabel(selectedEndpoint.url_validation_status) }}
                   </el-tag>
                 </el-descriptions-item>
-                <el-descriptions-item label="Base URL">{{ selectedEndpoint.base_url || '系统固定' }}</el-descriptions-item>
-                <el-descriptions-item label="认证方式">{{ selectedEndpoint.auth_scheme || 'BEARER' }}</el-descriptions-item>
-                <el-descriptions-item label="API模式">{{ selectedEndpoint.api_mode || '系统固定' }}</el-descriptions-item>
-                <el-descriptions-item label="模型发现">{{ selectedEndpoint.models_endpoint_enabled ? '/models' : '手工登记' }}</el-descriptions-item>
+                <el-descriptions-item label="接口地址">{{ selectedEndpoint.base_url || '系统固定' }}</el-descriptions-item>
+                <el-descriptions-item label="模型获取方式">{{ selectedEndpoint.models_endpoint_enabled ? '自动读取' : '手工添加' }}</el-descriptions-item>
               </el-descriptions>
+              <el-collapse class="advanced-information">
+                <el-collapse-item title="高级信息" name="provider-technical">
+                  <el-descriptions :column="2" border size="small">
+                    <el-descriptions-item label="接口版本">{{ selectedEndpoint.profile_version }}</el-descriptions-item>
+                    <el-descriptions-item label="服务类型">{{ selectedEndpoint.provider_type }}</el-descriptions-item>
+                    <el-descriptions-item label="认证方式">{{ selectedEndpoint.auth_scheme || 'BEARER' }}</el-descriptions-item>
+                    <el-descriptions-item label="API 模式">{{ selectedEndpoint.api_mode || '系统固定' }}</el-descriptions-item>
+                    <el-descriptions-item label="结构化输出">{{ selectedEndpoint.structured_output_mode }}</el-descriptions-item>
+                    <el-descriptions-item label="技术状态">{{ selectedEndpoint.state }}</el-descriptions-item>
+                  </el-descriptions>
+                </el-collapse-item>
+              </el-collapse>
 
               <div
                 v-if="authStore.isAdmin && !isDemo && selectedEndpoint.provider_type === 'OPENAI_COMPATIBLE' && selectedEndpoint.state === 'DRAFT'"
@@ -204,7 +245,7 @@
                 <el-alert
                   type="warning"
                   :closable="false"
-                  title="该版本尚未验证URL，验证通过后才能配置API凭证。"
+                  title="该接口版本尚未验证地址，验证通过后才能添加 API 密钥。"
                 />
                 <el-checkbox v-model="endpointTransmissionConfirmed">
                   我确认将研究数据发送到该第三方服务，并已评估其隐私、数据保留和安全政策
@@ -214,7 +255,7 @@
                   :loading="providerSubmitting"
                   :disabled="!endpointTransmissionConfirmed"
                   @click="validateProviderEndpoint(selectedEndpoint)"
-                >确认并验证URL</el-button>
+                >确认并验证地址</el-button>
               </div>
             </section>
 
@@ -227,7 +268,7 @@
             >
               <div class="endpoint-editor__header">
                 <div>
-                  <strong>{{ endpointEditorMode === 'create' ? '新增服务商' : '创建Endpoint新版本' }}</strong>
+                  <strong>{{ endpointEditorMode === 'create' ? '添加服务商' : '创建接口新版本' }}</strong>
                   <span v-if="endpointEditorMode === 'new-version'">旧版本保持不可变，新配置保存为下一版本。</span>
                 </div>
                 <el-button text @click="cancelEndpointEdit">取消</el-button>
@@ -236,18 +277,18 @@
                 <el-form-item label="服务商名称">
                   <el-input v-model="endpointDisplayName" maxlength="120" autocomplete="off" />
                 </el-form-item>
-                <el-form-item label="Provider类型">
+                <el-form-item label="服务类型">
                   <el-input model-value="OPENAI_COMPATIBLE" disabled />
                 </el-form-item>
-                <el-form-item label="HTTPS Base URL">
+                <el-form-item label="接口地址（HTTPS）">
                   <el-input v-model="endpointBaseUrl" placeholder="https://provider.example/v1" autocomplete="off" />
-                  <div v-if="endpointEditorMode === 'new-version'" class="field-note">新版本必须保持相同Origin。</div>
+                  <div v-if="endpointEditorMode === 'new-version'" class="field-note">新版本必须保持相同来源域名。</div>
                 </el-form-item>
-                <el-form-item label="API模式">
+                <el-form-item label="接口模式">
                   <el-select v-model="endpointApiMode">
-                    <el-option label="Chat Completions" value="OPENAI_CHAT_COMPLETIONS" />
-                    <el-option label="Responses" value="OPENAI_RESPONSES" />
-                    <el-option label="Auto Detect" value="AUTO_DETECT" />
+                    <el-option label="聊天补全（Chat Completions）" value="OPENAI_CHAT_COMPLETIONS" />
+                    <el-option label="响应接口（Responses）" value="OPENAI_RESPONSES" />
+                    <el-option label="自动检测" value="AUTO_DETECT" />
                   </el-select>
                 </el-form-item>
                 <el-form-item label="认证方式">
@@ -258,10 +299,10 @@
                 </el-form-item>
                 <el-form-item label="结构化输出模式">
                   <el-select v-model="endpointStructuredMode">
-                    <el-option label="Native JSON Schema" value="NATIVE_JSON_SCHEMA" />
-                    <el-option label="Tool Call" value="TOOL_CALL" />
-                    <el-option label="JSON Only" value="JSON_ONLY" />
-                    <el-option label="Unknown" value="UNKNOWN" />
+                    <el-option label="原生 JSON Schema" value="NATIVE_JSON_SCHEMA" />
+                    <el-option label="工具调用（Tool Call）" value="TOOL_CALL" />
+                    <el-option label="仅 JSON" value="JSON_ONLY" />
+                    <el-option label="未知" value="UNKNOWN" />
                   </el-select>
                 </el-form-item>
                 <el-form-item label="模型发现">
@@ -278,26 +319,26 @@
                 <el-button @click="cancelEndpointEdit">取消</el-button>
               </div>
               <p class="security-note">
-                保存草稿不会发送凭证。保存后再单独确认第三方数据传输并验证URL。
+                保存草稿不会发送 API 密钥。保存后再单独确认第三方数据传输并验证接口地址。
               </p>
             </el-form>
           </el-tab-pane>
 
-          <el-tab-pane label="API凭证" name="credentials">
+          <el-tab-pane label="API 密钥" name="credentials">
             <el-table :data="credentials" size="small">
-              <el-table-column prop="provider" label="Provider" width="120" />
-              <el-table-column prop="provider_type" label="类型" min-width="180" />
-              <el-table-column label="Endpoint版本" min-width="190">
-                <template #default="{ row }">{{ credentialEndpointLabel(row) }}</template>
+              <el-table-column label="绑定服务商" min-width="180">
+                <template #default="{ row }">{{ credentialProviderLabel(row) }}</template>
               </el-table-column>
-              <el-table-column prop="credential_id" label="凭证名称" min-width="180" />
-              <el-table-column label="已保存Key" width="130">
+              <el-table-column label="接口版本" width="120">
+                <template #default="{ row }">{{ credentialVersionLabel(row) }}</template>
+              </el-table-column>
+              <el-table-column prop="credential_id" label="密钥名称" min-width="180" />
+              <el-table-column label="已保存密钥" width="130">
                 <template #default="{ row }">{{ row.configured ? '••••••••' : '未配置' }}</template>
               </el-table-column>
-              <el-table-column prop="status" label="状态" width="130" />
-              <el-table-column prop="secret_store_status" label="Secret Store" width="140" />
+              <el-table-column label="状态" width="130"><template #default="{ row }">{{ statusLabel(row.status) }}</template></el-table-column>
+              <el-table-column label="安全存储" width="140"><template #default="{ row }">{{ statusLabel(row.secret_store_status) }}</template></el-table-column>
               <el-table-column prop="last_verified_at" label="最后验证" min-width="190" />
-              <el-table-column prop="last_error_code" label="错误代码" min-width="180" />
               <el-table-column v-if="authStore.isAdmin && !isDemo" label="操作" width="150" fixed="right">
                 <template #default="{ row }">
                   <el-button link @click="verifyCredential(row)">验证</el-button>
@@ -305,7 +346,7 @@
                 </template>
               </el-table-column>
             </el-table>
-            <el-empty v-if="!credentials.length" description="尚未配置模型API凭证" />
+            <el-empty v-if="!credentials.length" description="尚未添加 API 密钥" />
 
             <el-form
               v-if="authStore.isAdmin && !isDemo"
@@ -318,40 +359,29 @@
                 v-if="credentialSecretStoreUnavailable"
                 type="error"
                 :closable="false"
-                title="当前后端无法访问macOS Keychain；凭证保存保持关闭。请使用本机安全后端入口。"
+                title="当前后端无法访问 macOS 钥匙串，因此无法安全保存 API 密钥。解决办法：使用本机安全入口重新打开此页面。"
               />
               <el-alert
                 v-else-if="credentialProviderType === 'OPENAI_COMPATIBLE' && !validatedCompatibleEndpoints.length"
                 type="warning"
                 :closable="false"
-                title="暂无已验证的第三方服务商，请先完成服务商URL验证。"
+                title="当前没有地址验证通过的服务商。解决办法：先到“服务商配置”添加并验证接口地址。"
               />
               <div class="credential-grid">
-                <el-form-item label="Provider类型">
+                <el-form-item label="服务类型">
                   <el-select
                     v-model="credentialProviderType"
                     @change="handleCredentialProviderChange"
                   >
-                    <el-option label="OpenAI Official" value="OPENAI_OFFICIAL" />
-                    <el-option label="OpenAI Compatible" value="OPENAI_COMPATIBLE" />
+                    <el-option label="OpenAI 官方服务" value="OPENAI_OFFICIAL" />
+                    <el-option label="第三方兼容服务" value="OPENAI_COMPATIBLE" />
                   </el-select>
                 </el-form-item>
-                <el-form-item v-if="credentialProviderType === 'OPENAI_COMPATIBLE'" label="已验证Endpoint版本">
-                  <el-select
-                    v-model="credentialEndpointIdentity"
-                    placeholder="先验证服务商URL"
-                    :disabled="Boolean(activeCredential) || !validatedCompatibleEndpoints.length"
-                    @change="handleCredentialEndpointChange"
-                  >
-                    <el-option
-                      v-for="item in validatedCompatibleEndpoints"
-                      :key="`${item.endpoint_profile_id}@${item.profile_version}`"
-                      :label="`${item.display_name} @ ${item.profile_version}`"
-                      :value="`${item.endpoint_profile_id}@${item.profile_version}`"
-                    />
-                  </el-select>
+                <el-form-item v-if="credentialProviderType === 'OPENAI_COMPATIBLE'" label="绑定服务商">
+                  <el-input :model-value="selectedCredentialEndpoint?.display_name || '请先选择并验证服务商'" disabled />
+                  <div class="field-note">接口版本：当前版本（由系统自动选择）</div>
                 </el-form-item>
-                <el-form-item label="凭证名称">
+                <el-form-item label="密钥名称">
                   <el-input
                     v-model="credentialName"
                     :disabled="Boolean(activeCredential)"
@@ -359,14 +389,14 @@
                     autocomplete="off"
                   />
                 </el-form-item>
-                <el-form-item v-if="credentialProviderType === 'OPENAI_OFFICIAL'" label="固定 Base URL">
+                <el-form-item v-if="credentialProviderType === 'OPENAI_OFFICIAL'" label="固定接口地址">
                   <el-input
                     v-model="credentialBaseUrl"
                     disabled
                     autocomplete="off"
                   />
                 </el-form-item>
-                <el-form-item label="API Key">
+                <el-form-item label="API 密钥">
                   <el-input
                     v-model="credentialApiKey"
                     type="password"
@@ -382,116 +412,179 @@
                   :disabled="Boolean(activeCredential) || credentialSubmissionBlocked"
                   @click="saveCredential(false)"
                 >
-                  保存并验证
+                  添加 API 密钥
                 </el-button>
                 <el-button
                   :loading="credentialSubmitting"
                   :disabled="!activeCredential || credentialSecretStoreUnavailable"
                   @click="saveCredential(true)"
                 >
-                  替换凭证
+                  替换 API 密钥
                 </el-button>
               </div>
+              <div v-if="credentialSubmissionBlocked" class="action-hint">
+                {{ credentialActionBlockedReason }}
+              </div>
               <p class="security-note">
-                Key只由后端请求接收并写入macOS Keychain；不会进入MongoDB、日志、
-                localStorage、sessionStorage或Cookie。已保存Key永远不可回显，也不能跨Endpoint版本复用。
+                API 密钥只由后端短暂接收并写入 macOS 钥匙串；不会进入数据库、日志或浏览器存储。
+                已保存密钥永远不可回显，系统会自动绑定当前接口版本。
               </p>
             </el-form>
             <el-alert
               v-else-if="isDemo"
               type="info"
               :closable="false"
-              title="隔离Demo禁止保存、替换、验证或撤销真实API凭证。"
+              title="隔离演示环境禁止保存、替换、验证或撤销真实 API 密钥。"
             />
             <el-alert
               v-else
               type="info"
               :closable="false"
-              title="普通用户只能查看凭证和能力状态；凭证管理仅限数据库管理员。"
+              title="普通用户只能查看配置状态；API 密钥管理仅限管理员。"
             />
 
             <el-descriptions v-if="lastCredentialResult" class="capability-result" :column="2" border>
-              <el-descriptions-item label="认证">{{ lastCredentialResult.capability.authentication_status }}</el-descriptions-item>
-              <el-descriptions-item label="Provider">{{ lastCredentialResult.capability.provider_access_status }}</el-descriptions-item>
-              <el-descriptions-item label="Normal">{{ lastCredentialResult.capability.normal_model_status }}</el-descriptions-item>
-              <el-descriptions-item label="Top">{{ lastCredentialResult.capability.top_model_status }}</el-descriptions-item>
-              <el-descriptions-item label="结构化输出">{{ lastCredentialResult.capability.structured_output_status }}</el-descriptions-item>
-              <el-descriptions-item label="价格">{{ lastCredentialResult.capability.price_status }}</el-descriptions-item>
-              <el-descriptions-item label="预算">{{ lastCredentialResult.capability.budget_status }}</el-descriptions-item>
+              <el-descriptions-item label="身份认证">{{ statusLabel(lastCredentialResult.capability.authentication_status) }}</el-descriptions-item>
+              <el-descriptions-item label="服务商访问">{{ statusLabel(lastCredentialResult.capability.provider_access_status) }}</el-descriptions-item>
+              <el-descriptions-item label="普通决策模型">{{ statusLabel(lastCredentialResult.capability.normal_model_status) }}</el-descriptions-item>
+              <el-descriptions-item label="风险终审模型">{{ statusLabel(lastCredentialResult.capability.top_model_status) }}</el-descriptions-item>
+              <el-descriptions-item label="结构化输出">{{ statusLabel(lastCredentialResult.capability.structured_output_status) }}</el-descriptions-item>
+              <el-descriptions-item label="调用价格">{{ statusLabel(lastCredentialResult.capability.price_status) }}</el-descriptions-item>
+              <el-descriptions-item label="调用限制">{{ statusLabel(lastCredentialResult.capability.budget_status) }}</el-descriptions-item>
               <el-descriptions-item label="检查时间">{{ lastCredentialResult.capability.checked_at }}</el-descriptions-item>
             </el-descriptions>
+            <el-collapse class="advanced-information">
+              <el-collapse-item title="高级信息（密钥标识与技术版本）" name="credential-technical">
+                <el-table :data="credentials" size="small">
+                  <el-table-column prop="credential_id" label="密钥标识" />
+                  <el-table-column prop="endpoint_profile_version" label="技术版本" />
+                  <el-table-column prop="status" label="技术状态" />
+                  <el-table-column prop="last_error_code" label="技术错误码" />
+                </el-table>
+              </el-collapse-item>
+            </el-collapse>
           </el-tab-pane>
 
-          <el-tab-pane label="模型目录" name="models">
+          <el-tab-pane label="模型管理" name="models">
             <div class="status-line">
-              <el-select v-model="selectedEndpointIdentity" placeholder="选择Endpoint版本" @change="handleSelectedEndpointChange">
+              <el-select v-model="selectedEndpointIdentity" placeholder="选择服务商" @change="handleSelectedEndpointChange">
                 <el-option
                   v-for="item in validatedCompatibleEndpoints"
                   :key="`${item.endpoint_profile_id}@${item.profile_version}`"
-                  :label="`${item.display_name} @ ${item.profile_version}`"
+                  :label="`${item.display_name}（当前版本）`"
                   :value="`${item.endpoint_profile_id}@${item.profile_version}`"
                 />
               </el-select>
-              <span>模型名称和能力仅属于所选Endpoint，不继承官方OpenAI能力。</span>
-              <el-button v-if="authStore.isAdmin && !isDemo" :loading="modelSubmitting" @click="discoverEndpointModelCatalog">探测 /models</el-button>
+              <span>分别添加普通决策模型和风险终审模型；模型能力不会从其他服务商继承。</span>
+              <el-button v-if="authStore.isAdmin && !isDemo" :loading="modelSubmitting" :disabled="!selectedEndpoint" @click="discoverEndpointModelCatalog">自动读取模型列表</el-button>
             </div>
             <el-table :data="endpointModels" size="small">
-              <el-table-column prop="remote_model_name" label="远端模型" min-width="180" />
-              <el-table-column prop="display_name" label="显示名称" min-width="160" />
-              <el-table-column label="角色能力" min-width="230">
-                <template #default="{ row }">{{ row.role_capabilities.join(', ') || '未分配' }}</template>
+              <el-table-column prop="display_name" label="模型名称" min-width="180" />
+              <el-table-column label="用途" min-width="230">
+                <template #default="{ row }">{{ roleCapabilitiesLabel(row.role_capabilities) }}</template>
               </el-table-column>
-              <el-table-column prop="supports_json_schema" label="JSON Schema" width="130" />
-              <el-table-column prop="supports_tool_call" label="Tool Call" width="120" />
-              <el-table-column prop="status" label="状态" width="120" />
+              <el-table-column label="状态" width="120"><template #default="{ row }">{{ statusLabel(row.status) }}</template></el-table-column>
             </el-table>
             <el-form v-if="authStore.isAdmin && !isDemo" class="credential-form" label-position="top" @submit.prevent>
               <div class="credential-grid">
-                <el-form-item label="远端模型名称"><el-input v-model="modelRemoteName" autocomplete="off" /></el-form-item>
+                <el-form-item label="服务商模型名称"><el-input v-model="modelRemoteName" autocomplete="off" /></el-form-item>
                 <el-form-item label="显示名称"><el-input v-model="modelDisplayName" autocomplete="off" /></el-form-item>
-                <el-form-item label="角色能力">
+                <el-form-item label="模型用途">
                   <el-checkbox-group v-model="modelRoles">
-                    <el-checkbox value="NORMAL_TRADER">Normal</el-checkbox>
-                    <el-checkbox value="TOP_RISK_REVIEWER">Top</el-checkbox>
+                    <el-checkbox value="NORMAL_TRADER">普通决策模型</el-checkbox>
+                    <el-checkbox value="TOP_RISK_REVIEWER">风险终审模型</el-checkbox>
                   </el-checkbox-group>
                 </el-form-item>
                 <el-form-item label="结构化能力">
                   <el-checkbox v-model="modelSupportsJsonSchema">JSON Schema</el-checkbox>
                   <el-checkbox v-model="modelSupportsToolCall">Tool Call</el-checkbox>
                 </el-form-item>
-                <el-form-item label="最大上下文Tokens"><el-input-number v-model="modelMaxContext" :min="1" controls-position="right" /></el-form-item>
-                <el-form-item label="最大输出Tokens"><el-input-number v-model="modelMaxOutput" :min="1" controls-position="right" /></el-form-item>
+                <el-form-item label="最大上下文 Token 数"><el-input-number v-model="modelMaxContext" :min="1" controls-position="right" /></el-form-item>
+                <el-form-item label="最大输出 Token 数"><el-input-number v-model="modelMaxOutput" :min="1" controls-position="right" /></el-form-item>
               </div>
-              <el-button type="primary" :loading="modelSubmitting" @click="createEndpointModelDefinition">手工登记模型</el-button>
+              <el-button type="primary" :loading="modelSubmitting" :disabled="Boolean(modelActionBlockedReason)" @click="createEndpointModelDefinition">添加模型</el-button>
+              <div v-if="modelActionBlockedReason" class="action-hint">{{ modelActionBlockedReason }}</div>
             </el-form>
+            <el-collapse class="advanced-information">
+              <el-collapse-item title="调用价格" name="model-pricing">
+                <el-table :data="endpointPrices" size="small">
+                  <el-table-column prop="endpoint_model_id" label="模型标识" min-width="180" />
+                  <el-table-column label="价格类型" min-width="155">
+                    <template #default="{ row }">
+                      <el-tag :type="row.pricing_source === 'SELF_HOSTED' ? 'success' : 'info'">
+                        {{ row.pricing_source === 'SELF_HOSTED' ? '自建服务 / 价格0' : '外部服务真实价格' }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="输入 / 1M"><template #default="{ row }">{{ row.input_price_per_million }} {{ row.currency }}</template></el-table-column>
+                  <el-table-column label="输出 / 1M"><template #default="{ row }">{{ row.output_price_per_million }} {{ row.currency }}</template></el-table-column>
+                </el-table>
+                <el-form v-if="authStore.isAdmin && !isDemo" class="credential-form" label-position="top" @submit.prevent>
+                  <div class="credential-grid">
+                    <el-form-item label="模型"><el-select v-model="priceModelIdentity"><el-option v-for="item in endpointModels" :key="`${item.endpoint_model_id}@${item.model_version}`" :label="item.display_name" :value="`${item.endpoint_model_id}@${item.model_version}`" /></el-select></el-form-item>
+                    <el-form-item label="价格类型"><el-select v-model="pricePricingSource"><el-option label="外部付费服务 / 真实价格" value="PROVIDER_PUBLISHED" /><el-option label="自建服务 / 价格0" value="SELF_HOSTED" /></el-select></el-form-item>
+                    <el-form-item label="货币"><el-input v-model="priceCurrency" maxlength="8" /></el-form-item>
+                    <el-form-item label="输入价格 / 1M Token"><el-input v-model="priceInput" inputmode="decimal" :disabled="pricePricingSource === 'SELF_HOSTED'" /></el-form-item>
+                    <el-form-item label="缓存输入价格 / 1M Token"><el-input v-model="priceCachedInput" inputmode="decimal" :disabled="pricePricingSource === 'SELF_HOSTED'" /></el-form-item>
+                    <el-form-item label="输出价格 / 1M Token"><el-input v-model="priceOutput" inputmode="decimal" :disabled="pricePricingSource === 'SELF_HOSTED'" /></el-form-item>
+                    <el-form-item label="生效时间"><el-input v-model="priceEffectiveAt" /></el-form-item>
+                    <el-form-item label="价格来源说明"><el-input v-model="priceSource" maxlength="500" /></el-form-item>
+                    <el-form-item label="确认"><el-checkbox v-model="priceVerified">{{ pricePricingSource === 'SELF_HOSTED' ? '确认该服务为自建服务且不按 Token 计费' : '已对照服务商真实价格来源' }}</el-checkbox></el-form-item>
+                  </div>
+                  <el-button type="primary" :loading="priceSubmitting" @click="createEndpointPriceVersion">保存调用价格</el-button>
+                </el-form>
+              </el-collapse-item>
+              <el-collapse-item title="高级信息（技术模型、Prompt 与版本）" name="model-technical">
+                <el-table :data="endpointModels" size="small">
+                  <el-table-column prop="remote_model_name" label="远端模型名" />
+                  <el-table-column prop="model_version" label="模型版本" />
+                  <el-table-column prop="status" label="技术状态" />
+                  <el-table-column prop="supports_json_schema" label="JSON Schema" />
+                  <el-table-column prop="supports_tool_call" label="Tool Call" />
+                </el-table>
+                <el-table :data="promptProfiles" size="small">
+                  <el-table-column prop="prompt_id" label="Prompt 标识" />
+                  <el-table-column prop="prompt_version" label="版本" />
+                  <el-table-column prop="role" label="技术角色" />
+                  <el-table-column prop="schema_target" label="Schema" />
+                </el-table>
+              </el-collapse-item>
+            </el-collapse>
           </el-tab-pane>
 
-          <el-tab-pane label="模型Profile" name="profiles">
+          <el-tab-pane label="模型角色" name="profiles">
             <el-table :data="modelStatus?.profiles || []" size="small">
-              <el-table-column prop="role" label="角色" min-width="180" />
-              <el-table-column label="Profile" min-width="230">
-                <template #default="{ row }">{{ row.profile_id }}@{{ row.profile_version }}</template>
+              <el-table-column label="角色" min-width="180"><template #default="{ row }">{{ roleLabel(row.role) }}</template></el-table-column>
+              <el-table-column label="模型角色配置" min-width="230">
+                <template #default="{ row }">{{ row.model_name }}</template>
               </el-table-column>
-              <el-table-column prop="provider" label="Provider" width="110" />
-              <el-table-column prop="model_name" label="模型" min-width="150" />
-              <el-table-column label="Prompt" min-width="220">
-                <template #default="{ row }">{{ row.prompt_id || '—' }}@{{ row.prompt_version || '—' }}</template>
-              </el-table-column>
-              <el-table-column label="Configured" width="135">
-                <template #default="{ row }"><el-tag :type="row.configured ? 'success' : 'danger'">{{ row.configured ? 'CONFIGURED' : 'NOT_CONFIGURED' }}</el-tag></template>
+              <el-table-column label="状态" width="135">
+                <template #default="{ row }"><el-tag :type="row.configured ? 'success' : 'warning'">{{ row.configured ? '已配置' : '未配置' }}</el-tag></template>
               </el-table-column>
             </el-table>
+            <div v-if="authStore.isAdmin && !isDemo" class="primary-role-actions">
+              <div>
+                <el-button type="primary" :loading="assignmentSubmitting" :disabled="Boolean(roleActionBlockedReason('NORMAL_TRADER'))" @click="createRoleAssignment('NORMAL_TRADER')">创建普通模型角色</el-button>
+                <small v-if="roleActionBlockedReason('NORMAL_TRADER')">{{ roleActionBlockedReason('NORMAL_TRADER') }}</small>
+              </div>
+              <div>
+                <el-button type="primary" :loading="assignmentSubmitting" :disabled="Boolean(roleActionBlockedReason('TOP_RISK_REVIEWER'))" @click="createRoleAssignment('TOP_RISK_REVIEWER')">创建终审模型角色</el-button>
+                <small v-if="roleActionBlockedReason('TOP_RISK_REVIEWER')">{{ roleActionBlockedReason('TOP_RISK_REVIEWER') }}</small>
+              </div>
+            </div>
+            <el-collapse class="advanced-information">
+              <el-collapse-item title="高级信息（精确角色绑定）" name="role-technical">
             <el-form v-if="authStore.isAdmin && !isDemo" class="credential-form" label-position="top" @submit.prevent>
               <div class="credential-grid">
                 <el-form-item label="角色">
                   <el-radio-group v-model="assignmentRole" @change="handleAssignmentRoleChange">
-                    <el-radio-button label="NORMAL_TRADER">Normal</el-radio-button>
-                    <el-radio-button label="TOP_RISK_REVIEWER">Top</el-radio-button>
+                    <el-radio-button label="NORMAL_TRADER">普通决策</el-radio-button>
+                    <el-radio-button label="TOP_RISK_REVIEWER">风险终审</el-radio-button>
                   </el-radio-group>
                 </el-form-item>
-                <el-form-item label="Profile ID"><el-input v-model="assignmentProfileId" autocomplete="off" /></el-form-item>
-                <el-form-item label="Profile版本"><el-input v-model="assignmentProfileVersion" autocomplete="off" /></el-form-item>
-                <el-form-item label="Endpoint模型">
+                <el-form-item label="角色配置标识"><el-input v-model="assignmentProfileId" autocomplete="off" /></el-form-item>
+                <el-form-item label="技术版本"><el-input v-model="assignmentProfileVersion" autocomplete="off" /></el-form-item>
+                <el-form-item label="模型">
                   <el-select v-model="assignmentModelIdentity">
                     <el-option v-for="item in endpointModels" :key="`${item.endpoint_model_id}@${item.model_version}`" :label="item.remote_model_name" :value="`${item.endpoint_model_id}@${item.model_version}`" />
                   </el-select>
@@ -501,20 +594,22 @@
                     <el-option v-for="item in endpointPrices.filter(price => price.endpoint_profile_id === selectedEndpoint?.endpoint_profile_id && price.endpoint_profile_version === selectedEndpoint?.profile_version && price.endpoint_model_id === selectedAssignmentModel?.endpoint_model_id)" :key="`${item.price_version_id}@${item.price_version}`" :label="`${item.currency} ${item.input_price_per_million}/${item.output_price_per_million}`" :value="`${item.price_version_id}@${item.price_version}`" />
                   </el-select>
                 </el-form-item>
-                <el-form-item label="凭证">
+                <el-form-item label="API 密钥">
                   <el-select v-model="assignmentCredentialId">
                     <el-option v-for="item in compatibleCredentials" :key="item.credential_id" :label="item.credential_id" :value="item.credential_id" />
                   </el-select>
                 </el-form-item>
               </div>
-              <el-checkbox v-model="assignmentSameModelConfirmed">我明确确认Normal和Top可使用同一Endpoint模型</el-checkbox>
+              <el-checkbox v-model="assignmentSameModelConfirmed">我明确确认普通决策和风险终审可使用同一模型</el-checkbox>
               <div class="credential-actions">
-                <el-button type="primary" :loading="assignmentSubmitting" @click="assignCompatibleProfile">显式分配Profile</el-button>
+                <el-button type="primary" :loading="assignmentSubmitting" @click="assignCompatibleProfile">保存精确角色绑定</el-button>
               </div>
             </el-form>
+              </el-collapse-item>
+            </el-collapse>
           </el-tab-pane>
 
-          <el-tab-pane label="Prompt版本" name="prompts">
+          <el-tab-pane v-if="false" label="Prompt版本" name="prompts">
             <el-table :data="promptProfiles" size="small">
               <el-table-column prop="prompt_id" label="Prompt" min-width="230" />
               <el-table-column prop="prompt_version" label="版本" min-width="210" />
@@ -526,7 +621,7 @@
             </el-table>
           </el-tab-pane>
 
-          <el-tab-pane label="价格" name="prices">
+          <el-tab-pane v-if="false" label="价格" name="prices">
             <el-table :data="endpointPrices" size="small">
               <el-table-column prop="endpoint_model_id" label="模型ID" min-width="180" />
               <el-table-column label="价格类型" min-width="155">
@@ -575,32 +670,99 @@
             </el-form>
           </el-tab-pane>
 
-          <el-tab-pane label="预算" name="budget">
-            <el-descriptions v-if="modelStatus?.budget" class="budget-summary" :column="3" border>
-              <el-descriptions-item label="Daily Calls">{{ modelStatus.budget.daily_calls }} / {{ modelStatus.budget.max_daily_calls }}</el-descriptions-item>
-              <el-descriptions-item label="Daily Cost">{{ modelStatus.budget.daily_cost }} / {{ modelStatus.budget.max_daily_cost }} {{ modelStatus.budget.currency }}</el-descriptions-item>
-              <el-descriptions-item label="Budget Policy">{{ modelStatus.budget.policy_id }}@{{ modelStatus.budget.policy_version }}</el-descriptions-item>
-            </el-descriptions>
-            <el-alert type="warning" :closable="false" title="外部付费Provider必须登记真实价格；自建服务可登记价格0，但Token、调用次数、超时和重试资源限制继续生效。" />
+          <el-tab-pane label="能力检测" name="capabilities">
+            <div class="capability-primary-action">
+              <div>
+                <strong>验证普通决策模型与风险终审模型</strong>
+                <span>能力检测会使用最小请求验证认证、模型访问和结构化输出，不会创建订单。</span>
+              </div>
+              <el-button type="primary" :disabled="Boolean(capabilityActionBlockedReason)" @click="startCapabilityCheck">开始能力检测</el-button>
+            </div>
+            <div v-if="capabilityActionBlockedReason" class="action-hint">{{ capabilityActionBlockedReason }}</div>
+            <el-table :data="modelStatus?.profiles || []" size="small">
+              <el-table-column label="角色" min-width="180"><template #default="{ row }">{{ roleLabel(row.role) }}</template></el-table-column>
+              <el-table-column label="模型角色配置" min-width="230"><template #default="{ row }">{{ row.model_name }}</template></el-table-column>
+              <el-table-column label="能力状态" width="180"><template #default="{ row }">{{ statusLabel(row.capability) }}</template></el-table-column>
+              <el-table-column prop="last_check" label="最后检测" min-width="190" />
+              <el-table-column v-if="authStore.isAdmin && !isDemo" label="操作" width="130" fixed="right">
+                <template #default="{ row }"><el-button link @click="checkCapability(row)">检测此模型</el-button></template>
+              </el-table-column>
+            </el-table>
+            <el-collapse class="advanced-information">
+              <el-collapse-item title="高级信息（技术状态与版本）" name="capability-technical">
+                <el-table :data="modelStatus?.profiles || []" size="small">
+                  <el-table-column prop="profile_id" label="角色配置标识" />
+                  <el-table-column prop="profile_version" label="技术版本" />
+                  <el-table-column prop="role" label="技术角色" />
+                  <el-table-column prop="capability" label="技术状态" />
+                </el-table>
+              </el-collapse-item>
+            </el-collapse>
           </el-tab-pane>
 
-          <el-tab-pane label="能力检查" name="capabilities">
+          <el-tab-pane label="调用限制" name="budget">
+            <el-descriptions v-if="modelStatus?.budget" class="budget-summary" :column="3" border>
+              <el-descriptions-item label="今日调用次数">{{ modelStatus.budget.daily_calls }} / {{ modelStatus.budget.max_daily_calls }}</el-descriptions-item>
+              <el-descriptions-item label="今日费用">{{ modelStatus.budget.daily_cost }} / {{ modelStatus.budget.max_daily_cost }} {{ modelStatus.budget.currency }}</el-descriptions-item>
+              <el-descriptions-item label="剩余调用次数">{{ modelStatus.budget.remaining_calls }}</el-descriptions-item>
+            </el-descriptions>
+            <el-alert type="warning" :closable="false" title="外部付费服务必须登记真实价格；自建服务可以设置价格0，但 Token 数量、调用次数、并发、超时和重试限制继续有效。" />
+            <el-collapse class="advanced-information">
+              <el-collapse-item title="高级信息（限制策略与调用记录）" name="budget-technical">
+                <el-descriptions v-if="modelStatus?.budget" :column="2" border size="small">
+                  <el-descriptions-item label="策略标识">{{ modelStatus.budget.policy_id }}</el-descriptions-item>
+                  <el-descriptions-item label="策略版本">{{ modelStatus.budget.policy_version }}</el-descriptions-item>
+                  <el-descriptions-item label="技术币种">{{ modelStatus.budget.currency }}</el-descriptions-item>
+                  <el-descriptions-item label="剩余费用">{{ modelStatus.budget.remaining_cost }}</el-descriptions-item>
+                </el-descriptions>
+                <el-table v-if="authStore.isAdmin && !isDemo" :data="modelRuns" size="small">
+                  <el-table-column prop="created_at" label="时间" min-width="190" />
+                  <el-table-column prop="run_mode" label="技术模式" min-width="190" />
+                  <el-table-column label="角色"><template #default="{ row }">{{ roleLabel(row.role) }}</template></el-table-column>
+                  <el-table-column prop="model_name" label="模型" />
+                  <el-table-column label="显示状态"><template #default="{ row }">{{ statusLabel(row.structured_output_status) }}</template></el-table-column>
+                  <el-table-column prop="structured_output_status" label="技术状态" />
+                  <el-table-column prop="total_tokens" label="Token 数" />
+                </el-table>
+              </el-collapse-item>
+            </el-collapse>
+          </el-tab-pane>
+
+          <el-tab-pane v-if="false" label="能力检测" name="capabilities-hidden">
+            <div class="capability-primary-action">
+              <div>
+                <strong>验证普通决策模型与风险终审模型</strong>
+                <span>能力检测会使用最小请求验证认证、模型访问和结构化输出，不会创建订单。</span>
+              </div>
+              <el-button type="primary" :disabled="Boolean(capabilityActionBlockedReason)" @click="startCapabilityCheck">开始能力检测</el-button>
+            </div>
+            <div v-if="capabilityActionBlockedReason" class="action-hint">{{ capabilityActionBlockedReason }}</div>
             <el-table :data="modelStatus?.profiles || []" size="small">
-              <el-table-column prop="role" label="角色" min-width="180" />
-              <el-table-column label="Profile" min-width="230">
-                <template #default="{ row }">{{ row.profile_id }}@{{ row.profile_version }}</template>
+              <el-table-column label="角色" min-width="180"><template #default="{ row }">{{ roleLabel(row.role) }}</template></el-table-column>
+              <el-table-column label="模型角色配置" min-width="230">
+                <template #default="{ row }">{{ row.model_name }}</template>
               </el-table-column>
-              <el-table-column prop="capability" label="Capability" width="180" />
-              <el-table-column prop="last_check" label="Last Check" min-width="190" />
+              <el-table-column label="能力状态" width="180"><template #default="{ row }">{{ statusLabel(row.capability) }}</template></el-table-column>
+              <el-table-column prop="last_check" label="最后检测" min-width="190" />
               <el-table-column v-if="authStore.isAdmin && !isDemo" label="操作" width="130" fixed="right">
                 <template #default="{ row }">
-                  <el-button link @click="checkCapability(row)">能力检查</el-button>
+                  <el-button link @click="checkCapability(row)">检测此模型</el-button>
                 </template>
               </el-table-column>
             </el-table>
+            <el-collapse class="advanced-information">
+              <el-collapse-item title="高级信息（技术状态与版本）" name="capability-technical">
+                <el-table :data="modelStatus?.profiles || []" size="small">
+                  <el-table-column prop="profile_id" label="角色配置标识" />
+                  <el-table-column prop="profile_version" label="技术版本" />
+                  <el-table-column prop="role" label="技术角色" />
+                  <el-table-column prop="capability" label="技术状态" />
+                </el-table>
+              </el-collapse-item>
+            </el-collapse>
           </el-tab-pane>
 
-          <el-tab-pane label="调用记录" name="runs">
+          <el-tab-pane v-if="false" label="调用记录" name="runs">
             <el-table v-if="authStore.isAdmin && !isDemo" :data="modelRuns" size="small">
               <el-table-column prop="created_at" label="时间" min-width="190" />
               <el-table-column prop="run_mode" label="模式" min-width="190" />
@@ -614,7 +776,7 @@
             <el-alert v-else type="info" :closable="false" title="模型调用审计仅管理员可见。" />
           </el-tab-pane>
         </el-tabs>
-        <el-alert class="model-secret-notice" type="info" :closable="false" title="浏览器不会直接访问OpenAI，也不提供显示已保存Key、任意Prompt或未登记模型调用入口。" />
+        <el-alert class="model-secret-notice" type="info" :closable="false" title="浏览器不会直接访问模型服务商，也不会显示已保存的 API 密钥。技术版本、Prompt 和调用审计仅在高级信息中展示。" />
       </el-tab-pane>
       <el-tab-pane v-if="!modelsOnly" label="完整性与版本" name="integrity">
         <h4>完整性</h4><pre>{{ pretty(integrity) }}</pre>
@@ -702,6 +864,7 @@ const endpointModels = ref<EndpointModelDefinition[]>([])
 const endpointPrices = ref<EndpointPriceVersion[]>([])
 const configurationStatus = ref<ProviderConfigurationStatus | null>(null)
 const lastConfigurationError = ref('')
+const lastConfigurationTechnicalError = ref('')
 const lastCredentialResult = ref<ModelCredentialMutationResult | null>(null)
 const credentialProviderType = ref<'OPENAI_OFFICIAL' | 'OPENAI_COMPATIBLE'>('OPENAI_OFFICIAL')
 const credentialName = ref('openai-primary')
@@ -790,9 +953,180 @@ const credentialSubmissionBlocked = computed(
   () => credentialSecretStoreUnavailable.value
     || (credentialProviderType.value === 'OPENAI_COMPATIBLE' && !selectedCredentialEndpoint.value)
 )
+const configurationComponents = computed(() => new Map(
+  (configurationStatus.value?.components || []).map(item => [item.key, item])
+))
+const setupSteps = computed(() => [
+  { key: 'provider', title: '① 添加服务商', complete: componentIsComplete('endpoint') },
+  { key: 'credential', title: '② 添加 API 密钥', complete: componentIsComplete('credential') },
+  {
+    key: 'models',
+    title: '③ 登记普通模型和终审模型',
+    complete: ['normal_model', 'top_model', 'normal_price', 'top_price'].every(componentIsComplete)
+  },
+  {
+    key: 'profiles',
+    title: '④ 创建模型角色',
+    complete: ['normal_profile', 'top_profile', 'assignments'].every(componentIsComplete)
+  },
+  { key: 'capability', title: '⑤ 执行能力检测', complete: componentIsComplete('capability') },
+  { key: 'complete', title: '⑥ 完成配置', complete: Boolean(configurationStatus.value?.production_allowed) }
+])
+const setupActiveStep = computed(() => {
+  const firstIncomplete = setupSteps.value.findIndex(step => !step.complete)
+  return firstIncomplete < 0 ? setupSteps.value.length : firstIncomplete
+})
+const configurationNextAction = computed(() => {
+  const firstIncomplete = setupSteps.value.find(step => !step.complete)
+  if (!firstIncomplete) {
+    return { complete: true, missing: '', actionLabel: '', tab: 'providers' as ModelSettingsTab }
+  }
+  const actions: Record<string, { missing: string; actionLabel: string; tab: ModelSettingsTab }> = {
+    provider: { missing: '服务商', actionLabel: '添加服务商', tab: 'providers' },
+    credential: { missing: 'API 密钥', actionLabel: '添加 API 密钥', tab: 'credentials' },
+    models: { missing: '普通决策模型、风险终审模型或调用价格', actionLabel: '添加模型', tab: 'models' },
+    profiles: { missing: '模型角色配置或角色绑定', actionLabel: '创建模型角色', tab: 'profiles' },
+    capability: { missing: '能力检测', actionLabel: '开始能力检测', tab: 'capabilities' },
+    complete: { missing: '调用限制确认', actionLabel: '查看调用限制', tab: 'budget' }
+  }
+  return { complete: false, ...actions[firstIncomplete.key] }
+})
+const credentialActionBlockedReason = computed(() => {
+  if (credentialSecretStoreUnavailable.value) return '当前安全存储不可用，请使用本机安全入口。'
+  if (credentialProviderType.value === 'OPENAI_COMPATIBLE' && !selectedCredentialEndpoint.value) {
+    return '请先添加服务商并完成接口地址验证。'
+  }
+  if (activeCredential.value) return '当前服务商已经有 API 密钥；如需更换，请点击“替换 API 密钥”。'
+  return ''
+})
+const modelActionBlockedReason = computed(() => {
+  if (!selectedEndpoint.value) return '请先选择地址验证通过的服务商。'
+  if (!modelRemoteName.value.trim()) return '请填写服务商模型名称。'
+  if (!modelRoles.value.length) return '请选择“普通决策模型”或“风险终审模型”。'
+  return ''
+})
+const capabilityActionBlockedReason = computed(() => {
+  if (!componentIsComplete('normal_profile') || !componentIsComplete('top_profile')) {
+    return '请先创建普通模型角色和终审模型角色。'
+  }
+  if (!componentIsComplete('assignments')) return '请先完成两个模型角色的绑定。'
+  if (componentIsComplete('capability')) return '两个模型的能力检测均已通过。'
+  return ''
+})
 const statusType = computed(() => readiness.value?.overall_status === 'READY_FOR_PAPER' ? 'success' : readiness.value?.overall_status === 'UNSAFE' ? 'danger' : 'warning')
 const short = (value?: string) => value ? value.slice(0, 12) : '—'
 const pretty = (value: unknown) => JSON.stringify(value, null, 2)
+
+const STATUS_LABELS: Record<string, string> = {
+  READY: '可用',
+  URL_VALIDATED: '地址验证通过',
+  UNVERIFIED: '未验证',
+  MISSING: '未配置',
+  NOT_CONFIGURED: '未配置',
+  DEGRADED: '异常',
+  BLOCKED: '已阻止',
+  BUDGET_BLOCKED: '已阻止',
+  ACTIVE: '已启用',
+  ENABLED: '已启用',
+  REUSED: '已复用',
+  CREATED: '已创建',
+  CONFIGURED: '已配置',
+  PASS: '验证通过',
+  NOT_CHECKED: '未检测',
+  CAPABILITY_CHECKED: '能力检测完成',
+  CREDENTIAL_CONFIGURED: 'API 密钥已配置',
+  AUTHENTICATED: '身份认证通过',
+  MODELS_REGISTERED: '模型已登记',
+  PRICES_CONFIGURED: '调用价格已配置',
+  PROFILES_CONFIGURED: '模型角色已配置',
+  SELF_HOSTED_ZERO: '自建服务 / 价格0',
+  DISABLED: '已停用',
+  REVOKED: '已撤销',
+  REJECTED: '已拒绝',
+  UNAVAILABLE: '不可用',
+  FAILED: '失败',
+  DRAFT: '待验证'
+}
+const COMPONENT_LABELS: Record<string, string> = {
+  endpoint: '接口地址',
+  credential: 'API 密钥',
+  normal_model: '普通决策模型',
+  top_model: '风险终审模型',
+  normal_price: '普通模型调用价格',
+  top_price: '终审模型调用价格',
+  normal_profile: '普通模型角色配置',
+  top_profile: '终审模型角色配置',
+  assignments: '角色绑定',
+  capability: '能力检测',
+  budget: '调用限制'
+}
+const ERROR_GUIDANCE: Record<string, { summary: string; solution: string }> = {
+  CREDENTIAL_BINDING_EXISTS: {
+    summary: '该密钥绑定到了旧接口版本。',
+    solution: '点击“添加 API 密钥”，系统会自动绑定当前服务商。'
+  },
+  UNAUTHORIZED: {
+    summary: 'API 密钥未通过身份认证。',
+    solution: '检查密钥是否有效，然后使用“替换 API 密钥”重新提交。'
+  },
+  PROJECT_ACCESS_DENIED: {
+    summary: '当前密钥没有访问该服务项目的权限。',
+    solution: '在服务商后台授权当前项目，或更换有权限的密钥。'
+  },
+  MODEL_NOT_FOUND: {
+    summary: '服务商没有找到登记的模型。',
+    solution: '在“模型管理”中核对服务商模型名称。'
+  },
+  BUDGET_PRICING_UNAVAILABLE: {
+    summary: '模型尚未配置调用价格。',
+    solution: '在“模型管理 → 调用价格”中登记真实价格或自建服务价格0。'
+  },
+  BUDGET_CURRENCY_MISMATCH: {
+    summary: '调用价格币种与调用限制策略不一致。',
+    solution: '登记与调用限制相同币种的价格版本。'
+  },
+  RATE_LIMITED: {
+    summary: '服务商暂时限制了请求频率。',
+    solution: '稍后重试，并检查“调用限制”。'
+  },
+  TIMEOUT: {
+    summary: '服务商在限定时间内没有响应。',
+    solution: '检查接口地址和网络状态后重试。'
+  }
+}
+
+function statusLabel(status?: string | null): string {
+  if (!status) return '未配置'
+  return STATUS_LABELS[status] || status
+}
+
+function configurationComponentLabel(key: string): string {
+  return COMPONENT_LABELS[key] || key
+}
+
+function reasonLabel(reason?: string | null): string {
+  if (!reason) return ''
+  return ERROR_GUIDANCE[reason]?.summary || statusLabel(reason)
+}
+
+function componentIsComplete(key: string): boolean {
+  return Boolean(configurationComponents.value.get(key)?.complete)
+}
+
+function providerTypeLabel(type?: string): string {
+  return type === 'OPENAI_OFFICIAL' ? 'OpenAI 官方服务' : '第三方兼容服务'
+}
+
+function roleLabel(role?: string): string {
+  if (role === 'NORMAL_TRADER') return '普通决策模型'
+  if (role === 'TOP_RISK_REVIEWER') return '风险终审模型'
+  if (role === 'RESEARCH_AGENT') return '研究模型'
+  return role || '未配置'
+}
+
+function roleCapabilitiesLabel(roles: string[]): string {
+  return roles.length ? roles.map(roleLabel).join('、') : '未指定用途'
+}
 
 watch(
   () => props.initialModelTab,
@@ -804,6 +1138,9 @@ watch(activeModelTab, tab => {
   emit('model-tab-change', tab)
   if (tab !== 'credentials') credentialApiKey.value = ''
   if (tab !== 'providers') endpointTransmissionConfirmed.value = false
+})
+watch(lastConfigurationError, value => {
+  if (!value) lastConfigurationTechnicalError.value = ''
 })
 watch(pricePricingSource, source => {
   priceVerified.value = false
@@ -853,17 +1190,42 @@ function configurationErrorMessage(action: string, error: unknown): string {
       ? detail
       : candidate.message
   const status = candidate.response?.status
-  return [
-    action,
+  const guidance = errorCode ? ERROR_GUIDANCE[errorCode] : undefined
+  lastConfigurationTechnicalError.value = [
     status ? `HTTP ${status}` : 'NETWORK_ERROR',
     errorCode || 'REQUEST_FAILED',
     sanitizedMessage || '请求失败且后端未返回可展示摘要'
   ].join(' · ')
+  if (guidance) {
+    return `${action}：${guidance.summary} 解决办法：${guidance.solution}`
+  }
+  return `${action}：请求未完成。解决办法：检查当前步骤的必填项和服务状态后重试；如仍失败，请展开“高级信息”查看技术详情。`
 }
 
 function showConfigurationFailure(action: string, error: unknown) {
   lastConfigurationError.value = configurationErrorMessage(action, error)
   ElMessage.error(lastConfigurationError.value)
+}
+
+function goToNextConfigurationStep() {
+  activeModelTab.value = configurationNextAction.value.tab
+  if (configurationNextAction.value.tab === 'providers' && !providerEndpoints.value.length) {
+    openCreateProviderEndpoint()
+  }
+}
+
+function roleActionBlockedReason(role: 'NORMAL_TRADER' | 'TOP_RISK_REVIEWER'): string {
+  if (!selectedEndpoint.value) return '请先选择服务商。'
+  if (!compatibleCredentials.value.length) return '请先添加当前服务商的 API 密钥。'
+  const model = endpointModels.value.find(item => item.role_capabilities.includes(role))
+  if (!model) return `请先添加${roleLabel(role)}。`
+  const price = endpointPrices.value.find(item =>
+    item.endpoint_profile_id === selectedEndpoint.value?.endpoint_profile_id
+    && item.endpoint_profile_version === selectedEndpoint.value?.profile_version
+    && item.endpoint_model_id === model.endpoint_model_id
+  )
+  if (!price) return `请先配置${roleLabel(role)}的调用价格。`
+  return ''
 }
 
 function synchronizeEndpointSelections() {
@@ -1103,7 +1465,7 @@ function endpointStateType(state: ProviderEndpointProfile['state']): 'success' |
 
 async function createProviderEndpoint() {
   if (!endpointDisplayName.value.trim() || !endpointBaseUrl.value.trim()) {
-    ElMessage.error('请填写服务商名称和HTTPS Base URL')
+    ElMessage.error('请填写服务商名称和 HTTPS 接口地址')
     return
   }
   if (endpointEditorMode.value === 'new-version' && selectedEndpoint.value?.provider_type !== 'OPENAI_COMPATIBLE') {
@@ -1124,7 +1486,7 @@ async function createProviderEndpoint() {
         return
       }
     } catch {
-      ElMessage.error('请输入合法的HTTPS Base URL')
+      ElMessage.error('请输入合法的 HTTPS 接口地址')
       return
     }
   }
@@ -1154,13 +1516,13 @@ async function createProviderEndpoint() {
     clearEndpointEditor()
     ElMessage.success(
       editorMode === 'new-version'
-        ? 'Endpoint新版本已保存为DRAFT，请继续执行安全验证'
-        : '服务商草稿已保存，请继续执行安全验证'
+        ? `接口新版本${statusLabel(response.data.result)}，请继续执行地址验证`
+        : `服务商${statusLabel(response.data.result)}，请继续执行地址验证`
     )
     await load()
     selectedEndpointIdentity.value = identity
   } catch (error) {
-    showConfigurationFailure('保存Endpoint失败', error)
+    showConfigurationFailure('保存接口配置失败', error)
   } finally {
     providerSubmitting.value = false
   }
@@ -1177,8 +1539,8 @@ async function validateProviderEndpoint(row: EndpointRow) {
     return
   }
   await ElMessageBox.confirm(
-    'AlphaGuard将验证输入URL、DNS结果、实际连接IP和重定向。验证通过后，模型输入可能发送到该第三方服务。',
-    '确认第三方数据传输与Endpoint验证',
+    'AlphaGuard 将验证接口地址、DNS 结果、实际连接 IP 和重定向。验证通过后，模型输入可能发送到该第三方服务。',
+    '确认第三方数据传输与接口验证',
     { type: 'warning', confirmButtonText: '确认并验证' }
   )
   providerSubmitting.value = true
@@ -1190,7 +1552,7 @@ async function validateProviderEndpoint(row: EndpointRow) {
     })
     const validatedIdentity = `${response.data.endpoint_profile_id}@${response.data.profile_version}`
     selectedEndpointIdentity.value = validatedIdentity
-    ElMessage.success(response.data.url_validation_status === 'PASS' ? 'Endpoint URL安全验证通过，可配置API凭证' : 'Endpoint已安全拒绝')
+    ElMessage.success(response.data.url_validation_status === 'PASS' ? '接口地址验证通过，可以添加 API 密钥' : '接口地址已安全拒绝')
     await load()
     if (response.data.url_validation_status === 'PASS') {
       credentialProviderType.value = 'OPENAI_COMPATIBLE'
@@ -1199,7 +1561,7 @@ async function validateProviderEndpoint(row: EndpointRow) {
       activeModelTab.value = 'credentials'
     }
   } catch (error) {
-    showConfigurationFailure('验证Endpoint失败', error)
+    showConfigurationFailure('验证接口地址失败', error)
   } finally {
     endpointTransmissionConfirmed.value = false
     providerSubmitting.value = false
@@ -1207,13 +1569,13 @@ async function validateProviderEndpoint(row: EndpointRow) {
 }
 async function createEndpointModelDefinition() {
   if (!selectedEndpoint.value || !modelRemoteName.value.trim() || !modelRoles.value.length) {
-    ElMessage.error('请选择已验证Endpoint，并填写模型名称和角色能力')
+    ElMessage.error('请选择地址验证通过的服务商，并填写模型名称和用途')
     return
   }
   modelSubmitting.value = true
   try {
     lastConfigurationError.value = ''
-    await alphaguardModelsApi.createEndpointModel(selectedEndpoint.value.endpoint_profile_id, {
+    const response = await alphaguardModelsApi.createEndpointModel(selectedEndpoint.value.endpoint_profile_id, {
       endpoint_profile_version: selectedEndpoint.value.profile_version,
       remote_model_name: modelRemoteName.value.trim(),
       display_name: modelDisplayName.value.trim() || modelRemoteName.value.trim(),
@@ -1226,7 +1588,7 @@ async function createEndpointModelDefinition() {
     modelRemoteName.value = ''
     modelDisplayName.value = ''
     modelRoles.value = []
-    ElMessage.success('Endpoint模型定义已create-only登记')
+    ElMessage.success(`模型${statusLabel(response.data.result)}`)
     await Promise.all([
       loadEndpointModels(),
       loadSelectedEndpointConfiguration()
@@ -1239,7 +1601,7 @@ async function createEndpointModelDefinition() {
 }
 async function discoverEndpointModelCatalog() {
   if (!selectedEndpoint.value) {
-    ElMessage.error('请选择已验证Endpoint')
+    ElMessage.error('请选择地址验证通过的服务商')
     return
   }
   modelSubmitting.value = true
@@ -1254,7 +1616,7 @@ async function discoverEndpointModelCatalog() {
       }
     )
     endpointModels.value = response.data.items
-    ElMessage.success(response.data.items.length ? '模型目录快照已保存' : 'Provider未返回模型，请手工登记')
+    ElMessage.success(response.data.items.length ? '模型列表已读取并保存' : '服务商没有返回模型，请使用“添加模型”手工登记')
     await loadSelectedEndpointConfiguration()
   } catch (error) {
     showConfigurationFailure('探测模型目录失败', error)
@@ -1270,7 +1632,7 @@ async function createEndpointPriceVersion() {
   priceSubmitting.value = true
   try {
     lastConfigurationError.value = ''
-    await alphaguardModelsApi.createPrice({
+    const response = await alphaguardModelsApi.createPrice({
       endpoint_profile_id: selectedEndpoint.value.endpoint_profile_id,
       endpoint_profile_version: selectedEndpoint.value.profile_version,
       endpoint_model_id: selectedPriceModel.value.endpoint_model_id,
@@ -1288,7 +1650,7 @@ async function createEndpointPriceVersion() {
     priceCachedInput.value = ''
     priceOutput.value = ''
     priceVerified.value = false
-    ElMessage.success(pricePricingSource.value === 'SELF_HOSTED' ? '自建服务零价格已create-only登记' : 'Decimal价格版本已create-only登记')
+    ElMessage.success(pricePricingSource.value === 'SELF_HOSTED' ? `自建服务价格0${statusLabel(response.data.result)}` : `调用价格${statusLabel(response.data.result)}`)
     const prices = await alphaguardModelsApi.prices()
     endpointPrices.value = prices.data.items
     await loadSelectedEndpointConfiguration()
@@ -1300,7 +1662,7 @@ async function createEndpointPriceVersion() {
 }
 async function assignCompatibleProfile() {
   if (!selectedEndpoint.value || !selectedAssignmentModel.value || !selectedAssignmentPrice.value || !assignmentCredentialId.value) {
-    ElMessage.error('Endpoint、模型、价格和凭证必须全部精确选择')
+    ElMessage.error('服务商、模型、调用价格和 API 密钥必须全部精确选择')
     return
   }
   assignmentSubmitting.value = true
@@ -1320,13 +1682,37 @@ async function assignCompatibleProfile() {
       prompt_profile_id: assignmentRole.value === 'NORMAL_TRADER' ? 'normal_trade_plan_prompt' : 'top_risk_review_prompt',
       explicit_same_model_confirmation: assignmentSameModelConfirmed.value
     })
-    ElMessage.success(`${assignmentRole.value} Profile已显式绑定`)
+    ElMessage.success(`${roleLabel(assignmentRole.value)}角色已创建并绑定`)
     await load()
   } catch (error) {
-    showConfigurationFailure('创建Profile与Assignment失败', error)
+    showConfigurationFailure('创建模型角色与角色绑定失败', error)
   } finally {
     assignmentSubmitting.value = false
   }
+}
+async function createRoleAssignment(role: 'NORMAL_TRADER' | 'TOP_RISK_REVIEWER') {
+  const blockedReason = roleActionBlockedReason(role)
+  if (blockedReason) {
+    ElMessage.warning(blockedReason)
+    return
+  }
+  const model = endpointModels.value.find(item => item.role_capabilities.includes(role))
+  const price = endpointPrices.value.find(item =>
+    item.endpoint_profile_id === selectedEndpoint.value?.endpoint_profile_id
+    && item.endpoint_profile_version === selectedEndpoint.value?.profile_version
+    && item.endpoint_model_id === model?.endpoint_model_id
+  )
+  const credential = compatibleCredentials.value[0]
+  if (!model || !price || !credential) return
+  assignmentRole.value = role
+  assignmentProfileId.value = role === 'NORMAL_TRADER'
+    ? 'alphaguard_normal_compatible'
+    : 'alphaguard_top_compatible'
+  assignmentProfileVersion.value = selectedEndpoint.value?.profile_version || 'v1'
+  assignmentModelIdentity.value = `${model.endpoint_model_id}@${model.model_version}`
+  assignmentPriceIdentity.value = `${price.price_version_id}@${price.price_version}`
+  assignmentCredentialId.value = credential.credential_id
+  await assignCompatibleProfile()
 }
 function handleAssignmentRoleChange() {
   assignmentProfileId.value = assignmentRole.value === 'NORMAL_TRADER'
@@ -1336,11 +1722,11 @@ function handleAssignmentRoleChange() {
 }
 async function saveCredential(replace: boolean) {
   if (credentialProviderType.value === 'OPENAI_COMPATIBLE' && !selectedCredentialEndpoint.value) {
-    ElMessage.error('请先验证服务商URL，再配置兼容服务凭证')
+    ElMessage.error('请先验证服务商接口地址，再添加 API 密钥')
     return
   }
   if (!credentialApiKey.value) {
-    ElMessage.error('请输入API Key')
+    ElMessage.error('请输入 API 密钥')
     return
   }
   const resolvedCredentialName = credentialProviderType.value === 'OPENAI_COMPATIBLE'
@@ -1372,15 +1758,19 @@ async function saveCredential(replace: boolean) {
         })
     lastCredentialResult.value = response.data
     if (!response.data.stored) {
-      lastConfigurationError.value = [
-        '凭证验证未通过，未保存',
-        response.data.last_error_code || 'VALIDATION_FAILED',
+      const errorCode = response.data.last_error_code || 'VALIDATION_FAILED'
+      const guidance = ERROR_GUIDANCE[errorCode]
+      lastConfigurationTechnicalError.value = [
+        errorCode,
         response.data.sanitized_message || '后端已安全拒绝本次提交'
       ].join(' · ')
+      lastConfigurationError.value = guidance
+        ? `API 密钥未保存：${guidance.summary} 解决办法：${guidance.solution}`
+        : 'API 密钥未保存：验证没有通过。解决办法：检查密钥和当前服务商是否匹配后重新提交。'
       ElMessage.error(lastConfigurationError.value)
     } else {
       ElMessage.success(
-        replace ? '新凭证已验证并安全替换' : '凭证已写入安全Secret Store'
+        replace ? '新 API 密钥已验证并安全替换' : 'API 密钥已写入安全存储'
       )
     }
     await load()
@@ -1404,15 +1794,20 @@ function credentialFromRow(
     provider: row.provider
   }
 }
-function credentialEndpointLabel(row: Record<string, unknown>): string {
-  if (typeof row.endpoint_profile_id !== 'string') return '系统固定'
+function credentialProviderLabel(row: Record<string, unknown>): string {
+  if (typeof row.endpoint_profile_id !== 'string') return 'OpenAI 官方服务'
   const endpoint = providerEndpoints.value.find(item =>
     item.endpoint_profile_id === row.endpoint_profile_id
     && item.profile_version === row.endpoint_profile_version
   )
-  return endpoint
-    ? `${endpoint.display_name} @ ${endpoint.profile_version}`
-    : `第三方服务商 @ ${String(row.endpoint_profile_version || '未知版本')}`
+  return endpoint?.display_name || '第三方兼容服务'
+}
+function credentialVersionLabel(row: Record<string, unknown>): string {
+  if (typeof row.endpoint_profile_id !== 'string') return '系统版本'
+  return row.endpoint_profile_id === selectedEndpoint.value?.endpoint_profile_id
+    && row.endpoint_profile_version === selectedEndpoint.value?.profile_version
+    ? '当前版本'
+    : '旧版本'
 }
 async function verifyCredential(row: Record<string, unknown>) {
   const credential = credentialFromRow(row)
@@ -1453,11 +1848,11 @@ async function revokeCredential(row: Record<string, unknown>) {
 }
 async function checkCapability(row: Record<string, unknown>) {
   if (typeof row.profile_id !== 'string' || typeof row.profile_version !== 'string') {
-    ElMessage.error('模型Profile身份无效，能力检查已阻断')
+    ElMessage.error('模型角色配置无效，能力检测已阻断')
     return
   }
   await ElMessageBox.confirm(
-    '将使用已登记 Profile 执行最小、不可交易的真实网络能力检查，并受预算约束。不会创建订单。',
+    '将使用已登记的模型角色执行最小、不可交易的真实网络能力检测，并受调用限制约束。不会创建订单。',
     '确认模型能力检查',
     { type: 'warning', confirmButtonText: '执行检查' }
   )
@@ -1469,6 +1864,22 @@ async function checkCapability(row: Record<string, unknown>) {
   })
   ElMessage.success('能力检查已完成')
   await load()
+}
+async function startCapabilityCheck() {
+  if (capabilityActionBlockedReason.value) {
+    ElMessage.warning(capabilityActionBlockedReason.value)
+    return
+  }
+  const target = (modelStatus.value?.profiles || []).find(item =>
+    item.endpoint_profile_id === selectedEndpoint.value?.endpoint_profile_id
+    && item.endpoint_profile_version === selectedEndpoint.value?.profile_version
+    && item.capability !== 'READY'
+  )
+  if (!target) {
+    ElMessage.success('两个模型的能力检测均已通过')
+    return
+  }
+  await checkCapability(target as unknown as Record<string, unknown>)
 }
 async function runJob(name: string) {
   await alphaguardOperationsApi.runJob(name)
@@ -1507,6 +1918,10 @@ onMounted(load)
 .endpoint-editor__header { margin-bottom: 14px; }
 .admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--el-border-color-light); }
 .model-tabs, .budget-summary, .model-secret-notice, .capability-result { margin-top: 16px; }
+.configuration-guide { display: grid; gap: 14px; margin-top: 16px; }
+.next-action-card, .capability-primary-action { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; border: 1px solid var(--el-color-primary-light-7); border-radius: 8px; background: var(--el-color-primary-light-9); }
+.next-action-card > div, .capability-primary-action > div { display: grid; gap: 6px; }
+.next-action-card span, .capability-primary-action span { color: var(--el-text-color-secondary); }
 .configuration-feedback, .configuration-completeness { margin-top: 14px; }
 .configuration-completeness { padding: 14px; border: 1px solid var(--el-border-color-light); border-radius: 6px; background: var(--el-fill-color-lighter); }
 .configuration-completeness__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -1515,6 +1930,11 @@ onMounted(load)
 .configuration-completeness__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
 .configuration-component { display: grid; gap: 6px; align-content: start; padding: 10px; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; background: var(--el-bg-color); }
 .configuration-component small { color: var(--el-text-color-secondary); overflow-wrap: anywhere; }
+.advanced-information { margin-top: 14px; }
+.action-hint { margin-top: 8px; color: var(--el-color-warning); font-size: 13px; line-height: 1.5; }
+.primary-role-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.primary-role-actions > div { display: grid; gap: 7px; }
+.primary-role-actions small { color: var(--el-text-color-secondary); }
 .credential-form { margin-top: 18px; padding: 16px; border: 1px solid var(--el-border-color-light); border-radius: 6px; }
 .credential-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
 .credential-actions { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -1525,6 +1945,7 @@ pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--el-fil
 :deep(.model-tabs--embedded > .el-tabs__header) { display: none; }
 :deep(.operations-tabs--embedded > .el-tabs__content) { padding: 0; }
 @media (max-width: 700px) {
-  .safety-strip, .credential-grid { grid-template-columns: 1fr; }
+  .safety-strip, .credential-grid, .primary-role-actions { grid-template-columns: 1fr; }
+  .next-action-card, .capability-primary-action { align-items: stretch; flex-direction: column; }
 }
 </style>

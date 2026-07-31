@@ -440,13 +440,13 @@ def test_credential_host_loads_only_model_apis_and_opens_models_tab():
     assert "const activeOperationTab = ref(modelsOnly.value ? 'models' : 'services')" in operations
     assert 'v-model="activeOperationTab"' in operations
     assert 'v-model="activeModelTab"' in operations
-    assert '<el-tab-pane label="Models & API" name="models">' in operations
+    assert '<el-tab-pane label="模型与 API" name="models">' in operations
     assert '<section v-if="!modelsOnly" class="safety-strip">' in operations
     assert "'operations-tabs--embedded': props.embedded" in operations
 
     assert "import AlphaGuardOperations from '@/views/AlphaGuard/Operations.vue'" in config_management
-    assert '<span>1. 服务商</span>' in config_management
-    assert '<span>2. API凭证</span>' in config_management
+    assert '<span>1. 服务商配置</span>' in config_management
+    assert '<span>2. API 密钥</span>' in config_management
     assert '<AlphaGuardOperations' in config_management
     assert "models-only" in config_management
     assert "embedded" in config_management
@@ -464,27 +464,84 @@ def test_provider_setup_uses_explicit_guided_create_validate_credential_flow():
     ).read_text(encoding="utf-8")
 
     assert "endpointEditorMode !== 'closed'" in operations
-    assert '>新增服务商</el-button>' in operations
+    assert '>添加服务商</el-button>' in operations
     assert "'继续配置'" in operations
     assert ">创建新版本</el-button>" in operations
     assert "create_new_version: true" in operations
     assert "该服务地址已经登记，请继续配置已有服务商或显式创建新版本" in operations
     assert "validatedCompatibleEndpoints" in operations
-    assert 'v-model="credentialEndpointIdentity"' in operations
+    assert ":model-value=\"selectedCredentialEndpoint?.display_name" in operations
+    assert "接口版本：当前版本（由系统自动选择）" in operations
+    assert "synchronizeEndpointSelections" in operations
     assert "credentialSubmissionBlocked" in operations
     assert "compatibleCredentialDefaultName" in operations
     assert "`${endpoint.endpoint_profile_id}-${endpoint.profile_version}-primary`" in operations
     assert "configurationErrorMessage" in operations
-    assert "CREDENTIAL_BINDING_EXISTS" not in operations
+    assert "CREDENTIAL_BINDING_EXISTS" in operations
+    assert "该密钥绑定到了旧接口版本" in operations
+    assert "系统会自动绑定当前服务商" in operations
     assert "配置完整性" in operations
     assert "endpointConfigurationStatus" in operations
     assert "lastConfigurationError" in operations
     assert "if (!response.data.stored)" in operations
     assert "ElMessage.error(lastConfigurationError.value)" in operations
-    assert "暂无已验证的第三方服务商，请先完成服务商URL验证" in operations
+    assert "当前没有地址验证通过的服务商" in operations
+    assert "先到“服务商配置”添加并验证接口地址" in operations
     assert "if (response.data.url_validation_status === 'PASS') {" in operations
     assert "credentialProviderType.value = 'OPENAI_COMPATIBLE'" in operations
     assert "credentialEndpointIdentity.value = validatedIdentity" in operations
+
+
+def test_model_configuration_experience_is_chinese_and_guided():
+    operations = (
+        ROOT / "frontend/src/views/AlphaGuard/Operations.vue"
+    ).read_text(encoding="utf-8")
+    config_management = (
+        ROOT / "frontend/src/views/Settings/ConfigManagement.vue"
+    ).read_text(encoding="utf-8")
+
+    for label in (
+        "服务商配置",
+        "模型管理",
+        "API 密钥",
+        "模型角色",
+        "能力检测",
+        "调用限制",
+    ):
+        assert label in operations
+        assert label in config_management
+
+    for step in (
+        "① 添加服务商",
+        "② 添加 API 密钥",
+        "③ 登记普通模型和终审模型",
+        "④ 创建模型角色",
+        "⑤ 执行能力检测",
+        "⑥ 完成配置",
+    ):
+        assert step in operations
+
+    for action in (
+        "添加 API 密钥",
+        "添加模型",
+        "创建普通模型角色",
+        "创建终审模型角色",
+        "开始能力检测",
+    ):
+        assert action in operations
+
+    assert "当前缺少：" in operations
+    assert "下一步：点击" in operations
+    assert "接口版本：当前版本（由系统自动选择）" in operations
+    assert "高级信息（技术状态与版本）" in operations
+    assert "URL_VALIDATED: '地址验证通过'" in operations
+    assert "UNVERIFIED: '未验证'" in operations
+    assert "MISSING: '未配置'" in operations
+    assert "DEGRADED: '异常'" in operations
+    assert "BLOCKED: '已阻止'" in operations
+    assert "ACTIVE: '已启用'" in operations
+    assert "REUSED: '已复用'" in operations
+    assert "CREATED: '已创建'" in operations
 
 
 def test_configuration_api_is_refresh_driven_and_returns_no_secret_fields():

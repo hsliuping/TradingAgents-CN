@@ -1212,8 +1212,8 @@ def test_registry_indexes_and_frontend_browser_isolation_contract():
         encoding="utf-8"
     )
     assert "服务商" in operations
-    assert "模型目录" in operations
-    assert "价格" in operations
+    assert "模型管理" in operations
+    assert "调用价格" in operations
     assert "我确认将研究数据发送到该第三方服务" in operations
     assert 'type="password"' in operations
     assert "credentialApiKey.value = ''" in operations

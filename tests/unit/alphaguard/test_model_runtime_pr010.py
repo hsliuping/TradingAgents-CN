@@ -731,7 +731,7 @@ def test_model_indexes_frontend_modes_and_secret_boundary():
             ROOT / "tradingagents/alphaguard/model_runtime_schemas.py"
         ).read_text(encoding="utf-8")
     assert "TradingAgents 研究" in decisions
-    assert "Models & API" in operations
+    assert "模型与 API" in operations
     assert "credential_ref" not in router
     assert "api_key: SecretStr" in router
 
