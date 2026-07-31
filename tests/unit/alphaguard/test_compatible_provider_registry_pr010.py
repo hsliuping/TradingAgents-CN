@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -133,6 +134,45 @@ async def test_dns_resolving_to_private_address_is_rejected_before_network():
 
 
 @pytest.mark.asyncio
+async def test_proxy_fake_ip_uses_pinned_public_dns_fallback():
+    fallback_calls = []
+    validator = EndpointSafetyValidator(
+        resolver=lambda _host, _port: ["198.18.1.73"],
+        fake_ip_resolver=lambda host: (
+            fallback_calls.append(host) or ["104.21.60.35", "172.67.191.33"]
+        ),
+    )
+    endpoint = parse_registered_endpoint("https://provider.example/v1")
+    resolved = await validator.resolve(endpoint)
+    assert resolved == ("104.21.60.35", "172.67.191.33")
+    assert fallback_calls == ["provider.example"]
+
+
+@pytest.mark.asyncio
+async def test_proxy_fake_ip_fallback_still_rejects_non_public_answers():
+    validator = EndpointSafetyValidator(
+        resolver=lambda _host, _port: ["198.18.1.73"],
+        fake_ip_resolver=lambda _host: ["10.0.0.7"],
+    )
+    endpoint = parse_registered_endpoint("https://provider.example/v1")
+    with pytest.raises(EndpointSecurityError) as error:
+        await validator.resolve(endpoint)
+    assert error.value.code == "SSRF_UNSAFE_ADDRESS"
+
+
+@pytest.mark.asyncio
+async def test_proxy_fake_ip_mixed_with_other_dns_answer_is_rejected():
+    validator = EndpointSafetyValidator(
+        resolver=lambda _host, _port: ["198.18.1.73", "104.21.60.35"],
+        fake_ip_resolver=lambda _host: ["104.21.60.35"],
+    )
+    endpoint = parse_registered_endpoint("https://provider.example/v1")
+    with pytest.raises(EndpointSecurityError) as error:
+        await validator.resolve(endpoint)
+    assert error.value.code == "SSRF_UNSAFE_ADDRESS"
+
+
+@pytest.mark.asyncio
 async def test_cross_origin_redirect_is_rejected(monkeypatch):
     class Response:
         status_code = 302
@@ -213,6 +253,50 @@ async def test_endpoint_versions_are_create_only_reused_and_conflicting():
     assert second.config_hash == first.config_hash
     with pytest.raises(ProviderRegistryConflict):
         await registry.register_endpoint(**{**kwargs, "display_name": "Changed"})
+
+
+@pytest.mark.asyncio
+async def test_endpoint_configuration_change_requires_explicit_new_version():
+    db = FakeDB()
+    registry = CompatibleProviderRegistryService(db)
+    kwargs = dict(
+        display_name="Compatible Test",
+        base_url="https://models.example.com/v1",
+        api_mode="OPENAI_CHAT_COMPLETIONS",
+        auth_scheme="BEARER",
+        models_endpoint_enabled=True,
+        structured_output_mode="JSON_ONLY",
+        notes=None,
+        created_by="admin",
+    )
+    first, _ = await registry.register_endpoint(**kwargs)
+    second, created = await registry.register_endpoint(
+        **{
+            **kwargs,
+            "display_name": "Compatible Test v2",
+            "auth_scheme": "X_API_KEY",
+            "endpoint_profile_id": first.endpoint_profile_id,
+            "create_new_version": True,
+        }
+    )
+
+    assert created is True
+    assert second.endpoint_profile_id == first.endpoint_profile_id
+    assert second.profile_version == "v2"
+    assert second.auth_scheme == "X_API_KEY"
+    assert (
+        await registry.endpoint(first.endpoint_profile_id, "v1")
+    ).auth_scheme == "BEARER"
+
+    with pytest.raises(ValueError, match="cannot change normalized origin"):
+        await registry.register_endpoint(
+            **{
+                **kwargs,
+                "base_url": "https://other.example.com/v1",
+                "endpoint_profile_id": first.endpoint_profile_id,
+                "create_new_version": True,
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -386,6 +470,86 @@ async def test_compatible_credential_is_exactly_bound_and_secret_free():
     )
     with pytest.raises(ProviderRegistryNotReady):
         registry._verify_credential_binding(later, document)
+
+
+@pytest.mark.asyncio
+async def test_compatible_credential_bootstrap_uses_bound_endpoint_and_stores_degraded(
+    monkeypatch,
+):
+    db, store, _registry, endpoint = await validated_registry()
+    service = ModelCredentialManagementService(db, secret_store=store)
+    requested_urls: list[str] = []
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"data": [{"id": "remote-normal"}, {"id": "remote-top"}]}
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, url):
+            requested_urls.append(url)
+            return Response()
+
+    monkeypatch.setattr(
+        "app.services.alphaguard.model_credential_management_service."
+        "build_pinned_client",
+        lambda **_kwargs: Client(),
+    )
+    result = await service.create(
+        credential_id="compatible-bootstrap",
+        provider="openai_compatible",
+        provider_type="OPENAI_COMPATIBLE",
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        endpoint_profile_version=endpoint.profile_version,
+        secret=TEST_SECRET,
+        base_url=None,
+        operator_user_id="admin",
+        trace_id="trace-bootstrap",
+    )
+
+    assert result.stored is True
+    assert result.status == "DEGRADED"
+    assert result.capability.authentication_status == "READY"
+    assert result.capability.provider_access_status == "READY"
+    assert result.capability.normal_model_status == "MODEL_NOT_FOUND"
+    assert result.capability.top_model_status == "MODEL_NOT_FOUND"
+    assert requested_urls == [f"{endpoint.base_url}/models"]
+    assert all("api.openai.com" not in url for url in requested_urls)
+    assert TEST_SECRET not in repr(db.collections)
+
+
+@pytest.mark.asyncio
+async def test_official_credential_rejects_compatible_endpoint_binding():
+    db = FakeDB()
+    store = FakeSecretStore()
+    service = ModelCredentialManagementService(db, secret_store=store)
+
+    with pytest.raises(
+        ValueError,
+        match="official credential cannot bind a compatible Endpoint Profile",
+    ):
+        await service.create(
+            credential_id="invalid-official-binding",
+            provider="openai",
+            provider_type="OPENAI_OFFICIAL",
+            endpoint_profile_id="compatible-endpoint",
+            endpoint_profile_version="v2",
+            secret=TEST_SECRET,
+            base_url=None,
+            operator_user_id="admin",
+            trace_id="trace-invalid-binding",
+        )
+
+    assert db["ag_model_credentials"].count() == 0
+    assert not store.values
 
 
 @pytest.mark.asyncio
@@ -706,6 +870,252 @@ def test_endpoint_api_is_admin_only_and_official_url_cannot_be_registered(monkey
     )
     assert official.status_code == 400
     assert db["ag_model_provider_endpoints"].count() == 0
+
+
+def test_staged_v4_configuration_persists_through_api_refresh_without_network(
+    monkeypatch,
+):
+    import app.routers.alphaguard_models as models_router
+
+    db = FakeDB()
+    store = FakeSecretStore()
+    registry_class = CompatibleProviderRegistryService
+
+    def registry_factory(_db, **_kwargs):
+        return registry_class(
+            db,
+            safety_validator=SafeValidator(),
+            secret_store=store,
+        )
+
+    credential_service = ModelCredentialManagementService(
+        db, secret_store=store
+    )
+
+    async def bootstrap_probe(**_kwargs):
+        return CredentialCapabilitySummary(
+            provider="openai_compatible",
+            authentication_status="READY",
+            provider_access_status="READY",
+            normal_model_status="MODEL_NOT_FOUND",
+            top_model_status="MODEL_NOT_FOUND",
+            structured_output_status="NOT_CHECKED",
+            price_status="NOT_VERIFIED",
+            budget_status="BLOCKED",
+            checked_at=datetime.now(timezone.utc),
+        )
+
+    credential_service._probe_compatible_secret = bootstrap_probe
+    monkeypatch.setattr(models_router, "get_mongo_db", lambda: db)
+    monkeypatch.setattr(
+        models_router, "CompatibleProviderRegistryService", registry_factory
+    )
+    monkeypatch.setattr(
+        models_router,
+        "ModelCredentialManagementService",
+        lambda _db: credential_service,
+    )
+    app = FastAPI()
+    app.include_router(models_router.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": "admin",
+        "is_admin": True,
+    }
+    client = TestClient(app)
+    endpoint_payload = {
+        "display_name": "Isolated Compatible",
+        "provider_type": "OPENAI_COMPATIBLE",
+        "base_url": "https://models.example.com/v1",
+        "api_mode": "OPENAI_CHAT_COMPLETIONS",
+        "auth_scheme": "BEARER",
+        "models_endpoint_enabled": True,
+        "structured_output_mode": "JSON_ONLY",
+    }
+
+    draft = client.post(
+        "/api/alphaguard/models/endpoints", json=endpoint_payload
+    )
+    assert draft.status_code == 200
+    endpoint_id = draft.json()["data"]["item"]["endpoint_profile_id"]
+    validated_v2 = client.post(
+        f"/api/alphaguard/models/endpoints/{endpoint_id}/validate",
+        json={"profile_version": "v1", "confirm_data_transmission": True},
+    )
+    assert validated_v2.status_code == 200
+    assert validated_v2.json()["data"]["profile_version"] == "v2"
+    v2_credential_id = f"{endpoint_id}-v2-primary"
+    v2_credential = client.post(
+        "/api/alphaguard/models/credentials",
+        json={
+            "provider": "openai_compatible",
+            "provider_type": "OPENAI_COMPATIBLE",
+            "endpoint_profile_id": endpoint_id,
+            "endpoint_profile_version": "v2",
+            "credential_name": v2_credential_id,
+            "api_key": TEST_SECRET,
+        },
+    )
+    assert v2_credential.status_code == 200
+    assert v2_credential.json()["data"]["stored"] is True
+
+    draft_v3 = client.post(
+        "/api/alphaguard/models/endpoints",
+        json={
+            **endpoint_payload,
+            "display_name": "Isolated Compatible v4",
+            "endpoint_profile_id": endpoint_id,
+            "create_new_version": True,
+        },
+    )
+    assert draft_v3.status_code == 200
+    assert draft_v3.json()["data"]["item"]["profile_version"] == "v3"
+    validated_v4 = client.post(
+        f"/api/alphaguard/models/endpoints/{endpoint_id}/validate",
+        json={"profile_version": "v3", "confirm_data_transmission": True},
+    )
+    assert validated_v4.status_code == 200
+    assert validated_v4.json()["data"]["profile_version"] == "v4"
+
+    secret_count = len(store.values)
+    collision = client.post(
+        "/api/alphaguard/models/credentials",
+        json={
+            "provider": "openai_compatible",
+            "provider_type": "OPENAI_COMPATIBLE",
+            "endpoint_profile_id": endpoint_id,
+            "endpoint_profile_version": "v4",
+            "credential_name": v2_credential_id,
+            "api_key": TEST_SECRET,
+        },
+    )
+    assert collision.status_code == 409
+    assert collision.json()["detail"]["error_code"] == (
+        "CREDENTIAL_BINDING_EXISTS"
+    )
+    assert db["ag_model_credentials"].count() == 1
+    assert len(store.values) == secret_count
+    assert TEST_SECRET not in collision.text
+
+    v4_credential_id = f"{endpoint_id}-v4-primary"
+    v4_credential = client.post(
+        "/api/alphaguard/models/credentials",
+        json={
+            "provider": "openai_compatible",
+            "provider_type": "OPENAI_COMPATIBLE",
+            "endpoint_profile_id": endpoint_id,
+            "endpoint_profile_version": "v4",
+            "credential_name": v4_credential_id,
+            "api_key": TEST_SECRET,
+        },
+    )
+    assert v4_credential.status_code == 200
+    assert v4_credential.json()["data"]["status"] == "DEGRADED"
+
+    model_results = {}
+    for role, remote_name in (
+        ("NORMAL_TRADER", "isolated-normal"),
+        ("TOP_RISK_REVIEWER", "isolated-top"),
+    ):
+        response = client.post(
+            f"/api/alphaguard/models/endpoints/{endpoint_id}/models",
+            json={
+                "endpoint_profile_version": "v4",
+                "remote_model_name": remote_name,
+                "display_name": remote_name,
+                "role_capabilities": [role],
+                "supports_json_schema": False,
+                "supports_tool_call": False,
+                "max_context_tokens": 64000,
+                "max_output_tokens": 4000,
+            },
+        )
+        assert response.status_code == 200
+        item = response.json()["data"]["item"]
+        assert item["status"] == "UNVERIFIED"
+        model_results[role] = item
+
+    price_results = {}
+    for role, item in model_results.items():
+        response = client.post(
+            "/api/alphaguard/models/prices",
+            json={
+                "endpoint_profile_id": endpoint_id,
+                "endpoint_profile_version": "v4",
+                "endpoint_model_id": item["endpoint_model_id"],
+                "endpoint_model_version": item["model_version"],
+                "input_price_per_million": "1.25",
+                "output_price_per_million": "5.00",
+                "currency": "USD",
+                "effective_at": "2026-07-30T00:00:00Z",
+                "source_description": "isolated verified pricing",
+                "verified": True,
+            },
+        )
+        assert response.status_code == 200
+        price_results[role] = response.json()["data"]["item"]
+
+    profile_results = {}
+    for role in ("NORMAL_TRADER", "TOP_RISK_REVIEWER"):
+        response = client.post(
+            "/api/alphaguard/models/profiles/compatible",
+            json={
+                "role": role,
+                "profile_id": f"isolated-{role.lower()}",
+                "profile_version": "v4",
+                "endpoint_profile_id": endpoint_id,
+                "endpoint_profile_version": "v4",
+                "endpoint_model_id": model_results[role]["endpoint_model_id"],
+                "endpoint_model_version": model_results[role]["model_version"],
+                "credential_id": v4_credential_id,
+                "price_version_id": price_results[role]["price_version_id"],
+                "price_version": price_results[role]["price_version"],
+                "prompt_profile_id": (
+                    "normal_trade_plan_prompt"
+                    if role == "NORMAL_TRADER"
+                    else "top_risk_review_prompt"
+                ),
+                "explicit_same_model_confirmation": False,
+            },
+        )
+        assert response.status_code == 200
+        profile = response.json()["data"]["profile"]
+        assert profile["capability_status"] == "UNVERIFIED"
+        assert profile["production_allowed"] is False
+        profile_results[role] = profile
+
+    before_capability = client.get(
+        f"/api/alphaguard/models/endpoints/{endpoint_id}/configuration-status",
+        params={"profile_version": "v4"},
+    )
+    assert before_capability.status_code == 200
+    assert before_capability.json()["data"]["stage"] == (
+        "PROFILES_CONFIGURED"
+    )
+    assert before_capability.json()["data"]["production_allowed"] is False
+
+    for profile in profile_results.values():
+        asyncio.run(
+            db["ag_model_capability_checks"].insert_one(
+                {
+                    "profile_id": profile["profile_id"],
+                    "profile_version": profile["profile_version"],
+                    "status": "READY",
+                    "checked_at": datetime.now(timezone.utc),
+                }
+            )
+        )
+    refreshed = client.get(
+        f"/api/alphaguard/models/endpoints/{endpoint_id}/configuration-status",
+        params={"profile_version": "v4"},
+    )
+    assert refreshed.status_code == 200
+    assert refreshed.json()["data"]["stage"] == "READY"
+    assert refreshed.json()["data"]["production_allowed"] is True
+    assert not refreshed.json()["data"]["blocking_items"]
+    assert db["ag_model_endpoint_prices"].count() == 2
+    assert db["ag_model_profiles"].count() == 2
+    assert db["ag_model_profile_assignments"].count() == 2
+    assert TEST_SECRET not in repr(db.collections)
 
 
 def test_registry_indexes_and_frontend_browser_isolation_contract():

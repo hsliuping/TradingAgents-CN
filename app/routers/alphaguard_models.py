@@ -95,6 +95,7 @@ class EndpointCreateBody(_StrictBody):
     notes: str | None = Field(default=None, max_length=500)
     endpoint_profile_id: str | None = Field(default=None, max_length=100)
     profile_version: str = Field(default="v1", min_length=1, max_length=50)
+    create_new_version: bool = False
 
 
 class EndpointValidateBody(_StrictBody):
@@ -278,12 +279,36 @@ async def model_prompts(
 
 def _provider_http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, ProviderRegistryConflict):
-        return HTTPException(status_code=409, detail=str(exc))
+        return HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "INTEGRITY_CONFLICT",
+                "sanitized_message": str(exc),
+            },
+        )
     if isinstance(exc, ProviderRegistryNotReady):
-        return HTTPException(status_code=409, detail=str(exc))
+        return HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "CONFIGURATION_NOT_READY",
+                "sanitized_message": str(exc),
+            },
+        )
     if isinstance(exc, EndpointSecurityError):
-        return HTTPException(status_code=400, detail=f"{exc.code}: {exc}")
-    return HTTPException(status_code=400, detail=str(exc))
+        return HTTPException(
+            status_code=400,
+            detail={
+                "error_code": exc.code,
+                "sanitized_message": str(exc),
+            },
+        )
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error_code": "INVALID_CONFIGURATION",
+            "sanitized_message": str(exc),
+        },
+    )
 
 
 @router.get("/endpoints", response_model=dict)
@@ -343,6 +368,7 @@ async def create_model_endpoint(
             created_by=_actor(current_user),
             endpoint_profile_id=body.endpoint_profile_id,
             profile_version=body.profile_version,
+            create_new_version=body.create_new_version,
         )
         return ok(
             {
@@ -350,7 +376,11 @@ async def create_model_endpoint(
                 "result": "CREATED" if created else "REUSED",
             }
         )
-    except (ValueError, ProviderRegistryConflict) as exc:
+    except (
+        ValueError,
+        ProviderRegistryConflict,
+        ProviderRegistryNotReady,
+    ) as exc:
         raise _provider_http_error(exc) from exc
 
 
@@ -383,6 +413,41 @@ async def model_endpoint(
             )
         }
     return ok(item)
+
+
+@router.get(
+    "/endpoints/{endpoint_profile_id}/configuration-status",
+    response_model=dict,
+)
+async def endpoint_configuration_status(
+    endpoint_profile_id: str,
+    profile_version: str = Query(..., min_length=1, max_length=50),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        status = await CompatibleProviderRegistryService(
+            get_mongo_db()
+        ).configuration_status(endpoint_profile_id, profile_version)
+    except ProviderRegistryNotReady as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not current_user.get("is_admin", False):
+        status = {
+            "endpoint_profile_id": status["endpoint_profile_id"],
+            "endpoint_profile_version": status["endpoint_profile_version"],
+            "stage": status["stage"],
+            "production_allowed": status["production_allowed"],
+            "components": [
+                {
+                    "key": item["key"],
+                    "label": item["label"],
+                    "complete": item["complete"],
+                    "status": item["status"],
+                }
+                for item in status["components"]
+            ],
+            "blocking_items": status["blocking_items"],
+        }
+    return ok(status)
 
 
 @router.post("/endpoints/{endpoint_profile_id}/validate", response_model=dict)
@@ -494,6 +559,7 @@ async def create_endpoint_model(
             created_by=_actor(current_user),
             endpoint_model_id=body.endpoint_model_id,
             model_version=body.model_version,
+            status="UNVERIFIED",
         )
         return ok(
             {
@@ -654,7 +720,10 @@ async def create_model_credential(
     except Exception as exc:
         raise HTTPException(
             status_code=400,
-            detail="凭证请求格式无效；未保存任何数据",
+            detail={
+                "error_code": "INVALID_CREDENTIAL_REQUEST",
+                "sanitized_message": "凭证请求格式无效；未保存任何数据",
+            },
         ) from exc
     service = ModelCredentialManagementService(get_mongo_db())
     trace_id = _trace_id(request)
@@ -682,13 +751,28 @@ async def create_model_credential(
         )
         return ok(result.model_dump(mode="json"))
     except CredentialLifecycleConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "CREDENTIAL_BINDING_EXISTS",
+                "sanitized_message": str(exc),
+            },
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "INVALID_CREDENTIAL_BINDING",
+                "sanitized_message": str(exc),
+            },
+        ) from exc
     except SecretStoreError as exc:
         raise HTTPException(
             status_code=503,
-            detail="安全Secret Store不可用；凭证未保存",
+            detail={
+                "error_code": "SECRET_STORE_UNAVAILABLE",
+                "sanitized_message": "安全Secret Store不可用；凭证未保存",
+            },
         ) from exc
     finally:
         secret = ""
@@ -705,7 +789,10 @@ async def replace_model_credential(
     except Exception as exc:
         raise HTTPException(
             status_code=400,
-            detail="凭证请求格式无效；原凭证保持不变",
+            detail={
+                "error_code": "INVALID_CREDENTIAL_REQUEST",
+                "sanitized_message": "凭证请求格式无效；原凭证保持不变",
+            },
         ) from exc
     service = ModelCredentialManagementService(get_mongo_db())
     trace_id = _trace_id(request)
@@ -729,13 +816,28 @@ async def replace_model_credential(
         )
         return ok(result.model_dump(mode="json"))
     except CredentialLifecycleConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "CREDENTIAL_NOT_REPLACEABLE",
+                "sanitized_message": str(exc),
+            },
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "INVALID_CREDENTIAL_BINDING",
+                "sanitized_message": str(exc),
+            },
+        ) from exc
     except SecretStoreError as exc:
         raise HTTPException(
             status_code=503,
-            detail="安全Secret Store操作失败；原凭证保持不变",
+            detail={
+                "error_code": "SECRET_STORE_UNAVAILABLE",
+                "sanitized_message": "安全Secret Store操作失败；原凭证保持不变",
+            },
         ) from exc
     finally:
         secret = ""

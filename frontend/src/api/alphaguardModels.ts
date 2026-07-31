@@ -103,7 +103,41 @@ export interface ProviderEndpointProfile {
   url_validation_status: 'NOT_CHECKED' | 'PASS' | 'REJECTED'
   data_transmission_confirmed?: boolean
   last_error_code?: string | null
+  notes?: string | null
+  configuration_stage?: ProviderConfigurationStage
   system_managed?: boolean
+}
+
+export type ProviderConfigurationStage =
+  | 'DRAFT'
+  | 'URL_VALIDATED'
+  | 'CREDENTIAL_CONFIGURED'
+  | 'AUTHENTICATED'
+  | 'MODELS_REGISTERED'
+  | 'PRICES_CONFIGURED'
+  | 'PROFILES_CONFIGURED'
+  | 'CAPABILITY_CHECKED'
+  | 'READY'
+
+export interface ProviderConfigurationComponent {
+  key: string
+  label: string
+  complete: boolean
+  status: string
+  reason_code?: string | null
+}
+
+export interface ProviderConfigurationStatus {
+  endpoint_profile_id: string
+  endpoint_profile_version: string
+  persisted_endpoint_state?: string
+  stage: ProviderConfigurationStage
+  production_allowed: boolean
+  components: ProviderConfigurationComponent[]
+  blocking_items: string[]
+  budget_policy_id?: string
+  budget_policy_version?: string
+  budget_currency?: string
 }
 
 export interface EndpointModelDefinition {
@@ -203,7 +237,8 @@ export const alphaguardModelsApi = {
   }) {
     return ApiClient.post<ModelCredentialMutationResult>(
       '/api/alphaguard/models/credentials',
-      payload
+      payload,
+      { skipErrorHandler: true }
     )
   },
   replaceCredential(
@@ -212,18 +247,21 @@ export const alphaguardModelsApi = {
   ) {
     return ApiClient.put<ModelCredentialMutationResult>(
       `/api/alphaguard/models/credentials/${encodeURIComponent(credentialId)}`,
-      payload
+      payload,
+      { skipErrorHandler: true }
     )
   },
   verifyCredential(credentialId: string) {
     return ApiClient.post<ModelCredentialMutationResult>(
       `/api/alphaguard/models/credentials/${encodeURIComponent(credentialId)}/verify`,
-      {}
+      {},
+      { skipErrorHandler: true }
     )
   },
   revokeCredential(credentialId: string) {
     return ApiClient.delete<Record<string, unknown>>(
-      `/api/alphaguard/models/credentials/${encodeURIComponent(credentialId)}`
+      `/api/alphaguard/models/credentials/${encodeURIComponent(credentialId)}`,
+      { skipErrorHandler: true }
     )
   },
   prompts() {
@@ -245,9 +283,11 @@ export const alphaguardModelsApi = {
     models_endpoint_enabled: boolean
     structured_output_mode: 'NATIVE_JSON_SCHEMA' | 'TOOL_CALL' | 'JSON_ONLY' | 'UNKNOWN'
     notes?: string
+    endpoint_profile_id?: string
+    create_new_version?: boolean
   }) {
     return ApiClient.post<{ item: ProviderEndpointProfile; result: 'CREATED' | 'REUSED' }>(
-      '/api/alphaguard/models/endpoints', payload
+      '/api/alphaguard/models/endpoints', payload, { skipErrorHandler: true }
     )
   },
   validateEndpoint(endpointId: string, payload: {
@@ -256,7 +296,8 @@ export const alphaguardModelsApi = {
   }) {
     return ApiClient.post<ProviderEndpointProfile>(
       `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/validate`,
-      payload
+      payload,
+      { skipErrorHandler: true }
     )
   },
   disableEndpoint(endpointId: string, profileVersion: string) {
@@ -269,6 +310,12 @@ export const alphaguardModelsApi = {
     const query = profileVersion ? `?profile_version=${encodeURIComponent(profileVersion)}` : ''
     return ApiClient.get<{ items: EndpointModelDefinition[] }>(
       `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/models${query}`
+    )
+  },
+  endpointConfigurationStatus(endpointId: string, profileVersion: string) {
+    return ApiClient.get<ProviderConfigurationStatus>(
+      `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/configuration-status`,
+      { profile_version: profileVersion }
     )
   },
   createEndpointModel(endpointId: string, payload: {
@@ -284,7 +331,8 @@ export const alphaguardModelsApi = {
   }) {
     return ApiClient.post<{ item: EndpointModelDefinition; result: 'CREATED' | 'REUSED' }>(
       `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/models`,
-      payload
+      payload,
+      { skipErrorHandler: true }
     )
   },
   discoverEndpointModels(endpointId: string, payload: {
@@ -293,7 +341,8 @@ export const alphaguardModelsApi = {
   }) {
     return ApiClient.post<{ items: EndpointModelDefinition[] }>(
       `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/models/discover`,
-      payload
+      payload,
+      { skipErrorHandler: true }
     )
   },
   prices(endpointId?: string) {
@@ -316,7 +365,7 @@ export const alphaguardModelsApi = {
     verified: boolean
   }) {
     return ApiClient.post<{ item: EndpointPriceVersion; result: 'CREATED' | 'REUSED' }>(
-      '/api/alphaguard/models/prices', payload
+      '/api/alphaguard/models/prices', payload, { skipErrorHandler: true }
     )
   },
   assignCompatibleProfile(payload: {
@@ -334,7 +383,7 @@ export const alphaguardModelsApi = {
     explicit_same_model_confirmation: boolean
   }) {
     return ApiClient.post<Record<string, unknown>>(
-      '/api/alphaguard/models/profiles/compatible', payload
+      '/api/alphaguard/models/profiles/compatible', payload, { skipErrorHandler: true }
     )
   },
   runs(limit = 100) {

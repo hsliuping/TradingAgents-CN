@@ -184,13 +184,29 @@ npm run dev -- --host 127.0.0.1
 `AlphaGuard -> 运维中心 -> Models & API`。官方OpenAI的Base URL由系统固定；第三方服务
 必须按以下顺序配置：
 
-1. “服务商”添加OpenAI-Compatible服务名称、HTTPS Base URL、API模式和认证方式；
-2. 明确确认将研究数据发送给该第三方，并执行URL安全验证；
-3. “模型目录”执行受控`/models`发现，或在不支持发现时手工登记模型和能力；
-4. “价格”登记属于该Endpoint/模型版本的输入、缓存输入、输出价格、货币和来源；
-5. “API凭证”选择已验证Endpoint，只在password输入框粘贴新的Key并保存验证；
-6. “模型Profile”分别绑定Normal和Top的Endpoint、模型、凭证、Prompt与价格；
-7. “能力检查”查看两个真实角色schema、Token usage、费用和预算结果。
+1. “1. 服务商”选择已有Endpoint继续配置，或点击“新增服务商”保存DRAFT；
+2. 在所选DRAFT详情中明确确认第三方数据传输，并执行URL安全验证；
+3. 验证通过后进入“2. API凭证”，只在password输入框粘贴新Key并保存到Keychain；
+4. “3. 模型目录”执行受控`/models`发现，或在不支持发现时手工登记模型和能力；
+5. “4. 价格”登记属于该Endpoint/模型版本的输入、缓存输入、输出价格、货币和来源；
+6. “5. 模型Profile”分别绑定Normal和Top的Endpoint、模型、凭证、Prompt与价格；
+7. “6. 能力检查”验证认证、模型、结构化输出、价格和预算状态。
+
+已有Endpoint配置需要变化时必须点击“创建新版本”，旧版本不会被编辑或覆盖。未通过URL
+验证的DRAFT不会出现在API凭证下拉框中。若Endpoint提供需认证的`/models`，API凭证可先在
+认证通过后保存为`DEGRADED`，再用于模型目录发现；这不表示模型、价格、预算或生产能力已
+READY。能力检查页最终查看两个真实角色schema、Token usage、费用和预算结果。
+
+页面顶部的“配置完整性”面板始终从后端重新读取当前所选Endpoint版本，逐项显示Endpoint、
+Credential、Normal/Top模型、Normal/Top价格、Normal/Top Profile、Assignment、Capability
+和Budget。`URL_VALIDATED`是合法中间状态，不会被显示成READY；模型可以先显示
+`UNVERIFIED`，Profile也可以在能力检查前显示`UNVERIFIED`。只有全部门禁通过时才显示
+`READY`。
+
+兼容Credential名称默认包含Endpoint版本，例如
+`<endpoint-profile-id>-v4-primary`。切换Endpoint时页面会选择该精确版本已有的Credential，
+否则生成新的版本化名称；旧v2 Credential不会用于v4。保存失败会明确显示脱敏的HTTP状态、
+错误代码和摘要，并保持“未完成”，刷新后不会依赖浏览器本地状态伪装成功。
 
 不要把API Key发送到聊天、Codex提示词、终端命令、文档或截图；已经暴露过的Key不可恢复
 或复用。验证失败时Key不会写入Keychain；替换失败时旧凭证继续生效。撤销会从Keychain

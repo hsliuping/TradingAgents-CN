@@ -78,6 +78,8 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const notifStore = useNotificationStore()
 const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
+const isCredentialHost =
+  import.meta.env.VITE_ALPHAGUARD_CREDENTIAL_HOST === 'true'
 const { unreadCount, items } = storeToRefs(notifStore)
 const drawerVisible = ref(false)
 const filter = ref<'all' | 'unread'>('all')
@@ -102,7 +104,10 @@ function toLocal(iso: string) { try { return new Date(iso).toLocaleString() } ca
 function go(n: any) { if (n.link) window.open(n.link, '_blank') }
 
 onMounted(() => {
-  if (isDemo) return
+  // The Keychain-only host has no notification responsibility. More
+  // importantly, the legacy WebSocket puts its auth token in the query
+  // string, so never construct that URL in credential-management mode.
+  if (isDemo || isCredentialHost) return
   notifStore.refreshUnreadCount()
   // 🔥 建立 WebSocket 连接（优先），失败自动降级到 SSE
   notifStore.connect()

@@ -110,7 +110,10 @@ def main(*, execute: bool, host: str, port: int) -> int:
         build_host_app(),
         host=host,
         port=port,
-        access_log=True,
+        # WebSocket authentication uses a query parameter in the legacy UI.
+        # Keep the Keychain host access log disabled so that token never lands
+        # in terminal output or log files; application audit logs remain on.
+        access_log=False,
     )
     return 0
 

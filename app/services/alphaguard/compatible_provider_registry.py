@@ -158,6 +158,7 @@ class CompatibleProviderRegistryService:
         created_by: str,
         endpoint_profile_id: str | None = None,
         profile_version: str = "v1",
+        create_new_version: bool = False,
     ) -> tuple[ProviderEndpointProfile, bool]:
         parsed = parse_registered_endpoint(base_url)
         if parsed.normalized_origin == "https://api.openai.com":
@@ -167,9 +168,32 @@ class CompatibleProviderRegistryService:
         endpoint_id = endpoint_profile_id or (
             f"compatible-{canonical_hash({'origin': parsed.normalized_origin})[:20]}"
         )
+        resolved_profile_version = profile_version
+        if create_new_version:
+            if not endpoint_profile_id:
+                raise ValueError(
+                    "endpoint_profile_id is required for a new endpoint version"
+                )
+            rows = await self.repository.list(
+                "endpoints", {"endpoint_profile_id": endpoint_profile_id}
+            )
+            if not rows:
+                raise ProviderRegistryNotReady(
+                    "endpoint profile is not registered"
+                )
+            if any(
+                row.get("normalized_origin") != parsed.normalized_origin
+                for row in rows
+            ):
+                raise ValueError(
+                    "an endpoint version cannot change normalized origin"
+                )
+            resolved_profile_version = _next_version(
+                rows, "profile_version"
+            )
         payload = {
             "endpoint_profile_id": endpoint_id,
-            "profile_version": profile_version,
+            "profile_version": resolved_profile_version,
             "provider_type": "OPENAI_COMPATIBLE",
             "display_name": display_name,
             "base_url": parsed.base_url,
@@ -239,62 +263,303 @@ class CompatibleProviderRegistryService:
         projections = []
         for row in latest.values():
             projection = dict(row)
-            if (
-                row.get("url_validation_status") == "PASS"
-                and row.get("data_transmission_confirmed")
-                and row.get("enabled")
-            ):
-                binding = {
-                    "provider_type": "OPENAI_COMPATIBLE",
-                    "endpoint_profile_id": row["endpoint_profile_id"],
-                    "endpoint_profile_version": row["profile_version"],
-                    "normalized_origin": row["normalized_origin"],
-                    "auth_scheme": row["auth_scheme"],
-                    "status": {"$ne": "REVOKED"},
-                }
-                credential = await self.db["ag_model_credentials"].find_one(
-                    binding
-                )
-                assignments = await self.repository.list(
-                    "profile_assignments", {}, sort=("assigned_at", -1)
-                )
-                selected: dict[str, dict[str, Any]] = {}
-                for assignment in assignments:
-                    selected.setdefault(str(assignment["role"]), assignment)
-                profile_rows = []
-                for role in ("NORMAL_TRADER", "TOP_RISK_REVIEWER"):
-                    assignment = selected.get(role)
-                    if not assignment:
-                        continue
-                    profile = await self.db["ag_model_profiles"].find_one(
-                        {
-                            "profile_id": assignment["profile_id"],
-                            "profile_version": assignment["profile_version"],
-                            "endpoint_profile_id": row["endpoint_profile_id"],
-                            "endpoint_profile_version": row["profile_version"],
-                        }
-                    )
-                    if profile:
-                        profile_rows.append(profile)
-                checks_ready = len(profile_rows) == 2
-                for profile in profile_rows:
-                    check = await self.db["ag_model_capability_checks"].find_one(
-                        {
-                            "profile_id": profile["profile_id"],
-                            "profile_version": profile["profile_version"],
-                        },
-                        sort=[("checked_at", -1)],
-                    )
-                    checks_ready = checks_ready and bool(
-                        check and check.get("status") == "READY"
-                    )
-                if credential and checks_ready:
-                    projection["state"] = "READY"
-                    projection["production_allowed"] = True
-                elif credential or profile_rows:
-                    projection["state"] = "DEGRADED"
+            status = await self.configuration_status(
+                str(row["endpoint_profile_id"]),
+                str(row["profile_version"]),
+            )
+            # Endpoint documents are immutable facts. Configuration progress
+            # is a read-only projection and must never rewrite the persisted
+            # URL_VALIDATED state merely because later objects are incomplete.
+            projection["configuration_stage"] = status["stage"]
+            projection["production_allowed"] = status["production_allowed"]
             projections.append(projection)
         return [OFFICIAL_OPENAI_ENDPOINT, *projections]
+
+    async def configuration_status(
+        self,
+        endpoint_profile_id: str,
+        endpoint_profile_version: str,
+    ) -> dict[str, Any]:
+        """Return a secret-free, read-only configuration completeness view."""
+
+        endpoint = await self.endpoint(
+            endpoint_profile_id, endpoint_profile_version
+        )
+        roles = ("NORMAL_TRADER", "TOP_RISK_REVIEWER")
+        endpoint_ready = bool(
+            endpoint.enabled
+            and endpoint.url_validation_status == "PASS"
+            and endpoint.data_transmission_confirmed
+            and endpoint.state
+            in {"URL_VALIDATED", "CAPABILITY_CHECKED", "READY"}
+        )
+        credential = await self.db["ag_model_credentials"].find_one(
+            {
+                "provider_type": "OPENAI_COMPATIBLE",
+                "endpoint_profile_id": endpoint_profile_id,
+                "endpoint_profile_version": endpoint_profile_version,
+                "normalized_origin": endpoint.normalized_origin,
+                "auth_scheme": endpoint.auth_scheme,
+                "status": {"$ne": "REVOKED"},
+            },
+            {"_id": 0, "credential_ref": 0},
+        )
+        credential_present = bool(credential)
+        credential_ready = bool(
+            credential
+            and credential.get("status") in {"CONFIGURED", "DEGRADED"}
+        )
+
+        model_rows = await self.repository.list(
+            "endpoint_models",
+            {
+                "endpoint_profile_id": endpoint_profile_id,
+                "endpoint_profile_version": endpoint_profile_version,
+            },
+            sort=("created_at", -1),
+        )
+        role_models: dict[str, list[dict[str, Any]]] = {
+            role: [
+                model
+                for model in model_rows
+                if role in model.get("role_capabilities", [])
+                and model.get("status") not in {"DISABLED", "NOT_FOUND", "UNSUPPORTED"}
+            ]
+            for role in roles
+        }
+
+        price_rows = await self.repository.list(
+            "endpoint_prices",
+            {
+                "endpoint_profile_id": endpoint_profile_id,
+                "endpoint_profile_version": endpoint_profile_version,
+            },
+            sort=("created_at", -1),
+        )
+        now = datetime.now(timezone.utc)
+        role_prices: dict[str, list[dict[str, Any]]] = {}
+        for role in roles:
+            model_ids = {
+                (model["endpoint_model_id"], model["model_version"])
+                for model in role_models[role]
+            }
+            role_prices[role] = [
+                price
+                for price in price_rows
+                if (
+                    price.get("endpoint_model_id"),
+                    price.get("endpoint_model_version"),
+                )
+                in model_ids
+                and bool(price.get("verified"))
+                and price.get("effective_at") <= now
+            ]
+
+        assignments = await self.repository.list(
+            "profile_assignments", {}, sort=("assigned_at", -1)
+        )
+        selected_assignments: dict[str, dict[str, Any]] = {}
+        for assignment in assignments:
+            selected_assignments.setdefault(str(assignment["role"]), assignment)
+        role_profiles: dict[str, dict[str, Any] | None] = {}
+        role_checks: dict[str, dict[str, Any] | None] = {}
+        for role in roles:
+            assignment = selected_assignments.get(role)
+            profile = None
+            if assignment:
+                candidate = await self.db["ag_model_profiles"].find_one(
+                    {
+                        "profile_id": assignment["profile_id"],
+                        "profile_version": assignment["profile_version"],
+                        "role": role,
+                        "endpoint_profile_id": endpoint_profile_id,
+                        "endpoint_profile_version": endpoint_profile_version,
+                    },
+                    {"_id": 0},
+                )
+                if candidate:
+                    profile = clean_document(candidate)
+            role_profiles[role] = profile
+            role_checks[role] = (
+                await self.db["ag_model_capability_checks"].find_one(
+                    {
+                        "profile_id": profile["profile_id"],
+                        "profile_version": profile["profile_version"],
+                    },
+                    {"_id": 0, "request_hash": 0, "response_hash": 0},
+                    sort=[("checked_at", -1)],
+                )
+                if profile
+                else None
+            )
+
+        resolved_role_prices: dict[str, dict[str, Any] | None] = {}
+        for role in roles:
+            profile = role_profiles[role]
+            resolved_role_prices[role] = (
+                next(
+                    (
+                        price
+                        for price in role_prices[role]
+                        if price.get("price_version_id")
+                        == profile.get("price_version_id")
+                    ),
+                    None,
+                )
+                if profile
+                else role_prices[role][0]
+                if role_prices[role]
+                else None
+            )
+
+        models_ready = all(role_models[role] for role in roles)
+        prices_ready = all(resolved_role_prices[role] for role in roles)
+        profiles_ready = all(role_profiles[role] for role in roles)
+        assignments_ready = all(
+            selected_assignments.get(role) and role_profiles[role]
+            for role in roles
+        )
+        capability_checked = all(role_checks[role] for role in roles)
+        capability_ready = all(
+            role_checks[role] and role_checks[role].get("status") == "READY"
+            for role in roles
+        )
+        selected_prices = [
+            resolved_role_prices[role]
+            for role in roles
+            if resolved_role_prices[role]
+        ]
+        if len(selected_prices) != len(roles):
+            budget_status = "BUDGET_BLOCKED"
+            budget_reason = "BUDGET_PRICING_UNAVAILABLE"
+        elif any(
+            price.get("currency") != ModelBudgetService(self.db).policy.currency
+            for price in selected_prices
+        ):
+            budget_status = "BUDGET_BLOCKED"
+            budget_reason = "BUDGET_CURRENCY_MISMATCH"
+        else:
+            budget_status = "READY"
+            budget_reason = None
+
+        if not endpoint_ready:
+            stage = "DRAFT"
+        elif not credential_present:
+            stage = "URL_VALIDATED"
+        elif not credential_ready:
+            stage = "CREDENTIAL_CONFIGURED"
+        elif not models_ready:
+            stage = "AUTHENTICATED"
+        elif not prices_ready:
+            stage = "MODELS_REGISTERED"
+        elif not profiles_ready or not assignments_ready:
+            stage = "PRICES_CONFIGURED"
+        elif not capability_checked:
+            stage = "PROFILES_CONFIGURED"
+        elif not capability_ready or budget_status != "READY":
+            stage = "CAPABILITY_CHECKED"
+        else:
+            stage = "READY"
+
+        component_values = {
+            "endpoint": endpoint_ready,
+            "credential": credential_ready,
+            "normal_model": bool(role_models["NORMAL_TRADER"]),
+            "top_model": bool(role_models["TOP_RISK_REVIEWER"]),
+            "normal_price": bool(resolved_role_prices["NORMAL_TRADER"]),
+            "top_price": bool(resolved_role_prices["TOP_RISK_REVIEWER"]),
+            "normal_profile": bool(role_profiles["NORMAL_TRADER"]),
+            "top_profile": bool(role_profiles["TOP_RISK_REVIEWER"]),
+            "assignments": bool(assignments_ready),
+            "capability": bool(capability_ready),
+            "budget": budget_status == "READY",
+        }
+        labels = {
+            "endpoint": "Endpoint",
+            "credential": "Credential",
+            "normal_model": "Normal Model",
+            "top_model": "Top Model",
+            "normal_price": "Normal Price",
+            "top_price": "Top Price",
+            "normal_profile": "Normal Profile",
+            "top_profile": "Top Profile",
+            "assignments": "Assignments",
+            "capability": "Capability",
+            "budget": "Budget",
+        }
+        component_statuses = {
+            "endpoint": endpoint.state if endpoint_ready else "MISSING",
+            "credential": (
+                str(credential.get("status")) if credential_ready else "MISSING"
+            ),
+            "normal_model": (
+                "READY"
+                if role_checks["NORMAL_TRADER"]
+                and role_checks["NORMAL_TRADER"].get("status") == "READY"
+                else str(role_models["NORMAL_TRADER"][0].get("status"))
+                if role_models["NORMAL_TRADER"]
+                else "MISSING"
+            ),
+            "top_model": (
+                "READY"
+                if role_checks["TOP_RISK_REVIEWER"]
+                and role_checks["TOP_RISK_REVIEWER"].get("status") == "READY"
+                else str(role_models["TOP_RISK_REVIEWER"][0].get("status"))
+                if role_models["TOP_RISK_REVIEWER"]
+                else "MISSING"
+            ),
+            "normal_price": (
+                "VERIFIED"
+                if resolved_role_prices["NORMAL_TRADER"]
+                else "MISSING"
+            ),
+            "top_price": (
+                "VERIFIED"
+                if resolved_role_prices["TOP_RISK_REVIEWER"]
+                else "MISSING"
+            ),
+            "normal_profile": (
+                str(role_checks["NORMAL_TRADER"].get("status"))
+                if role_checks["NORMAL_TRADER"]
+                else "UNVERIFIED"
+                if role_profiles["NORMAL_TRADER"]
+                else "MISSING"
+            ),
+            "top_profile": (
+                str(role_checks["TOP_RISK_REVIEWER"].get("status"))
+                if role_checks["TOP_RISK_REVIEWER"]
+                else "UNVERIFIED"
+                if role_profiles["TOP_RISK_REVIEWER"]
+                else "MISSING"
+            ),
+            "assignments": "ACTIVE" if assignments_ready else "MISSING",
+            "capability": "READY" if capability_ready else "MISSING",
+            "budget": budget_status,
+        }
+        components = [
+            {
+                "key": key,
+                "label": labels[key],
+                "complete": complete,
+                "status": component_statuses[key],
+                "reason_code": budget_reason if key == "budget" else None,
+            }
+            for key, complete in component_values.items()
+        ]
+        return {
+            "endpoint_profile_id": endpoint_profile_id,
+            "endpoint_profile_version": endpoint_profile_version,
+            "persisted_endpoint_state": endpoint.state,
+            "stage": stage,
+            "production_allowed": stage == "READY",
+            "components": components,
+            "blocking_items": [
+                item["key"] for item in components if not item["complete"]
+            ],
+            "budget_policy_id": ModelBudgetService(self.db).policy.policy_id,
+            "budget_policy_version": ModelBudgetService(self.db).policy.policy_version,
+            "budget_currency": ModelBudgetService(self.db).policy.currency,
+        }
 
     async def validate_endpoint(
         self,

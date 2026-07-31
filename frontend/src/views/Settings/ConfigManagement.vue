@@ -8,11 +8,11 @@
           配置管理
         </h1>
         <p class="page-description">
-          管理系统配置、大模型、数据源等设置
+          统一管理模型服务商、安全凭证、预算与系统配置
         </p>
       </div>
       <div class="header-right">
-        <el-button type="success" @click="handleReloadConfig" :loading="reloadLoading">
+        <el-button v-if="!isCredentialHost" type="success" @click="handleReloadConfig" :loading="reloadLoading">
           <el-icon><Refresh /></el-icon>
           重载配置
         </el-button>
@@ -21,67 +21,102 @@
 
     <el-row :gutter="24">
       <!-- 左侧：配置菜单 -->
-      <el-col :span="4">
+      <el-col :span="4" class="config-nav-column">
         <el-card class="config-menu" shadow="never">
           <el-menu
             :default-active="activeTab"
             @select="handleMenuSelect"
             class="config-nav"
           >
-            <el-menu-item index="validation">
-              <el-icon><CircleCheck /></el-icon>
-              <span>配置验证</span>
-            </el-menu-item>
-            <el-menu-item index="providers">
-              <el-icon><OfficeBuilding /></el-icon>
-              <span>厂家管理</span>
-            </el-menu-item>
-            <el-menu-item index="model-catalog">
-              <el-icon><Collection /></el-icon>
-              <span>模型目录</span>
-            </el-menu-item>
-            <el-menu-item index="llm">
-              <el-icon><Cpu /></el-icon>
-              <span>大模型配置</span>
-            </el-menu-item>
-            <el-menu-item index="datasource">
-              <el-icon><DataBoard /></el-icon>
-              <span>数据源配置</span>
-            </el-menu-item>
-            <el-menu-item index="database">
-              <el-icon><Coin /></el-icon>
-              <span>数据库配置</span>
-            </el-menu-item>
-            <el-menu-item index="system">
-              <el-icon><Tools /></el-icon>
-              <span>系统设置</span>
-            </el-menu-item>
-            <el-menu-item index="api-keys">
-              <el-icon><Key /></el-icon>
-              <span>API密钥状态</span>
-            </el-menu-item>
-            <el-menu-item index="import-export">
-              <el-icon><Download /></el-icon>
-              <span>导入导出</span>
-            </el-menu-item>
+            <el-menu-item-group title="模型接入">
+              <el-menu-item index="providers">
+                <el-icon><OfficeBuilding /></el-icon>
+                <span>1. 服务商</span>
+              </el-menu-item>
+              <el-menu-item index="api-keys">
+                <el-icon><Key /></el-icon>
+                <span>2. API凭证</span>
+              </el-menu-item>
+              <el-menu-item index="model-catalog">
+                <el-icon><Collection /></el-icon>
+                <span>3. 模型目录</span>
+              </el-menu-item>
+              <el-menu-item index="pricing">
+                <el-icon><Coin /></el-icon>
+                <span>4. 价格</span>
+              </el-menu-item>
+              <el-menu-item index="llm">
+                <el-icon><Cpu /></el-icon>
+                <span>5. 模型Profile</span>
+              </el-menu-item>
+              <el-menu-item index="capabilities">
+                <el-icon><CircleCheck /></el-icon>
+                <span>6. 能力检查</span>
+              </el-menu-item>
+            </el-menu-item-group>
+            <el-menu-item-group title="治理与审计">
+              <el-menu-item index="prompt-profiles">
+                <el-icon><Collection /></el-icon>
+                <span>Prompt版本</span>
+              </el-menu-item>
+              <el-menu-item index="budget">
+                <el-icon><Coin /></el-icon>
+                <span>预算</span>
+              </el-menu-item>
+              <el-menu-item index="model-runs">
+                <el-icon><Collection /></el-icon>
+                <span>调用记录</span>
+              </el-menu-item>
+            </el-menu-item-group>
+            <el-menu-item-group v-if="!isCredentialHost" title="系统配置">
+              <el-menu-item index="validation">
+                <el-icon><CircleCheck /></el-icon>
+                <span>配置验证</span>
+              </el-menu-item>
+              <el-menu-item index="datasource">
+                <el-icon><DataBoard /></el-icon>
+                <span>数据源配置</span>
+              </el-menu-item>
+              <el-menu-item index="database">
+                <el-icon><Coin /></el-icon>
+                <span>数据库配置</span>
+              </el-menu-item>
+              <el-menu-item index="system">
+                <el-icon><Tools /></el-icon>
+                <span>系统设置</span>
+              </el-menu-item>
+              <el-menu-item index="import-export">
+                <el-icon><Download /></el-icon>
+                <span>导入导出</span>
+              </el-menu-item>
+            </el-menu-item-group>
           </el-menu>
         </el-card>
       </el-col>
 
       <!-- 右侧：配置内容 -->
-      <el-col :span="20">
+      <el-col :span="20" class="config-content-column">
         <!-- 配置验证 -->
-        <div v-show="activeTab === 'validation'">
+        <div v-if="activeTab === 'validation'">
           <ConfigValidator />
         </div>
 
+        <div v-if="isSecureModelTab" class="secure-model-settings">
+          <AlphaGuardOperations
+            models-only
+            embedded
+            :initial-model-tab="activeSecureModelTab"
+            @model-tab-change="handleSecureModelTabChange"
+          />
+        </div>
+
         <!-- 模型目录管理 -->
-        <div v-show="activeTab === 'model-catalog'">
+        <div v-if="activeTab === 'legacy-model-catalog'">
           <ModelCatalogManagement />
         </div>
 
         <!-- 厂家管理 -->
-        <el-card v-show="activeTab === 'providers'" class="config-content" shadow="never">
+        <el-card v-show="activeTab === 'legacy-providers'" class="config-content" shadow="never">
           <template #header>
             <div class="card-header">
               <h3>大模型厂家管理</h3>
@@ -197,7 +232,7 @@
         </el-card>
 
         <!-- 大模型配置 -->
-        <el-card v-show="activeTab === 'llm'" class="config-content" shadow="never">
+        <el-card v-show="activeTab === 'legacy-llm'" class="config-content" shadow="never">
           <template #header>
             <div class="card-header">
               <h3>大模型配置</h3>
@@ -801,7 +836,7 @@
         </el-card>
 
         <!-- API密钥状态 -->
-        <el-card v-show="activeTab === 'api-keys'" class="config-content" shadow="never">
+        <el-card v-show="activeTab === 'legacy-api-keys'" class="config-content" shadow="never">
           <template #header>
             <div class="card-header">
               <h3>API密钥状态</h3>
@@ -1130,6 +1165,7 @@ import ConfigValidator from '@/components/ConfigValidator.vue'
 import LLMConfigDialog from './components/LLMConfigDialog.vue'
 import ProviderDialog from './components/ProviderDialog.vue'
 import ModelCatalogManagement from './components/ModelCatalogManagement.vue'
+import AlphaGuardOperations from '@/views/AlphaGuard/Operations.vue'
 import DataSourceConfigDialog from './components/DataSourceConfigDialog.vue'
 import MarketCategoryManagement from './components/MarketCategoryManagement.vue'
 import DataSourceGroupingDialog from './components/DataSourceGroupingDialog.vue'
@@ -1152,8 +1188,43 @@ type LLMConfigGroup = {
 
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
 
+type ModelSettingsTab =
+  | 'providers'
+  | 'credentials'
+  | 'models'
+  | 'profiles'
+  | 'prompts'
+  | 'prices'
+  | 'budget'
+  | 'capabilities'
+  | 'runs'
+
+const secureModelTabByConfigTab: Record<string, ModelSettingsTab> = {
+  providers: 'providers',
+  'api-keys': 'credentials',
+  'model-catalog': 'models',
+  llm: 'profiles',
+  'prompt-profiles': 'prompts',
+  pricing: 'prices',
+  budget: 'budget',
+  capabilities: 'capabilities',
+  'model-runs': 'runs'
+}
+const configTabBySecureModelTab: Record<ModelSettingsTab, string> = Object.fromEntries(
+  Object.entries(secureModelTabByConfigTab).map(([configTab, modelTab]) => [modelTab, configTab])
+) as Record<ModelSettingsTab, string>
+
+const isCredentialHost =
+  import.meta.env.VITE_ALPHAGUARD_CREDENTIAL_HOST === 'true'
+
 // 响应式数据
-const activeTab = ref('validation')
+const activeTab = ref(isCredentialHost ? 'providers' : 'validation')
+const isSecureModelTab = computed(
+  () => Boolean(secureModelTabByConfigTab[activeTab.value])
+)
+const activeSecureModelTab = computed<ModelSettingsTab>(
+  () => secureModelTabByConfigTab[activeTab.value] || 'providers'
+)
 const providers = ref<LLMProvider[]>([])
 const llmConfigs = ref<LLMConfig[]>([])
 const llmConfigGroups = ref<LLMConfigGroup[]>([])
@@ -1223,14 +1294,14 @@ const handleMenuSelect = (index: string) => {
   loadTabData(index)
 }
 
+const handleSecureModelTabChange = (tab: ModelSettingsTab) => {
+  const configTab = configTabBySecureModelTab[tab]
+  if (configTab && activeTab.value !== configTab) activeTab.value = configTab
+}
+
 const loadTabData = async (tab: string) => {
+  if (secureModelTabByConfigTab[tab]) return
   switch (tab) {
-    case 'providers':
-      await loadProviders()
-      break
-    case 'llm':
-      await loadLLMConfigs()
-      break
     case 'datasource':
       await loadDataSourceConfigs()
       break
@@ -1242,10 +1313,6 @@ const loadTabData = async (tab: string) => {
       await loadProviders()
       await loadLLMConfigs()
       await loadSystemSettings()
-      break
-    case 'api-keys':
-      await loadProviders()
-      await loadLLMConfigs()
       break
   }
 }
@@ -2236,9 +2303,12 @@ watch(
 
 // 生命周期
 onMounted(async () => {
-  // 先加载厂家信息，再加载其他数据
-  await loadProviders()
-  await loadProviderInfoMap()
+  if (!isCredentialHost) {
+    // Legacy providers still support non-AlphaGuard system settings, but the
+    // credential-only host must never load their DB/.env credential bridge.
+    await loadProviders()
+    await loadProviderInfoMap()
+  }
   loadTabData(activeTab.value)
 })
 </script>
@@ -2280,6 +2350,23 @@ onMounted(async () => {
   .config-menu {
     .config-nav {
       border: none;
+    }
+  }
+
+  .config-content-column,
+  .secure-model-settings {
+    min-width: 0;
+  }
+
+  .secure-model-settings {
+    max-width: 100%;
+    overflow: hidden;
+
+    :deep(.el-table),
+    :deep(.el-tabs),
+    :deep(.el-tab-pane) {
+      max-width: 100%;
+      min-width: 0;
     }
   }
 

@@ -6371,6 +6371,44 @@ Profile分配。Endpoint、模型、价格与Profile assignment均为版本化cr
 Endpoint version、normalized origin和auth scheme；Endpoint新版本不会继承旧Key。
 `AUTO_DETECT`只可登记，未升级为明确API模式前保持fail-closed。
 
+本机代理使用RFC 2544 `198.18.0.0/15` Fake-IP时，系统DNS结果不能直接作为连接目标。
+Validator只对该专用Fake-IP段启用固定公网IP、TLS校验的可信DoH解析，随后仍将Provider
+连接钉到返回的公网IP；普通私网、localhost、元数据地址、混合Fake-IP/其他地址和DoH返回
+非公网地址仍拒绝。凭证专用前端不建立通知WebSocket或轮询通知，因此不会构造包含登录
+Token的旧查询URL；凭证Host同时关闭Uvicorn access log。应用审计与脱敏业务日志继续保留。
+
+前端模型配置入口已统一：`/settings/config`保留原配置管理页的左侧导航和工作区布局，
+但服务商、API凭证、模型目录、模型Profile、Prompt版本、价格、预算、能力检查和调用记录
+均嵌入同一个AlphaGuard安全模型设置组件。凭证专用Host只加载`/api/alphaguard/models/*`
+及认证接口，不再加载旧厂家配置、数据库Key或`.env`迁移桥接；普通配置Host仍可管理数据源、
+数据库和非敏感系统设置。`/alphaguard/operations`与统一配置页因此共享实现和运行状态，
+不会形成第二套Credential或Endpoint写入路径。
+
+模型接入交互进一步收敛为六步左侧导航：服务商、API凭证、模型目录、价格、模型Profile、
+能力检查；Prompt版本、预算和调用记录归入治理与审计。服务商页默认选择已有Endpoint并展示
+版本详情，新建表单只有点击“新增服务商”后才出现。已有DRAFT显示“继续配置”，第三方数据
+传输确认只出现在独立URL验证步骤；配置变更必须显式选择“创建新版本”，并发送
+`endpoint_profile_id + create_new_version=true`，旧版本保持不可变。同一Origin再次走新增
+流程时前端返回已有Endpoint，不再提交会产生`INTEGRITY_CONFLICT`的重复DRAFT。
+
+凭证表单使用独立的已验证Endpoint选择状态，不再复用服务商页可能指向DRAFT的选择值。
+只有`url_validation_status=PASS && enabled=true`的兼容Endpoint可被选择；没有已验证Endpoint
+时保存按钮保持禁用。URL验证成功后页面切换到API凭证步骤，左侧导航与内部页签双向同步。
+API Key仍为password输入，切换Provider、Endpoint或离开凭证步骤会立即清空组件状态。
+
+后续本机验证形成`Ailinyu OpenAI Compatible@v2`，状态为`URL_VALIDATED / PASS`，且
+`data_transmission_confirmed=true`。首次从URL验证步骤跳转到凭证步骤时，前端遗漏同步
+`credentialProviderType`，导致兼容凭证请求被错误标记为`OPENAI_OFFICIAL`并只向固定官方
+OpenAI `/models`发出一次认证探测；该探测返回`401 UNAUTHORIZED`，Secret未写入Keychain，
+MongoDB活动凭证仍为`0`。系统不保留、不恢复也不重试该Secret。
+
+修复后，URL验证PASS会原子同步兼容Provider类型和精确Endpoint版本；后端同时拒绝任何
+携带兼容Endpoint绑定的`OPENAI_OFFICIAL`凭证请求，因此第三方凭证不能再路由到官方地址。
+兼容Endpoint若支持认证后的`/models`，现在允许在尚未登记Normal/Top模型、价格和Profile时
+先完成认证并把凭证保存为`DEGRADED`；只有认证与Endpoint访问为READY才写Keychain，模型、
+结构化输出、价格和预算仍分别保持`MODEL_NOT_FOUND / NOT_CHECKED / NOT_VERIFIED / BLOCKED`，
+不会被伪装成完整READY。这解除配置顺序死循环，同时保留生产调用fail-closed。
+
 兼容模型必须在对应Endpoint版本下登记；价格必须绑定同一Endpoint、模型与版本，使用
 Decimal/Decimal128保存每百万Token价格和货币。缺价格、货币与预算策略不兼容、或响应
 缺少可审计usage/cost时分别阻断为`PRICE_NOT_VERIFIED`、`BUDGET_BLOCKED`或
@@ -6381,26 +6419,33 @@ Decimal/Decimal128保存每百万Token价格和货币。缺价格、货币与预
 能力检查使用真实角色契约`NormalTradePlan`与`TopReviewDecision`，分别锁定不可变能力
 Prompt，验证结构化输出、Pydantic schema、token usage、费用、超时和错误分类。能力API
 只返回脱敏状态与消息，不返回请求/响应hash；兼容Provider返回401时不会回退到官方
-OpenAI。真实Endpoint、模型、价格和新Key均尚未由用户登记，因此本阶段没有发起第三方
-网络能力调用，也没有宣称PR-010 Level B完成。
+OpenAI。真实兼容Endpoint v2已通过URL门禁；管理员随后使用新Key完成认证，Secret已写入
+Keychain并严格绑定v2，MongoDB只保存`DEGRADED / MODEL_NOT_FOUND`元数据。受控`/models`
+发现已create-only登记39个`UNVERIFIED`模型目录条目；价格、角色能力、Profile和结构化输出
+模式仍未完成，因此没有发起Normal/Top结构化能力调用，也没有宣称PR-010 Level B完成。
+
+管理员随后确认采用推荐的角色拆分，但暂不登记价格。系统create-only生成JSON_ONLY配置草稿
+v3，并经相同SSRF、DNS、连接IP和Origin门禁形成`URL_VALIDATED / PASS`的v4；v2和其凭证
+保持不可变且不会自动继承。v4手工登记`gpt-5.6-terra@v1`为Normal、
+`gpt-5.6-sol@v1`为Top，二者状态均为`UNVERIFIED`，没有宣称名称代表真实能力。相同输入
+复跑均返回`REUSED`。因为v4价格、凭证和Profile均为0，预算与生产模型调用继续fail-closed。
 
 Mongo索引迁移已删除与Endpoint绑定冲突的旧`uniq_model_credential_provider`索引，并
 create-only创建18个索引、复用2个；再次dry-run确认无需变更。配置seed首次新增2个仅用于
 能力检查的Prompt并复用3个Profile，未修改原有Profile、Prompt或失败审计。生产库检查为：
 
 ```text
-compatible credentials=0
-compatible endpoints=0
-endpoint models=0
+compatible credentials=1（绑定v2，DEGRADED；authentication/provider access READY）
+compatible endpoint versions=4（v1/v3 DRAFT；v2/v4 URL_VALIDATED / PASS）
+endpoint models=41（v2发现39个；v4角色登记2个，全部UNVERIFIED）
 endpoint prices=0
 profile assignments=0
-endpoint events=0
 OrderIntent/Outbox/Order/Fill/Position/Reservation/Ledger=0
 PAPER_QUANT/PAPER_NORMAL/PAPER_TOP_CONFIRMED cash_available=1000000.00
 cash_reserved=0
 ```
 
-专项合并测试为`45 passed, 22 warnings`，默认离线CI为`579 passed, 89 warnings`，
+最新专项合并测试为`53 passed, 22 warnings`，默认离线CI为`587 passed, 89 warnings`，
 live/safety回归为`22 passed, 85 warnings`；前端`npm run type-check`、正式
 `npm run build`和`npx vite build`均PASS，所有本阶段Python文件可编译。全仓Python编译
 仍被阶段前已有的`scripts/补充行业信息_akshare.py:81`语法错误阻断，本阶段未修改该旧脚本。
@@ -6421,3 +6466,67 @@ EXPERIMENT_READY=true
 CHALLENGER_READY=false
 LIVE_READY=false
 ```
+
+### 24.11 Provider v4 Configuration Persistence & Activation Fix
+
+本阶段没有继续PR-010 Level B、没有调用真实模型，也没有读取、打印或替换当前Keychain
+Secret。只读检查确认v4 Endpoint仍为
+`compatible-2707eb3ae865f4c88ef6@v4 / URL_VALIDATED / PASS`；v4 Credential、价格、
+Profile和Assignment均为0，v4的Normal/Top模型分别为
+`gpt-5.6-terra@v1 / gpt-5.6-sol@v1 / UNVERIFIED`。唯一活动兼容Credential仍是
+`xingyunge`，精确绑定v2且状态为`DEGRADED`。
+
+配置未持久化的主根因是Credential ID与Endpoint版本未对齐。Mongo使用全局唯一
+`credential_id`，但前端兼容Provider默认名称原为`<endpoint_profile_id>-primary`，不含
+Endpoint版本；切换v2到v4时还可能保留旧名称。因此创建v4 Credential会与v2身份冲突。
+先前浏览器Network历史已经不可恢复，不能伪造原请求状态；FakeDB/FakeSecretStore的完整
+API重现准确得到`HTTP 409 / CREDENTIAL_BINDING_EXISTS`，且Keychain和Mongo写入数均不变。
+修复后默认名称为`<endpoint_profile_id>-<profile_version>-primary`，Endpoint切换会按精确
+版本选择已有Credential或重置为该版本的新名称，v2 Credential不能被v4继承。
+
+后端配置流程现在明确分阶段：
+
+```text
+DRAFT
+-> URL_VALIDATED
+-> CREDENTIAL_CONFIGURED
+-> AUTHENTICATED
+-> MODELS_REGISTERED
+-> PRICES_CONFIGURED
+-> PROFILES_CONFIGURED
+-> CAPABILITY_CHECKED
+-> READY
+```
+
+`URL_VALIDATED`允许保存第一份Credential，不要求Endpoint先READY；认证和Provider访问通过
+后可先安全保存为`DEGRADED`。手工模型写接口固定登记为`UNVERIFIED`；价格独立于Profile
+create-only写入；UNVERIFIED模型可以创建`production_allowed=false`、
+`capability_status=UNVERIFIED`的Normal或Top Profile和显式Assignment。只有两个角色能力检查与同币种预算均
+READY时，只读配置投影才显示`READY / production_allowed=true`。Endpoint create-only记录
+本身不被篡改，v4持久化状态继续如实保持`URL_VALIDATED`。
+
+新增只读`GET /api/alphaguard/models/endpoints/{id}/configuration-status`，逐项投影Endpoint、
+Credential、Normal/Top Model、Normal/Top Price、Normal/Top Profile、Assignments、Capability
+和Budget。它只返回非敏感ID、状态和阻断原因，不返回Credential ref、Secret或请求/响应
+hash。价格缺失返回`BUDGET_PRICING_UNAVAILABLE`；货币与预算策略不兼容返回
+`BUDGET_CURRENCY_MISMATCH`，不会临时换汇或绕过预算。
+
+前端新增“配置完整性”面板并在刷新时重新读取后端，不再依赖本地成功状态。Endpoint、
+Credential、模型、价格和Profile提交均使用局部失败处理；失败显示脱敏的HTTP状态、
+`error_code`和`sanitized_message`，且不会显示成功Toast。Credential响应`stored=false`现在
+使用错误状态展示，不再以成功样式提示“未保存”。API Key仍在请求发出前和finally中清空，
+错误内容、日志、Mongo和浏览器存储均不包含Secret。
+
+隔离完整流程验证记录：创建Endpoint、URL验证、保存v2 Credential、创建并验证v4、用旧
+Credential ID重现409、用版本化ID成功保存v4 Credential、登记两个UNVERIFIED模型、在
+Profile前登记两条USD Decimal价格、创建两个UNVERIFIED Profile和显式Assignment、刷新
+配置投影，最终插入隔离READY能力检查后投影进入READY。所有步骤仅使用FakeDB和
+FakeSecretStore，不访问外部Provider；Secret未进入任何测试响应或数据库表示。
+
+验证结果：第三方Provider与安全Credential专项`38 passed, 22 warnings`；默认离线CI
+`589 passed, 89 warnings`；前端`npm run type-check`、正式`npm run build`和
+`npx vite build`均PASS；Python修改文件编译与`git diff --check`通过。真实数据库复核仍为
+v4 Credential/Price/Profile/Assignment=0、v2 Credential=1，说明本阶段未修改用户真实配置。
+用户后续恢复配置时只需在统一页面选择v4；页面会自动生成版本化Credential名称，并按
+Credential、模型、价格、Profile、Capability顺序显示真实持久化状态。该操作不属于本阶段，
+也不能据此宣称PR-010 Level B完成。

@@ -441,7 +441,7 @@ class ModelCredentialManagementService:
             )
             for role in ("NORMAL_TRADER", "TOP_RISK_REVIEWER")
         }
-        if not all(roles.values()):
+        if not endpoint.models_endpoint_enabled and not all(roles.values()):
             return CredentialCapabilitySummary(
                 provider="openai_compatible",
                 authentication_status="NOT_CHECKED",
@@ -550,14 +550,35 @@ class ModelCredentialManagementService:
             )
         normal_status = (
             "READY"
-            if roles["NORMAL_TRADER"]["remote_model_name"] in available_models
+            if roles["NORMAL_TRADER"]
+            and roles["NORMAL_TRADER"]["remote_model_name"] in available_models
             else "MODEL_NOT_FOUND"
         )
         top_status = (
             "READY"
-            if roles["TOP_RISK_REVIEWER"]["remote_model_name"] in available_models
+            if roles["TOP_RISK_REVIEWER"]
+            and roles["TOP_RISK_REVIEWER"]["remote_model_name"]
+            in available_models
             else "MODEL_NOT_FOUND"
         )
+        # Credential bootstrap deliberately precedes model/profile/price
+        # registration for endpoints that expose an authenticated /models
+        # catalog. Authentication can therefore be proven and the secret can
+        # be stored as DEGRADED without pretending the remaining capabilities
+        # are ready. Endpoints without /models still require explicit model
+        # definitions before a bounded authentication probe is possible.
+        if not all(roles.values()):
+            return CredentialCapabilitySummary(
+                provider="openai_compatible",
+                authentication_status="READY",
+                provider_access_status="READY",
+                normal_model_status=normal_status,
+                top_model_status=top_status,
+                structured_output_status="NOT_CHECKED",
+                price_status="NOT_VERIFIED",
+                budget_status="BLOCKED",
+                checked_at=checked_at,
+            )
         prices = await registry.list_prices(endpoint_profile_id)
         priced_models = {
             item["endpoint_model_id"]
@@ -623,6 +644,19 @@ class ModelCredentialManagementService:
                 result.top_model_status,
             )
         )
+
+    @classmethod
+    def _credential_can_be_stored(
+        cls,
+        result: CredentialCapabilitySummary,
+        provider_type: str,
+    ) -> bool:
+        if provider_type == "OPENAI_COMPATIBLE":
+            return (
+                result.authentication_status == "READY"
+                and result.provider_access_status == "READY"
+            )
+        return cls._credential_checks_pass(result)
 
     @staticmethod
     def _primary_error(
@@ -777,6 +811,13 @@ class ModelCredentialManagementService:
         elif provider_type == "OPENAI_OFFICIAL":
             if provider != "openai":
                 raise ValueError("official credential provider must be openai")
+            if (
+                endpoint_profile_id is not None
+                or endpoint_profile_version is not None
+            ):
+                raise ValueError(
+                    "official credential cannot bind a compatible Endpoint Profile"
+                )
             endpoint = None
             normalized_origin = None
             auth_scheme = None
@@ -853,7 +894,7 @@ class ModelCredentialManagementService:
             )
         )
         error_code = self._primary_error(capability)
-        if not self._credential_checks_pass(capability):
+        if not self._credential_can_be_stored(capability, provider_type):
             await self.audit(
                 credential_id=credential_id,
                 provider=provider,
@@ -1010,7 +1051,7 @@ class ModelCredentialManagementService:
             )
         )
         error_code = self._primary_error(capability)
-        if not self._credential_checks_pass(capability):
+        if not self._credential_can_be_stored(capability, provider_type):
             await self.audit(
                 credential_id=credential_id,
                 provider=provider,
@@ -1169,7 +1210,7 @@ class ModelCredentialManagementService:
         finally:
             secret = None
         error_code = self._primary_error(capability)
-        passed = self._credential_checks_pass(capability)
+        passed = self._credential_can_be_stored(capability, provider_type)
         await self.db["ag_model_credentials"].update_one(
             {"credential_id": credential_id},
             {

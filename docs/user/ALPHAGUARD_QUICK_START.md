@@ -82,13 +82,22 @@ npm run dev -- --host 127.0.0.1
 打开 `http://localhost:3002/login`，手工登录后进入
 `AlphaGuard -> 运维中心 -> Models & API`。第三方服务按以下顺序登记：
 
-1. 在“服务商”添加OpenAI-Compatible HTTPS Base URL并确认第三方数据发送；
-2. 通过URL安全验证；
-3. 在“模型目录”受控探测`/models`或手工登记模型及实际能力；
-4. 在“价格”登记该Endpoint独立的Decimal价格版本；
-5. 在“API凭证”选择已验证Endpoint，填写新Key并保存验证；
-6. 在“模型Profile”分别分配Normal与Top；使用同一模型时必须显式确认；
-7. 在“能力检查”查看Normal/Top结构化输出、usage、费用和预算状态。
+1. 在“1. 服务商”选择已有Endpoint继续配置，或新增OpenAI-Compatible DRAFT；
+2. 明确确认第三方数据发送并通过URL安全验证；
+3. 在“2. API凭证”选择已验证Endpoint，填写新Key并保存到Keychain；
+4. 在“3. 模型目录”受控探测`/models`或手工登记模型及实际能力；
+5. 在“4. 价格”登记该Endpoint独立的Decimal价格版本；
+6. 在“5. 模型Profile”分别分配Normal与Top；使用同一模型时必须显式确认；
+7. 在“6. 能力检查”查看Normal/Top结构化输出、usage、费用和预算状态。
+
+配置变更使用“创建新版本”，旧Endpoint版本不会被覆盖；DRAFT未通过URL验证前不能进入
+凭证配置。凭证先通过Endpoint认证但尚未登记模型或价格时显示`DEGRADED`属于预期状态；
+继续完成模型目录、价格和Profile后再执行完整能力检查。
+
+选择Endpoint版本后先看页面顶部“配置完整性”。兼容Credential默认名称包含Endpoint版本；
+不要把v2名称复用于v4。任何步骤失败都会显示脱敏的HTTP状态、错误代码和摘要，并且刷新后
+仍以数据库真实状态为准。`URL_VALIDATED`、`UNVERIFIED`或`DEGRADED`都是可继续配置的安全
+中间状态，不等于READY，也不会触发付费模型调用。
 
 不要把Key发到聊天、终端参数、文档或截图中；已经暴露过的Key不可恢复或复用。真实环境
 健康检查仍可运行：

@@ -388,6 +388,9 @@ def test_frontend_secret_is_password_only_cleared_and_never_persisted():
     app_shell = (ROOT / "frontend/src/App.vue").read_text(
         encoding="utf-8"
     )
+    header_actions = (
+        ROOT / "frontend/src/components/Layout/HeaderActions.vue"
+    ).read_text(encoding="utf-8")
     api = (
         ROOT / "frontend/src/api/alphaguardModels.ts"
     ).read_text(encoding="utf-8")
@@ -402,6 +405,7 @@ def test_frontend_secret_is_password_only_cleared_and_never_persisted():
     assert "api.openai.com" not in api
     assert "/api/alphaguard/models/credentials" in api
     assert "VITE_ALPHAGUARD_CREDENTIAL_HOST" in app_shell
+    assert "isDemo || isCredentialHost" in header_actions
 
 
 def test_credential_host_is_narrow_and_connection_logs_are_redacted():
@@ -415,8 +419,87 @@ def test_credential_host_is_narrow_and_connection_logs_are_redacted():
     assert 'path == "/api/system/config/validate"' in host
     assert '"/api/auth/login"' in host
     assert '"/api/alphaguard/models/"' in host
+    assert "access_log=False" in host
     assert "实际传入的连接字符串" not in bridge
     assert "mongodb_conn[:30]" not in bridge
+
+
+def test_credential_host_loads_only_model_apis_and_opens_models_tab():
+    operations = (
+        ROOT / "frontend/src/views/AlphaGuard/Operations.vue"
+    ).read_text(encoding="utf-8")
+    config_management = (
+        ROOT / "frontend/src/views/Settings/ConfigManagement.vue"
+    ).read_text(encoding="utf-8")
+
+    credential_branch = operations.index("if (modelsOnly.value) {")
+    operations_request = operations.index("alphaguardOperationsApi.readiness()")
+
+    assert credential_branch < operations_request
+    assert "const modelsOnly = computed(() => isCredentialHost || props.modelsOnly)" in operations
+    assert "const activeOperationTab = ref(modelsOnly.value ? 'models' : 'services')" in operations
+    assert 'v-model="activeOperationTab"' in operations
+    assert 'v-model="activeModelTab"' in operations
+    assert '<el-tab-pane label="Models & API" name="models">' in operations
+    assert '<section v-if="!modelsOnly" class="safety-strip">' in operations
+    assert "'operations-tabs--embedded': props.embedded" in operations
+
+    assert "import AlphaGuardOperations from '@/views/AlphaGuard/Operations.vue'" in config_management
+    assert '<span>1. 服务商</span>' in config_management
+    assert '<span>2. API凭证</span>' in config_management
+    assert '<AlphaGuardOperations' in config_management
+    assert "models-only" in config_management
+    assert "embedded" in config_management
+    assert ':initial-model-tab="activeSecureModelTab"' in config_management
+    assert '@model-tab-change="handleSecureModelTabChange"' in config_management
+    assert '<div v-if="activeTab === \'validation\'">' in config_management
+    assert '<div v-if="activeTab === \'legacy-model-catalog\'">' in config_management
+    assert 'activeTab === \'legacy-providers\'' in config_management
+    assert 'activeTab === \'legacy-api-keys\'' in config_management
+
+
+def test_provider_setup_uses_explicit_guided_create_validate_credential_flow():
+    operations = (
+        ROOT / "frontend/src/views/AlphaGuard/Operations.vue"
+    ).read_text(encoding="utf-8")
+
+    assert "endpointEditorMode !== 'closed'" in operations
+    assert '>新增服务商</el-button>' in operations
+    assert "'继续配置'" in operations
+    assert ">创建新版本</el-button>" in operations
+    assert "create_new_version: true" in operations
+    assert "该服务地址已经登记，请继续配置已有服务商或显式创建新版本" in operations
+    assert "validatedCompatibleEndpoints" in operations
+    assert 'v-model="credentialEndpointIdentity"' in operations
+    assert "credentialSubmissionBlocked" in operations
+    assert "compatibleCredentialDefaultName" in operations
+    assert "`${endpoint.endpoint_profile_id}-${endpoint.profile_version}-primary`" in operations
+    assert "configurationErrorMessage" in operations
+    assert "CREDENTIAL_BINDING_EXISTS" not in operations
+    assert "配置完整性" in operations
+    assert "endpointConfigurationStatus" in operations
+    assert "lastConfigurationError" in operations
+    assert "if (!response.data.stored)" in operations
+    assert "ElMessage.error(lastConfigurationError.value)" in operations
+    assert "暂无已验证的第三方服务商，请先完成服务商URL验证" in operations
+    assert "if (response.data.url_validation_status === 'PASS') {" in operations
+    assert "credentialProviderType.value = 'OPENAI_COMPATIBLE'" in operations
+    assert "credentialEndpointIdentity.value = validatedIdentity" in operations
+
+
+def test_configuration_api_is_refresh_driven_and_returns_no_secret_fields():
+    api = (
+        ROOT / "frontend/src/api/alphaguardModels.ts"
+    ).read_text(encoding="utf-8")
+    router = (
+        ROOT / "app/routers/alphaguard_models.py"
+    ).read_text(encoding="utf-8")
+
+    assert "endpointConfigurationStatus" in api
+    assert "/configuration-status" in api
+    assert "api_key" not in api[api.index("export interface ProviderConfigurationStatus"):api.index("export interface EndpointModelDefinition")]
+    assert '"/endpoints/{endpoint_profile_id}/configuration-status"' in router
+    assert '"credential_ref"' not in router[router.index("async def endpoint_configuration_status"):router.index("@router.post(\"/endpoints/{endpoint_profile_id}/validate\"")]
 
 
 def test_credential_collections_have_create_only_indexes():

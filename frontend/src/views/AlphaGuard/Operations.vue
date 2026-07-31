@@ -2,12 +2,12 @@
   <div v-loading="loading" class="page-grid">
     <el-result v-if="loadError" icon="warning" title="运维状态加载失败" :sub-title="loadError"><template #extra><el-button @click="load">重试</el-button></template></el-result>
     <template v-else>
-    <section class="safety-strip">
+    <section v-if="!modelsOnly" class="safety-strip">
       <div><span>SYSTEM_MODE</span><strong>{{ readiness?.system_mode || 'UNKNOWN' }}</strong></div>
       <div><span>LIVE_TRADING_ENABLED</span><el-tag type="danger">{{ readiness?.live_trading_enabled ?? false }}</el-tag></div>
       <div><span>LIVE_EXECUTION_ALLOWED</span><el-tag type="danger">{{ readiness?.live_execution_allowed ?? false }}</el-tag></div>
     </section>
-    <el-card shadow="never">
+    <el-card v-if="!modelsOnly" shadow="never">
       <template #header><div class="header-row"><strong>系统准备度</strong><el-button @click="load">刷新</el-button></div></template>
       <div class="status-line">
         <el-tag :type="statusType" size="large">{{ readiness?.overall_status || 'UNKNOWN' }}</el-tag>
@@ -18,8 +18,12 @@
       <el-alert v-if="readiness?.blocking_items.length" type="warning" :closable="false" :title="readiness.blocking_items.join('；')" />
     </el-card>
 
-    <el-tabs type="border-card">
-      <el-tab-pane label="服务">
+    <el-tabs
+      v-model="activeOperationTab"
+      type="border-card"
+      :class="{ 'operations-tabs--embedded': props.embedded }"
+    >
+      <el-tab-pane v-if="!modelsOnly" label="服务" name="services">
         <el-table :data="services" size="small">
           <el-table-column prop="service_name" label="服务" />
           <el-table-column prop="status" label="状态" />
@@ -28,7 +32,7 @@
           <el-table-column prop="sanitized_message" label="脱敏摘要" min-width="260" />
         </el-table>
       </el-tab-pane>
-      <el-tab-pane label="数据准备">
+      <el-tab-pane v-if="!modelsOnly" label="数据准备" name="data-readiness">
         <el-table :data="dataStatuses" size="small">
           <el-table-column prop="component" label="组件" min-width="190" />
           <el-table-column prop="status" label="状态" width="120" />
@@ -37,7 +41,7 @@
           <el-table-column label="阻断" min-width="300"><template #default="{ row }">{{ row.blocking_reasons.join('；') }}</template></el-table-column>
         </el-table>
       </el-tab-pane>
-      <el-tab-pane label="任务">
+      <el-tab-pane v-if="!modelsOnly" label="任务" name="jobs">
         <el-table :data="jobs" size="small">
           <el-table-column prop="job_name" label="任务" min-width="190" />
           <el-table-column prop="worker_name" label="Worker" min-width="130" />
@@ -51,7 +55,7 @@
           <el-button v-for="name in manualJobs" :key="name" size="small" @click="runJob(name)">{{ name }}</el-button>
         </div>
       </el-tab-pane>
-      <el-tab-pane label="告警">
+      <el-tab-pane v-if="!modelsOnly" label="告警" name="alerts">
         <el-table :data="alerts" size="small">
           <el-table-column prop="severity" label="级别" width="100" />
           <el-table-column prop="code" label="代码" min-width="220" />
@@ -67,16 +71,72 @@
         </el-table>
         <el-empty v-if="!alerts.length" description="暂无持久化告警" />
       </el-tab-pane>
-      <el-tab-pane label="Models & API">
+      <el-tab-pane label="Models & API" name="models">
         <div class="status-line">
           <el-tag :type="modelStatus?.status === 'READY' ? 'success' : modelStatus?.status === 'DEGRADED' ? 'warning' : 'danger'">
             {{ modelStatus?.status || 'NOT_CONFIGURED' }}
           </el-tag>
           <span>只有精确登记并通过网络能力检查的 Normal / Top Profile 才能进入生产链。</span>
         </div>
-        <el-tabs class="model-tabs">
-          <el-tab-pane label="服务商">
-            <el-table :data="providerEndpoints" size="small">
+        <el-alert
+          v-if="lastConfigurationError"
+          class="configuration-feedback"
+          type="error"
+          :closable="false"
+          :title="lastConfigurationError"
+        />
+        <section v-if="configurationStatus" class="configuration-completeness">
+          <div class="configuration-completeness__header">
+            <div>
+              <strong>配置完整性</strong>
+              <span>
+                {{ configurationStatus.endpoint_profile_id }}@{{ configurationStatus.endpoint_profile_version }}
+              </span>
+            </div>
+            <div>
+              <el-tag :type="configurationStatus.production_allowed ? 'success' : 'warning'">
+                {{ configurationStatus.stage }}
+              </el-tag>
+              <el-button text @click="loadSelectedEndpointConfiguration">刷新状态</el-button>
+            </div>
+          </div>
+          <div class="configuration-completeness__grid">
+            <div
+              v-for="item in configurationStatus.components"
+              :key="item.key"
+              class="configuration-component"
+            >
+              <span>{{ item.label }}</span>
+              <el-tag :type="item.complete ? 'success' : 'warning'" size="small">
+                {{ item.status }}
+              </el-tag>
+              <small v-if="item.reason_code">{{ item.reason_code }}</small>
+            </div>
+          </div>
+        </section>
+        <el-tabs
+          v-model="activeModelTab"
+          class="model-tabs"
+          :class="{ 'model-tabs--embedded': props.embedded }"
+        >
+          <el-tab-pane label="服务商" name="providers">
+            <div class="provider-toolbar">
+              <div>
+                <strong>模型服务商</strong>
+                <span>选择已有服务商继续配置，或创建一个新的第三方服务商。</span>
+              </div>
+              <el-button
+                v-if="authStore.isAdmin && !isDemo"
+                type="primary"
+                @click="openCreateProviderEndpoint"
+              >新增服务商</el-button>
+            </div>
+            <el-table
+              :data="providerEndpoints"
+              size="small"
+              highlight-current-row
+              @row-click="continueProviderEndpoint"
+            >
               <el-table-column prop="display_name" label="服务商" min-width="170" />
               <el-table-column prop="provider_type" label="类型" min-width="180" />
               <el-table-column label="版本" width="100">
@@ -88,23 +148,90 @@
               <el-table-column label="生产使用" width="120">
                 <template #default="{ row }">{{ row.production_allowed ? 'ENABLED' : 'DISABLED' }}</template>
               </el-table-column>
-              <el-table-column v-if="authStore.isAdmin && !isDemo" label="操作" width="130">
+              <el-table-column label="操作" width="160" fixed="right">
                 <template #default="{ row }">
                   <el-button
                     link
-                    :disabled="row.provider_type !== 'OPENAI_COMPATIBLE' || row.state !== 'DRAFT'"
-                    @click="validateProviderEndpoint(row)"
-                  >验证URL</el-button>
+                    @click.stop="continueProviderEndpoint(row)"
+                  >{{ row.state === 'DRAFT' ? '继续配置' : '查看' }}</el-button>
+                  <el-button
+                    v-if="authStore.isAdmin && !isDemo && row.provider_type === 'OPENAI_COMPATIBLE'"
+                    link
+                    @click.stop="openNewEndpointVersion(row)"
+                  >新版本</el-button>
                 </template>
               </el-table-column>
             </el-table>
+            <el-empty v-if="!providerEndpoints.length" description="尚未登记模型服务商" />
+
+            <section v-if="selectedEndpoint && endpointEditorMode === 'closed'" class="provider-detail">
+              <div class="provider-detail__header">
+                <div>
+                  <strong>{{ selectedEndpoint.display_name }}</strong>
+                  <span>{{ selectedEndpoint.profile_version }}</span>
+                </div>
+                <div class="provider-detail__actions">
+                  <el-button
+                    v-if="authStore.isAdmin && !isDemo && selectedEndpoint.provider_type === 'OPENAI_COMPATIBLE'"
+                    @click="openNewEndpointVersion(selectedEndpoint)"
+                  >创建新版本</el-button>
+                  <el-button
+                    v-if="selectedEndpoint.url_validation_status === 'PASS'"
+                    type="primary"
+                    @click="goToCredentialSettings(selectedEndpoint)"
+                  >配置API凭证</el-button>
+                </div>
+              </div>
+              <el-descriptions :column="2" border size="small">
+                <el-descriptions-item label="Endpoint状态">
+                  <el-tag :type="endpointStateType(selectedEndpoint.state)">{{ selectedEndpoint.state }}</el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="URL安全">
+                  <el-tag :type="selectedEndpoint.url_validation_status === 'PASS' ? 'success' : 'warning'">
+                    {{ selectedEndpoint.url_validation_status }}
+                  </el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="Base URL">{{ selectedEndpoint.base_url || '系统固定' }}</el-descriptions-item>
+                <el-descriptions-item label="认证方式">{{ selectedEndpoint.auth_scheme || 'BEARER' }}</el-descriptions-item>
+                <el-descriptions-item label="API模式">{{ selectedEndpoint.api_mode || '系统固定' }}</el-descriptions-item>
+                <el-descriptions-item label="模型发现">{{ selectedEndpoint.models_endpoint_enabled ? '/models' : '手工登记' }}</el-descriptions-item>
+              </el-descriptions>
+
+              <div
+                v-if="authStore.isAdmin && !isDemo && selectedEndpoint.provider_type === 'OPENAI_COMPATIBLE' && selectedEndpoint.state === 'DRAFT'"
+                class="endpoint-validation"
+              >
+                <el-alert
+                  type="warning"
+                  :closable="false"
+                  title="该版本尚未验证URL，验证通过后才能配置API凭证。"
+                />
+                <el-checkbox v-model="endpointTransmissionConfirmed">
+                  我确认将研究数据发送到该第三方服务，并已评估其隐私、数据保留和安全政策
+                </el-checkbox>
+                <el-button
+                  type="primary"
+                  :loading="providerSubmitting"
+                  :disabled="!endpointTransmissionConfirmed"
+                  @click="validateProviderEndpoint(selectedEndpoint)"
+                >确认并验证URL</el-button>
+              </div>
+            </section>
+
             <el-form
-              v-if="authStore.isAdmin && !isDemo"
-              class="credential-form"
+              v-if="authStore.isAdmin && !isDemo && endpointEditorMode !== 'closed'"
+              class="credential-form endpoint-editor"
               label-position="top"
               autocomplete="off"
               @submit.prevent
             >
+              <div class="endpoint-editor__header">
+                <div>
+                  <strong>{{ endpointEditorMode === 'create' ? '新增服务商' : '创建Endpoint新版本' }}</strong>
+                  <span v-if="endpointEditorMode === 'new-version'">旧版本保持不可变，新配置保存为下一版本。</span>
+                </div>
+                <el-button text @click="cancelEndpointEdit">取消</el-button>
+              </div>
               <div class="credential-grid">
                 <el-form-item label="服务商名称">
                   <el-input v-model="endpointDisplayName" maxlength="120" autocomplete="off" />
@@ -114,6 +241,7 @@
                 </el-form-item>
                 <el-form-item label="HTTPS Base URL">
                   <el-input v-model="endpointBaseUrl" placeholder="https://provider.example/v1" autocomplete="off" />
+                  <div v-if="endpointEditorMode === 'new-version'" class="field-note">新版本必须保持相同Origin。</div>
                 </el-form-item>
                 <el-form-item label="API模式">
                   <el-select v-model="endpointApiMode">
@@ -143,24 +271,24 @@
                   <el-input v-model="endpointNotes" maxlength="500" autocomplete="off" />
                 </el-form-item>
               </div>
-              <el-checkbox v-model="endpointTransmissionConfirmed">
-                我确认将研究数据发送到该第三方服务，并已评估其隐私、数据保留和安全政策
-              </el-checkbox>
               <div class="credential-actions">
-                <el-button type="primary" :loading="providerSubmitting" @click="createProviderEndpoint">保存Endpoint DRAFT</el-button>
+                <el-button type="primary" :loading="providerSubmitting" @click="createProviderEndpoint">
+                  {{ endpointEditorMode === 'create' ? '保存服务商草稿' : '保存为新版本' }}
+                </el-button>
+                <el-button @click="cancelEndpointEdit">取消</el-button>
               </div>
               <p class="security-note">
-                保存DRAFT不会发送凭证。URL验证会检查HTTPS、DNS公网地址、实际连接目标和重定向；跨Origin跳转一律拒绝。
+                保存草稿不会发送凭证。保存后再单独确认第三方数据传输并验证URL。
               </p>
             </el-form>
           </el-tab-pane>
 
-          <el-tab-pane label="API凭证">
+          <el-tab-pane label="API凭证" name="credentials">
             <el-table :data="credentials" size="small">
               <el-table-column prop="provider" label="Provider" width="120" />
               <el-table-column prop="provider_type" label="类型" min-width="180" />
               <el-table-column label="Endpoint版本" min-width="190">
-                <template #default="{ row }">{{ row.endpoint_profile_id ? `${row.endpoint_profile_id}@${row.endpoint_profile_version}` : '系统固定' }}</template>
+                <template #default="{ row }">{{ credentialEndpointLabel(row) }}</template>
               </el-table-column>
               <el-table-column prop="credential_id" label="凭证名称" min-width="180" />
               <el-table-column label="已保存Key" width="130">
@@ -170,7 +298,7 @@
               <el-table-column prop="secret_store_status" label="Secret Store" width="140" />
               <el-table-column prop="last_verified_at" label="最后验证" min-width="190" />
               <el-table-column prop="last_error_code" label="错误代码" min-width="180" />
-              <el-table-column v-if="authStore.isAdmin && !isDemo" label="操作" width="150">
+              <el-table-column v-if="authStore.isAdmin && !isDemo" label="操作" width="150" fixed="right">
                 <template #default="{ row }">
                   <el-button link @click="verifyCredential(row)">验证</el-button>
                   <el-button link type="danger" @click="revokeCredential(row)">撤销</el-button>
@@ -192,15 +320,29 @@
                 :closable="false"
                 title="当前后端无法访问macOS Keychain；凭证保存保持关闭。请使用本机安全后端入口。"
               />
+              <el-alert
+                v-else-if="credentialProviderType === 'OPENAI_COMPATIBLE' && !validatedCompatibleEndpoints.length"
+                type="warning"
+                :closable="false"
+                title="暂无已验证的第三方服务商，请先完成服务商URL验证。"
+              />
               <div class="credential-grid">
                 <el-form-item label="Provider类型">
-                  <el-select v-model="credentialProviderType" :disabled="Boolean(activeCredential)">
+                  <el-select
+                    v-model="credentialProviderType"
+                    @change="handleCredentialProviderChange"
+                  >
                     <el-option label="OpenAI Official" value="OPENAI_OFFICIAL" />
                     <el-option label="OpenAI Compatible" value="OPENAI_COMPATIBLE" />
                   </el-select>
                 </el-form-item>
                 <el-form-item v-if="credentialProviderType === 'OPENAI_COMPATIBLE'" label="已验证Endpoint版本">
-                  <el-select v-model="selectedEndpointIdentity" @change="loadEndpointModels">
+                  <el-select
+                    v-model="credentialEndpointIdentity"
+                    placeholder="先验证服务商URL"
+                    :disabled="Boolean(activeCredential) || !validatedCompatibleEndpoints.length"
+                    @change="handleCredentialEndpointChange"
+                  >
                     <el-option
                       v-for="item in validatedCompatibleEndpoints"
                       :key="`${item.endpoint_profile_id}@${item.profile_version}`"
@@ -237,7 +379,7 @@
                 <el-button
                   type="primary"
                   :loading="credentialSubmitting"
-                  :disabled="Boolean(activeCredential) || credentialSecretStoreUnavailable"
+                  :disabled="Boolean(activeCredential) || credentialSubmissionBlocked"
                   @click="saveCredential(false)"
                 >
                   保存并验证
@@ -280,9 +422,9 @@
             </el-descriptions>
           </el-tab-pane>
 
-          <el-tab-pane label="模型目录">
+          <el-tab-pane label="模型目录" name="models">
             <div class="status-line">
-              <el-select v-model="selectedEndpointIdentity" placeholder="选择Endpoint版本" @change="loadEndpointModels">
+              <el-select v-model="selectedEndpointIdentity" placeholder="选择Endpoint版本" @change="handleSelectedEndpointChange">
                 <el-option
                   v-for="item in validatedCompatibleEndpoints"
                   :key="`${item.endpoint_profile_id}@${item.profile_version}`"
@@ -324,7 +466,7 @@
             </el-form>
           </el-tab-pane>
 
-          <el-tab-pane label="模型Profile">
+          <el-tab-pane label="模型Profile" name="profiles">
             <el-table :data="modelStatus?.profiles || []" size="small">
               <el-table-column prop="role" label="角色" min-width="180" />
               <el-table-column label="Profile" min-width="230">
@@ -356,7 +498,7 @@
                 </el-form-item>
                 <el-form-item label="价格版本">
                   <el-select v-model="assignmentPriceIdentity">
-                    <el-option v-for="item in endpointPrices.filter(price => price.endpoint_profile_id === selectedEndpoint?.endpoint_profile_id && price.endpoint_model_id === selectedAssignmentModel?.endpoint_model_id)" :key="`${item.price_version_id}@${item.price_version}`" :label="`${item.currency} ${item.input_price_per_million}/${item.output_price_per_million}`" :value="`${item.price_version_id}@${item.price_version}`" />
+                    <el-option v-for="item in endpointPrices.filter(price => price.endpoint_profile_id === selectedEndpoint?.endpoint_profile_id && price.endpoint_profile_version === selectedEndpoint?.profile_version && price.endpoint_model_id === selectedAssignmentModel?.endpoint_model_id)" :key="`${item.price_version_id}@${item.price_version}`" :label="`${item.currency} ${item.input_price_per_million}/${item.output_price_per_million}`" :value="`${item.price_version_id}@${item.price_version}`" />
                   </el-select>
                 </el-form-item>
                 <el-form-item label="凭证">
@@ -372,7 +514,7 @@
             </el-form>
           </el-tab-pane>
 
-          <el-tab-pane label="Prompt版本">
+          <el-tab-pane label="Prompt版本" name="prompts">
             <el-table :data="promptProfiles" size="small">
               <el-table-column prop="prompt_id" label="Prompt" min-width="230" />
               <el-table-column prop="prompt_version" label="版本" min-width="210" />
@@ -384,7 +526,7 @@
             </el-table>
           </el-tab-pane>
 
-          <el-tab-pane label="价格">
+          <el-tab-pane label="价格" name="prices">
             <el-table :data="endpointPrices" size="small">
               <el-table-column prop="endpoint_model_id" label="模型ID" min-width="180" />
               <el-table-column label="输入 / 1M" min-width="130"><template #default="{ row }">{{ row.input_price_per_million }} {{ row.currency }}</template></el-table-column>
@@ -414,7 +556,7 @@
             </el-form>
           </el-tab-pane>
 
-          <el-tab-pane label="预算">
+          <el-tab-pane label="预算" name="budget">
             <el-descriptions v-if="modelStatus?.budget" class="budget-summary" :column="3" border>
               <el-descriptions-item label="Daily Calls">{{ modelStatus.budget.daily_calls }} / {{ modelStatus.budget.max_daily_calls }}</el-descriptions-item>
               <el-descriptions-item label="Daily Cost">{{ modelStatus.budget.daily_cost }} / {{ modelStatus.budget.max_daily_cost }} {{ modelStatus.budget.currency }}</el-descriptions-item>
@@ -423,7 +565,7 @@
             <el-alert type="warning" :closable="false" title="价格版本未核验时，预算状态必须保持BLOCKED，不能执行付费模型调用。" />
           </el-tab-pane>
 
-          <el-tab-pane label="能力检查">
+          <el-tab-pane label="能力检查" name="capabilities">
             <el-table :data="modelStatus?.profiles || []" size="small">
               <el-table-column prop="role" label="角色" min-width="180" />
               <el-table-column label="Profile" min-width="230">
@@ -431,7 +573,7 @@
               </el-table-column>
               <el-table-column prop="capability" label="Capability" width="180" />
               <el-table-column prop="last_check" label="Last Check" min-width="190" />
-              <el-table-column v-if="authStore.isAdmin && !isDemo" label="操作" width="130">
+              <el-table-column v-if="authStore.isAdmin && !isDemo" label="操作" width="130" fixed="right">
                 <template #default="{ row }">
                   <el-button link @click="checkCapability(row)">能力检查</el-button>
                 </template>
@@ -439,7 +581,7 @@
             </el-table>
           </el-tab-pane>
 
-          <el-tab-pane label="调用记录">
+          <el-tab-pane label="调用记录" name="runs">
             <el-table v-if="authStore.isAdmin && !isDemo" :data="modelRuns" size="small">
               <el-table-column prop="created_at" label="时间" min-width="190" />
               <el-table-column prop="run_mode" label="模式" min-width="190" />
@@ -455,7 +597,7 @@
         </el-tabs>
         <el-alert class="model-secret-notice" type="info" :closable="false" title="浏览器不会直接访问OpenAI，也不提供显示已保存Key、任意Prompt或未登记模型调用入口。" />
       </el-tab-pane>
-      <el-tab-pane label="完整性与版本">
+      <el-tab-pane v-if="!modelsOnly" label="完整性与版本" name="integrity">
         <h4>完整性</h4><pre>{{ pretty(integrity) }}</pre>
         <h4>版本（已脱敏）</h4><pre>{{ pretty(versions) }}</pre>
       </el-tab-pane>
@@ -465,7 +607,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -477,6 +619,7 @@ import {
   type ModelRunSummary,
   type ModelRuntimeStatus,
   type PromptProfileSummary,
+  type ProviderConfigurationStatus,
   type ProviderEndpointProfile
 } from '@/api/alphaguardModels'
 import {
@@ -488,10 +631,39 @@ import {
   type SystemReadiness
 } from '@/api/alphaguardOperations'
 
+type ModelSettingsTab =
+  | 'providers'
+  | 'credentials'
+  | 'models'
+  | 'profiles'
+  | 'prompts'
+  | 'prices'
+  | 'budget'
+  | 'capabilities'
+  | 'runs'
+
+type EndpointEditorMode = 'closed' | 'create' | 'new-version'
+
+const props = withDefaults(defineProps<{
+  modelsOnly?: boolean
+  embedded?: boolean
+  initialModelTab?: ModelSettingsTab
+}>(), {
+  modelsOnly: false,
+  embedded: false,
+  initialModelTab: 'providers'
+})
+const emit = defineEmits<{
+  (event: 'model-tab-change', tab: ModelSettingsTab): void
+}>()
+
 const authStore = useAuthStore()
 const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 const isCredentialHost =
   import.meta.env.VITE_ALPHAGUARD_CREDENTIAL_HOST === 'true'
+const modelsOnly = computed(() => isCredentialHost || props.modelsOnly)
+const activeOperationTab = ref(modelsOnly.value ? 'models' : 'services')
+const activeModelTab = ref<ModelSettingsTab>(props.initialModelTab)
 const loading = ref(false)
 const loadError = ref('')
 const readiness = ref<SystemReadiness | null>(null)
@@ -509,11 +681,14 @@ const modelRuns = ref<ModelRunSummary[]>([])
 const providerEndpoints = ref<ProviderEndpointProfile[]>([])
 const endpointModels = ref<EndpointModelDefinition[]>([])
 const endpointPrices = ref<EndpointPriceVersion[]>([])
+const configurationStatus = ref<ProviderConfigurationStatus | null>(null)
+const lastConfigurationError = ref('')
 const lastCredentialResult = ref<ModelCredentialMutationResult | null>(null)
 const credentialProviderType = ref<'OPENAI_OFFICIAL' | 'OPENAI_COMPATIBLE'>('OPENAI_OFFICIAL')
 const credentialName = ref('openai-primary')
 const credentialBaseUrl = ref('https://api.openai.com/v1')
 const selectedEndpointIdentity = ref('')
+const credentialEndpointIdentity = ref('')
 const credentialApiKey = ref('')
 const credentialSubmitting = ref(false)
 const credentialSecretStoreStatus = ref<'READY' | 'UNAVAILABLE'>('UNAVAILABLE')
@@ -525,6 +700,7 @@ const endpointModelsEnabled = ref(true)
 const endpointStructuredMode = ref<'NATIVE_JSON_SCHEMA' | 'TOOL_CALL' | 'JSON_ONLY' | 'UNKNOWN'>('UNKNOWN')
 const endpointNotes = ref('')
 const endpointTransmissionConfirmed = ref(false)
+const endpointEditorMode = ref<EndpointEditorMode>('closed')
 const providerSubmitting = ref(false)
 const modelRemoteName = ref('')
 const modelDisplayName = ref('')
@@ -554,15 +730,6 @@ const assignmentSubmitting = ref(false)
 const selectedEndpoint = computed(() => providerEndpoints.value.find(
   item => `${item.endpoint_profile_id}@${item.profile_version}` === selectedEndpointIdentity.value
 ) || null)
-const activeCredential = computed(() => credentials.value.find(item => {
-  if (item.status === 'REVOKED') return false
-  if (credentialProviderType.value === 'OPENAI_OFFICIAL') {
-    return item.provider_type === 'OPENAI_OFFICIAL'
-  }
-  return item.provider_type === 'OPENAI_COMPATIBLE'
-    && item.endpoint_profile_id === selectedEndpoint.value?.endpoint_profile_id
-    && item.endpoint_profile_version === selectedEndpoint.value?.profile_version
-}) || null)
 const compatibleCredentials = computed(() => credentials.value.filter(
   item => item.provider_type === 'OPENAI_COMPATIBLE'
     && item.status !== 'REVOKED'
@@ -575,6 +742,18 @@ const compatibleEndpoints = computed(() => providerEndpoints.value.filter(
 const validatedCompatibleEndpoints = computed(() => compatibleEndpoints.value.filter(
   item => item.url_validation_status === 'PASS' && item.enabled
 ))
+const selectedCredentialEndpoint = computed(() => validatedCompatibleEndpoints.value.find(
+  item => `${item.endpoint_profile_id}@${item.profile_version}` === credentialEndpointIdentity.value
+) || null)
+const activeCredential = computed(() => credentials.value.find(item => {
+  if (item.status === 'REVOKED') return false
+  if (credentialProviderType.value === 'OPENAI_OFFICIAL') {
+    return item.provider_type === 'OPENAI_OFFICIAL'
+  }
+  return item.provider_type === 'OPENAI_COMPATIBLE'
+    && item.endpoint_profile_id === selectedCredentialEndpoint.value?.endpoint_profile_id
+    && item.endpoint_profile_version === selectedCredentialEndpoint.value?.profile_version
+}) || null)
 const selectedPriceModel = computed(() => endpointModels.value.find(
   item => `${item.endpoint_model_id}@${item.model_version}` === priceModelIdentity.value
 ) || null)
@@ -587,14 +766,117 @@ const selectedAssignmentPrice = computed(() => endpointPrices.value.find(
 const credentialSecretStoreUnavailable = computed(
   () => credentialSecretStoreStatus.value !== 'READY'
 )
+const credentialSubmissionBlocked = computed(
+  () => credentialSecretStoreUnavailable.value
+    || (credentialProviderType.value === 'OPENAI_COMPATIBLE' && !selectedCredentialEndpoint.value)
+)
 const statusType = computed(() => readiness.value?.overall_status === 'READY_FOR_PAPER' ? 'success' : readiness.value?.overall_status === 'UNSAFE' ? 'danger' : 'warning')
 const short = (value?: string) => value ? value.slice(0, 12) : '—'
 const pretty = (value: unknown) => JSON.stringify(value, null, 2)
+
+watch(
+  () => props.initialModelTab,
+  tab => {
+    activeModelTab.value = tab
+  }
+)
+watch(activeModelTab, tab => {
+  emit('model-tab-change', tab)
+  if (tab !== 'credentials') credentialApiKey.value = ''
+  if (tab !== 'providers') endpointTransmissionConfirmed.value = false
+})
+
+function endpointIdentity(endpoint: ProviderEndpointProfile): string {
+  return `${endpoint.endpoint_profile_id}@${endpoint.profile_version}`
+}
+
+function compatibleCredentialDefaultName(endpoint: ProviderEndpointProfile | null): string {
+  if (!endpoint) return 'compatible-primary'
+  return `${endpoint.endpoint_profile_id}-${endpoint.profile_version}-primary`.slice(0, 100)
+}
+
+function configurationErrorMessage(action: string, error: unknown): string {
+  const candidate = error as {
+    message?: string
+    response?: {
+      status?: number
+      data?: {
+        detail?: string | {
+          error_code?: string
+          sanitized_message?: string
+        }
+      }
+    }
+  }
+  const detail = candidate.response?.data?.detail
+  const errorCode = typeof detail === 'object' && detail
+    ? detail.error_code
+    : undefined
+  const sanitizedMessage = typeof detail === 'object' && detail
+    ? detail.sanitized_message
+    : typeof detail === 'string'
+      ? detail
+      : candidate.message
+  const status = candidate.response?.status
+  return [
+    action,
+    status ? `HTTP ${status}` : 'NETWORK_ERROR',
+    errorCode || 'REQUEST_FAILED',
+    sanitizedMessage || '请求失败且后端未返回可展示摘要'
+  ].join(' · ')
+}
+
+function showConfigurationFailure(action: string, error: unknown) {
+  lastConfigurationError.value = configurationErrorMessage(action, error)
+  ElMessage.error(lastConfigurationError.value)
+}
+
+function synchronizeEndpointSelections() {
+  if (!providerEndpoints.value.some(item => endpointIdentity(item) === selectedEndpointIdentity.value)) {
+    const preferred = validatedCompatibleEndpoints.value[0] || compatibleEndpoints.value[0] || providerEndpoints.value[0]
+    selectedEndpointIdentity.value = preferred ? endpointIdentity(preferred) : ''
+  }
+  if (!validatedCompatibleEndpoints.value.some(item => endpointIdentity(item) === credentialEndpointIdentity.value)) {
+    const preferred = validatedCompatibleEndpoints.value[0]
+    credentialEndpointIdentity.value = preferred ? endpointIdentity(preferred) : ''
+  }
+  if (selectedEndpoint.value) {
+    assignmentProfileVersion.value = selectedEndpoint.value.profile_version
+  }
+}
 
 async function load() {
   loading.value = true
   loadError.value = ''
   try {
+    if (modelsOnly.value) {
+      const [m, c, p, runs, endpoints, prices] = await Promise.all([
+        alphaguardModelsApi.status(),
+        alphaguardModelsApi.credentials(),
+        alphaguardModelsApi.prompts(),
+        authStore.isAdmin && !isDemo
+          ? alphaguardModelsApi.runs(100)
+          : Promise.resolve({ data: { items: [] as ModelRunSummary[] } }),
+        alphaguardModelsApi.endpoints(),
+        alphaguardModelsApi.prices()
+      ])
+      modelStatus.value = m.data
+      credentials.value = c.data.items
+      credentialSecretStoreStatus.value = c.data.secret_store_status
+      promptProfiles.value = p.data.items
+      modelRuns.value = runs.data.items
+      providerEndpoints.value = endpoints.data.items
+      endpointPrices.value = prices.data.items
+      synchronizeEndpointSelections()
+      await Promise.all([
+        loadEndpointModels(),
+        loadSelectedEndpointConfiguration()
+      ])
+      if (activeCredential.value) {
+        credentialName.value = activeCredential.value.credential_id
+      }
+      return
+    }
     const [r, s, d, j, a, v, i, m, c, p, runs, endpoints, prices] = await Promise.all([
       alphaguardOperationsApi.readiness(),
       alphaguardOperationsApi.services(),
@@ -627,11 +909,11 @@ async function load() {
     modelRuns.value = runs.data.items
     providerEndpoints.value = endpoints.data.items
     endpointPrices.value = prices.data.items
-    if (!selectedEndpointIdentity.value) {
-      const preferred = validatedCompatibleEndpoints.value[0] || compatibleEndpoints.value[0]
-      if (preferred) selectedEndpointIdentity.value = `${preferred.endpoint_profile_id}@${preferred.profile_version}`
-    }
-    await loadEndpointModels()
+    synchronizeEndpointSelections()
+    await Promise.all([
+      loadEndpointModels(),
+      loadSelectedEndpointConfiguration()
+    ])
     if (activeCredential.value) {
       credentialName.value = activeCredential.value.credential_id
     }
@@ -652,13 +934,169 @@ async function loadEndpointModels() {
   )
   endpointModels.value = response.data.items
 }
+
+async function loadSelectedEndpointConfiguration() {
+  if (!selectedEndpoint.value || selectedEndpoint.value.provider_type !== 'OPENAI_COMPATIBLE') {
+    configurationStatus.value = null
+    return
+  }
+  try {
+    const response = await alphaguardModelsApi.endpointConfigurationStatus(
+      selectedEndpoint.value.endpoint_profile_id,
+      selectedEndpoint.value.profile_version
+    )
+    configurationStatus.value = response.data
+  } catch (error) {
+    configurationStatus.value = null
+    showConfigurationFailure('刷新配置完整性失败', error)
+  }
+}
+
+async function handleSelectedEndpointChange() {
+  priceModelIdentity.value = ''
+  assignmentModelIdentity.value = ''
+  assignmentPriceIdentity.value = ''
+  assignmentCredentialId.value = ''
+  assignmentProfileVersion.value = selectedEndpoint.value?.profile_version || 'v1'
+  await Promise.all([
+    loadEndpointModels(),
+    loadSelectedEndpointConfiguration()
+  ])
+}
+
+function clearEndpointEditor() {
+  endpointEditorMode.value = 'closed'
+  endpointDisplayName.value = ''
+  endpointBaseUrl.value = ''
+  endpointApiMode.value = 'OPENAI_CHAT_COMPLETIONS'
+  endpointAuthScheme.value = 'BEARER'
+  endpointModelsEnabled.value = true
+  endpointStructuredMode.value = 'UNKNOWN'
+  endpointNotes.value = ''
+  endpointTransmissionConfirmed.value = false
+}
+
+function openCreateProviderEndpoint() {
+  clearEndpointEditor()
+  endpointEditorMode.value = 'create'
+}
+
+type EndpointRow = Record<string, unknown> | ProviderEndpointProfile
+
+function openNewEndpointVersion(row: EndpointRow) {
+  const endpoint = 'endpoint_profile_id' in row && 'profile_version' in row
+    ? endpointFromRow(row as Record<string, unknown>)
+    : null
+  if (!endpoint || endpoint.provider_type !== 'OPENAI_COMPATIBLE') {
+    ElMessage.error('只有第三方兼容服务商可以创建新版本')
+    return
+  }
+  selectedEndpointIdentity.value = endpointIdentity(endpoint)
+  endpointEditorMode.value = 'new-version'
+  endpointDisplayName.value = endpoint.display_name
+  endpointBaseUrl.value = endpoint.base_url || ''
+  endpointApiMode.value = endpoint.api_mode || 'OPENAI_CHAT_COMPLETIONS'
+  endpointAuthScheme.value = endpoint.auth_scheme || 'BEARER'
+  endpointModelsEnabled.value = endpoint.models_endpoint_enabled !== false
+  endpointStructuredMode.value = endpoint.structured_output_mode || 'UNKNOWN'
+  endpointNotes.value = endpoint.notes || ''
+  endpointTransmissionConfirmed.value = false
+}
+
+function cancelEndpointEdit() {
+  clearEndpointEditor()
+}
+
+async function continueProviderEndpoint(row: EndpointRow) {
+  const endpoint = endpointFromRow(row)
+  if (!endpoint) return
+  selectedEndpointIdentity.value = endpointIdentity(endpoint)
+  endpointTransmissionConfirmed.value = false
+  endpointEditorMode.value = 'closed'
+  await handleSelectedEndpointChange()
+}
+
+function goToCredentialSettings(endpoint: ProviderEndpointProfile) {
+  selectedEndpointIdentity.value = endpointIdentity(endpoint)
+  if (endpoint.provider_type === 'OPENAI_COMPATIBLE') {
+    credentialProviderType.value = 'OPENAI_COMPATIBLE'
+    credentialEndpointIdentity.value = endpointIdentity(endpoint)
+    const existing = credentials.value.find(item => item.status !== 'REVOKED'
+      && item.provider_type === 'OPENAI_COMPATIBLE'
+      && item.endpoint_profile_id === endpoint.endpoint_profile_id
+      && item.endpoint_profile_version === endpoint.profile_version)
+    credentialName.value = existing?.credential_id || compatibleCredentialDefaultName(endpoint)
+  }
+  activeModelTab.value = 'credentials'
+}
+
+function handleCredentialProviderChange() {
+  credentialApiKey.value = ''
+  if (credentialProviderType.value === 'OPENAI_COMPATIBLE') {
+    const preferred = validatedCompatibleEndpoints.value[0]
+    credentialEndpointIdentity.value = preferred ? endpointIdentity(preferred) : ''
+    selectedEndpointIdentity.value = credentialEndpointIdentity.value
+    const existing = credentials.value.find(item => item.status !== 'REVOKED'
+      && item.provider_type === 'OPENAI_COMPATIBLE'
+      && item.endpoint_profile_id === preferred?.endpoint_profile_id
+      && item.endpoint_profile_version === preferred?.profile_version)
+    credentialName.value = existing?.credential_id || compatibleCredentialDefaultName(preferred || null)
+    return
+  }
+  const official = credentials.value.find(item => item.status !== 'REVOKED' && item.provider_type === 'OPENAI_OFFICIAL')
+  credentialName.value = official?.credential_id || 'openai-primary'
+}
+
+function handleCredentialEndpointChange() {
+  credentialApiKey.value = ''
+  if (selectedCredentialEndpoint.value) {
+    selectedEndpointIdentity.value = endpointIdentity(selectedCredentialEndpoint.value)
+    const existing = credentials.value.find(item => item.status !== 'REVOKED'
+      && item.provider_type === 'OPENAI_COMPATIBLE'
+      && item.endpoint_profile_id === selectedCredentialEndpoint.value?.endpoint_profile_id
+      && item.endpoint_profile_version === selectedCredentialEndpoint.value?.profile_version)
+    credentialName.value = existing?.credential_id || compatibleCredentialDefaultName(selectedCredentialEndpoint.value)
+  }
+}
+
+function endpointStateType(state: ProviderEndpointProfile['state']): 'success' | 'warning' | 'danger' | 'info' {
+  if (state === 'READY' || state === 'URL_VALIDATED' || state === 'CAPABILITY_CHECKED') return 'success'
+  if (state === 'DRAFT' || state === 'DEGRADED') return 'warning'
+  if (state === 'REJECTED' || state === 'DISABLED') return 'danger'
+  return 'info'
+}
+
 async function createProviderEndpoint() {
   if (!endpointDisplayName.value.trim() || !endpointBaseUrl.value.trim()) {
     ElMessage.error('请填写服务商名称和HTTPS Base URL')
     return
   }
+  if (endpointEditorMode.value === 'new-version' && selectedEndpoint.value?.provider_type !== 'OPENAI_COMPATIBLE') {
+    ElMessage.error('请选择已有第三方服务商后再创建新版本')
+    return
+  }
+  if (endpointEditorMode.value === 'create') {
+    try {
+      const requestedOrigin = new URL(endpointBaseUrl.value.trim()).origin
+      const existing = compatibleEndpoints.value.find(item => {
+        if (!item.base_url) return false
+        return new URL(item.base_url).origin === requestedOrigin
+      })
+      if (existing) {
+        clearEndpointEditor()
+        selectedEndpointIdentity.value = endpointIdentity(existing)
+        ElMessage.warning('该服务地址已经登记，请继续配置已有服务商或显式创建新版本')
+        return
+      }
+    } catch {
+      ElMessage.error('请输入合法的HTTPS Base URL')
+      return
+    }
+  }
   providerSubmitting.value = true
   try {
+    lastConfigurationError.value = ''
+    const editorMode = endpointEditorMode.value
     const response = await alphaguardModelsApi.createEndpoint({
       display_name: endpointDisplayName.value.trim(),
       provider_type: 'OPENAI_COMPATIBLE',
@@ -667,25 +1105,36 @@ async function createProviderEndpoint() {
       auth_scheme: endpointAuthScheme.value,
       models_endpoint_enabled: endpointModelsEnabled.value,
       structured_output_mode: endpointStructuredMode.value,
-      notes: endpointNotes.value.trim() || undefined
+      notes: endpointNotes.value.trim() || undefined,
+      ...(endpointEditorMode.value === 'new-version'
+        ? {
+            endpoint_profile_id: selectedEndpoint.value?.endpoint_profile_id,
+            create_new_version: true
+          }
+        : {})
     })
     const item = response.data.item
-    selectedEndpointIdentity.value = `${item.endpoint_profile_id}@${item.profile_version}`
-    endpointDisplayName.value = ''
-    endpointBaseUrl.value = ''
-    endpointNotes.value = ''
-    endpointTransmissionConfirmed.value = false
-    ElMessage.success('Endpoint Profile已保存为DRAFT，请继续执行安全验证')
+    const identity = endpointIdentity(item)
+    selectedEndpointIdentity.value = identity
+    clearEndpointEditor()
+    ElMessage.success(
+      editorMode === 'new-version'
+        ? 'Endpoint新版本已保存为DRAFT，请继续执行安全验证'
+        : '服务商草稿已保存，请继续执行安全验证'
+    )
     await load()
+    selectedEndpointIdentity.value = identity
+  } catch (error) {
+    showConfigurationFailure('保存Endpoint失败', error)
   } finally {
     providerSubmitting.value = false
   }
 }
-function endpointFromRow(row: Record<string, unknown>): ProviderEndpointProfile | null {
+function endpointFromRow(row: EndpointRow): ProviderEndpointProfile | null {
   if (typeof row.endpoint_profile_id !== 'string' || typeof row.profile_version !== 'string') return null
   return providerEndpoints.value.find(item => item.endpoint_profile_id === row.endpoint_profile_id && item.profile_version === row.profile_version) || null
 }
-async function validateProviderEndpoint(row: Record<string, unknown>) {
+async function validateProviderEndpoint(row: EndpointRow) {
   const endpoint = endpointFromRow(row)
   if (!endpoint || endpoint.provider_type !== 'OPENAI_COMPATIBLE') return
   if (!endpointTransmissionConfirmed.value) {
@@ -699,14 +1148,25 @@ async function validateProviderEndpoint(row: Record<string, unknown>) {
   )
   providerSubmitting.value = true
   try {
+    lastConfigurationError.value = ''
     const response = await alphaguardModelsApi.validateEndpoint(endpoint.endpoint_profile_id, {
       profile_version: endpoint.profile_version,
       confirm_data_transmission: true
     })
-    selectedEndpointIdentity.value = `${response.data.endpoint_profile_id}@${response.data.profile_version}`
-    ElMessage.success(response.data.url_validation_status === 'PASS' ? 'Endpoint URL安全验证通过' : 'Endpoint已安全拒绝')
+    const validatedIdentity = `${response.data.endpoint_profile_id}@${response.data.profile_version}`
+    selectedEndpointIdentity.value = validatedIdentity
+    ElMessage.success(response.data.url_validation_status === 'PASS' ? 'Endpoint URL安全验证通过，可配置API凭证' : 'Endpoint已安全拒绝')
     await load()
+    if (response.data.url_validation_status === 'PASS') {
+      credentialProviderType.value = 'OPENAI_COMPATIBLE'
+      credentialEndpointIdentity.value = validatedIdentity
+      handleCredentialEndpointChange()
+      activeModelTab.value = 'credentials'
+    }
+  } catch (error) {
+    showConfigurationFailure('验证Endpoint失败', error)
   } finally {
+    endpointTransmissionConfirmed.value = false
     providerSubmitting.value = false
   }
 }
@@ -717,6 +1177,7 @@ async function createEndpointModelDefinition() {
   }
   modelSubmitting.value = true
   try {
+    lastConfigurationError.value = ''
     await alphaguardModelsApi.createEndpointModel(selectedEndpoint.value.endpoint_profile_id, {
       endpoint_profile_version: selectedEndpoint.value.profile_version,
       remote_model_name: modelRemoteName.value.trim(),
@@ -731,7 +1192,12 @@ async function createEndpointModelDefinition() {
     modelDisplayName.value = ''
     modelRoles.value = []
     ElMessage.success('Endpoint模型定义已create-only登记')
-    await loadEndpointModels()
+    await Promise.all([
+      loadEndpointModels(),
+      loadSelectedEndpointConfiguration()
+    ])
+  } catch (error) {
+    showConfigurationFailure('登记模型失败', error)
   } finally {
     modelSubmitting.value = false
   }
@@ -743,6 +1209,7 @@ async function discoverEndpointModelCatalog() {
   }
   modelSubmitting.value = true
   try {
+    lastConfigurationError.value = ''
     const credential = compatibleCredentials.value[0]
     const response = await alphaguardModelsApi.discoverEndpointModels(
       selectedEndpoint.value.endpoint_profile_id,
@@ -753,6 +1220,9 @@ async function discoverEndpointModelCatalog() {
     )
     endpointModels.value = response.data.items
     ElMessage.success(response.data.items.length ? '模型目录快照已保存' : 'Provider未返回模型，请手工登记')
+    await loadSelectedEndpointConfiguration()
+  } catch (error) {
+    showConfigurationFailure('探测模型目录失败', error)
   } finally {
     modelSubmitting.value = false
   }
@@ -764,6 +1234,7 @@ async function createEndpointPriceVersion() {
   }
   priceSubmitting.value = true
   try {
+    lastConfigurationError.value = ''
     await alphaguardModelsApi.createPrice({
       endpoint_profile_id: selectedEndpoint.value.endpoint_profile_id,
       endpoint_profile_version: selectedEndpoint.value.profile_version,
@@ -784,6 +1255,9 @@ async function createEndpointPriceVersion() {
     ElMessage.success('Decimal价格版本已create-only登记')
     const prices = await alphaguardModelsApi.prices()
     endpointPrices.value = prices.data.items
+    await loadSelectedEndpointConfiguration()
+  } catch (error) {
+    showConfigurationFailure('登记价格失败', error)
   } finally {
     priceSubmitting.value = false
   }
@@ -795,6 +1269,7 @@ async function assignCompatibleProfile() {
   }
   assignmentSubmitting.value = true
   try {
+    lastConfigurationError.value = ''
     await alphaguardModelsApi.assignCompatibleProfile({
       role: assignmentRole.value,
       profile_id: assignmentProfileId.value.trim(),
@@ -811,6 +1286,8 @@ async function assignCompatibleProfile() {
     })
     ElMessage.success(`${assignmentRole.value} Profile已显式绑定`)
     await load()
+  } catch (error) {
+    showConfigurationFailure('创建Profile与Assignment失败', error)
   } finally {
     assignmentSubmitting.value = false
   }
@@ -819,15 +1296,20 @@ function handleAssignmentRoleChange() {
   assignmentProfileId.value = assignmentRole.value === 'NORMAL_TRADER'
     ? 'alphaguard_normal_compatible'
     : 'alphaguard_top_compatible'
+  assignmentProfileVersion.value = selectedEndpoint.value?.profile_version || 'v1'
 }
 async function saveCredential(replace: boolean) {
+  if (credentialProviderType.value === 'OPENAI_COMPATIBLE' && !selectedCredentialEndpoint.value) {
+    ElMessage.error('请先验证服务商URL，再配置兼容服务凭证')
+    return
+  }
   if (!credentialApiKey.value) {
     ElMessage.error('请输入API Key')
     return
   }
   const resolvedCredentialName = credentialProviderType.value === 'OPENAI_COMPATIBLE'
-    && credentialName.value.trim() === 'openai-primary'
-    ? `${selectedEndpoint.value?.endpoint_profile_id || 'compatible'}-primary`
+    && ['openai-primary', 'compatible-primary'].includes(credentialName.value.trim())
+    ? compatibleCredentialDefaultName(selectedCredentialEndpoint.value)
     : credentialName.value.trim()
   const payload = {
     api_key: credentialApiKey.value,
@@ -838,6 +1320,7 @@ async function saveCredential(replace: boolean) {
   credentialApiKey.value = ''
   credentialSubmitting.value = true
   try {
+    lastConfigurationError.value = ''
     const response = replace && activeCredential.value
       ? await alphaguardModelsApi.replaceCredential(
           activeCredential.value.credential_id,
@@ -846,18 +1329,27 @@ async function saveCredential(replace: boolean) {
       : await alphaguardModelsApi.createCredential({
           provider: credentialProviderType.value === 'OPENAI_COMPATIBLE' ? 'openai_compatible' : 'openai',
           provider_type: credentialProviderType.value,
-          endpoint_profile_id: credentialProviderType.value === 'OPENAI_COMPATIBLE' ? selectedEndpoint.value?.endpoint_profile_id : undefined,
-          endpoint_profile_version: credentialProviderType.value === 'OPENAI_COMPATIBLE' ? selectedEndpoint.value?.profile_version : undefined,
+          endpoint_profile_id: credentialProviderType.value === 'OPENAI_COMPATIBLE' ? selectedCredentialEndpoint.value?.endpoint_profile_id : undefined,
+          endpoint_profile_version: credentialProviderType.value === 'OPENAI_COMPATIBLE' ? selectedCredentialEndpoint.value?.profile_version : undefined,
           credential_name: resolvedCredentialName,
           ...payload
         })
     lastCredentialResult.value = response.data
-    ElMessage.success(
-      response.data.stored
-        ? replace ? '新凭证已验证并安全替换' : '凭证已写入安全Secret Store'
-        : '凭证验证未通过，未保存'
-    )
+    if (!response.data.stored) {
+      lastConfigurationError.value = [
+        '凭证验证未通过，未保存',
+        response.data.last_error_code || 'VALIDATION_FAILED',
+        response.data.sanitized_message || '后端已安全拒绝本次提交'
+      ].join(' · ')
+      ElMessage.error(lastConfigurationError.value)
+    } else {
+      ElMessage.success(
+        replace ? '新凭证已验证并安全替换' : '凭证已写入安全Secret Store'
+      )
+    }
     await load()
+  } catch (error) {
+    showConfigurationFailure(replace ? '替换凭证失败' : '保存凭证失败', error)
   } finally {
     payload.api_key = ''
     credentialApiKey.value = ''
@@ -876,16 +1368,31 @@ function credentialFromRow(
     provider: row.provider
   }
 }
+function credentialEndpointLabel(row: Record<string, unknown>): string {
+  if (typeof row.endpoint_profile_id !== 'string') return '系统固定'
+  const endpoint = providerEndpoints.value.find(item =>
+    item.endpoint_profile_id === row.endpoint_profile_id
+    && item.profile_version === row.endpoint_profile_version
+  )
+  return endpoint
+    ? `${endpoint.display_name} @ ${endpoint.profile_version}`
+    : `第三方服务商 @ ${String(row.endpoint_profile_version || '未知版本')}`
+}
 async function verifyCredential(row: Record<string, unknown>) {
   const credential = credentialFromRow(row)
   if (!credential) {
     ElMessage.error('凭证身份无效，验证已阻断')
     return
   }
-  const response = await alphaguardModelsApi.verifyCredential(credential.credential_id)
-  lastCredentialResult.value = response.data
-  ElMessage.success('凭证能力检查已完成')
-  await load()
+  try {
+    lastConfigurationError.value = ''
+    const response = await alphaguardModelsApi.verifyCredential(credential.credential_id)
+    lastCredentialResult.value = response.data
+    ElMessage.success('凭证能力检查已完成')
+    await load()
+  } catch (error) {
+    showConfigurationFailure('验证凭证失败', error)
+  }
 }
 async function revokeCredential(row: Record<string, unknown>) {
   const credential = credentialFromRow(row)
@@ -898,10 +1405,15 @@ async function revokeCredential(row: Record<string, unknown>) {
     '确认撤销模型凭证',
     { type: 'warning', confirmButtonText: '撤销凭证' }
   )
-  await alphaguardModelsApi.revokeCredential(credential.credential_id)
-  lastCredentialResult.value = null
-  ElMessage.success('凭证已撤销')
-  await load()
+  try {
+    lastConfigurationError.value = ''
+    await alphaguardModelsApi.revokeCredential(credential.credential_id)
+    lastCredentialResult.value = null
+    ElMessage.success('凭证已撤销')
+    await load()
+  } catch (error) {
+    showConfigurationFailure('撤销凭证失败', error)
+  }
 }
 async function checkCapability(row: Record<string, unknown>) {
   if (typeof row.profile_id !== 'string' || typeof row.profile_version !== 'string') {
@@ -946,13 +1458,36 @@ onMounted(load)
 .safety-strip > div { min-height: 58px; padding: 10px 14px; border: 1px solid var(--el-border-color-light); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .safety-strip span { color: var(--el-text-color-secondary); font-size: 12px; }
 .header-row, .status-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.status-line > span { min-width: 0; flex: 1 1 320px; overflow-wrap: anywhere; }
+.provider-toolbar, .provider-detail__header, .endpoint-editor__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.provider-toolbar { margin-bottom: 14px; }
+.provider-toolbar > div, .provider-detail__header > div:first-child, .endpoint-editor__header > div { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.provider-toolbar span, .provider-detail__header span, .endpoint-editor__header span, .field-note { color: var(--el-text-color-secondary); font-size: 12px; }
+.provider-detail { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--el-border-color-light); }
+.provider-detail__header { margin-bottom: 14px; }
+.provider-detail__actions { display: flex; gap: 8px; }
+.endpoint-validation { display: grid; gap: 14px; align-items: start; margin-top: 16px; }
+.endpoint-validation .el-button { width: fit-content; }
+.endpoint-editor__header { margin-bottom: 14px; }
 .admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--el-border-color-light); }
 .model-tabs, .budget-summary, .model-secret-notice, .capability-result { margin-top: 16px; }
+.configuration-feedback, .configuration-completeness { margin-top: 14px; }
+.configuration-completeness { padding: 14px; border: 1px solid var(--el-border-color-light); border-radius: 6px; background: var(--el-fill-color-lighter); }
+.configuration-completeness__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.configuration-completeness__header > div { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.configuration-completeness__header span { color: var(--el-text-color-secondary); font-size: 12px; }
+.configuration-completeness__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+.configuration-component { display: grid; gap: 6px; align-content: start; padding: 10px; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; background: var(--el-bg-color); }
+.configuration-component small { color: var(--el-text-color-secondary); overflow-wrap: anywhere; }
 .credential-form { margin-top: 18px; padding: 16px; border: 1px solid var(--el-border-color-light); border-radius: 6px; }
 .credential-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
 .credential-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .security-note { margin: 12px 0 0; color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.6; }
 pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--el-fill-color-light); border-radius: 6px; white-space: pre-wrap; }
+:deep(.operations-tabs--embedded) { border: 0; box-shadow: none; }
+:deep(.operations-tabs--embedded > .el-tabs__header),
+:deep(.model-tabs--embedded > .el-tabs__header) { display: none; }
+:deep(.operations-tabs--embedded > .el-tabs__content) { padding: 0; }
 @media (max-width: 700px) {
   .safety-strip, .credential-grid { grid-template-columns: 1fr; }
 }

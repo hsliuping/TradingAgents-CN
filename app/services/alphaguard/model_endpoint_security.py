@@ -42,6 +42,11 @@ _BLOCKED_HOST_SUFFIXES = (
 )
 _REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
 _INVALID_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+_PROXY_FAKE_IP_NETWORKS = (ipaddress.ip_network("198.18.0.0/15"),)
+_PINNED_DOH_RESOLVERS = (
+    ("https://cloudflare-dns.com/dns-query", "1.1.1.1"),
+    ("https://dns.google/resolve", "8.8.8.8"),
+)
 
 
 class EndpointSecurityError(ValueError):
@@ -102,6 +107,14 @@ def _safe_ip(value: str) -> str:
             "endpoint resolves to a non-public network address",
         )
     return parsed.compressed
+
+
+def _is_proxy_fake_ip(value: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(value.split("%", 1)[0])
+    except ValueError:
+        return False
+    return any(parsed in network for network in _PROXY_FAKE_IP_NETWORKS)
 
 
 def parse_registered_endpoint(value: str) -> ParsedEndpoint:
@@ -353,15 +366,76 @@ def build_pinned_client(
     )
 
 
+def _resolve_via_pinned_doh(hostname: str) -> list[str]:
+    """Resolve proxy Fake-IP hostnames without trusting the proxy DNS answer."""
+    for resolver_url, pinned_ip in _PINNED_DOH_RESOLVERS:
+        endpoint = parse_registered_endpoint(resolver_url)
+        try:
+            with build_pinned_client(
+                endpoint=endpoint,
+                resolved_ips=(pinned_ip,),
+                timeout_seconds=8,
+            ) as client:
+                addresses: set[str] = set()
+                for record_type in ("A", "AAAA"):
+                    response = client.get(
+                        endpoint.base_url,
+                        params={"name": hostname, "type": record_type},
+                        headers={"accept": "application/dns-json"},
+                    )
+                    if response.status_code != 200:
+                        raise EndpointSecurityError(
+                            "DNS_DOH_UNAVAILABLE",
+                            "trusted public DNS fallback returned an error",
+                        )
+                    payload = response.json()
+                    if payload.get("Status") != 0:
+                        continue
+                    for answer in payload.get("Answer") or []:
+                        if answer.get("type") not in {1, 28}:
+                            continue
+                        addresses.add(_safe_ip(str(answer.get("data", ""))))
+                if addresses:
+                    return sorted(addresses)
+        except EndpointSecurityError:
+            continue
+        except Exception:
+            continue
+    raise EndpointSecurityError(
+        "DNS_DOH_UNAVAILABLE",
+        "trusted public DNS fallback could not resolve the endpoint",
+    )
+
+
 class EndpointSafetyValidator:
-    def __init__(self, *, resolver=None):
+    def __init__(self, *, resolver=None, fake_ip_resolver=None):
         self.resolver = resolver or _default_resolve
+        self.fake_ip_resolver = fake_ip_resolver or _resolve_via_pinned_doh
 
     async def resolve(self, endpoint: ParsedEndpoint) -> tuple[str, ...]:
         raw = await asyncio.to_thread(
             self.resolver, endpoint.hostname, endpoint.port
         )
-        resolved = tuple(sorted({_safe_ip(item) for item in raw}))
+        raw_addresses = tuple(sorted(set(raw)))
+        if not raw_addresses:
+            raise EndpointSecurityError(
+                "DNS_NO_RESULTS", "endpoint hostname did not resolve"
+            )
+        fake_addresses = tuple(
+            item for item in raw_addresses if _is_proxy_fake_ip(item)
+        )
+        if fake_addresses:
+            if len(fake_addresses) != len(raw_addresses):
+                raise EndpointSecurityError(
+                    "SSRF_UNSAFE_ADDRESS",
+                    "endpoint DNS mixed proxy Fake-IP and other addresses",
+                )
+            raw_addresses = tuple(
+                await asyncio.to_thread(
+                    self.fake_ip_resolver, endpoint.hostname
+                )
+            )
+        resolved = tuple(sorted({_safe_ip(item) for item in raw_addresses}))
         if not resolved:
             raise EndpointSecurityError(
                 "DNS_NO_RESULTS", "endpoint hostname did not resolve"
