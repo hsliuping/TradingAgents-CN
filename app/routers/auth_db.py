@@ -74,18 +74,60 @@ async def get_current_user(
     """
     获取当前用户信息（混合认证）
 
-    支持两种认证方式：
-    1. JWT Token（优先）- 用于 API 调用
-    2. Session Cookie（回退）- 用于 Web 前端
+    支持三种认证方式（按优先级）：
+    1. Basic Auth（仅京东云模式，JDYUN_MODE=true 生效）- 京东云网关代理场景
+    2. JWT Token - 用于 API 调用
+    3. Session Cookie - 用于 Web 前端
     """
+    from app.core.jdyun import is_jdyun_mode, verify_jdyun_basic_auth
+
     request_path = request.url.path if hasattr(request, 'url') else 'unknown'
     has_session_cookie = bool(request.session.get("user_id")) if "session" in request.scope else False
     logger.debug(
-        "🔐 认证检查开始: path=%s has_authorization=%s has_session_cookie=%s",
+        "🔐 认证检查开始: path=%s has_authorization=%s has_session_cookie=%s jdyun_mode=%s",
         request_path,
         bool(authorization),
         has_session_cookie,
+        is_jdyun_mode(),
     )
+
+    # 方式 0: 京东云 Basic Auth 认证（仅 JDYUN_MODE=true 生效）
+    # 京东云平台代理请求时，会在 HTTP 头加上 Authorization: Basic base64(user:pass)
+    # 通过白名单验证后直接返回虚拟 admin 用户，不查 DB，不依赖 JWT/Session
+    if is_jdyun_mode() and authorization and authorization.lower().startswith("basic "):
+        try:
+            import base64
+            encoded = authorization.split(" ", 1)[1]
+            decoded_bytes = base64.b64decode(encoded, validate=True)
+            decoded = decoded_bytes.decode("utf-8")
+            if ":" in decoded:
+                username, password = decoded.split(":", 1)
+                if verify_jdyun_basic_auth(username, password):
+                    logger.info(f"✅ [京东云 Basic Auth] 认证成功: user={username}")
+                    return {
+                        "id": f"jcloud-{username}",
+                        "user_id": f"jcloud-{username}",
+                        "username": username,
+                        "email": f"{username}@jcloud.local",
+                        "name": username,
+                        "is_admin": True,  # 京东云用户视为 admin
+                        "roles": ["admin"],
+                        "preferences": {
+                            "default_market": "A股",
+                            "default_depth": "3",
+                            "default_analysts": ["市场分析师", "基本面分析师"],
+                            "ui_theme": "light",
+                            "language": "zh-CN",
+                        },
+                        "auth_method": "basic",
+                    }
+                logger.warning(f"❌ [京东云 Basic Auth] 凭据错误: user={username}")
+            else:
+                logger.warning("❌ [京东云 Basic Auth] Authorization 格式错误: 缺少数分隔符")
+        except Exception as e:
+            logger.warning(f"❌ [京东云 Basic Auth] 解析失败: {e}")
+        # Basic Auth 验证失败 → 继续走原认证链（JWT/Session）
+        # 注意: Basic Auth 是京东云代理的主路径,失败后即便走 JWT/Session 也会被网关拒绝
 
     jwt_failed_reason: Optional[str] = None
 
