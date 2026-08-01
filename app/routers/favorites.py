@@ -10,6 +10,7 @@ import logging
 from app.routers.auth_db import get_current_user
 from app.models.user import User, FavoriteStock
 from app.services.favorites_service import favorites_service
+from app.services.realtime_sync_result import normalize_realtime_sync_result
 from app.core.response import ok
 
 logger = logging.getLogger("webapi")
@@ -277,10 +278,15 @@ async def sync_favorites_realtime(
             force=True  # 强制执行，跳过交易时间检查
         )
 
-        success_count = sync_result.get("success_count", 0)
-        failed_count = sync_result.get("failed_count", 0)
+        sync_result = normalize_realtime_sync_result(symbols, sync_result)
+        success_count = sync_result["success_count"]
+        failed_count = sync_result["error_count"]
 
         logger.info(f"✅ 自选股实时行情同步完成: 成功 {success_count}/{len(symbols)} 只")
+
+        message = f"同步完成: 成功 {success_count} 只，失败 {failed_count} 只"
+        if errors:
+            message += f"；失败原因: {errors[0].get('error', '未知错误')}"
 
         return ok({
             "total": len(symbols),
@@ -288,8 +294,9 @@ async def sync_favorites_realtime(
             "failed_count": failed_count,
             "symbols": symbols,
             "data_source": request.data_source,
-            "message": f"同步完成: 成功 {success_count} 只，失败 {failed_count} 只"
-        })
+            "errors": sync_result["errors"],
+            "message": message
+        }, message)
 
     except HTTPException:
         raise
