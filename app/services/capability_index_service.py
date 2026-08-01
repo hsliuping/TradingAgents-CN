@@ -760,11 +760,24 @@ class CapabilityIndexService:
         skipped = 0
         total = len(documents)
         batch_size = max(1, total // 10)  # 每 10% 输出一次进度
+        consecutive_failures = 0  # 🔥 连续失败计数器，超过阈值则跳过剩余文档
+        max_consecutive_failures = 5
         for idx, document in enumerate(documents):
             embedding, provider = self._embedding_manager.get_embedding(document.retrieval_text)
             if embedding is None:
                 skipped += 1
+                consecutive_failures += 1
+                # 🔥 连续失败超过阈值，跳过剩余文档避免长时间阻塞
+                if consecutive_failures >= max_consecutive_failures:
+                    remaining = total - idx - 1
+                    logger.warning(
+                        "[CapabilityIndex] ⚠️ 连续 %d 次失败，跳过剩余 %d 个文档（Embedding API 不可用）",
+                        consecutive_failures, remaining,
+                    )
+                    skipped += remaining
+                    break
                 continue
+            consecutive_failures = 0  # 成功则重置
             metadata = document.model_dump(mode="json")
             metadata["embedding_provider"] = provider
             self._collection.add(
@@ -830,6 +843,8 @@ class CapabilityIndexService:
 
         upserted = 0
         skipped = 0
+        consecutive_failures = 0  # 🔥 连续失败计数器
+        max_consecutive_failures = 5
         if changed_ids:
             upsert_documents: List[str] = []
             upsert_embeddings: List[List[float]] = []
@@ -841,7 +856,18 @@ class CapabilityIndexService:
                 embedding, provider = self._embedding_manager.get_embedding(document.retrieval_text)
                 if embedding is None:
                     skipped += 1
+                    consecutive_failures += 1
+                    # 🔥 连续失败超过阈值，跳过剩余变更文档
+                    if consecutive_failures >= max_consecutive_failures:
+                        remaining = len(changed_ids) - len(upsert_ids) - skipped
+                        logger.warning(
+                            "[CapabilityIndex] ⚠️ 增量同步连续 %d 次失败，跳过剩余 %d 个文档",
+                            consecutive_failures, remaining,
+                        )
+                        skipped += remaining
+                        break
                     continue
+                consecutive_failures = 0  # 成功则重置
                 metadata = document.model_dump(mode="json")
                 metadata["embedding_provider"] = provider
                 upsert_documents.append(document.retrieval_text)

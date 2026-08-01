@@ -73,7 +73,7 @@ class EmbeddingManager:
     def __init__(self, db=None):
         """
         初始化 Embedding 管理器
-        
+
         Args:
             db: MongoDB 数据库连接（用于读取配置）
         """
@@ -81,7 +81,13 @@ class EmbeddingManager:
         self._providers = []
         self._primary_provider = None
         self._fallback_providers = []
-        
+
+        # 🔥 熔断机制：连续失败超过阈值后直接返回，避免对每个文档都尝试调用
+        # 失败的 API（例如 300 个文档 × 2 个提供商 × 1秒/调用 = 10 分钟阻塞）
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 3  # 连续失败 3 次后熔断
+        self._circuit_broken = False
+
         # 初始化提供商
         self._init_providers()
     
@@ -365,16 +371,32 @@ class EmbeddingManager:
             logger.warning("⚠️ 没有可用的 Embedding 提供商")
             return None, "no_provider"
 
+        # 🔥 熔断检查：连续失败超过阈值后直接返回，不再尝试调用
+        if self._circuit_broken:
+            return None, "circuit_broken"
+
         # 尝试主提供商
         embedding = self._call_provider(self._primary_provider, text)
         if embedding:
+            self._consecutive_failures = 0  # 成功则重置计数器
             return embedding, self._primary_provider['display_name']
+
+        # 主提供商失败，累计连续失败次数
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._max_consecutive_failures:
+            self._circuit_broken = True
+            logger.warning(
+                f"⚠️ Embedding 已熔断：连续失败 {self._consecutive_failures} 次，"
+                f"后续调用将直接跳过（需重启服务或修复 API Key 后恢复）"
+            )
+            return None, "circuit_broken"
 
         # 尝试备用提供商
         for provider in self._fallback_providers:
             logger.info(f"💡 尝试备用提供商: {provider['display_name']}")
             embedding = self._call_provider(provider, text)
             if embedding:
+                self._consecutive_failures = 0  # 成功则重置计数器
                 return embedding, provider['display_name']
 
         # 所有提供商都失败
@@ -556,10 +578,13 @@ class EmbeddingManager:
 
             # 🔥 本地模型（Ollama、LocalAI）通常不需要 API Key，使用 "ollama" 或空字符串
             api_key = provider.get('api_key') or "ollama"
-            
+
+            # 🔥 禁用 SDK 自动重试：401/网络错误时立即返回，由上层熔断机制统一处理
+            # 避免 300 个文档 × (1 原始 + 2 重试) × 1秒 = 15 分钟阻塞启动
             client = OpenAI(
                 api_key=api_key,  # 本地模型可以使用任意值或 "ollama"
-                base_url=provider['base_url']
+                base_url=provider['base_url'],
+                max_retries=0,
             )
 
             # 🔥 统一使用 1024 维，如果模型支持 dimensions 参数，直接指定
