@@ -24,7 +24,7 @@
 
 ### 角色分工(用户看到的 Tab 名)
 
-报告里有 3 个辩论相关 Tab(来自 [ReportDetail.vue:286-312](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L286-L312)):
+报告里有 3 个辩论相关 Tab:
 
 | 用户看到的 Tab 名 | 后端 key | 立场 | 关注点 |
 |------|----|------|--------|

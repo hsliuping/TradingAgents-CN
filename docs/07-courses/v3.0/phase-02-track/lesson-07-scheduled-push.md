@@ -51,7 +51,7 @@
 - **执行日**:
   - 简单模式:勾选周一到周日
   - 高级模式:在 Cron 表达式里
-- **分析深度**: 1-5 级(1级-快速分析 / 2级-基础分析 / 3级-标准分析 / 4级-深度分析 / 5级-全面分析,见 [BatchAnalysis.vue:139-158](file:///c:/TradingAgentsCN/frontend/src/views/Analysis/BatchAnalysis.vue#L139-L158))
+- **分析深度**: 1-5 级(1级-快速分析 / 2级-基础分析 / 3级-标准分析 / 4级-深度分析 / 5级-全面分析)
 - **快速/深度分析模型**: 用什么 LLM
 - **分析分组**: 选**关注分组**(`group_ids` 列表),自动跑分组里所有股票
 - **推送渠道**: 选**哪些渠道**接收通知(见第二部分)
@@ -210,6 +210,3 @@ A: 告警是另一套机制(止盈/止损),第 13 课讲。定时分析完成后
 - [第 1 课:股票筛选](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-01-stock-screening.md) - 创建关注分组
 - [第 8 课:AI 对话助手](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-08-ai-assistant-memory.md)
 - [第 13 课:风险跟踪](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-13-risk-tracking.md) - 止盈止损告警
-- 前端代码: [ScheduledAnalysis.vue](file:///c:/TradingAgentsCN/frontend/src/views/Settings/ScheduledAnalysis.vue)
-- 前端代码: [ChannelConfigs.vue](file:///c:/TradingAgentsCN/frontend/src/views/Settings/ChannelConfigs.vue)
-- 后端: [scheduled_analysis.py](file:///c:/TradingAgentsCN/app/routers/scheduled_analysis.py)

@@ -187,6 +187,3 @@ A: 在同一会话里**直接说"你错了,应该是 X"**,AI 会基于上下文�
 - [第 9 课:跟踪节奏控制](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-09-track-rhythm.md)
 - [第 26 课:AI 工作流架构师](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-26-ai-workflow-architect.md) - 自然语言生成工作流
 - [第 28 课:Skill 自动生成](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-28-buffett-workflow-case.md)
-- 前端代码: [Assistant/index.vue](file:///c:/TradingAgentsCN/frontend/src/views/Assistant/index.vue)
-- 前端代码: [Memory/index.vue](file:///c:/TradingAgentsCN/frontend/src/views/Memory/index.vue)
-- 后端: [intelligent_assistant.py](file:///c:/TradingAgentsCN/app/routers/intelligent_assistant.py) (智能助手 API)

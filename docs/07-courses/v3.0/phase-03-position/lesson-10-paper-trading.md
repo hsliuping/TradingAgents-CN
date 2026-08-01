@@ -117,7 +117,7 @@
 2. 用第 1 课"自然语言筛选"找 1 只"新能源行业 + ROE > 10% + 总市值 > 500 亿"的股票
 3. 先点"分析" → 跑 3级 - 标准分析
 4. 看 AI 输出:
-   - **决策标签**是 乐观/审慎/中性 中的哪个?(来自 [PositionAnalysisDetailDialog.vue:235-244](file:///c:/TradingAgentsCN/frontend/src/views/Portfolio/components/PositionAnalysisDetailDialog.vue#L235-L244))
+   - **决策标签**是 乐观/审慎/中性 中的哪个?
    - **风险审阅** Tab 里的"风险等级/风险评分"是多少?
 5. 如果决策标签是"乐观" + 风险等级较低,模拟买入 1000 股
 6. 等 1 天(或调时间),看浮动盈亏
@@ -159,5 +159,3 @@ A: **不一定**。模拟没心理压力,实盘有。心理因素是新手最大
 
 - [第 11 课:持仓研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-11-position-research.md)
 - [第 14 课:持仓阶段常见错误](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-14-position-pitfalls.md)
-- 前端代码: [PaperTrading/index.vue](file:///c:/TradingAgentsCN/frontend/src/views/PaperTrading/index.vue)
-- 后端: [paper.py](file:///c:/TradingAgentsCN/app/routers/paper.py)

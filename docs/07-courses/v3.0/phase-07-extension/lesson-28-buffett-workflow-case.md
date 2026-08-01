@@ -225,7 +225,7 @@ api_config:
 | **单一职责** | 一个 Agent 只做一件事 | 价值/护城河/管理层分开,不混在一个 Agent |
 | **可验证** | 输出能被验证/打分 | 内在价值可对比真实价格,评分 0-5 可校准 |
 | **数据驱动** | 基于真实数据,不臆测 | 必须用 Tushare 财务数据,不能 LLM 编造 |
-| **可解释** | 结论能解释为什么 | 输出包含 reasoning 字段 |
+| **可解释** | 结论能解释为什么 | 输出包含评估理由 |
 | **可调优** | 提示词可以迭代 | 每个 Agent 都有"测试"按钮 |
 
 #### 3.2 创建 5 个 Agent
@@ -561,7 +561,7 @@ AI 复述后,确认 → AI 生成工作流。
 | 执行顺序 | 阶段 1 并行,阶段 2-3 串行 | ? |
 | Agent ID | 都是你创建的 5 个 ID | ? |
 | 输入参数 | `stock_code` (string, 必填) | ? |
-| 输出结构 | 包含 decision / evaluation / scores | ? |
+| 输出结构 | 包含决策标签 / 评估结论 / 评分 | ? |
 
 #### 4.3 手动调整
 
@@ -865,10 +865,4 @@ A: 单股研究是"通用 7 Agent"输出;巴菲特工作流是"专业 5 Agent"�
 - [第 6 课:通用研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-06-general-research.md)
 - [阶段 7 完成!进入阶段 8](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-08-personal-plan/README.md)
 
-> 💡 **开发参考**(可选看):
-> - 后端: `/api/agents`(Agent CRUD)
-> - 后端: `/api/skills`(Skill CRUD)
-> - 后端: `/api/workflow/architect`(架构师 API)
-> - 前端: [Workflow/Architect/index.vue](file:///c:/TradingAgentsCN/frontend/src/views/Workflow/Architect/index.vue)
-> - 前端: [Agents/index.vue](file:///c:/TradingAgentsCN/frontend/src/views/Agents/index.vue)
-> - 前端: [Skills/index.vue](file:///c:/TradingAgentsCN/frontend/src/views/Skills/index.vue)
+

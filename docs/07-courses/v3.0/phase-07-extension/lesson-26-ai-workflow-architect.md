@@ -94,7 +94,7 @@ AI 生成后,可以:
 ### 组件 4:输出结构
 
 - `output_config` 定义报告长什么样
-- 字段: summary / key_points / reports / decision
+- 字段: 摘要 / 要点 / 子报告 / 决策标签
 
 ### 组件 5:执行配置
 

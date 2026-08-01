@@ -56,7 +56,7 @@
 
 ### 步骤 4:选择分析深度(5 级可选)
 
-页面里"分析深度"下拉框的实际展示名是这 5 个(来自 [BatchAnalysis.vue:139-158](file:///c:/TradingAgentsCN/frontend/src/views/Analysis/BatchAnalysis.vue#L139-L158)):
+页面里"分析深度"下拉框的实际展示名是这 5 个:
 
 | 档位 | 页面显示名 | 耗时/只 | 适用场景 |
 |------|------|---------|---------|
@@ -83,8 +83,8 @@
 ### 步骤 6:选择分析师团队
 
 **核心区分**:这里"分析师团队"勾选的是**单只分析会用到的输入角色**。**注意区分**:
-- 页面"分析师团队"下能勾选的:**只有 7 个分析师**(A 股场景,来自 [analysts.ts:13-59](file:///c:/TradingAgentsCN/frontend/src/constants/analysts.ts#L13-L59))
-- 但**报告里实际能看到**的研究角色,还包括辩论员、研究整合员、风险评估师等(来自 [ReportDetail.vue:286-312](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L286-L312))
+- 页面"分析师团队"下能勾选的:**只有 7 个分析师**(A 股场景)
+- 但**报告里实际能看到**的研究角色,还包括辩论员、研究整合员、风险评估师等
 
 **勾选框里的 7 个分析师**(用户实际看到的):
 
@@ -111,7 +111,7 @@
 | 👔 风险评估师 | 风险研究 | 风险研究综合 |
 
 **实战建议**:
-- **新手**:勾选"市场分析师+基本面分析师"就够(系统默认勾这 2 个,见 [analysts.ts:65](file:///c:/TradingAgentsCN/frontend/src/constants/analysts.ts#L65))
+- **新手**:勾选"市场分析师+基本面分析师"就够(系统默认勾这 2 个)
 - **进阶**:把"大盘分析师+板块分析师"也加上,看宏观背景
 - **大量预筛**:只勾"市场分析师",跑得快
 
@@ -130,7 +130,7 @@
 - 系统弹出确认框:"确定要提交批量分析任务吗?市场:A 股 数量:N 只 分析引擎:v2.0 引擎"
 - 确认后,任务入队
 
-**v2.0 引擎**是当前唯一可用的引擎(旧版引擎已隐藏,见 [BatchAnalysis.vue:184-185 注释](file:///c:/TradingAgentsCN/frontend/src/views/Analysis/BatchAnalysis.vue#L184-L185))。
+**v2.0 引擎**是当前唯一可用的引擎(旧版引擎已隐藏)。
 
 ### 步骤 9:跟踪进度
 
@@ -152,7 +152,7 @@
 1. **报告中心** `/reports` → 看到所有完成的任务列表
 2. **单只报告**: 点某只的"查看" → 跳到 `/reports/view/:id` 看完整 12 个子报告
 
-**v3.0 报告实际包含 12 个子报告 Tab**(详见第 3 课),以下都是用户在 `/reports/view/:id` 里**实际看到的 Tab 名**(来自 [ReportDetail.vue:286-312](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L286-L312)):
+**v3.0 报告实际包含 12 个子报告 Tab**(详见第 3 课),以下都是用户在 `/reports/view/:id` 里**实际看到的 Tab 名**:
 
 | 报告 Tab 名(用户看到的) | 实际字段 key | 阶段 |
 |--------|--------|------|
@@ -191,14 +191,14 @@ v3.0 系统采用**合规术语**,**已不是"买入/卖出/持有"**。报告�
 
 > ⚠️ **重要**:这些标签是**研究结论倾向**,**不是交易指令**。"乐观"不等于"建议加仓","审慎"不等于"建议减仓"。最终买卖决策由你自己判断。
 
-持仓分析里还能看到"偏多 / 偏空 / 待验证"3 个补充标签(见 [PositionAnalysisDetail.vue:235-244](file:///c:/TradingAgentsCN/frontend/src/views/Portfolio/components/PositionAnalysisDetailDialog.vue#L235-L244))。
+持仓分析里还能看到"偏多 / 偏空 / 待验证"3 个补充标签。
 
 ## 🛠️ 实操作业
 
 1. 打开 `/analysis/batch`
 2. 在文本框输入:`600519, 000858, 300750`(3 只 A 股白马)
 3. 分析深度选 **3级 - 标准分析**(推荐)
-4. 分析师勾选:📈 市场分析师 + 💰 基本面分析师(就是默认的 2 个,见 [analysts.ts:65](file:///c:/TradingAgentsCN/frontend/src/constants/analysts.ts#L65))
+4. 分析师勾选:📈 市场分析师 + 💰 基本面分析师(就是默认的 2 个)
 5. 右侧"高级配置"用默认模型
 6. 点"开始批量分析(3 只)"按钮
 7. 在 `/tasks/unified` 看进度
@@ -232,5 +232,3 @@ A: 可以,在"市场"下拉选 ETF,然后输入 ETF 代码(如 510050)。
 - [第 1 课:股票筛选](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-01-stock-screening.md)
 - [第 3 课:单股研究入门](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-03-single-analysis-basic.md)
 - [第 7 课:定时分析与渠道推送](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-07-scheduled-push.md) - 解决"每天手动重复提交"的问题
-- 后端代码: [analysis.py](file:///c:/TradingAgentsCN/app/routers/analysis.py) (BatchAnalyzeRequest 模型)
-- 前端代码: [BatchAnalysis.vue](file:///c:/TradingAgentsCN/frontend/src/views/Analysis/BatchAnalysis.vue)

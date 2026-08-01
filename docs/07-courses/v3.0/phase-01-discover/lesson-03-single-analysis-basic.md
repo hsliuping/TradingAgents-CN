@@ -50,7 +50,7 @@
 
 ### 步骤 5:选择分析深度(5 级)
 
-页面里"分析深度"下拉框的实际展示名(来自 [BatchAnalysis.vue:139-158](file:///c:/TradingAgentsCN/frontend/src/views/Analysis/BatchAnalysis.vue#L139-L158)):
+页面里"分析深度"下拉框的实际展示名:
 
 | 档位 | 页面显示名 | 耗时 |
 |------|------|------|
@@ -67,7 +67,7 @@
 
 ### 步骤 6:选择分析师团队(关键)
 
-**重要**:页面"分析师团队"里**能勾选的只有 7 个**(A 股场景),来自 [analysts.ts:13-59](file:///c:/TradingAgentsCN/frontend/src/constants/analysts.ts#L13-L59):
+**重要**:页面"分析师团队"里**能勾选的只有 7 个**(A 股场景):
 
 | 页面显示名 | 实际 ID | 作用 |
 |---------|---------|------|
@@ -79,7 +79,7 @@
 | 🏭 板块分析师 | `sector_analyst` | 行业地位 |
 | ETF分析师 | `etf` | 仅 ETF 市场时可选 |
 
-**系统默认勾选**:`["市场分析师", "基本面分析师"]`(见 [analysts.ts:65](file:///c:/TradingAgentsCN/frontend/src/constants/analysts.ts#L65))
+**系统默认勾选**:`["市场分析师", "基本面分析师"]`
 
 **报告里另外出现的"研究角色"**是工作流自动跑出来的,不是手动勾选:
 - 🐂 积极证据研究员 / 🐻 谨慎证据研究员(2 角色辩论)
@@ -121,15 +121,15 @@
 
 ### 1. 报告页面顶部的"研究简报"卡片
 
-报告最上方有一个 **"🧾 研究简报"** 卡片(来自 [ReportDetail.vue:108-119](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L108-L119)),内容是 Markdown 渲染的摘要文本。
+报告最上方有一个 **"🧾 研究简报"** 卡片,内容是 Markdown 渲染的摘要文本。
 
 ### 2. 报告页面底部的"详细研究报告"卡片
 
-研究简报下面有一个 **"📄 详细研究报告"** 卡片(来自 [ReportDetail.vue:121-145](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L121-L145)),里面是按阶段的 Tab 列表。
+研究简报下面有一个 **"📄 详细研究报告"** 卡片,里面是按阶段的 Tab 列表。
 
 ### 3. 详细研究报告的 14 个 Tab(用户实际看到的名字)
 
-下面这些是用户**在 Tab 上看到的名字**(来自 [ReportDetail.vue:286-312](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L286-L312)):
+下面这些是用户**在 Tab 上看到的名字**:
 
 | 阶段 | 用户看到的 Tab 名(带图标) | 来自 |
 |------|--------|------|
@@ -156,7 +156,7 @@
 
 ### 4. "风险审阅" Tab 里的结构化字段
 
-报告里如果包含"⚠️ 风险审阅" Tab(对应 `risk_assessment` / `risk_management_decision`),里面会用以下标签展示(来自 [ReportDetail.vue:707-745](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L707-L745)):
+报告里如果包含"⚠️ 风险审阅" Tab,里面会用以下标签展示:
 
 | 页面显示的标签 | 含义 |
 |----------|------|
@@ -222,6 +222,3 @@ A: 不一定,数据检验只查"必备数据是否已同步"。任务还可能�
 
 - [第 4 课:多角色辩论——怎么读懂 AI 的"🐂 积极 vs 🐻 谨慎"研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-04-single-analysis-multi-scenario.md)
 - [第 5 课:发现阶段的常见错误](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-05-discover-pitfalls.md)
-- 前端代码: [SingleAnalysis.vue](file:///c:/TradingAgentsCN/frontend/src/views/Analysis/SingleAnalysis.vue)
-- 前端代码: [ReportDetail.vue](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue)(报告详情页)
-- 字段参考: [real-frontend-display-names.md](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/real-frontend-display-names.md)

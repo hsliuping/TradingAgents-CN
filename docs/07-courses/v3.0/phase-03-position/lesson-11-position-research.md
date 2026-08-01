@@ -29,8 +29,6 @@
 
 ## 🧠 持仓研究的决策展示
 
-来源: [PositionAnalysisDetailDialog.vue:235-244](file:///c:/TradingAgentsCN/frontend/src/views/Portfolio/components/PositionAnalysisDetailDialog.vue#L235-L244)
-
 | 标签 | 含义 |
 |------|------|
 | **乐观** | 系统看好,关注 |
@@ -97,7 +95,7 @@
 - **评估结论**:风险综合判断(长文本)
 - **核心风险**:风险点列表
 - **风控建议**:风险控制建议
-- **投资调整建议**:投资策略调整建议(显示给用户的标签名,来自 [ReportDetail.vue:707-745](file:///c:/TradingAgentsCN/frontend/src/views/Reports/ReportDetail.vue#L707-L745))
+- **投资调整建议**:投资策略调整建议
 
 ### 步骤 6:跟进操作
 
@@ -157,8 +155,8 @@ A: 检查:
 - 持仓是否已添加(有代码、数量、成本价)
 - 是否京东云版(可能按钮被隐藏)
 
-**Q:AI 建议"加仓",我能直接加吗?**
-A: 不能直接加。AI 建议是**研究参考**。见第 12 课"加减仓决策"。
+**Q:AI 决策标签是"乐观",我能直接加仓吗?**
+A: 不能直接加。AI 决策标签是**研究参考**,不是交易指令。见第 12 课"加减仓决策"。
 
 ## 📚 延伸阅读
 

@@ -148,5 +148,3 @@ A: 不能。回测是独立模块,在 `/backtest`。通用研究是基于 LLM �
 
 - [第 7 课:定时分析 + 渠道推送](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-07-scheduled-push.md)
 - [第 26 课:AI 工作流架构师](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-26-ai-workflow-architect.md) - 创建自定义工作流
-- 前端代码: [GeneralAnalysis.vue](file:///c:/TradingAgentsCN/frontend/src/views/Analysis/GeneralAnalysis.vue)
-- 后端代码: `/api/workflow` (工作流 API)

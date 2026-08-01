@@ -320,6 +320,4 @@ A: 可以。智能筛选时直接说"低费率 ETF""沪深 300ETF""行业 ETF"�
 - [第 2 课:批量分析——从 500 只缩到 50 只](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-02-batch-analysis.md)
 - [第 3 课:单股研究入门——50 只里挑 5 只](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-03-single-analysis-basic.md)
 
-> 💡 **开发参考**(如果你想深入了解平台实现,可选看):
-> - [Screening/index.vue](file:///c:/TradingAgentsCN/frontend/src/views/Screening/index.vue)(筛选页前端代码)
-> - [analysts.ts](file:///c:/TradingAgentsCN/frontend/src/constants/analysts.ts)(分析师常量定义)
+
