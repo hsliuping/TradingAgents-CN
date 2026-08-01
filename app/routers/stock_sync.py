@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.routers.auth_db import get_current_user
 from app.core.response import ok
 from app.core.database import get_mongo_db
+from app.services.realtime_sync_result import normalize_realtime_sync_result
 from app.worker.tushare_sync_service import get_tushare_sync_service
 from app.worker.akshare_sync_service import get_akshare_sync_service
 from app.worker.financial_data_sync_service import get_financial_sync_service
@@ -110,6 +111,7 @@ class SingleStockSyncRequest(BaseModel):
 
 
 class BatchStockSyncRequest(BaseModel):
+    sync_realtime: bool = Field(False, description="sync realtime quotes")
     """批量股票同步请求"""
     symbols: List[str] = Field(..., description="股票代码列表")
     sync_historical: bool = Field(True, description="是否同步历史数据")
@@ -588,10 +590,35 @@ async def sync_batch_stocks(
         result = {
             "total": len(request.symbols),
             "symbols": request.symbols,
+            "realtime_sync": None,
             "historical_sync": None,
             "financial_sync": None,
             "basic_sync": None
         }
+
+        if request.sync_realtime:
+            try:
+                if request.data_source == "tushare":
+                    service = await get_tushare_sync_service()
+                elif request.data_source == "akshare":
+                    service = await get_akshare_sync_service()
+                else:
+                    raise ValueError(f"Unsupported data source: {request.data_source}")
+
+                realtime_result = await service.sync_realtime_quotes(
+                    symbols=request.symbols,
+                    force=True,
+                )
+                result["realtime_sync"] = normalize_realtime_sync_result(
+                    request.symbols,
+                    realtime_result,
+                )
+            except Exception as e:
+                logger.error("Batch realtime quote synchronization failed: %s", e)
+                result["realtime_sync"] = normalize_realtime_sync_result(
+                    request.symbols,
+                    {"errors": [{"error": str(e), "context": "sync_realtime_quotes"}]},
+                )
         
         # 同步历史数据
         if request.sync_historical:
@@ -739,10 +766,11 @@ async def sync_batch_stocks(
                 }
 
         # 判断整体是否成功
+        realtime_success = result["realtime_sync"].get("success_count", 0) if request.sync_realtime else 0
         hist_success = result["historical_sync"].get("success_count", 0) if request.sync_historical else 0
         fin_success = result["financial_sync"].get("success_count", 0) if request.sync_financial else 0
         basic_success = result["basic_sync"].get("success_count", 0) if request.sync_basic else 0
-        total_success = max(hist_success, fin_success, basic_success)
+        total_success = max(realtime_success, hist_success, fin_success, basic_success)
 
         # 添加统计信息到结果中
         result["total_success"] = total_success
@@ -808,4 +836,3 @@ async def get_sync_status(
     except Exception as e:
         logger.error(f"❌ 获取同步状态失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取同步状态失败: {str(e)}")
-

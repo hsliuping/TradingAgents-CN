@@ -8,6 +8,7 @@ from bson import ObjectId
 
 from app.core.database import get_mongo_db
 from app.models.user import FavoriteStock
+from app.services.market_quote_normalizer import normalize_market_quote
 from app.services.quotes_service import get_quotes_service
 
 
@@ -123,13 +124,17 @@ class FavoritesService:
         if codes:
             try:
                 coll = db["market_quotes"]
-                cursor = coll.find({"code": {"$in": codes}}, {"code": 1, "close": 1, "pct_chg": 1, "amount": 1})
+                cursor = coll.find(
+                    {"code": {"$in": codes}},
+                    {"code": 1, "close": 1, "pct_chg": 1, "price": 1, "change_percent": 1, "amount": 1},
+                )
                 docs = await cursor.to_list(length=None)
                 quotes_map = {str(d.get("code")).zfill(6): d for d in (docs or [])}
                 for it in items:
                     code = it.get("stock_code")
                     q = quotes_map.get(code)
                     if q:
+                        q = normalize_market_quote(q)
                         it["current_price"] = q.get("close")
                         it["change_percent"] = q.get("pct_chg")
                 # 兜底：对未命中的代码使用在线源补齐（可选）
@@ -182,6 +187,27 @@ class FavoritesService:
                 "alert_price_high": alert_price_high,
                 "alert_price_low": alert_price_low
             }
+
+            # Tags typed into the favorite form must also be available to the
+            # tag selector after the page reloads. $setOnInsert preserves
+            # custom color and ordering on tags that already exist.
+            now = datetime.utcnow()
+            tag_names = {tag.strip() for tag in (tags or []) if tag and tag.strip()}
+            for tag_name in tag_names:
+                await db.user_tags.update_one(
+                    {"user_id": str(user_id), "name": tag_name},
+                    {
+                        "$setOnInsert": {
+                            "user_id": str(user_id),
+                            "name": tag_name,
+                            "color": "#409EFF",
+                            "sort_order": 0,
+                            "created_at": now,
+                            "updated_at": now,
+                        }
+                    },
+                    upsert=True,
+                )
 
             logger.info(f"🔧 [add_favorite] 自选股数据构建完成: {favorite_stock}")
 

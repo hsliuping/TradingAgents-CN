@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional
 
 from app.core.database import get_mongo_db
 from app.services.historical_data_service import get_historical_data_service
+from app.services.market_quote_normalizer import normalize_market_quote
 from app.services.news_data_service import get_news_data_service
 from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
 
@@ -342,6 +343,8 @@ class AKShareSyncService:
                                     if "code" not in quotes_data:
                                         quotes_data["code"] = symbol
 
+                                    quotes_data = normalize_market_quote(quotes_data)
+
                                     # 更新到数据库
                                     await self.db.market_quotes.update_one(
                                         {"code": symbol},
@@ -423,6 +426,8 @@ class AKShareSyncService:
                         if "code" not in quotes_data:
                             quotes_data["code"] = symbol
 
+                        quotes_data = normalize_market_quote(quotes_data)
+
                         # 更新到数据库
                         await self.db.market_quotes.update_one(
                             {"code": symbol},
@@ -503,6 +508,8 @@ class AKShareSyncService:
                 # 确保 symbol 字段存在
                 if "symbol" not in quotes_data:
                     quotes_data["symbol"] = symbol
+
+                quotes_data = normalize_market_quote(quotes_data)
 
                 # 🔥 打印即将保存到数据库的数据
                 logger.info(f"💾 准备保存 {symbol} 行情到数据库:")

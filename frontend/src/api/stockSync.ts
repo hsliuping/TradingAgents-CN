@@ -16,6 +16,7 @@ export interface SingleStockSyncRequest {
 
 export interface BatchStockSyncRequest {
   symbols: string[]
+  sync_realtime?: boolean
   sync_historical: boolean
   sync_financial: boolean
   sync_basic?: boolean
@@ -62,6 +63,12 @@ export interface SingleStockSyncResponse {
 export interface BatchStockSyncResponse {
   total: number
   symbols: string[]
+  realtime_sync: {
+    total_processed: number
+    success_count: number
+    error_count: number
+    errors: Array<{ error?: string; context?: string }>
+  } | null
   historical_sync: {
     success_count: number
     error_count: number
@@ -122,4 +129,3 @@ export const stockSyncApi = {
     return ApiClient.get<StockSyncStatus>(`/api/stock-sync/status/${symbol}`)
   }
 }
-

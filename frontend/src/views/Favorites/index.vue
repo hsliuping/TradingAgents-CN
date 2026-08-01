@@ -417,6 +417,7 @@
       <el-form :model="batchSyncForm" label-width="120px">
         <el-form-item label="同步内容">
           <el-checkbox-group v-model="batchSyncForm.syncTypes">
+            <el-checkbox label="realtime">实时行情</el-checkbox>
             <el-checkbox label="historical">历史行情数据</el-checkbox>
             <el-checkbox label="financial">财务数据</el-checkbox>
             <el-checkbox label="basic">基础数据</el-checkbox>
@@ -1125,6 +1126,7 @@ const handleBatchSync = async () => {
 
     const res = await stockSyncApi.syncBatch({
       symbols,
+      sync_realtime: batchSyncForm.value.syncTypes.includes('realtime'),
       sync_historical: batchSyncForm.value.syncTypes.includes('historical'),
       sync_financial: batchSyncForm.value.syncTypes.includes('financial'),
       data_source: batchSyncForm.value.dataSource,
@@ -1134,6 +1136,14 @@ const handleBatchSync = async () => {
     if (res.success) {
       const data = res.data
       let message = `批量同步完成 (共 ${symbols.length} 只股票)\n`
+
+      if (data.realtime_sync) {
+        const realtime = data.realtime_sync
+        message += `实时行情: ${realtime.success_count}/${realtime.total_processed} 成功，失败 ${realtime.error_count}\n`
+        if (realtime.error_count > 0 && realtime.errors?.[0]?.error) {
+          message += `失败原因: ${realtime.errors[0].error}\n`
+        }
+      }
 
       if (data.historical_sync) {
         message += `✅ 历史数据: ${data.historical_sync.success_count}/${data.historical_sync.success_count + data.historical_sync.error_count} 成功，共 ${data.historical_sync.total_records} 条记录\n`

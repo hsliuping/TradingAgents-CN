@@ -42,9 +42,41 @@ class TagsService:
             "updated_at": (doc.get("updated_at") or datetime.utcnow()).isoformat(),
         }
 
+    async def _migrate_favorite_tags(self, user_id: str) -> None:
+        """Make tags stored by older favorite records available to the tag UI."""
+        db = await self._get_db()
+        normalized_user_id = self._normalize_user_id(user_id)
+        favorites_doc = await db.user_favorites.find_one(
+            {"user_id": normalized_user_id},
+            {"favorites.tags": 1},
+        )
+        tag_names = {
+            tag.strip()
+            for favorite in (favorites_doc or {}).get("favorites", [])
+            for tag in favorite.get("tags", [])
+            if tag and tag.strip()
+        }
+        now = datetime.utcnow()
+        for tag_name in tag_names:
+            await db.user_tags.update_one(
+                {"user_id": normalized_user_id, "name": tag_name},
+                {
+                    "$setOnInsert": {
+                        "user_id": normalized_user_id,
+                        "name": tag_name,
+                        "color": "#409EFF",
+                        "sort_order": 0,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                },
+                upsert=True,
+            )
+
     async def list_tags(self, user_id: str) -> List[Dict[str, Any]]:
         db = await self._get_db()
         await self.ensure_indexes()
+        await self._migrate_favorite_tags(user_id)
         cursor = db.user_tags.find({"user_id": self._normalize_user_id(user_id)}).sort([
             ("sort_order", 1), ("name", 1)
         ])
@@ -94,4 +126,3 @@ class TagsService:
 
 # 全局实例
 tags_service = TagsService()
-
