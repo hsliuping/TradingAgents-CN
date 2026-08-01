@@ -45,7 +45,7 @@
 
 - **通用研究** `/analysis/general`:基于"通用分析流程"工作流的灵活研究
 - **定时分析** `/settings/scheduled-analysis`:支持多时段、Cron 表达式、关注分组
-- **渠道推送** `/settings/channel-configs`:飞书/钉钉/企业微信/邮件,4 种事件
+- **渠道推送** `/settings/channel-configs`:飞书/钉钉/邮件,3 种渠道,4 种事件
 - **AI 对话助手** `/assistant`:自然语言对话式研究
 - **AI 记忆** `/memory`:多主题会话管理
 

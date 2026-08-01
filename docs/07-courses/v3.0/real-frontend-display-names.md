@@ -44,10 +44,10 @@
 | `sentiment_report` | 💬 社交媒体分析师 |
 | `news_report` | 📰 新闻分析师 |
 | `fundamentals_report` | 💰 基本面分析师 |
-| `bull_researcher` | 🐂 积极证据研究员 |
-| `bull_report` | 🐂 积极证据研究 |
-| `bear_researcher` | 🐻 谨慎证据研究员 |
-| `bear_report` | 🐻 谨慎证据研究 |
+| `bull_researcher` | 🐂 乐观情景研究员 |
+| `bull_report` | 🐂 乐观情景研究 |
+| `bear_researcher` | 🐻 审慎情景研究员 |
+| `bear_report` | 🐻 审慎情景研究 |
 | `research_team_decision` | 🔬 研究整合员 |
 | `trader_investment_plan` | 🧩 研究整合员 |
 | `risky_analyst` | ⚡ 高弹性情景分析师 |
@@ -88,7 +88,7 @@
 
 **注意**:
 - 报告顶部分析师列表(无图标) ≠ 报告 Tab 列表(带图标)。同样一个 Agent,顶部的标签是"市场分析师",Tab 标签是"📈 市场分析师"。
-- "乐观情景研究员"和"🐂 积极证据研究员"是**同一个 Agent 在不同位置的两种显示名**(顶部和 Tab)。
+- "乐观情景研究员"和"🐂 乐观情景研究员"是**同一个 Agent 在不同位置的统一显示名**(顶部和 Tab)。
 
 ## 5. 风险评估 JSON 字段(报告里"风险审阅" Tab 渲染)
 
@@ -112,12 +112,7 @@
 | `乐观` | 乐观 |
 | `审慎` | 审慎 |
 | `中性` | 中性 |
-| `偏多` | 偏多 |
-| `偏空` | 偏空 |
-| `待验证` | 待验证 |
-| `增持观点`(旧) | 偏多 |
-| `减持观点`(旧) | 偏空 |
-| `观望观点`(旧) | 待验证 |
+v3.0 持仓研究与单股研究使用相同的 3 个决策标签(乐观/审慎/中性)，不再有"偏多/偏空/待验证"等额外标签。
 
 ## 7. 股票筛选页(Screening/index.vue)字段
 
@@ -218,7 +213,7 @@
 | 后端 key | 页面显示名(下拉) |
 |---------|---------|
 | `analysts_v2` | 独立分析师 v2.0 |
-| `researchers_v2` | 积极/谨慎证据研究员 v2.0 |
+| `researchers_v2` | 乐观/审慎情景研究员 v2.0 |
 | `debators_v2` | 风险多情景研究 v2.0 |
 | `managers_v2` | 研究/风险评估师 v2.0 |
 | `trader_v2` | 研究整合员 v2.0 |
@@ -243,10 +238,10 @@
   - news_report → 📰 新闻分析师
 
 第三阶段:研究团队(多情景研究 + 初步研究观察)
-  - bull_researcher → 🐂 积极证据研究员
-  - bull_report → 🐂 积极证据研究
-  - bear_researcher → 🐻 谨慎证据研究员
-  - bear_report → 🐻 谨慎证据研究
+  - bull_researcher → 🐂 乐观情景研究员
+  - bull_report → 🐂 乐观情景研究
+  - bear_researcher → 🐻 审慎情景研究员
+  - bear_report → 🐻 审慎情景研究
   - research_team_decision → 🔬 研究整合员
   - investment_plan (与 research_team_decision 重复时隐藏)
 
@@ -346,6 +341,6 @@
 ## ⚠️ 修订课程时的注意事项
 
 1. **优先以"用户在页面上看到的中文标签"为准**,而不是后端字段名
-2. **同一个东西在不同位置的显示可能不同**(如"乐观情景研究员"在顶部,"🐂 积极证据研究员"在 Tab)
-3. **不要用代码 key**(如 `bull_researcher`、`risk_level`)给用户看,要写"🐂 积极证据研究员"、"风险等级"
+2. **同一个东西在不同位置的显示已统一**(如"乐观情景研究员"在顶部和 Tab 都一致)
+3. **不要用代码 key**(如 `bull_researcher`、`risk_level`)给用户看,要写"🐂 乐观情景研究员"、"风险等级"
 4. **写代码引用时**用 `[BatchAnalysis.vue:139-158](file:///...)` 这种带行号的格式,方便核对
