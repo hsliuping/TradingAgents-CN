@@ -339,7 +339,7 @@ import { useAuthStore } from '@/stores/auth'
 import ModelConfig from '@/components/ModelConfig.vue'
 import { resolveModelSelection } from '@/utils/modelSelection'
 import { validateStockCode } from '@/utils/stockValidator'
-import { isJdyunMode, JDYUN_CHAT_MODELS } from '@/utils/config'
+import { isJdyunMode, JDYUN_CHAT_MODELS, loadJdyunChatModels } from '@/utils/config'
 
 // 路由实例（必须在顶层调用）
 const router = useRouter()
@@ -488,6 +488,9 @@ const clearStocks = () => {
 const initializeModelSettings = async () => {
   try {
     console.log('🔍 [批量分析] 开始加载模型配置...')
+
+    // 🔥 京东云模式：先从后端加载可用模型列表，覆盖默认值
+    await loadJdyunChatModels()
 
     // 获取所有可用的模型列表
     const llmConfigs = await configApi.getLLMConfigs()

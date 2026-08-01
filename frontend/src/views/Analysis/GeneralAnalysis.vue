@@ -714,7 +714,7 @@ import {
   type GeneralTaskListParams,
 } from '@/api/unifiedTasks'
 import { useAuthStore } from '@/stores/auth'
-import { isJdyunMode, JDYUN_CHAT_MODELS } from '@/utils/config'
+import { isJdyunMode, JDYUN_CHAT_MODELS, loadJdyunChatModels } from '@/utils/config'
 import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 
 const router = useRouter()
@@ -819,6 +819,9 @@ const elapsedText = computed(() => {
 const loadModels = async () => {
   modelsLoading.value = true
   try {
+    // 🔥 京东云模式：先从后端加载可用模型列表，覆盖默认值
+    await loadJdyunChatModels()
+
     const response = await configApi.getLLMConfigs()
     let models = Array.isArray(response) ? response : []
 
