@@ -24,6 +24,7 @@ from app.services.alphaguard.compatible_provider_registry import (
 from app.services.alphaguard.model_endpoint_security import EndpointSecurityError
 from app.services.alphaguard.model_credential_management_service import (
     CredentialLifecycleConflict,
+    CredentialLifecycleNotFound,
     ModelCredentialManagementService,
 )
 from app.services.alphaguard.model_profile_registry import ModelProfileRegistry
@@ -128,6 +129,11 @@ class EndpointModelDiscoveryBody(_StrictBody):
     credential_id: str | None = Field(default=None, min_length=1, max_length=100)
 
 
+class EndpointModelOptionsBody(_StrictBody):
+    endpoint_profile_version: str = Field(min_length=1, max_length=50)
+    credential_id: str = Field(min_length=1, max_length=100)
+
+
 class EndpointPriceCreateBody(_StrictBody):
     endpoint_profile_id: str = Field(min_length=1, max_length=100)
     endpoint_profile_version: str = Field(min_length=1, max_length=50)
@@ -159,6 +165,17 @@ class CompatibleProfileAssignmentBody(_StrictBody):
     price_version_id: str = Field(min_length=1, max_length=160)
     price_version: str = Field(min_length=1, max_length=50)
     prompt_profile_id: str = Field(min_length=1, max_length=100)
+    explicit_same_model_confirmation: bool = False
+
+
+class SimpleDecisionModelConfigBody(_StrictBody):
+    endpoint_profile_id: str = Field(min_length=1, max_length=100)
+    endpoint_profile_version: str = Field(min_length=1, max_length=50)
+    credential_id: str = Field(min_length=1, max_length=100)
+    normal_endpoint_model_id: str = Field(min_length=1, max_length=160)
+    normal_endpoint_model_version: str = Field(min_length=1, max_length=50)
+    top_endpoint_model_id: str = Field(min_length=1, max_length=160)
+    top_endpoint_model_version: str = Field(min_length=1, max_length=50)
     explicit_same_model_confirmation: bool = False
 
 
@@ -575,6 +592,60 @@ async def create_endpoint_model(
 
 
 @router.post(
+    "/endpoints/{endpoint_profile_id}/models/options", response_model=dict
+)
+async def endpoint_model_options(
+    endpoint_profile_id: str,
+    body: EndpointModelOptionsBody,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    credential_service = ModelCredentialManagementService(get_mongo_db())
+    trace_id = _trace_id(request)
+    await _require_admin_with_audit(
+        user=current_user,
+        service=credential_service,
+        action="ENDPOINT_MODEL_OPTIONS",
+        credential_id=body.credential_id,
+        provider="openai_compatible",
+        trace_id=trace_id,
+    )
+    try:
+        names = await CompatibleProviderRegistryService(
+            get_mongo_db(), secret_store=credential_service.secret_store
+        ).model_options(
+            endpoint_profile_id=endpoint_profile_id,
+            endpoint_profile_version=body.endpoint_profile_version,
+            credential_id=body.credential_id,
+        )
+        return ok(
+            {
+                "items": [
+                    {"remote_model_name": name, "display_name": name}
+                    for name in names
+                ],
+                "source": "MODELS_ENDPOINT",
+                "status": "READY" if names else "EMPTY",
+            }
+        )
+    except Exception as exc:
+        if isinstance(
+            exc,
+            (
+                ValueError,
+                ProviderRegistryNotReady,
+                ProviderRegistryConflict,
+                EndpointSecurityError,
+            ),
+        ):
+            raise _provider_http_error(exc) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"provider model options failed: {exc.__class__.__name__}",
+        ) from exc
+
+
+@router.post(
     "/endpoints/{endpoint_profile_id}/models/discover", response_model=dict
 )
 async def discover_endpoint_models(
@@ -693,6 +764,34 @@ async def create_compatible_profile_assignment(
                 "profile": profile.model_dump(mode="json"),
                 "assignment": assignment.model_dump(mode="json"),
             }
+        )
+    except (ValueError, ProviderRegistryNotReady, ProviderRegistryConflict) as exc:
+        raise _provider_http_error(exc) from exc
+
+
+@router.post("/profiles/decision-models", response_model=dict)
+async def configure_decision_models(
+    body: SimpleDecisionModelConfigBody,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    credential_service = ModelCredentialManagementService(get_mongo_db())
+    await _require_admin_with_audit(
+        user=current_user,
+        service=credential_service,
+        action="DECISION_MODELS_CONFIGURE",
+        credential_id=body.credential_id,
+        provider="openai_compatible",
+        trace_id=_trace_id(request),
+    )
+    try:
+        return ok(
+            await CompatibleProviderRegistryService(
+                get_mongo_db()
+            ).configure_decision_models(
+                **body.model_dump(mode="python"),
+                assigned_by=_actor(current_user),
+            )
         )
     except (ValueError, ProviderRegistryNotReady, ProviderRegistryConflict) as exc:
         raise _provider_http_error(exc) from exc
@@ -897,8 +996,30 @@ async def revoke_model_credential(
                 trace_id=trace_id,
             )
         )
+    except CredentialLifecycleNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "CREDENTIAL_NOT_FOUND",
+                "sanitized_message": "API 密钥记录不存在",
+            },
+        ) from exc
     except CredentialLifecycleConflict as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "CREDENTIAL_LIFECYCLE_CONFLICT",
+                "sanitized_message": "API 密钥状态已发生变化，请刷新后重试",
+            },
+        ) from exc
+    except SecretStoreError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_code": "SECRET_STORE_UNAVAILABLE",
+                "sanitized_message": "安全 Secret Store 操作失败；请稍后重试",
+            },
+        ) from exc
 
 
 @router.get("/runs", response_model=dict)

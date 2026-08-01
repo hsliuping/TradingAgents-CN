@@ -28,6 +28,8 @@ class StructuredInvocation:
 
 def _sanitise_error(error: BaseException | str) -> str:
     text = str(error)
+    if _is_provider_quota_exhausted(error):
+        return "provider quota is exhausted"
     text = re.sub(
         r"(?i)(authorization|api[-_ ]?key|access[-_ ]?token|bearer)"
         r"(\s*[:=]\s*|\s+)[^\s,;]+",
@@ -40,6 +42,23 @@ def _sanitise_error(error: BaseException | str) -> str:
     if isinstance(error, BaseException):
         return error.__class__.__name__
     return "unspecified error"
+
+
+_PROVIDER_QUOTA_MARKERS = (
+    "insufficient_user_quota",
+    "insufficient_quota",
+    "insufficient balance",
+    "quota exhausted",
+    "quota_exhausted",
+    "quota exceeded",
+    "余额不足",
+    "额度不足",
+)
+
+
+def _is_provider_quota_exhausted(error: BaseException | str) -> bool:
+    text = str(error).lower()
+    return any(marker in text for marker in _PROVIDER_QUOTA_MARKERS)
 
 
 def _json_schema_without_execution_meta(
@@ -101,9 +120,17 @@ def _extract_request_id(response: Any) -> str | None:
 
 
 def _extract_token_usage(response: Any) -> tuple[int | None, int | None, int | None]:
-    usage = getattr(response, "usage_metadata", None)
+    usage = (
+        response.get("usage_metadata")
+        if isinstance(response, dict)
+        else getattr(response, "usage_metadata", None)
+    )
     if not isinstance(usage, dict):
-        metadata = getattr(response, "response_metadata", None)
+        metadata = (
+            response.get("response_metadata")
+            if isinstance(response, dict)
+            else getattr(response, "response_metadata", None)
+        )
         if isinstance(metadata, dict):
             usage = metadata.get("token_usage") or metadata.get("usage")
     if not isinstance(usage, dict):
@@ -125,8 +152,12 @@ def _extract_token_usage(response: Any) -> tuple[int | None, int | None, int | N
 def _classify_provider_error(exc: BaseException) -> str:
     text = f"{exc.__class__.__name__} {exc}".lower()
     status = getattr(exc, "status_code", None)
-    if status in {401, 403} or "unauthorized" in text or "authentication" in text:
+    if _is_provider_quota_exhausted(exc):
+        return "PROVIDER_QUOTA_EXHAUSTED"
+    if status == 401 or "unauthorized" in text or "authentication" in text:
         return "UNAUTHORIZED"
+    if status == 403:
+        return "PROJECT_ACCESS_DENIED"
     if status == 404 or "model_not_found" in text or "model not found" in text:
         return "MODEL_NOT_FOUND"
     if status == 429 or "rate limit" in text or "ratelimit" in text:
@@ -146,6 +177,32 @@ def _serialise_raw(raw: Any) -> str:
     if isinstance(raw, dict):
         return json.dumps(raw, ensure_ascii=False, sort_keys=True, default=str)
     return str(raw)
+
+
+def _unwrap_message_envelope(raw: Any) -> Any:
+    """Unwrap a LangChain message dump returned by compatible providers.
+
+    Some OpenAI-compatible services return valid JSON content, while the
+    structured-output adapter serialises the surrounding AIMessage into a
+    mapping.  Only mappings carrying message-envelope metadata are unwrapped;
+    an application schema that legitimately owns a ``content`` field remains
+    untouched.
+    """
+
+    if not isinstance(raw, dict) or "content" not in raw:
+        return raw
+    envelope_markers = {
+        "additional_kwargs",
+        "response_metadata",
+        "usage_metadata",
+        "tool_calls",
+        "invalid_tool_calls",
+        "type",
+    }
+    if not envelope_markers.intersection(raw):
+        return raw
+    content = raw.get("content")
+    return content if isinstance(content, (str, dict)) else raw
 
 
 def _with_json_schema_instruction(
@@ -584,6 +641,8 @@ def _invoke_json_object_once(
         parsed_response, (dict, BaseModel)
     ):
         raw = parsed_response.content
+    if effective_mode != "TOOL_CALL":
+        raw = _unwrap_message_envelope(raw)
 
     if raw is None or (isinstance(raw, str) and not raw.strip()):
         error_type = "EMPTY_RESPONSE"

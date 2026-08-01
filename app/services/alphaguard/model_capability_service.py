@@ -8,7 +8,7 @@ import time
 from typing import Literal
 from uuid import NAMESPACE_URL, uuid5
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.schemas.alphaguard.decision import canonical_hash
 from app.schemas.alphaguard.model_runtime import ModelCapabilityCheck
@@ -43,6 +43,29 @@ class CapabilityEcho(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     status: Literal["READY"]
     note: str = Field(min_length=1, max_length=200)
+
+
+def _safe_validation_diagnostics(exc: ValidationError) -> dict[str, object]:
+    """Retain only schema paths and error kinds, never model-provided values."""
+
+    errors = exc.errors(include_url=False, include_context=False, include_input=False)
+    fields = tuple(
+        dict.fromkeys(
+            ".".join(str(part) for part in item.get("loc", ())) or "<root>"
+            for item in errors
+        )
+    )
+    error_types = tuple(
+        dict.fromkeys(str(item.get("type") or "unknown") for item in errors)
+    )
+    return {
+        "validation_error_count": len(errors),
+        "validation_missing_field_count": sum(
+            1 for item in errors if item.get("type") == "missing"
+        ),
+        "validation_error_fields": fields,
+        "validation_error_types": error_types,
+    }
 
 
 class ModelCapabilityService:
@@ -89,7 +112,7 @@ class ModelCapabilityService:
                     ).resolve_profile_binding(profile)
                 )
                 secret = self.credentials.resolve(
-                    str(credential["credential_ref"])
+                    f"keychain-alias:{credential['credential_id']}"
                 )
             except Exception as exc:
                 return (
@@ -252,6 +275,7 @@ class ModelCapabilityService:
         error_category = None
         error_code = None
         message = None
+        validation_diagnostics: dict[str, object] = {}
         try:
             profile = await self.profiles.persisted(
                 profile_id, profile_version
@@ -385,6 +409,7 @@ class ModelCapabilityService:
                                 in {
                                     "UNAUTHORIZED",
                                     "PROJECT_ACCESS_DENIED",
+                                    "PROVIDER_QUOTA_EXHAUSTED",
                                     "MODEL_NOT_FOUND",
                                     "STRUCTURED_OUTPUT_UNSUPPORTED",
                                     "USAGE_UNAVAILABLE",
@@ -397,28 +422,45 @@ class ModelCapabilityService:
                             error_category = category
                             error_code = category
                             message = invocation.error_message
+                            if category == "PROVIDER_QUOTA_EXHAUSTED":
+                                status = "BUDGET_BLOCKED"
+                                message = "provider quota is exhausted"
                         else:
                             payload = dict(invocation.payload or {})
                             payload["model_meta"] = invocation.model_meta.model_dump(
                                 mode="json"
                             )
-                            capability_schema.model_validate(payload)
-                            usage = (
-                                invocation.model_meta.input_tokens,
-                                invocation.model_meta.output_tokens,
-                                invocation.model_meta.total_tokens,
-                                invocation.model_meta.estimated_cost,
-                            )
-                            if any(value is None for value in usage):
-                                status = "USAGE_UNAVAILABLE"
-                                error_category = "USAGE_UNAVAILABLE"
-                                error_code = "USAGE_UNAVAILABLE"
+                            try:
+                                capability_schema.model_validate(payload)
+                            except ValidationError as exc:
+                                status = "INVALID_OUTPUT"
+                                structured_supported = False
+                                error_category = "INVALID_OUTPUT"
+                                error_code = "INVALID_OUTPUT"
+                                validation_diagnostics = (
+                                    _safe_validation_diagnostics(exc)
+                                )
                                 message = (
-                                    "provider response did not expose complete token "
-                                    "usage and auditable cost"
+                                    "model output did not match the required "
+                                    "capability schema"
                                 )
                             else:
-                                status = "READY"
+                                usage = (
+                                    invocation.model_meta.input_tokens,
+                                    invocation.model_meta.output_tokens,
+                                    invocation.model_meta.total_tokens,
+                                    invocation.model_meta.estimated_cost,
+                                )
+                                if any(value is None for value in usage):
+                                    status = "USAGE_UNAVAILABLE"
+                                    error_category = "USAGE_UNAVAILABLE"
+                                    error_code = "USAGE_UNAVAILABLE"
+                                    message = (
+                                        "provider response did not expose complete token "
+                                        "usage and auditable cost"
+                                    )
+                                else:
+                                    status = "READY"
         except CredentialNotConfigured as exc:
             status = "NOT_CONFIGURED"
             error_category = error_category or "MODEL_NOT_CONFIGURED"
@@ -480,6 +522,7 @@ class ModelCapabilityService:
             "sanitized_message": (
                 sanitize_model_message(message) if message else None
             ),
+            **validation_diagnostics,
             "checked_by": checked_by,
             "checked_at": checked_at,
             "input_hash": input_hash,

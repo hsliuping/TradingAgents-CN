@@ -71,6 +71,10 @@ class CredentialLifecycleConflict(RuntimeError):
     pass
 
 
+class CredentialLifecycleNotFound(CredentialLifecycleConflict):
+    pass
+
+
 class _EphemeralCredentialResolver:
     """Request-scoped resolver used only before a Keychain switch."""
 
@@ -136,6 +140,112 @@ class ModelCredentialManagementService:
         if not _SAFE_CREDENTIAL_ID.fullmatch(normalized):
             raise ValueError("credential_id contains unsupported characters")
         return normalized
+
+    async def _acquire_lifecycle(
+        self,
+        existing: dict[str, Any],
+        *,
+        operation: str,
+    ) -> str:
+        operation_id = str(uuid4())
+        result = await self.db["ag_model_credentials"].update_one(
+            {
+                "credential_id": existing["credential_id"],
+                "credential_ref": existing["credential_ref"],
+                "status": existing["status"],
+                "lifecycle_operation_id": {"$in": [None]},
+            },
+            {
+                "$set": {
+                    "lifecycle_operation_id": operation_id,
+                    "lifecycle_operation": operation,
+                    "lifecycle_started_at": datetime.now(timezone.utc),
+                }
+            },
+        )
+        if result.matched_count != 1:
+            raise CredentialLifecycleConflict(
+                "credential lifecycle operation is already in progress"
+            )
+        return operation_id
+
+    async def _release_lifecycle(
+        self,
+        *,
+        credential_id: str,
+        operation_id: str,
+    ) -> None:
+        await self.db["ag_model_credentials"].update_one(
+            {
+                "credential_id": credential_id,
+                "lifecycle_operation_id": operation_id,
+            },
+            {
+                "$set": {
+                    "lifecycle_operation_id": None,
+                    "lifecycle_operation": None,
+                    "lifecycle_started_at": None,
+                }
+            },
+        )
+
+    def _read_alias_target(self, alias: str) -> str | None:
+        try:
+            return self.secret_store.read(
+                service=KEYCHAIN_ALIAS_SERVICE,
+                account=alias,
+            )
+        except SecretNotFound:
+            return None
+
+    def _restore_alias_state(
+        self,
+        *,
+        alias: str,
+        owned_target: str | None,
+        previous_target: str | None,
+    ) -> None:
+        current_target = self._read_alias_target(alias)
+        if current_target != owned_target:
+            raise CredentialLifecycleConflict(
+                "credential alias changed concurrently"
+            )
+        if previous_target is None:
+            self.secret_store.delete(
+                service=KEYCHAIN_ALIAS_SERVICE,
+                account=alias,
+                missing_ok=True,
+            )
+        else:
+            self.secret_store.write(
+                service=KEYCHAIN_ALIAS_SERVICE,
+                account=alias,
+                secret=previous_target,
+            )
+
+    async def _audit_secret_store_failure(
+        self,
+        *,
+        credential_id: str,
+        provider: str,
+        operator_user_id: str,
+        action: str,
+        trace_id: str,
+    ) -> None:
+        try:
+            await self.audit(
+                credential_id=credential_id,
+                provider=provider,
+                operator_user_id=operator_user_id,
+                action=action,
+                status="FAILED",
+                error_code="SECRET_STORE_UNAVAILABLE",
+                trace_id=trace_id,
+            )
+        except Exception:
+            # Preserve the SecretStoreError so the API always returns its
+            # sanitized 503 instead of leaking a secondary audit failure.
+            return
 
     async def audit(
         self,
@@ -719,18 +829,18 @@ class ModelCredentialManagementService:
         ).to_list(length=100)
         items = []
         for row in rows:
-            latest_failure = await self.db[
+            latest_event = await self.db[
                 "ag_model_credential_events"
             ].find_one(
-                {
-                    "credential_id": row["credential_id"],
-                    "error_code": {"$ne": None},
-                },
-                sort=[("created_at", -1)],
+                {"credential_id": row["credential_id"]},
+                sort=[("created_at", -1), ("_id", -1)],
             )
             error_code = (
-                str(latest_failure.get("error_code"))
-                if latest_failure and latest_failure.get("error_code")
+                str(latest_event.get("error_code"))
+                if latest_event
+                and latest_event.get("status")
+                in {"FAILED", "DEGRADED", "ERROR", "REJECTED"}
+                and latest_event.get("error_code")
                 else None
             )
             configured = False
@@ -744,6 +854,7 @@ class ModelCredentialManagementService:
             )
             if (
                 row.get("status") in {"CONFIGURED", "DEGRADED"}
+                and not row.get("lifecycle_operation_id")
                 and self.secret_store.available
             ):
                 configured = ModelCredentialService(
@@ -1078,21 +1189,34 @@ class ModelCredentialManagementService:
         new_account = f"{provider}-{uuid4()}"
         new_ref = keychain_ref(service=service, account=new_account)
         alias = self._alias(provider, credential_id, provider_type)
-        self.secret_store.write(
-            service=service, account=new_account, secret=secret
+        operation_id = await self._acquire_lifecycle(
+            existing, operation="REPLACE"
         )
+        previous_alias_target = None
+        new_direct_written = False
+        alias_switched = False
         try:
+            previous_alias_target = self._read_alias_target(alias)
+            if previous_alias_target not in {None, old_ref}:
+                raise CredentialLifecycleConflict(
+                    "credential alias changed concurrently"
+                )
+            self.secret_store.write(
+                service=service, account=new_account, secret=secret
+            )
+            new_direct_written = True
             self.secret_store.write(
                 service=KEYCHAIN_ALIAS_SERVICE,
                 account=alias,
                 secret=new_ref,
             )
-            now = datetime.now(timezone.utc)
+            alias_switched = True
             updated = await self.db["ag_model_credentials"].update_one(
                 {
                     "credential_id": credential_id,
                     "credential_ref": old_ref,
-                    "status": {"$ne": "REVOKED"},
+                    "status": existing["status"],
+                    "lifecycle_operation_id": operation_id,
                 },
                 {
                     "$set": {
@@ -1102,8 +1226,11 @@ class ModelCredentialManagementService:
                             if error_code is None
                             else "DEGRADED"
                         ),
-                        "updated_at": now,
+                        "updated_at": datetime.now(timezone.utc),
                         "last_verified_at": capability.checked_at,
+                        "lifecycle_operation_id": None,
+                        "lifecycle_operation": None,
+                        "lifecycle_started_at": None,
                     }
                 },
             )
@@ -1111,19 +1238,57 @@ class ModelCredentialManagementService:
                 raise CredentialLifecycleConflict(
                     "credential changed concurrently"
                 )
-        except Exception:
-            self.secret_store.write(
-                service=KEYCHAIN_ALIAS_SERVICE,
-                account=alias,
-                secret=old_ref,
-            )
-            self.secret_store.delete(
-                service=service, account=new_account, missing_ok=True
-            )
+        except Exception as operation_error:
+            try:
+                if alias_switched:
+                    self._restore_alias_state(
+                        alias=alias,
+                        owned_target=new_ref,
+                        previous_target=previous_alias_target,
+                    )
+                if new_direct_written:
+                    self.secret_store.delete(
+                        service=service,
+                        account=new_account,
+                        missing_ok=True,
+                    )
+            finally:
+                await self._release_lifecycle(
+                    credential_id=credential_id,
+                    operation_id=operation_id,
+                )
+            if isinstance(operation_error, SecretStoreError):
+                await self._audit_secret_store_failure(
+                    credential_id=credential_id,
+                    provider=provider,
+                    operator_user_id=operator_user_id,
+                    action="CREDENTIAL_REPLACED",
+                    trace_id=trace_id,
+                )
             raise
-        self.secret_store.delete(
-            service=old_service, account=old_account, missing_ok=True
-        )
+        try:
+            self.secret_store.delete(
+                service=old_service, account=old_account, missing_ok=True
+            )
+        except SecretStoreError:
+            await self._audit_secret_store_failure(
+                credential_id=credential_id,
+                provider=provider,
+                operator_user_id=operator_user_id,
+                action="CREDENTIAL_REPLACED",
+                trace_id=trace_id,
+            )
+            # The alias is already removed and Mongo marks the credential
+            # REVOKED, so ModelRunner cannot resolve it. Report the remaining
+            # direct Keychain cleanup separately instead of claiming that the
+            # revocation itself failed.
+            return {
+                "credential_id": credential_id,
+                "provider": provider,
+                "configured": False,
+                "status": "REVOKED",
+                "cleanup_status": "PENDING",
+            }
         await self.audit(
             credential_id=credential_id,
             provider=provider,
@@ -1173,7 +1338,10 @@ class ModelCredentialManagementService:
         try:
             secret = ModelCredentialService(
                 self.secret_store
-            ).resolve(str(existing["credential_ref"]))
+            ).resolve(
+                "keychain-alias:"
+                f"{self._alias(provider, credential_id, provider_type)}"
+            )
             capability = (
                 await self._probe_compatible_secret(
                     credential_id=credential_id,
@@ -1211,8 +1379,13 @@ class ModelCredentialManagementService:
             secret = None
         error_code = self._primary_error(capability)
         passed = self._credential_can_be_stored(capability, provider_type)
-        await self.db["ag_model_credentials"].update_one(
-            {"credential_id": credential_id},
+        updated = await self.db["ag_model_credentials"].update_one(
+            {
+                "credential_id": credential_id,
+                "credential_ref": existing["credential_ref"],
+                "status": {"$ne": "REVOKED"},
+                "lifecycle_operation_id": {"$in": [None]},
+            },
             {
                 "$set": {
                     "status": (
@@ -1225,6 +1398,10 @@ class ModelCredentialManagementService:
                 }
             },
         )
+        if updated.matched_count != 1:
+            raise CredentialLifecycleConflict(
+                "credential changed during verification"
+            )
         await self.audit(
             credential_id=credential_id,
             provider=provider,
@@ -1270,42 +1447,105 @@ class ModelCredentialManagementService:
             {"credential_id": credential_id}
         )
         if existing is None:
-            raise CredentialLifecycleConflict("credential not found")
+            raise CredentialLifecycleNotFound("credential not found")
         provider = str(existing["provider"])
         provider_type = str(
             existing.get("provider_type") or "OPENAI_OFFICIAL"
         )
-        if existing.get("status") == "REVOKED":
+        was_revoked = existing.get("status") == "REVOKED"
+        service, account = self._parse_direct_ref(
+            str(existing["credential_ref"])
+        )
+        direct_ref = str(existing["credential_ref"])
+        alias = self._alias(provider, credential_id, provider_type)
+        if not was_revoked:
+            operation_id = await self._acquire_lifecycle(
+                existing, operation="REVOKE"
+            )
+            alias_target = None
+            alias_deleted = False
+            try:
+                alias_target = self._read_alias_target(alias)
+                if alias_target not in {None, direct_ref}:
+                    raise CredentialLifecycleConflict(
+                        "credential alias changed concurrently"
+                    )
+                if alias_target == direct_ref:
+                    self.secret_store.delete(
+                        service=KEYCHAIN_ALIAS_SERVICE,
+                        account=alias,
+                        missing_ok=True,
+                    )
+                    alias_deleted = True
+                updated = await self.db["ag_model_credentials"].update_one(
+                    {
+                        "credential_id": credential_id,
+                        "credential_ref": direct_ref,
+                        "status": existing["status"],
+                        "lifecycle_operation_id": operation_id,
+                    },
+                    {
+                        "$set": {
+                            "status": "REVOKED",
+                            "updated_at": datetime.now(timezone.utc),
+                            "lifecycle_operation_id": None,
+                            "lifecycle_operation": None,
+                            "lifecycle_started_at": None,
+                        }
+                    },
+                )
+                if updated.matched_count != 1:
+                    raise CredentialLifecycleConflict(
+                        "credential changed concurrently"
+                    )
+                operation_id = None
+            except Exception as operation_error:
+                try:
+                    if alias_deleted:
+                        self._restore_alias_state(
+                            alias=alias,
+                            owned_target=None,
+                            previous_target=alias_target,
+                        )
+                finally:
+                    if operation_id is not None:
+                        await self._release_lifecycle(
+                            credential_id=credential_id,
+                            operation_id=operation_id,
+                        )
+                if isinstance(operation_error, SecretStoreError):
+                    await self._audit_secret_store_failure(
+                        credential_id=credential_id,
+                        provider=provider,
+                        operator_user_id=operator_user_id,
+                        action="CREDENTIAL_REVOKED",
+                        trace_id=trace_id,
+                    )
+                raise
+
+        try:
+            self.secret_store.delete(
+                service=service, account=account, missing_ok=True
+            )
+        except SecretStoreError:
+            await self._audit_secret_store_failure(
+                credential_id=credential_id,
+                provider=provider,
+                operator_user_id=operator_user_id,
+                action="CREDENTIAL_REVOKED",
+                trace_id=trace_id,
+            )
+            # The runtime alias is gone and the database row is REVOKED. The
+            # remaining direct Keychain item is unreachable by ModelRunner and
+            # can be retried by repeating this idempotent revoke operation.
             return {
                 "credential_id": credential_id,
                 "provider": provider,
                 "configured": False,
                 "status": "REVOKED",
+                "cleanup_status": "PENDING",
             }
-        service, account = self._parse_direct_ref(
-            str(existing["credential_ref"])
-        )
-        self.secret_store.delete(
-            service=KEYCHAIN_ALIAS_SERVICE,
-            account=self._alias(provider, credential_id, provider_type),
-            missing_ok=True,
-        )
-        self.secret_store.delete(
-            service=service, account=account, missing_ok=True
-        )
-        now = datetime.now(timezone.utc)
-        await self.db["ag_model_credentials"].update_one(
-            {
-                "credential_id": credential_id,
-                "status": {"$ne": "REVOKED"},
-            },
-            {
-                "$set": {
-                    "status": "REVOKED",
-                    "updated_at": now,
-                }
-            },
-        )
+
         await self.audit(
             credential_id=credential_id,
             provider=provider,
@@ -1320,6 +1560,7 @@ class ModelCredentialManagementService:
             "provider": provider,
             "configured": False,
             "status": "REVOKED",
+            "cleanup_status": "COMPLETE",
         }
 
     @staticmethod

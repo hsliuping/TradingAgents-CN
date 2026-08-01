@@ -17,6 +17,10 @@ export interface ModelProfileStatus {
   configured: boolean
   credential_status?: 'CONFIGURED' | 'NOT_CONFIGURED'
   capability: string
+  capability_stale?: boolean
+  capability_stale_reason?: 'CREDENTIAL_REVERIFIED' | null
+  last_error_code?: string | null
+  failure_summary?: string | null
   last_check?: string | null
   last_success?: string | null
   last_failure?: string | null
@@ -106,6 +110,8 @@ export interface ProviderEndpointProfile {
   notes?: string | null
   configuration_stage?: ProviderConfigurationStage
   system_managed?: boolean
+  latest_profile_version?: string
+  has_newer_draft?: boolean
 }
 
 export type ProviderConfigurationStage =
@@ -158,6 +164,11 @@ export interface EndpointModelDefinition {
   content_hash: string
 }
 
+export interface EndpointModelOption {
+  remote_model_name: string
+  display_name: string
+}
+
 export interface EndpointPriceVersion {
   price_version_id: string
   price_version: string
@@ -203,6 +214,16 @@ export interface ModelRunSummary {
   latency_ms: number
   error_category?: string | null
   created_at: string
+}
+
+export interface ModelCapabilityCheckResult {
+  capability_check_id: string
+  profile_id: string
+  profile_version: string
+  status: string
+  error_code?: string | null
+  sanitized_message?: string | null
+  checked_at: string
 }
 
 export interface ResearchResultSummary {
@@ -304,7 +325,8 @@ export const alphaguardModelsApi = {
   disableEndpoint(endpointId: string, profileVersion: string) {
     return ApiClient.post<ProviderEndpointProfile>(
       `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/disable`,
-      { profile_version: profileVersion }
+      { profile_version: profileVersion },
+      { skipErrorHandler: true }
     )
   },
   endpointModels(endpointId: string, profileVersion?: string) {
@@ -329,6 +351,8 @@ export const alphaguardModelsApi = {
     supports_reasoning?: boolean
     max_context_tokens?: number
     max_output_tokens?: number
+    endpoint_model_id?: string
+    model_version?: string
   }) {
     return ApiClient.post<{ item: EndpointModelDefinition; result: 'CREATED' | 'REUSED' }>(
       `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/models`,
@@ -342,6 +366,20 @@ export const alphaguardModelsApi = {
   }) {
     return ApiClient.post<{ items: EndpointModelDefinition[] }>(
       `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/models/discover`,
+      payload,
+      { skipErrorHandler: true }
+    )
+  },
+  endpointModelOptions(endpointId: string, payload: {
+    endpoint_profile_version: string
+    credential_id: string
+  }) {
+    return ApiClient.post<{
+      items: EndpointModelOption[]
+      source: 'MODELS_ENDPOINT'
+      status: 'READY' | 'EMPTY'
+    }>(
+      `/api/alphaguard/models/endpoints/${encodeURIComponent(endpointId)}/models/options`,
       payload,
       { skipErrorHandler: true }
     )
@@ -388,6 +426,22 @@ export const alphaguardModelsApi = {
       '/api/alphaguard/models/profiles/compatible', payload, { skipErrorHandler: true }
     )
   },
+  configureDecisionModels(payload: {
+    endpoint_profile_id: string
+    endpoint_profile_version: string
+    credential_id: string
+    normal_endpoint_model_id: string
+    normal_endpoint_model_version: string
+    top_endpoint_model_id: string
+    top_endpoint_model_version: string
+    explicit_same_model_confirmation: boolean
+  }) {
+    return ApiClient.post<{ roles: Record<string, Record<string, unknown>> }>(
+      '/api/alphaguard/models/profiles/decision-models',
+      payload,
+      { skipErrorHandler: true }
+    )
+  },
   runs(limit = 100) {
     return ApiClient.get<{ items: ModelRunSummary[] }>(
       `/api/alphaguard/models/runs?limit=${limit}`
@@ -399,9 +453,10 @@ export const alphaguardModelsApi = {
     idempotency_key: string
     network: boolean
   }) {
-    return ApiClient.post<Record<string, unknown>>(
+    return ApiClient.post<ModelCapabilityCheckResult>(
       '/api/alphaguard/models/capability-check',
-      payload
+      payload,
+      { skipErrorHandler: true }
     )
   },
   snapshotRuns(snapshotId: string) {

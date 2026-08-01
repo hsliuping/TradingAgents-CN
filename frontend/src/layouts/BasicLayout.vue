@@ -37,7 +37,8 @@
       <header class="header">
         <div class="header-left">
           <el-button
-            type="text"
+            link
+            :aria-label="appStore.sidebarCollapsed ? '展开导航' : '收起导航'"
             @click.stop="appStore.toggleSidebar()"
             class="sidebar-toggle"
           >
@@ -274,6 +275,15 @@ watch(() => route.fullPath, () => {
 
   .header {
     padding: 0 16px;
+
+    .header-left {
+      min-width: 0;
+      gap: 8px;
+    }
+
+    .header-right {
+      flex-shrink: 0;
+    }
   }
 }
 

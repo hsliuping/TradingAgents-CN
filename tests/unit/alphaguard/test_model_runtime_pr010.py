@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -27,6 +28,11 @@ from app.services.alphaguard.model_runtime_config import (
 from app.services.alphaguard.model_runtime_context import (
     ModelRuntimeContextError,
     build_model_runtime_context,
+)
+from app.services.alphaguard.model_runtime_status_service import (
+    ModelRuntimeStatusService,
+    capability_failure_summary,
+    project_capability_check,
 )
 from app.services.alphaguard.prompt_profile_registry import (
     PromptProfileRegistry,
@@ -56,7 +62,10 @@ from tradingagents.alphaguard.decision_schemas import (
     TopReviewDecision,
 )
 from tradingagents.alphaguard.mongo_indexes import ALPHAGUARD_INDEX_SPECS
-from tradingagents.alphaguard.structured_output import invoke_json_object
+from tradingagents.alphaguard.structured_output import (
+    _classify_provider_error,
+    invoke_json_object,
+)
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -99,8 +108,32 @@ class StructuredLLM:
         }
 
 
+class CompatibleMessageEnvelopeLLM(StructuredLLM):
+    def invoke(self, _messages):
+        self.invocations += 1
+        return {
+            "raw": RawResponse(),
+            "parsed": {
+                "content": '{"status":"READY","note":"compatible envelope"}',
+                "additional_kwargs": {},
+                "response_metadata": {},
+                "type": "ai",
+                "usage_metadata": {
+                    "input_tokens": 11,
+                    "output_tokens": 7,
+                    "total_tokens": 18,
+                },
+            },
+            "parsing_error": None,
+        }
+
+
 class UnauthorizedError(RuntimeError):
     status_code = 401
+
+
+class ProviderQuotaError(RuntimeError):
+    status_code = 403
 
 
 class TransientThenReadyLLM(StructuredLLM):
@@ -200,6 +233,44 @@ async def test_profile_and_prompt_registries_are_exact_create_only():
         profiles.definition("unknown-profile", "latest")
 
 
+@pytest.mark.asyncio
+async def test_decision_status_is_independent_from_research_profile():
+    db = FakeDB()
+    profiles = ModelProfileRegistry(db)
+    prompts = PromptProfileRegistry(db)
+    await profiles.seed()
+    await prompts.seed()
+    research = profiles.for_role("RESEARCH_AGENT")
+    await db["ag_model_profiles"].delete_one(
+        {
+            "profile_id": research.profile_id,
+            "profile_version": research.profile_version,
+        }
+    )
+    for role in ("NORMAL_TRADER", "TOP_RISK_REVIEWER"):
+        profile = profiles.for_role(role)
+        await db["ag_model_capability_checks"].insert_one(
+            {
+                "profile_id": profile.profile_id,
+                "profile_version": profile.profile_version,
+                "status": "READY",
+                "checked_at": datetime.now(timezone.utc),
+            }
+        )
+
+    service = ModelRuntimeStatusService(db)
+    service.credentials = SimpleNamespace(configured=lambda _ref: True)
+    result = await service.status(admin=False)
+
+    assert result["status"] == "NOT_CONFIGURED"
+    assert result["decision_status"] == "READY"
+    assert result["research_status"] == "NOT_CONFIGURED"
+    by_role = {item["role"]: item for item in result["profiles"]}
+    assert by_role["NORMAL_TRADER"]["configured"] is True
+    assert by_role["TOP_RISK_REVIEWER"]["configured"] is True
+    assert by_role["RESEARCH_AGENT"]["configured"] is False
+
+
 def test_capability_checks_use_exact_role_decision_contracts():
     profiles = ModelProfileRegistry()
     normal_prompt, normal_schema = ModelCapabilityService._capability_contract(
@@ -274,6 +345,40 @@ def test_strict_native_schema_audits_tokens_cost_and_401():
     assert "secret" not in (failed.error_message or "")
     assert len(failed.attempt_metas) == 1
 
+
+def test_native_schema_unwraps_compatible_message_envelope():
+    result = invoke_json_object(
+        llm=CompatibleMessageEnvelopeLLM(),
+        messages=[],
+        schema_model=SimpleCapabilitySchema,
+        provider="openai-compatible",
+        configured_model_name="compatible-model",
+        prompt_name="capability",
+        prompt_version="v1",
+        structured_output_mode="NATIVE_SCHEMA",
+    )
+    assert result.failure_status is None
+    assert result.payload == {
+        "status": "READY",
+        "note": "compatible envelope",
+    }
+
+
+def test_capability_failure_summary_hides_validation_details():
+    assert capability_failure_summary("PROVIDER_ERROR", "ValidationError") == (
+        "模型已返回内容，但结构化结果未通过校验。"
+    )
+    assert capability_failure_summary("INVALID_OUTPUT", "INVALID_OUTPUT") == (
+        "模型返回了 JSON，但决策字段不完整或不符合要求；"
+        "请改用结构化输出能力更稳定的模型。"
+    )
+    assert capability_failure_summary(
+        "INVALID_OUTPUT", "INVALID_OUTPUT", 7
+    ) == (
+        "模型返回了 JSON，但有 7 个决策字段缺失或不符合要求；"
+        "请改用结构化输出能力更稳定的模型。"
+    )
+
     unsupported_model = NoStructuredOutputLLM()
     unsupported = invoke_json_object(
         llm=unsupported_model,
@@ -287,6 +392,152 @@ def test_strict_native_schema_audits_tokens_cost_and_401():
     )
     assert unsupported.error_type == "STRUCTURED_OUTPUT_UNSUPPORTED"
     assert unsupported_model.invocations == 0
+
+
+def test_newer_successful_credential_verification_marks_old_check_stale():
+    checked_at = datetime(2026, 8, 1, 2, 55, tzinfo=timezone.utc)
+    original = {
+        "status": "UNAUTHORIZED",
+        "error_code": "UNAUTHORIZED",
+        "checked_at": checked_at,
+    }
+    projected, stale = project_capability_check(
+        original,
+        {
+            "status": "CONFIGURED",
+            # Motor returns UTC-naive values unless tz_aware is enabled.
+            "last_verified_at": datetime(2026, 8, 1, 2, 56),
+        },
+    )
+
+    assert stale is True
+    assert projected is not None
+    assert projected["status"] == "UNVERIFIED"
+    assert projected["error_code"] == "CREDENTIAL_REVERIFIED"
+    assert original["status"] == "UNAUTHORIZED"
+
+    failed_verification, failed_stale = project_capability_check(
+        original,
+        {
+            "status": "DEGRADED",
+            "last_verified_at": datetime(2026, 8, 1, 2, 57),
+        },
+    )
+    assert failed_stale is False
+    assert failed_verification == original
+
+    legacy, legacy_stale = project_capability_check(
+        {
+            "status": "PROVIDER_ERROR",
+            "error_code": "ValidationError",
+            "checked_at": checked_at,
+        },
+        None,
+    )
+    assert legacy_stale is False
+    assert legacy is not None
+    assert legacy["status"] == "INVALID_OUTPUT"
+    assert legacy["error_code"] == "INVALID_OUTPUT"
+
+    quota_original = {
+        "status": "UNAUTHORIZED",
+        "error_code": "UNAUTHORIZED",
+        "sanitized_message": (
+            "403 insufficient_user_quota balance=0.01 precharge=2.00 "
+            "request_id=req-sensitive"
+        ),
+        "checked_at": checked_at,
+    }
+    quota, quota_stale = project_capability_check(quota_original, None)
+    assert quota_stale is False
+    assert quota is not None
+    assert quota["status"] == "BUDGET_BLOCKED"
+    assert quota["error_code"] == "PROVIDER_QUOTA_EXHAUSTED"
+    assert quota["sanitized_message"] == "provider quota is exhausted"
+    assert quota_original["status"] == "UNAUTHORIZED"
+    assert "0.01" not in quota["sanitized_message"]
+    assert "req-sensitive" not in quota["sanitized_message"]
+
+
+@pytest.mark.asyncio
+async def test_capability_schema_validation_is_invalid_output_not_provider_error():
+    db = FakeDB()
+    await ModelProfileRegistry(db).seed()
+    await PromptProfileRegistry(db).seed()
+    service = ModelCapabilityService(
+        db,
+        provider_runtime=SimpleNamespace(
+            create_registered=AsyncMock(return_value=StructuredLLM())
+        ),
+    )
+    service.credentials = SimpleNamespace(configured=lambda _ref: True)
+    service._provider_access_probe = AsyncMock(
+        return_value=("READY", None, 1.0)
+    )
+    service.budget = SimpleNamespace(
+        check=AsyncMock(
+            return_value=BudgetDecision(
+                allowed=True,
+                status="READY",
+                estimated_input_tokens=10,
+                estimated_output_tokens=10,
+                estimated_cost=0,
+                remaining_daily_calls=10,
+                remaining_daily_cost=10,
+                permitted_attempts=1,
+            )
+        )
+    )
+
+    result = await service.check(
+        profile_id="alphaguard_normal_openai",
+        profile_version="v2",
+        checked_by="admin",
+        idempotency_key="invalid-capability-contract",
+        network=True,
+    )
+
+    assert result.status == "INVALID_OUTPUT"
+    assert result.error_category == "INVALID_OUTPUT"
+    assert result.error_code == "INVALID_OUTPUT"
+    assert result.structured_output_supported is False
+    assert result.validation_error_count is not None
+    assert result.validation_error_count > 0
+    assert result.validation_missing_field_count is not None
+    assert result.validation_missing_field_count > 0
+    assert result.validation_error_fields
+    assert "missing" in result.validation_error_types
+    serialized = result.model_dump_json()
+    assert "structured output available" not in serialized
+    assert "validation" not in (result.sanitized_message or "").lower()
+
+
+def test_provider_quota_is_not_auth_failure_and_error_details_are_removed():
+    error = ProviderQuotaError(
+        "insufficient_user_quota balance=0.01 precharge=2.00 "
+        "request_id=req-sensitive"
+    )
+    assert _classify_provider_error(error) == "PROVIDER_QUOTA_EXHAUSTED"
+
+    result = invoke_json_object(
+        llm=StructuredLLM(error=error),
+        messages=[],
+        schema_model=SimpleCapabilitySchema,
+        provider="openai-compatible",
+        configured_model_name="registered-model",
+        prompt_name="capability",
+        prompt_version="v1",
+        structured_output_mode="NATIVE_SCHEMA",
+        max_retries=3,
+    )
+
+    assert result.error_type == "PROVIDER_QUOTA_EXHAUSTED"
+    assert result.error_message == "provider quota is exhausted"
+    assert len(result.attempt_metas) == 1
+    serialized = result.model_meta.model_dump_json()
+    assert "balance" not in serialized
+    assert "precharge" not in serialized
+    assert "req-sensitive" not in serialized
 
 
 def test_only_transient_errors_retry_and_every_attempt_is_exposed():
@@ -753,6 +1004,8 @@ def test_model_api_is_authenticated_admin_controlled_and_strict(monkeypatch):
     assert response.status_code == 200
     assert "credential_ref" not in response.text
     assert "api_key" not in response.text.lower()
+    assert response.json()["data"]["decision_status"] == "NOT_CONFIGURED"
+    assert response.json()["data"]["research_status"] == "NOT_CONFIGURED"
     blocked = client.post(
         "/api/alphaguard/models/capability-check",
         json={

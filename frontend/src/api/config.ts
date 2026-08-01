@@ -187,6 +187,11 @@ export const configApi = {
     return unwrapResponse(ApiClient.get<SystemConfig>('/api/config/system'))
   },
 
+  // 使用统一认证请求验证旧系统配置，避免页面绕过请求拦截器。
+  validateSystemConfig<T = Record<string, unknown>>(): Promise<T> {
+    return unwrapResponse(ApiClient.get<T>('/api/system/config/validate', undefined, { skipErrorHandler: true }))
+  },
+
   // ========== 大模型厂家管理 ==========
 
   // 获取所有大模型厂家

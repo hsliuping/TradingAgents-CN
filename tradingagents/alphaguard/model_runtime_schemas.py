@@ -41,6 +41,7 @@ CapabilityStatus = Literal[
     "PROJECT_ACCESS_DENIED",
     "MODEL_NOT_FOUND",
     "STRUCTURED_OUTPUT_UNSUPPORTED",
+    "INVALID_OUTPUT",
     "USAGE_UNAVAILABLE",
     "TIMEOUT",
     "RATE_LIMITED",
@@ -342,6 +343,10 @@ class ModelCapabilityCheck(_StrictFrozenModel):
     error_category: str | None = None
     error_code: str | None = None
     sanitized_message: str | None = None
+    validation_error_count: int | None = Field(default=None, ge=1)
+    validation_missing_field_count: int | None = Field(default=None, ge=0)
+    validation_error_fields: tuple[str, ...] = ()
+    validation_error_types: tuple[str, ...] = ()
     checked_by: str
     checked_at: datetime
     input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")

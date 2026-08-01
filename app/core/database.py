@@ -186,8 +186,8 @@ class DatabaseManager:
 db_manager = DatabaseManager()
 
 
-async def init_database():
-    """初始化数据库连接"""
+async def connect_database():
+    """Connect to MongoDB and Redis without mutating schema objects."""
     global mongo_client, mongo_db, redis_client, redis_pool
 
     try:
@@ -203,12 +203,15 @@ async def init_database():
 
         logger.info("🎉 所有数据库连接初始化完成")
 
-        # 🔥 初始化数据库视图和索引
-        await init_database_views_and_indexes()
-
     except Exception as e:
         logger.error(f"💥 数据库初始化失败: {e}")
         raise
+
+
+async def init_database():
+    """Connect to databases and ensure application views and indexes."""
+    await connect_database()
+    await init_database_views_and_indexes()
 
 
 async def init_database_views_and_indexes():

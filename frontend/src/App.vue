@@ -28,7 +28,6 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import NetworkStatus from '@/components/NetworkStatus.vue'
-import axios from 'axios'
 import { configApi } from '@/api/config'
 
 // 需要缓存的组件
@@ -59,17 +58,19 @@ const checkFirstTimeSetup = async () => {
     }
 
     // 验证配置完整性
-    const response = await axios.get('/api/system/config/validate')
-    if (response.data.success) {
-      const result = response.data.data
+    const result = await configApi.validateSystemConfig<{
+      success: boolean
+      missing_required?: unknown[]
+      env_validation?: { missing_required?: unknown[] }
+    }>()
+    const missingRequired = result.missing_required || result.env_validation?.missing_required || []
 
-      // 如果有缺少的必需配置，显示配置向导
-      if (!result.success && result.missing_required?.length > 0) {
-        // 延迟显示，等待页面加载完成
-        setTimeout(() => {
-          showConfigWizard.value = true
-        }, 1000)
-      }
+    // 如果有缺少的必需配置，显示配置向导
+    if (!result.success && missingRequired.length > 0) {
+      // 延迟显示，等待页面加载完成
+      setTimeout(() => {
+        showConfigWizard.value = true
+      }, 1000)
     }
   } catch (error) {
     console.error('检查配置失败:', error)

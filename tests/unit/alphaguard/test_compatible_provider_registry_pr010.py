@@ -35,8 +35,11 @@ from app.services.alphaguard.model_profile_registry import ModelProfileRegistry
 from app.services.alphaguard.model_budget_service import ModelBudgetService
 from app.services.alphaguard.model_provider_runtime import ModelProviderRuntime
 from app.services.alphaguard.model_credential_service import ModelCredentialService
-from app.services.alphaguard.model_secret_store import keychain_ref
-from app.services.alphaguard.model_secret_store import SecretNotFound
+from app.services.alphaguard.model_secret_store import (
+    KEYCHAIN_ALIAS_SERVICE,
+    SecretNotFound,
+    keychain_ref,
+)
 from tests.unit.alphaguard._fakes import FakeDB
 from tradingagents.alphaguard.mongo_indexes import ALPHAGUARD_INDEX_SPECS
 
@@ -68,6 +71,16 @@ class FakeSecretStore:
         self.values.pop((service, account), None)
 
 
+class TrackingCredentialService(ModelCredentialService):
+    def __init__(self, secret_store):
+        super().__init__(secret_store)
+        self.resolved_refs: list[str] = []
+
+    def resolve(self, credential_ref: str) -> str:
+        self.resolved_refs.append(credential_ref)
+        return super().resolve(credential_ref)
+
+
 class SafeValidator:
     async def validate(self, base_url: str) -> EndpointSafetyResult:
         parsed = parse_registered_endpoint(base_url)
@@ -79,6 +92,26 @@ class SafeValidator:
             status_code=401,
             redirect_status="NONE",
         )
+
+
+def install_fake_credential(
+    store: FakeSecretStore,
+    *,
+    credential_id: str,
+    account: str,
+) -> str:
+    direct_ref = keychain_ref(service="Compatible Test", account=account)
+    store.write(
+        service="Compatible Test",
+        account=account,
+        secret=TEST_SECRET,
+    )
+    store.write(
+        service=KEYCHAIN_ALIAS_SERVICE,
+        account=credential_id,
+        secret=direct_ref,
+    )
+    return direct_ref
 
 
 async def validated_registry(*, confirm=True):
@@ -303,6 +336,195 @@ async def test_endpoint_configuration_change_requires_explicit_new_version():
 
 
 @pytest.mark.asyncio
+async def test_newer_draft_does_not_hide_current_validated_endpoint():
+    _db, _store, registry, validated_v2 = await validated_registry()
+    draft_v3, _ = await registry.register_endpoint(
+        display_name="Compatible Test v4",
+        base_url=validated_v2.base_url,
+        api_mode=validated_v2.api_mode,
+        auth_scheme=validated_v2.auth_scheme,
+        models_endpoint_enabled=validated_v2.models_endpoint_enabled,
+        structured_output_mode=validated_v2.structured_output_mode,
+        notes="next validated endpoint",
+        created_by="admin",
+        endpoint_profile_id=validated_v2.endpoint_profile_id,
+        create_new_version=True,
+    )
+    validated_v4 = await registry.validate_endpoint(
+        endpoint_profile_id=draft_v3.endpoint_profile_id,
+        profile_version=draft_v3.profile_version,
+        confirm_data_transmission=True,
+        operator_user_id="admin",
+        trace_id="trace-validate-v4",
+    )
+    draft_v5, _ = await registry.register_endpoint(
+        display_name="Compatible Test draft v5",
+        base_url=validated_v4.base_url,
+        api_mode=validated_v4.api_mode,
+        auth_scheme=validated_v4.auth_scheme,
+        models_endpoint_enabled=validated_v4.models_endpoint_enabled,
+        structured_output_mode=validated_v4.structured_output_mode,
+        notes="unfinished draft",
+        created_by="admin",
+        endpoint_profile_id=validated_v4.endpoint_profile_id,
+        create_new_version=True,
+    )
+
+    endpoints = await registry.list_endpoints()
+    compatible = next(
+        item
+        for item in endpoints
+        if item.get("provider_type") == "OPENAI_COMPATIBLE"
+    )
+
+    assert validated_v4.profile_version == "v4"
+    assert draft_v5.profile_version == "v5"
+    assert compatible["profile_version"] == "v4"
+    assert compatible["url_validation_status"] == "PASS"
+    assert compatible["latest_profile_version"] == "v5"
+    assert compatible["has_newer_draft"] is True
+
+
+@pytest.mark.asyncio
+async def test_latest_disabled_version_tombstones_endpoint_lineage():
+    _db, _store, registry, endpoint = await validated_registry()
+    disabled = await registry.disable_endpoint(
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        profile_version=endpoint.profile_version,
+        operator_user_id="admin",
+        trace_id="trace-disable",
+    )
+
+    endpoints = await registry.list_endpoints()
+    compatible = next(
+        item
+        for item in endpoints
+        if item.get("provider_type") == "OPENAI_COMPATIBLE"
+    )
+
+    assert compatible["profile_version"] == disabled.profile_version
+    assert compatible["state"] == "DISABLED"
+    assert compatible["enabled"] is False
+    assert compatible["has_newer_draft"] is False
+    assert compatible["production_allowed"] is False
+    assert (
+        await registry.endpoint(
+            endpoint.endpoint_profile_id, endpoint.profile_version
+        )
+    ).state == "URL_VALIDATED"
+
+    draft, _ = await registry.register_endpoint(
+        display_name="Compatible Test replacement draft",
+        base_url=endpoint.base_url,
+        api_mode=endpoint.api_mode,
+        auth_scheme=endpoint.auth_scheme,
+        models_endpoint_enabled=endpoint.models_endpoint_enabled,
+        structured_output_mode=endpoint.structured_output_mode,
+        notes="not yet validated",
+        created_by="admin",
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        create_new_version=True,
+    )
+    endpoints_with_draft = await registry.list_endpoints()
+    still_disabled = next(
+        item
+        for item in endpoints_with_draft
+        if item.get("provider_type") == "OPENAI_COMPATIBLE"
+    )
+    assert still_disabled["profile_version"] == disabled.profile_version
+    assert still_disabled["state"] == "DISABLED"
+    assert still_disabled["latest_profile_version"] == draft.profile_version
+    assert still_disabled["has_newer_draft"] is True
+    with pytest.raises(ProviderRegistryNotReady, match="lineage is disabled"):
+        await registry._require_active_lineage(endpoint)
+
+    replacement = await registry.validate_endpoint(
+        endpoint_profile_id=draft.endpoint_profile_id,
+        profile_version=draft.profile_version,
+        confirm_data_transmission=True,
+        operator_user_id="admin",
+        trace_id="trace-replacement-validate",
+    )
+    reactivated = next(
+        item
+        for item in await registry.list_endpoints()
+        if item.get("provider_type") == "OPENAI_COMPATIBLE"
+    )
+    assert reactivated["profile_version"] == replacement.profile_version
+    assert reactivated["state"] == "URL_VALIDATED"
+    await registry._require_active_lineage(replacement)
+    with pytest.raises(ProviderRegistryNotReady, match="lineage is disabled"):
+        await registry._require_active_lineage(endpoint)
+    old_status = await registry.configuration_status(
+        endpoint.endpoint_profile_id, endpoint.profile_version
+    )
+    assert old_status["production_allowed"] is False
+
+    assert int(replacement.profile_version[1:]) > int(disabled.profile_version[1:])
+
+
+@pytest.mark.asyncio
+async def test_configuration_status_requires_real_secret_store_alias():
+    db, store, registry, endpoint = await validated_registry()
+    direct_ref = keychain_ref(
+        service="Compatible Test", account="metadata-only"
+    )
+    store.write(
+        service="Compatible Test",
+        account="metadata-only",
+        secret=TEST_SECRET,
+    )
+    await db["ag_model_credentials"].insert_one(
+        {
+            "credential_id": "metadata-only",
+            "provider": "openai_compatible",
+            "provider_type": "OPENAI_COMPATIBLE",
+            "credential_ref": direct_ref,
+            "endpoint_profile_id": endpoint.endpoint_profile_id,
+            "endpoint_profile_version": endpoint.profile_version,
+            "normalized_origin": endpoint.normalized_origin,
+            "auth_scheme": endpoint.auth_scheme,
+            "status": "CONFIGURED",
+        }
+    )
+
+    status = await registry.configuration_status(
+        endpoint.endpoint_profile_id, endpoint.profile_version
+    )
+    components = {item["key"]: item for item in status["components"]}
+
+    assert status["stage"] == "URL_VALIDATED"
+    assert components["credential"]["complete"] is False
+    assert components["credential"]["status"] == "MISSING"
+
+    store.write(
+        service=KEYCHAIN_ALIAS_SERVICE,
+        account="metadata-only",
+        secret=direct_ref,
+    )
+    configured = await registry.configuration_status(
+        endpoint.endpoint_profile_id, endpoint.profile_version
+    )
+    configured_components = {
+        item["key"]: item for item in configured["components"]
+    }
+    assert configured_components["credential"]["complete"] is True
+
+    store.write(
+        service=KEYCHAIN_ALIAS_SERVICE,
+        account="metadata-only",
+        secret=keychain_ref(service="Compatible Test", account="other"),
+    )
+    mismatched = await registry.configuration_status(
+        endpoint.endpoint_profile_id, endpoint.profile_version
+    )
+    mismatched_components = {
+        item["key"]: item for item in mismatched["components"]
+    }
+    assert mismatched_components["credential"]["complete"] is False
+
+
+@pytest.mark.asyncio
 async def test_manual_models_and_decimal_prices_are_endpoint_scoped():
     db, _store, registry, endpoint = await validated_registry()
     model, created = await registry.register_model(
@@ -490,6 +712,346 @@ async def test_models_endpoint_discovery_and_manual_fallback(monkeypatch):
     assert manual.discovery_mode == "MANUAL"
 
 
+@pytest.mark.parametrize(
+    ("provider_rows", "expected"),
+    [
+        (
+            [
+                {"id": "zeta-model"},
+                {"id": "alpha-model"},
+                {"id": "zeta-model"},
+                {"id": ""},
+                {"not_id": "ignored"},
+                "ignored",
+            ],
+            ["alpha-model", "zeta-model"],
+        ),
+        ([], []),
+    ],
+)
+@pytest.mark.asyncio
+async def test_model_options_are_sorted_deduplicated_and_read_only(
+    monkeypatch,
+    provider_rows,
+    expected,
+):
+    db, store, registry, endpoint = await validated_registry()
+    credential_id = "model-options-primary"
+    direct_ref = install_fake_credential(
+        store,
+        credential_id=credential_id,
+        account=credential_id,
+    )
+    await db["ag_model_credentials"].insert_one(
+        {
+            "credential_id": credential_id,
+            "provider": "openai_compatible",
+            "provider_type": "OPENAI_COMPATIBLE",
+            "credential_ref": direct_ref,
+            "endpoint_profile_id": endpoint.endpoint_profile_id,
+            "endpoint_profile_version": endpoint.profile_version,
+            "normalized_origin": endpoint.normalized_origin,
+            "auth_scheme": endpoint.auth_scheme,
+            "status": "CONFIGURED",
+        }
+    )
+    requested_urls: list[str] = []
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {"data": provider_rows}
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, url):
+            requested_urls.append(url)
+            return Response()
+
+    monkeypatch.setattr(
+        "app.services.alphaguard.compatible_provider_registry.build_pinned_client",
+        lambda **kwargs: (
+            Client()
+            if kwargs["secret"] == TEST_SECRET
+            else pytest.fail("model options did not resolve the Keychain secret")
+        ),
+    )
+    read_only_collections = (
+        "ag_model_endpoint_models",
+        "ag_model_endpoint_events",
+        "ag_model_endpoint_prices",
+        "ag_model_profiles",
+        "ag_model_profile_assignments",
+    )
+    before = {
+        name: db[name].count()
+        for name in read_only_collections
+    }
+
+    names = await registry.model_options(
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        endpoint_profile_version=endpoint.profile_version,
+        credential_id=credential_id,
+    )
+
+    assert names == expected
+    assert requested_urls == [f"{endpoint.base_url}/models"]
+    assert {
+        name: db[name].count()
+        for name in read_only_collections
+    } == before
+
+
+@pytest.mark.asyncio
+async def test_model_options_require_exact_endpoint_version_and_keychain_alias(
+    monkeypatch,
+):
+    db, store, registry, endpoint = await validated_registry()
+    credential_id = "model-options-binding"
+    direct_ref = keychain_ref(
+        service="Compatible Test", account=credential_id
+    )
+    store.write(
+        service="Compatible Test",
+        account=credential_id,
+        secret=TEST_SECRET,
+    )
+    await db["ag_model_credentials"].insert_one(
+        {
+            "credential_id": credential_id,
+            "provider": "openai_compatible",
+            "provider_type": "OPENAI_COMPATIBLE",
+            "credential_ref": direct_ref,
+            "endpoint_profile_id": endpoint.endpoint_profile_id,
+            "endpoint_profile_version": endpoint.profile_version,
+            "normalized_origin": endpoint.normalized_origin,
+            "auth_scheme": endpoint.auth_scheme,
+            "status": "CONFIGURED",
+        }
+    )
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {"data": [{"id": "bound-model"}]}
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, _url):
+            return Response()
+
+    network_calls = 0
+
+    def client_factory(**kwargs):
+        nonlocal network_calls
+        network_calls += 1
+        assert kwargs["secret"] == TEST_SECRET
+        return Client()
+
+    monkeypatch.setattr(
+        "app.services.alphaguard.compatible_provider_registry.build_pinned_client",
+        client_factory,
+    )
+
+    with pytest.raises(
+        ProviderRegistryNotReady,
+        match="Secret Store alias is not configured",
+    ):
+        await registry.model_options(
+            endpoint_profile_id=endpoint.endpoint_profile_id,
+            endpoint_profile_version=endpoint.profile_version,
+            credential_id=credential_id,
+        )
+    assert network_calls == 0
+
+    store.write(
+        service=KEYCHAIN_ALIAS_SERVICE,
+        account=credential_id,
+        secret=direct_ref,
+    )
+    assert await registry.model_options(
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        endpoint_profile_version=endpoint.profile_version,
+        credential_id=credential_id,
+    ) == ["bound-model"]
+    assert network_calls == 1
+
+    next_draft, _ = await registry.register_endpoint(
+        display_name="Compatible Test next version",
+        base_url=endpoint.base_url,
+        api_mode=endpoint.api_mode,
+        auth_scheme=endpoint.auth_scheme,
+        models_endpoint_enabled=endpoint.models_endpoint_enabled,
+        structured_output_mode=endpoint.structured_output_mode,
+        notes="exact credential binding test",
+        created_by="admin",
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        create_new_version=True,
+    )
+    next_endpoint = await registry.validate_endpoint(
+        endpoint_profile_id=next_draft.endpoint_profile_id,
+        profile_version=next_draft.profile_version,
+        confirm_data_transmission=True,
+        operator_user_id="admin",
+        trace_id="trace-model-options-next-version",
+    )
+    with pytest.raises(
+        ProviderRegistryNotReady,
+        match="exact endpoint version",
+    ):
+        await registry.model_options(
+            endpoint_profile_id=next_endpoint.endpoint_profile_id,
+            endpoint_profile_version=next_endpoint.profile_version,
+            credential_id=credential_id,
+        )
+    assert network_calls == 1
+
+
+def test_model_options_api_is_admin_only_and_returns_names_only(monkeypatch):
+    import app.routers.alphaguard_models as models_router
+
+    db, store, _registry, endpoint = asyncio.run(validated_registry())
+    credential_id = "model-options-api"
+    direct_ref = install_fake_credential(
+        store,
+        credential_id=credential_id,
+        account=credential_id,
+    )
+    asyncio.run(
+        db["ag_model_credentials"].insert_one(
+            {
+                "credential_id": credential_id,
+                "provider": "openai_compatible",
+                "provider_type": "OPENAI_COMPATIBLE",
+                "credential_ref": direct_ref,
+                "endpoint_profile_id": endpoint.endpoint_profile_id,
+                "endpoint_profile_version": endpoint.profile_version,
+                "normalized_origin": endpoint.normalized_origin,
+                "auth_scheme": endpoint.auth_scheme,
+                "status": "CONFIGURED",
+            }
+        )
+    )
+    credential_service = ModelCredentialManagementService(
+        db, secret_store=store
+    )
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {
+                "data": [
+                    {"id": "top-model", "owned_by": "must-not-leak"},
+                    {"id": "normal-model"},
+                ]
+            }
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, _url):
+            return Response()
+
+    network_calls = 0
+
+    def client_factory(**kwargs):
+        nonlocal network_calls
+        network_calls += 1
+        assert kwargs["secret"] == TEST_SECRET
+        return Client()
+
+    monkeypatch.setattr(models_router, "get_mongo_db", lambda: db)
+    monkeypatch.setattr(
+        models_router,
+        "ModelCredentialManagementService",
+        lambda _db: credential_service,
+    )
+    monkeypatch.setattr(
+        "app.services.alphaguard.compatible_provider_registry.build_pinned_client",
+        client_factory,
+    )
+    app = FastAPI()
+    app.include_router(models_router.router, prefix="/api")
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": "ordinary",
+        "is_admin": False,
+    }
+    client = TestClient(app)
+    path = (
+        "/api/alphaguard/models/endpoints/"
+        f"{endpoint.endpoint_profile_id}/models/options"
+    )
+    body = {
+        "endpoint_profile_version": endpoint.profile_version,
+        "credential_id": credential_id,
+    }
+
+    blocked = client.post(path, json=body)
+    assert blocked.status_code == 403
+    assert network_calls == 0
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": "admin",
+        "is_admin": True,
+    }
+    response = client.post(path, json=body)
+
+    assert response.status_code == 200
+    assert network_calls == 1
+    payload = response.json()
+    assert set(payload["data"]) == {"items", "source", "status"}
+    assert payload["data"]["source"] == "MODELS_ENDPOINT"
+    assert payload["data"]["status"] == "READY"
+    assert payload["data"]["items"] == [
+        {
+            "remote_model_name": "normal-model",
+            "display_name": "normal-model",
+        },
+        {
+            "remote_model_name": "top-model",
+            "display_name": "top-model",
+        },
+    ]
+    assert all(
+        set(item) == {"remote_model_name", "display_name"}
+        for item in payload["data"]["items"]
+    )
+    assert TEST_SECRET not in response.text
+    assert "owned_by" not in response.text
+
+
 @pytest.mark.asyncio
 async def test_compatible_credential_is_exactly_bound_and_secret_free():
     db, store, registry, endpoint = await validated_registry()
@@ -668,7 +1230,7 @@ async def test_failed_compatible_verification_persists_no_secret_or_metadata():
 
 @pytest.mark.asyncio
 async def test_explicit_role_assignments_resolve_exact_dynamic_profiles():
-    db, _store, registry, endpoint = await validated_registry()
+    db, store, registry, endpoint = await validated_registry()
     model, _ = await registry.register_model(
         endpoint_profile_id=endpoint.endpoint_profile_id,
         endpoint_profile_version=endpoint.profile_version,
@@ -696,12 +1258,17 @@ async def test_explicit_role_assignments_resolve_exact_dynamic_profiles():
         verified=True,
         created_by="admin",
     )
+    direct_ref = install_fake_credential(
+        store,
+        credential_id="compatible-primary",
+        account="compatible-primary",
+    )
     await db["ag_model_credentials"].insert_one(
         {
             "credential_id": "compatible-primary",
             "provider": "openai_compatible",
             "provider_type": "OPENAI_COMPATIBLE",
-            "credential_ref": "keychain:service/account",
+            "credential_ref": direct_ref,
             "endpoint_profile_id": endpoint.endpoint_profile_id,
             "endpoint_profile_version": endpoint.profile_version,
             "normalized_origin": endpoint.normalized_origin,
@@ -764,6 +1331,124 @@ async def test_explicit_role_assignments_resolve_exact_dynamic_profiles():
             explicit_same_model_confirmation=False,
             assigned_by="admin",
         )
+
+
+@pytest.mark.asyncio
+async def test_simple_decision_model_config_hides_versions_and_reuses_bindings():
+    db, store, registry, endpoint = await validated_registry()
+    models = {}
+    for role, remote_name in (
+        ("NORMAL_TRADER", "normal-simple-model"),
+        ("TOP_RISK_REVIEWER", "top-simple-model"),
+    ):
+        model, _ = await registry.register_model(
+            endpoint_profile_id=endpoint.endpoint_profile_id,
+            endpoint_profile_version=endpoint.profile_version,
+            remote_model_name=remote_name,
+            display_name=remote_name,
+            role_capabilities=[role],
+            supports_json_schema=True,
+            supports_tool_call=False,
+            supports_reasoning=None,
+            max_context_tokens=64000,
+            max_output_tokens=4000,
+            created_by="admin",
+        )
+        await registry.register_price(
+            endpoint_profile_id=endpoint.endpoint_profile_id,
+            endpoint_profile_version=endpoint.profile_version,
+            endpoint_model_id=model.endpoint_model_id,
+            endpoint_model_version=model.model_version,
+            pricing_source="SELF_HOSTED",
+            input_price_per_million=Decimal("0"),
+            cached_input_price_per_million=Decimal("0"),
+            output_price_per_million=Decimal("0"),
+            currency="USD",
+            effective_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+            source_description="self hosted",
+            verified=True,
+            created_by="admin",
+        )
+        models[role] = model
+    direct_ref = keychain_ref(
+        service="Compatible Test", account="simple-primary"
+    )
+    await db["ag_model_credentials"].insert_one(
+        {
+            "credential_id": "simple-primary",
+            "provider": "openai_compatible",
+            "provider_type": "OPENAI_COMPATIBLE",
+            "credential_ref": direct_ref,
+            "endpoint_profile_id": endpoint.endpoint_profile_id,
+            "endpoint_profile_version": endpoint.profile_version,
+            "normalized_origin": endpoint.normalized_origin,
+            "auth_scheme": endpoint.auth_scheme,
+            "status": "CONFIGURED",
+        }
+    )
+    payload = {
+        "endpoint_profile_id": endpoint.endpoint_profile_id,
+        "endpoint_profile_version": endpoint.profile_version,
+        "credential_id": "simple-primary",
+        "normal_endpoint_model_id": models["NORMAL_TRADER"].endpoint_model_id,
+        "normal_endpoint_model_version": models["NORMAL_TRADER"].model_version,
+        "top_endpoint_model_id": models["TOP_RISK_REVIEWER"].endpoint_model_id,
+        "top_endpoint_model_version": models["TOP_RISK_REVIEWER"].model_version,
+        "explicit_same_model_confirmation": False,
+        "assigned_by": "admin",
+    }
+    with pytest.raises(
+        ProviderRegistryNotReady,
+        match="Secret Store alias is not configured",
+    ):
+        await registry.configure_decision_models(**payload)
+    install_fake_credential(
+        store,
+        credential_id="simple-primary",
+        account="simple-primary",
+    )
+    first = await registry.configure_decision_models(**payload)
+    second = await registry.configure_decision_models(**payload)
+    assert {item["result"] for item in first["roles"].values()} == {"CREATED"}
+    assert {item["result"] for item in second["roles"].values()} == {"REUSED"}
+    assert db["ag_model_profiles"].count() == 2
+    assert db["ag_model_profile_assignments"].count() == 2
+
+    checked_at = datetime(2026, 8, 1, 2, 55, tzinfo=timezone.utc)
+    for role in ("NORMAL_TRADER", "TOP_RISK_REVIEWER"):
+        assignment = await db["ag_model_profile_assignments"].find_one(
+            {"role": role}
+        )
+        await db["ag_model_capability_checks"].insert_one(
+            {
+                "profile_id": assignment["profile_id"],
+                "profile_version": assignment["profile_version"],
+                "status": "READY",
+                "checked_at": checked_at,
+            }
+        )
+    await db["ag_model_credentials"].update_one(
+        {"credential_id": "simple-primary"},
+        {
+            "$set": {
+                "last_verified_at": datetime(2026, 8, 1, 2, 56),
+            }
+        },
+    )
+    stale_status = await registry.configuration_status(
+        endpoint.endpoint_profile_id, endpoint.profile_version
+    )
+    stale_components = {
+        item["key"]: item for item in stale_status["components"]
+    }
+    assert stale_status["stage"] == "PROFILES_CONFIGURED"
+    assert stale_components["normal_profile"]["status"] == "UNVERIFIED"
+    assert stale_components["top_profile"]["status"] == "UNVERIFIED"
+    assert stale_components["capability"]["complete"] is False
+    assert (
+        stale_components["capability"]["reason_code"]
+        == "CREDENTIAL_REVERIFIED"
+    )
 
 
 @pytest.mark.asyncio
@@ -877,6 +1562,11 @@ async def test_unified_model_runtime_uses_registered_pinned_endpoint():
     )
     direct_ref = keychain_ref(service="Compatible Test", account="runtime")
     store.write(service="Compatible Test", account="runtime", secret=TEST_SECRET)
+    store.write(
+        service=KEYCHAIN_ALIAS_SERVICE,
+        account="runtime-compatible",
+        secret=direct_ref,
+    )
     await db["ag_model_credentials"].insert_one(
         {
             "credential_id": "runtime-compatible",
@@ -905,7 +1595,8 @@ async def test_unified_model_runtime_uses_registered_pinned_endpoint():
         explicit_same_model_confirmation=False,
         assigned_by="admin",
     )
-    runtime = ModelProviderRuntime(ModelCredentialService(store))
+    credentials = TrackingCredentialService(store)
+    runtime = ModelProviderRuntime(credentials)
     llm = await runtime.create_registered(profile, db=db)
     assert llm.model_name == "compatible-runtime-model"
     assert str(llm.openai_api_base).rstrip("/") == endpoint.base_url
@@ -913,6 +1604,26 @@ async def test_unified_model_runtime_uses_registered_pinned_endpoint():
     assert llm.http_client._transport.endpoint.normalized_origin == (
         endpoint.normalized_origin
     )
+    assert credentials.resolved_refs[0] == (
+        "keychain-alias:runtime-compatible"
+    )
+
+    disabled = await registry.disable_endpoint(
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        profile_version=endpoint.profile_version,
+        operator_user_id="admin",
+        trace_id="trace-runtime-disable",
+    )
+    endpoints = await registry.list_endpoints()
+    projected = next(
+        item
+        for item in endpoints
+        if item.get("endpoint_profile_id") == endpoint.endpoint_profile_id
+    )
+    assert projected["profile_version"] == disabled.profile_version
+    assert projected["state"] == "DISABLED"
+    with pytest.raises(ProviderRegistryNotReady, match="lineage is disabled"):
+        await registry.resolve_profile_binding(profile)
 
 
 def test_endpoint_api_is_admin_only_and_official_url_cannot_be_registered(monkeypatch):
@@ -1205,20 +1916,21 @@ def test_registry_indexes_and_frontend_browser_isolation_contract():
         "ag_model_endpoint_events",
     }
     assert required <= set(ALPHAGUARD_INDEX_SPECS)
-    operations = (
-        ROOT / "frontend/src/views/AlphaGuard/Operations.vue"
+    model_panel = (
+        ROOT
+        / "frontend/src/components/alphaguard/ModelConfigurationPanel.vue"
     ).read_text(encoding="utf-8")
     api = (ROOT / "frontend/src/api/alphaguardModels.ts").read_text(
         encoding="utf-8"
     )
-    assert "服务商" in operations
-    assert "模型管理" in operations
-    assert "调用价格" in operations
-    assert "我确认将研究数据发送到该第三方服务" in operations
-    assert 'type="password"' in operations
-    assert "credentialApiKey.value = ''" in operations
-    assert "localStorage.setItem" not in operations
-    assert "sessionStorage.setItem" not in operations
+    assert "模型服务" in model_panel
+    assert "决策模型" in model_panel
+    assert "模型与价格" in model_panel
+    assert "我确认模型请求会发送到该服务" in model_panel
+    assert 'type="password"' in model_panel
+    assert "credentialApiKey.value = ''" in model_panel
+    assert "localStorage.setItem" not in model_panel
+    assert "sessionStorage.setItem" not in model_panel
     assert "models.example" not in api
     assert "/api/alphaguard/models/endpoints" in api
 

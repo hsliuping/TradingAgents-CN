@@ -71,7 +71,9 @@ class ModelProviderRuntime:
         endpoint, model, _price, credential = (
             await registry.resolve_profile_binding(profile)
         )
-        secret = self.credentials.resolve(str(credential["credential_ref"]))
+        secret = self.credentials.resolve(
+            f"keychain-alias:{credential['credential_id']}"
+        )
         client = build_pinned_client(
             endpoint=parse_registered_endpoint(endpoint.base_url),
             resolved_ips=endpoint.resolved_ips,

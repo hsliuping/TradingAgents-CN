@@ -30,6 +30,12 @@ from .model_runtime_repository import (
     ModelRuntimeIntegrityConflict,
     ModelRuntimeRepository,
 )
+from .model_runtime_status_service import project_capability_check
+from .model_secret_store import (
+    KEYCHAIN_ALIAS_SERVICE,
+    SecretNotFound,
+    SecretStoreError,
+)
 from .prompt_profile_registry import PromptProfileRegistry
 from .paper_storage import clean_document
 
@@ -263,13 +269,102 @@ class CompatibleProviderRegistryService:
         rows.sort(key=lambda item: int(str(item["profile_version"])[1:]))
         return ProviderEndpointProfile.model_validate(rows[-1])
 
+    @staticmethod
+    def _endpoint_version_number(row: dict[str, Any]) -> int:
+        return int(str(row["profile_version"])[1:])
+
+    @classmethod
+    def _lineage_disabled_in_rows(
+        cls, rows: list[dict[str, Any]]
+    ) -> bool:
+        disabled_versions = [
+            cls._endpoint_version_number(row)
+            for row in rows
+            if row.get("state") == "DISABLED"
+        ]
+        active_versions = [
+            cls._endpoint_version_number(row)
+            for row in rows
+            if bool(row.get("enabled"))
+            and row.get("url_validation_status") == "PASS"
+            and bool(row.get("data_transmission_confirmed"))
+            and row.get("state")
+            in {"URL_VALIDATED", "CAPABILITY_CHECKED", "READY"}
+        ]
+        return bool(disabled_versions) and max(disabled_versions) > max(
+            active_versions, default=0
+        )
+
+    async def _endpoint_version_is_disabled(
+        self, endpoint: ProviderEndpointProfile
+    ) -> bool:
+        rows = await self.repository.list(
+            "endpoints",
+            {"endpoint_profile_id": endpoint.endpoint_profile_id},
+        )
+        return self._endpoint_version_is_disabled_in_rows(
+            rows,
+            endpoint.profile_version,
+        )
+
+    @classmethod
+    def _endpoint_version_is_disabled_in_rows(
+        cls,
+        rows: list[dict[str, Any]],
+        profile_version: str,
+    ) -> bool:
+        disabled_versions = [
+            cls._endpoint_version_number(row)
+            for row in rows
+            if row.get("state") == "DISABLED"
+        ]
+        requested_version = int(profile_version.removeprefix("v"))
+        return bool(disabled_versions) and requested_version <= max(
+            disabled_versions
+        )
+
+    async def _require_active_lineage(
+        self, endpoint: ProviderEndpointProfile
+    ) -> None:
+        if await self._endpoint_version_is_disabled(endpoint):
+            raise ProviderRegistryNotReady("endpoint lineage is disabled")
+
     async def list_endpoints(self) -> list[dict[str, Any]]:
         rows = await self.repository.list("endpoints", sort=("created_at", -1))
-        latest: dict[str, dict[str, Any]] = {}
+        versions: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            latest.setdefault(str(row["endpoint_profile_id"]), row)
+            versions.setdefault(str(row["endpoint_profile_id"]), []).append(row)
         projections = []
-        for row in latest.values():
+        for endpoint_rows in versions.values():
+            endpoint_rows.sort(
+                key=self._endpoint_version_number,
+                reverse=True,
+            )
+            latest_row = endpoint_rows[0]
+            # A newer immutable draft must not displace the last validated,
+            # enabled version used by the guided configuration flow. Drafts
+            # remain persisted and directly addressable by their version.
+            lineage_disabled = self._lineage_disabled_in_rows(endpoint_rows)
+            row = (
+                next(
+                    item
+                    for item in endpoint_rows
+                    if item.get("state") == "DISABLED"
+                )
+                if lineage_disabled
+                else next(
+                    (
+                        item
+                        for item in endpoint_rows
+                        if bool(item.get("enabled"))
+                        and item.get("url_validation_status") == "PASS"
+                        and bool(item.get("data_transmission_confirmed"))
+                        and item.get("state")
+                        in {"URL_VALIDATED", "CAPABILITY_CHECKED", "READY"}
+                    ),
+                    latest_row,
+                )
+            )
             projection = dict(row)
             status = await self.configuration_status(
                 str(row["endpoint_profile_id"]),
@@ -280,6 +375,12 @@ class CompatibleProviderRegistryService:
             # URL_VALIDATED state merely because later objects are incomplete.
             projection["configuration_stage"] = status["stage"]
             projection["production_allowed"] = status["production_allowed"]
+            projection["latest_profile_version"] = str(
+                latest_row["profile_version"]
+            )
+            projection["has_newer_draft"] = (
+                latest_row["profile_version"] != row["profile_version"]
+            )
             projections.append(projection)
         return [OFFICIAL_OPENAI_ENDPOINT, *projections]
 
@@ -293,15 +394,19 @@ class CompatibleProviderRegistryService:
         endpoint = await self.endpoint(
             endpoint_profile_id, endpoint_profile_version
         )
+        endpoint_version_disabled = await self._endpoint_version_is_disabled(
+            endpoint
+        )
         roles = ("NORMAL_TRADER", "TOP_RISK_REVIEWER")
         endpoint_ready = bool(
-            endpoint.enabled
+            not endpoint_version_disabled
+            and endpoint.enabled
             and endpoint.url_validation_status == "PASS"
             and endpoint.data_transmission_confirmed
             and endpoint.state
             in {"URL_VALIDATED", "CAPABILITY_CHECKED", "READY"}
         )
-        credential = await self.db["ag_model_credentials"].find_one(
+        credential_rows = await self.db["ag_model_credentials"].find(
             {
                 "provider_type": "OPENAI_COMPATIBLE",
                 "endpoint_profile_id": endpoint_profile_id,
@@ -309,14 +414,12 @@ class CompatibleProviderRegistryService:
                 "normalized_origin": endpoint.normalized_origin,
                 "auth_scheme": endpoint.auth_scheme,
                 "status": {"$ne": "REVOKED"},
-            },
-            {"_id": 0, "credential_ref": 0},
-        )
-        credential_present = bool(credential)
-        credential_ready = bool(
-            credential
-            and credential.get("status") in {"CONFIGURED", "DEGRADED"}
-        )
+            }
+        ).sort([("updated_at", -1), ("_id", -1)]).limit(2).to_list(length=2)
+        # Multiple active bindings for one endpoint identity are an integrity
+        # conflict; never select one according to incidental insertion order.
+        credential = credential_rows[0] if len(credential_rows) == 1 else None
+        credential_ready = self._credential_secret_configured(credential)
 
         model_rows = await self.repository.list(
             "endpoint_models",
@@ -371,6 +474,7 @@ class CompatibleProviderRegistryService:
             selected_assignments.setdefault(str(assignment["role"]), assignment)
         role_profiles: dict[str, dict[str, Any] | None] = {}
         role_checks: dict[str, dict[str, Any] | None] = {}
+        role_check_stale: dict[str, bool] = {}
         for role in roles:
             assignment = selected_assignments.get(role)
             profile = None
@@ -388,7 +492,7 @@ class CompatibleProviderRegistryService:
                 if candidate:
                     profile = clean_document(candidate)
             role_profiles[role] = profile
-            role_checks[role] = (
+            latest_check = (
                 await self.db["ag_model_capability_checks"].find_one(
                     {
                         "profile_id": profile["profile_id"],
@@ -399,6 +503,17 @@ class CompatibleProviderRegistryService:
                 )
                 if profile
                 else None
+            )
+            bound_credential = (
+                credential
+                if profile
+                and credential
+                and profile.get("credential_id")
+                == credential.get("credential_id")
+                else None
+            )
+            role_checks[role], role_check_stale[role] = (
+                project_capability_check(latest_check, bound_credential)
             )
 
         resolved_role_prices: dict[str, dict[str, Any] | None] = {}
@@ -427,7 +542,10 @@ class CompatibleProviderRegistryService:
             selected_assignments.get(role) and role_profiles[role]
             for role in roles
         )
-        capability_checked = all(role_checks[role] for role in roles)
+        capability_checked = all(
+            role_checks[role] and not role_check_stale[role]
+            for role in roles
+        )
         capability_ready = all(
             role_checks[role] and role_checks[role].get("status") == "READY"
             for role in roles
@@ -452,10 +570,8 @@ class CompatibleProviderRegistryService:
 
         if not endpoint_ready:
             stage = "DRAFT"
-        elif not credential_present:
-            stage = "URL_VALIDATED"
         elif not credential_ready:
-            stage = "CREDENTIAL_CONFIGURED"
+            stage = "URL_VALIDATED"
         elif not models_ready:
             stage = "AUTHENTICATED"
         elif not prices_ready:
@@ -552,13 +668,31 @@ class CompatibleProviderRegistryService:
             "capability": "READY" if capability_ready else "MISSING",
             "budget": budget_status,
         }
+        component_reasons = {
+            "normal_profile": (
+                "CREDENTIAL_REVERIFIED"
+                if role_check_stale["NORMAL_TRADER"]
+                else None
+            ),
+            "top_profile": (
+                "CREDENTIAL_REVERIFIED"
+                if role_check_stale["TOP_RISK_REVIEWER"]
+                else None
+            ),
+            "capability": (
+                "CREDENTIAL_REVERIFIED"
+                if any(role_check_stale.values())
+                else None
+            ),
+            "budget": budget_reason,
+        }
         components = [
             {
                 "key": key,
                 "label": labels[key],
                 "complete": complete,
                 "status": component_statuses[key],
-                "reason_code": budget_reason if key == "budget" else None,
+                "reason_code": component_reasons.get(key),
             }
             for key, complete in component_values.items()
         ]
@@ -587,6 +721,7 @@ class CompatibleProviderRegistryService:
         trace_id: str,
     ) -> ProviderEndpointProfile:
         endpoint = await self.endpoint(endpoint_profile_id, profile_version)
+        await self._require_active_lineage(endpoint)
         rows = await self.repository.list(
             "endpoints", {"endpoint_profile_id": endpoint_profile_id}
         )
@@ -595,6 +730,9 @@ class CompatibleProviderRegistryService:
                 ProviderEndpointProfile.model_validate(row)
                 for row in rows
                 if row.get("url_validation_status") == "PASS"
+                and not self._endpoint_version_is_disabled_in_rows(
+                    rows, str(row["profile_version"])
+                )
                 and _endpoint_config_signature(row)
                 == _endpoint_config_signature(endpoint.model_dump(mode="python"))
                 and bool(row.get("data_transmission_confirmed"))
@@ -697,6 +835,12 @@ class CompatibleProviderRegistryService:
         rows = await self.repository.list(
             "endpoints", {"endpoint_profile_id": endpoint_profile_id}
         )
+        if await self._endpoint_version_is_disabled(endpoint):
+            disabled_rows = [
+                row for row in rows if row.get("state") == "DISABLED"
+            ]
+            disabled_rows.sort(key=self._endpoint_version_number)
+            return ProviderEndpointProfile.model_validate(disabled_rows[-1])
         next_version = _next_version(rows, "profile_version")
         payload = endpoint.model_copy(
             update={
@@ -754,6 +898,7 @@ class CompatibleProviderRegistryService:
         endpoint = await self.endpoint(
             endpoint_profile_id, endpoint_profile_version
         )
+        await self._require_active_lineage(endpoint)
         if endpoint.state not in {"URL_VALIDATED", "CAPABILITY_CHECKED", "READY"}:
             raise ProviderRegistryNotReady("endpoint URL is not validated")
         identity_seed = canonical_hash(
@@ -815,56 +960,11 @@ class CompatibleProviderRegistryService:
         operator_user_id: str,
         trace_id: str,
     ) -> list[EndpointModelDefinition]:
-        endpoint = await self.endpoint(
-            endpoint_profile_id, endpoint_profile_version
+        names = await self.model_options(
+            endpoint_profile_id=endpoint_profile_id,
+            endpoint_profile_version=endpoint_profile_version,
+            credential_id=credential_id,
         )
-        if not endpoint.models_endpoint_enabled:
-            raise ProviderRegistryNotReady("endpoint requires manual model registration")
-        credential = None
-        secret = None
-        if credential_id:
-            credential = await self.db["ag_model_credentials"].find_one(
-                {"credential_id": credential_id, "status": {"$ne": "REVOKED"}}
-            )
-            self._verify_credential_binding(endpoint, credential)
-            secret = ModelCredentialService(self.secret_store).resolve(
-                str(credential["credential_ref"])
-            )
-        parsed = parse_registered_endpoint(endpoint.base_url)
-
-        def fetch() -> list[str]:
-            with build_pinned_client(
-                endpoint=parsed,
-                resolved_ips=endpoint.resolved_ips,
-                timeout_seconds=30,
-                secret=secret,
-                auth_scheme=endpoint.auth_scheme,
-            ) as client:
-                response = client.get(f"{endpoint.base_url.rstrip('/')}/models")
-                if 300 <= response.status_code < 400:
-                    raise EndpointSecurityError(
-                        "REDIRECT_FORBIDDEN",
-                        "credential-bearing model discovery cannot redirect",
-                    )
-                response.raise_for_status()
-                payload = response.json()
-                if not isinstance(payload, dict) or not isinstance(
-                    payload.get("data"), list
-                ):
-                    raise ValueError("provider /models response is invalid")
-                return sorted(
-                    {
-                        str(item["id"])
-                        for item in payload["data"]
-                        if isinstance(item, dict)
-                        and isinstance(item.get("id"), str)
-                        and item["id"]
-                    }
-                )
-
-        import asyncio
-
-        names = await asyncio.to_thread(fetch)
         results = []
         for name in names:
             model, _ = await self.register_model(
@@ -892,8 +992,69 @@ class CompatibleProviderRegistryService:
             operator_user_id=operator_user_id,
             trace_id=trace_id,
         )
-        secret = ""
         return results
+
+    async def model_options(
+        self,
+        *,
+        endpoint_profile_id: str,
+        endpoint_profile_version: str,
+        credential_id: str | None,
+    ) -> list[str]:
+        """Read the provider model catalog without creating registry objects."""
+        endpoint = await self.endpoint(
+            endpoint_profile_id, endpoint_profile_version
+        )
+        await self._require_active_lineage(endpoint)
+        if not endpoint.models_endpoint_enabled:
+            raise ProviderRegistryNotReady("endpoint requires manual model registration")
+        credential = None
+        secret = None
+        if credential_id:
+            credential = await self.db["ag_model_credentials"].find_one(
+                {"credential_id": credential_id, "status": {"$ne": "REVOKED"}}
+            )
+            self._verify_credential_binding(endpoint, credential)
+            secret = ModelCredentialService(self.secret_store).resolve(
+                f"keychain-alias:{credential['credential_id']}"
+            )
+        parsed = parse_registered_endpoint(endpoint.base_url)
+
+        def fetch() -> list[str]:
+            with build_pinned_client(
+                endpoint=parsed,
+                resolved_ips=endpoint.resolved_ips,
+                timeout_seconds=30,
+                secret=secret,
+                auth_scheme=endpoint.auth_scheme,
+            ) as client:
+                response = client.get(f"{endpoint.base_url.rstrip('/')}/models")
+                if 300 <= response.status_code < 400:
+                    raise EndpointSecurityError(
+                        "REDIRECT_FORBIDDEN",
+                        "credential-bearing model discovery cannot redirect",
+                    )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict) or not isinstance(
+                    payload.get("data"), list
+                ):
+                    raise ValueError("provider /models response is invalid")
+                names = {
+                    str(item["id"]).strip()
+                    for item in payload["data"]
+                    if isinstance(item, dict)
+                    and isinstance(item.get("id"), str)
+                    and 0 < len(str(item["id"]).strip()) <= 200
+                }
+                return sorted(names)[:1000]
+
+        import asyncio
+
+        try:
+            return await asyncio.to_thread(fetch)
+        finally:
+            secret = ""
 
     async def register_price(
         self,
@@ -914,7 +1075,10 @@ class CompatibleProviderRegistryService:
         price_version_id: str | None = None,
         price_version: str = "v1",
     ) -> tuple[EndpointPriceVersion, bool]:
-        await self.endpoint(endpoint_profile_id, endpoint_profile_version)
+        endpoint = await self.endpoint(
+            endpoint_profile_id, endpoint_profile_version
+        )
+        await self._require_active_lineage(endpoint)
         model = await self.repository.get(
             "endpoint_models",
             {
@@ -979,9 +1143,38 @@ class CompatibleProviderRegistryService:
             "endpoint_prices", query, sort=("created_at", -1)
         )
 
-    @staticmethod
+    def _credential_secret_configured(
+        self, credential: dict[str, Any] | None
+    ) -> bool:
+        if not credential or credential.get("status") not in {
+            "CONFIGURED",
+            "DEGRADED",
+        }:
+            return False
+        if credential.get("lifecycle_operation_id"):
+            return False
+        credential_id = str(credential.get("credential_id") or "").strip()
+        direct_ref = str(credential.get("credential_ref") or "").strip()
+        if not credential_id or not direct_ref:
+            return False
+        credential_service = ModelCredentialService(self.secret_store)
+        try:
+            alias_target = credential_service.secret_store.read(
+                service=KEYCHAIN_ALIAS_SERVICE,
+                account=credential_id,
+            )
+        except (SecretNotFound, SecretStoreError):
+            return False
+        if alias_target != direct_ref:
+            return False
+        return credential_service.configured(
+            f"keychain-alias:{credential_id}"
+        )
+
     def _verify_credential_binding(
-        endpoint: ProviderEndpointProfile, credential: dict[str, Any] | None
+        self,
+        endpoint: ProviderEndpointProfile,
+        credential: dict[str, Any] | None,
     ) -> None:
         if not credential:
             raise ProviderRegistryNotReady("endpoint credential is not configured")
@@ -995,6 +1188,10 @@ class CompatibleProviderRegistryService:
         if any(credential.get(key) != value for key, value in expected.items()):
             raise ProviderRegistryNotReady(
                 "credential is not bound to this exact endpoint version"
+            )
+        if not self._credential_secret_configured(credential):
+            raise ProviderRegistryNotReady(
+                "endpoint credential Secret Store alias is not configured"
             )
 
     async def register_profile_assignment(
@@ -1017,6 +1214,7 @@ class CompatibleProviderRegistryService:
         endpoint = await self.endpoint(
             endpoint_profile_id, endpoint_profile_version
         )
+        await self._require_active_lineage(endpoint)
         if (
             endpoint.state not in {"URL_VALIDATED", "CAPABILITY_CHECKED", "READY"}
             or endpoint.url_validation_status != "PASS"
@@ -1221,6 +1419,181 @@ class CompatibleProviderRegistryService:
         )
         return saved, saved_assignment
 
+    async def configure_decision_models(
+        self,
+        *,
+        endpoint_profile_id: str,
+        endpoint_profile_version: str,
+        credential_id: str,
+        normal_endpoint_model_id: str,
+        normal_endpoint_model_version: str,
+        top_endpoint_model_id: str,
+        top_endpoint_model_version: str,
+        explicit_same_model_confirmation: bool,
+        assigned_by: str,
+    ) -> dict[str, Any]:
+        """Apply the two decision roles without exposing registry internals.
+
+        The simple settings UI selects one registered model per role.  This
+        method resolves the active verified price, reuses an identical active
+        binding, and creates the next immutable profile version only when the
+        selected model actually changes.
+        """
+
+        endpoint = await self.endpoint(
+            endpoint_profile_id, endpoint_profile_version
+        )
+        await self._require_active_lineage(endpoint)
+        credential = await self.db["ag_model_credentials"].find_one(
+            {"credential_id": credential_id, "status": {"$ne": "REVOKED"}}
+        )
+        self._verify_credential_binding(endpoint, credential)
+        selections = {
+            "NORMAL_TRADER": (
+                normal_endpoint_model_id,
+                normal_endpoint_model_version,
+                "alphaguard_normal_compatible",
+                "normal_trade_plan_prompt",
+            ),
+            "TOP_RISK_REVIEWER": (
+                top_endpoint_model_id,
+                top_endpoint_model_version,
+                "alphaguard_top_compatible",
+                "top_risk_review_prompt",
+            ),
+        }
+        same_model = (
+            normal_endpoint_model_id == top_endpoint_model_id
+            and normal_endpoint_model_version == top_endpoint_model_version
+        )
+        if same_model and not explicit_same_model_confirmation:
+            raise ProviderRegistryNotReady(
+                "using one endpoint model for Normal and Top requires explicit confirmation"
+            )
+
+        resolved: dict[str, dict[str, Any]] = {}
+        now = datetime.now(timezone.utc)
+        for role, (model_id, model_version, profile_id, prompt_id) in selections.items():
+            model_raw = await self.repository.get(
+                "endpoint_models",
+                {"endpoint_model_id": model_id, "model_version": model_version},
+            )
+            if not model_raw:
+                raise ProviderRegistryNotReady(
+                    f"{role} endpoint model is not registered"
+                )
+            model = EndpointModelDefinition.model_validate(model_raw)
+            if (
+                model.endpoint_profile_id != endpoint_profile_id
+                or model.endpoint_profile_version != endpoint_profile_version
+                or role not in model.role_capabilities
+            ):
+                raise ProviderRegistryNotReady(
+                    f"{role} model is not available for this service version"
+                )
+            price_rows = await self.repository.list(
+                "endpoint_prices",
+                {
+                    "endpoint_profile_id": endpoint_profile_id,
+                    "endpoint_profile_version": endpoint_profile_version,
+                    "endpoint_model_id": model_id,
+                    "endpoint_model_version": model_version,
+                },
+                sort=("effective_at", -1),
+                limit=500,
+            )
+            price_raw = next(
+                (
+                    row
+                    for row in price_rows
+                    if row.get("verified") is True
+                    and row.get("currency")
+                    == ModelBudgetService(self.db).policy.currency
+                    and isinstance(row.get("effective_at"), datetime)
+                    and _as_utc(row["effective_at"]) <= now
+                ),
+                None,
+            )
+            if not price_raw:
+                raise ProviderRegistryNotReady(
+                    f"{role} model has no active verified price"
+                )
+            price = EndpointPriceVersion.model_validate(clean_document(price_raw))
+            resolved[role] = {
+                "model": model,
+                "price": price,
+                "profile_id": profile_id,
+                "prompt_id": prompt_id,
+            }
+
+        results: dict[str, Any] = {}
+        for role, item in resolved.items():
+            model = item["model"]
+            price = item["price"]
+            profile_id = str(item["profile_id"])
+            current_assignment = await self.db[
+                "ag_model_profile_assignments"
+            ].find_one({"role": role}, sort=[("assigned_at", -1)])
+            current_profile = None
+            if current_assignment:
+                current_profile = await self.db["ag_model_profiles"].find_one(
+                    {
+                        "profile_id": current_assignment.get("profile_id"),
+                        "profile_version": current_assignment.get("profile_version"),
+                    }
+                )
+            if current_profile and all(
+                (
+                    current_profile.get("endpoint_profile_id")
+                    == endpoint_profile_id,
+                    current_profile.get("endpoint_profile_version")
+                    == endpoint_profile_version,
+                    current_profile.get("endpoint_model_id")
+                    == model.endpoint_model_id,
+                    current_profile.get("endpoint_model_version")
+                    == model.model_version,
+                    current_profile.get("credential_id") == credential_id,
+                    current_profile.get("price_version_id")
+                    == price.price_version_id,
+                )
+            ):
+                results[role] = {
+                    "result": "REUSED",
+                    "profile_id": current_profile["profile_id"],
+                    "profile_version": current_profile["profile_version"],
+                    "model_name": current_profile["model_name"],
+                }
+                continue
+            profile_rows = await self.repository.list(
+                "profiles", {"profile_id": profile_id}, limit=500
+            )
+            profile_version = _next_version(profile_rows, "profile_version")
+            profile, assignment = await self.register_profile_assignment(
+                role=role,
+                profile_id=profile_id,
+                profile_version=profile_version,
+                endpoint_profile_id=endpoint_profile_id,
+                endpoint_profile_version=endpoint_profile_version,
+                endpoint_model_id=model.endpoint_model_id,
+                endpoint_model_version=model.model_version,
+                credential_id=credential_id,
+                price_version_id=price.price_version_id,
+                price_version=price.price_version,
+                prompt_profile_id=str(item["prompt_id"]),
+                explicit_same_model_confirmation=(
+                    explicit_same_model_confirmation if same_model else False
+                ),
+                assigned_by=assigned_by,
+            )
+            results[role] = {
+                "result": "CREATED",
+                "profile_id": profile.profile_id,
+                "profile_version": profile.profile_version,
+                "model_name": profile.model_name,
+                "assignment_id": assignment.assignment_id,
+            }
+        return {"roles": results}
+
     async def resolve_profile_binding(
         self, profile: ModelProfile
     ) -> tuple[ProviderEndpointProfile, EndpointModelDefinition, EndpointPriceVersion, dict[str, Any]]:
@@ -1230,6 +1603,7 @@ class CompatibleProviderRegistryService:
             str(profile.endpoint_profile_id),
             str(profile.endpoint_profile_version),
         )
+        await self._require_active_lineage(endpoint)
         model_raw = await self.repository.get(
             "endpoint_models",
             {

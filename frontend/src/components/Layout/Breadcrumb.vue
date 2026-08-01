@@ -31,5 +31,13 @@ const breadcrumbList = computed(() => {
 <style lang="scss" scoped>
 .breadcrumb {
   font-size: 14px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .breadcrumb :deep(.el-breadcrumb__item:not(:last-child)) {
+    display: none;
+  }
 }
 </style>

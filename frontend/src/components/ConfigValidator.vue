@@ -285,7 +285,7 @@ import {
   InfoFilled,
   Coin
 } from '@element-plus/icons-vue'
-import axios from 'axios'
+import { configApi } from '@/api/config'
 
 // 类型定义
 interface ConfigItem {
@@ -348,33 +348,21 @@ const hasRecommendedWarnings = computed(() => {
 const handleValidate = async () => {
   validating.value = true
   try {
-    const response = await axios.get('/api/system/config/validate')
+    const result = await configApi.validateSystemConfig<ValidationResult>()
+    validationResult.value = result
 
-    console.log('🔍 配置验证响应:', response.data)
+    // 提取环境变量验证结果和 MongoDB 验证结果
+    envValidation.value = result.env_validation || null
+    mongodbValidation.value = result.mongodb_validation || null
+    updateConfigItems()
 
-    if (response.data.success) {
-      validationResult.value = response.data.data
-
-      // 提取环境变量验证结果和 MongoDB 验证结果
-      envValidation.value = response.data.data.env_validation || null
-      mongodbValidation.value = response.data.data.mongodb_validation || null
-
-      console.log('🔍 环境变量验证:', envValidation.value)
-      console.log('🔍 MongoDB 验证:', mongodbValidation.value)
-
-      updateConfigItems()
-
-      if (validationResult.value?.success) {
-        ElMessage.success('配置验证通过')
-      } else {
-        ElMessage.warning('配置验证失败，请检查缺少的配置项')
-      }
+    if (validationResult.value.success) {
+      ElMessage.success('配置验证通过')
     } else {
-      ElMessage.error(response.data.message || '验证失败')
+      ElMessage.warning('配置验证失败，请检查缺少的配置项')
     }
   } catch (error: any) {
-    console.error('配置验证失败:', error)
-    ElMessage.error(error.response?.data?.message || '验证失败')
+    ElMessage.error(error.response?.data?.message || '配置验证请求失败，请确认管理员权限后重试')
   } finally {
     validating.value = false
   }
@@ -636,4 +624,3 @@ onMounted(() => {
   }
 }
 </style>
-

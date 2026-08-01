@@ -29,7 +29,7 @@ def build_host_app():
     from app.core.alphaguard_config import (
         validate_alphaguard_startup_safety,
     )
-    from app.core.database import close_db, init_db
+    from app.core.database import close_db, connect_database
     from app.core.startup_validator import validate_startup_config
     from app.main import app
     from app.services.alphaguard.model_secret_store import (
@@ -43,7 +43,9 @@ def build_host_app():
     async def credential_host_lifespan(_app):
         validate_startup_config()
         validate_alphaguard_startup_safety()
-        await init_db()
+        # Credential management needs connections only. Schema/index setup is
+        # owned by the regular application bootstrap and must not run here.
+        await connect_database()
         try:
             yield
         finally:
