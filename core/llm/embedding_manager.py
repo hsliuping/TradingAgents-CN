@@ -93,7 +93,12 @@ class EmbeddingManager:
     
     def _init_providers(self):
         """从数据库或环境变量初始化 Embedding 提供商"""
-        # 🔥 优先从数据库读取配置
+        # 🔥 京东云模式：优先使用环境变量配置（EMBEDDING_*）
+        # 数据库中的 jdyun provider 记录的是旧地址/旧 Key，环境变量才是部署时注入的最新配置
+        if os.getenv("JDYUN_MODE", "").lower() in ("true", "1", "yes"):
+            if self._init_from_jdyun_env():
+                return
+        # 原有逻辑：优先从数据库读取配置
         if self.db is not None:
             try:
                 self._init_from_database()
@@ -106,6 +111,33 @@ class EmbeddingManager:
         # 降级：从环境变量初始化
         self._init_from_env()
     
+    def _init_from_jdyun_env(self) -> bool:
+        """京东云模式：从环境变量初始化 Embedding 提供商
+
+        优先使用 EMBEDDING_* 环境变量，未设置时回退到 OPENAI_*。
+        返回 True 表示成功使用环境变量配置，False 表示未配置完整需走数据库。
+        """
+        api_base = os.getenv("EMBEDDING_API_BASE", "") or os.getenv("OPENAI_API_BASE", "")
+        api_key = os.getenv("EMBEDDING_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
+        model = os.getenv("EMBEDDING_MODEL", "") or "text-embedding-v3"
+
+        if not api_base or not api_key:
+            logger.warning("⚠️ 京东云模式：EMBEDDING_API_BASE/EMBEDDING_API_KEY 未配置，回退到数据库")
+            return False
+
+        provider_info = {
+            "name": "jdyun",
+            "api_key": api_key,
+            "base_url": api_base,
+            "model": model,
+            "display_name": "京东云",
+        }
+        self._providers = [provider_info]
+        self._primary_provider = provider_info
+        self._fallback_providers = []
+        logger.info(f"✅ 京东云模式：使用环境变量 Embedding 提供商 (模型: {model}, base: {api_base})")
+        return True
+
     def _init_from_database(self):
         """从数据库读取 Embedding 配置"""
         if self.db is None:
