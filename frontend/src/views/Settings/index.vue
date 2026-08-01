@@ -281,10 +281,20 @@
           </template>
 
           <el-form label-width="120px">
-            <el-form-item label="修改密码">
+            <!-- 🔧 京东云模式：密码由京东云平台统一管理，本应用不支持修改密码 -->
+            <el-form-item v-if="!isJdyunMode()" label="修改密码">
               <el-button type="primary" @click="changePasswordDialogVisible = true">
                 修改密码
               </el-button>
+            </el-form-item>
+            <el-form-item v-else label="账号安全">
+              <el-alert
+                type="info"
+                :closable="false"
+                show-icon
+                title="账号由京东云平台统一管理"
+                description="您的访问凭证由京东云平台分配与管理，与本应用解耦。如需修改账号或凭证，请前往京东云平台控制台完成。"
+              />
             </el-form-item>
           </el-form>
         </el-card>

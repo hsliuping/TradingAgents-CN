@@ -151,21 +151,43 @@ def get_llm_max_retries(default: int = 2) -> int:
 # ============================================================================
 # Basic Auth 白名单配置（京东云网关代理场景）
 # ============================================================================
+# 语义说明：
+#   - Basic Auth 的 username 是京东云用户的唯一标识（如 jcloud-ugidvcp）
+#   - Basic Auth 的 password 字段是京东云平台生成的「访问令牌」
+#   - 访问令牌与用户登录密码完全解耦
+#
+# 两种配置模式：
+#   1. 严格模式（token 固定不变）: JDYUN_BASIC_AUTH_USERS="jcloud-ugidvcp:8437F13D..."
+#      → username + token 都必须匹配
+#   2. 通配符模式（token 可变）:   JDYUN_BASIC_AUTH_USERS="jcloud-ugidvcp:*"
+#      → 只校验 username，token 可任意变化（适用于京东云动态签发 token 的场景）
+#
+# 通配符模式安全性：
+#   - 在"一用户一容器"架构下，容器端口仅对京东云网关暴露，不直接对外
+#   - 京东云网关侧已对用户做过认证，到达容器的请求都是可信的
+#   - 容器只需识别"是哪个用户"即可，不需要二次校验 token
+# ============================================================================
+
+# 通配符，表示不校验 token（只校验 username）
+JDYUN_TOKEN_WILDCARD = "*"
+
 
 def get_jdyun_basic_auth_users() -> Dict[str, str]:
     """
-    解析京东云 Basic Auth 白名单
+    解析京东云 Basic Auth 白名单（用户名 → 访问令牌）
 
-    环境变量格式: JDYUN_BASIC_AUTH_USERS=user1:pass1,user2:pass2
-    - 多个账户用英文逗号分隔
-    - 用户名和密码用英文冒号分隔
-    - 密码中的冒号用第一个冒号切分（避免歧义）
+    环境变量格式: JDYUN_BASIC_AUTH_USERS=user1:token1,user2:token2
+    - 多个账户用英文逗号分隔（一用户一容器场景下通常只有一条）
+    - 用户名和访问令牌用英文冒号分隔
+    - 令牌中的冒号用第一个冒号切分（避免歧义）
+    - 令牌为 * 时表示通配符模式（只校验 username，不校验 token）
 
     Returns:
-        {"user1": "pass1", "user2": "pass2"} 形式的用户-密码字典
+        {"user1": "token1", "user2": "*"} 形式的用户-令牌字典
 
     安全性:
-    - 密码以明文存储在 env 中，等同 OPENAI_API_KEY 的处理方式
+    - 这里的值是京东云平台生成的访问令牌，不是用户登录密码
+    - 令牌以明文存储在 env 中，等同 OPENAI_API_KEY 的处理方式
     - 建议仅在京东云注入的环境使用，不要写入 .env.jdyun 提交到 Git
     - 京东云网关负责 https 加密传输，明文只在容器内可见
     """
@@ -178,40 +200,135 @@ def get_jdyun_basic_auth_users() -> Dict[str, str]:
         if not entry or ":" not in entry:
             logger.warning("⚠️ [京东云 Basic Auth] 跳过格式错误的账户配置项: %s", entry)
             continue
-        user, password = entry.split(":", 1)
+        user, token = entry.split(":", 1)
         user = user.strip()
-        password = password.strip()
-        if user and password:
-            result[user] = password
+        token = token.strip()
+        if user and token:
+            result[user] = token
         else:
-            logger.warning("⚠️ [京东云 Basic Auth] 跳过空用户名或密码的账户: %s", entry)
+            logger.warning("⚠️ [京东云 Basic Auth] 跳过空用户名或令牌的账户: %s", entry)
     if result:
-        logger.info("🔐 [京东云 Basic Auth] 已加载 %d 个白名单账户", len(result))
+        # 统计通配符模式数量
+        wildcard_count = sum(1 for v in result.values() if v == JDYUN_TOKEN_WILDCARD)
+        if wildcard_count:
+            logger.info(
+                "🔐 [京东云 Basic Auth] 已加载 %d 个白名单账户（其中 %d 个为通配符模式，只校验用户名）",
+                len(result), wildcard_count,
+            )
+        else:
+            logger.info("🔐 [京东云 Basic Auth] 已加载 %d 个白名单账户（严格模式）", len(result))
     return result
 
 
-def verify_jdyun_basic_auth(username: str, password: str) -> bool:
+def verify_jdyun_basic_auth(username: str, token: str) -> bool:
     """
-    验证京东云 Basic Auth 凭据
+    验证京东云 Basic Auth 凭据（用户名 + 访问令牌）
 
     Args:
-        username: 用户名
-        password: 明文密码
+        username: 京东云用户唯一标识（如 jcloud-ugidvcp）
+        token: 京东云平台为该用户生成的访问令牌（不是登录密码）
 
     Returns:
         凭据有效返回 True，否则 False
 
+    两种模式:
+        - 严格模式: 白名单中令牌为具体值时，username + token 都必须匹配
+        - 通配符模式: 白名单中令牌为 * 时，只校验 username（token 可任意变化）
+
     安全性:
-    - 使用 hmac.compare_digest 做恒定时间比较（避免时序攻击）
-    - 用户名不在白名单时直接返回 False，不进行密码比较
+        - 严格模式使用 hmac.compare_digest 做恒定时间比较（避免时序攻击）
+        - 用户名不在白名单时直接返回 False，不进行令牌比较
+        - 通配符模式适用于京东云网关已认证的场景，容器不直接对外暴露
     """
     import hmac
 
     white_list = get_jdyun_basic_auth_users()
-    expected_password = white_list.get(username, "")
-    if not expected_password:
+    expected_token = white_list.get(username, "")
+    if not expected_token:
+        # username 不在白名单
         return False
+    if expected_token == JDYUN_TOKEN_WILDCARD:
+        # 通配符模式：只校验 username，不校验 token
+        # 适用于京东云动态签发 token、token 定期轮换等场景
+        return True
+    # 严格模式：username + token 都校验
     return hmac.compare_digest(
-        password.encode("utf-8"),
-        expected_password.encode("utf-8"),
+        token.encode("utf-8"),
+        expected_token.encode("utf-8"),
     )
+
+
+# ============================================================================
+# 京东云网关 IP 白名单（第二道防线）
+# ============================================================================
+# 分级校验策略下，老用户免令牌校验，存在 username 泄露后被伪造的风险
+# IP 白名单确保请求必须来自京东云网关，即使 username 泄露，外部攻击者也无法伪造
+#
+# 配置方式:
+#   JDYUN_GATEWAY_IPS=10.0.0.1,10.0.0.2,172.16.0.0/12
+#   - 支持单个 IP 和 CIDR 格式，逗号分隔
+#   - 留空则不启用 IP 校验（仅依赖网络隔离）
+# ============================================================================
+
+def get_jdyun_gateway_ips() -> list:
+    """
+    解析京东云网关 IP 白名单。
+
+    环境变量: JDYUN_GATEWAY_IPS=10.0.0.1,172.16.0.0/12
+    - 支持单个 IP（10.0.0.1）和 CIDR（172.16.0.0/12）
+    - 逗号分隔多个
+
+    Returns:
+        IP/CIDR 字符串列表，未配置返回空列表
+    """
+    raw = os.getenv("JDYUN_GATEWAY_IPS", "").strip()
+    if not raw:
+        return []
+    return [ip.strip() for ip in raw.split(",") if ip.strip()]
+
+
+def is_from_jdyun_gateway(client_ip: str) -> bool:
+    """
+    检查请求是否来自京东云网关（IP 白名单校验）。
+
+    Args:
+        client_ip: 客户端 IP 地址（从 request.client.host 获取）
+
+    Returns:
+        在白名单内返回 True，不在或未配置白名单返回 True（未配置时不拦截）
+
+    安全性:
+        - 未配置 JDYUN_GATEWAY_IPS 时不校验（向后兼容）
+        - 配置后，非白名单 IP 的请求直接拒绝
+        - 支持 CIDR 格式（如 172.16.0.0/12）
+    """
+    import ipaddress
+
+    gateway_ips = get_jdyun_gateway_ips()
+    if not gateway_ips:
+        # 未配置 IP 白名单 → 不拦截（向后兼容）
+        return True
+
+    if not client_ip:
+        return False
+
+    try:
+        client_addr = ipaddress.ip_address(client_ip)
+        for rule in gateway_ips:
+            try:
+                if "/" in rule:
+                    # CIDR 格式
+                    network = ipaddress.ip_network(rule, strict=False)
+                    if client_addr in network:
+                        return True
+                else:
+                    # 单个 IP
+                    if client_addr == ipaddress.ip_address(rule):
+                        return True
+            except ValueError:
+                logger.warning(f"⚠️ [京东云 IP 白名单] 无效的 IP/CIDR 规则: {rule}")
+                continue
+        return False
+    except ValueError:
+        logger.warning(f"⚠️ [京东云 IP 白名单] 无效的客户端 IP: {client_ip}")
+        return False

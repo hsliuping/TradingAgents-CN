@@ -39,7 +39,8 @@
             <el-icon><Setting /></el-icon>
             设置
           </el-dropdown-item>
-          <el-dropdown-item divided command="logout">
+          <!-- 🔧 京东云模式：隐藏退出登录（登录态由京东云网关统一管理，我们本地没有 JWT，logout 后反而无法自动重新认证） -->
+          <el-dropdown-item v-if="!isJdyunMode" divided command="logout">
             <el-icon><SwitchButton /></el-icon>
             退出登录
           </el-dropdown-item>

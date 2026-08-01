@@ -53,6 +53,7 @@
 - [API 文档](./03-development/api/)
 - [开发流程](./03-development/workflow/development-workflow.md)
 - [分支策略](./03-development/workflow/branch-guide.md)
+- [京东云对接指南](./03-development/guides/jdyun-integration-guide.md) ⭐ 京东云工程师专用
 
 ### 运维部署
 - [Docker 部署](./04-operations/deployment/docker-deployment-guide.md)
@@ -62,6 +63,8 @@
 
 ### 产品演进（按版本号管理）
 - **[v3.0（当前版本）](./05-design/v3.0/)** - 当前发布版本的设计文档
+  - [京东云合作版定制设计](./05-design/v3.0/jdyun-edition-design.md)
+  - [京东云登录认证设计](./05-design/v3.0/jdyun-auth-design.md)
 - **[v4.0（下一版本）](./05-design/v4.0/)** - 下一版本规划
 - **[v5.0（远期愿景）](./05-design/v5.0/)** - 远期愿景
 - [前沿探索](./05-design/research/) - 不绑定版本的前沿研究

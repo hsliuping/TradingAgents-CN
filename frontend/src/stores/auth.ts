@@ -3,6 +3,7 @@ import { useStorage } from '@vueuse/core'
 import { authApi } from '@/api/auth'
 import type { User, LoginForm, RegisterForm, UserUpdatePayload } from '@/types/auth'
 import { useAppStore } from './app'
+import { isJdyunMode } from '@/utils/config'
 
 export interface AuthState {
   // 认证状态
@@ -495,7 +496,21 @@ export const useAuthStore = defineStore('auth', {
           }
         }
       } else {
-        console.log('📝 没有token，跳过认证检查')
+        console.log('📝 没有token，跳过JWT认证检查')
+        // 京东云模式下，尝试通过 Basic Auth（cookie 携带）调用 /api/auth/me 完成自动免密登录
+        if (isJdyunMode()) {
+          try {
+            console.log('☁️  京东云模式：尝试 Basic Auth 免密认证')
+            const ok = await this.fetchUserInfo()
+            if (ok) {
+              this.isAuthenticated = true
+              await this.fetchUserPermissions()
+              console.log('✅ 京东云 Basic Auth 免密认证成功:', this.user?.username)
+            }
+          } catch (e: any) {
+            console.log('⚠️  京东云 Basic Auth 未登录（正常）:', e?.message || e)
+          }
+        }
       }
     }
   }

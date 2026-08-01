@@ -92,40 +92,83 @@ async def get_current_user(
     )
 
     # 方式 0: 京东云 Basic Auth 认证（仅 JDYUN_MODE=true 生效）
-    # 京东云平台代理请求时，会在 HTTP 头加上 Authorization: Basic base64(user:pass)
-    # 通过白名单验证后直接返回虚拟 admin 用户，不查 DB，不依赖 JWT/Session
+    # 京东云平台代理请求时，会在 HTTP 头加上 Authorization: Basic base64(user:token)
+    # 其中 token 是京东云为该用户生成的访问令牌（不是登录密码，与用户密码解耦）
+    #
+    # 分级校验策略：
+    #   - 新用户（DB 中无记录）：必须 username + token 都匹配环境变量白名单（防伪造）
+    #   - 老用户（DB 中已建档）：只校验 username，token 可任意变化（安全由京东云网关把关）
+    #
+    # 白名单验证通过后，在 users 集合自动为该 username 建档（新用户）或直接返回（老用户）
+    # — 30+ 处业务代码会把 user["id"] 转 MongoDB ObjectId，因此必须返回数据库真实记录 —
     if is_jdyun_mode() and authorization and authorization.lower().startswith("basic "):
         try:
             import base64
+            from app.core.jdyun import is_from_jdyun_gateway
+
+            # ===== 第二道防线：京东云网关 IP 白名单 =====
+            # 分级校验下老用户免令牌，IP 白名单确保请求来自京东云网关
+            # 未配置 JDYUN_GATEWAY_IPS 时跳过（向后兼容）
+            client_ip = request.client.host if request.client else ""
+            if not is_from_jdyun_gateway(client_ip):
+                logger.warning(f"❌ [京东云 Basic Auth] IP 不在网关白名单，拒绝: {client_ip}")
+                raise HTTPException(
+                    status_code=403,
+                    detail="请求来源 IP 不在京东云网关白名单中",
+                )
+
             encoded = authorization.split(" ", 1)[1]
             decoded_bytes = base64.b64decode(encoded, validate=True)
             decoded = decoded_bytes.decode("utf-8")
             if ":" in decoded:
-                username, password = decoded.split(":", 1)
-                if verify_jdyun_basic_auth(username, password):
-                    logger.info(f"✅ [京东云 Basic Auth] 认证成功: user={username}")
-                    return {
-                        "id": f"jcloud-{username}",
-                        "user_id": f"jcloud-{username}",
-                        "username": username,
-                        "email": f"{username}@jcloud.local",
-                        "name": username,
-                        "is_admin": True,  # 京东云用户视为 admin
-                        "roles": ["admin"],
-                        "preferences": {
-                            "default_market": "A股",
-                            "default_depth": "3",
-                            "default_analysts": ["市场分析师", "基本面分析师"],
-                            "ui_theme": "light",
-                            "language": "zh-CN",
-                        },
-                        "auth_method": "basic",
-                    }
-                logger.warning(f"❌ [京东云 Basic Auth] 凭据错误: user={username}")
+                username, token = decoded.split(":", 1)
+
+                # ===== 分级校验：新用户严格，老用户宽松 =====
+                is_existing = user_service.is_existing_jdyun_user(username)
+                if is_existing:
+                    # 老用户：只校验 username（token 可变，安全由京东云网关把关）
+                    auth_passed = True
+                    logger.info(f"✅ [京东云 Basic Auth] 老用户免令牌校验: user={username}")
+                else:
+                    # 新用户首次认证：必须 username + token 都匹配白名单
+                    auth_passed = verify_jdyun_basic_auth(username, token)
+                    if not auth_passed:
+                        logger.warning(f"❌ [京东云 Basic Auth] 新用户首次认证失败（令牌不匹配）: user={username}")
+
+                if auth_passed:
+                    # ===== 认证通过 → 为京东云用户自动建档/复用真实 DB 记录 =====
+                    jdyun_user = await user_service.get_or_create_jdyun_user(
+                        jdyun_username=username,
+                        is_admin=True,  # 京东云用户默认为 admin（京东云平台侧已鉴权）
+                    )
+                    if jdyun_user:
+                        logger.info(
+                            f"✅ [京东云 Basic Auth] 认证成功: user={username} "
+                            f"db_id={jdyun_user.id} roles={['admin'] if jdyun_user.is_admin else ['user']} "
+                            f"mode={'老用户' if is_existing else '新用户建档'}"
+                        )
+                        return {
+                            "id": str(jdyun_user.id),
+                            "user_id": str(jdyun_user.id),
+                            "username": jdyun_user.username,
+                            "email": jdyun_user.email,
+                            "name": jdyun_user.username,
+                            "is_admin": bool(jdyun_user.is_admin),
+                            "roles": ["admin"] if jdyun_user.is_admin else ["user"],
+                            "preferences": (
+                                jdyun_user.preferences.model_dump()
+                                if jdyun_user.preferences
+                                else {}
+                            ),
+                            "auth_method": "basic",
+                            "provider": "jdyun",
+                        }
+                    # 理论上不会走到这里（get_or_create_jdyun_user 失败才会），打日志后回退
+                    logger.error(f"❌ [京东云 Basic Auth] 用户建档失败，回退虚拟用户: {username}")
             else:
                 logger.warning("❌ [京东云 Basic Auth] Authorization 格式错误: 缺少数分隔符")
         except Exception as e:
-            logger.warning(f"❌ [京东云 Basic Auth] 解析失败: {e}")
+            logger.warning(f"❌ [京东云 Basic Auth] 解析失败: {e}", exc_info=True)
         # Basic Auth 验证失败 → 继续走原认证链（JWT/Session）
         # 注意: Basic Auth 是京东云代理的主路径,失败后即便走 JWT/Session 也会被网关拒绝
 

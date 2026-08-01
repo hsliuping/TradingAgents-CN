@@ -253,6 +253,13 @@ action_start() {
             -e EMBEDDING_API_BASE="${EMBEDDING_API_BASE:-https://modelservice.jdcloud.com/v1}"
             -e EMBEDDING_API_KEY="${EMBEDDING_API_KEY:-}"
             -e TUSHARE_TOKEN="${TUSHARE_TOKEN:-}"
+            -e JDYUN_BASIC_AUTH_USERS="${JDYUN_BASIC_AUTH_USERS:-}"
+            -e JDYUN_GATEWAY_IPS="${JDYUN_GATEWAY_IPS:-}"
+            -e JDYUN_LLM_MAX_RETRIES="${JDYUN_LLM_MAX_RETRIES:-8}"
+            -e JDYUN_LLM_MAX_RPM="${JDYUN_LLM_MAX_RPM:-30}"
+            -e JDYUN_BATCH_MAX_CONCURRENT="${JDYUN_BATCH_MAX_CONCURRENT:-1}"
+            -e JDYUN_WORKER_MAX_CONCURRENT="${JDYUN_WORKER_MAX_CONCURRENT:-1}"
+            -e JDYUN_STOCK_INTERVAL_SECONDS="${JDYUN_STOCK_INTERVAL_SECONDS:-10}"
         )
     fi
 
