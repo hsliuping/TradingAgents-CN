@@ -319,7 +319,7 @@ def _provider_http_error(exc: Exception) -> HTTPException:
         return HTTPException(
             status_code=409,
             detail={
-                "error_code": "CONFIGURATION_NOT_READY",
+                "error_code": exc.code,
                 "sanitized_message": str(exc),
             },
         )

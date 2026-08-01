@@ -115,7 +115,11 @@ def install_fake_credential(
     return direct_ref
 
 
-async def validated_registry(*, confirm=True):
+async def validated_registry(
+    *,
+    confirm=True,
+    structured_output_mode="NATIVE_JSON_SCHEMA",
+):
     db = FakeDB()
     store = FakeSecretStore()
     registry = CompatibleProviderRegistryService(
@@ -127,7 +131,7 @@ async def validated_registry(*, confirm=True):
         api_mode="OPENAI_CHAT_COMPLETIONS",
         auth_scheme="BEARER",
         models_endpoint_enabled=True,
-        structured_output_mode="NATIVE_JSON_SCHEMA",
+        structured_output_mode=structured_output_mode,
         notes="test endpoint",
         created_by="admin",
     )
@@ -1392,7 +1396,9 @@ async def test_explicit_role_assignments_resolve_exact_dynamic_profiles():
 
 @pytest.mark.asyncio
 async def test_simple_decision_model_config_hides_versions_and_reuses_bindings():
-    db, store, registry, endpoint = await validated_registry()
+    db, store, registry, endpoint = await validated_registry(
+        structured_output_mode="UNKNOWN"
+    )
     models = {}
     for role, remote_name in (
         ("NORMAL_TRADER", "normal-simple-model"),
@@ -1468,6 +1474,49 @@ async def test_simple_decision_model_config_hides_versions_and_reuses_bindings()
     second = await registry.configure_decision_models(**payload)
     assert {item["result"] for item in first["roles"].values()} == {"CREATED"}
     assert {item["result"] for item in second["roles"].values()} == {"REUSED"}
+    assert db["ag_model_profiles"].count() == 2
+    assert db["ag_model_profile_assignments"].count() == 2
+    profiles = await db["ag_model_profiles"].find({}).to_list(length=None)
+    assert {profile["structured_output_mode"] for profile in profiles} == {
+        "NATIVE_SCHEMA"
+    }
+
+    unsupported, _ = await registry.register_model(
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        endpoint_profile_version=endpoint.profile_version,
+        remote_model_name="plain-text-only",
+        display_name="plain-text-only",
+        role_capabilities=["NORMAL_TRADER"],
+        supports_json_schema=False,
+        supports_tool_call=False,
+        supports_reasoning=None,
+        max_context_tokens=64000,
+        max_output_tokens=4000,
+        created_by="admin",
+    )
+    await registry.register_price(
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        endpoint_profile_version=endpoint.profile_version,
+        endpoint_model_id=unsupported.endpoint_model_id,
+        endpoint_model_version=unsupported.model_version,
+        pricing_source="SELF_HOSTED",
+        input_price_per_million=Decimal("0"),
+        cached_input_price_per_million=Decimal("0"),
+        output_price_per_million=Decimal("0"),
+        currency="USD",
+        effective_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        source_description="self hosted",
+        verified=True,
+        created_by="admin",
+    )
+    unsupported_payload = {
+        **payload,
+        "normal_endpoint_model_id": unsupported.endpoint_model_id,
+        "normal_endpoint_model_version": unsupported.model_version,
+    }
+    with pytest.raises(ProviderRegistryNotReady) as blocked:
+        await registry.configure_decision_models(**unsupported_payload)
+    assert blocked.value.code == "STRUCTURED_OUTPUT_NOT_READY"
     assert db["ag_model_profiles"].count() == 2
     assert db["ag_model_profile_assignments"].count() == 2
 

@@ -134,6 +134,26 @@ def test_authenticated_degraded_credential_can_continue_model_bootstrap():
     assert "服务商拒绝读取模型列表" in panel
 
 
+def test_configured_roles_clear_bootstrap_copy_and_unchecked_models_are_not_failures():
+    panel = _panel()
+
+    assert "!decisionRoles.every(role => (modelStatus.value?.profiles || []).some" in panel
+    assert "Boolean(profile.last_check) && profile.capability !== 'READY'" in panel
+    assert "const hasPreviousCapabilityCheck = computed" in panel
+    assert "hasPreviousCapabilityCheck.value ? '重新检测' : '开始检测'" in panel
+
+
+def test_model_binding_errors_explain_how_to_repair_configuration():
+    panel = _panel()
+
+    assert "STRUCTURED_OUTPUT_NOT_READY" in panel
+    assert "启用 JSON Schema 或工具调用" in panel
+    assert "MODEL_ROLE_NOT_SUPPORTED" in panel
+    assert "重新添加模型并勾选正确用途" in panel
+    assert "MODEL_PRICE_NOT_READY" in panel
+    assert "自建服务请选择“价格为 0”" in panel
+
+
 def test_partial_loads_and_confirmation_errors_are_visible():
     panel = _panel()
 

@@ -66,7 +66,14 @@ class ProviderRegistryConflict(RuntimeError):
 
 
 class ProviderRegistryNotReady(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "CONFIGURATION_NOT_READY",
+    ):
+        super().__init__(message)
+        self.code = code
 
 
 class ProviderCatalogError(RuntimeError):
@@ -135,6 +142,33 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _profile_structured_output_mode(
+    endpoint: ProviderEndpointProfile,
+    model: EndpointModelDefinition,
+) -> str:
+    explicit_modes = {
+        "NATIVE_JSON_SCHEMA": "NATIVE_SCHEMA",
+        "TOOL_CALL": "TOOL_CALL",
+        "JSON_ONLY": "JSON_SCHEMA",
+    }
+    explicit = explicit_modes.get(endpoint.structured_output_mode)
+    if explicit:
+        return explicit
+    if endpoint.structured_output_mode != "UNKNOWN":
+        raise ProviderRegistryNotReady(
+            "endpoint structured output mode is not supported",
+            code="STRUCTURED_OUTPUT_NOT_READY",
+        )
+    if model.supports_json_schema:
+        return "NATIVE_SCHEMA"
+    if model.supports_tool_call:
+        return "TOOL_CALL"
+    raise ProviderRegistryNotReady(
+        "selected model does not declare a supported structured output capability",
+        code="STRUCTURED_OUTPUT_NOT_READY",
+    )
 
 
 def _endpoint_config_signature(value: dict[str, Any]) -> tuple[Any, ...]:
@@ -1216,7 +1250,10 @@ class CompatibleProviderRegistryService:
         credential: dict[str, Any] | None,
     ) -> None:
         if not credential:
-            raise ProviderRegistryNotReady("endpoint credential is not configured")
+            raise ProviderRegistryNotReady(
+                "endpoint credential is not configured",
+                code="CREDENTIAL_NOT_ACTIVE",
+            )
         expected = {
             "provider_type": endpoint.provider_type,
             "endpoint_profile_id": endpoint.endpoint_profile_id,
@@ -1226,11 +1263,13 @@ class CompatibleProviderRegistryService:
         }
         if any(credential.get(key) != value for key, value in expected.items()):
             raise ProviderRegistryNotReady(
-                "credential is not bound to this exact endpoint version"
+                "credential is not bound to this exact endpoint version",
+                code="CREDENTIAL_ENDPOINT_VERSION_MISMATCH",
             )
         if not self._credential_secret_configured(credential):
             raise ProviderRegistryNotReady(
-                "endpoint credential Secret Store alias is not configured"
+                "endpoint credential Secret Store alias is not configured",
+                code="CREDENTIAL_NOT_ACTIVE",
             )
 
     async def register_profile_assignment(
@@ -1313,16 +1352,7 @@ class CompatibleProviderRegistryService:
         )
         self._verify_credential_binding(endpoint, credential)
         prompt = PromptProfileRegistry(self.db).definition(prompt_profile_id)
-        mode_map = {
-            "NATIVE_JSON_SCHEMA": "NATIVE_SCHEMA",
-            "TOOL_CALL": "TOOL_CALL",
-            "JSON_ONLY": "JSON_SCHEMA",
-        }
-        structured_mode = mode_map.get(endpoint.structured_output_mode)
-        if not structured_mode:
-            raise ProviderRegistryNotReady(
-                "endpoint structured output mode is not configured"
-            )
+        structured_mode = _profile_structured_output_mode(endpoint, model)
         other_role = (
             "TOP_RISK_REVIEWER"
             if role == "NORMAL_TRADER"
@@ -1507,7 +1537,8 @@ class CompatibleProviderRegistryService:
         )
         if same_model and not explicit_same_model_confirmation:
             raise ProviderRegistryNotReady(
-                "using one endpoint model for Normal and Top requires explicit confirmation"
+                "using one endpoint model for Normal and Top requires explicit confirmation",
+                code="SAME_MODEL_CONFIRMATION_REQUIRED",
             )
 
         resolved: dict[str, dict[str, Any]] = {}
@@ -1519,7 +1550,8 @@ class CompatibleProviderRegistryService:
             )
             if not model_raw:
                 raise ProviderRegistryNotReady(
-                    f"{role} endpoint model is not registered"
+                    f"{role} endpoint model is not registered",
+                    code="MODEL_NOT_REGISTERED",
                 )
             model = EndpointModelDefinition.model_validate(model_raw)
             if (
@@ -1528,8 +1560,11 @@ class CompatibleProviderRegistryService:
                 or role not in model.role_capabilities
             ):
                 raise ProviderRegistryNotReady(
-                    f"{role} model is not available for this service version"
+                    f"{role} model is not available for this service version",
+                    code="MODEL_ROLE_NOT_SUPPORTED",
                 )
+            _profile_structured_output_mode(endpoint, model)
+            PromptProfileRegistry(self.db).definition(prompt_id)
             price_rows = await self.repository.list(
                 "endpoint_prices",
                 {
@@ -1555,7 +1590,8 @@ class CompatibleProviderRegistryService:
             )
             if not price_raw:
                 raise ProviderRegistryNotReady(
-                    f"{role} model has no active verified price"
+                    f"{role} model has no active verified price",
+                    code="MODEL_PRICE_NOT_READY",
                 )
             price = EndpointPriceVersion.model_validate(clean_document(price_raw))
             resolved[role] = {

@@ -675,6 +675,12 @@ const credentialReady = computed(() => Boolean(
 const credentialNeedsModelSetup = computed(() => Boolean(
   credentialReady.value
   && currentCredential.value?.status === 'DEGRADED'
+  && !decisionRoles.every(role => (modelStatus.value?.profiles || []).some(profile =>
+    profile.configured
+    && profile.role === role
+    && profile.endpoint_profile_id === selectedEndpoint.value?.endpoint_profile_id
+    && profile.endpoint_profile_version === selectedEndpoint.value?.profile_version
+  ))
   && ['MODEL_NOT_FOUND', 'PRICE_NOT_VERIFIED', 'BUDGET_BLOCKED'].includes(
     currentCredential.value.last_error_code || ''
   )
@@ -761,8 +767,11 @@ const overallReady = computed(() =>
 const hasStaleCapability = computed(() =>
   decisionRoles.some(role => Boolean(profileForRole(role)?.capability_stale))
 )
+const hasPreviousCapabilityCheck = computed(() =>
+  decisionRoles.some(role => Boolean(profileForRole(role)?.last_check))
+)
 const failedCapabilityProfiles = computed(() => endpointProfiles.value.filter(profile =>
-  profile.configured && profile.capability !== 'READY'
+  profile.configured && Boolean(profile.last_check) && profile.capability !== 'READY'
 ))
 const capabilityFailureDetail = computed(() => {
   if (!failedCapabilityProfiles.value.length) return ''
@@ -772,8 +781,7 @@ const capabilityFailureDetail = computed(() => {
   return `${failures.join(' ')} 请先更换对应模型或处理服务商额度并保存；配置不变时，重复检测通常会得到相同结果。`
 })
 const capabilityActionLabel = computed(() => {
-  const hasPreviousCheck = decisionRoles.some(role => Boolean(profileForRole(role)?.last_check))
-  return hasStaleCapability.value || hasPreviousCheck ? '重新检测' : '开始检测'
+  return hasStaleCapability.value || hasPreviousCapabilityCheck.value ? '重新检测' : '开始检测'
 })
 const overallStatusLabel = computed(() =>
   overallReady.value ? '配置可用' : hasStaleCapability.value ? '需重新检测' : '配置未完成'
@@ -805,8 +813,7 @@ const nextAction = computed(() => {
     return { complete: false, title: '当前需要：重新检测模型', description: 'API 密钥已重新验证，请对当前两个模型重新执行连接检测。' }
   }
   if (!decisionRoles.every(role => profileForRole(role)?.capability === 'READY')) {
-    const hasPreviousCheck = decisionRoles.some(role => Boolean(profileForRole(role)?.last_check))
-    return hasPreviousCheck
+    return hasPreviousCapabilityCheck.value
       ? {
           complete: false,
           title: '当前需要：更换或修复失败模型',
@@ -1208,6 +1215,12 @@ function parseActionError(action: string, error: unknown): string {
     CREDENTIAL_ENDPOINT_VERSION_MISMATCH: '该密钥属于旧接口版本，请为当前模型服务添加新密钥。',
     CREDENTIAL_NOT_ACTIVE: '当前密钥已撤销，请添加新密钥。',
     ENDPOINT_NOT_VALIDATED: '接口地址尚未验证，请先编辑并验证模型服务。',
+    CONFIGURATION_NOT_READY: '当前模型服务配置不完整。请编辑当前服务并检查高级选项。',
+    STRUCTURED_OUTPUT_NOT_READY: '所选模型缺少结构化输出能力。请在“添加模型”的高级选项中启用 JSON Schema 或工具调用。',
+    MODEL_NOT_REGISTERED: '所选模型登记记录不存在，请重新添加该模型。',
+    MODEL_ROLE_NOT_SUPPORTED: '所选模型没有对应角色能力，请重新添加模型并勾选正确用途。',
+    MODEL_PRICE_NOT_READY: '所选模型缺少有效价格记录；自建服务请选择“价格为 0”。',
+    SAME_MODEL_CONFIRMATION_REQUIRED: '两个角色选择了同一模型，请勾选同模型确认后再保存。',
     UNAUTHORIZED: '密钥认证失败，请检查后重新提交。',
     PROJECT_ACCESS_DENIED: '服务商拒绝读取模型列表。请检查该密钥的模型目录权限，或直接输入已知模型名称。',
     PROVIDER_QUOTA_EXHAUSTED: '服务商额度不足，请充值或选择额度要求更低的模型。',
