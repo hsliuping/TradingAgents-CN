@@ -37,8 +37,15 @@ import { URL } from 'node:url'
 const GATEWAY_PORT = parseInt(process.env.JDYUN_GATEWAY_PORT || '3100', 10)
 const FRONTEND_TARGET = process.env.JDYUN_FRONTEND_TARGET || 'http://127.0.0.1:3003'
 const BACKEND_TARGET = process.env.JDYUN_BACKEND_TARGET || 'http://127.0.0.1:8002'
+
+// 登录页凭据（模拟京东云平台账号，用户在登录页输入）
 const AUTH_USER = process.env.JDYUN_AUTH_USER || 'testuser'
 const AUTH_PASS = process.env.JDYUN_AUTH_PASS || ''
+
+// 注入后端的 Basic Auth 凭据（对应后端 JDYUN_BASIC_AUTH_USERS 配置）
+// 格式: username:token（如 jcloud-ugidvcp:8437F13DABE87D0BC1D4DCCD4739C5A7）
+// 未设置时回退到登录凭据（单用户场景）
+const INJECT_AUTH = process.env.JDYUN_INJECT_AUTH || `${AUTH_USER}:${AUTH_PASS}`
 
 if (!AUTH_PASS) {
   console.error('❌ 缺少 JDYUN_AUTH_PASS 环境变量。')
@@ -46,8 +53,8 @@ if (!AUTH_PASS) {
   process.exit(1)
 }
 
-// Cookie 中存储的凭据（就是 Basic Auth 的 base64 值）
-const CREDENTIAL_B64 = Buffer.from(`${AUTH_USER}:${AUTH_PASS}`, 'utf-8').toString('base64')
+// Cookie 中存储的凭据（就是注入后端的 Basic Auth 的 base64 值）
+const CREDENTIAL_B64 = Buffer.from(INJECT_AUTH, 'utf-8').toString('base64')
 const SESSION_COOKIE_NAME = 'jdyun_session'
 
 // 后端路径前缀
