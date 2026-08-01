@@ -18,6 +18,7 @@ from app.services.alphaguard.model_capability_service import (
 )
 from app.services.alphaguard.compatible_provider_registry import (
     CompatibleProviderRegistryService,
+    ProviderCatalogError,
     ProviderRegistryConflict,
     ProviderRegistryNotReady,
 )
@@ -298,6 +299,14 @@ async def model_prompts(
 
 
 def _provider_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, ProviderCatalogError):
+        return HTTPException(
+            status_code=502,
+            detail={
+                "error_code": exc.code,
+                "sanitized_message": str(exc),
+            },
+        )
     if isinstance(exc, ProviderRegistryConflict):
         return HTTPException(
             status_code=409,
@@ -633,6 +642,7 @@ async def endpoint_model_options(
             exc,
             (
                 ValueError,
+                ProviderCatalogError,
                 ProviderRegistryNotReady,
                 ProviderRegistryConflict,
                 EndpointSecurityError,

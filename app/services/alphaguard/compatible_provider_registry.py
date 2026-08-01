@@ -69,6 +69,41 @@ class ProviderRegistryNotReady(RuntimeError):
     pass
 
 
+class ProviderCatalogError(RuntimeError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _catalog_error(status_code: int, response_text: str) -> ProviderCatalogError:
+    normalized = response_text.lower()
+    quota_markers = (
+        "insufficient_user_quota",
+        "insufficient quota",
+        "quota exceeded",
+        "balance insufficient",
+    )
+    if status_code == 401:
+        return ProviderCatalogError(
+            "UNAUTHORIZED", "provider rejected model catalog authentication"
+        )
+    if status_code == 403 and any(marker in normalized for marker in quota_markers):
+        return ProviderCatalogError(
+            "PROVIDER_QUOTA_EXHAUSTED", "provider quota is exhausted"
+        )
+    if status_code == 403:
+        return ProviderCatalogError(
+            "PROJECT_ACCESS_DENIED", "provider denied model catalog access"
+        )
+    if status_code == 429:
+        return ProviderCatalogError(
+            "RATE_LIMITED", "provider rate limited model catalog access"
+        )
+    return ProviderCatalogError(
+        "PROVIDER_ERROR", "provider model catalog request failed"
+    )
+
+
 def _hashable(value: Any) -> Any:
     if isinstance(value, Decimal):
         return format(value.normalize(), "f")
@@ -1034,7 +1069,11 @@ class CompatibleProviderRegistryService:
                         "REDIRECT_FORBIDDEN",
                         "credential-bearing model discovery cannot redirect",
                     )
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    raise _catalog_error(
+                        response.status_code,
+                        str(getattr(response, "text", ""))[:4096],
+                    )
                 payload = response.json()
                 if not isinstance(payload, dict) or not isinstance(
                     payload.get("data"), list

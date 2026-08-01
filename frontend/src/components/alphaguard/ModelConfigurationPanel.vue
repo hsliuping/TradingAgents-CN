@@ -144,8 +144,8 @@
             <strong>{{ currentCredential ? '••••••••' : '未配置' }}</strong>
             <span>{{ credentialStatusDescription }}</span>
           </div>
-          <el-tag :type="credentialReady ? 'success' : 'warning'" size="small">
-            {{ currentCredential ? statusLabel(currentCredential.status) : '未配置' }}
+          <el-tag :type="credentialStatusType" size="small">
+            {{ credentialStatusLabel }}
           </el-tag>
         </div>
       </section>
@@ -670,11 +670,30 @@ const currentCredential = computed(() => credentials.value.find(item =>
 
 const credentialReady = computed(() => Boolean(
   currentCredential.value?.configured
-  && currentCredential.value.status !== 'DEGRADED'
 ))
+
+const credentialNeedsModelSetup = computed(() => Boolean(
+  credentialReady.value
+  && currentCredential.value?.status === 'DEGRADED'
+  && ['MODEL_NOT_FOUND', 'PRICE_NOT_VERIFIED', 'BUDGET_BLOCKED'].includes(
+    currentCredential.value.last_error_code || ''
+  )
+))
+
+const credentialStatusLabel = computed(() => {
+  if (!currentCredential.value) return '未配置'
+  if (credentialNeedsModelSetup.value) return '已保存，待配置'
+  if (credentialReady.value) return '已配置'
+  return statusLabel(currentCredential.value.status)
+})
+
+const credentialStatusType = computed<'success' | 'warning'>(() =>
+  credentialReady.value ? 'success' : 'warning'
+)
 
 const credentialStatusDescription = computed(() => {
   if (!currentCredential.value) return credentialBlockedReason.value || '等待添加'
+  if (credentialNeedsModelSetup.value) return '认证和服务访问已通过，请继续添加决策模型'
   if (credentialReady.value) return '已绑定当前模型服务'
   return currentCredential.value.sanitized_message
     || '密钥记录存在，但安全存储当前不可读；可以更换或撤销。'
@@ -1190,6 +1209,7 @@ function parseActionError(action: string, error: unknown): string {
     CREDENTIAL_NOT_ACTIVE: '当前密钥已撤销，请添加新密钥。',
     ENDPOINT_NOT_VALIDATED: '接口地址尚未验证，请先编辑并验证模型服务。',
     UNAUTHORIZED: '密钥认证失败，请检查后重新提交。',
+    PROJECT_ACCESS_DENIED: '服务商拒绝读取模型列表。请检查该密钥的模型目录权限，或直接输入已知模型名称。',
     PROVIDER_QUOTA_EXHAUSTED: '服务商额度不足，请充值或选择额度要求更低的模型。',
     BUDGET_BLOCKED: '服务商额度不足，请充值或选择额度要求更低的模型。',
     MODEL_NOT_FOUND: '服务商没有找到该模型名称，请核对后重试。',

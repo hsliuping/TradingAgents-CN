@@ -116,6 +116,24 @@ def test_unreadable_credential_remains_replaceable_and_revocable():
     assert "currentCredential.value\n      ? await alphaguardModelsApi.replaceCredential" in panel
 
 
+def test_authenticated_degraded_credential_can_continue_model_bootstrap():
+    panel = _panel()
+    credential_projection = panel[
+        panel.index("const credentialReady = computed"):
+        panel.index("const endpointProfiles = computed")
+    ]
+
+    assert "currentCredential.value?.configured" in credential_projection
+    assert "currentCredential.value.status !== 'DEGRADED'" not in credential_projection
+    assert "const credentialNeedsModelSetup = computed" in credential_projection
+    assert "'MODEL_NOT_FOUND'" in credential_projection
+    assert "已保存，待配置" in credential_projection
+    assert "认证和服务访问已通过，请继续添加决策模型" in credential_projection
+    assert ':disabled="!canManage || !credentialReady"' in panel
+    assert "if (!credentialReady.value) return '请先添加或修复 API 密钥。'" in panel
+    assert "服务商拒绝读取模型列表" in panel
+
+
 def test_partial_loads_and_confirmation_errors_are_visible():
     panel = _panel()
 

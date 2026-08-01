@@ -17,6 +17,7 @@ from app.schemas.alphaguard.model_runtime import (
 )
 from app.services.alphaguard.compatible_provider_registry import (
     CompatibleProviderRegistryService,
+    ProviderCatalogError,
     ProviderRegistryConflict,
     ProviderRegistryNotReady,
 )
@@ -927,6 +928,62 @@ async def test_model_options_require_exact_endpoint_version_and_keychain_alias(
             credential_id=credential_id,
         )
     assert network_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_model_options_classify_provider_403_without_leaking_response(
+    monkeypatch,
+):
+    db, store, registry, endpoint = await validated_registry()
+    credential_id = "model-options-provider-denied"
+    direct_ref = install_fake_credential(
+        store,
+        credential_id=credential_id,
+        account=credential_id,
+    )
+    await db["ag_model_credentials"].insert_one(
+        {
+            "credential_id": credential_id,
+            "provider": "openai_compatible",
+            "provider_type": "OPENAI_COMPATIBLE",
+            "credential_ref": direct_ref,
+            "endpoint_profile_id": endpoint.endpoint_profile_id,
+            "endpoint_profile_version": endpoint.profile_version,
+            "normalized_origin": endpoint.normalized_origin,
+            "auth_scheme": endpoint.auth_scheme,
+            "status": "DEGRADED",
+        }
+    )
+
+    class Response:
+        status_code = 403
+        text = "private upstream detail must not escape"
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, _url):
+            return Response()
+
+    monkeypatch.setattr(
+        "app.services.alphaguard.compatible_provider_registry.build_pinned_client",
+        lambda **_kwargs: Client(),
+    )
+
+    with pytest.raises(ProviderCatalogError) as raised:
+        await registry.model_options(
+            endpoint_profile_id=endpoint.endpoint_profile_id,
+            endpoint_profile_version=endpoint.profile_version,
+            credential_id=credential_id,
+        )
+
+    assert raised.value.code == "PROJECT_ACCESS_DENIED"
+    assert str(raised.value) == "provider denied model catalog access"
+    assert "private upstream detail" not in str(raised.value)
 
 
 def test_model_options_api_is_admin_only_and_returns_names_only(monkeypatch):
