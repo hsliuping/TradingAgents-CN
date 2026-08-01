@@ -19,11 +19,11 @@
    ↓
 50-100 只
    │
-   │  第 3 课: 单股研究(3 档标准深度)
+   │  第 3 课: 单股研究(3 级标准深度)
    ↓
 10-20 只
    │
-   │  第 4 课: 多角色辩论(4-5 档深度)
+   │  第 4 课: 多角色辩论(4-5 级深度)
    ↓
 2-3 只核心标的
    │
@@ -38,7 +38,7 @@
 |----|------|------|---------|
 | [第 1 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-01-stock-screening.md) | 股票筛选(自然语言 + 条件) | 20 分钟 | 500-1000 只股票池 |
 | [第 2 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-02-batch-analysis.md) | 批量分析(单次 ≤ 10 只) | 25 分钟 | 50 只窄选 |
-| [第 3 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-03-single-analysis-basic.md) | 单股研究入门(5 档深度) | 30 分钟 | 10-20 只深度研究 |
+| [第 3 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-03-single-analysis-basic.md) | 单股研究入门(5 级深度) | 30 分钟 | 10-20 只深度研究 |
 | [第 4 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-04-single-analysis-multi-scenario.md) | 多角色辩论(3 角色) | 30 分钟 | 2-3 只核心标的 |
 | [第 5 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-05-discover-pitfalls.md) | 发现阶段常见错误 | 25 分钟 | 个人避雷清单 |
 
@@ -46,10 +46,10 @@
 
 - **自然语言筛选**: `/screening` 默认 Tab,基于 LLM 意图理解,支持多轮对话
 - **条件筛选**: `/screening` "高级模式" Tab,精确字段构建
-- **批量分析**: `/analysis/batch`,单次最多 10 只,5 档深度
-- **单股研究**: `/analysis/single`,5 档深度,12 个子报告
-- **3 角色辩论**: bull_researcher / bear_researcher / neutral_analyst(4-5 档)
-- **3 风险视角**: risky_analyst / safe_analyst / neutral_analyst(4-5 档)
+- **批量分析**: `/analysis/batch`,单次最多 10 只,5 级深度
+- **单股研究**: `/analysis/single`,5 级深度,12 个子报告
+- **3 角色辩论**: bull_researcher / bear_researcher / neutral_analyst(4-5 级)
+- **3 风险视角**: risky_analyst / safe_analyst / neutral_analyst(4-5 级)
 - **合规术语**: 决策 action ∈ {乐观, 审慎, 中性}(不是 买入/卖出/持有)
 
 ## ⚠️ 阶段限制(基于实际代码)
@@ -57,7 +57,7 @@
 - ⚠️ **平台仅支持 A 股和 ETF 基金**(港美股前端入口已下线)
 - ⚠️ **批量分析单次 ≤ 10 只**(后端硬限制)
 - ⚠️ **京东云版单并发**,批量任务串行执行
-- ⚠️ **1-3 档深度无辩论角色**,4-5 档才有
+- ⚠️ **1-3 级深度无辩论角色**,4-5 级才有
 
 ## 🎓 学完后能做什么
 

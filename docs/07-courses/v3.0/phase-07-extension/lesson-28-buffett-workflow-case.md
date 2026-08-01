@@ -428,7 +428,7 @@ description: 基于内在价值计算买入区间
   "current_price": {数字,从行情数据获取},
   "margin_of_safety": {百分比,如 0.25 表示 25%},
   "valuation_zone": "大幅低估 / 合理偏低 / 合理估值 / 偏高 / 大幅高估",
-  "buy_range": [下限, 上限],  # 建议买入的价格区间
+  "buy_range": [下限, 上限],  # 合理估值区间(基于安全边际,仅供参考)
   "reasoning": "100-200 字推理"
 }
 

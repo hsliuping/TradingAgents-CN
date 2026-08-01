@@ -2,6 +2,8 @@
 
 > **课时**: 25 分钟 | **难度**: ⭐⭐⭐ 进阶 | **前置**: 阶段 1-4 全部
 
+> ⚠️ **风险提示**:本课程内容仅为平台功能教学,AI 输出的研究报告不构成投资建议,最终决策由你自己负责。
+
 ## 🎯 学完后能做什么
 
 - 进入 `/workflow/architect` AI 工作流架构师
@@ -169,5 +171,4 @@ A: 默认**不共享**,每个用户独立。需要的话**手动复制配置**�
 - [第 27 课:Agent 工坊 + Skill 中心](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-27-agent-skill-workshop.md)
 - [第 28 课:巴菲特工作流实战](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-28-buffett-workflow-case.md)
 - [第 6 课:通用研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-06-general-research.md)
-- 前端代码: [Workflow/Architect/index.vue](file:///c:/TradingAgentsCN/frontend/src/views/Workflow/Architect/index.vue)
-- 后端: `/api/workflow/architect` (架构师 API)
+- [附录 A:v3.0 平台能力速查表](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/appendices/A-platform-capabilities.md)

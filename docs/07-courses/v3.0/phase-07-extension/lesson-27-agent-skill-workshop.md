@@ -2,6 +2,8 @@
 
 > **课时**: 25 分钟 | **难度**: ⭐⭐⭐ 进阶 | **前置**: 第 26 课
 
+> ⚠️ **风险提示**:本课程内容仅为平台功能教学,AI 输出的研究报告不构成投资建议,最终决策由你自己负责。
+
 ## 🎯 学完后能做什么
 
 - 理解 **Agent** 和 **Skill** 的区别
@@ -36,7 +38,7 @@
 #### 步骤 1:进入 Agent 工坊
 
 1. 侧边栏"工作流 → Agent 工坊"
-2. 看到已有 Agent 列表(47 个内置 + 你的自定义)
+2. 看到已有 Agent 列表(内置 + 你的自定义)
 
 #### 步骤 2:创建自定义 Agent
 
@@ -118,21 +120,21 @@
 - 在 Agent 的"可用工具"列表里**勾选新 Skill**
 - 保存
 
-## 📊 内置 47 个 Agent 的分类
+## 📊 内置 Agent 的分类
 
-v3.0 内置 Agent 来自 `agent_configs` 集合,分 6 大类:
+v3.0 内置 Agent 来自 `agent_configs` 集合,分 6 大类(数量随版本更新可能变化):
 
-| 类别 | 数量 | 例子 |
-|------|------|------|
-| **基础面分析师** | 6 | market_analyst, fundamentals_analyst |
-| **辩论角色** | 3 | bull_researcher, bear_researcher, neutral_analyst |
-| **风险角色** | 3 | risky_analyst, safe_analyst, neutral_analyst |
-| **决策角色** | 2 | research_manager, risk_manager |
-| **持仓角色** | 4 | position_technical, position_fundamental, position_risk, position_advisor |
-| **行业/市场** | 2 | sector_analyst, index_analyst |
-| **其他** | 27 | 新闻/情绪/工具类 |
+| 类别 | 例子 |
+|------|------|
+| **基础面分析师** | market_analyst, fundamentals_analyst |
+| **辩论角色** | bull_researcher, bear_researcher, research_manager |
+| **风险角色** | risky_analyst, safe_analyst, neutral_analyst |
+| **决策角色** | risk_manager, research_manager |
+| **持仓角色** | position_technical, position_fundamental, position_risk, position_advisor |
+| **行业/市场** | sector_analyst, index_analyst |
+| **其他** | 新闻/情绪/工具类 |
 
-> 💡 **数量统计来源**: 见 [agent_configs 集合](file:///c:/TradingAgentsCN/app/services/agent_configs.py)
+> 💡 **查看当前 Agent 列表**:进入 `/agents` 页面即可看到所有内置 Agent 和你的自定义 Agent。
 
 ## 🧠 Agent 设计的"4 个原则"
 
@@ -154,14 +156,14 @@ v3.0 内置 Agent 来自 `agent_configs` 集合,分 6 大类:
 ### 原则 4:可解释
 
 - Agent 的结论要**能解释为什么**
-- 输出包含 `reasoning` 字段
+- 输出包含**评估理由**(长文本说明依据)
 
 ## ⚠️ v3.0 重要变化
 
 - ✅ **Agent 工坊**:v3.0 新增,可以自定义分析师
 - ✅ **Skill 中心**:v3.0 新增,可以扩展平台能力
 - ✅ **MCP 协议**:支持外部 MCP 工具(高级)
-- ✅ **47 个内置 Agent**:覆盖大多数场景
+- ✅ **内置 Agent 覆盖大多数场景**(进入 `/agents` 查看完整列表)
 - ⚠️ **Agent 创建需要权限**:普通用户可能受限
 - ⚠️ **Skill 创建需要 API Key**(部分类型)
 - ⚠️ **京东云版**:Agent/Skill 创建受平台限制
@@ -218,7 +220,4 @@ A: 可以。同一个 Agent 可用于多个工作流。
 
 - [第 26 课:AI 工作流架构师](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-26-ai-workflow-architect.md)
 - [第 28 课:巴菲特工作流实战](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-28-buffett-workflow-case.md)
-- 前端代码: [Agents/index.vue](file:///c:/TradingAgentsCN/frontend/src/views/Agents/index.vue)
-- 前端代码: [Skills/index.vue](file:///c:/TradingAgentsCN/frontend/src/views/Skills/index.vue)
-- 后端: `/api/agents` (Agent CRUD API)
-- 后端: `/api/skills` (Skill CRUD API)
+- [附录 A:v3.0 平台能力速查表](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/appendices/A-platform-capabilities.md)
