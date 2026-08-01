@@ -186,23 +186,23 @@ def _init_system_config(db, chat_models: List[str], default_model: str, embeddin
 
 def init_jdyun_config():
     """
-    京东云版首次启动时从环境变量初始化数据库配置
+    京东云版启动时从环境变量同步数据库配置
 
-    这个函数是幂等的：
-    - 首次调用时写入配置
-    - 后续调用时检测到已初始化则跳过
-    - 环境变量变化时重启服务，会重新写入（通过删除标记可强制重新初始化）
+    每次启动都会执行同步（幂等操作）：
+    - 更新 llm_providers 中的 jdyun Provider（base_url / api_key / embedding_model）
+    - 更新 system_configs 中的模型列表（从 OPENAI_MODEL 逗号分隔解析）和默认模型
+    - 这样换模型时只需修改 OPENAI_MODEL 环境变量，重启即可生效，无需手动改数据库
     """
     from app.core.jdyun import (
         is_jdyun_mode, get_jdyun_api_base, get_jdyun_api_key,
         get_jdyun_default_model, get_jdyun_embedding_model,
-        get_jdyun_tushare_token, JDYUN_CHAT_MODELS,
+        get_jdyun_tushare_token, get_jdyun_chat_models,
     )
 
     if not is_jdyun_mode():
         return False
 
-    logger.info("🔧 [京东云初始化] 开始从环境变量初始化数据库配置...")
+    logger.info("🔧 [京东云初始化] 开始从环境变量同步数据库配置...")
 
     db = _get_sync_db()
     if db is None:
@@ -215,6 +215,7 @@ def init_jdyun_config():
     default_model = get_jdyun_default_model()
     embedding_model = get_jdyun_embedding_model()
     tushare_token = get_jdyun_tushare_token()
+    chat_models = get_jdyun_chat_models()
 
     if not api_base or not api_key:
         logger.error("❌ [京东云初始化] OPENAI_API_BASE 或 OPENAI_API_KEY 未设置，跳过初始化")
@@ -223,29 +224,24 @@ def init_jdyun_config():
     if not tushare_token:
         logger.warning("⚠️ [京东云初始化] TUSHARE_TOKEN 未设置，数据源功能可能不可用")
 
-    # 检查是否已初始化
-    if _is_jdyun_initialized(db):
-        logger.info("  ℹ️  京东云配置已初始化，跳过")
-        return True
-
     try:
-        # 1. 初始化 Provider
+        # 1. 同步 Provider（幂等更新）
         _init_jdyun_provider(db, api_base, api_key, embedding_model)
 
-        # 2. 初始化系统配置（模型列表 + 默认模型 + 数据源）
-        _init_system_config(db, JDYUN_CHAT_MODELS, default_model, embedding_model, tushare_token)
+        # 2. 同步系统配置（模型列表 + 默认模型 + 数据源）
+        _init_system_config(db, chat_models, default_model, embedding_model, tushare_token)
 
         # 3. 标记已初始化
         _mark_jdyun_initialized(db)
 
-        logger.info("✅ [京东云初始化] 数据库配置初始化完成")
+        logger.info("✅ [京东云初始化] 数据库配置同步完成")
         logger.info(f"  - Provider: jdyun ({api_base})")
-        logger.info(f"  - 模型: {', '.join(JDYUN_CHAT_MODELS)}")
+        logger.info(f"  - 模型: {', '.join(chat_models)}")
         logger.info(f"  - 默认模型: {default_model}")
         logger.info(f"  - Embedding: {embedding_model}")
         logger.info(f"  - Tushare: {'已配置' if tushare_token else '未配置'}")
         return True
 
     except Exception as e:
-        logger.error(f"❌ [京东云初始化] 初始化失败: {e}", exc_info=True)
+        logger.error(f"❌ [京东云初始化] 同步失败: {e}", exc_info=True)
         return False

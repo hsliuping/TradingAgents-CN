@@ -17,7 +17,8 @@ from typing import Dict
 logger = logging.getLogger(__name__)
 
 # 京东云预置的对话模型列表（均可用作 quick_model 或 deep_model）
-JDYUN_CHAT_MODELS = [
+# 🔥 支持通过 OPENAI_MODEL 环境变量覆盖（逗号分隔多个模型，第一个为默认模型）
+JDYUN_DEFAULT_CHAT_MODELS = [
     "GLM-5",
     "GLM-5.1",
     "GLM-5.2",
@@ -51,10 +52,24 @@ def get_jdyun_api_key() -> str:
     return os.getenv("OPENAI_API_KEY", "").strip()
 
 
+def get_jdyun_chat_models() -> list:
+    """获取京东云对话模型列表
+
+    从 OPENAI_MODEL 环境变量解析（逗号分隔多个模型，第一个为默认模型），
+    未设置时回退到默认列表。
+    """
+    raw = os.getenv("OPENAI_MODEL", "").strip()
+    if raw:
+        models = [m.strip() for m in raw.split(",") if m.strip()]
+        if models:
+            return models
+    return list(JDYUN_DEFAULT_CHAT_MODELS)
+
+
 def get_jdyun_default_model() -> str:
-    """获取默认对话模型"""
-    model = os.getenv("OPENAI_MODEL", "").strip()
-    return model if model else JDYUN_CHAT_MODELS[0]
+    """获取默认对话模型（OPENAI_MODEL 列表中的第一个）"""
+    models = get_jdyun_chat_models()
+    return models[0] if models else JDYUN_DEFAULT_CHAT_MODELS[0]
 
 
 def get_jdyun_embedding_model() -> str:
@@ -82,7 +97,7 @@ def get_jdyun_tushare_token() -> str:
 
 def is_jdyun_model(model_name: str) -> bool:
     """判断模型是否属于京东云预置模型"""
-    return (model_name or "").strip() in JDYUN_CHAT_MODELS
+    return (model_name or "").strip() in get_jdyun_chat_models()
 
 
 def get_jdyun_status() -> dict:
@@ -93,7 +108,7 @@ def get_jdyun_status() -> dict:
         "api_base": get_jdyun_api_base(),
         "api_key_configured": bool(get_jdyun_api_key()),
         "current_model": get_jdyun_default_model(),
-        "available_models": JDYUN_CHAT_MODELS,
+        "available_models": get_jdyun_chat_models(),
         "embedding_model": get_jdyun_embedding_model(),
         "embedding_dims": JDYUN_EMBEDDING_DIMS,
         "tushare_token_configured": bool(get_jdyun_tushare_token()),
