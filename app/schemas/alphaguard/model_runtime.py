@@ -16,6 +16,7 @@ from tradingagents.alphaguard.model_runtime_schemas import (  # noqa: F401
     ProviderEndpointProfile,
     RealModelValidationRun,
     ResearchAgentResult,
+    ResearchManagerContractCheck,
 )
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     "ProviderEndpointProfile",
     "RealModelValidationRun",
     "ResearchAgentResult",
+    "ResearchManagerContractCheck",
 ]

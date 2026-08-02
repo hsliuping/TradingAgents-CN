@@ -4,6 +4,7 @@ MODEL_RUNTIME_COLLECTIONS = {
     "profiles": "ag_model_profiles",
     "prompts": "ag_model_prompt_versions",
     "capability_checks": "ag_model_capability_checks",
+    "contract_checks": "ag_model_contract_checks",
     "runs": "ag_model_runs",
     "research_results": "ag_model_research_results",
     "validation_runs": "ag_model_validation_runs",

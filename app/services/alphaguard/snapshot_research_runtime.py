@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -37,6 +37,9 @@ RESEARCH_ROLES = (
     ("research_manager", "RESEARCH_MANAGER"),
 )
 
+RESEARCH_MANAGER_CONTRACT_ID = "research_manager_output_contract"
+RESEARCH_MANAGER_CONTRACT_VERSION = "v2"
+
 
 class ResearchAgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -47,10 +50,33 @@ class ResearchAgentOutput(BaseModel):
     evidence_refs: list[str]
 
 
+NonEmptyResearchText = Annotated[str, Field(min_length=1)]
+
+
+class ResearchManagerOutputV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    status: Literal["SUCCESS", "INSUFFICIENT_DATA"] = Field(
+        description=(
+            "Evidence-completeness status only; this is never a trading action."
+        )
+    )
+    summary: NonEmptyResearchText
+    findings: list[NonEmptyResearchText]
+    risks: list[NonEmptyResearchText]
+    evidence_refs: list[NonEmptyResearchText]
+
+
+RESEARCH_MANAGER_SCHEMA_HASH = canonical_hash(
+    model_output_schema(ResearchManagerOutputV2)
+)
+
+
 def _context_bound_research_schema(
     context: ModelRuntimeContext,
+    *,
+    schema_model: type[BaseModel] = ResearchAgentOutput,
 ) -> dict[str, Any]:
-    schema = model_output_schema(ResearchAgentOutput)
+    schema = model_output_schema(schema_model)
     allowed = sorted(
         context.payload.get("allowed_evidence_refs") or context.evidence_refs
     )
@@ -61,6 +87,62 @@ def _context_bound_research_schema(
         "type": "array",
     }
     return schema
+
+
+def validation_error_projection(
+    error: ValidationError,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    fields: list[str] = []
+    error_types: list[str] = []
+    for item in error.errors(include_url=False, include_context=False, include_input=False):
+        location = ".".join(str(part) for part in item.get("loc") or ("$",))
+        fields.append(location or "$")
+        error_types.append(str(item.get("type") or "validation_error"))
+    return tuple(fields), tuple(error_types)
+
+
+def normalized_payload_shape(
+    payload: dict[str, Any] | None,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    def type_name(value: Any) -> str:
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, str):
+            return "string"
+        if isinstance(value, (int, float)):
+            return "number"
+        if isinstance(value, list):
+            return "array"
+        if isinstance(value, dict):
+            return "object"
+        return "unsupported"
+
+    fields = tuple(sorted((payload or {}).keys()))
+    return fields, tuple(type_name((payload or {})[field]) for field in fields)
+
+
+def _manager_research_projection(
+    results: list[ResearchAgentResult],
+) -> list[dict[str, Any]]:
+    projection: list[dict[str, Any]] = []
+    for result in results:
+        structured = dict(result.structured_summary or {})
+        projection.append(
+            {
+                "research_result_id": result.research_result_id,
+                "agent_name": result.agent_name,
+                "agent_role": result.agent_role,
+                "status": result.status,
+                "summary": structured.get("summary") or structured.get("reason"),
+                "findings": list(structured.get("findings") or ())[:6],
+                "risks": list(structured.get("risks") or ())[:6],
+                "evidence_refs": list(result.evidence_refs)[:12],
+                "result_hash": result.result_hash,
+            }
+        )
+    return projection
 
 
 def _failure_meta(
@@ -162,25 +244,49 @@ class SnapshotResearchRuntime:
         profile = profile_override or await self.profiles.persisted_for_role(
             "RESEARCH_AGENT"
         )
-        research_prompt = self.prompts.definition(
+        research_prompt_definition = self.prompts.definition(
             "alphaguard_research_snapshot"
         )
-        prompt = await self.prompts.persisted(
-            research_prompt.prompt_id,
-            research_prompt.prompt_version,
+        research_prompt = await self.prompts.persisted(
+            research_prompt_definition.prompt_id,
+            research_prompt_definition.prompt_version,
+        )
+        manager_prompt_definition = self.prompts.definition(
+            "alphaguard_research_manager_snapshot",
+            RESEARCH_MANAGER_CONTRACT_VERSION,
+        )
+        manager_prompt = await self.prompts.persisted(
+            manager_prompt_definition.prompt_id,
+            manager_prompt_definition.prompt_version,
         )
         model = llm or await self.provider_runtime.create_registered(
             profile, db=self.db
         )
         results: list[ResearchAgentResult] = []
-        output_schema = _context_bound_research_schema(context)
         for agent_name, agent_role in RESEARCH_ROLES:
-            rendered = prompt.template.format(
-                agent_role=agent_role,
-                context_json=json.dumps(
-                    context.payload, ensure_ascii=False, sort_keys=True
-                ),
+            is_manager = agent_name == "research_manager"
+            prompt = manager_prompt if is_manager else research_prompt
+            schema_model = ResearchManagerOutputV2 if is_manager else ResearchAgentOutput
+            output_schema = _context_bound_research_schema(
+                context,
+                schema_model=schema_model,
             )
+            context_json = json.dumps(
+                context.payload, ensure_ascii=False, sort_keys=True
+            )
+            prior_research = _manager_research_projection(results)
+            if is_manager:
+                rendered = prompt.template.format(
+                    context_json=context_json,
+                    research_json=json.dumps(
+                        prior_research, ensure_ascii=False, sort_keys=True
+                    ),
+                )
+            else:
+                rendered = prompt.template.format(
+                    agent_role=agent_role,
+                    context_json=context_json,
+                )
             budget = await self.budget.check(
                 profile=profile,
                 analysis_id=analysis_id,
@@ -193,6 +299,18 @@ class SnapshotResearchRuntime:
                     "prompt": prompt.template_hash,
                     "agent_role": agent_role,
                     "context_hash": context.context_hash,
+                    "output_contract": (
+                        {
+                            "contract_id": RESEARCH_MANAGER_CONTRACT_ID,
+                            "contract_version": RESEARCH_MANAGER_CONTRACT_VERSION,
+                            "schema_hash": RESEARCH_MANAGER_SCHEMA_HASH,
+                            "prior_result_hashes": [
+                                item.result_hash for item in results
+                            ],
+                        }
+                        if is_manager
+                        else {"contract_version": "v1"}
+                    ),
                 }
             )
             if not budget.allowed:
@@ -231,7 +349,7 @@ class SnapshotResearchRuntime:
             invocation = invoke_json_object(
                 llm=model,
                 messages=[{"role": "system", "content": rendered}],
-                schema_model=ResearchAgentOutput,
+                schema_model=schema_model,
                 provider=profile.provider,
                 configured_model_name=profile.model_name,
                 prompt_name=prompt.prompt_id,
@@ -269,31 +387,40 @@ class SnapshotResearchRuntime:
             status = invocation.failure_status or "SUCCESS"
             summary: dict[str, Any]
             evidence_refs: list[str]
-            try:
-                parsed = ResearchAgentOutput.model_validate(
-                    invocation.payload or {}
-                )
-            except ValidationError:
-                status = "INVALID_OUTPUT"
-                summary = {"reason": "STRICT_SCHEMA_VALIDATION_FAILED"}
+            if invocation.failure_status is not None:
+                summary = {
+                    "reason": invocation.error_type or invocation.failure_status,
+                }
                 evidence_refs = []
             else:
-                allowed = set(
-                    context.payload.get("allowed_evidence_refs")
-                    or context.evidence_refs
-                )
-                unknown = set(parsed.evidence_refs) - allowed
-                if unknown:
+                try:
+                    parsed = schema_model.model_validate(invocation.payload or {})
+                except ValidationError as exc:
                     status = "INVALID_OUTPUT"
+                    fields, error_types = validation_error_projection(exc)
                     summary = {
-                        "reason": "UNKNOWN_EVIDENCE_REFS",
-                        "unknown_evidence_refs": sorted(unknown),
+                        "reason": "STRICT_SCHEMA_VALIDATION_FAILED",
+                        "validation_error_fields": list(fields),
+                        "validation_error_types": list(error_types),
                     }
                     evidence_refs = []
                 else:
-                    status = parsed.status
-                    summary = parsed.model_dump(mode="json")
-                    evidence_refs = parsed.evidence_refs
+                    allowed = set(
+                        context.payload.get("allowed_evidence_refs")
+                        or context.evidence_refs
+                    )
+                    unknown = set(parsed.evidence_refs) - allowed
+                    if unknown:
+                        status = "INVALID_OUTPUT"
+                        summary = {
+                            "reason": "UNKNOWN_EVIDENCE_REFS",
+                            "unknown_evidence_refs": sorted(unknown),
+                        }
+                        evidence_refs = []
+                    else:
+                        status = parsed.status
+                        summary = parsed.model_dump(mode="json")
+                        evidence_refs = parsed.evidence_refs
             result, _ = await self._save_result(
                 analysis_id=analysis_id,
                 context=context,

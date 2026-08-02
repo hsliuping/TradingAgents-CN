@@ -1257,6 +1257,25 @@ ALPHAGUARD_INDEX_SPECS = {
         },
         {"keys": [("status", 1), ("checked_at", -1)], "name": "idx_model_capability_status"},
     ],
+    "ag_model_contract_checks": [
+        {
+            "keys": [("contract_check_id", 1)],
+            "name": "uniq_model_contract_check",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("contract_id", 1),
+                ("contract_version", 1),
+                ("profile_id", 1),
+                ("profile_version", 1),
+                ("input_hash", 1),
+            ],
+            "name": "uniq_model_contract_check_identity",
+            "unique": True,
+        },
+        {"keys": [("status", 1), ("checked_at", -1)], "name": "idx_model_contract_check_status"},
+    ],
     "ag_model_runs": [
         {
             "keys": [("model_run_id", 1)],

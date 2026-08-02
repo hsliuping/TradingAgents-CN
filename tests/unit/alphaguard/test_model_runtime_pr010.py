@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -42,13 +42,26 @@ from app.services.alphaguard.prompt_profile_registry import (
     PromptProfileRegistry,
 )
 from app.services.alphaguard.real_model_validation_service import (
+    SAMPLE_SELECTION_VERSION,
+    VALIDATION_CONTRACT_VERSION,
     RealModelValidationService,
     _decision_research_projection,
+    _sample_order_key,
+)
+from app.services.alphaguard.research_manager_contract_service import (
+    CAPABILITY_EVIDENCE_REF,
+    ResearchManagerContractService,
 )
 from app.services.alphaguard.snapshot_research_runtime import (
     RESEARCH_ROLES,
+    RESEARCH_MANAGER_CONTRACT_ID,
+    RESEARCH_MANAGER_CONTRACT_VERSION,
+    RESEARCH_MANAGER_SCHEMA_HASH,
+    ResearchManagerOutputV2,
     SnapshotResearchRuntime,
     _context_bound_research_schema,
+    normalized_payload_shape,
+    validation_error_projection,
 )
 from app.services.alphaguard.decision_model_runner import (
     ExistingProviderDecisionModelRunner,
@@ -299,6 +312,145 @@ def test_capability_checks_use_exact_role_decision_contracts():
     assert normal_schema is NormalTradePlan
     assert top_prompt == "top_review_capability_prompt"
     assert top_schema is TopReviewDecision
+
+
+def test_research_manager_v2_contract_is_strict_and_hash_stable():
+    valid = {
+        "status": "SUCCESS",
+        "summary": "Evidence synthesis is complete.",
+        "findings": ["Snapshot evidence is internally consistent."],
+        "risks": [],
+        "evidence_refs": ["price:1"],
+    }
+    assert ResearchManagerOutputV2.model_validate(valid).status == "SUCCESS"
+    for invalid in (
+        {**valid, "status": "HOLD"},
+        {key: value for key, value in valid.items() if key != "risks"},
+        {**valid, "findings": "not-an-array"},
+        {**valid, "decision": "BUY"},
+    ):
+        with pytest.raises(ValidationError):
+            ResearchManagerOutputV2.model_validate(invalid)
+    assert RESEARCH_MANAGER_CONTRACT_ID == "research_manager_output_contract"
+    assert RESEARCH_MANAGER_CONTRACT_VERSION == "v2"
+    assert len(RESEARCH_MANAGER_SCHEMA_HASH) == 64
+
+
+def test_research_manager_diagnostics_store_shape_not_payload_values():
+    secret_text = "MODEL-CONTENT-MUST-NOT-BE-PERSISTED"
+    payload = {"status": "HOLD", "summary": secret_text}
+    fields, field_types = normalized_payload_shape(payload)
+    assert fields == ("status", "summary")
+    assert field_types == ("string", "string")
+    with pytest.raises(ValidationError) as captured:
+        ResearchManagerOutputV2.model_validate(payload)
+    error_fields, error_types = validation_error_projection(captured.value)
+    diagnostics = str((fields, field_types, error_fields, error_types))
+    assert "status" in error_fields
+    assert "literal_error" in error_types
+    assert secret_text not in diagnostics
+
+
+@pytest.mark.asyncio
+async def test_research_manager_contract_check_is_real_shape_only_and_reused(
+    monkeypatch,
+):
+    db = FakeDB()
+    await ModelProfileRegistry(db).seed()
+    await PromptProfileRegistry(db).seed()
+    model = StructuredLLM(
+        {
+            "status": "SUCCESS",
+            "summary": "Synthetic evidence is complete.",
+            "findings": ["The immutable reference is available."],
+            "risks": [],
+            "evidence_refs": [CAPABILITY_EVIDENCE_REF],
+        }
+    )
+    service = ResearchManagerContractService(db)
+
+    async def allowed(**_kwargs):
+        return BudgetDecision(
+            allowed=True,
+            status="READY",
+            estimated_input_tokens=10,
+            estimated_output_tokens=10,
+            estimated_cost=0,
+            remaining_daily_calls=99,
+            remaining_daily_cost=20,
+            permitted_attempts=1,
+        )
+
+    monkeypatch.setattr(service.budget, "check", allowed)
+    first = await service.check(
+        checked_by="admin",
+        idempotency_key="manager-contract-v2-check",
+        llm=model,
+    )
+    second = await service.check(
+        checked_by="admin",
+        idempotency_key="manager-contract-v2-check",
+        llm=model,
+    )
+    assert first == second
+    assert first.status == "READY"
+    assert first.schema_hash == RESEARCH_MANAGER_SCHEMA_HASH
+    assert first.prompt_version == "v2"
+    assert first.payload_fields == (
+        "evidence_refs",
+        "findings",
+        "risks",
+        "status",
+        "summary",
+    )
+    assert first.validation_error_fields == ()
+    assert model.invocations == 1
+    assert db["ag_model_contract_checks"].count() == 1
+    assert db["ag_model_runs"].count() == 1
+    stored = str(db["ag_model_contract_checks"].documents)
+    assert "Synthetic evidence is complete" not in stored
+
+
+@pytest.mark.asyncio
+async def test_research_manager_contract_check_records_exact_error_paths(
+    monkeypatch,
+):
+    db = FakeDB()
+    await ModelProfileRegistry(db).seed()
+    await PromptProfileRegistry(db).seed()
+    service = ResearchManagerContractService(db)
+    model = StructuredLLM(
+        {
+            "status": "HOLD",
+            "summary": "invalid manager action",
+            "findings": [],
+            "risks": [],
+            "evidence_refs": [CAPABILITY_EVIDENCE_REF],
+        }
+    )
+
+    async def allowed(**_kwargs):
+        return BudgetDecision(
+            allowed=True,
+            status="READY",
+            estimated_input_tokens=10,
+            estimated_output_tokens=10,
+            estimated_cost=0,
+            remaining_daily_calls=99,
+            remaining_daily_cost=20,
+            permitted_attempts=1,
+        )
+
+    monkeypatch.setattr(service.budget, "check", allowed)
+    result = await service.check(
+        checked_by="admin",
+        idempotency_key="manager-contract-v2-invalid",
+        llm=model,
+    )
+    assert result.status == "INVALID_OUTPUT"
+    assert result.validation_error_fields == ("status",)
+    assert result.validation_error_types == ("literal_error",)
+    assert "invalid manager action" not in str(result.model_dump())
 
 
 @pytest.mark.asyncio
@@ -685,6 +837,11 @@ async def test_validation_is_idempotent_and_never_writes_trade_objects(monkeypat
     assert first.status == "MODEL_NOT_CONFIGURED"
     assert first.execution_gate_status == "NOT_REACHED"
     assert first.execution_gate_invoked is False
+    assert first.validation_contract_version == VALIDATION_CONTRACT_VERSION
+    assert first.contract_hash is not None
+    assert first.sample_selection_version == SAMPLE_SELECTION_VERSION
+    assert first.actual_production_decision is False
+    assert first.actual_execution is False
     assert db["ag_model_validation_runs"].count() == 1
     for collection in (
         "ag_order_intents",
@@ -696,6 +853,81 @@ async def test_validation_is_idempotent_and_never_writes_trade_objects(monkeypat
         "ag_paper_ledgers",
     ):
         assert db[collection].count() == 0
+
+
+@pytest.mark.asyncio
+async def test_v10_identity_does_not_overwrite_immutable_v9_failure(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    db = FakeDB()
+    await ModelProfileRegistry(db).seed()
+    await PromptProfileRegistry(db).seed()
+    old_v9 = {
+        "validation_run_id": "2bb79775-cc28-580c-b25d-436da85d7ca1",
+        "contract_version": "real-model-historical-evidence-v9",
+        "status": "FAILED",
+        "failure_code": "RESEARCH_MODEL_PATH_FAILED",
+        "snapshot_id": "a3b1f35f-a707-52b0-8016-4e70c812c5bb",
+        "result_hash": "9" * 64,
+    }
+    await db["ag_model_validation_runs"].insert_one(old_v9)
+    result = await RealModelValidationService(db).run(
+        requested_by="admin",
+        idempotency_key="validation-v10-new-identity",
+    )
+    assert result.validation_run_id != old_v9["validation_run_id"]
+    assert result.validation_contract_version == (
+        "real-model-historical-evidence-v10"
+    )
+    stored_old = await db["ag_model_validation_runs"].find_one(
+        {"validation_run_id": old_v9["validation_run_id"]}
+    )
+    assert stored_old["failure_code"] == "RESEARCH_MODEL_PATH_FAILED"
+    assert stored_old["result_hash"] == "9" * 64
+    assert db["ag_model_validation_runs"].count() == 2
+
+
+def test_triggered_sample_order_is_stable_without_future_performance():
+    base = make_context().quant_proposal
+    proposals = [
+        base.model_copy(
+            update={
+                "proposal_id": "proposal-b",
+                "symbol": "300750",
+                "trade_date": base.trade_date,
+            }
+        ),
+        base.model_copy(
+            update={
+                "proposal_id": "proposal-a",
+                "symbol": "300750",
+                "trade_date": base.trade_date,
+            }
+        ),
+        base.model_copy(
+            update={
+                "proposal_id": "proposal-c",
+                "symbol": "000333",
+                "trade_date": base.trade_date,
+            }
+        ),
+        base.model_copy(
+            update={
+                "proposal_id": "proposal-newest",
+                "symbol": "601318",
+                "trade_date": base.trade_date + timedelta(days=1),
+            }
+        ),
+    ]
+    ordered = sorted(proposals, key=_sample_order_key)
+    assert [item.proposal_id for item in ordered] == [
+        "proposal-newest",
+        "proposal-c",
+        "proposal-a",
+        "proposal-b",
+    ]
+    assert SAMPLE_SELECTION_VERSION == (
+        "triggered-date-desc-symbol-asc-proposal-asc-v1"
+    )
 
 
 @pytest.mark.asyncio
@@ -917,6 +1149,13 @@ async def test_research_agents_share_snapshot_and_never_query_latest(monkeypatch
     assert model.invocations == len(RESEARCH_ROLES)
     assert {item.snapshot_id for item in results} == {"snapshot-v2"}
     assert {item.context_hash for item in results} == {"f" * 64}
+    manager_run = next(
+        item
+        for item in db["ag_model_runs"].documents
+        if item["agent_name"] == "research_manager"
+    )
+    assert manager_run["prompt_id"] == "alphaguard_research_manager_snapshot"
+    assert manager_run["prompt_version"] == "v2"
     assert db["stock_daily_quotes"].count() == 0
 
 

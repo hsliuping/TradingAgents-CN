@@ -339,6 +339,7 @@
             <el-table-column prop="created_at" label="时间" min-width="190" />
             <el-table-column label="样本" min-width="150"><template #default="{ row }">{{ row.symbol || '—' }} · {{ row.source_trade_date || '—' }}</template></el-table-column>
             <el-table-column label="状态"><template #default="{ row }">{{ statusLabel(row.status) }}</template></el-table-column>
+            <el-table-column label="验证契约" min-width="190"><template #default="{ row }">{{ row.validation_contract_version || '旧版契约' }}</template></el-table-column>
             <el-table-column label="普通模型"><template #default="{ row }">{{ row.normal_model_run_id ? '已调用' : '未到达' }}</template></el-table-column>
             <el-table-column label="终审模型"><template #default="{ row }">{{ row.top_model_run_id ? '已调用' : '未到达' }}</template></el-table-column>
             <el-table-column label="共识"><template #default="{ row }">{{ statusLabel(row.consensus_status || 'NOT_REACHED') }}</template></el-table-column>
@@ -346,6 +347,19 @@
             <el-table-column label="执行安全门" min-width="150"><template #default="{ row }">{{ statusLabel(row.execution_gate_status) }}</template></el-table-column>
             <el-table-column label="Snapshot" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.snapshot_id) }}</span></template></el-table-column>
             <el-table-column label="Context Hash" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.context_hash) }}</span></template></el-table-column>
+            <el-table-column label="失败原因" min-width="210"><template #default="{ row }">{{ row.failure_code || '—' }}</template></el-table-column>
+          </el-table>
+
+          <h4>研究经理结构契约</h4>
+          <el-empty v-if="!contractChecks.length" description="尚无结构契约检查" :image-size="56" />
+          <el-table v-else :data="contractChecks" size="small">
+            <el-table-column prop="checked_at" label="时间" min-width="190" />
+            <el-table-column label="契约"><template #default="{ row }">{{ row.contract_id }}@{{ row.contract_version }}</template></el-table-column>
+            <el-table-column label="状态"><template #default="{ row }">{{ statusLabel(row.status) }}</template></el-table-column>
+            <el-table-column label="Schema Hash" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.schema_hash) }}</span></template></el-table-column>
+            <el-table-column label="Prompt Hash" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.prompt_hash) }}</span></template></el-table-column>
+            <el-table-column prop="total_tokens" label="Token 数" />
+            <el-table-column label="延迟"><template #default="{ row }">{{ row.latency_ms }} ms</template></el-table-column>
           </el-table>
         </el-collapse-item>
       </el-collapse>
@@ -582,6 +596,7 @@ import {
   type ModelCredentialStatus,
   type ModelProfileStatus,
   type RealModelValidationSummary,
+  type ResearchManagerContractCheckSummary,
   type ModelRunSummary,
   type ModelRuntimeStatus,
   type ProviderConfigurationStatus,
@@ -613,6 +628,7 @@ const modelStatus = ref<ModelRuntimeStatus | null>(null)
 const configurationStatus = ref<ProviderConfigurationStatus | null>(null)
 const modelRuns = ref<ModelRunSummary[]>([])
 const validationRuns = ref<RealModelValidationSummary[]>([])
+const contractChecks = ref<ResearchManagerContractCheckSummary[]>([])
 const secretStoreStatus = ref<'READY' | 'UNAVAILABLE'>('UNAVAILABLE')
 const selectedEndpointIdentity = ref('')
 const normalModelIdentity = ref('')
@@ -1745,12 +1761,14 @@ function isDialogCancellation(error: unknown): boolean {
 async function loadAuditData() {
   if (!advancedSections.value.includes('technical') || auditLoaded.value || !canManage.value) return
   try {
-    const [runsResponse, validationResponse] = await Promise.all([
+    const [runsResponse, validationResponse, contractResponse] = await Promise.all([
       alphaguardModelsApi.runs(100),
-      alphaguardModelsApi.validationRuns(20)
+      alphaguardModelsApi.validationRuns(20),
+      alphaguardModelsApi.contractChecks(20)
     ])
     modelRuns.value = runsResponse.data.items
     validationRuns.value = validationResponse.data.items
+    contractChecks.value = contractResponse.data.items
     auditLoaded.value = true
   } catch (error) {
     showActionError('加载审计记录失败', error)

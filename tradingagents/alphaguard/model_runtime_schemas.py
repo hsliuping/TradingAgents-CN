@@ -354,6 +354,44 @@ class ModelCapabilityCheck(_StrictFrozenModel):
     schema_version: str = "model_capability_check_v1"
 
 
+class ResearchManagerContractCheck(_StrictFrozenModel):
+    contract_check_id: str = Field(min_length=1)
+    contract_id: Literal["research_manager_output_contract"] = (
+        "research_manager_output_contract"
+    )
+    contract_version: Literal["v2"] = "v2"
+    schema_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    prompt_id: str = Field(min_length=1)
+    prompt_version: str = Field(min_length=1)
+    prompt_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    profile_id: str = Field(min_length=1)
+    profile_version: str = Field(min_length=1)
+    run_mode: Literal["MODEL_CAPABILITY_CHECK"] = "MODEL_CAPABILITY_CHECK"
+    automated_execution_allowed: Literal[False] = False
+    status: Literal[
+        "READY",
+        "INVALID_OUTPUT",
+        "MODEL_FAILED",
+        "BUDGET_BLOCKED",
+    ]
+    model_run_id: str | None = None
+    request_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    response_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    payload_fields: tuple[str, ...] = ()
+    payload_field_types: tuple[str, ...] = ()
+    validation_error_fields: tuple[str, ...] = ()
+    validation_error_types: tuple[str, ...] = ()
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    latency_ms: float = Field(ge=0)
+    checked_by: str = Field(min_length=1)
+    checked_at: datetime
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    result_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    schema_version: str = "research_manager_contract_check_v1"
+
+
 class ModelCredentialMetadata(_StrictFrozenModel):
     """Mongo-safe metadata; no Secret or Secret-derived attributes."""
 
@@ -490,6 +528,11 @@ class RealModelValidationRun(_StrictFrozenModel):
     run_mode: Literal["REAL_MODEL_VALIDATION"] = "REAL_MODEL_VALIDATION"
     research_only: Literal[True] = True
     automated_execution_allowed: Literal[False] = False
+    actual_production_decision: Literal[False] = False
+    actual_execution: Literal[False] = False
+    validation_contract_version: str | None = None
+    contract_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    sample_selection_version: str | None = None
     requested_by: str
     snapshot_id: str | None = None
     snapshot_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")

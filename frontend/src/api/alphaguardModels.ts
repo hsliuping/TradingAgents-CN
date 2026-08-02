@@ -222,6 +222,11 @@ export interface RealModelValidationSummary {
   validation_run_id: string
   run_mode: 'REAL_MODEL_VALIDATION'
   status: string
+  validation_contract_version?: string | null
+  contract_hash?: string | null
+  sample_selection_version?: string | null
+  actual_production_decision?: false
+  actual_execution?: false
   symbol?: string | null
   source_trade_date?: string | null
   snapshot_id?: string | null
@@ -237,6 +242,27 @@ export interface RealModelValidationSummary {
   model_call_records: ModelRunSummary[]
   failure_code?: string | null
   created_at: string
+}
+
+export interface ResearchManagerContractCheckSummary {
+  contract_check_id: string
+  contract_id: 'research_manager_output_contract'
+  contract_version: 'v2'
+  schema_hash: string
+  prompt_id: string
+  prompt_version: string
+  prompt_hash: string
+  profile_id: string
+  profile_version: string
+  status: 'READY' | 'INVALID_OUTPUT' | 'MODEL_FAILED' | 'BUDGET_BLOCKED'
+  model_run_id?: string | null
+  payload_fields: string[]
+  payload_field_types: string[]
+  validation_error_fields: string[]
+  validation_error_types: string[]
+  total_tokens?: number | null
+  latency_ms: number
+  checked_at: string
 }
 
 export interface ModelCapabilityCheckResult {
@@ -266,6 +292,11 @@ export const alphaguardModelsApi = {
   validationRuns(limit = 20) {
     return ApiClient.get<{ items: RealModelValidationSummary[] }>(
       `/api/alphaguard/models/validation-runs?limit=${limit}`
+    )
+  },
+  contractChecks(limit = 20) {
+    return ApiClient.get<{ items: ResearchManagerContractCheckSummary[] }>(
+      `/api/alphaguard/models/contract-checks?limit=${limit}`
     )
   },
   credentials() {

@@ -45,12 +45,18 @@ from .research_decision_path_validation_service import CANONICAL_BACKFILL_RUN_ID
 from .risk_policy_registry import RiskPolicyRegistry
 from .snapshot_data_resolver import ResolvedSnapshotData, SnapshotDataResolver
 from .snapshot_research_runtime import SnapshotResearchRuntime
+from .snapshot_research_runtime import (
+    RESEARCH_MANAGER_CONTRACT_ID,
+    RESEARCH_MANAGER_CONTRACT_VERSION,
+    RESEARCH_MANAGER_SCHEMA_HASH,
+)
 
 
 VALIDATION_SNAPSHOT_COLLECTION = "ag_model_validation_evidence_snapshots"
 VALIDATION_QUALITY_COLLECTION = "ag_model_validation_quality_reports"
 VALIDATION_ACCOUNT_COLLECTION = "ag_model_validation_account_evidence"
-VALIDATION_CONTRACT_VERSION = "real-model-historical-evidence-v9"
+VALIDATION_CONTRACT_VERSION = "real-model-historical-evidence-v10"
+SAMPLE_SELECTION_VERSION = "triggered-date-desc-symbol-asc-proposal-asc-v1"
 EXPECTED_NORMAL_MODEL = "gpt-5.6-luna"
 EXPECTED_TOP_MODEL = "gpt-5.6-sol"
 VALIDATION_EVIDENCE_REFS_PER_CATEGORY = 5
@@ -81,6 +87,14 @@ def _stable_id(namespace: str, payload: Any) -> str:
             NAMESPACE_URL,
             f"alphaguard:{namespace}:{canonical_hash(payload)}",
         )
+    )
+
+
+def _sample_order_key(proposal: QuantTradeProposal) -> tuple[int, str, str]:
+    return (
+        -proposal.trade_date.toordinal(),
+        proposal.symbol,
+        proposal.proposal_id,
     )
 
 
@@ -138,12 +152,13 @@ class RealModelValidationService:
         top = await self.profiles.persisted_for_role("TOP_RISK_REVIEWER")
         return normal, top
 
-    async def _historical_sample(
+    async def _historical_samples(
         self,
         *,
         proposal_id: str | None,
         user_id: str | None,
-    ) -> dict[str, Any] | None:
+        limit: int = 3,
+    ) -> list[dict[str, Any]]:
         query: dict[str, Any] = {
             "backfill_run_id": CANONICAL_BACKFILL_RUN_ID,
             "quant_proposal.status": "TRIGGERED",
@@ -154,11 +169,23 @@ class RealModelValidationService:
             query["quant_proposal.proposal_id"] = proposal_id
         if user_id:
             query["quant_proposal.user_id"] = str(user_id)
-        rows = await self.db["ag_research_quant_proposals"].find(query).sort(
-            "quant_proposal.trade_date", -1
-        ).to_list(length=100)
+        rows = await self.db["ag_research_quant_proposals"].find(query).to_list(
+            length=100
+        )
+        candidates: list[tuple[QuantTradeProposal, dict[str, Any]]] = []
         for raw in rows:
-            proposal = QuantTradeProposal.model_validate(raw["quant_proposal"])
+            try:
+                proposal = QuantTradeProposal.model_validate(raw["quant_proposal"])
+            except Exception:
+                continue
+            candidates.append((proposal, raw))
+        # QuantTradeProposal has no ranking-score field. This stable ordering is
+        # versioned and uses only source proposal facts, never future returns.
+        candidates.sort(
+            key=lambda item: _sample_order_key(item[0])
+        )
+        selected: list[dict[str, Any]] = []
+        for proposal, raw in candidates:
             wrapper_raw = await self.db["ag_research_snapshots"].find_one(
                 {
                     "backfill_run_id": CANONICAL_BACKFILL_RUN_ID,
@@ -187,15 +214,50 @@ class RealModelValidationService:
                 if (parsed := _reference_date(reference)) is not None
             ):
                 continue
-            return {
-                "sample_id": str(raw["sample_id"]),
-                "proposal": proposal,
-                "wrapper": wrapper,
-                "regime": MarketRegimeResult.model_validate(
-                    regime_raw["regime_result"]
+            selected.append(
+                {
+                    "sample_id": str(raw["sample_id"]),
+                    "proposal": proposal,
+                    "wrapper": wrapper,
+                    "regime": MarketRegimeResult.model_validate(
+                        regime_raw["regime_result"]
+                    ),
+                }
+            )
+            if len(selected) >= limit:
+                break
+        return selected
+
+    async def _historical_sample(
+        self,
+        *,
+        proposal_id: str | None,
+        user_id: str | None,
+    ) -> dict[str, Any] | None:
+        samples = await self._historical_samples(
+            proposal_id=proposal_id,
+            user_id=user_id,
+            limit=1,
+        )
+        return samples[0] if samples else None
+
+    def _validation_contract_hash(self) -> str:
+        manager_prompt = self.prompts.definition(
+            "alphaguard_research_manager_snapshot",
+            RESEARCH_MANAGER_CONTRACT_VERSION,
+        )
+        return canonical_hash(
+            {
+                "validation_contract_version": VALIDATION_CONTRACT_VERSION,
+                "research_manager_contract_id": RESEARCH_MANAGER_CONTRACT_ID,
+                "research_manager_contract_version": (
+                    RESEARCH_MANAGER_CONTRACT_VERSION
                 ),
+                "research_manager_schema_hash": RESEARCH_MANAGER_SCHEMA_HASH,
+                "research_manager_prompt_hash": manager_prompt.template_hash,
+                "sample_selection_version": SAMPLE_SELECTION_VERSION,
             }
-        return None
+        )
 
     async def _source_context_count(self, trade_date: date) -> int:
         count = await self.db["ag_market_contexts"].count_documents(
@@ -295,6 +357,11 @@ class RealModelValidationService:
             "status": "READY" if not blockers else "BLOCKED",
             "run_mode": "REAL_MODEL_VALIDATION",
             "automated_execution_allowed": False,
+            "actual_production_decision": False,
+            "actual_execution": False,
+            "validation_contract_version": VALIDATION_CONTRACT_VERSION,
+            "contract_hash": self._validation_contract_hash(),
+            "sample_selection_version": SAMPLE_SELECTION_VERSION,
             "decision_status": status.get("decision_status"),
             "normal_model": normal.model_name if normal else None,
             "top_model": top.model_name if top else None,
@@ -527,9 +594,14 @@ class RealModelValidationService:
         normal_prompt = self.prompts.definition(normal_profile.prompt_profile_id)
         top_prompt = self.prompts.definition(top_profile.prompt_profile_id)
         research_prompt = self.prompts.definition("alphaguard_research_snapshot")
+        research_manager_prompt = self.prompts.definition(
+            "alphaguard_research_manager_snapshot",
+            RESEARCH_MANAGER_CONTRACT_VERSION,
+        )
         input_hash = sha256_value(
             {
                 "contract": VALIDATION_CONTRACT_VERSION,
+                "contract_hash": self._validation_contract_hash(),
                 "source_snapshot_hash": source.immutable_hash,
                 "source_proposal_hash": proposal.input_hash,
                 "benchmark_manifest_hash": benchmark.manifest_hash,
@@ -601,6 +673,10 @@ class RealModelValidationService:
                 "top_model_version": f"{top_profile.profile_id}@{top_profile.profile_version}",
                 "prompt_versions": {
                     "research": f"{research_prompt.prompt_id}@{research_prompt.prompt_version}",
+                    "research_manager": (
+                        f"{research_manager_prompt.prompt_id}@"
+                        f"{research_manager_prompt.prompt_version}"
+                    ),
                     "normal": f"{normal_prompt.prompt_id}@{normal_prompt.prompt_version}",
                     "top": f"{top_prompt.prompt_id}@{top_prompt.prompt_version}",
                 },
@@ -787,6 +863,8 @@ class RealModelValidationService:
             "user_id": user_id,
             "run_mode": "REAL_MODEL_VALIDATION",
             "contract_version": VALIDATION_CONTRACT_VERSION,
+            "contract_hash": self._validation_contract_hash(),
+            "sample_selection_version": SAMPLE_SELECTION_VERSION,
         }
         validation_run_id = _stable_id("real-model-validation", identity)
         existing = await self.repository.get(
@@ -952,6 +1030,11 @@ class RealModelValidationService:
         proposal = sample["proposal"] if sample else None
         result_payload = {
             "validation_run_id": validation_run_id,
+            "validation_contract_version": VALIDATION_CONTRACT_VERSION,
+            "contract_hash": self._validation_contract_hash(),
+            "sample_selection_version": SAMPLE_SELECTION_VERSION,
+            "actual_production_decision": False,
+            "actual_execution": False,
             "requested_by": requested_by,
             "snapshot_id": snapshot.snapshot_id if snapshot else None,
             "snapshot_hash": snapshot.immutable_hash if snapshot else None,
@@ -981,6 +1064,7 @@ class RealModelValidationService:
             "input_hash": canonical_hash(identity),
             "created_at": started,
             "completed_at": datetime.now(timezone.utc),
+            "schema_version": "real_model_validation_v3",
         }
         result_payload["result_hash"] = canonical_hash(
             result_payload,

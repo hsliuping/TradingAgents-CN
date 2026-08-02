@@ -1075,6 +1075,21 @@ async def model_validation_runs(
     return ok({"items": items})
 
 
+@router.get("/contract-checks", response_model=dict)
+async def model_contract_checks(
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    items = await ModelRuntimeRepository(get_mongo_db()).list(
+        "contract_checks",
+        {},
+        sort=("checked_at", -1),
+        limit=limit,
+    )
+    return ok({"items": items})
+
+
 @router.get("/snapshots/{snapshot_id}/runs", response_model=dict)
 async def model_snapshot_runs(
     snapshot_id: str,

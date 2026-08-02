@@ -6530,3 +6530,77 @@ v4 Credential/Price/Profile/Assignment=0、v2 Credential=1，说明本阶段未�
 用户后续恢复配置时只需在统一页面选择v4；页面会自动生成版本化Credential名称，并按
 Credential、模型、价格、Profile、Capability顺序显示真实持久化状态。该操作不属于本阶段，
 也不能据此宣称PR-010 Level B完成。
+
+### 24.12 PR-010 Research Manager Contract v2 and v10 Validation
+
+PR-010运行时稳定化修改已先独立封存在`1d5615d`和
+`alphaguard-pr010-validation-runtime`。旧v9验证
+`2bb79775-cc28-580c-b25d-436da85d7ca1`永久保持
+`FAILED / RESEARCH_MODEL_PATH_FAILED`，其Snapshot、结果hash和模型审计均未回写。
+原始模型正文按安全设计没有持久化，因此不能伪造v9失败的精确字段；可确认Provider适配器
+已完成响应解包和JSON对象标准化，失败发生在后续严格Pydantic验证。前五个角色均保存了
+`status/summary/findings/risks/evidence_refs`五字段结构，经理只保存了脱敏失败原因。按现存证据，
+根因只能归入A/D（缺字段、字段类型或枚举/空值不匹配）；B（Provider包装未剥离）、
+C（Prompt Schema与Pydantic不一致）和F（Markdown/额外文本）没有证据支持，E（reasoning/content
+映射）也未观察到异常。因为正文未留存，不能在A和D之间继续猜测。
+
+新增不可变`research_manager_output_contract@v2`和
+`alphaguard_research_manager_snapshot@v2`。经理状态现在明确表示证据完整性，只允许
+`SUCCESS / INSUFFICIENT_DATA`，不得使用BUY、SELL、HOLD、WAIT等交易状态；五个字段、
+数组元素类型、可空规则和extra-forbid与Pydantic Schema一致。Schema hash和Prompt hash
+进入v10契约hash、请求hash、Snapshot输入hash和验证身份。前五个研究角色继续使用v1，
+经理读取其有界投影与结果hash。失败诊断只保存顶层字段名/类型及Pydantic字段路径/错误类型，
+不保存模型正文或证据文本。
+
+最小真实`MODEL_CAPABILITY_CHECK`仅调用Normal Profile一次，结果为`READY`：
+
+```text
+contract_check_id=d233f1aa-010b-56c4-ac61-4e4ab5b55fcb
+contract=research_manager_output_contract@v2
+schema_hash=a56a7933b47a325e90579481ea20625d9435d046877079a3fa819a044a22cb68
+prompt_hash=a9771164501c12ab12ad3f87a0c7d15105ec40a26bd4569e35840f4f97e89848
+payload fields=evidence_refs/findings/risks/status/summary
+validation errors=0
+tokens=1048 input / 226 output / 1274 total
+latency=5793ms
+```
+
+同一能力检查身份复跑返回`REUSED`，契约记录与模型调用均保持1。该检查
+`automated_execution_allowed=false`，不创建Snapshot、Proposal或交易对象。
+
+v10样本排序不使用未来收益。现有`QuantTradeProposal`没有Proposal评分字段，因此没有杜撰
+评分；使用版本化`trade_date desc / symbol asc / proposal_id asc`稳定顺序。前三个合格自然
+TRIGGERED样本均完成真实TradingAgents研究和Normal调用：
+
+```text
+000333 / 2026-06-12 / 8233af3b-eba0-5625-9d2b-ea80de1d3068
+  research=6 SUCCESS, Normal=INSUFFICIENT_DATA/NONE
+300750 / 2026-05-08 / b23f36fb-04f7-5727-956a-b66ae48189df
+  research=6 SUCCESS, Normal=INSUFFICIENT_DATA/NONE
+300750 / 2026-04-30 / f996ed03-6bfb-5900-88f9-94da840a108b
+  research=6 SUCCESS, Normal=INSUFFICIENT_DATA/NONE
+```
+
+三次运行各有7条模型调用审计，21条调用全部`SUCCESS`，合计273469 Token。所有角色在各自
+运行内共享唯一Snapshot ID和context hash。Normal均基于缺少调整后净利润、经营现金流、
+分红或公告条款证据而自然安全停止；没有强制`PROPOSE_TRADE`。因此Top、Consensus、
+HardRisk和执行安全门均未到达，结果为`NO_COMPLETE_DUAL_MODEL_PATH`。按照完成门禁不创建
+`alphaguard-pr010-real-model-runtime`提交或标签，也不开始PR-011。
+
+三个v10身份普通复跑均`REUSED`，模型调用总数与验证对象总数不增加。正式数据库保持：
+
+```text
+OrderIntent/Outbox/Order/Fill/Position/Reservation/Ledger/Settlement=0
+PAPER_QUANT/PAPER_NORMAL/PAPER_TOP_CONFIRMED cash_available=1000000.00
+cash_reserved/realized_pnl/fees=0
+actual_production_decision=false
+actual_execution=false
+```
+
+前端高级审计区新增v10契约版本、契约hash、失败原因和研究经理结构契约状态，只读API不返回
+Secret。阶段验证为：经理契约专项`39 passed`，默认离线CI`652 passed, 89 warnings`，
+前端type-check和正式build均PASS；浏览器实际读取到1条v2契约检查和3条v10验证记录，未新增
+控制台错误。MongoDB、Redis、FastAPI、queue-worker和analysis-worker均HEALTHY，FastAPI、
+queue-worker和analysis-worker在`live=true`下均以非零状态拒绝启动。PR-010 Level B仍未完成，
+阻断项是三个允许样本均未自然产生可进入Top的Normal交易计划，而不是Provider响应解析或
+经理Schema失败。
