@@ -83,7 +83,7 @@ curl --header 'Authorization: Basic amNsb3VkLXVnaWR2Y3A6ODQzN0YxM0RBQkU4N0QwQkMx
 | `EMBEDDING_API_KEY` | ✅ | 京东云 API Key（Embedding 向量化用，通常与 OPENAI_API_KEY 相同） | `pk-xxxxxxxx` |
 | `EMBEDDING_MODEL` | ✅ | Embedding 模型 | `Qwen3-Embedding-8B` |
 | `TUSHARE_TOKEN` | ✅ | Tushare 数据源 Token | `<由用户提供>` |
-| `MONGODB_PASSWORD` | ✅ | MongoDB 数据库密码 | `<自定义强密码>` |
+| `MONGODB_PASSWORD` | ✅ | MongoDB 数据库密码（容器内部使用，不对外暴露，可用固定密码） | `<自定义密码>` |
 
 ### 3.2 可选环境变量（容器自动生成）
 
