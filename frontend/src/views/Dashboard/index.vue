@@ -260,7 +260,7 @@
             <span class="feature-tag">🏭 Agent 工坊</span>
             <span class="feature-tag">📱 QQ 频道接入</span>
             <span class="feature-tag">⚡ Skill 自动生成</span>
-            <span class="feature-tag">🔍 智能选股</span>
+            <span class="feature-tag">🔍 选股助手</span>
           </div>
         </div>
         <div class="learning-action">
@@ -409,8 +409,8 @@
                 <el-icon><Filter /></el-icon>
               </div>
               <div class="action-content">
-                <h3>智能选股 <el-tag size="small" type="success">v3.0</el-tag></h3>
-                <p>自然语言描述选股条件，AI 自动筛选</p>
+                <h3>选股助手 <el-tag size="small" type="success">v3.0</el-tag></h3>
+                <p>根据您描述的条件，快速筛选符合条件的股票</p>
               </div>
               <el-icon class="action-arrow"><ArrowRight /></el-icon>
             </div>
@@ -719,7 +719,7 @@ const isJdyunMode = checkJdyunMode()
 // 京东云版"更多功能"折叠区配置
 const jdyunMoreFeatures = ref([
   { path: '/assistant', title: '智能助手', description: '一句话描述需求，AI 自动完成', icon: ChatDotRound },
-  { path: '/screening', title: '智能选股', description: '多维度筛选符合条件的股票', icon: Search },
+  { path: '/screening', title: '选股助手', description: '多维度筛选符合条件的股票', icon: Search },
   { path: '/workflow', title: '流程管理', description: '管理工作流和自定义流程', icon: Tools },
   { path: '/workflow/agent-workshop', title: 'Agent 工坊', description: '可视化构建专属 Agent', icon: EditPen },
   { path: '/review', title: '操作复盘', description: '对操作记录进行 AI 复盘分析', icon: DataAnalysis },

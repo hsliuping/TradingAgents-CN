@@ -39,8 +39,7 @@
             <el-icon><Setting /></el-icon>
             设置
           </el-dropdown-item>
-          <!-- 🔧 京东云模式：隐藏退出登录（登录态由京东云网关统一管理，我们本地没有 JWT，logout 后反而无法自动重新认证） -->
-          <el-dropdown-item v-if="!isJdyunMode" divided command="logout">
+          <el-dropdown-item divided command="logout">
             <el-icon><SwitchButton /></el-icon>
             退出登录
           </el-dropdown-item>
@@ -116,9 +115,16 @@ const handleCommand = async (command: string) => {
       router.push('/settings')
       break
     case 'logout':
-      await authStore.logout()
-      ElMessage.success('已退出登录')
-      router.push('/login')
+      if (isJdyunMode) {
+        // 京东云模式：跳转到网关 /logout 清除 jdyun_session cookie
+        // 网关清除 cookie 后会 302 跳转到 /login，用户下次需重新登录
+        authStore.clearAuthInfo()
+        window.location.href = '/logout'
+      } else {
+        await authStore.logout()
+        ElMessage.success('已退出登录')
+        router.push('/login')
+      }
       break
   }
 }

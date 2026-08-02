@@ -79,7 +79,13 @@
 
     <!-- 右侧：操作入口 -->
     <div class="action-entry">
-      <button class="action-btn action-btn-primary" @click="$emit('analyze')">
+      <div class="action-placeholder"></div>
+      <button class="action-btn action-btn-primary" @click="$emit('sync')" :disabled="syncLoading">
+        <span class="icon">🔄</span>
+        <span class="title">同步数据</span>
+        <span class="desc">更新行情/财务数据</span>
+      </button>
+      <button class="action-btn" @click="$emit('analyze')">
         <span class="icon">🔬</span>
         <span class="title">{{ isEtf ? '发起ETF研究' : '发起研究' }}</span>
         <span class="desc">AI 多智能体深度分析</span>
@@ -88,11 +94,6 @@
         <span class="icon">💼</span>
         <span class="title">持仓分析</span>
         <span class="desc">查看持仓研究详情</span>
-      </button>
-      <button class="action-btn" @click="$emit('sync')" :disabled="syncLoading">
-        <span class="icon">🔄</span>
-        <span class="title">同步数据</span>
-        <span class="desc">更新行情/财务数据</span>
       </button>
       <button class="action-btn" @click="$emit('goTradeReview')">
         <span class="icon">📈</span>
@@ -118,11 +119,6 @@
         <span class="icon">📜</span>
         <span class="title">历史记录</span>
         <span class="desc">查看分析/复盘历史</span>
-      </button>
-      <button class="action-btn" @click="$emit('goApiGuide')">
-        <span class="icon">📡</span>
-        <span class="title">API文档</span>
-        <span class="desc">查看接口调试信息</span>
       </button>
     </div>
   </div>
@@ -373,6 +369,11 @@ function formatSyncInterval(seconds: number): string {
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   width: 520px;
+}
+
+.action-placeholder {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .action-btn {
