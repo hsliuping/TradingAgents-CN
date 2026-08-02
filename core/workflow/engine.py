@@ -248,6 +248,13 @@ class WorkflowEngine:
         self._current_execution: Optional[WorkflowExecution] = None
         self._progress_callback: Optional[Callable] = None
 
+        # 🆕 进度跟踪状态（按已完成 agent 数 / 总数计算进度，只增不减）
+        self._progress_agent_nodes = []      # 有 agent_id 的 agent 节点列表
+        self._progress_node_keys = {}        # {key: node} 映射，匹配 stream 返回的 node_name
+        self._progress_completed = set()     # 已完成 agent 的 key 集合
+        self._progress_total = 0             # agent 节点总数 N
+        self._progress_max = 10              # 已上报的最大进度值（保证只增不减）
+
         # 🆕 动态状态生成
         self._use_dynamic_state = use_dynamic_state
         self._state_schema = None
@@ -450,6 +457,7 @@ class WorkflowEngine:
 
         # 创建执行记录
         execution = self._create_execution(inputs)
+        self._init_progress_tracking()
         self._report_progress(10, "开始执行工作流", "start")
 
         try:
@@ -509,7 +517,7 @@ class WorkflowEngine:
             execution.error = str(e)
             execution.completed_at = datetime.now().isoformat()
             self._report_progress(
-                progress=execution.outputs.get("progress", 0) if execution.outputs else 0,
+                progress=self._progress_max,
                 message=f"执行失败: {str(e)}",
                 step_name="error",
                 error=str(e)
@@ -519,8 +527,41 @@ class WorkflowEngine:
         finally:
             self._current_execution = execution
     
+    def _init_progress_tracking(self) -> None:
+        """初始化进度跟踪：统计 agent 节点总数，建立匹配映射
+
+        以「有 agent_id 的节点」作为 agent 节点（控制节点
+        PARALLEL/MERGE/DEBATE/START/END 无 agent_id，自动排除）。
+        进度按 已完成agent数/总数 计算，只增不减，自动适应 agent 增减。
+        """
+        self._progress_completed = set()
+        self._progress_max = 10
+        self._progress_agent_nodes = []
+        self._progress_node_keys = {}
+
+        if not self._definition or not self._definition.nodes:
+            self._progress_total = 0
+            return
+
+        for node in self._definition.nodes:
+            agent_id = getattr(node, "agent_id", None)
+            if not agent_id:
+                continue  # 控制节点（start/end/parallel/merge/debate）跳过
+            self._progress_agent_nodes.append(node)
+            # 建立多种 key 的映射，匹配 stream 返回的 node_name
+            for key in (agent_id, node.label, node.id):
+                if key:
+                    self._progress_node_keys[key] = node
+
+        self._progress_total = len(self._progress_agent_nodes)
+
     def _get_node_progress_info(self, node_name: str) -> tuple:
         """获取节点的进度信息（百分比和友好消息）
+
+        🔥 按「已完成 agent 数 / 总数」计算进度，只增不减：
+        - 10% 起（编译/开始），10%-90% 区间按 completed/N 均分，100% 在工作流完成时上报
+        - 控制节点不增加 completed，但上报当前进度 + 友好消息
+        - 无 definition（N==0）时回退到 node_mapping 固定百分比，兼容单 agent 调试
 
         Args:
             node_name: 节点名称（从 LangGraph stream 返回）
@@ -528,7 +569,7 @@ class WorkflowEngine:
         Returns:
             (progress_percentage, friendly_message, step_name)
         """
-        # 节点名称到友好消息的映射
+        # 节点名称到友好消息的映射（仅用于展示，进度值不再取自此映射）
         # 支持三种格式：旧格式（"Market Analyst"）、v1格式（"market_analyst"）、v2格式（"market_analyst_v2"）
         # 格式：(progress_percentage, friendly_message, step_name)
         # - progress_percentage: 进度百分比
@@ -611,28 +652,45 @@ class WorkflowEngine:
             if pattern in node_name:
                 return (None, None, None)  # 跳过这些节点
 
-        if node_name in node_mapping:
-            return node_mapping[node_name]
+        # 从映射取友好消息（命中时；进度值不再取自映射）
+        mapped = node_mapping.get(node_name)
 
-        # 动态推导：从工作流定义中查找节点信息
-        if self._definition:
-            agent_nodes = [
-                n for n in self._definition.nodes
-                if (n.type.value if hasattr(n.type, "value") else n.type)
-                   not in ("start", "end")
-            ]
-            total = max(len(agent_nodes), 1)
-            for i, node in enumerate(agent_nodes):
-                agent_id = node.agent_id or ""
-                if agent_id == node_name or node.label == node_name or node.id == node_name:
-                    progress = int(10 + (80 * ((i + 1) / total)))
-                    meta = self._lookup_agent_metadata(agent_id) if agent_id else None
-                    label = (meta.node_name if meta and meta.node_name
-                             else node.label or agent_id.replace("_", " ").title())
-                    return (progress, f"正在执行: {label}", label)
+        # 匹配 agent 节点并累积完成数（控制节点无 agent_id，不会命中）
+        agent_node = self._progress_node_keys.get(node_name)
+        if agent_node is not None and node_name not in self._progress_completed:
+            self._progress_completed.add(node_name)
+
+        # 计算进度
+        if self._progress_total > 0:
+            # 按已完成 agent 数均分 10%-90% 区间
+            progress = 10 + int(round(80 * len(self._progress_completed) / self._progress_total))
+        elif mapped is not None:
+            # 无 definition 回退：使用固定百分比（兼容单 agent 调试等场景）
+            progress = mapped[0]
+        else:
+            progress = self._progress_max  # 未知节点，保持当前
+
+        # 只增不减
+        if progress < self._progress_max:
+            progress = self._progress_max
+        else:
+            self._progress_max = progress
+
+        # 友好消息与 step_name
+        if mapped is not None:
+            return (progress, mapped[1], mapped[2])
+
+        # 动态推导：从工作流定义中查找节点 label
+        for node in self._progress_agent_nodes:
+            agent_id = node.agent_id or ""
+            if agent_id == node_name or node.label == node_name or node.id == node_name:
+                meta = self._lookup_agent_metadata(agent_id) if agent_id else None
+                label = (meta.node_name if meta and meta.node_name
+                         else node.label or agent_id.replace("_", " ").title())
+                return (progress, f"正在执行: {label}", label)
 
         friendly_name = node_name.replace("_v2", "").replace("_", " ").title()
-        return (50, f"正在执行: {friendly_name}", friendly_name)
+        return (progress, f"正在执行: {friendly_name}", friendly_name)
 
     async def execute_async(
         self,
@@ -667,6 +725,7 @@ class WorkflowEngine:
         execution_config = self._build_execution_config(config, runtime_inputs)
 
         execution = self._create_execution(inputs)
+        self._init_progress_tracking()
         self._report_progress(10, "开始执行工作流", "start")
 
         try:
@@ -722,7 +781,7 @@ class WorkflowEngine:
             execution.error = str(e)
             execution.completed_at = datetime.now().isoformat()
             self._report_progress(
-                progress=execution.outputs.get("progress", 0) if execution.outputs else 0,
+                progress=self._progress_max,
                 message=f"执行失败: {str(e)}",
                 step_name="error",
                 error=str(e)
