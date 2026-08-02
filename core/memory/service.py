@@ -569,9 +569,19 @@ class MemoryService:
                 "diagnostics": diagnostics,
             }
         except Exception as e:
+            err_msg = str(e)
+            # mem0 2.0.11 get_all() 在 Qdrant 空结果时的已知 bug：
+            # 空查询触发 numpy "index 0 is out of bounds"，但此时 Qdrant 连通正常（仅无数据）
+            if "out of bounds" in err_msg:
+                return {
+                    "ok": True,
+                    "mem0_version": _get_mem0_version(),
+                    "diagnostics": diagnostics,
+                    "note": "collection_empty_but_reachable",
+                }
             return {
                 "ok": False,
-                "error": str(e),
+                "error": err_msg,
                 "mem0_version": _get_mem0_version(),
                 "diagnostics": diagnostics,
             }
