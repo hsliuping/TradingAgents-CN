@@ -148,6 +148,25 @@ class ChallengerAssignmentService:
                 user_id=str(user_id),
                 market="CN",
                 account_id=account.account_id,
+                challenger_version_id=(
+                    definition.challenger_version_id
+                    or definition.challenger_version_ref
+                ),
+                baseline_champion_id=(
+                    definition.baseline_champion_id
+                    or f"{definition.component_type}:"
+                    f"{definition.component_key}:{definition.market}"
+                ),
+                baseline_champion_version=(
+                    definition.baseline_champion_version
+                    or definition.baseline_version_ref
+                ),
+                config_hash=(
+                    definition.config_hash
+                    or definition.immutable_definition_hash
+                ),
+                validation_only=definition.validation_only,
+                promotion_eligible=definition.promotion_eligible,
                 activation_trade_date=activation_trade_date,
                 baseline_account_snapshot_id=snapshot.account_snapshot_id,
                 starting_equity=Decimal(snapshot.total_equity),
@@ -244,6 +263,88 @@ class ChallengerAssignmentService:
             market=assignment.market,
         )
         return updated
+
+    async def pause(self, experiment_id: str, *, reason: str) -> ChallengerAssignment:
+        """Stop new Challenger work without deleting execution history."""
+
+        raw = clean_document(
+            await self.db["ag_exp_challenger_assignments"].find_one(
+                {"experiment_id": experiment_id, "status": "ACTIVE"}
+            )
+        )
+        if raw is None:
+            raise LookupError("active ChallengerAssignment does not exist")
+        assignment = ChallengerAssignment.model_validate(raw)
+        updated = assignment.model_copy(update={"status": "SUSPENDED"})
+        await self.db["ag_exp_challenger_assignments"].replace_one(
+            {"assignment_id": assignment.assignment_id, "status": "ACTIVE"},
+            experiment_document(updated),
+        )
+        pending_tasks = await self.db["ag_exp_task_runs"].find(
+            {
+                "job_type": "PAPER_CHALLENGER",
+                "experiment_id": experiment_id,
+                "status": "PENDING",
+            }
+        ).to_list(length=None)
+        for task in pending_tasks:
+            await self.db["ag_exp_task_runs"].update_one(
+                {"task_run_id": task["task_run_id"], "status": "PENDING"},
+                {
+                    "$set": {
+                        "status": "FAILED",
+                        "error": "CHALLENGER_PAUSED",
+                        "finished_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow(),
+                    }
+                },
+            )
+        definition = await self.registry.get(experiment_id)
+        if definition.status == "CHALLENGER":
+            await self.registry.transition(
+                experiment_id,
+                "SUSPENDED",
+                reason=reason,
+            )
+        await self.audit.record(
+            "CHALLENGER_SUSPENDED",
+            reason,
+            experiment_id=experiment_id,
+            assignment_id=assignment.assignment_id,
+            user_id=assignment.user_id,
+            market=assignment.market,
+        )
+        return updated
+
+    async def retire(self, experiment_id: str, *, reason: str) -> ChallengerAssignment:
+        """Retire a paused Challenger; positions and orders remain auditable."""
+
+        raw = clean_document(
+            await self.db["ag_exp_challenger_assignments"].find_one(
+                {
+                    "experiment_id": experiment_id,
+                    "status": {"$in": ["SUSPENDED", "COMPLETED"]},
+                }
+            )
+        )
+        if raw is None:
+            raise ValueError("Challenger must be paused before retirement")
+        assignment = ChallengerAssignment.model_validate(raw)
+        definition = await self.registry.get(experiment_id)
+        if definition.status != "RETIRED":
+            await self.registry.retire(experiment_id, reason=reason)
+        await self.db["ag_exp_locks"].delete_one(
+            {"_id": f"challenger:{assignment.exclusivity_key}"}
+        )
+        await self.audit.record(
+            "CHALLENGER_RETIRED",
+            reason,
+            experiment_id=experiment_id,
+            assignment_id=assignment.assignment_id,
+            user_id=assignment.user_id,
+            market=assignment.market,
+        )
+        return assignment
 
     async def reconcile_closing(self) -> dict[str, int]:
         """Complete only naturally-flat assignments; never force liquidation."""

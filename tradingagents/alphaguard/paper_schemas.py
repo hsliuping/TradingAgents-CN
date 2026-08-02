@@ -170,6 +170,10 @@ class OrderIntent(PaperSchema):
     risk_decision_id: str | None = None
     experiment_id: str | None = None
     assignment_id: str | None = None
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_mode: Literal["PAPER_CHALLENGER"] | None = None
     symbol: str = Field(pattern=r"^\d{6}$")
     market: Literal["CN"] = "CN"
     currency: Literal["CNY"] = "CNY"
@@ -226,6 +230,10 @@ class OrderIntent(PaperSchema):
                 or not self.hard_risk_approved
                 or not self.experiment_id
                 or not self.assignment_id
+                or not self.challenger_version_id
+                or not self.baseline_champion_id
+                or not self.config_hash
+                or self.run_mode != "PAPER_CHALLENGER"
             ):
                 raise ValueError(
                     "PAPER_CHALLENGER intent requires experiment lineage and "
@@ -233,7 +241,17 @@ class OrderIntent(PaperSchema):
                 )
         if (
             self.account_type != "PAPER_CHALLENGER"
-            and (self.experiment_id is not None or self.assignment_id is not None)
+            and any(
+                value is not None
+                for value in (
+                    self.experiment_id,
+                    self.assignment_id,
+                    self.challenger_version_id,
+                    self.baseline_champion_id,
+                    self.config_hash,
+                    self.run_mode,
+                )
+            )
         ):
             raise ValueError(
                 "experiment lineage is reserved for PAPER_CHALLENGER"
@@ -241,8 +259,17 @@ class OrderIntent(PaperSchema):
         hash_excludes = {"intent_id", "immutable_hash", "created_at"}
         # Preserve PR-006 immutable hashes for legacy/non-experiment intents.
         # Challenger hashes bind both lineage fields when present.
-        if self.experiment_id is None and self.assignment_id is None:
-            hash_excludes.update({"experiment_id", "assignment_id"})
+        if self.run_mode is None:
+            hash_excludes.update(
+                {
+                    "experiment_id",
+                    "assignment_id",
+                    "challenger_version_id",
+                    "baseline_champion_id",
+                    "config_hash",
+                    "run_mode",
+                }
+            )
         expected_hash = paper_canonical_hash(
             self,
             exclude=hash_excludes,
@@ -258,12 +285,20 @@ class ExecutionOutboxEvent(PaperSchema):
         "CREATE_TOP_CONFIRMED_INTENT",
         "CREATE_QUANT_BENCHMARK_INTENT",
         "CREATE_NORMAL_BENCHMARK_INTENT",
+        "CREATE_CHALLENGER_INTENT",
     ]
     source_object_id: str = Field(min_length=1)
     user_id: str = Field(min_length=1)
     account_id: str | None = None
     analysis_id: str | None = None
     candidate_id: str | None = None
+    snapshot_id: str | None = None
+    experiment_id: str | None = None
+    assignment_id: str | None = None
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_mode: Literal["PAPER_CHALLENGER"] | None = None
     status: Literal[
         "PENDING",
         "PROCESSING",
@@ -283,6 +318,26 @@ class ExecutionOutboxEvent(PaperSchema):
     execution_environment: Literal["PAPER"] = "PAPER"
     live_execution_allowed: Literal[False] = False
 
+    @model_validator(mode="after")
+    def validate_challenger_lineage(self) -> "ExecutionOutboxEvent":
+        lineage = (
+            self.experiment_id,
+            self.assignment_id,
+            self.challenger_version_id,
+            self.baseline_champion_id,
+            self.config_hash,
+        )
+        if self.event_type == "CREATE_CHALLENGER_INTENT":
+            if (
+                self.run_mode != "PAPER_CHALLENGER"
+                or not self.snapshot_id
+                or not all(lineage)
+            ):
+                raise ValueError("Challenger outbox requires complete experiment lineage")
+        elif self.run_mode is not None or any(value is not None for value in lineage):
+            raise ValueError("experiment lineage is reserved for Challenger outbox")
+        return self
+
 
 class PaperOrder(PaperSchema):
     order_id: str = Field(min_length=1)
@@ -294,8 +349,13 @@ class PaperOrder(PaperSchema):
     source_type: str = Field(min_length=1)
     source_object_id: str = Field(min_length=1)
     risk_decision_id: str | None = None
+    snapshot_id: str | None = None
     experiment_id: str | None = None
     assignment_id: str | None = None
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_mode: Literal["PAPER_CHALLENGER"] | None = None
     symbol: str = Field(pattern=r"^\d{6}$")
     market: Literal["CN"] = "CN"
     currency: Literal["CNY"] = "CNY"
@@ -347,6 +407,22 @@ class PaperOrder(PaperSchema):
             raise ValueError("reserved quantity cannot exceed remaining quantity")
         if self.status == "FILLED" and self.remaining_quantity != 0:
             raise ValueError("FILLED order must have no remaining quantity")
+        lineage = (
+            self.experiment_id,
+            self.assignment_id,
+            self.challenger_version_id,
+            self.baseline_champion_id,
+            self.config_hash,
+        )
+        if self.account_type == "PAPER_CHALLENGER":
+            if (
+                self.run_mode != "PAPER_CHALLENGER"
+                or not self.snapshot_id
+                or not all(lineage)
+            ):
+                raise ValueError("Challenger order requires complete experiment lineage")
+        elif self.run_mode is not None or any(value is not None for value in lineage):
+            raise ValueError("experiment lineage is reserved for Challenger orders")
         return self
 
 
@@ -366,6 +442,13 @@ class PaperReservation(PaperSchema):
     reservation_id: str = Field(min_length=1)
     order_id: str = Field(min_length=1)
     account_id: str = Field(min_length=1)
+    snapshot_id: str | None = None
+    experiment_id: str | None = None
+    assignment_id: str | None = None
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_mode: Literal["PAPER_CHALLENGER"] | None = None
     reservation_type: Literal["CASH", "POSITION"]
     currency: Literal["CNY"] | None = None
     symbol: str | None = None
@@ -404,6 +487,19 @@ class PaperReservation(PaperSchema):
                 raise ValueError("lot allocations do not equal reserved quantity")
             if self.consumed_quantity > self.reserved_quantity:
                 raise ValueError("position consumption exceeds reservation")
+        lineage = (
+            self.experiment_id,
+            self.assignment_id,
+            self.challenger_version_id,
+            self.baseline_champion_id,
+            self.config_hash,
+        )
+        if self.run_mode == "PAPER_CHALLENGER" and (
+            not self.snapshot_id or not all(lineage)
+        ):
+            raise ValueError("Challenger reservation requires complete lineage")
+        if self.run_mode is None and any(value is not None for value in lineage):
+            raise ValueError("experiment lineage requires PAPER_CHALLENGER run mode")
         return self
 
 
@@ -513,8 +609,13 @@ class PaperFill(PaperSchema):
     order_id: str = Field(min_length=1)
     intent_id: str = Field(min_length=1)
     account_id: str = Field(min_length=1)
+    snapshot_id: str | None = None
     experiment_id: str | None = None
     assignment_id: str | None = None
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_mode: Literal["PAPER_CHALLENGER"] | None = None
     execution_snapshot_id: str = Field(min_length=1)
     trade_date: date
     execution_time_policy: str = Field(min_length=1)
@@ -547,8 +648,30 @@ class PaperFill(PaperSchema):
         if self.net_cash_effect != expected_effect:
             raise ValueError("fill net cash effect mismatch")
         hash_excludes = {"fill_id", "immutable_hash", "created_at"}
-        if self.experiment_id is None and self.assignment_id is None:
-            hash_excludes.update({"experiment_id", "assignment_id"})
+        lineage = (
+            self.experiment_id,
+            self.assignment_id,
+            self.challenger_version_id,
+            self.baseline_champion_id,
+            self.config_hash,
+        )
+        if self.run_mode == "PAPER_CHALLENGER":
+            if not self.snapshot_id or not all(lineage):
+                raise ValueError("Challenger fill requires complete experiment lineage")
+        elif any(value is not None for value in lineage):
+            raise ValueError("experiment lineage is reserved for Challenger fills")
+        if self.run_mode is None:
+            hash_excludes.update(
+                {
+                    "snapshot_id",
+                    "experiment_id",
+                    "assignment_id",
+                    "challenger_version_id",
+                    "baseline_champion_id",
+                    "config_hash",
+                    "run_mode",
+                }
+            )
         expected_hash = paper_canonical_hash(
             self,
             exclude=hash_excludes,
@@ -564,6 +687,13 @@ class PositionLot(PaperSchema):
     symbol: str = Field(pattern=r"^\d{6}$")
     market: Literal["CN"] = "CN"
     source_fill_id: str = Field(min_length=1)
+    snapshot_id: str | None = None
+    experiment_id: str | None = None
+    assignment_id: str | None = None
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_mode: Literal["PAPER_CHALLENGER"] | None = None
     acquired_trade_date: date
     original_quantity: int = Field(gt=0)
     remaining_quantity: int = Field(ge=0)
@@ -589,12 +719,33 @@ class PositionLot(PaperSchema):
             raise ValueError("lot reservation allocations do not match reserved quantity")
         if self.status == "CLOSED" and self.remaining_quantity != 0:
             raise ValueError("closed lot must have zero remaining")
+        lineage = (
+            self.experiment_id,
+            self.assignment_id,
+            self.challenger_version_id,
+            self.baseline_champion_id,
+            self.config_hash,
+        )
+        if self.run_mode == "PAPER_CHALLENGER" and (
+            not self.snapshot_id or not all(lineage)
+        ):
+            raise ValueError("Challenger position lot requires complete lineage")
+        if self.run_mode is None and any(value is not None for value in lineage):
+            raise ValueError("experiment lineage requires PAPER_CHALLENGER run mode")
         return self
 
 
 class PaperPosition(PaperSchema):
     position_id: str = Field(min_length=1)
     account_id: str = Field(min_length=1)
+    snapshot_id: str | None = None
+    snapshot_ids: list[str] = Field(default_factory=list)
+    experiment_id: str | None = None
+    assignment_id: str | None = None
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_mode: Literal["PAPER_CHALLENGER"] | None = None
     symbol: str = Field(pattern=r"^\d{6}$")
     market: Literal["CN"] = "CN"
     currency: Literal["CNY"] = "CNY"
@@ -615,6 +766,20 @@ class PaperPosition(PaperSchema):
             raise ValueError("position availability and reservation exceed quantity")
         if self.quantity == 0 and self.total_cost != 0:
             raise ValueError("zero position cannot retain cost")
+        lineage = (
+            self.experiment_id,
+            self.assignment_id,
+            self.challenger_version_id,
+            self.baseline_champion_id,
+            self.config_hash,
+        )
+        if self.run_mode == "PAPER_CHALLENGER":
+            if not self.snapshot_id or not all(lineage) or not self.snapshot_ids:
+                raise ValueError("Challenger position requires complete lineage")
+            if self.snapshot_id not in self.snapshot_ids:
+                raise ValueError("position snapshot_id must be in snapshot_ids")
+        elif any(value is not None for value in lineage):
+            raise ValueError("experiment lineage requires PAPER_CHALLENGER run mode")
         return self
 
 
@@ -623,6 +788,13 @@ class LedgerEntry(PaperSchema):
     settlement_id: str = Field(min_length=1)
     fill_id: str = Field(min_length=1)
     account_id: str = Field(min_length=1)
+    snapshot_id: str | None = None
+    experiment_id: str | None = None
+    assignment_id: str | None = None
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_mode: Literal["PAPER_CHALLENGER"] | None = None
     entry_type: Literal[
         "CASH_CHANGE",
         "POSITION_COST_CHANGE",
@@ -644,6 +816,13 @@ class SettlementRecord(PaperSchema):
     fill_id: str = Field(min_length=1)
     order_id: str = Field(min_length=1)
     account_id: str = Field(min_length=1)
+    snapshot_id: str | None = None
+    experiment_id: str | None = None
+    assignment_id: str | None = None
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    run_mode: Literal["PAPER_CHALLENGER"] | None = None
     status: Literal[
         "PREPARED",
         "ACCOUNT_APPLIED",

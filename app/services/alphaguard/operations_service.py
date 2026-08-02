@@ -65,6 +65,8 @@ JOB_REGISTRY: tuple[dict[str, Any], ...] = (
     {"job_name": "account_snapshot", "worker": "api-scheduler", "scheduler_id": "alphaguard_paper_account_snapshot", "collection": "ag_paper_job_runs", "job_type": "create_daily_account_snapshots"},
     {"job_name": "evaluation_pipeline", "worker": "api-scheduler", "scheduler_id": "alphaguard_evaluation_worker", "collection": "ag_eval_runs"},
     {"job_name": "experiment_worker", "worker": "api-scheduler", "scheduler_id": "alphaguard_experiment_consumer", "collection": "ag_exp_task_runs"},
+    {"job_name": "challenger_scheduler", "worker": "api-scheduler", "scheduler_id": "alphaguard_challenger_scheduler", "collection": "ag_exp_task_runs", "job_type": "PAPER_CHALLENGER"},
+    {"job_name": "challenger_runtime", "worker": "api-scheduler", "scheduler_id": "alphaguard_challenger_runtime", "collection": "ag_exp_challenger_runs"},
     {"job_name": "promotion_saga_recovery", "worker": "api-scheduler", "scheduler_id": "alphaguard_promotion_saga_recovery", "collection": "ag_exp_task_runs", "job_type": "PROMOTION_SAGA_RECOVERY"},
 )
 
@@ -405,17 +407,47 @@ class AlphaGuardOperationsService:
                 last_checked_at=now,
             )
         )
+        challenger_accounts = await _count(
+            self.db["ag_paper_accounts"],
+            {
+                "account_type": "PAPER_CHALLENGER",
+                "market": "CN",
+                "status": "ACTIVE",
+            },
+        )
+        challenger_framework = bool(
+            challenger_accounts
+            and await _count(self.db["ag_exp_promotion_policies"])
+            and await _count(self.db["ag_exp_component_versions"])
+        )
+        pending_jobs = await _count(
+            self.db["ag_exp_task_runs"],
+            {"job_type": "PAPER_CHALLENGER", "status": "PENDING"},
+        )
+        run_count = await _count(self.db["ag_exp_challenger_runs"])
+        failure_count = await _count(
+            self.db["ag_exp_challenger_runs"], {"status": "FAILED"}
+        )
         statuses.append(
             DataReadinessStatus(
                 component="CHALLENGER_PIPELINE",
-                status="NOT_READY",
+                status="READY" if challenger_framework else "NOT_READY",
                 market="CN",
-                record_count=0,
+                record_count=challenger_accounts,
                 required_for=["PAPER_CHALLENGER", "PROMOTION"],
-                blocking_reasons=["FULL_CHALLENGER_PIPELINE_NOT_READY"],
+                blocking_reasons=(
+                    []
+                    if challenger_framework
+                    else [
+                        "PAPER_CHALLENGER_ACCOUNT_OR_RUNTIME_DEPENDENCY_MISSING"
+                    ]
+                ),
                 warnings=[
-                    "PAPER_CHALLENGER remains disabled; PR-010 Normal/Top "
-                    "capability and a valid experiment must be READY first"
+                    f"run_count={run_count}",
+                    f"failed_run_count={failure_count}",
+                    f"pending_job_count={pending_jobs}",
+                    "model Profile and budget readiness are enforced when a Challenger runs",
+                    "no active Challenger is required for runtime readiness",
                 ],
                 last_checked_at=now,
             )
@@ -986,7 +1018,19 @@ class AlphaGuardOperationsService:
             and await _count(self.db["ag_exp_promotion_policies"])
             and await _count(self.db["ag_exp_component_versions"])
         )
-        challenger_ready = False
+        challenger_ready = bool(
+            experiment_framework
+            and self._data_ready(data, "CHALLENGER_PIPELINE")
+            and paper_ready
+            and evaluation_ready
+            and not required_services_bad
+        )
+        active_challenger = bool(
+            await _count(
+                self.db["ag_exp_challenger_assignments"],
+                {"status": "ACTIVE"},
+            )
+        )
         overall = (
             "UNSAFE"
             if unsafe_reasons
@@ -1026,6 +1070,7 @@ class AlphaGuardOperationsService:
             "evaluation_ready": evaluation_ready,
             "experiment_ready": experiment_framework,
             "challenger_ready": challenger_ready,
+            "active_challenger": active_challenger,
             "live_ready": False,
             "code_commit": versions["code_commit"],
             "build_version": versions["build_version"],
@@ -1093,11 +1138,104 @@ class AlphaGuardOperationsService:
             "ag_paper_fills",
             "ag_eval_subjects",
             "ag_exp_runs",
+            "ag_exp_challenger_runs",
+            "ag_exp_challenger_objects",
         ):
             counts[name] = await _count(self.db[name])
         return {
             "readiness": report,
             "sample_counts": counts,
+            "challenger_status": await self.challenger_operations_status(),
             "open_alerts": alerts,
             "safety_notice": "PAPER ONLY — live execution is unavailable",
+        }
+
+    async def challenger_operations_status(self) -> dict[str, Any]:
+        """Return a secret-free, read-only summary for the Operations page."""
+
+        accounts = await self.db["ag_paper_accounts"].find(
+            {"account_type": "PAPER_CHALLENGER", "market": "CN"}
+        ).to_list(length=None)
+        account_ids = [
+            str(item["account_id"])
+            for item in accounts
+            if item.get("account_id") is not None
+        ]
+        active_accounts = [item for item in accounts if item.get("status") == "ACTIVE"]
+        latest_run = clean_document(
+            await self.db["ag_exp_challenger_runs"].find_one(
+                {}, sort=[("updated_at", -1)]
+            )
+        )
+        latest_success = clean_document(
+            await self.db["ag_exp_challenger_runs"].find_one(
+                {"status": {"$in": ["COMPLETED", "BLOCKED"]}},
+                sort=[("completed_at", -1)],
+            )
+        )
+        latest_failure = clean_document(
+            await self.db["ag_exp_challenger_runs"].find_one(
+                {"status": "FAILED"}, sort=[("completed_at", -1)]
+            )
+        )
+        subject_query = (
+            {"account_id": {"$in": account_ids}}
+            if account_ids
+            else {"account_id": {"$in": []}}
+        )
+        subjects = await self.db["ag_eval_subjects"].find(subject_query).to_list(
+            length=None
+        )
+        subject_ids = [
+            str(item["evaluation_subject_id"])
+            for item in subjects
+            if item.get("evaluation_subject_id") is not None
+        ]
+        mature_labels = await _count(
+            self.db["ag_eval_horizon_labels"],
+            {
+                "evaluation_subject_id": {"$in": subject_ids},
+                "status": "CALCULATED",
+            },
+        )
+        from .model_budget_service import ModelBudgetService
+
+        budget = await ModelBudgetService(self.db).summary()
+        return {
+            "account_status": "ACTIVE" if active_accounts else "NOT_CONFIGURED",
+            "active_challenger_count": await _count(
+                self.db["ag_exp_challenger_assignments"], {"status": "ACTIVE"}
+            ),
+            "last_run_at": (
+                latest_run.get("updated_at") or latest_run.get("created_at")
+                if latest_run
+                else None
+            ),
+            "last_success_at": (
+                latest_success.get("completed_at") if latest_success else None
+            ),
+            "last_failure_at": (
+                latest_failure.get("completed_at") if latest_failure else None
+            ),
+            "pending_task_count": await _count(
+                self.db["ag_exp_task_runs"],
+                {"job_type": "PAPER_CHALLENGER", "status": "PENDING"},
+            ),
+            "model_call_count": await _count(
+                self.db["ag_model_runs"], {"run_mode": "PAPER_CHALLENGER"}
+            ),
+            "budget_status": (
+                "READY" if int(budget["remaining_calls"]) > 0 else "BLOCKED"
+            ),
+            "budget_remaining_calls": int(budget["remaining_calls"]),
+            "order_count": await _count(
+                self.db["ag_paper_orders"],
+                {"account_id": {"$in": account_ids}},
+            ),
+            "fill_count": await _count(
+                self.db["ag_paper_fills"],
+                {"account_id": {"$in": account_ids}},
+            ),
+            "evaluation_subject_count": len(subjects),
+            "mature_evaluation_count": mature_labels,
         }

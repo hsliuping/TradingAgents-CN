@@ -19,7 +19,12 @@ from tradingagents.alphaguard.experiment_schemas import (
 )
 
 
-async def seed_single_variable_experiment(db, *, user_id: str = "user-1"):
+async def seed_single_variable_experiment(
+    db,
+    *,
+    user_id: str = "user-1",
+    validation_only: bool = False,
+):
     descriptor = next(
         item
         for item in current_component_payloads()
@@ -63,6 +68,7 @@ async def seed_single_variable_experiment(db, *, user_id: str = "user-1"):
         baseline_version_ref=baseline.version_ref,
         challenger_version_ref=challenger.version_ref,
         primary_variable_path=f"factor_weights.{factor_id}",
+        validation_only=validation_only,
         expected_improvement=["stability"],
         expected_risks=["under-weighting"],
         success_criteria=["paired comparison"],

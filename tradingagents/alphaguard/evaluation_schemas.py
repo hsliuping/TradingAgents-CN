@@ -382,6 +382,7 @@ AttributionCategory = Literal[
 class AttributionRecord(EvaluationSchema):
     attribution_id: str = Field(min_length=1)
     subject_id: str = Field(min_length=1)
+    lineage_ids: dict[str, str] = Field(default_factory=dict)
     status: Literal[
         "PENDING_HORIZON",
         "NOT_REQUIRED",

@@ -39,6 +39,13 @@ class ExecutionOutboxService:
         account_id: str | None = None,
         analysis_id: str | None = None,
         candidate_id: str | None = None,
+        snapshot_id: str | None = None,
+        experiment_id: str | None = None,
+        assignment_id: str | None = None,
+        challenger_version_id: str | None = None,
+        baseline_champion_id: str | None = None,
+        config_hash: str | None = None,
+        run_mode: str | None = None,
         now: datetime | None = None,
     ) -> ExecutionOutboxEvent:
         now = now or datetime.utcnow()
@@ -52,6 +59,17 @@ class ExecutionOutboxService:
             "user_id": str(user_id),
             "account_id": account_id,
         }
+        lineage_payload = {
+            "snapshot_id": snapshot_id,
+            "experiment_id": experiment_id,
+            "assignment_id": assignment_id,
+            "challenger_version_id": challenger_version_id,
+            "baseline_champion_id": baseline_champion_id,
+            "config_hash": config_hash,
+            "run_mode": run_mode,
+        }
+        if any(value is not None for value in lineage_payload.values()):
+            identity_payload.update(lineage_payload)
         idempotency_key = paper_canonical_hash(identity_payload)
         existing = clean_document(
             await self.collection.find_one({"idempotency_key": idempotency_key})
@@ -65,6 +83,10 @@ class ExecutionOutboxService:
                 "user_id": stored.user_id,
                 "account_id": stored.account_id,
             }
+            if any(value is not None for value in lineage_payload.values()):
+                actual.update(
+                    {key: getattr(stored, key) for key in lineage_payload}
+                )
             if actual != expected:
                 raise ExecutionOutboxConflictError(
                     "same outbox idempotency key has conflicting content"
@@ -80,6 +102,7 @@ class ExecutionOutboxService:
             account_id=account_id,
             analysis_id=analysis_id,
             candidate_id=candidate_id,
+            **lineage_payload,
             status="PENDING",
             attempt_count=0,
             next_attempt_at=now,

@@ -27,6 +27,7 @@ DEFAULT_ACCOUNT_TYPES = (
     "PAPER_QUANT",
     "PAPER_NORMAL",
     "PAPER_TOP_CONFIRMED",
+    "PAPER_CHALLENGER",
 )
 
 
@@ -49,7 +50,7 @@ async def main(
     )
     if not execute:
         print(
-            "dry-run: no accounts written; PAPER_CHALLENGER remains uninitialized; "
+            "dry-run: no accounts written; "
             "pass --execute with a verified administrator --user-id"
         )
         if not user_id:
@@ -125,8 +126,8 @@ if __name__ == "__main__":
         choices=tuple(builtin_account_policy().account_types),
         dest="account_types",
         help=(
-            "account type to initialize; repeat as needed. Defaults to the three "
-            "MVP accounts and excludes PAPER_CHALLENGER"
+            "account type to initialize; repeat as needed. Defaults to all four "
+            "isolated automatic paper accounts"
         ),
     )
     args = parser.parse_args()

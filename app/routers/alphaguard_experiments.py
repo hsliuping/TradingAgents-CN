@@ -31,6 +31,9 @@ from app.services.alphaguard.experiment_repository import (
 )
 from app.services.alphaguard.experiment_task_service import ExperimentTaskService
 from app.services.alphaguard.paper_storage import clean_document
+from app.services.alphaguard.paper_challenger_query_service import (
+    PaperChallengerQueryService,
+)
 from app.services.alphaguard.shadow_experiment_service import (
     ShadowExperimentService,
 )
@@ -110,8 +113,32 @@ class ReasonRequest(BaseModel):
 
 class ChallengerActivateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    user_id: str
+    user_id: str | None = None
     activation_trade_date: date
+
+
+class ChallengerCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    hypothesis: str = Field(min_length=1)
+    component_type: str
+    component_key: str
+    baseline_version_ref: str
+    challenger_version_ref: str
+    primary_variable_path: str
+    owner_user_id: str | None = None
+    validation_only: bool = False
+    expected_improvement: list[str] = Field(default_factory=list)
+    expected_risks: list[str] = Field(default_factory=list)
+    success_criteria: list[str] = Field(default_factory=list)
+    failure_criteria: list[str] = Field(default_factory=list)
+
+
+class ChallengerBacktestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dataset_manifest_id: str
+    split_id: str | None = None
 
 
 class RiskReviewRequest(BaseModel):
@@ -204,6 +231,240 @@ async def create_experiment(
         return ok(jsonable_encoder(definition), "experiment created")
     except Exception as exc:
         raise _http_error(exc) from exc
+
+
+# These static Challenger routes must be registered before
+# /experiments/{experiment_id} so "challengers" is never parsed as an ID.
+@router.get("/experiments/challengers", response_model=dict)
+async def list_challengers(
+    current_user: dict = Depends(get_current_user),
+):
+    items = await PaperChallengerQueryService(get_mongo_db()).list(
+        user_id=None if current_user.get("is_admin") else str(current_user["id"])
+    )
+    return ok({"items": jsonable_encoder(items)})
+
+
+@router.post("/experiments/challengers", response_model=dict)
+async def create_challenger(
+    body: ChallengerCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    try:
+        definition = await ExperimentRegistry(get_mongo_db()).create(
+            user_id=body.owner_user_id or str(current_user["id"]),
+            created_by=str(current_user["id"]),
+            name=body.name,
+            description=body.description,
+            hypothesis=body.hypothesis,
+            component_type=body.component_type,
+            component_key=body.component_key,
+            market="CN",
+            baseline_version_ref=body.baseline_version_ref,
+            challenger_version_ref=body.challenger_version_ref,
+            primary_variable_path=body.primary_variable_path,
+            validation_only=body.validation_only,
+            expected_improvement=body.expected_improvement,
+            expected_risks=body.expected_risks,
+            success_criteria=body.success_criteria,
+            failure_criteria=body.failure_criteria,
+        )
+        return ok(jsonable_encoder(definition), "挑战者草稿已创建")
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/experiments/challengers/options", response_model=dict)
+async def challenger_options(
+    current_user: dict = Depends(get_current_user),
+):
+    db = get_mongo_db()
+    champions = [
+        clean_document(item)
+        for item in await db["ag_exp_champion_assignments"].find(
+            {"status": "ACTIVE", "market": "CN"}
+        ).sort("component_type", 1).to_list(length=200)
+    ]
+    versions = [
+        clean_document(item)
+        for item in await db["ag_exp_component_versions"].find(
+            {"market": "CN", "registration_supported": True}
+        ).sort("created_at", -1).to_list(length=500)
+    ]
+    return ok(
+        jsonable_encoder(
+            {
+                "champions": champions,
+                "component_versions": versions,
+                "change_types": [
+                    {"value": "FACTOR_WEIGHT", "label": "因子权重"},
+                    {"value": "FACTOR_SET", "label": "因子集合"},
+                    {"value": "REGIME_CONFIG", "label": "市场状态参数"},
+                    {"value": "STRATEGY_CONFIG", "label": "策略参数"},
+                ],
+            }
+        )
+    )
+
+
+@router.get("/experiments/challengers/{experiment_id}", response_model=dict)
+async def get_challenger(
+    experiment_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    await _authorized_experiment(experiment_id, current_user)
+    query = PaperChallengerQueryService(get_mongo_db())
+    return ok(
+        jsonable_encoder(
+            {
+                "summary": await query.summary(experiment_id),
+                "runs": await query.runs(experiment_id),
+            }
+        )
+    )
+
+
+@router.post("/experiments/challengers/{experiment_id}/backtest", response_model=dict)
+async def backtest_challenger(
+    experiment_id: str,
+    body: ChallengerBacktestRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    await _authorized_experiment(experiment_id, current_user)
+    task = await ExperimentTaskService(get_mongo_db()).enqueue(
+        "HISTORICAL_REPLAY",
+        experiment_id=experiment_id,
+        payload={
+            "dataset_manifest_id": body.dataset_manifest_id,
+            "split_id": body.split_id,
+        },
+        requested_by=str(current_user["id"]),
+    )
+    return ok(jsonable_encoder(task), "历史回放已进入实验队列")
+
+
+@router.post("/experiments/challengers/{experiment_id}/shadow", response_model=dict)
+async def shadow_challenger(
+    experiment_id: str,
+    body: ShadowStartRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    await _authorized_experiment(experiment_id, current_user)
+    try:
+        value = await ShadowExperimentService(get_mongo_db()).start(
+            experiment_id,
+            dataset_manifest_id=body.dataset_manifest_id,
+            created_by=str(current_user["id"]),
+        )
+        return ok(jsonable_encoder(value), "Shadow 观察已启动")
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/experiments/challengers/{experiment_id}/activate", response_model=dict)
+async def activate_challenger_v2(
+    experiment_id: str,
+    body: ChallengerActivateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    definition = await _authorized_experiment(experiment_id, current_user)
+    try:
+        value = await ChallengerAssignmentService(get_mongo_db()).activate(
+            experiment_id,
+            user_id=body.user_id or definition.user_id,
+            activation_trade_date=body.activation_trade_date,
+        )
+        return ok(jsonable_encoder(value), "模拟挑战者已启用")
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/experiments/challengers/{experiment_id}/pause", response_model=dict)
+async def pause_challenger(
+    experiment_id: str,
+    body: ReasonRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    await _authorized_experiment(experiment_id, current_user)
+    try:
+        value = await ChallengerAssignmentService(get_mongo_db()).pause(
+            experiment_id, reason=body.reason
+        )
+        return ok(jsonable_encoder(value), "模拟挑战者已暂停")
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/experiments/challengers/{experiment_id}/retire", response_model=dict)
+async def retire_challenger(
+    experiment_id: str,
+    body: ReasonRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    await _authorized_experiment(experiment_id, current_user)
+    try:
+        value = await ChallengerAssignmentService(get_mongo_db()).retire(
+            experiment_id, reason=body.reason
+        )
+        return ok(jsonable_encoder(value), "模拟挑战者已退役")
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/experiments/challengers/{experiment_id}/runs", response_model=dict)
+async def challenger_runs(
+    experiment_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    await _authorized_experiment(experiment_id, current_user)
+    items = await PaperChallengerQueryService(get_mongo_db()).runs(experiment_id)
+    return ok({"items": jsonable_encoder(items)})
+
+
+@router.get("/experiments/challengers/{experiment_id}/decisions", response_model=dict)
+async def challenger_decisions(
+    experiment_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    await _authorized_experiment(experiment_id, current_user)
+    items = await PaperChallengerQueryService(get_mongo_db()).decisions(experiment_id)
+    return ok({"items": jsonable_encoder(items)})
+
+
+@router.get("/experiments/challengers/{experiment_id}/orders", response_model=dict)
+async def challenger_orders(
+    experiment_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    await _authorized_experiment(experiment_id, current_user)
+    value = await PaperChallengerQueryService(get_mongo_db()).orders(experiment_id)
+    return ok(jsonable_encoder(value))
+
+
+@router.get("/experiments/challengers/{experiment_id}/evaluation", response_model=dict)
+async def challenger_evaluation(
+    experiment_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    await _authorized_experiment(experiment_id, current_user)
+    value = await PaperChallengerQueryService(get_mongo_db()).evaluation(experiment_id)
+    return ok(jsonable_encoder(value))
+
+
+@router.get("/experiments/challengers/{experiment_id}/comparison", response_model=dict)
+async def challenger_comparison(
+    experiment_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    await _authorized_experiment(experiment_id, current_user)
+    value = await PaperChallengerQueryService(get_mongo_db()).comparison(experiment_id)
+    return ok(jsonable_encoder(value))
 
 
 @router.get("/experiments/{experiment_id}", response_model=dict)
@@ -420,9 +681,10 @@ async def activate_challenger(
 ):
     _require_admin(current_user)
     try:
+        definition = await ExperimentRegistry(get_mongo_db()).get(experiment_id)
         value = await ChallengerAssignmentService(get_mongo_db()).activate(
             experiment_id,
-            user_id=body.user_id,
+            user_id=body.user_id or definition.user_id,
             activation_trade_date=body.activation_trade_date,
         )
         return ok(jsonable_encoder(value), "PAPER_CHALLENGER activated")

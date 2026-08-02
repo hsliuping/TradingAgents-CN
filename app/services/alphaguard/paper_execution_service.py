@@ -175,8 +175,13 @@ class PaperExecutionService:
             "order_id": order.order_id,
             "intent_id": order.intent_id,
             "account_id": order.account_id,
+            "snapshot_id": order.snapshot_id,
             "experiment_id": order.experiment_id,
             "assignment_id": order.assignment_id,
+            "challenger_version_id": order.challenger_version_id,
+            "baseline_champion_id": order.baseline_champion_id,
+            "config_hash": order.config_hash,
+            "run_mode": order.run_mode,
             "execution_snapshot_id": snapshot.execution_snapshot_id,
             "trade_date": snapshot.trade_date,
             "execution_time_policy": "AFTER_MARKET_CLOSE_DAILY_OHLCV_V1",
@@ -197,8 +202,18 @@ class PaperExecutionService:
             "live_execution_allowed": False,
         }
         hash_excludes = {"fill_id", "immutable_hash", "created_at"}
-        if payload["experiment_id"] is None and payload["assignment_id"] is None:
-            hash_excludes.update({"experiment_id", "assignment_id"})
+        if payload["run_mode"] is None:
+            hash_excludes.update(
+                {
+                    "snapshot_id",
+                    "experiment_id",
+                    "assignment_id",
+                    "challenger_version_id",
+                    "baseline_champion_id",
+                    "config_hash",
+                    "run_mode",
+                }
+            )
         payload["immutable_hash"] = paper_canonical_hash(
             payload,
             exclude=hash_excludes,

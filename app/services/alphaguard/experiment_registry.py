@@ -6,6 +6,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from app.services.alphaguard.experiment_audit_service import ExperimentAuditService
+from app.services.alphaguard.champion_resolver import champion_slot_id
 from app.services.alphaguard.experiment_component_adapters import (
     component_capability,
     diff_leaf_paths,
@@ -82,6 +83,7 @@ class ExperimentRegistry:
         expected_risks: list[str] | None = None,
         success_criteria: list[str] | None = None,
         failure_criteria: list[str] | None = None,
+        validation_only: bool = False,
         now: datetime | None = None,
     ) -> ExperimentDefinition:
         now = now or datetime.utcnow()
@@ -114,8 +116,35 @@ class ExperimentRegistry:
             and execution_supported
             and baseline.promotion_eligible
             and challenger.promotion_eligible
+            and not validation_only
         )
         policy = promotion_policy()
+        change_type = (
+            "WEIGHT"
+            if component_type == "FACTOR_WEIGHT"
+            else "COMPONENT_SET"
+            if component_type == "FACTOR_SET"
+            else "PARAMETER"
+        )
+        change_payload = {
+            "variable_path": primary_variable_path,
+            "baseline_value_hash": experiment_hash(
+                value_at_path(baseline.payload, primary_variable_path)
+            ),
+            "challenger_value_hash": experiment_hash(
+                value_at_path(challenger.payload, primary_variable_path)
+            ),
+        }
+        config_hash = experiment_hash(
+            {
+                "baseline_version_ref": baseline_version_ref,
+                "baseline_payload_hash": baseline.payload_hash,
+                "challenger_version_ref": challenger_version_ref,
+                "challenger_payload_hash": challenger.payload_hash,
+                "primary_variable_path": primary_variable_path,
+                "secondary_variable_paths": secondary,
+            }
+        )
         payload = {
             "experiment_id": str(uuid4()),
             "user_id": str(user_id),
@@ -127,6 +156,16 @@ class ExperimentRegistry:
             "market": market,
             "baseline_version_ref": baseline_version_ref,
             "challenger_version_ref": challenger_version_ref,
+            "challenger_version_id": challenger_version_ref,
+            "baseline_champion_id": champion_slot_id(
+                component_type, component_key, market
+            ),
+            "baseline_champion_version": baseline_version_ref,
+            "change_type": change_type,
+            "change_summary": f"仅变更 {primary_variable_path}",
+            "change_payload": change_payload,
+            "config_hash": config_hash,
+            "validation_only": validation_only,
             "primary_variable_path": primary_variable_path,
             "baseline_value_hash": experiment_hash(
                 value_at_path(baseline.payload, primary_variable_path)
@@ -157,13 +196,7 @@ class ExperimentRegistry:
             change_id=str(uuid4()),
             experiment_id=definition.experiment_id,
             variable_path=primary_variable_path,
-            change_type=(
-                "WEIGHT"
-                if component_type == "FACTOR_WEIGHT"
-                else "COMPONENT_SET"
-                if component_type == "FACTOR_SET"
-                else "PARAMETER"
-            ),
+            change_type=change_type,
             baseline_value=value_at_path(
                 baseline.payload, primary_variable_path
             ),
@@ -226,7 +259,7 @@ class ExperimentRegistry:
         if raw is None:
             raise LookupError("ExperimentDefinition does not exist")
         model = ExperimentDefinition.model_validate(raw)
-        if _definition_hash(model.model_dump(mode="python")) != model.immutable_definition_hash:
+        if _definition_hash(raw) != model.immutable_definition_hash:
             raise ExperimentIntegrityConflict(
                 "ExperimentDefinition immutable hash mismatch"
             )

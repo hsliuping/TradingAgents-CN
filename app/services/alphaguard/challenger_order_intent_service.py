@@ -1,8 +1,8 @@
 """Internal-only PAPER_CHALLENGER intent creation.
 
-There is intentionally no public API for this service and no formal execution
-outbox event.  A Challenger output must contain a complete isolated
-NormalPlan -> TopReview -> Consensus -> HardRisk chain.
+There is intentionally no public API for this service.  It is reached only by
+the durable execution outbox after a Challenger output contains a complete
+isolated NormalPlan -> TopReview -> Consensus -> HardRisk chain.
 """
 
 from __future__ import annotations
@@ -204,6 +204,10 @@ class ChallengerOrderIntentService:
             "risk_decision_id": risk.risk_decision_id,
             "experiment_id": assignment.experiment_id,
             "assignment_id": assignment.assignment_id,
+            "challenger_version_id": assignment.challenger_version_id,
+            "baseline_champion_id": assignment.baseline_champion_id,
+            "config_hash": assignment.config_hash,
+            "run_mode": "PAPER_CHALLENGER",
             "symbol": output.symbol,
             "market": "CN",
             "currency": "CNY",

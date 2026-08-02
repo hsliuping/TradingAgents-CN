@@ -683,6 +683,8 @@ async def lifespan(app: FastAPI):
         # Its DB-backed tasks are idempotent and failures cannot pause Champion.
         from app.worker.alphaguard.experiment_tasks import (
             challenger_monitor_worker,
+            challenger_runtime_worker,
+            challenger_schedule_worker,
             experiment_reconciliation_worker,
             experiment_run_consumer,
             promotion_saga_recovery_worker,
@@ -710,6 +712,22 @@ async def lifespan(app: FastAPI):
             CronTrigger(hour=18, minute=10, timezone=settings.TIMEZONE),
             id="alphaguard_challenger_monitor",
             name="AlphaGuard挑战者隔离监控",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            challenger_schedule_worker,
+            CronTrigger(hour=17, minute=35, timezone=settings.TIMEZONE),
+            id="alphaguard_challenger_scheduler",
+            name="AlphaGuard挑战者任务生成",
+            replace_existing=True,
+            max_instances=1,
+        )
+        scheduler.add_job(
+            challenger_runtime_worker,
+            IntervalTrigger(minutes=5, timezone=settings.TIMEZONE),
+            id="alphaguard_challenger_runtime",
+            name="AlphaGuard挑战者隔离运行",
             replace_existing=True,
             max_instances=1,
         )

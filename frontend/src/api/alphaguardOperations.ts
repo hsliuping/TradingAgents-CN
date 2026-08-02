@@ -71,6 +71,7 @@ export interface SystemReadiness {
   evaluation_ready: boolean
   experiment_ready: boolean
   challenger_ready: boolean
+  active_challenger: boolean
   live_ready: false
   code_commit: string
   build_version: string
@@ -84,8 +85,25 @@ interface Items<T> { items: T[] }
 export interface OperationsOverview {
   readiness: SystemReadiness
   sample_counts: Record<string, number>
+  challenger_status: ChallengerOperationsStatus
   open_alerts: OperationalAlert[]
   safety_notice: string
+}
+
+export interface ChallengerOperationsStatus {
+  account_status: 'ACTIVE' | 'NOT_CONFIGURED'
+  active_challenger_count: number
+  last_run_at: string | null
+  last_success_at: string | null
+  last_failure_at: string | null
+  pending_task_count: number
+  model_call_count: number
+  budget_status: 'READY' | 'BLOCKED'
+  budget_remaining_calls: number
+  order_count: number
+  fill_count: number
+  evaluation_subject_count: number
+  mature_evaluation_count: number
 }
 
 export const alphaguardOperationsApi = {
@@ -133,4 +151,3 @@ export const alphaguardOperationsApi = {
     )
   }
 }
-

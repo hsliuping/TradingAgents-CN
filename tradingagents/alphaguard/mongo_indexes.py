@@ -475,6 +475,10 @@ ALPHAGUARD_INDEX_SPECS = {
             "keys": [("source_object_id", 1), ("source_type", 1)],
             "name": "idx_intent_source",
         },
+        {
+            "keys": [("experiment_id", 1), ("challenger_version_id", 1), ("created_at", -1)],
+            "name": "idx_intent_challenger_lineage",
+        },
     ],
     "ag_paper_orders": [
         {"keys": [("order_id", 1)], "name": "uniq_paper_order_id", "unique": True},
@@ -490,6 +494,10 @@ ALPHAGUARD_INDEX_SPECS = {
         {
             "keys": [("symbol", 1), ("trade_date", -1)],
             "name": "idx_paper_order_symbol_date",
+        },
+        {
+            "keys": [("experiment_id", 1), ("challenger_version_id", 1), ("created_at", -1)],
+            "name": "idx_paper_order_challenger_lineage",
         },
     ],
     "ag_paper_fills": [
@@ -508,6 +516,10 @@ ALPHAGUARD_INDEX_SPECS = {
             "keys": [("account_id", 1), ("trade_date", -1)],
             "name": "idx_paper_fill_account_date",
         },
+        {
+            "keys": [("experiment_id", 1), ("challenger_version_id", 1), ("trade_date", -1)],
+            "name": "idx_paper_fill_challenger_lineage",
+        },
     ],
     "ag_paper_positions": [
         {
@@ -518,6 +530,10 @@ ALPHAGUARD_INDEX_SPECS = {
         {
             "keys": [("account_id", 1), ("quantity", 1)],
             "name": "idx_paper_position_quantity",
+        },
+        {
+            "keys": [("experiment_id", 1), ("challenger_version_id", 1), ("account_id", 1)],
+            "name": "idx_paper_position_challenger_lineage",
         },
     ],
     "ag_paper_position_lots": [
@@ -579,6 +595,10 @@ ALPHAGUARD_INDEX_SPECS = {
             "keys": [("status", 1), ("updated_at", 1)],
             "name": "idx_settlement_status_updated",
         },
+        {
+            "keys": [("experiment_id", 1), ("challenger_version_id", 1), ("created_at", -1)],
+            "name": "idx_settlement_challenger_lineage",
+        },
     ],
     "ag_paper_ledger_entries": [
         {
@@ -595,6 +615,10 @@ ALPHAGUARD_INDEX_SPECS = {
             "keys": [("account_id", 1), ("created_at", -1)],
             "name": "idx_paper_ledger_account_created",
         },
+        {
+            "keys": [("experiment_id", 1), ("challenger_version_id", 1), ("created_at", -1)],
+            "name": "idx_paper_ledger_challenger_lineage",
+        },
     ],
     "ag_execution_outbox": [
         {
@@ -610,6 +634,10 @@ ALPHAGUARD_INDEX_SPECS = {
         {
             "keys": [("status", 1), ("next_attempt_at", 1)],
             "name": "idx_execution_outbox_status_next",
+        },
+        {
+            "keys": [("experiment_id", 1), ("challenger_version_id", 1), ("created_at", -1)],
+            "name": "idx_execution_outbox_challenger_lineage",
         },
     ],
     "ag_paper_account_snapshots": [
@@ -951,6 +979,35 @@ ALPHAGUARD_INDEX_SPECS = {
         {"keys": [("experiment_id", 1), ("status", 1)], "name": "idx_exp_challenger_status"},
         {"keys": [("account_id", 1), ("activation_trade_date", 1)], "name": "idx_exp_challenger_account"},
         {"keys": [("exclusivity_key", 1), ("status", 1)], "name": "idx_exp_challenger_exclusivity"},
+    ],
+    "ag_exp_challenger_runs": [
+        {"keys": [("run_id", 1)], "name": "uniq_exp_challenger_run", "unique": True},
+        {"keys": [("task_identity", 1)], "name": "uniq_exp_challenger_task", "unique": True},
+        {
+            "keys": [
+                ("experiment_id", 1),
+                ("challenger_version_id", 1),
+                ("trading_date", 1),
+                ("candidate_id", 1),
+            ],
+            "name": "idx_exp_challenger_run_identity",
+        },
+        {"keys": [("status", 1), ("updated_at", -1)], "name": "idx_exp_challenger_run_status"},
+    ],
+    "ag_exp_challenger_objects": [
+        {"keys": [("record_id", 1)], "name": "uniq_exp_challenger_object", "unique": True},
+        {
+            "keys": [
+                ("experiment_id", 1),
+                ("challenger_version_id", 1),
+                ("run_id", 1),
+                ("object_type", 1),
+                ("object_id", 1),
+            ],
+            "name": "uniq_exp_challenger_stage_identity",
+            "unique": True,
+        },
+        {"keys": [("snapshot_id", 1), ("object_type", 1)], "name": "idx_exp_challenger_snapshot_stage"},
     ],
     "ag_exp_comparison_reports": [
         {"keys": [("comparison_report_id", 1)], "name": "uniq_exp_comparison_id", "unique": True},

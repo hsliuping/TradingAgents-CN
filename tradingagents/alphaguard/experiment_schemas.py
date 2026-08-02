@@ -156,6 +156,14 @@ class ExperimentDefinition(ExperimentSchema):
     market: str = Field(min_length=1)
     baseline_version_ref: str = Field(min_length=1)
     challenger_version_ref: str = Field(min_length=1)
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    baseline_champion_version: str | None = None
+    change_type: str | None = None
+    change_summary: str | None = None
+    change_payload: dict[str, Any] = Field(default_factory=dict)
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    validation_only: bool = False
     primary_variable_path: str = Field(min_length=1)
     baseline_value_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     challenger_value_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -190,6 +198,13 @@ class ExperimentDefinition(ExperimentSchema):
             raise ValueError("unsupported execution cannot be promotion eligible")
         if not self.execution_supported and not self.unsupported_reason:
             raise ValueError("unsupported execution requires an explicit reason")
+        if self.validation_only and self.promotion_eligible:
+            raise ValueError("validation-only experiment cannot be promotion eligible")
+        if (
+            self.challenger_version_id is not None
+            and self.challenger_version_id != self.challenger_version_ref
+        ):
+            raise ValueError("challenger version identity mismatch")
         if self.updated_at < self.created_at:
             raise ValueError("experiment updated_at precedes created_at")
         return self
@@ -500,6 +515,12 @@ class ChallengerAssignment(ExperimentSchema):
     user_id: str = Field(min_length=1)
     market: str = Field(min_length=1)
     account_id: str = Field(min_length=1)
+    challenger_version_id: str | None = None
+    baseline_champion_id: str | None = None
+    baseline_champion_version: str | None = None
+    config_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    validation_only: bool = False
+    promotion_eligible: bool = False
     activation_trade_date: date
     deactivation_trade_date: date | None = None
     baseline_account_snapshot_id: str = Field(min_length=1)
@@ -508,6 +529,98 @@ class ChallengerAssignment(ExperimentSchema):
     exclusivity_key: str = Field(min_length=1)
     created_at: datetime
     activated_at: datetime | None = None
+    schema_version: str = EXPERIMENT_SCHEMA_VERSION
+
+
+class ChallengerStageRecord(ExperimentSchema):
+    """Immutable experiment-owned output from one Challenger pipeline stage."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    record_id: str = Field(min_length=1)
+    object_type: Literal[
+        "FACTOR_RESULT",
+        "REGIME_RESULT",
+        "QUANT_PROPOSAL",
+        "DECISION_CONTEXT",
+        "RESEARCH_RESULT",
+        "NORMAL_PLAN",
+        "TOP_REVIEW",
+        "REVISION_REQUEST",
+        "CONSENSUS_DECISION",
+        "HARD_RISK_DECISION",
+        "EXECUTION_OUTBOX",
+        "ORDER_INTENT",
+        "PAPER_ORDER",
+        "PAPER_FILL",
+        "EVALUATION_SUBJECT",
+        "ATTRIBUTION_RESULT",
+    ]
+    object_id: str = Field(min_length=1)
+    experiment_id: str = Field(min_length=1)
+    challenger_version_id: str = Field(min_length=1)
+    baseline_champion_id: str = Field(min_length=1)
+    account_id: str = Field(min_length=1)
+    assignment_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    run_mode: Literal["PAPER_CHALLENGER"] = "PAPER_CHALLENGER"
+    snapshot_id: str = Field(min_length=1)
+    config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload: dict[str, Any]
+    payload_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime
+    schema_version: str = EXPERIMENT_SCHEMA_VERSION
+
+    @model_validator(mode="after")
+    def validate_payload_hash(self) -> "ChallengerStageRecord":
+        if experiment_hash(self.payload) != self.payload_hash:
+            raise ValueError("Challenger stage payload_hash mismatch")
+        return self
+
+
+class PaperChallengerRun(ExperimentSchema):
+    """State-controlled identity for one date/snapshot Challenger run."""
+
+    run_id: str = Field(min_length=1)
+    task_identity: str = Field(min_length=1)
+    experiment_id: str = Field(min_length=1)
+    challenger_version_id: str = Field(min_length=1)
+    baseline_champion_id: str = Field(min_length=1)
+    baseline_champion_version: str = Field(min_length=1)
+    assignment_id: str = Field(min_length=1)
+    account_id: str = Field(min_length=1)
+    user_id: str = Field(min_length=1)
+    market: Literal["CN"] = "CN"
+    symbol: str = Field(pattern=r"^\d{6}$")
+    trading_date: date
+    candidate_id: str | None = None
+    snapshot_id: str = Field(min_length=1)
+    snapshot_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    run_mode: Literal["PAPER_CHALLENGER"] = "PAPER_CHALLENGER"
+    execution_target: Literal["PAPER_ONLY"] = "PAPER_ONLY"
+    live_trading_enabled: Literal[False] = False
+    broker_execution_allowed: Literal[False] = False
+    automated_execution_allowed: bool
+    validation_only: bool
+    promotion_eligible: bool
+    status: Literal[
+        "CREATED",
+        "RUNNING",
+        "COMPLETED",
+        "BLOCKED",
+        "FAILED",
+        "CANCELLED",
+    ]
+    terminal_stage: str | None = None
+    stage_record_ids: list[str] = Field(default_factory=list)
+    order_intent_id: str | None = None
+    outbox_event_id: str | None = None
+    failure_code: str | None = None
+    result_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
     schema_version: str = EXPERIMENT_SCHEMA_VERSION
 
 
@@ -774,6 +887,8 @@ class ExperimentTaskRun(ExperimentSchema):
     idempotency_key: str = Field(min_length=1)
     status: Literal["PENDING", "RUNNING", "COMPLETED", "FAILED"]
     attempt_count: int = Field(ge=1)
+    max_attempts: int = Field(default=3, ge=1)
+    next_attempt_at: datetime | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     result: dict[str, Any] | None = None

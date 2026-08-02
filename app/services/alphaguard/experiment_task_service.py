@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from uuid import NAMESPACE_URL, uuid5
 
 from app.services.alphaguard.champion_comparison_service import (
@@ -93,6 +93,11 @@ class ExperimentTaskService:
         job_types: set[str] | None = None,
         limit: int = 5,
     ) -> dict[str, int]:
+        now = datetime.utcnow()
+        await self._recover_stale_challenger_tasks(
+            job_types=job_types,
+            now=now,
+        )
         query: dict = {"status": "PENDING"}
         if job_types:
             query["job_type"] = {"$in": sorted(job_types)}
@@ -102,11 +107,14 @@ class ExperimentTaskService:
         counts = {"completed": 0, "failed": 0}
         for raw in pending:
             item = ExperimentTaskRun.model_validate(clean_document(raw))
+            if item.next_attempt_at is not None and item.next_attempt_at > now:
+                continue
             running = item.model_copy(
                 update={
                     "status": "RUNNING",
-                    "started_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow(),
+                    "started_at": now,
+                    "next_attempt_at": None,
+                    "updated_at": now,
                 }
             )
             claimed = await self.db["ag_exp_task_runs"].replace_one(
@@ -130,12 +138,27 @@ class ExperimentTaskService:
                 )
                 counts["completed"] += 1
             except Exception as exc:
+                retryable = (
+                    running.job_type == "PAPER_CHALLENGER"
+                    and running.attempt_count < running.max_attempts
+                )
+                failed_at = datetime.utcnow()
                 terminal = running.model_copy(
                     update={
-                        "status": "FAILED",
+                        "status": "PENDING" if retryable else "FAILED",
+                        "attempt_count": (
+                            running.attempt_count + 1
+                            if retryable
+                            else running.attempt_count
+                        ),
+                        "next_attempt_at": (
+                            failed_at + timedelta(minutes=5)
+                            if retryable
+                            else None
+                        ),
                         "error": safe_error_message(exc),
-                        "finished_at": datetime.utcnow(),
-                        "updated_at": datetime.utcnow(),
+                        "finished_at": None if retryable else failed_at,
+                        "updated_at": failed_at,
                     }
                 )
                 counts["failed"] += 1
@@ -144,6 +167,50 @@ class ExperimentTaskService:
                 experiment_document(terminal),
             )
         return counts
+
+    async def _recover_stale_challenger_tasks(
+        self,
+        *,
+        job_types: set[str] | None,
+        now: datetime,
+    ) -> int:
+        if job_types is not None and "PAPER_CHALLENGER" not in job_types:
+            return 0
+        stale = await self.db["ag_exp_task_runs"].find(
+            {
+                "job_type": "PAPER_CHALLENGER",
+                "status": "RUNNING",
+                "updated_at": {"$lt": now - timedelta(hours=2)},
+            }
+        ).to_list(length=None)
+        recovered = 0
+        for raw in stale:
+            task = ExperimentTaskRun.model_validate(clean_document(raw))
+            if task.attempt_count >= task.max_attempts:
+                status = "FAILED"
+                next_attempt_at = None
+                finished_at = now
+                attempt_count = task.attempt_count
+            else:
+                status = "PENDING"
+                next_attempt_at = now
+                finished_at = None
+                attempt_count = task.attempt_count + 1
+            result = await self.db["ag_exp_task_runs"].update_one(
+                {"task_run_id": task.task_run_id, "status": "RUNNING"},
+                {
+                    "$set": {
+                        "status": status,
+                        "attempt_count": attempt_count,
+                        "next_attempt_at": next_attempt_at,
+                        "finished_at": finished_at,
+                        "error": "WORKER_RESTART_RECOVERY",
+                        "updated_at": now,
+                    }
+                },
+            )
+            recovered += int(result.matched_count == 1)
+        return recovered
 
     async def _dispatch(self, task: ExperimentTaskRun) -> dict:
         payload = dict((task.result or {}).get("request") or {})
@@ -176,6 +243,24 @@ class ExperimentTaskService:
                 payload["shadow_run_id"], payload["snapshot_id"]
             )
             return {"output_id": output.output_id, "result_hash": output.result_hash}
+        if task.job_type == "PAPER_CHALLENGER":
+            from app.services.alphaguard.paper_challenger_runtime_service import (
+                PaperChallengerRuntimeService,
+            )
+
+            run, reused = await PaperChallengerRuntimeService(self.db).run(
+                experiment_id=task.experiment_id or "",
+                snapshot_id=payload["snapshot_id"],
+                trading_date=date.fromisoformat(payload["trading_date"]),
+                candidate_id=payload.get("candidate_id"),
+                retry_failed=task.attempt_count > 1,
+            )
+            return {
+                "run_id": run.run_id,
+                "status": run.status,
+                "reused": reused,
+                "outbox_event_id": run.outbox_event_id,
+            }
         if task.job_type == "COMPARISON":
             report = await ChampionComparisonService(self.db).create(
                 task.experiment_id or ""

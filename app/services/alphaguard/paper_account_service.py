@@ -270,6 +270,44 @@ class PaperAccountService:
         realized = Decimal(str(existing.get("realized_pnl", "0"))) if existing else Decimal("0")
         fees = Decimal(str(existing.get("total_fees", "0"))) if existing else Decimal("0")
         applied = list(existing.get("applied_settlement_ids", [])) if existing else []
+        lineage_fields = (
+            "experiment_id",
+            "assignment_id",
+            "challenger_version_id",
+            "baseline_champion_id",
+            "config_hash",
+            "run_mode",
+        )
+        lineage = {
+            field: (existing or {}).get(field)
+            for field in lineage_fields
+        }
+        snapshot_ids = list((existing or {}).get("snapshot_ids") or [])
+        snapshot_id = (existing or {}).get("snapshot_id")
+        if lots:
+            for field in lineage_fields:
+                values = {
+                    getattr(lot, field)
+                    for lot in lots
+                    if getattr(lot, field) is not None
+                }
+                if len(values) > 1:
+                    raise ValueError(
+                        f"position lots cross Challenger lineage: {field}"
+                    )
+                lineage[field] = next(iter(values), None)
+            snapshot_ids = sorted(
+                {lot.snapshot_id for lot in lots if lot.snapshot_id is not None}
+            )
+            latest_lot = max(
+                lots,
+                key=lambda lot: (
+                    lot.acquired_trade_date,
+                    lot.created_at,
+                    lot.lot_id,
+                ),
+            )
+            snapshot_id = latest_lot.snapshot_id
         position = PaperPosition(
             position_id=(
                 existing.get("position_id")
@@ -277,6 +315,9 @@ class PaperAccountService:
                 else str(uuid5(NAMESPACE_URL, f"alphaguard:position:{account_id}:CN:{symbol}"))
             ),
             account_id=account_id,
+            snapshot_id=snapshot_id,
+            snapshot_ids=snapshot_ids,
+            **lineage,
             symbol=symbol,
             market="CN",
             currency="CNY",

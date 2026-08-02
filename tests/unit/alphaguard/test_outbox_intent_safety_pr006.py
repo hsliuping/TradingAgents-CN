@@ -436,12 +436,28 @@ async def test_benchmark_gate_never_claims_consensus_or_hard_risk():
     assert decision.hard_risk_approved is False
 
 
-def test_challenger_has_no_outbox_event_type():
-    allowed = set(
-        ExecutionOutboxService.__dict__
-    )
-    # There is no public or internal CREATE_CHALLENGER event in PR-006.
+def test_challenger_outbox_event_is_paper_only():
+    # PR-011 reuses the durable outbox for the isolated Challenger account.
     from tradingagents.alphaguard.paper_schemas import ExecutionOutboxEvent
+
+    event = ExecutionOutboxEvent(
+        outbox_event_id="x",
+        event_type="CREATE_CHALLENGER_INTENT",
+        source_object_id="x",
+        user_id="u",
+        snapshot_id="snapshot",
+        experiment_id="experiment",
+        assignment_id="assignment",
+        challenger_version_id="challenger-v1",
+        baseline_champion_id="champion",
+        config_hash="1" * 64,
+        run_mode="PAPER_CHALLENGER",
+        idempotency_key="x",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    assert event.execution_environment == "PAPER"
+    assert event.live_execution_allowed is False
 
     with pytest.raises(Exception):
         ExecutionOutboxEvent(
@@ -449,7 +465,15 @@ def test_challenger_has_no_outbox_event_type():
             event_type="CREATE_CHALLENGER_INTENT",
             source_object_id="x",
             user_id="u",
+            snapshot_id="snapshot",
+            experiment_id="experiment",
+            assignment_id="assignment",
+            challenger_version_id="challenger-v1",
+            baseline_champion_id="champion",
+            config_hash="1" * 64,
+            run_mode="PAPER_CHALLENGER",
             idempotency_key="x",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
+            live_execution_allowed=True,
         )

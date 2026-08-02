@@ -6964,3 +6964,168 @@ analysis-worker live=true=exit 1
 Readiness，不影响本次显式`REAL_MODEL_VALIDATION`运行记录及五个运行组件的健康状态。PR-010
 Level B满足真实Top调用、严格校验、Consensus、HardRisk、验证模式执行阻断、幂等和零交易
 副作用要求；完成检查点后停止，PR-011未开始。
+
+## 25. PR-011 Isolated PAPER_CHALLENGER Runtime
+
+### 25.1 当前 Champion
+
+正式库继续使用5个既有ACTIVE指针：`FACTOR_SET/factor-set-v1`、
+`FACTOR_WEIGHT/factor-set-v1`、`REGIME_CONFIG/cn-market-regime`、
+`STRATEGY_CONFIG/SWING_TREND_PULLBACK_V1`和
+`STRATEGY_CONFIG/POSITION_EXIT_V1`。版本引用及5个`assignment_hash`在PR-011运行前后
+完全相同，没有自动晋升、停用、回退或生产配置替换。
+
+### 25.2 Challenger数据模型
+
+现有Experiment体系新增完整挑战身份：`experiment_id`、`challenger_version_id`、
+`baseline_champion_id/version`、`account_id`、`assignment_id`、`config_hash`、
+`run_mode=PAPER_CHALLENGER`。新增create-only的Challenger Assignment、Run和Stage Object；
+Factor、Regime、Proposal、研究、Normal、Top、Consensus、HardRisk及执行对象均保存该lineage，
+唯一身份包含实验和挑战版本，不能复用Champion决策对象冒充挑战结果。
+
+### 25.3 实验状态机
+
+沿用`DRAFT -> EXPERIMENT -> BACKTESTED -> SHADOW -> CHALLENGER`及`DEGRADED /
+SUSPENDED / RETIRED`。每个定义只允许一个`primary_variable_path`；缺少单变量变更或
+Shadow证据不能启用。暂停阻止新任务，退役为终态。`validation_only=true`强制
+`promotion_eligible=false`，不能进入正式绩效晋升。
+
+### 25.4 PAPER_CHALLENGER账户
+
+为当前正式前端用户create-or-reuse第四账户：
+`account_id=89b14ce9-25be-5c9a-8b6f-c316d0eb2bef`、`market=CN`、`currency=CNY`、
+`status=ACTIVE`。初始化复跑结果为`created=0 / reused=1 / conflicts=0 / failed=0`，没有
+重复入金或重置余额。
+
+### 25.5 初始资金
+
+`PAPER_CHALLENGER`为`initial_cash=1000000.00`、`cash_available=1000000.00`、
+`cash_reserved=0`、`realized_pnl=0`、`total_fees=0`，与三个既有自动模拟账户使用相同
+初始资金、费用、滑点、交易日历、T+1和撮合政策。
+
+### 25.6 决策链
+
+`PaperChallengerRuntimeService`只接受ACTIVE Assignment、完整v2/v3生产Snapshot及匹配的
+交易日，基于同一Snapshot并行计算Champion/Challenger输出；Challenger Factor、Regime、
+QuantProposal和后续Stage Envelope独立持久化。无自然`TRIGGERED` Proposal时安全停止。
+
+### 25.7 模型链
+
+真实运行适配器复用PR-010的`SnapshotResearchRuntime`和
+`ProfiledDecisionModelRunner`，支持TradingAgents研究、Normal与Top严格结构化路径；模型失败、
+非法输出或资源门禁失败均停止，不产生默认HOLD或订单。离线集成使用显式Stub验证状态机，
+不属于真实模型效果验证；正式环境没有活动Challenger，因此未调用模型。
+
+### 25.8 Consensus与HardRisk
+
+只有合法Normal和Top结果进入现有ConsensusEngine；`CONSENSUS_PASS`后才进入现有
+HardRiskEngine。Consensus拒绝、HardRisk拒绝或模型失败均不会创建执行事件。没有修改
+Consensus、HardRisk、策略参数、Prompt或Champion。
+
+### 25.9 订单和撮合
+
+通过完整链后只能写入`PAPER_CHALLENGER`专属Outbox，再由现有OrderIntent、Reservation、
+PaperOrder、MatchingEngine和PaperFill链消费。账户、实验、Assignment及挑战版本在每个对象
+中强制一致；禁止跨账户预约、下单、平仓或持仓合并，重复任务和消息返回既有对象。
+
+### 25.10 T+1
+
+最早有效交易日继续由持久化CN交易日历决定；T日决策不能T日成交。专项覆盖T+1、停牌、
+涨跌停、部分成交、订单过期和重复消息，未建立第二套撮合规则。
+
+### 25.11 持仓与结算
+
+继续复用PositionLot、SettlementService和Ledger；新增Challenger lineage校验，确保现金、冻结、
+持仓和费用只影响第四账户。测试验证现金、持仓和冻结非负，重复成交被拒绝，资产守恒。
+
+### 25.12 评价与归因
+
+Challenger Fill/决策进入现有EvaluationSubject和Attribution体系，并携带实验、挑战版本、
+账户及baseline Champion身份。1D/5D/10D/20D、MFE/MAE、绝对/相对收益、成本、换手率、
+Regime表现、未交易反事实和失败归因继续由既有评价链计算，不混入Champion累计结果。
+
+### 25.13 Champion对比
+
+只读比较输出包含收益差、回撤差、收益回撤比差、交易次数差、换手率差、成本差、Regime
+覆盖和极端交易依赖。页面只提供“提交人工评审”，它仅排队风险审查；不存在自动晋升API。
+
+### 25.14 调度和Worker
+
+现有Scheduler/Worker增加`job_type=PAPER_CHALLENGER`任务生成、隔离运行和监控，身份包含
+experiment/version/trading_date/candidate。无ACTIVE Assignment时不创建任务、不运行模型；
+重启可恢复、失败可重试、同一任务幂等，未新增队列。
+
+### 25.15 API
+
+新增/完善Challenger列表、创建、详情、backtest、shadow、activate、pause、retire以及runs、
+decisions、orders、evaluation、comparison接口。创建和生命周期写操作均以后端`is_admin=true`
+为最终门禁；没有自动晋升接口。列表只返回具有完整挑战身份的实验。
+
+### 25.16 前端
+
+`实验室 -> 挑战者`提供中文九步流程、当前下一步、空状态、创建表单、运行/订单/评价/对比及
+高级身份信息；状态按草稿、已回测、影子观察、模拟挑战中、运行异常、已暂停、已退役展示。
+页面明确说明不连接券商且不会自动替换Champion。“实验治理”页签保留既有人工审批和安全回退。
+
+### 25.17 Operations
+
+Readiness增加`CHALLENGER_READY`和`ACTIVE_CHALLENGER`。框架Readiness只表示账户、隔离运行时、
+调度和评价能力；模型Profile/能力及预算继续作为独立状态和实际运行门禁，未被伪造为可用。
+运维中心新增只读摘要：账户、活动数、最近运行/成功/失败、待执行任务、模型调用、资源预算、
+订单/成交和评价成熟度。当前为`CHALLENGER_READY=true / ACTIVE_CHALLENGER=false`。
+
+### 25.18 隔离验证
+
+独立FakeDB中的`validation_only=true / promotion_eligible=false`实验完成实验、决策、T+1订单、
+撮合、Fill、结算、持仓和评价链，并覆盖失败不下单、隔离、幂等、暂停和禁止自动晋升。正式库
+仅create-or-reuse空账户，没有创建实验或调用模型。
+
+### 25.19 正式数据库影响
+
+唯一预期业务写入是第四个空`PAPER_CHALLENGER`账户。正式库保持
+`ExperimentDefinition=0 / ChallengerAssignment=0 / ChallengerRun=0 /
+ChallengerObject=0 / OrderIntent=0 / Outbox=0 / Order=0 / Fill=0 / Position=0 /
+Reservation=0 / Ledger=0`，无负现金、负持仓或负冻结；浏览器冒烟未提交表单。
+
+### 25.20 三个原账户资产
+
+`PAPER_QUANT / PAPER_NORMAL / PAPER_TOP_CONFIRMED`均保持
+`cash_available=1000000.00 / cash_reserved=0 / realized_pnl=0 / total_fees=0`，没有账户重置、
+资金迁移、费用或持仓变化。
+
+### 25.21 Champion是否变化
+
+否。5个ACTIVE Champion指针、版本和assignment hash前后完全一致；PR-011未提供自动晋升，
+也未触发人工回退或审批。
+
+### 25.22 测试结果
+
+PR-011专项为`12 passed, 84 warnings`；PR-006～PR-008关联回归为`144 passed`；默认离线CI为
+`695 passed, 89 warnings`。前端type-check、正式build、独立Vite build（2611 modules）、修改
+Python文件编译、`git diff --check`和敏感信息扫描均通过。全仓compileall只保留既有
+`scripts/补充行业信息_akshare.py:81`语法错误。
+MongoDB、Redis、FastAPI、queue-worker和analysis-worker均HEALTHY；三个`live=true`入口继续
+fail-closed。浏览器桌面及390x844移动端无页面级横向溢出、空白表格、`undefined`或无限加载，
+九步流程、创建弹窗开关和实验治理页签正常，无Challenger API失败。
+
+### 25.23 已知限制
+
+正式环境尚无用户创建的实验和ACTIVE Challenger，因此没有正式Challenger运行、模型调用、订单、
+成交或成熟评价；这符合PR-011验收范围。容器不能访问宿主机macOS Keychain，所以通用模型
+Readiness继续如实降级；实际启用/运行仍会逐项检查模型Profile、Capability和预算。全仓旧脚本
+语法错误不属于本PR。
+
+### 25.24 回退步骤
+
+代码回退到`alphaguard-pr010-real-model-runtime`即可停止新Challenger调度/API/UI；数据库中新增
+集合和索引为create-only，可保留审计历史。第四账户当前为空，回退时不需要迁移资金或持仓；
+不得删除已存在的实验/运行审计，若未来已有ACTIVE Assignment，应先管理员暂停并让未完成订单按
+现有规则撤销或到期。
+
+### 25.25 Git状态
+
+本阶段以`f7059dad4481fdbd61d1b2e3dbf805b2e0577c41`和
+`alphaguard-pr010-real-model-runtime`为clean基线；所有PR-011代码、测试和本文档将一次性提交为
+`feat(alphaguard): complete isolated paper challenger runtime`并创建附注标签
+`alphaguard-pr011-paper-challenger`。提交前差异不含`.env`、Keychain内容、日志、数据库文件、
+浏览器认证状态或构建缓存；提交后必须再次确认工作区clean并停止，不开始PR-012。

@@ -30,6 +30,7 @@ async def experiment_run_consumer():
             "ROBUSTNESS",
             "COMPARISON",
             "RISK_REVIEW",
+            "PAPER_CHALLENGER",
         }
     )
 
@@ -59,6 +60,20 @@ async def challenger_monitor_worker():
     return await ChallengerAssignmentService(
         get_mongo_db()
     ).reconcile_closing()
+
+
+async def challenger_schedule_worker():
+    from app.services.alphaguard.paper_challenger_scheduler_service import (
+        PaperChallengerSchedulerService,
+    )
+
+    return await PaperChallengerSchedulerService(
+        get_mongo_db()
+    ).enqueue_for_trade_date(date.today())
+
+
+async def challenger_runtime_worker():
+    return await _consume({"PAPER_CHALLENGER"}, limit=1)
 
 
 async def comparison_report_worker():

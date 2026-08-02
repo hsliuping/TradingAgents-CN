@@ -17,6 +17,8 @@ EXPERIMENT_COLLECTIONS = {
     "shadow_runs": "ag_exp_shadow_runs",
     "shadow_outputs": "ag_exp_shadow_outputs",
     "challenger_assignments": "ag_exp_challenger_assignments",
+    "challenger_runs": "ag_exp_challenger_runs",
+    "challenger_objects": "ag_exp_challenger_objects",
     "comparison_reports": "ag_exp_comparison_reports",
     "risk_reviews": "ag_exp_risk_reviews",
     "promotion_policies": "ag_exp_promotion_policies",

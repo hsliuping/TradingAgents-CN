@@ -301,6 +301,8 @@ class AttributionEngine:
                 datetime.utcnow() if status in {"ATTRIBUTED", "NOT_REQUIRED"} else None
             ),
         }
+        if subject.lineage_ids.get("experiment_id"):
+            payload["lineage_ids"] = dict(subject.lineage_ids)
         payload["input_hash"] = evaluation_hash(
             {
                 **payload,

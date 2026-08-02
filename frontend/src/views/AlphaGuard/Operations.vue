@@ -27,6 +27,20 @@
           :title="readiness.blocking_items.join('；')"
         />
       </el-card>
+
+      <section class="challenger-status" aria-label="模拟挑战者运维状态">
+        <div><span>挑战者运行</span><strong>{{ readiness?.challenger_ready ? '已就绪' : '未就绪' }}</strong></div>
+        <div><span>活动挑战者</span><strong>{{ challengerStatus?.active_challenger_count ?? 0 }}</strong></div>
+        <div><span>模拟账户</span><strong>{{ challengerStatus?.account_status === 'ACTIVE' ? '正常' : '未配置' }}</strong></div>
+        <div><span>最近运行</span><strong>{{ displayTime(challengerStatus?.last_run_at) }}</strong></div>
+        <div><span>最近成功</span><strong>{{ displayTime(challengerStatus?.last_success_at) }}</strong></div>
+        <div><span>最近失败</span><strong>{{ displayTime(challengerStatus?.last_failure_at) }}</strong></div>
+        <div><span>待执行任务</span><strong>{{ challengerStatus?.pending_task_count ?? 0 }}</strong></div>
+        <div><span>模型调用量</span><strong>{{ challengerStatus?.model_call_count ?? 0 }}</strong></div>
+        <div><span>资源预算</span><strong>{{ challengerStatus?.budget_status === 'READY' ? '可用' : '已阻止' }}</strong></div>
+        <div><span>订单 / 成交</span><strong>{{ challengerStatus?.order_count ?? 0 }} / {{ challengerStatus?.fill_count ?? 0 }}</strong></div>
+        <div><span>评价成熟度</span><strong>{{ challengerStatus?.mature_evaluation_count ?? 0 }} / {{ challengerStatus?.evaluation_subject_count ?? 0 }}</strong></div>
+      </section>
     </template>
 
     <el-tabs
@@ -125,6 +139,7 @@ import ModelConfigurationPanel from '@/components/alphaguard/ModelConfigurationP
 import {
   alphaguardOperationsApi,
   type DataReadiness,
+  type ChallengerOperationsStatus,
   type JobHealth,
   type OperationalAlert,
   type ServiceHealth,
@@ -150,6 +165,7 @@ const loading = ref(false)
 const loadError = ref('')
 const runningJob = ref('')
 const readiness = ref<SystemReadiness | null>(null)
+const challengerStatus = ref<ChallengerOperationsStatus | null>(null)
 const services = ref<ServiceHealth[]>([])
 const dataStatuses = ref<DataReadiness[]>([])
 const jobs = ref<JobHealth[]>([])
@@ -165,6 +181,7 @@ const statusType = computed(() => readiness.value?.overall_status === 'READY_FOR
     : 'warning')
 
 const short = (value?: string) => value ? value.slice(0, 12) : '—'
+const displayTime = (value?: string | null) => value ? value.replace('T', ' ').slice(0, 19) : '暂无'
 const pretty = (value: unknown) => JSON.stringify(value, null, 2)
 
 async function loadOperations() {
@@ -172,7 +189,8 @@ async function loadOperations() {
   loading.value = true
   loadError.value = ''
   try {
-    const [readinessResponse, servicesResponse, dataResponse, jobsResponse, alertsResponse, versionsResponse, integrityResponse] = await Promise.all([
+    const [overviewResponse, readinessResponse, servicesResponse, dataResponse, jobsResponse, alertsResponse, versionsResponse, integrityResponse] = await Promise.all([
+      alphaguardOperationsApi.overview(),
       alphaguardOperationsApi.readiness(),
       alphaguardOperationsApi.services(),
       alphaguardOperationsApi.dataReadiness(),
@@ -181,6 +199,7 @@ async function loadOperations() {
       alphaguardOperationsApi.versions(),
       alphaguardOperationsApi.integrity()
     ])
+    challengerStatus.value = overviewResponse.data.challenger_status
     readiness.value = readinessResponse.data
     services.value = servicesResponse.data.items
     dataStatuses.value = dataResponse.data.items
@@ -260,6 +279,11 @@ onMounted(loadOperations)
 .safety-strip span { color: var(--el-text-color-secondary); font-size: 12px; }
 .header-row, .status-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .status-line > span { min-width: 0; flex: 1 1 280px; overflow-wrap: anywhere; }
+.challenger-status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--el-border-color-light); border-radius: 6px; overflow: hidden; }
+.challenger-status > div { min-height: 68px; padding: 11px 14px; border-right: 1px solid var(--el-border-color-light); border-bottom: 1px solid var(--el-border-color-light); display: grid; gap: 6px; }
+.challenger-status > div:nth-child(4n) { border-right: 0; }
+.challenger-status span { color: var(--el-text-color-secondary); font-size: 12px; }
+.challenger-status strong { min-width: 0; overflow-wrap: anywhere; }
 .admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--el-border-color-light); }
 pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--el-fill-color-light); border-radius: 6px; white-space: pre-wrap; }
 :deep(.operations-tabs--embedded) { border: 0; box-shadow: none; }
@@ -267,5 +291,7 @@ pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--el-fil
 :deep(.operations-tabs--embedded > .el-tabs__content) { padding: 0; }
 @media (max-width: 700px) {
   .safety-strip { grid-template-columns: 1fr; }
+  .challenger-status { grid-template-columns: 1fr; }
+  .challenger-status > div { border-right: 0; }
 }
 </style>

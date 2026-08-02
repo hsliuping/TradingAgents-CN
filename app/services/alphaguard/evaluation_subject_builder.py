@@ -453,6 +453,106 @@ class EvaluationSubjectBuilder:
                 )
             )
 
+        challenger_type_map = {
+            "QUANT_PROPOSAL": ("QUANT_PROPOSAL", "QUANT"),
+            "NORMAL_PLAN": ("NORMAL_PLAN", "NORMAL_MODEL"),
+            "TOP_REVIEW": ("TOP_REVIEW", "TOP_MODEL"),
+            "CONSENSUS_DECISION": ("CONSENSUS", "CONSENSUS"),
+            "HARD_RISK_DECISION": ("RISK_DECISION", "HARD_RISK"),
+        }
+        challenger_executed = {
+            str(item.get("experiment_id"))
+            for item in fills
+            if item.get("experiment_id")
+        }
+        challenger_query = (
+            {"account_id": {"$in": sorted(account_ids)}}
+            if user_id is not None
+            else {}
+        )
+        for record in await self.db["ag_exp_challenger_objects"].find(
+            challenger_query
+        ).to_list(length=None):
+            record = clean_document(record)
+            mapped = challenger_type_map.get(str(record.get("object_type")))
+            if mapped is None:
+                continue
+            subject_type, stage = mapped
+            payload = dict(record.get("payload") or {})
+            account = account_map.get(str(record.get("account_id")), {})
+            snapshot_id = str(record.get("snapshot_id") or payload.get("snapshot_id") or "")
+            snapshot = snapshots.get(snapshot_id, {})
+            status = str(payload.get("status") or payload.get("calculation_status") or "RECORDED")
+            action = payload.get("action") or payload.get("action_candidate")
+            source_version = (
+                payload.get("strategy_version")
+                or (payload.get("model_meta") or {}).get("model_version")
+                or payload.get("consensus_policy_version")
+                or payload.get("risk_policy_version")
+            )
+            evidence_refs = (
+                list(payload.get("evidence_refs") or [])
+                + list(payload.get("bullish_evidence") or [])
+                + list(payload.get("bearish_evidence") or [])
+            )
+            lineage = {
+                "experiment_id": str(record["experiment_id"]),
+                "challenger_version_id": str(record["challenger_version_id"]),
+                "baseline_champion_id": str(record["baseline_champion_id"]),
+                "account_id": str(record["account_id"]),
+                "assignment_id": str(record["assignment_id"]),
+                "run_id": str(record["run_id"]),
+                "run_mode": str(record.get("run_mode") or "PAPER_CHALLENGER"),
+                "snapshot_id": snapshot_id,
+                "config_hash": str(record["config_hash"]),
+                "proposal_id": str(payload.get("proposal_id") or payload.get("quant_proposal_id") or ""),
+                "plan_id": str(payload.get("plan_id") or ""),
+                "review_id": str(payload.get("review_id") or ""),
+                "consensus_id": str(payload.get("consensus_id") or ""),
+                "risk_decision_id": str(payload.get("risk_decision_id") or ""),
+            }
+            drafts.append(
+                self._draft(
+                    subject_type=subject_type,
+                    source=payload,
+                    source_object_id=str(record["object_id"]),
+                    source_object_version=(str(source_version) if source_version else None),
+                    stage=stage,
+                    status=status,
+                    action=_status_action(status, action),
+                    snapshot_id=snapshot_id,
+                    snapshots=snapshots,
+                    contexts=context_by_snapshot,
+                    user_id=str(account.get("user_id") or snapshot.get("user_id") or ""),
+                    symbol=str(payload.get("symbol") or snapshot.get("symbol") or ""),
+                    market=str(payload.get("market") or snapshot.get("market") or "CN"),
+                    decision_trade_date=_as_date(
+                        payload.get("trade_date") or snapshot.get("trade_date")
+                    ),
+                    candidate_id=payload.get("candidate_id"),
+                    analysis_id=payload.get("analysis_id"),
+                    entry_zone=payload.get("entry_zone"),
+                    initial_position_pct=(
+                        payload.get("approved_position_pct")
+                        if stage == "HARD_RISK"
+                        else payload.get("initial_position_pct")
+                    ),
+                    max_position_pct=(
+                        payload.get("approved_position_pct")
+                        if stage == "HARD_RISK"
+                        else payload.get("max_position_pct")
+                    ),
+                    evidence_refs=evidence_refs,
+                    lineage_ids=lineage,
+                    selected_for_execution=(
+                        status in {"TRIGGERED", "PROPOSE_TRADE", "CONFIRM", "RISK_ADJUST", "CONSENSUS_PASS", "PASS", "REDUCE"}
+                    ),
+                    actual_execution_exists=(
+                        str(record["experiment_id"]) in challenger_executed
+                    ),
+                )
+            )
+
         for benchmark in await self.db["ag_benchmark_execution_decisions"].find(
             {"account_id": {"$in": sorted(account_ids)}} if user_id is not None else {}
         ).to_list(length=None):
@@ -590,6 +690,12 @@ class EvaluationSubjectBuilder:
                         "consensus_id": str(intent.get("consensus_id") or ""),
                         "risk_decision_id": str(intent.get("risk_decision_id") or ""),
                         "account_id": str(intent["account_id"]),
+                        "experiment_id": str(intent.get("experiment_id") or ""),
+                        "assignment_id": str(intent.get("assignment_id") or ""),
+                        "challenger_version_id": str(intent.get("challenger_version_id") or ""),
+                        "baseline_champion_id": str(intent.get("baseline_champion_id") or ""),
+                        "run_mode": str(intent.get("run_mode") or ""),
+                        "config_hash": str(intent.get("config_hash") or ""),
                     },
                 )
             )
@@ -622,6 +728,28 @@ class EvaluationSubjectBuilder:
                             or ""
                         ),
                         "account_id": str(order["account_id"]),
+                        "experiment_id": str(
+                            order.get("experiment_id")
+                            or intent.get("experiment_id")
+                            or ""
+                        ),
+                        "assignment_id": str(
+                            order.get("assignment_id")
+                            or intent.get("assignment_id")
+                            or ""
+                        ),
+                        "challenger_version_id": str(
+                            order.get("challenger_version_id")
+                            or intent.get("challenger_version_id")
+                            or ""
+                        ),
+                        "baseline_champion_id": str(
+                            order.get("baseline_champion_id")
+                            or intent.get("baseline_champion_id")
+                            or ""
+                        ),
+                        "run_mode": str(order.get("run_mode") or intent.get("run_mode") or ""),
+                        "config_hash": str(order.get("config_hash") or intent.get("config_hash") or ""),
                     },
                     intent=intent,
                 )
@@ -638,6 +766,28 @@ class EvaluationSubjectBuilder:
                 "plan_id": str(intent.get("plan_id") or ""),
                 "risk_decision_id": str(intent.get("risk_decision_id") or ""),
                 "account_id": str(fill["account_id"]),
+                "experiment_id": str(
+                    fill.get("experiment_id")
+                    or intent.get("experiment_id")
+                    or ""
+                ),
+                "assignment_id": str(
+                    fill.get("assignment_id")
+                    or intent.get("assignment_id")
+                    or ""
+                ),
+                "challenger_version_id": str(
+                    fill.get("challenger_version_id")
+                    or intent.get("challenger_version_id")
+                    or ""
+                ),
+                "baseline_champion_id": str(
+                    fill.get("baseline_champion_id")
+                    or intent.get("baseline_champion_id")
+                    or ""
+                ),
+                "run_mode": str(fill.get("run_mode") or intent.get("run_mode") or ""),
+                "config_hash": str(fill.get("config_hash") or intent.get("config_hash") or ""),
                 "fill_trade_date": str(fill["trade_date"]),
                 "fill_price": str(fill["price"]),
                 "fill_quantity": str(fill["quantity"]),

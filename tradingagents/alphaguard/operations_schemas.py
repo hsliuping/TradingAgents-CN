@@ -232,6 +232,7 @@ class SystemReadinessReport(_FrozenOperationalModel):
     evaluation_ready: bool
     experiment_ready: bool
     challenger_ready: bool
+    active_challenger: bool = False
     live_ready: Literal[False] = False
     code_commit: str
     build_version: str
@@ -277,4 +278,3 @@ class OperationsJobRequest(_FrozenOperationalModel):
         cls, value: dict[str, Any] | None
     ) -> dict[str, Any] | None:
         return sanitize_operational_value(value) if value is not None else None
-

@@ -144,7 +144,46 @@ class OrderIntentFactory:
             return await self._quant_benchmark(event, now=now)
         if event.event_type == "CREATE_NORMAL_BENCHMARK_INTENT":
             return await self._normal_benchmark(event, now=now)
+        if event.event_type == "CREATE_CHALLENGER_INTENT":
+            return await self._paper_challenger(event, now=now)
         raise OrderIntentRejected("unsupported outbox event type")
+
+    async def _paper_challenger(
+        self,
+        event: ExecutionOutboxEvent,
+        *,
+        now: datetime | None,
+    ) -> OrderIntent:
+        from app.services.alphaguard.challenger_order_intent_service import (
+            ChallengerOrderIntentService,
+        )
+
+        output = _without_id(
+            await self.db["ag_exp_shadow_outputs"].find_one(
+                {
+                    "output_id": event.source_object_id,
+                    "run_type": "PAPER_CHALLENGER",
+                }
+            )
+        )
+        if output is None:
+            raise OrderIntentRejected("PAPER_CHALLENGER output does not exist")
+        assignment = _without_id(
+            await self.db["ag_exp_challenger_assignments"].find_one(
+                {
+                    "experiment_id": output["experiment_id"],
+                    "account_id": event.account_id,
+                    "status": "ACTIVE",
+                }
+            )
+        )
+        if assignment is None:
+            raise OrderIntentRejected("active PAPER_CHALLENGER assignment is missing")
+        return await ChallengerOrderIntentService(self.db).create_from_output(
+            output_id=event.source_object_id,
+            assignment_id=str(assignment["assignment_id"]),
+            now=now,
+        )
 
     async def _top_confirmed(
         self,

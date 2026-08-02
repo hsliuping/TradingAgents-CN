@@ -61,6 +61,14 @@ class ExecutionModeSafetyGate:
                 {"risk_decision_id": source_object_id}
             )
             snapshot_id = str(source.get("snapshot_id")) if source else None
+        elif event_type == "CREATE_CHALLENGER_INTENT":
+            source = await self.db["ag_exp_shadow_outputs"].find_one(
+                {
+                    "output_id": source_object_id,
+                    "run_type": "PAPER_CHALLENGER",
+                }
+            )
+            snapshot_id = str(source.get("snapshot_id")) if source else None
         if not snapshot_id:
             return
         snapshot = await self.db["ag_evidence_snapshots"].find_one(
