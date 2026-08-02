@@ -1,31 +1,33 @@
-﻿<template>
+<template>
   <div class="advanced-lesson-wrapper">
     <!-- 页面头部 -->
     <el-page-header @back="goBack" :content="lessonTitle">
       <template #extra>
-        <el-button type="primary" :icon="Download" @click="downloadLesson">下载</el-button>
+        <el-button v-if="canAccess" type="primary" :icon="Download" @click="downloadLesson">下载</el-button>
       </template>
     </el-page-header>
 
     <!-- 主容器：课程内容 + 侧边栏 -->
-    <div class="advanced-lesson">
+    <div v-if="canAccess" class="advanced-lesson">
       <div class="lesson-container">
         <div class="lesson-meta">
-          <el-tag type="warning" size="small">高级课程</el-tag>
+          <el-tag v-if="isFreeLesson(lessonOrder)" type="success" size="small">免费预览</el-tag>
+          <el-tag v-else type="warning" size="small">高级课程</el-tag>
           <span class="category-name">{{ categoryName }}</span>
           <span class="lesson-order">第{{ lessonOrder }}课</span>
         </div>
 
-        <div class="lesson-content" v-html="lessonContent"></div>
+        <div v-loading="loading" class="lesson-content" v-html="lessonContent"></div>
 
         <div class="lesson-footer">
           <el-divider />
           <div class="navigation">
-            <el-button v-if="prevLesson" @click="navigateToLesson(prevLesson.category.id, prevLesson.lesson.id)">
+            <el-button v-if="prevLesson && canAccessLesson(prevLesson.lesson.order)" @click="navigateToLesson(prevLesson.category.id, prevLesson.lesson.id)">
               <el-icon><ArrowLeft /></el-icon>
               上一课：{{ prevLesson.lesson.title }}
             </el-button>
-            <el-button v-if="nextLesson" @click="navigateToLesson(nextLesson.category.id, nextLesson.lesson.id)">
+            <div v-else></div>
+            <el-button v-if="nextLesson && canAccessLesson(nextLesson.lesson.order)" @click="navigateToLesson(nextLesson.category.id, nextLesson.lesson.id)">
               下一课：{{ nextLesson.lesson.title }}
               <el-icon><ArrowRight /></el-icon>
             </el-button>
@@ -45,6 +47,9 @@
         </ul>
       </div>
     </div>
+
+    <!-- 未解锁：知识星球引流 -->
+    <KnowledgePlanetPromotion v-else />
   </div>
 </template>
 
@@ -54,14 +59,18 @@ import { useRoute, useRouter } from 'vue-router'
 import { Download, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
+import { useLicenseStore } from '@/stores/license'
+import KnowledgePlanetPromotion from '@/components/KnowledgePlanetPromotion.vue'
 import { 
   advancedCourseCategories, 
   getLesson, 
-  getAdjacentLessons 
+  getAdjacentLessons,
+  isFreeLesson
 } from '@/config/advancedCourses'
 
 const route = useRoute()
 const router = useRouter()
+const licenseStore = useLicenseStore()
 
 const categoryId = computed(() => route.params.category as string)
 const lessonId = computed(() => route.params.lesson as string)
@@ -78,6 +87,20 @@ const category = computed(() => {
 const categoryName = computed(() => category.value?.name || '')
 const lessonTitle = computed(() => lesson.value?.title || '')
 const lessonOrder = computed(() => lesson.value?.order || 0)
+
+// 有完整访问权限？（老会员）
+const hasFullAccess = computed(() => licenseStore.hasLegacyCourseAccess)
+
+// 能否访问当前课程（免费课 or 老会员）
+const canAccess = computed(() => {
+  if (!lesson.value) return false
+  return isFreeLesson(lesson.value.order) || hasFullAccess.value
+})
+
+// 能否访问某节课（用于上下课导航）
+const canAccessLesson = (order: number) => {
+  return isFreeLesson(order) || hasFullAccess.value
+}
 
 // 获取相邻课程
 const adjacentLessons = computed(() => {
@@ -105,9 +128,12 @@ const loadLesson = async () => {
     return
   }
 
+  if (!canAccess.value) {
+    return
+  }
+
   loading.value = true
   try {
-    // 从静态导入映射中获取Markdown内容
     const { getCourseContent } = await import('@/config/advancedCourseContent')
     const markdown = await getCourseContent(lesson.value.file)
     
@@ -115,11 +141,9 @@ const loadLesson = async () => {
       throw new Error(`课程文件未找到: ${lesson.value.file}`)
     }
 
-    // 转换为HTML
     const html = renderMarkdown(markdown)
     lessonContent.value = html
 
-    // 提取目录
     await nextTick()
     extractTableOfContents()
   } catch (error: any) {
@@ -143,7 +167,6 @@ const extractTableOfContents = () => {
     const text = heading.textContent || ''
     const id = `heading-${index}`
 
-    // 设置ID以便跳转
     heading.id = id
 
     tableOfContents.value.push({
@@ -179,7 +202,7 @@ const downloadLesson = async () => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = lesson.value.file
+    a.download = lesson.value.file.split('/').pop() || 'lesson.md'
     a.click()
     URL.revokeObjectURL(url)
   } catch (error: any) {
@@ -446,4 +469,3 @@ onMounted(() => {
   }
 }
 </style>
-

@@ -92,20 +92,14 @@
       <div class="section-header">
         <div class="header-content">
           <h2>🎓 从散户到系统交易者：AI赋能的可进化投资法</h2>
-          <el-tag type="warning" size="large">高级学员</el-tag>
+          <el-tag type="success" size="large">{{ freeLessonCount }}节免费</el-tag>
+          <el-tag type="warning" size="large">完整版·知识星球</el-tag>
         </div>
-        <p class="section-subtitle">完整的投资系统构建课程，24节精心设计的课程，涵盖从基础概念到实战应用的完整投资闭环</p>
+        <p class="section-subtitle">30节系统课程，按炒股全生命周期组织：发现 → 跟踪 → 持仓 → 复盘 → 扩展。前{{ freeLessonCount }}节免费预览，完整版加入知识星球付费学习。</p>
       </div>
 
-      <!-- 未认证：升级提示 -->
-      <LicenseGate v-if="!isPro">
-        <template #locked>
-          <AdvancedCourseUpgradeCard />
-        </template>
-      </LicenseGate>
-
-      <!-- 已认证：课程分类 -->
-      <div v-else class="course-categories">
+      <!-- 课程分类（所有人可见） -->
+      <div class="course-categories">
         <el-row :gutter="20">
           <el-col 
             v-for="category in advancedCourseCategories" 
@@ -149,18 +143,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useLicenseStore } from '@/stores/license'
-import LicenseGate from '@/components/LicenseGate.vue'
-import AdvancedCourseUpgradeCard from '@/components/AdvancedCourseUpgradeCard.vue'
-import { advancedCourseCategories } from '@/config/advancedCourses'
+import { advancedCourseCategories, FREE_LESSON_COUNT } from '@/config/advancedCourses'
 
 const router = useRouter()
-const licenseStore = useLicenseStore()
 
-// 检查是否是高级学员
-const isPro = computed(() => licenseStore.isPro)
+const freeLessonCount = FREE_LESSON_COUNT
 
 // 为 Element Plus Tag 的 type 属性定义允许的联合类型，避免模板类型不匹配
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'

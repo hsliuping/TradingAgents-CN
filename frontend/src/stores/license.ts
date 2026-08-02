@@ -122,6 +122,14 @@ export const useLicenseStore = defineStore('license', () => {
     return error.value?.includes('网络') ?? false
   })
 
+  // 是否有老会员课程访问权限（平台内付费高级学员）
+  // 京东云用户永远没有，只有标准版 pro 用户才有
+  const hasLegacyCourseAccess = computed(() => {
+    if (isJdyunMode) return false
+    if (!licenseInfo.value) return false
+    return licenseInfo.value.is_valid && licenseInfo.value.plan === 'pro'
+  })
+
   const hasFeature = (_feature: ProFeature) => {
     // 🔧 京东云模式：所有功能开放
     if (isJdyunMode) return true
@@ -243,6 +251,7 @@ export const useLicenseStore = defineStore('license', () => {
     isExpiringSoon,
     isExpired,
     isOffline,
+    hasLegacyCourseAccess,
     hasFeature,
     // Actions
     setAppToken,

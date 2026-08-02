@@ -53,6 +53,29 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/help',
+    name: 'Help',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '使用手册',
+      icon: 'QuestionFilled',
+      requiresAuth: true,
+      hideInMenu: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'HelpHome',
+        component: () => import('@/views/Help/index.vue'),
+        meta: {
+          title: '使用手册',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/guide',
     name: 'Guide',
     component: () => import('@/layouts/BasicLayout.vue'),
@@ -187,8 +210,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Learning/Advanced.vue'),
         meta: {
           title: '从散户到系统交易者：AI赋能的可进化投资法',
-          requiresAuth: false,
-          requiresPro: true
+          requiresAuth: false
         }
       },
       {
@@ -197,8 +219,7 @@ const routes: RouteRecordRaw[] = [
         component: AdvancedSampleReport,
         meta: {
           title: '高级课程示例报告',
-          requiresAuth: false,
-          requiresPro: true
+          requiresAuth: false
         }
       },
       {
@@ -207,8 +228,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Learning/AdvancedLesson.vue'),
         meta: {
           title: '从散户到系统交易者：AI赋能的可进化投资法',
-          requiresAuth: false,
-          requiresPro: true
+          requiresAuth: false
         }
       }
     ]

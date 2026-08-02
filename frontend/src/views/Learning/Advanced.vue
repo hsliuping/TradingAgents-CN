@@ -2,7 +2,11 @@
   <div class="advanced-courses-page">
     <div class="page-header">
       <h1>🎓 从散户到系统交易者：AI赋能的可进化投资法</h1>
-      <p class="subtitle">完整的投资系统构建课程，24节精心设计的课程，涵盖从基础概念到实战应用的完整投资闭环</p>
+      <p class="subtitle">30节系统课程，按炒股全生命周期组织：发现 → 跟踪 → 持仓 → 复盘 → 扩展</p>
+      <div class="header-badges">
+        <el-tag type="success" size="default">{{ freeCount }}节免费预览</el-tag>
+        <el-tag type="warning" size="default">完整版需加入知识星球</el-tag>
+      </div>
     </div>
 
     <!-- 分类筛选提示 -->
@@ -52,33 +56,56 @@
             v-for="lesson in category.lessons" 
             :key="lesson.id"
             class="lesson-item"
+            :class="{ 'lesson-locked': !isFreeLesson(lesson.order) && !hasFullAccess }"
             @click="navigateToLesson(category.id, lesson.id)"
           >
             <div class="lesson-info">
-              <span class="lesson-order">{{ lesson.order }}</span>
+              <span class="lesson-order" :class="{ 'order-free': isFreeLesson(lesson.order), 'order-locked': !isFreeLesson(lesson.order) && !hasFullAccess }">
+                {{ isFreeLesson(lesson.order) ? lesson.order : '🔒' }}
+              </span>
               <span class="lesson-title">{{ lesson.title }}</span>
             </div>
-            <el-icon class="lesson-arrow"><ArrowRight /></el-icon>
+            <div class="lesson-badges">
+              <el-tag v-if="isFreeLesson(lesson.order)" type="success" size="small" effect="plain">免费</el-tag>
+              <el-icon class="lesson-arrow"><ArrowRight /></el-icon>
+            </div>
           </div>
         </div>
       </el-card>
     </div>
+
+    <!-- 知识星球引流卡片 -->
+    <KnowledgePlanetPromotion />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { advancedCourseCategories } from '@/config/advancedCourses'
+import { advancedCourseCategories, isFreeLesson } from '@/config/advancedCourses'
+import { useLicenseStore } from '@/stores/license'
+import KnowledgePlanetPromotion from '@/components/KnowledgePlanetPromotion.vue'
 import { ArrowRight } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const route = useRoute()
+const licenseStore = useLicenseStore()
+
+const hasFullAccess = computed(() => licenseStore.hasLegacyCourseAccess)
+const freeCount = computed(() => {
+  let count = 0
+  for (const cat of advancedCourseCategories) {
+    for (const lesson of cat.lessons) {
+      if (isFreeLesson(lesson.order)) count++
+    }
+  }
+  return count
+})
 
 // 获取URL中的分类参数
 const selectedCategoryId = computed(() => route.query.category as string | undefined)
 
-// 过滤显示的课程分类（如果有选择，只显示该分类）
+// 过滤显示的课程分类
 const displayedCategories = computed(() => {
   if (selectedCategoryId.value) {
     const category = advancedCourseCategories.find(cat => cat.id === selectedCategoryId.value)
@@ -91,7 +118,6 @@ const navigateToLesson = (categoryId: string, lessonId: string) => {
   router.push(`/learning/advanced/${categoryId}/${lessonId}`)
 }
 
-// 清除分类筛选
 const clearCategoryFilter = () => {
   router.push('/learning/advanced')
 }
@@ -122,6 +148,13 @@ const clearCategoryFilter = () => {
       font-size: 16px;
       opacity: 0.9;
       line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    .header-badges {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
     }
   }
 
@@ -181,6 +214,15 @@ const clearCategoryFilter = () => {
             transform: translateX(4px);
           }
 
+          &.lesson-locked {
+            opacity: 0.7;
+
+            &:hover {
+              opacity: 0.85;
+              background: var(--el-fill-color);
+            }
+          }
+
           .lesson-info {
             display: flex;
             align-items: center;
@@ -197,6 +239,15 @@ const clearCategoryFilter = () => {
               color: white;
               font-size: 12px;
               font-weight: 600;
+
+              &.order-free {
+                background: var(--el-color-success);
+              }
+
+              &.order-locked {
+                background: var(--el-color-info);
+                font-size: 14px;
+              }
             }
 
             .lesson-title {
@@ -205,8 +256,14 @@ const clearCategoryFilter = () => {
             }
           }
 
-          .lesson-arrow {
-            color: var(--el-text-color-placeholder);
+          .lesson-badges {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+
+            .lesson-arrow {
+              color: var(--el-text-color-placeholder);
+            }
           }
         }
       }
@@ -254,4 +311,3 @@ const clearCategoryFilter = () => {
   }
 }
 </style>
-
