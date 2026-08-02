@@ -131,6 +131,7 @@ COPY docs/02-user-guide/user-manual-v3.0.md /app/docs/02-user-guide/
 COPY docs/02-user-guide/jdyun-user-manual-v3.0.md /app/docs/02-user-guide/
 
 # 预生成的向量索引种子数据（首次启动时从 /app/qdrant-seed 导入到持久化卷，避免全量 embedding 请求）
+# 注意：种子数据中的签名在 build.sh 中通过 update_seed_signature_local.py 更新（确保跨环境一致）
 COPY deploy-all-in-one/qdrant-seed /app/qdrant-seed
 
 # ------------------------------------------------------------------------------

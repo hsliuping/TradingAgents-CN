@@ -321,9 +321,18 @@ class QdrantCollection:
         if not ids:
             return {"documents": [], "metadatas": [], "ids": []}
         try:
+            # Qdrant 本地模式中 point ID 是 UUID 对象，需要转换字符串
+            import uuid as uuid_module
+            qdrant_ids = []
+            for id_str in ids:
+                try:
+                    qdrant_ids.append(uuid_module.UUID(id_str))
+                except (ValueError, AttributeError):
+                    qdrant_ids.append(id_str)
+
             retrieved = self.client.retrieve(
                 collection_name=self.collection_name,
-                ids=ids,
+                ids=qdrant_ids,
                 with_payload=True,
                 with_vectors=False,
             )

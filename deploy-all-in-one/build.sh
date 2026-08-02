@@ -84,6 +84,17 @@ fi
 # ------------------------------------------------------------------------------
 cd "$PROJECT_ROOT"
 
+# ------------------------------------------------------------------------------
+# 更新种子数据中的用户手册签名（确保跨环境签名一致）
+# 签名基于文件内容 hash，不依赖路径和 mtime
+# ------------------------------------------------------------------------------
+if [ -f "deploy-all-in-one/update_seed_signature_local.py" ]; then
+    echo "📝 更新种子数据签名..."
+    python3 deploy-all-in-one/update_seed_signature_local.py 2>/dev/null || \
+    python deploy-all-in-one/update_seed_signature_local.py 2>/dev/null || \
+    echo "⚠️  签名更新跳过（需要 Python + 本地手册文件）"
+fi
+
 if [ "$SKIP_FRONTEND" = true ]; then
     echo "⏭️  跳过前端编译（--skip-frontend）"
     if [ ! -d "frontend/dist" ]; then

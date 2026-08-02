@@ -278,15 +278,22 @@ class UserManualManager:
     # ----------------------------------------------------------
 
     def _compute_manuals_signature(self, manuals: List[Tuple[str, str]]) -> str:
-        """计算手册文件签名（路径 + mtime + 大小），用于变化检测"""
+        """计算手册文件签名（基于文件内容 hash），用于变化检测。
+
+        签名只取决于文件名 + 文件内容，不依赖路径和 mtime，
+        确保不同部署环境（开发/Docker/京东云）产生相同签名，
+        让预生成的种子索引数据能跨环境复用。
+        """
         sig_parts = []
         for path, manual_type in manuals:
             try:
-                stat = os.stat(path)
-                sig_parts.append(f"{manual_type}:{path}:{stat.st_mtime}:{stat.st_size}")
+                with open(path, "rb") as f:
+                    content_hash = hashlib.md5(f.read()).hexdigest()
+                sig_parts.append(f"{manual_type}:{os.path.basename(path)}:{content_hash}")
             except OSError:
-                sig_parts.append(f"{manual_type}:{path}:missing")
-        return hashlib.md5("|".join(sig_parts).encode("utf-8")).hexdigest()
+                sig_parts.append(f"{manual_type}:{os.path.basename(path)}:missing")
+        # sorted 确保不同手册顺序产生相同签名
+        return hashlib.md5("|".join(sorted(sig_parts)).encode("utf-8")).hexdigest()
 
     def _get_indexed_signature_from_meta(self) -> Optional[str]:
         """从 Qdrant collection 的元数据中读取上次索引签名。
