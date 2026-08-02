@@ -15,9 +15,9 @@ import { isJdyunMode } from '@/utils/config'
 const standardManualLoader = (): Promise<{ default: string }> =>
   import('../../../docs/02-user-guide/user-manual-v3.0.md?raw')
 
-// 京东云合作版使用手册
+// 京东云合作版使用手册（v3.0 合并后使用标准版手册，京东云专属手册已移除）
 const jdyunManualLoader = (): Promise<{ default: string }> =>
-  import('../../../docs/02-user-guide/jdyun-user-manual-v3.0.md?raw')
+  import('../../../docs/02-user-guide/user-manual-v3.0.md?raw')
 
 /**
  * 获取当前模式下的用户手册内容

@@ -1,4 +1,0 @@
-services:
-  tradingagents:
-    image: tradingagents-cn-pro:3.0.0-jdyun
-    container_name: tradingagents-jdyun-test
