@@ -126,6 +126,21 @@ COPY scripts /app/scripts
 COPY install /app/install
 COPY migrations /app/migrations
 
+# ------------------------------------------------------------------------------
+# 源码保护：编译 Python 代码为 .pyc 字节码，删除 .py 源码
+# 参考 v2.0 docker/scripts/compile-and-cleanup.sh
+# 保留 __init__.py（包导入）、__main__.py（入口）、tradingagents/（开源）
+# 京东云版不需要 Cython 编译（License 已禁用），纯字节码编译即可
+# ------------------------------------------------------------------------------
+# 清理宿主机带来的 __pycache__ 和旧 .pyc（避免版本不匹配）
+RUN find /app/app /app/core -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/app /app/core -name "*.pyc" -delete 2>/dev/null || true
+# 复制编译脚本并执行
+COPY deploy-all-in-one/compile-and-cleanup.sh /tmp/compile-and-cleanup.sh
+RUN cd /app && chmod +x /tmp/compile-and-cleanup.sh && \
+    /tmp/compile-and-cleanup.sh && \
+    rm -f /tmp/compile-and-cleanup.sh
+
 # 用户手册文件（向量索引用，打包到镜像，容器内路径 /app/docs/02-user-guide/）
 COPY docs/02-user-guide/user-manual-v3.0.md /app/docs/02-user-guide/
 COPY docs/02-user-guide/jdyun-user-manual-v3.0.md /app/docs/02-user-guide/
