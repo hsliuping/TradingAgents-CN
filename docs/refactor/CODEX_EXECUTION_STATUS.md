@@ -7129,3 +7129,176 @@ Readiness继续如实降级；实际启用/运行仍会逐项检查模型Profile
 `feat(alphaguard): complete isolated paper challenger runtime`并创建附注标签
 `alphaguard-pr011-paper-challenger`。提交前差异不含`.env`、Keychain内容、日志、数据库文件、
 浏览器认证状态或构建缓存；提交后必须再次确认工作区clean并停止，不开始PR-012。
+
+## 26. PR-012 Governed Candidate Recommendations
+
+### 26.1 证券池来源
+
+推荐Universe只读取已持久化的`stock_basic_info`、CN交易日历、QFQ日线、当日全市场行情、
+SecurityTradingStatus、DataQuality、既有Factor/Regime/QuantProposal和用户约束对象。证券基础记录
+按代码、来源优先级和内容hash确定性去重；范围为A股普通股票及项目可识别的场内ETF。运行时没有
+临时抓取全市场网络数据，也没有创建第二套因子、交易策略或候选池。
+
+### 26.2 证券池数量
+
+正式持久化门禁选择最新开放CN交易日`2026-07-30`。Universe Manifest
+`6e21f70b-cdaf-5029-b9b3-43dae2716c83`锁定5535只受支持证券，其中A股5535只、当前基础字段可
+识别ETF为0只；`universe_version=cn-equity-etf-universe-v1:2026-07-30:e5125c3b42123059`。
+Operations优先使用不可变运行中的`total_securities`，不再把5540条含重复/不支持记录的原始基础
+文档误报为证券池数量。
+
+### 26.3 资格过滤规则
+
+`candidate-eligibility-v1`逐证券create-only保存结果和理由，门禁包括退市、退市整理期、ST、上市
+不足60个交易日、QFQ历史不足61根、当日行情缺失、TradingStatus未READY/停牌、DataQuality
+失败或缺失、20日平均成交额低于1000万元、20日零成交超过3日及OHLC价格异常。已有候选、持仓、
+未完成订单、有效交易计划和待评价任务也会被排除，不会生成重复待审核推荐。
+
+### 26.4 推荐策略版本
+
+策略为`CANDIDATE_RECOMMENDATION_CN_V1 / candidate-recommendation-policy-v1`，配置来自版本化YAML，
+`config_hash`随完整配置锁定。最低分55，每日最多15只，候选池软上限50；策略只决定研究对象筛选，
+不产生交易动作、目标价或收益承诺。
+
+### 26.5 推荐评分构成
+
+Decimal确定性评分先按数据质量15%、流动性15%、趋势20%、动量15%、相对沪深300强度15%、市场
+状态适配10%和已有策略信号10%计算分项，再减独立风险惩罚并限制在0到100。所有分项、Factor
+引用、Regime/Proposal引用、input hash和output hash均进入不可变推荐对象；同一输入结果稳定。
+
+### 26.6 风险惩罚
+
+风险惩罚使用既有波动风险12%、公告/事件风险12%和近60根价格最大回撤风险8%；高波动、事件证据
+风险、10%以上回撤及非PASS数据质量分别形成程序化中文风险说明。推荐评分不转换为买入概率、
+目标收益或胜率。
+
+### 26.7 推荐状态机
+
+计算对象保持`PENDING_REVIEW`不可变；用户动作由独立ReviewEvent表达`ACCEPTED / REJECTED /
+IGNORED`，新证据版本通过`SUPERSEDED`事件关联旧推荐，过期对象显示`EXPIRED`。评分和理由不被
+审核动作覆盖，重复身份但内容不同会触发完整性冲突。
+
+### 26.8 用户确认流程
+
+普通用户只能查看和处理自己的推荐，可查看详情、加入候选池、拒绝、暂不处理以及批量加入/拒绝。
+运行扫描是后端`is_admin=true`最终门禁。未经明确接受不会创建CandidateEntry；前端也明确显示
+“推荐不代表买入建议、加入候选池不会自动下单”。
+
+### 26.9 候选池写入
+
+接受事件调用现有CandidatePoolService，创建或复用
+`source=SYSTEM_RECOMMENDED_CONFIRMED`的正式候选来源，并保存`recommendation_id`、推荐分数、日期、
+理由摘要、操作者和Candidate身份。重复接受幂等；移除来源只更新现有候选状态，不删除推荐历史，
+持仓/订单/计划/评价保护规则和候选池50只软上限继续fail-closed。
+
+### 26.10 冷却和过期
+
+拒绝冷却5个交易日，暂不处理冷却3个交易日，推荐TTL为3个交易日。分数变化达到12分、Regime
+变化或策略信号变化属于实质新证据，可以创建带`supersedes_recommendation_id`的新版本；相同业务
+证据不会每天重复提示，已过期推荐不能接受。
+
+### 26.11 调度和Worker
+
+现有Scheduler注册`alphaguard_candidate_recommendations`盘后任务，Worker入口按持久化最新开放
+交易日为所有活动用户运行幂等扫描并刷新推荐评价。Operations受控任务新增
+`CANDIDATE_RECOMMENDATION_SCAN`，不允许任意函数执行；同一输入和Worker重启均复用既有运行，
+全市场扫描不进入TradingAgents或任何模型Runner。
+
+### 26.12 API
+
+新增用户隔离的列表、详情、运行列表/详情、接受、拒绝、暂不处理、批量接受、批量拒绝及管理员
+扫描接口。所有请求体`extra=forbid`，单次批量上限50；404/409保留业务边界，管理员权限、用户
+所有权、过期、软上限、幂等和create-only完整性均由后端执行。
+
+### 26.13 前端
+
+`候选池 -> 股票推荐`提供中文五步审核流程、摘要、状态筛选、批量操作、空状态、程序化理由/风险、
+评分明细和高级证据身份。候选池新增来源与推荐摘要联动。浏览器在1280x720和390x844验证推荐页、
+候选池及Operations：路由和数据加载正常，无`undefined`、无限加载、空白表格或最终页面级横向
+溢出，推荐与运维API没有失败。控制台保留后端重建窗口内通知子系统的7条WebSocket断连及1次
+既有`/api/notifications/unread_count` HTTP 500；没有推荐路由错误。这属于现有通用通知链，不在
+PR-012范围内，未借本阶段修改。
+
+### 26.14 Operations
+
+运维中心显示去重证券池数量、符合资格数、今日推荐、待审核、接受/拒绝数、最近成功时间、耗时、
+失败证券数、策略版本和永久关闭的自动接受状态。当前为
+`RECOMMENDATION_READY=true / AUTO_CANDIDATE_ACCEPT=false / LIVE_READY=false`；零推荐不被误判为
+运行故障。390px布局通过最小宽度约束保持页面在视口内，宽表只在自身容器中滚动。
+
+### 26.15 推荐评价
+
+每个推荐独立创建1D/5D/10D/20D评价，计算绝对收益、相对沪深300/行业收益、MFE、MAE，以及后续
+是否进入候选池、触发策略或形成有效计划。评价只写推荐专属集合，不进入Paper账户净值、交易
+策略质量或模型决策质量；用户未接受不计作推荐失败。
+
+### 26.16 正式环境推荐运行结果
+
+正式运行`819120ee-aed7-5909-b469-741b195efd13`为`SUCCESS`，耗时715ms：总数5535、符合资格0、
+评分0、推荐0、失败证券0。过滤计数为DataQuality不可用5535、TradingStatus未就绪5535、上市
+日期缺失5530、低流动性5530、价格历史不足5530、ST不允许208、当日行情缺失2。持久化集合为
+Policy 1、Universe Manifest 1、Eligibility 5535、Run 1、Recommendation/Review/Evaluation 0。
+零推荐是当前正式全市场持久化数据的真实门禁结果，没有网络补数或降低阈值。
+
+### 26.17 是否调用模型
+
+否。正式运行的`model_call_count_before/model_call_count_after=130/130`。相同输入复跑返回同一
+run ID及output hash，`created=false`，模型调用仍为130；推荐代码不引用模型Provider、Prompt、
+Normal、Top、Consensus或HardRisk入口。
+
+### 26.18 是否自动加入候选池
+
+否。正式扫描前后Candidates均为5，五个candidate ID完全相同，没有新增、移除或改写候选来源；
+Recommendation为0，ReviewEvent为0。`AUTO_CANDIDATE_ACCEPT=false`是代码固定安全状态，调度与
+管理员扫描都不能绕过人工确认。
+
+### 26.19 四个账户资产
+
+`PAPER_QUANT / PAPER_NORMAL / PAPER_TOP_CONFIRMED / PAPER_CHALLENGER`均保持
+`initial_cash=cash_available=1000000.00`、`cash_reserved=0`、`realized_pnl=0`、`total_fees=0`。
+OrderIntent、Outbox、Order、Fill、Position、PositionLot、Reservation、Ledger和Settlement集合
+全部为0，无负现金、负持仓、冻结异常或资产不守恒。
+
+### 26.20 Champion状态
+
+5个ACTIVE Champion指针及assignment hash保持不变：`f91fcb80...`、`b91b9db9...`、
+`f123cc54...`、`a53a7c55...`、`31abdf01...`。推荐策略没有修改Factor、Regime、Strategy、Prompt、
+模型、Consensus、HardRisk、撮合、费用、交易参数或Champion。
+
+### 26.21 Challenger状态
+
+Challenger Assignment=0、Challenger Run=0，`ACTIVE_CHALLENGER=false`。正式扫描没有创建实验、
+启动挑战者、调用模型或改变第四账户；PR-011的隔离与人工晋升边界保持原样。
+
+### 26.22 测试结果
+
+PR-012专项`21 passed`，候选池联合回归`29 passed`，PR-003/007/009/011关联回归`50 passed`，
+默认离线CI`716 passed, 89 warnings`。前端type-check、正式`npm run build`、独立Vite build
+（2615 modules）、修改Python文件`py_compile`、`git diff --check`和敏感信息扫描均PASS。
+MongoDB、Redis、FastAPI、Scheduler、queue-worker、analysis-worker均HEALTHY；FastAPI、两套
+Worker在`live=true`时分别exit 3/1/1拒绝启动。
+
+### 26.23 已知限制
+
+当前全市场基础列表可用，但绝大多数证券尚没有推荐策略要求的61根QFQ历史、当日TradingStatus和
+DataQuality，因此正式运行安全地产生0条推荐；当前基础字段也未识别出场内ETF。这是生产数据
+覆盖限制，不是推荐运行故障。全仓`compileall`仍只有既有无关脚本
+`scripts/补充行业信息_akshare.py:81`的SyntaxError，本PR未修改该脚本；运行Readiness继续因既有
+实验样本和容器模型配置如实为`DEGRADED_PAPER`，但`RECOMMENDATION_READY=true`。开发浏览器的
+通用通知WebSocket和未读数接口在后端重建窗口内仍会报错，不影响推荐页数据，但需由通知模块后续
+独立修复。
+
+### 26.24 回退步骤
+
+代码可回退到`alphaguard-pr011-paper-challenger`以移除推荐API、调度、索引声明和前端入口；应先
+停用新的推荐Scheduler入口。推荐Policy、Manifest、Eligibility、Run、Recommendation、Review和
+Evaluation集合均为create-only审计对象，可保留且不应自动删除。回退不得修改5个既有候选、四个
+Paper账户、Champion/Challenger或历史推荐审核证据。
+
+### 26.25 Git状态
+
+本阶段从clean的`fc401f0cf4f8c6758ea01432fa68dad47a58ee0e`和
+`alphaguard-pr011-paper-challenger`开始；所有PR-012代码、测试、YAML和本文档一次性提交为
+`feat(alphaguard): add governed candidate recommendations`并创建附注标签
+`alphaguard-pr012-candidate-recommendations`。提交范围不包含Secret、`.env`、Keychain、日志、
+数据库备份/运行文件、浏览器认证状态或构建缓存；提交后工作区必须clean并停止，不开始下一阶段。

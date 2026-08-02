@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any
 
@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .instruments import Market, normalize_instrument
 
 
-CANDIDATE_SCHEMA_VERSION = "candidate-entry-v1"
+CANDIDATE_SCHEMA_VERSION = "candidate-entry-v2"
 CANDIDATE_EVENT_SCHEMA_VERSION = "candidate-event-v1"
 
 
@@ -21,6 +21,7 @@ class CandidateSource(str, Enum):
     SYSTEM_SCREENED = "SYSTEM_SCREENED"
     EVENT_TRIGGERED = "EVENT_TRIGGERED"
     EXPERIMENT_ASSIGNED = "EXPERIMENT_ASSIGNED"
+    SYSTEM_RECOMMENDED_CONFIRMED = "SYSTEM_RECOMMENDED_CONFIRMED"
 
 
 class CandidateStatus(str, Enum):
@@ -73,6 +74,11 @@ class CandidateEntry(CandidateSchema):
     active_order_ids: list[str] = Field(default_factory=list)
     held_account_ids: list[str] = Field(default_factory=list)
     removal_requested: bool = False
+    recommendation_id: str | None = None
+    recommendation_run_id: str | None = None
+    recommendation_score: float | None = Field(default=None, ge=0, le=100)
+    recommendation_trade_date: date | None = None
+    recommendation_reason_summary: str | None = None
     schema_version: str = CANDIDATE_SCHEMA_VERSION
 
     @model_validator(mode="before")
@@ -103,6 +109,20 @@ class CandidateEntry(CandidateSchema):
             or self.held_account_ids
         ):
             raise ValueError("REMOVED candidate cannot retain monitoring dependencies")
+        recommendation_fields = (
+            self.recommendation_id,
+            self.recommendation_run_id,
+            self.recommendation_score,
+            self.recommendation_trade_date,
+            self.recommendation_reason_summary,
+        )
+        has_recommendation_source = (
+            CandidateSource.SYSTEM_RECOMMENDED_CONFIRMED in self.sources
+        )
+        if has_recommendation_source and not all(
+            value is not None for value in recommendation_fields[:4]
+        ):
+            raise ValueError("confirmed recommendation source requires recommendation lineage")
         return self
 
 

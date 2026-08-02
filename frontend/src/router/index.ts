@@ -394,6 +394,12 @@ const routes: RouteRecordRaw[] = [
             meta: { title: 'AlphaGuard 候选池', requiresAuth: true }
           },
           {
+            path: 'recommendations',
+            name: 'AlphaGuardRecommendations',
+            component: () => import('@/views/AlphaGuard/Recommendations.vue'),
+            meta: { title: 'AlphaGuard 股票推荐', requiresAuth: true }
+          },
+          {
             path: 'decisions',
             name: 'AlphaGuardDecisions',
             component: () => import('@/views/AlphaGuard/Decisions.vue'),

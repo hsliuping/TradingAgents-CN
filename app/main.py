@@ -28,7 +28,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import alphaguard, alphaguard_decisions, alphaguard_evaluations, alphaguard_experiments, alphaguard_models, alphaguard_operations, alphaguard_paper, alphaguard_quant, auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
+from app.routers import alphaguard, alphaguard_decisions, alphaguard_evaluations, alphaguard_experiments, alphaguard_models, alphaguard_operations, alphaguard_paper, alphaguard_quant, alphaguard_recommendations, auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_data as stock_data_router
@@ -759,6 +759,18 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
             max_instances=1,
         )
+        from app.worker.alphaguard.recommendation_tasks import (
+            scheduled_candidate_recommendation_scan,
+        )
+
+        scheduler.add_job(
+            scheduled_candidate_recommendation_scan,
+            CronTrigger(hour=18, minute=20, timezone=settings.TIMEZONE),
+            id="alphaguard_candidate_recommendations",
+            name="AlphaGuard候选股票推荐",
+            replace_existing=True,
+            max_instances=1,
+        )
 
         scheduler.start()
 
@@ -881,6 +893,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(alphaguard.router, prefix="/api", tags=["alphaguard"])
 app.include_router(alphaguard_quant.router, prefix="/api", tags=["alphaguard-quant"])
+app.include_router(alphaguard_recommendations.router, prefix="/api", tags=["alphaguard-recommendations"])
 app.include_router(alphaguard_decisions.router, prefix="/api", tags=["alphaguard-decisions"])
 app.include_router(alphaguard_evaluations.router, prefix="/api", tags=["alphaguard-evaluations"])
 app.include_router(alphaguard_experiments.router, prefix="/api", tags=["alphaguard-experiments"])

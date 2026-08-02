@@ -15,6 +15,11 @@ export interface CandidateEntry {
   next_scan_at?: string | null
   latest_snapshot_id?: string | null
   removal_requested: boolean
+  recommendation_id?: string | null
+  recommendation_run_id?: string | null
+  recommendation_score?: number | null
+  recommendation_trade_date?: string | null
+  recommendation_reason_summary?: string | null
   updated_at: string
 }
 

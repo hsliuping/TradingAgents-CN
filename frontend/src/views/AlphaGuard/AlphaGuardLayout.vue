@@ -41,6 +41,7 @@ const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 const navItems = [
   { path: '/alphaguard/overview', label: '总览' },
   { path: '/alphaguard/candidates', label: '候选池' },
+  { path: '/alphaguard/recommendations', label: '股票推荐' },
   { path: '/alphaguard/decisions', label: '决策链' },
   { path: '/alphaguard/paper', label: '自动模拟' },
   { path: '/alphaguard/evaluations', label: '评价中心' },

@@ -1,17 +1,18 @@
 <template>
   <div v-loading="loading" class="page-grid">
     <section class="page-heading">
-      <div><h2>候选池</h2><p>用户明确选择的标的；系统不会自动推荐或扫描全市场。</p></div>
+      <div><h2>候选池</h2><p>用户明确选择或确认推荐的标的；任何推荐都不会自动加入。</p></div>
       <div><el-button :disabled="isDemo" @click="reconcile">安全核对</el-button><el-button type="primary" :disabled="isDemo" @click="dialogVisible = true">添加标的</el-button></div>
     </section>
 
-    <el-alert type="info" :closable="false" show-icon title="移除只撤销 USER_SELECTED 来源，不会删除 Snapshot、决策、评价或仍受持仓/订单保护的候选。" />
+    <el-alert type="info" :closable="false" show-icon title="移除只撤销当前可移除来源，不会删除推荐、Snapshot、决策、评价或仍受持仓/订单保护的候选。" />
 
     <el-table :data="rows" size="small" highlight-current-row @row-click="openDetail">
       <el-table-column prop="symbol" label="代码" width="90" />
       <el-table-column prop="name" label="名称" min-width="105" />
       <el-table-column prop="market" label="市场" width="70" />
-      <el-table-column label="来源" width="135"><template #default="{ row }"><el-tag v-for="source in row.sources" :key="source" size="small">{{ source }}</el-tag></template></el-table-column>
+      <el-table-column label="来源" min-width="160"><template #default="{ row }"><el-tag v-for="source in row.sources" :key="source" size="small">{{ sourceLabel(source) }}</el-tag></template></el-table-column>
+      <el-table-column label="推荐" width="95"><template #default="{ row }">{{ row.recommendation_score != null ? Number(row.recommendation_score).toFixed(1) + ' 分' : '—' }}</template></el-table-column>
       <el-table-column prop="status" label="状态" width="105" />
       <el-table-column label="DataQuality" width="125"><template #default="{ row }"><el-tag :type="qualityType(row.dataQuality)">{{ row.dataQuality }}</el-tag></template></el-table-column>
       <el-table-column label="最新 Snapshot" min-width="145"><template #default="{ row }">{{ shortId(row.snapshot?.snapshot_id) }}</template></el-table-column>
@@ -32,6 +33,11 @@
           <el-descriptions-item label="DataQuality">{{ selected.dataQuality }}</el-descriptions-item>
           <el-descriptions-item label="持仓保护">{{ selected.held_account_ids.length ? selected.held_account_ids.length + ' 个账户' : '无' }}</el-descriptions-item>
           <el-descriptions-item label="冷却截止">{{ selected.cooldown_until || '无' }}</el-descriptions-item>
+          <el-descriptions-item label="推荐来源" v-if="selected.recommendation_id">
+            {{ selected.recommendation_trade_date }} · {{ selected.recommendation_score }} 分
+            <router-link :to="`/alphaguard/recommendations?recommendation=${selected.recommendation_id}`">查看原推荐</router-link>
+          </el-descriptions-item>
+          <el-descriptions-item label="推荐理由" v-if="selected.recommendation_reason_summary">{{ selected.recommendation_reason_summary }}</el-descriptions-item>
         </el-descriptions>
         <h4>最新 EvidenceSnapshot</h4>
         <el-empty v-if="!selected.snapshot" description="尚无正式 Snapshot" />
@@ -122,6 +128,7 @@ function evidenceContractStatus(snapshot: EvidenceSnapshotSummary) {
 }
 function qualityType(status: string) { return status === 'PASS' ? 'success' : status === 'FAIL' ? 'danger' : 'warning' }
 function proposalType(status: string) { return status === 'TRIGGERED' ? 'success' : status === 'INSUFFICIENT_DATA' ? 'warning' : status === 'REJECTED' ? 'danger' : 'info' }
+function sourceLabel(source: string) { return ({ USER_SELECTED: '用户手工添加', POSITION_REQUIRED: '持仓强制保留', SYSTEM_RECOMMENDED_CONFIRMED: '系统推荐后人工确认', SYSTEM_SCREENED: '系统筛选', EVENT_TRIGGERED: '事件触发', EXPERIMENT_ASSIGNED: '实验分配' } as Record<string, string>)[source] || source }
 onMounted(load)
 </script>
 

@@ -72,6 +72,8 @@ export interface SystemReadiness {
   experiment_ready: boolean
   challenger_ready: boolean
   active_challenger: boolean
+  recommendation_ready: boolean
+  auto_candidate_accept: false
   live_ready: false
   code_commit: string
   build_version: string
@@ -86,8 +88,26 @@ export interface OperationsOverview {
   readiness: SystemReadiness
   sample_counts: Record<string, number>
   challenger_status: ChallengerOperationsStatus
+  recommendation_status: RecommendationOperationsStatus
   open_alerts: OperationalAlert[]
   safety_notice: string
+}
+
+export interface RecommendationOperationsStatus {
+  recommendation_ready: boolean
+  auto_candidate_accept: false
+  security_count: number
+  eligible_count: number
+  today_recommendation_count: number
+  pending_review_count: number
+  accepted_count: number
+  rejected_count: number
+  ignored_count: number
+  last_run_status: string
+  last_success_at: string | null
+  last_duration_ms: number
+  failed_symbol_count: number
+  policy_version: string
 }
 
 export interface ChallengerOperationsStatus {

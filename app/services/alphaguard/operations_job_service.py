@@ -29,6 +29,7 @@ ALLOWED_OPERATIONS_JOBS = frozenset(
         "EXPERIMENT_RECONCILIATION",
         "PROMOTION_SAGA_RECOVERY",
         "INTEGRITY_CHECK",
+        "CANDIDATE_RECOMMENDATION_SCAN",
     }
 )
 
@@ -99,6 +100,7 @@ class OperationsJobService:
             "EXPERIMENT_RECONCILIATION": {"as_of_trade_date"},
             "PROMOTION_SAGA_RECOVERY": set(),
             "INTEGRITY_CHECK": set(),
+            "CANDIDATE_RECOMMENDATION_SCAN": {"as_of_trade_date"},
         }
         unexpected = set(payload) - allowed[job_name]
         if unexpected:
@@ -226,6 +228,26 @@ class OperationsJobService:
             return {"task_run_id": task.task_run_id, "status": task.status}
         if request.job_name == "INTEGRITY_CHECK":
             return await operations.integrity()
+        if request.job_name == "CANDIDATE_RECOMMENDATION_SCAN":
+            from app.services.alphaguard.candidate_recommendation_service import (
+                CandidateRecommendationService,
+            )
+
+            as_of = (
+                date.fromisoformat(request.payload["as_of_trade_date"])
+                if request.payload.get("as_of_trade_date")
+                else None
+            )
+            run, created = await CandidateRecommendationService(self.db).run(
+                user_id=request.requested_by,
+                trade_date=as_of,
+            )
+            return {
+                "recommendation_run_id": run.recommendation_run_id,
+                "status": run.status,
+                "run_action": "CREATED" if created else "REUSED",
+                "recommended_securities": run.recommended_securities,
+            }
         raise ValueError(f"unsupported operation job: {request.job_name}")
 
     async def _event(
@@ -269,4 +291,3 @@ async def process_operations_job_requests() -> dict[str, int]:
         redis_client=get_redis_client(),
         scheduler=_scheduler_instance,
     ).process_pending()
-

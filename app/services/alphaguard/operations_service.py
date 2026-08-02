@@ -32,6 +32,9 @@ from tradingagents.alphaguard.operations_schemas import (
     SystemReadinessReport,
     operations_hash,
 )
+from app.services.alphaguard.candidate_recommendation_service import (
+    CandidateRecommendationService,
+)
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -68,6 +71,7 @@ JOB_REGISTRY: tuple[dict[str, Any], ...] = (
     {"job_name": "challenger_scheduler", "worker": "api-scheduler", "scheduler_id": "alphaguard_challenger_scheduler", "collection": "ag_exp_task_runs", "job_type": "PAPER_CHALLENGER"},
     {"job_name": "challenger_runtime", "worker": "api-scheduler", "scheduler_id": "alphaguard_challenger_runtime", "collection": "ag_exp_challenger_runs"},
     {"job_name": "promotion_saga_recovery", "worker": "api-scheduler", "scheduler_id": "alphaguard_promotion_saga_recovery", "collection": "ag_exp_task_runs", "job_type": "PROMOTION_SAGA_RECOVERY"},
+    {"job_name": "candidate_recommendations", "worker": "api-scheduler", "scheduler_id": "alphaguard_candidate_recommendations", "collection": "ag_candidate_recommendation_runs"},
 )
 
 
@@ -1031,6 +1035,7 @@ class AlphaGuardOperationsService:
                 {"status": "ACTIVE"},
             )
         )
+        recommendation_status = await CandidateRecommendationService(self.db).metrics()
         overall = (
             "UNSAFE"
             if unsafe_reasons
@@ -1071,6 +1076,8 @@ class AlphaGuardOperationsService:
             "experiment_ready": experiment_framework,
             "challenger_ready": challenger_ready,
             "active_challenger": active_challenger,
+            "recommendation_ready": recommendation_status["recommendation_ready"],
+            "auto_candidate_accept": False,
             "live_ready": False,
             "code_commit": versions["code_commit"],
             "build_version": versions["build_version"],
@@ -1140,12 +1147,15 @@ class AlphaGuardOperationsService:
             "ag_exp_runs",
             "ag_exp_challenger_runs",
             "ag_exp_challenger_objects",
+            "ag_candidate_recommendation_runs",
+            "ag_candidate_recommendations",
         ):
             counts[name] = await _count(self.db[name])
         return {
             "readiness": report,
             "sample_counts": counts,
             "challenger_status": await self.challenger_operations_status(),
+            "recommendation_status": await CandidateRecommendationService(self.db).metrics(),
             "open_alerts": alerts,
             "safety_notice": "PAPER ONLY — live execution is unavailable",
         }

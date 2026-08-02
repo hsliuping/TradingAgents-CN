@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -11,6 +11,7 @@ from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
 from app.core.database import get_mongo_db
+from app.services.alphaguard.paper_storage import to_mongo_value
 from tradingagents.alphaguard.candidate_schemas import (
     CANDIDATE_EVENT_SCHEMA_VERSION,
     CANDIDATE_SCHEMA_VERSION,
@@ -45,7 +46,7 @@ def _candidate_document(candidate: CandidateEntry) -> dict[str, Any]:
     data = candidate.model_dump(mode="python")
     data["sources"] = sorted(source.value for source in candidate.sources)
     data["status"] = candidate.status.value
-    return data
+    return to_mongo_value(data)
 
 
 def _event_document(event: CandidateEvent) -> dict[str, Any]:
@@ -172,6 +173,11 @@ class CandidatePoolService:
         held_account_id: str | None = None,
         trace_id: str | None = None,
         reason: str = "candidate source synchronized",
+        recommendation_id: str | None = None,
+        recommendation_run_id: str | None = None,
+        recommendation_score: float | None = None,
+        recommendation_trade_date: date | None = None,
+        recommendation_reason_summary: str | None = None,
     ) -> CandidateEntry:
         normalized_market, normalized_symbol = normalize_instrument(symbol, market)
         identity = {
@@ -207,6 +213,11 @@ class CandidatePoolService:
                 active_order_ids=[],
                 held_account_ids=[held_account_id] if held_account_id else [],
                 removal_requested=False,
+                recommendation_id=recommendation_id,
+                recommendation_run_id=recommendation_run_id,
+                recommendation_score=recommendation_score,
+                recommendation_trade_date=recommendation_trade_date,
+                recommendation_reason_summary=recommendation_reason_summary,
                 schema_version=CANDIDATE_SCHEMA_VERSION,
             )
             try:
@@ -258,6 +269,22 @@ class CandidatePoolService:
                 "priority": priority if not source_was_present else current.priority,
                 "held_account_ids": sorted(held_account_ids),
                 "removal_requested": False,
+                "recommendation_id": recommendation_id or current.recommendation_id,
+                "recommendation_run_id": (
+                    recommendation_run_id or current.recommendation_run_id
+                ),
+                "recommendation_score": (
+                    recommendation_score
+                    if recommendation_score is not None
+                    else current.recommendation_score
+                ),
+                "recommendation_trade_date": (
+                    recommendation_trade_date or current.recommendation_trade_date
+                ),
+                "recommendation_reason_summary": (
+                    recommendation_reason_summary
+                    or current.recommendation_reason_summary
+                ),
                 "updated_at": now,
             }
         )
@@ -569,6 +596,17 @@ class CandidatePoolService:
                 "held_account_ids": live_accounts,
                 "active_order_ids": active_orders,
                 "removal_requested": request_flag,
+                **(
+                    {
+                        "recommendation_id": None,
+                        "recommendation_run_id": None,
+                        "recommendation_score": None,
+                        "recommendation_trade_date": None,
+                        "recommendation_reason_summary": None,
+                    }
+                    if source == CandidateSource.SYSTEM_RECOMMENDED_CONFIRMED
+                    else {}
+                ),
                 "updated_at": datetime.utcnow(),
             }
         )
@@ -617,11 +655,16 @@ class CandidatePoolService:
         current = await self.get_candidate(candidate_id, user_id)
         if current is None:
             raise LookupError("candidate not found")
+        removable_source = (
+            CandidateSource.USER_SELECTED
+            if CandidateSource.USER_SELECTED in current.sources
+            else CandidateSource.SYSTEM_RECOMMENDED_CONFIRMED
+        )
         candidate, reasons = await self.remove_source(
             user_id=current.user_id,
             symbol=current.symbol,
             market=current.market,
-            source=CandidateSource.USER_SELECTED,
+            source=removable_source,
             removal_requested=True,
             trace_id=trace_id,
             reason="user requested candidate removal",

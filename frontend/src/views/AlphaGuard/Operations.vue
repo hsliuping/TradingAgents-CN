@@ -41,6 +41,18 @@
         <div><span>订单 / 成交</span><strong>{{ challengerStatus?.order_count ?? 0 }} / {{ challengerStatus?.fill_count ?? 0 }}</strong></div>
         <div><span>评价成熟度</span><strong>{{ challengerStatus?.mature_evaluation_count ?? 0 }} / {{ challengerStatus?.evaluation_subject_count ?? 0 }}</strong></div>
       </section>
+      <section class="recommendation-status" aria-label="候选推荐运维状态">
+        <div><span>推荐运行</span><strong>{{ recommendationStatus?.recommendation_ready ? '已就绪' : '未就绪' }}</strong></div>
+        <div><span>证券池</span><strong>{{ recommendationStatus?.security_count ?? 0 }}</strong></div>
+        <div><span>符合资格</span><strong>{{ recommendationStatus?.eligible_count ?? 0 }}</strong></div>
+        <div><span>今日推荐</span><strong>{{ recommendationStatus?.today_recommendation_count ?? 0 }}</strong></div>
+        <div><span>待审核</span><strong>{{ recommendationStatus?.pending_review_count ?? 0 }}</strong></div>
+        <div><span>已接受 / 已拒绝</span><strong>{{ recommendationStatus?.accepted_count ?? 0 }} / {{ recommendationStatus?.rejected_count ?? 0 }}</strong></div>
+        <div><span>最近运行</span><strong>{{ displayTime(recommendationStatus?.last_success_at) }}</strong></div>
+        <div><span>耗时 / 失败证券</span><strong>{{ recommendationStatus?.last_duration_ms ?? 0 }} ms / {{ recommendationStatus?.failed_symbol_count ?? 0 }}</strong></div>
+        <div><span>策略版本</span><strong>{{ recommendationStatus?.policy_version || '未登记' }}</strong></div>
+        <div><span>自动加入候选池</span><strong>永久关闭</strong></div>
+      </section>
     </template>
 
     <el-tabs
@@ -139,6 +151,7 @@ import ModelConfigurationPanel from '@/components/alphaguard/ModelConfigurationP
 import {
   alphaguardOperationsApi,
   type DataReadiness,
+  type RecommendationOperationsStatus,
   type ChallengerOperationsStatus,
   type JobHealth,
   type OperationalAlert,
@@ -166,6 +179,7 @@ const loadError = ref('')
 const runningJob = ref('')
 const readiness = ref<SystemReadiness | null>(null)
 const challengerStatus = ref<ChallengerOperationsStatus | null>(null)
+const recommendationStatus = ref<RecommendationOperationsStatus | null>(null)
 const services = ref<ServiceHealth[]>([])
 const dataStatuses = ref<DataReadiness[]>([])
 const jobs = ref<JobHealth[]>([])
@@ -200,6 +214,7 @@ async function loadOperations() {
       alphaguardOperationsApi.integrity()
     ])
     challengerStatus.value = overviewResponse.data.challenger_status
+    recommendationStatus.value = overviewResponse.data.recommendation_status
     readiness.value = readinessResponse.data
     services.value = servicesResponse.data.items
     dataStatuses.value = dataResponse.data.items
@@ -273,17 +288,20 @@ onMounted(loadOperations)
 </script>
 
 <style scoped>
-.page-grid { display: grid; gap: 16px; }
+.page-grid { display: grid; gap: 16px; min-width: 0; }
+.page-grid > .el-tabs { min-width: 0; max-width: 100%; }
 .safety-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .safety-strip > div { min-height: 58px; padding: 10px 14px; border: 1px solid var(--el-border-color-light); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .safety-strip span { color: var(--el-text-color-secondary); font-size: 12px; }
 .header-row, .status-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .status-line > span { min-width: 0; flex: 1 1 280px; overflow-wrap: anywhere; }
 .challenger-status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--el-border-color-light); border-radius: 6px; overflow: hidden; }
-.challenger-status > div { min-height: 68px; padding: 11px 14px; border-right: 1px solid var(--el-border-color-light); border-bottom: 1px solid var(--el-border-color-light); display: grid; gap: 6px; }
+.recommendation-status { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--el-border-color-light); border-radius: 6px; overflow: hidden; }
+.challenger-status > div, .recommendation-status > div { min-height: 68px; padding: 11px 14px; border-right: 1px solid var(--el-border-color-light); border-bottom: 1px solid var(--el-border-color-light); display: grid; gap: 6px; }
 .challenger-status > div:nth-child(4n) { border-right: 0; }
-.challenger-status span { color: var(--el-text-color-secondary); font-size: 12px; }
-.challenger-status strong { min-width: 0; overflow-wrap: anywhere; }
+.recommendation-status > div:nth-child(5n) { border-right: 0; }
+.challenger-status span, .recommendation-status span { color: var(--el-text-color-secondary); font-size: 12px; }
+.challenger-status strong, .recommendation-status strong { min-width: 0; overflow-wrap: anywhere; }
 .admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--el-border-color-light); }
 pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--el-fill-color-light); border-radius: 6px; white-space: pre-wrap; }
 :deep(.operations-tabs--embedded) { border: 0; box-shadow: none; }
@@ -292,6 +310,7 @@ pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--el-fil
 @media (max-width: 700px) {
   .safety-strip { grid-template-columns: 1fr; }
   .challenger-status { grid-template-columns: 1fr; }
-  .challenger-status > div { border-right: 0; }
+  .recommendation-status { grid-template-columns: 1fr; }
+  .challenger-status > div, .recommendation-status > div { border-right: 0; }
 }
 </style>

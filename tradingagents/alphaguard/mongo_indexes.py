@@ -27,6 +27,83 @@ ALPHAGUARD_INDEX_SPECS = {
         },
         {"keys": [("user_id", 1), ("created_at", -1)], "name": "idx_user_created"},
     ],
+    "ag_candidate_recommendation_policies": [
+        {
+            "keys": [("policy_id", 1), ("policy_version", 1)],
+            "name": "uniq_candidate_recommendation_policy",
+            "unique": True,
+        },
+        {"keys": [("config_hash", 1)], "name": "idx_candidate_recommendation_policy_hash"},
+    ],
+    "ag_candidate_universe_manifests": [
+        {"keys": [("manifest_id", 1)], "name": "uniq_candidate_universe_manifest", "unique": True},
+        {
+            "keys": [("market", 1), ("universe_date", 1), ("universe_version", 1)],
+            "name": "uniq_candidate_universe_version",
+            "unique": True,
+        },
+        {"keys": [("universe_hash", 1)], "name": "idx_candidate_universe_hash"},
+    ],
+    "ag_candidate_eligibility_results": [
+        {
+            "keys": [("eligibility_result_id", 1)],
+            "name": "uniq_candidate_eligibility_result",
+            "unique": True,
+        },
+        {
+            "keys": [("recommendation_run_id", 1), ("symbol", 1)],
+            "name": "uniq_candidate_run_symbol_eligibility",
+            "unique": True,
+        },
+        {"keys": [("trade_date", -1), ("eligible", 1)], "name": "idx_candidate_eligibility_date"},
+    ],
+    "ag_candidate_recommendation_runs": [
+        {
+            "keys": [("recommendation_run_id", 1)],
+            "name": "uniq_candidate_recommendation_run",
+            "unique": True,
+        },
+        {
+            "keys": [("user_id", 1), ("trade_date", -1), ("completed_at", -1)],
+            "name": "idx_candidate_recommendation_run_user_date",
+        },
+        {"keys": [("input_hash", 1)], "name": "idx_candidate_recommendation_run_input"},
+    ],
+    "ag_candidate_recommendations": [
+        {"keys": [("recommendation_id", 1)], "name": "uniq_candidate_recommendation", "unique": True},
+        {
+            "keys": [("user_id", 1), ("trade_date", -1), ("recommendation_score", -1)],
+            "name": "idx_candidate_recommendation_user_date_score",
+        },
+        {
+            "keys": [("recommendation_run_id", 1), ("symbol", 1)],
+            "name": "uniq_candidate_recommendation_run_symbol",
+            "unique": True,
+        },
+        {"keys": [("expires_at", 1)], "name": "idx_candidate_recommendation_expiry"},
+    ],
+    "ag_candidate_recommendation_review_events": [
+        {
+            "keys": [("review_event_id", 1)],
+            "name": "uniq_candidate_recommendation_review_event",
+            "unique": True,
+        },
+        {
+            "keys": [("recommendation_id", 1)],
+            "name": "uniq_candidate_recommendation_terminal_review",
+            "unique": True,
+        },
+        {"keys": [("user_id", 1), ("created_at", -1)], "name": "idx_candidate_review_user_time"},
+    ],
+    "ag_candidate_recommendation_evaluations": [
+        {"keys": [("evaluation_id", 1)], "name": "uniq_candidate_recommendation_evaluation", "unique": True},
+        {
+            "keys": [("recommendation_id", 1)],
+            "name": "uniq_candidate_recommendation_evaluation_source",
+            "unique": True,
+        },
+        {"keys": [("status", 1), ("trade_date", 1)], "name": "idx_candidate_recommendation_evaluation_maturity"},
+    ],
     "ag_evidence_snapshots": [
         {"keys": [("snapshot_id", 1)], "name": "uniq_snapshot_id", "unique": True},
         {

@@ -1,0 +1,39 @@
+policy_id: CANDIDATE_RECOMMENDATION_CN_V1
+policy_version: candidate-recommendation-policy-v1
+universe_policy_version: cn-equity-etf-universe-v1
+eligibility_policy_version: candidate-eligibility-v1
+enabled: true
+
+supported_markets: [CN]
+supported_security_types: [A_SHARE, EXCHANGE_TRADED_FUND]
+
+eligibility:
+  allow_st: false
+  minimum_listing_sessions: 60
+  minimum_data_history: 61
+  minimum_average_amount: 10000000
+  maximum_zero_volume_sessions: 3
+  liquidity_lookback_sessions: 20
+  stale_quote_sessions: 1
+
+factor_weights:
+  DATA_QUALITY: 0.15
+  LIQUIDITY: 0.15
+  TREND: 0.20
+  MOMENTUM: 0.15
+  RELATIVE_STRENGTH: 0.15
+  MARKET_REGIME: 0.10
+  STRATEGY_SIGNAL: 0.10
+
+risk_penalties:
+  VOLATILITY_RISK: 0.12
+  EVENT_RISK: 0.12
+  DRAWDOWN_RISK: 0.08
+
+minimum_recommendation_score: 55
+daily_result_limit: 15
+candidate_pool_soft_limit: 50
+cooldown_days_rejected: 5
+cooldown_days_ignored: 3
+recommendation_ttl_days: 3
+score_change_breaks_cooldown: 12

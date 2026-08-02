@@ -233,6 +233,8 @@ class SystemReadinessReport(_FrozenOperationalModel):
     experiment_ready: bool
     challenger_ready: bool
     active_challenger: bool = False
+    recommendation_ready: bool = False
+    auto_candidate_accept: Literal[False] = False
     live_ready: Literal[False] = False
     code_commit: str
     build_version: str
