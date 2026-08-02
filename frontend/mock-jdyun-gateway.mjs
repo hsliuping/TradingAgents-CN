@@ -24,8 +24,7 @@
  *
  * 环境变量:
  *   JDYUN_GATEWAY_PORT      网关监听端口（默认 3100）
- *   JDYUN_FRONTEND_TARGET   前端地址（默认 http://127.0.0.1:3003）
- *   JDYUN_BACKEND_TARGET    后端地址（默认 http://127.0.0.1:8002）
+ *   JDYUN_TARGET            目标地址（默认 http://127.0.0.1:8082）
  *   JDYUN_AUTH_USER         登录用户名（默认 testuser）
  *   JDYUN_AUTH_PASS         登录密码（必填）
  */
@@ -34,24 +33,19 @@ import http from 'node:http'
 import { URL } from 'node:url'
 
 // ===== 配置 =====
+// 单容器镜像：前端+后端+Nginx 统一在 8082 端口
+// 模拟网关只需把所有请求转发到 8082，Nginx 内部自动区分前端/后端
 const GATEWAY_PORT = parseInt(process.env.JDYUN_GATEWAY_PORT || '3100', 10)
-const FRONTEND_TARGET = process.env.JDYUN_FRONTEND_TARGET || 'http://127.0.0.1:3003'
-const BACKEND_TARGET = process.env.JDYUN_BACKEND_TARGET || 'http://127.0.0.1:8002'
+const TARGET = process.env.JDYUN_TARGET || 'http://127.0.0.1:8082'
 
 // 登录页凭据（模拟京东云平台账号，用户在登录页输入）
-const AUTH_USER = process.env.JDYUN_AUTH_USER || 'testuser'
-const AUTH_PASS = process.env.JDYUN_AUTH_PASS || ''
+// 开发测试用，直接写死，无需配置环境变量
+const AUTH_USER = 'testuser'
+const AUTH_PASS = 'Test@123456'
 
 // 注入后端的 Basic Auth 凭据（对应后端 JDYUN_BASIC_AUTH_USERS 配置）
-// 格式: username:token（如 jcloud-ugidvcp:8437F13DABE87D0BC1D4DCCD4739C5A7）
-// 未设置时回退到登录凭据（单用户场景）
-const INJECT_AUTH = process.env.JDYUN_INJECT_AUTH || `${AUTH_USER}:${AUTH_PASS}`
-
-if (!AUTH_PASS) {
-  console.error('❌ 缺少 JDYUN_AUTH_PASS 环境变量。')
-  console.error('   示例: $env:JDYUN_AUTH_PASS = "Test@123456"; node frontend/mock-jdyun-gateway.mjs')
-  process.exit(1)
-}
+// 默认用 .env.docker.jdyun 中的 jcloud-ugidvcp 凭据
+const INJECT_AUTH = process.env.JDYUN_INJECT_AUTH || 'jcloud-ugidvcp:8437F13DABE87D0BC1D4DCCD4739C5A7'
 
 // Cookie 中存储的凭据（就是注入后端的 Basic Auth 的 base64 值）
 const CREDENTIAL_B64 = Buffer.from(INJECT_AUTH, 'utf-8').toString('base64')
@@ -221,7 +215,7 @@ function forward(req, res, target, injectAuth) {
 function forwardUpgrade(req, socket, head) {
   const pathname = (req.url || '/').split('?')[0]
   const isBackend = isBackendPath(pathname)
-  const target = isBackend ? BACKEND_TARGET : FRONTEND_TARGET
+  const target = TARGET
   const t = parseTarget(target)
   // 复制原始头，覆盖 host，显式设置升级头（避免 Node.js http 客户端覆盖 Connection）
   const headers = { ...req.headers, host: t.host }
@@ -317,13 +311,13 @@ async function handleHttp(req, res) {
     if (!loggedIn) {
       return res.writeHead(401, { 'Content-Type': 'application/json' }).end(JSON.stringify({ success: false, message: '未登录' }))
     }
-    console.log(`🔐 [API] ${req.method} ${pathname} → 后端`)
-    return forward(req, res, BACKEND_TARGET, true)
+    console.log(`🔐 [API] ${req.method} ${pathname} -> 后端`)
+    return forward(req, res, TARGET, true)
   }
 
   // 公开资源（静态文件等）：直接转发到前端
   if (isPublicPath(pathname)) {
-    return forward(req, res, FRONTEND_TARGET, false)
+    return forward(req, res, TARGET, false)
   }
 
   // 页面请求：未登录重定向到登录页
@@ -333,8 +327,8 @@ async function handleHttp(req, res) {
   }
 
   // 已登录：转发到前端
-  console.log(`🌐 [页面] ${req.method} ${pathname} → 前端`)
-  return forward(req, res, FRONTEND_TARGET, false)
+  console.log(`🌐 [页面] ${req.method} ${pathname} -> 前端`)
+  return forward(req, res, TARGET, false)
 }
 
 // ===== 启动 =====
@@ -352,8 +346,7 @@ server.listen(GATEWAY_PORT, '0.0.0.0', () => {
   console.log('==========================================================')
   console.log(`  网关地址:  http://localhost:${GATEWAY_PORT}`)
   console.log(`  登录页:    http://localhost:${GATEWAY_PORT}/login`)
-  console.log(`  前端目标:  ${FRONTEND_TARGET}`)
-  console.log(`  后端目标:  ${BACKEND_TARGET}`)
+  console.log(`  目标地址:  ${TARGET}`)
   console.log(`  登录凭据:  ${AUTH_USER} / ${AUTH_PASS}`)
   console.log('==========================================================')
   console.log('  流程: 打开网关地址 → 登录页 → 输入凭据 → 跳转系统')
