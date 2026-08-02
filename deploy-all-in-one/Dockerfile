@@ -137,13 +137,13 @@ COPY deploy-all-in-one/conf/redis.conf /etc/redis/redis.conf
 # ------------------------------------------------------------------------------
 # 创建数据目录并设置权限
 # ------------------------------------------------------------------------------
-RUN mkdir -p /data/db /var/lib/redis /app/runtime /app/logs \
+RUN mkdir -p /data/db /var/lib/redis /app/runtime /app/logs /app/data \
              /var/log/mongodb /var/log/redis \
              /var/run && \
     chown -R appuser:appuser /app /var/log/nginx /app/frontend 2>/dev/null || true && \
     chown -R mongodb:mongodb /data/db /var/log/mongodb 2>/dev/null || true && \
     chown -R redis:redis /var/lib/redis /var/log/redis 2>/dev/null || true && \
-    chmod 750 /data/db /var/lib/redis /app/runtime /app/logs && \
+    chmod 750 /data/db /var/lib/redis /app/runtime /app/logs /app/data && \
     # s6 服务脚本需要可执行权限
     find /etc/s6-overlay/s6-rc.d -name "run" | xargs chmod +x 2>/dev/null || true && \
     echo "目录权限设置完成"

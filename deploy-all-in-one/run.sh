@@ -31,6 +31,7 @@ VOLUME_MONGO="ta-mongo-data"
 VOLUME_REDIS="ta-redis-data"
 VOLUME_RUNTIME="ta-runtime"
 VOLUME_LOGS="ta-logs"
+VOLUME_QDRANT="ta-qdrant"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -219,6 +220,7 @@ action_start() {
         -v "${VOLUME_REDIS}:/var/lib/redis"
         -v "${VOLUME_RUNTIME}:/app/runtime"
         -v "${VOLUME_LOGS}:/app/logs"
+        -v "${VOLUME_QDRANT}:/app/data"
         -e MONGODB_PASSWORD="$MONGODB_PASSWORD"
         -e TZ="${TZ:-Asia/Shanghai}"
     )
@@ -340,10 +342,11 @@ action_clean() {
     echo "   - $VOLUME_REDIS (Redis 数据)"
     echo "   - $VOLUME_RUNTIME (运行时配置)"
     echo "   - $VOLUME_LOGS (日志)"
+    echo "   - $VOLUME_QDRANT (Qdrant 向量库数据)"
     read -p "确认删除？(yes/no): " confirm
     if [ "$confirm" = "yes" ]; then
         action_stop
-        docker volume rm "$VOLUME_MONGO" "$VOLUME_REDIS" "$VOLUME_RUNTIME" "$VOLUME_LOGS" 2>&1 || true
+        docker volume rm "$VOLUME_MONGO" "$VOLUME_REDIS" "$VOLUME_RUNTIME" "$VOLUME_LOGS" "$VOLUME_QDRANT" 2>&1 || true
         echo "✅ 数据卷已清理"
     else
         echo "已取消"

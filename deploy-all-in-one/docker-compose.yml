@@ -21,6 +21,7 @@ services:
       - ta-redis:/var/lib/redis
       - ta-runtime:/app/runtime
       - ta-logs:/app/logs
+      - ta-qdrant:/app/data
     environment:
       TZ: "Asia/Shanghai"
       MONGODB_PASSWORD: "${MONGODB_PASSWORD:?MONGODB_PASSWORD must be set in .env}"
@@ -52,4 +53,6 @@ volumes:
   ta-runtime:
     driver: local
   ta-logs:
+    driver: local
+  ta-qdrant:
     driver: local

@@ -425,8 +425,13 @@ async def lifespan(app: FastAPI):
                 )
                 return
 
-            # 非阻塞地执行重建（force=False 时会按签名比对决定是否重建）
-            result = manager.ensure_indexed(force=False)
+            # 延迟 3 秒，让 uvicorn 先完全启动并监听端口
+            await asyncio.sleep(3)
+
+            # 在独立线程中执行同步索引，避免阻塞事件循环
+            # ensure_indexed 是同步方法（含大量 embedding 请求），
+            # 直接在协程中调用会阻塞 uvicorn 监听端口
+            result = await asyncio.to_thread(manager.ensure_indexed, force=False)
             if result["rebuilt"]:
                 logger.info(
                     "✅ 用户手册索引构建完成: %d 个切片，来源 %d 份手册，签名=%s",

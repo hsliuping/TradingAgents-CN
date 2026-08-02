@@ -303,6 +303,50 @@ class QdrantCollection:
             logger.error(f"❌ [Qdrant] 按 ID 删除文档失败: {e}")
             return False
 
+    def delete(self, ids: List[str]) -> bool:
+        """delete_ids 的别名（兼容 ChromaDB 风格的 delete 调用）。"""
+        return self.delete_ids(ids)
+
+    def get(self, ids: List[str]) -> Dict[str, Any]:
+        """按 ID 批量检索点（ChromaDB 风格），用于读取签名 point 等元信息。
+
+        返回格式与 query() 一致：
+            {
+                "documents": [...],
+                "metadatas": [...],
+                "ids": [...],
+            }
+        不存在的 ID 会被跳过，返回结果只包含实际命中的点。
+        """
+        if not ids:
+            return {"documents": [], "metadatas": [], "ids": []}
+        try:
+            retrieved = self.client.retrieve(
+                collection_name=self.collection_name,
+                ids=ids,
+                with_payload=True,
+                with_vectors=False,
+            )
+            documents = []
+            metadatas = []
+            result_ids = []
+            for point in retrieved:
+                payload = point.payload or {}
+                # document 存在 payload["document"]，与 add() 一致
+                document = payload.get("document", "")
+                metadata = {k: v for k, v in payload.items() if k != "document"}
+                documents.append(document)
+                metadatas.append(metadata)
+                result_ids.append(point.id)
+            return {
+                "documents": documents,
+                "metadatas": metadatas,
+                "ids": result_ids,
+            }
+        except Exception as e:
+            logger.error(f"❌ [Qdrant] get 按 ID 检索失败 (collection={self.collection_name}): {e}")
+            return {"documents": [], "metadatas": [], "ids": []}
+
     def query(
         self,
         query_embeddings: List[List[float]],
