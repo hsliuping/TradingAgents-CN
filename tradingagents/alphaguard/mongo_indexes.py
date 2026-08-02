@@ -198,6 +198,39 @@ ALPHAGUARD_INDEX_SPECS = {
             "name": "idx_benchmark_price_window_hash",
         },
     ],
+    "ag_decision_evidence_pack_manifests": [
+        {
+            "keys": [("manifest_id", 1)],
+            "name": "uniq_decision_evidence_pack_manifest",
+            "unique": True,
+        },
+        {
+            "keys": [
+                ("source_snapshot_id", 1),
+                ("symbol", 1),
+                ("source_trade_date", 1),
+                ("schema_version", 1),
+                ("calculation_version", 1),
+            ],
+            "name": "uniq_decision_evidence_pack_source",
+            "unique": True,
+        },
+        {
+            "keys": [("manifest_hash", 1)],
+            "name": "idx_decision_evidence_pack_hash",
+        },
+    ],
+    "stock_corporate_actions": [
+        {
+            "keys": [("ref_id", 1)],
+            "name": "uniq_stock_corporate_action_ref",
+            "unique": True,
+        },
+        {
+            "keys": [("symbol", 1), ("published_at", -1)],
+            "name": "idx_stock_corporate_action_symbol_time",
+        },
+    ],
     "ag_security_master_sources": [
         {
             "keys": [("source_id", 1)],

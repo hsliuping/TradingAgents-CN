@@ -235,6 +235,33 @@ def _with_json_schema_instruction(
     return copied
 
 
+def render_structured_input_for_estimation(
+    messages: list[dict[str, str]] | tuple[dict[str, str], ...],
+    *,
+    schema: dict[str, Any],
+    structured_output_mode: str,
+) -> str:
+    """Serialize every logical input the adapter sends for Token preflight."""
+
+    effective_messages = list(messages)
+    transport_schema: dict[str, Any] | None = schema
+    if structured_output_mode == "JSON_SCHEMA":
+        effective_messages = _with_json_schema_instruction(
+            effective_messages,
+            schema=schema,
+        )
+        transport_schema = None
+    return json.dumps(
+        {
+            "messages": effective_messages,
+            "structured_output_mode": structured_output_mode,
+            "transport_schema": transport_schema,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
 def _finish_meta(
     *,
     provider: str,

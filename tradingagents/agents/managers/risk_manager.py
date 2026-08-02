@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from tradingagents.alphaguard.decision_control_schemas import (
 from tradingagents.alphaguard.decision_schemas import (
     ModelExecutionMeta,
     NormalTradePlan,
+    TopModelDecisionOutput,
     TopReviewDecision,
     validate_review_against_plan,
 )
@@ -30,8 +32,21 @@ from tradingagents.utils.logging_init import get_logger
 logger = get_logger("default")
 
 TOP_REVIEW_PROMPT_NAME = "top_review_decision"
-TOP_REVIEW_PROMPT_VERSION = "top_review_decision_v1"
-TOP_REVIEW_QUANT_PROMPT_VERSION = "top_review_decision_quant_v1"
+TOP_REVIEW_PROMPT_VERSION = "top_review_decision_v2"
+TOP_REVIEW_QUANT_PROMPT_VERSION = "top_review_decision_quant_v2"
+TOP_MODEL_PAYLOAD_SCHEMA_VERSION = "top_model_decision_output_v1"
+TOP_REVIEW_RECORD_SCHEMA_VERSION = "top_review_decision_v2"
+TOP_REQUEST_BUILDER_VERSION = "top-review-model-request-v2"
+
+
+@dataclass(frozen=True)
+class TopReviewModelRequest:
+    """Exact model-facing Top request before the provider adapter encodes it."""
+
+    messages: tuple[dict[str, str], ...]
+    output_schema: dict[str, Any]
+    system_content: str
+    user_payload: dict[str, Any]
 
 
 def _configured_provider(config: dict[str, Any]) -> str:
@@ -60,7 +75,7 @@ def _context_bound_review_schema(
     context: DecisionContext | None,
     normal_plan: NormalTradePlan,
 ) -> dict[str, Any]:
-    schema = model_output_schema(TopReviewDecision)
+    schema = model_output_schema(TopModelDecisionOutput)
     if context is None:
         return schema
     definitions = schema.get("$defs", {})
@@ -72,9 +87,11 @@ def _context_bound_review_schema(
             "title": "Evidence Id",
             "type": "string",
         }
-    adjusted = definitions.get("NormalTradePlan", {}).get("properties", {})
-    if adjusted:
-        adjusted["action"] = {
+    proposed = definitions.get("TopPlanProposedChanges", {}).get(
+        "properties", {}
+    )
+    if proposed:
+        proposed["action"] = {
             "description": "Must not reverse or change the Normal plan direction.",
             "enum": list(dict.fromkeys([normal_plan.action, "NONE", "HOLD", "WAIT"])),
             "title": "Action",
@@ -82,12 +99,129 @@ def _context_bound_review_schema(
         }
         for field in ("initial_position_pct", "max_position_pct"):
             maximum = getattr(normal_plan, field)
-            if maximum is not None and field in adjusted:
-                adjusted[field]["anyOf"] = [
+            if maximum is not None and field in proposed:
+                proposed[field]["anyOf"] = [
                     {"maximum": maximum, "minimum": 0, "type": "number"},
                     {"type": "null"},
                 ]
     return schema
+
+
+def build_top_review_model_request(
+    *,
+    context: DecisionContext | None,
+    normal_plan: NormalTradePlan,
+    state: dict[str, Any],
+    config: dict[str, Any],
+    prompt_version: str,
+    instrument_context: str,
+    risk_debate_state: dict[str, Any] | None = None,
+    reports: dict[str, Any] | None = None,
+    past_memory: str = "",
+) -> TopReviewModelRequest:
+    """Build the single source of truth for Top preflight and invocation."""
+
+    output_schema = _context_bound_review_schema(context, normal_plan)
+    output_schema_json = json.dumps(
+        output_schema, ensure_ascii=False, sort_keys=True
+    )
+    quant_rules = ""
+    if context:
+        quant_rules = """
+- 必须同时审阅 DecisionContext、原 QuantTradeProposal、NormalTradePlan、
+  市场状态、账户/组合证据、风险政策摘要和快照风险事件。
+- 不能独立发起或反转交易，不能提高仓位、扩大入场区间、延长有效期、
+  删除原条件、改变策略/证据链/核心 thesis，或从 null 新增 target_price。
+- RISK_ADJUST 只可降低仓位/置信度、缩窄区间、缩短有效期并追加风险条件。
+- 无法证明纯降险时使用 MATERIAL_REVISION 或 REJECT。
+- 方向错误必须 REJECT，不能在本链路研究相反方向。"""
+    system_content = f"""你是 AlphaGuard 顶尖模型风险终审，不是第二个 Trader。唯一正式输出是严格 JSON。
+Prompt：{TOP_REVIEW_PROMPT_NAME}@{prompt_version}
+- 只能返回 Schema 列出的业务决策字段，不得输出计划身份或运行时字段。
+- plan_id、supersedes_plan_id、snapshot_id、validation_run_id、review_id 和 model_meta
+  均由服务端管理；即使它们出现在只读上下文中，也不得复制、创建或修改。
+- CONFIRM、REJECT、SUSPEND 的 proposed_changes 必须是 {{}}。
+- RISK_ADJUST 和 MATERIAL_REVISION 的所有方案修改只能写入 proposed_changes。
+- MATERIAL_REVISION 必须提供 material_change_fields；没有修改时不得复制原方案。
+- target_price 可为 null，禁止推算。
+- 不得创建订单或任何新计划身份。
+{quant_rules}
+JSON Schema：
+{output_schema_json}
+标的约束：
+{instrument_context}"""
+    user_payload = (
+        {
+            "decision_context": context.model_dump(mode="json"),
+            "quant_trade_proposal": context.quant_proposal.model_dump(mode="json"),
+            "read_only_normal_trade_plan": normal_plan.model_dump(mode="json"),
+            "market_regime": context.market_regime.model_dump(mode="json"),
+            "account_evidence": [
+                item.model_dump(mode="json") for item in context.account_evidence
+            ],
+            "portfolio_evidence": [
+                item.model_dump(mode="json") for item in context.portfolio_evidence
+            ],
+            "risk_policy_summary": state.get("risk_policy_summary"),
+            "evaluation_clock": state.get("evaluation_clock"),
+        }
+        if context
+        else {
+            "read_only_normal_trade_plan": normal_plan.model_dump(mode="json"),
+            "risk_debate_history": (risk_debate_state or {}).get("history", ""),
+            "reports": reports or {},
+            "past_memory": past_memory,
+        }
+    )
+    registered_template = config.get("top_prompt_template")
+    if context and registered_template:
+        system_content = str(registered_template).format(
+            context_json=json.dumps(
+                context.model_dump(mode="json"),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            normal_plan_json=json.dumps(
+                normal_plan.model_dump(mode="json"),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            research_json=json.dumps(
+                state.get("tradingagents_research") or {},
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+        system_content += (
+            "\n\nServer-owned identity rule:\n"
+            "plan_id, supersedes_plan_id, snapshot_id, validation_run_id, "
+            "review_id, and model_meta may appear only in read-only context. "
+            "Never include them in the response. Return only TopModelDecisionOutput; "
+            "put allowed Normal-plan edits in proposed_changes, and use {} when "
+            "there is no change.\n"
+            "Verdict/change contract:\n"
+            "- CONFIRM, REJECT, and SUSPEND require proposed_changes={} and "
+            "material_change_fields=[].\n"
+            "- RISK_ADJUST requires non-empty proposed_changes and "
+            "material_change_fields=[].\n"
+            "- MATERIAL_REVISION requires non-empty proposed_changes and lists "
+            "every materially changed field in material_change_fields.\n\n"
+            "Exact model-facing JSON Schema:\n"
+            + output_schema_json
+        )
+    messages = (
+        {"role": "system", "content": system_content},
+        {
+            "role": "user",
+            "content": json.dumps(user_payload, ensure_ascii=False, default=str),
+        },
+    )
+    return TopReviewModelRequest(
+        messages=messages,
+        output_schema=output_schema,
+        system_content=system_content,
+        user_payload=user_payload,
+    )
 
 
 def _failure_review(
@@ -99,11 +233,15 @@ def _failure_review(
     reason: str,
     context: DecisionContext | None = None,
     revision_round: int = 0,
+    validation_run_id: str | None = None,
+    supersedes_plan_id: str | None = None,
 ) -> TopReviewDecision:
     return TopReviewDecision(
         review_id=str(uuid4()),
+        validation_run_id=validation_run_id,
         snapshot_id=snapshot_id,
         plan_id=plan_id,
+        supersedes_plan_id=supersedes_plan_id,
         analysis_id=context.analysis_id if context else None,
         decision_context_id=context.decision_context_id if context else None,
         quant_proposal_id=context.quant_proposal_id if context else None,
@@ -124,6 +262,10 @@ def _failure_review(
         material_change_fields=[],
         review_reason=reason,
         model_meta=model_meta,
+        model_decision_payload=None,
+        created_at=model_meta.finished_at,
+        schema_version=TOP_REVIEW_RECORD_SCHEMA_VERSION,
+        model_payload_schema_version=TOP_MODEL_PAYLOAD_SCHEMA_VERSION,
     )
 
 
@@ -225,6 +367,10 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                 model_meta=meta,
                 reason=message,
                 context=context,
+                validation_run_id=(
+                    state.get("trace_id")
+                    or (context.analysis_id if context else state.get("analysis_id"))
+                ),
             )
             decision_error = {
                 "stage": "RISK_JUDGE",
@@ -258,6 +404,11 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                     reason=message,
                     context=context,
                     revision_round=normal_plan.revision_round,
+                    validation_run_id=(
+                        state.get("trace_id")
+                        or (context.analysis_id if context else state.get("analysis_id"))
+                    ),
+                    supersedes_plan_id=normal_plan.supersedes_plan_id,
                 )
                 decision_error = state.get("decision_error") or {
                     "stage": "TRADER",
@@ -266,108 +417,34 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                     "error_message": message,
                 }
             else:
-                output_schema = _context_bound_review_schema(context, normal_plan)
-                output_schema_json = json.dumps(
-                    output_schema, ensure_ascii=False, sort_keys=True
+                request = build_top_review_model_request(
+                    context=context,
+                    normal_plan=normal_plan,
+                    state=state,
+                    config=config,
+                    prompt_version=prompt_version,
+                    instrument_context=instrument_context,
+                    risk_debate_state=risk_debate_state,
+                    reports=reports,
+                    past_memory=past_memory_str,
                 )
-                quant_rules = ""
-                if context:
-                    quant_rules = """
-- 必须同时审阅 DecisionContext、原 QuantTradeProposal、NormalTradePlan、
-  市场状态、账户/组合证据、风险政策摘要和快照风险事件。
-- 不能独立发起或反转交易，不能提高仓位、扩大入场区间、延长有效期、
-  删除原条件、改变策略/证据链/核心 thesis，或从 null 新增 target_price。
-- RISK_ADJUST 只可降低仓位/置信度、缩窄区间、缩短有效期并追加风险条件。
-- 无法证明纯降险时使用 MATERIAL_REVISION 或 REJECT。
-- 方向错误必须 REJECT，不能在本链路研究相反方向。"""
-                system_content = f"""你是 AlphaGuard 顶尖模型风险终审，不是第二个 Trader。唯一正式输出是严格 JSON。
-Prompt：{TOP_REVIEW_PROMPT_NAME}@{prompt_version}
-- 只能 CONFIRM、RISK_ADJUST、MATERIAL_REVISION、REJECT、SUSPEND。
-- CONFIRM 不带 adjusted_plan；RISK_ADJUST 必须带 adjusted_plan。
-- MATERIAL_REVISION 必须带 adjusted_plan 和 material_change_fields。
-- REJECT/SUSPEND 不带 adjusted_plan。
-- target_price 可为 null，禁止推算。
-- 不得生成 model_meta，不得创建订单。
-{quant_rules}
-JSON Schema：
-{output_schema_json}
-标的约束：
-{instrument_context}"""
-                user_payload = (
-                    {
-                        "decision_context": context.model_dump(mode="json"),
-                        "quant_trade_proposal": context.quant_proposal.model_dump(
-                            mode="json"
-                        ),
-                        "normal_trade_plan": normal_plan.model_dump(mode="json"),
-                        "market_regime": context.market_regime.model_dump(mode="json"),
-                        "account_evidence": [
-                            item.model_dump(mode="json")
-                            for item in context.account_evidence
-                        ],
-                        "portfolio_evidence": [
-                            item.model_dump(mode="json")
-                            for item in context.portfolio_evidence
-                        ],
-                        "risk_policy_summary": state.get("risk_policy_summary"),
-                        "evaluation_clock": state.get("evaluation_clock"),
-                    }
-                    if context
-                    else {
-                        "normal_trade_plan": normal_plan.model_dump(mode="json"),
-                        "risk_debate_history": risk_debate_state.get("history", ""),
-                        "reports": reports,
-                        "past_memory": past_memory_str,
-                    }
-                )
-                registered_template = config.get("top_prompt_template")
-                if context and registered_template:
-                    system_content = str(registered_template).format(
-                        context_json=json.dumps(
-                            context.model_dump(mode="json"),
-                            ensure_ascii=False,
-                            sort_keys=True,
-                        ),
-                        normal_plan_json=json.dumps(
-                            normal_plan.model_dump(mode="json"),
-                            ensure_ascii=False,
-                            sort_keys=True,
-                        ),
-                        research_json=json.dumps(
-                            state.get("tradingagents_research") or {},
-                            ensure_ascii=False,
-                            sort_keys=True,
-                        ),
-                    )
-                    system_content += (
-                        "\n\nExact model-facing JSON Schema:\n"
-                        + output_schema_json
-                    )
                 invocation = invoke_json_object(
                     llm=llm,
-                    messages=[
-                        {"role": "system", "content": system_content},
-                        {
-                            "role": "user",
-                            "content": json.dumps(
-                                user_payload, ensure_ascii=False, default=str
-                            ),
-                        },
-                    ],
-                    schema_model=TopReviewDecision,
+                    messages=list(request.messages),
+                    schema_model=TopModelDecisionOutput,
                     provider=_configured_provider(config),
                     configured_model_name=_configured_model(config),
                     prompt_name=TOP_REVIEW_PROMPT_NAME,
                     prompt_version=prompt_version,
                     trace_id=state.get("trace_id"),
                     template_hash=hashlib.sha256(
-                        system_content.encode()
+                        request.system_content.encode()
                     ).hexdigest(),
                     context_hash=(
                         state.get("model_runtime_context_hash")
                         or (context.context_hash if context else None)
                     ),
-                    input_hash=canonical_hash(user_payload),
+                    input_hash=canonical_hash(request.user_payload),
                     attempt_number=int(state.get("attempt_number") or 1),
                     structured_output_mode=str(
                         config.get("top_structured_output_mode") or "AUTO"
@@ -390,7 +467,7 @@ JSON Schema：
                     retry_backoff_seconds=float(
                         config.get("top_retry_backoff_seconds") or 0
                     ),
-                    schema_override=output_schema,
+                    schema_override=request.output_schema,
                 )
                 decision_error = None
                 if invocation.failure_status:
@@ -402,6 +479,15 @@ JSON Schema：
                         reason=invocation.error_message or "风险终审模型执行失败",
                         context=context,
                         revision_round=normal_plan.revision_round,
+                        validation_run_id=(
+                            state.get("trace_id")
+                            or (
+                                context.analysis_id
+                                if context
+                                else state.get("analysis_id")
+                            )
+                        ),
+                        supersedes_plan_id=normal_plan.supersedes_plan_id,
                     )
                     decision_error = {
                         "stage": "RISK_JUDGE",
@@ -410,79 +496,70 @@ JSON Schema：
                         "error_message": invocation.error_message,
                     }
                 else:
-                    payload = dict(invocation.payload or {})
-                    adjusted = payload.get("adjusted_plan")
-                    attempted_identity_changes: list[str] = []
-                    if isinstance(adjusted, dict):
-                        adjusted = dict(adjusted)
-                        for field in (
-                            "plan_id",
-                            "snapshot_id",
-                            "quant_proposal_id",
-                            "analysis_id",
-                            "decision_context_id",
-                            "symbol",
-                            "market",
-                            "strategy_id",
-                            "strategy_version",
-                            "revision_round",
-                            "supersedes_plan_id",
-                            "revision_request_id",
-                        ):
-                            supplied = adjusted.get(field)
-                            expected = getattr(normal_plan, field)
-                            if supplied is not None and str(supplied) != str(expected):
-                                attempted_identity_changes.append(field)
-                        adjusted.update(
-                            {
-                                field: getattr(normal_plan, field)
-                                for field in (
-                                    "plan_id",
-                                    "snapshot_id",
-                                    "quant_proposal_id",
-                                    "analysis_id",
-                                    "decision_context_id",
-                                    "symbol",
-                                    "market",
-                                    "trade_date",
-                                    "strategy_id",
-                                    "strategy_version",
-                                    "revision_round",
-                                    "supersedes_plan_id",
-                                    "revision_request_id",
-                                )
-                            },
-                            model_meta=invocation.model_meta.model_dump(mode="json"),
-                        )
-                        payload["adjusted_plan"] = adjusted
-                    payload.update(
-                        review_id=str(uuid4()),
-                        snapshot_id=normal_plan.snapshot_id,
-                        plan_id=normal_plan.plan_id,
-                        analysis_id=context.analysis_id if context else None,
-                        decision_context_id=(
-                            context.decision_context_id if context else None
-                        ),
-                        quant_proposal_id=(
-                            context.quant_proposal_id if context else None
-                        ),
-                        symbol=context.symbol if context else None,
-                        market=context.market if context else None,
-                        trade_date=context.trade_date if context else None,
-                        strategy_id=context.strategy_id if context else None,
-                        strategy_version=(
-                            context.strategy_version if context else None
-                        ),
-                        revision_round=normal_plan.revision_round,
-                        model_meta=invocation.model_meta.model_dump(mode="json"),
-                    )
                     try:
-                        if attempted_identity_changes:
-                            raise ValueError(
-                                "top model attempted forbidden identity changes: "
-                                + ", ".join(sorted(attempted_identity_changes))
+                        decision = TopModelDecisionOutput.model_validate(
+                            invocation.payload
+                        )
+                        adjusted_plan = None
+                        if decision.status in {"RISK_ADJUST", "MATERIAL_REVISION"}:
+                            adjusted_payload = normal_plan.model_dump(mode="python")
+                            adjusted_payload.update(
+                                decision.proposed_changes.model_dump(
+                                    mode="python", exclude_unset=True
+                                )
                             )
-                        review = TopReviewDecision.model_validate(payload)
+                            adjusted_payload["model_meta"] = invocation.model_meta
+                            adjusted_plan = NormalTradePlan.model_validate(
+                                adjusted_payload
+                            )
+                        review = TopReviewDecision(
+                            review_id=str(uuid4()),
+                            validation_run_id=(
+                                state.get("trace_id")
+                                or (
+                                    context.analysis_id
+                                    if context
+                                    else state.get("analysis_id")
+                                )
+                            ),
+                            snapshot_id=normal_plan.snapshot_id,
+                            plan_id=normal_plan.plan_id,
+                            supersedes_plan_id=normal_plan.supersedes_plan_id,
+                            analysis_id=context.analysis_id if context else None,
+                            decision_context_id=(
+                                context.decision_context_id if context else None
+                            ),
+                            quant_proposal_id=(
+                                context.quant_proposal_id if context else None
+                            ),
+                            symbol=context.symbol if context else None,
+                            market=context.market if context else None,
+                            trade_date=context.trade_date if context else None,
+                            strategy_id=context.strategy_id if context else None,
+                            strategy_version=(
+                                context.strategy_version if context else None
+                            ),
+                            revision_round=normal_plan.revision_round,
+                            status=decision.status,
+                            completeness_score=decision.completeness_score,
+                            logic_consistency_score=(
+                                decision.logic_consistency_score
+                            ),
+                            risk_control_score=decision.risk_control_score,
+                            missing_evidence=decision.missing_evidence,
+                            logical_conflicts=decision.logical_conflicts,
+                            risk_findings=decision.risk_findings,
+                            adjusted_plan=adjusted_plan,
+                            material_change_fields=decision.material_change_fields,
+                            review_reason=decision.review_reason,
+                            model_meta=invocation.model_meta,
+                            model_decision_payload=decision,
+                            created_at=invocation.model_meta.finished_at,
+                            schema_version=TOP_REVIEW_RECORD_SCHEMA_VERSION,
+                            model_payload_schema_version=(
+                                TOP_MODEL_PAYLOAD_SCHEMA_VERSION
+                            ),
+                        )
                         validate_review_against_plan(review, normal_plan)
                         if context:
                             from app.services.alphaguard.decision_validation import (
@@ -497,6 +574,7 @@ JSON Schema：
                                 model_runtime_context_hash=state.get(
                                     "model_runtime_context_hash"
                                 ),
+                                additional_prompt_versions={prompt_version},
                             )
                             if (
                                 review.status == "RISK_ADJUST"
@@ -508,9 +586,16 @@ JSON Schema：
                                 if violations:
                                     raise ValueError("; ".join(violations))
                     except (ValidationError, ValueError) as exc:
-                        reason = str(exc).replace("\n", " ").strip()[:240]
+                        if isinstance(exc, ValidationError):
+                            reason = ", ".join(
+                                f"{'.'.join(str(part) for part in item['loc'])}:"
+                                f"{item['type']}:{item['msg']}"
+                                for item in exc.errors(include_input=False)
+                            )[:240]
+                        else:
+                            reason = str(exc).replace("\n", " ").strip()[:240]
                         message = (
-                            "TopReviewDecision schema/permission validation failed: "
+                            "TopModelDecisionOutput schema/permission validation failed: "
                             f"{exc.__class__.__name__}"
                             + (f":{reason}" if reason else "")
                         )
@@ -526,6 +611,15 @@ JSON Schema：
                             reason=message,
                             context=context,
                             revision_round=normal_plan.revision_round,
+                            validation_run_id=(
+                                state.get("trace_id")
+                                or (
+                                    context.analysis_id
+                                    if context
+                                    else state.get("analysis_id")
+                                )
+                            ),
+                            supersedes_plan_id=normal_plan.supersedes_plan_id,
                         )
                         decision_error = {
                             "stage": "RISK_JUDGE",

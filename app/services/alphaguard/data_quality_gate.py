@@ -21,9 +21,14 @@ _REFERENCE_COLLECTIONS = {
     "historical_data": "historical_data",
     "financial_data": "stock_financial_data",
     "stock_financial_data": "stock_financial_data",
+    "decision_financial": "stock_financial_data",
+    "decision_cashflow": "stock_financial_data",
     "stock_news": "stock_news",
     "announcements": "stock_announcements",
     "stock_announcements": "stock_announcements",
+    "decision_announcement": "stock_announcements",
+    "decision_dividend": "stock_corporate_actions",
+    "decision_corporate_action": "stock_corporate_actions",
     "paper_account": "paper_accounts",
     "paper_accounts": "paper_accounts",
     # Versioned AlphaGuard paper accounts live in the PR-006 collection.
@@ -42,6 +47,7 @@ _REFERENCE_COLLECTIONS = {
     "market_breadth": "ag_market_contexts",
     "market_context_window": "ag_market_context_window_manifests",
     "benchmark_price_window": "ag_benchmark_price_window_manifests",
+    "decision_evidence_pack": "ag_decision_evidence_pack_manifests",
     "trading_status": "ag_security_trading_statuses",
     "trading_calendar": "trading_calendar",
     "sync_status": "sync_status",
@@ -368,6 +374,26 @@ class DataQualityGate:
                 blocking.append(
                     f"required {category} manifest hash does not match"
                 )
+            if category == "decision_evidence_pack":
+                matrix = documents[0].get("evidence_completeness_matrix") or {}
+                if (
+                    documents[0].get("overall_status") != "COMPLETE"
+                    or not isinstance(matrix, dict)
+                    or set(matrix) != {
+                        "financial_evidence",
+                        "cashflow_evidence",
+                        "dividend_evidence",
+                        "announcement_evidence",
+                    }
+                    or any(
+                        status not in {"COMPLETE", "NOT_APPLICABLE"}
+                        for status in matrix.values()
+                    )
+                ):
+                    missing.append("decision_evidence_pack")
+                    blocking.append(
+                        "required Decision Evidence Pack v3 is incomplete"
+                    )
 
         if not resolved.get("financials"):
             missing.append("financials")

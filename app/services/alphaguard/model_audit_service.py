@@ -16,6 +16,7 @@ from app.schemas.alphaguard.model_runtime import (
 from tradingagents.alphaguard.decision_schemas import ModelExecutionMeta
 
 from .model_runtime_repository import ModelRuntimeRepository
+from .model_budget_service import BudgetDecision
 
 
 def sanitize_model_message(value: Any) -> str:
@@ -49,6 +50,7 @@ class ModelAuditService:
         request_hash: str,
         meta: ModelExecutionMeta,
         response_hash: str | None = None,
+        budget: BudgetDecision | None = None,
     ) -> tuple[ModelRunRecord, bool]:
         identity = {
             "analysis_id": analysis_id,
@@ -66,6 +68,27 @@ class ModelAuditService:
         model_run_id = str(
             uuid5(NAMESPACE_URL, f"alphaguard:model-run:{canonical_hash(identity)}")
         )
+        remaining_context_capacity = None
+        context_usage_ratio = None
+        context_warning_level = None
+        if budget is not None:
+            used_context_tokens = (
+                meta.input_tokens + meta.output_tokens
+                if meta.input_tokens is not None and meta.output_tokens is not None
+                else budget.estimated_input_tokens + budget.estimated_output_tokens
+            )
+            remaining_context_capacity = max(
+                0, budget.model_context_window - used_context_tokens
+            )
+            context_usage_ratio = used_context_tokens / budget.model_context_window
+            if context_usage_ratio > 0.95:
+                context_warning_level = "OVER_95"
+            elif context_usage_ratio > 0.85:
+                context_warning_level = "OVER_85"
+            elif context_usage_ratio > 0.70:
+                context_warning_level = "OVER_70"
+            else:
+                context_warning_level = "NONE"
         payload = {
             "model_run_id": model_run_id,
             "analysis_id": analysis_id,
@@ -86,9 +109,21 @@ class ModelAuditService:
             "request_hash": request_hash,
             "response_hash": response_hash or meta.raw_output_hash,
             "structured_output_status": meta.execution_status,
+            "estimated_input_tokens": (
+                budget.estimated_input_tokens if budget else None
+            ),
             "input_tokens": meta.input_tokens,
             "output_tokens": meta.output_tokens,
             "total_tokens": meta.total_tokens,
+            "model_context_window": (
+                budget.model_context_window if budget else None
+            ),
+            "configured_max_output_tokens": (
+                budget.estimated_output_tokens if budget else None
+            ),
+            "remaining_context_capacity": remaining_context_capacity,
+            "context_usage_ratio": context_usage_ratio,
+            "context_warning_level": context_warning_level,
             "estimated_cost": meta.estimated_cost,
             "cost_currency": meta.cost_currency or "USD",
             "latency_ms": meta.latency_ms,

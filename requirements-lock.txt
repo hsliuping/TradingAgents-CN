@@ -228,6 +228,7 @@ Pygments==2.19.2
 PyJWT==2.10.1
 pymongo==4.15.1
 pypandoc==1.15
+pypdf==6.1.3
 pyparsing==3.2.5
 PyPika==0.48.9
 pyproject_hooks==1.2.0

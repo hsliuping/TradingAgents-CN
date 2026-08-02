@@ -327,7 +327,10 @@
             <el-table-column label="角色"><template #default="{ row }">{{ roleLabel(row.role) }}</template></el-table-column>
             <el-table-column prop="model_name" label="模型" />
             <el-table-column label="状态"><template #default="{ row }">{{ statusLabel(row.structured_output_status) }}</template></el-table-column>
-            <el-table-column prop="total_tokens" label="Token 数" />
+            <el-table-column label="估算 / 实际输入" min-width="140"><template #default="{ row }">{{ row.estimated_input_tokens ?? '—' }} / {{ row.input_tokens ?? '—' }}</template></el-table-column>
+            <el-table-column label="输出 Token"><template #default="{ row }">{{ row.output_tokens ?? '—' }}</template></el-table-column>
+            <el-table-column label="上下文余量" min-width="130"><template #default="{ row }">{{ row.remaining_context_capacity ?? '—' }} / {{ row.model_context_window ?? '—' }}</template></el-table-column>
+            <el-table-column label="上下文告警"><template #default="{ row }">{{ contextWarningLabel(row.context_warning_level) }}</template></el-table-column>
             <el-table-column label="延迟"><template #default="{ row }">{{ row.latency_ms }} ms</template></el-table-column>
             <el-table-column label="请求哈希" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.request_hash) }}</span></template></el-table-column>
             <el-table-column label="响应哈希" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.response_hash) }}</span></template></el-table-column>
@@ -340,14 +343,21 @@
             <el-table-column label="样本" min-width="150"><template #default="{ row }">{{ row.symbol || '—' }} · {{ row.source_trade_date || '—' }}</template></el-table-column>
             <el-table-column label="状态"><template #default="{ row }">{{ statusLabel(row.status) }}</template></el-table-column>
             <el-table-column label="验证契约" min-width="190"><template #default="{ row }">{{ row.validation_contract_version || '旧版契约' }}</template></el-table-column>
-            <el-table-column label="普通模型"><template #default="{ row }">{{ row.normal_model_run_id ? '已调用' : '未到达' }}</template></el-table-column>
-            <el-table-column label="终审模型"><template #default="{ row }">{{ row.top_model_run_id ? '已调用' : '未到达' }}</template></el-table-column>
+            <el-table-column label="决策证据" min-width="180"><template #default="{ row }">
+              <span>{{ statusLabel(row.decision_evidence_status || 'MISSING') }}</span>
+              <span v-if="row.decision_evidence_pack_manifest_id" class="hash-value"> · {{ shortHash(row.decision_evidence_pack_manifest_id) }}</span>
+            </template></el-table-column>
+            <el-table-column label="普通模型" min-width="150"><template #default="{ row }">{{ validationRoleStatus(row, 'NORMAL_TRADER') }}</template></el-table-column>
+            <el-table-column label="终审模型" min-width="170"><template #default="{ row }">{{ validationRoleStatus(row, 'TOP_RISK_REVIEWER') }}</template></el-table-column>
+            <el-table-column label="终审上下文" min-width="170"><template #default="{ row }">{{ validationTopContext(row) }}</template></el-table-column>
+            <el-table-column label="证据复用" min-width="120"><template #default="{ row }">{{ row.reused_research_and_normal ? '研究与普通模型已复用' : '未复用' }}</template></el-table-column>
             <el-table-column label="共识"><template #default="{ row }">{{ statusLabel(row.consensus_status || 'NOT_REACHED') }}</template></el-table-column>
             <el-table-column label="硬风控"><template #default="{ row }">{{ statusLabel(row.hard_risk_status || 'NOT_REACHED') }}</template></el-table-column>
             <el-table-column label="执行安全门" min-width="150"><template #default="{ row }">{{ statusLabel(row.execution_gate_status) }}</template></el-table-column>
+            <el-table-column label="Token 合计" min-width="110"><template #default="{ row }">{{ validationTokenTotal(row) }}</template></el-table-column>
             <el-table-column label="Snapshot" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.snapshot_id) }}</span></template></el-table-column>
             <el-table-column label="Context Hash" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.context_hash) }}</span></template></el-table-column>
-            <el-table-column label="失败原因" min-width="210"><template #default="{ row }">{{ row.failure_code || '—' }}</template></el-table-column>
+            <el-table-column label="失败原因" min-width="220"><template #default="{ row }">{{ validationFailureLabel(row) }}</template></el-table-column>
           </el-table>
 
           <h4>研究经理结构契约</h4>
@@ -985,7 +995,18 @@ const STATUS_LABELS: Record<string, string> = {
   SELF_HOSTED_ZERO: '自建服务 / 价格0',
   PROVIDER_PUBLISHED: '服务商价格',
   DISABLED: '已停用',
-  REJECTED: '已拒绝'
+  REJECTED: '已拒绝',
+  FAILED: '未完成',
+  COMPLETED: '已完成',
+  COMPLETE: '完整',
+  PARTIAL: '部分完整',
+  NOT_REACHED: '未到达',
+  PROPOSE_TRADE: '交易计划已生成',
+  MODEL_FAILED: '模型未执行',
+  MODEL_CONTEXT_WINDOW_EXCEEDED: '超过模型上下文窗口',
+  OVER_70: '已超过 70%',
+  OVER_85: '已超过 85%',
+  OVER_95: '已超过 95%'
 }
 
 const COMPONENT_LABELS: Record<string, string> = {
@@ -1034,6 +1055,47 @@ function roleLabel(role?: string): string {
 
 function statusLabel(status?: string | null): string {
   return status ? STATUS_LABELS[status] || status : '未配置'
+}
+
+function validationRoleStatus(
+  row: Partial<RealModelValidationSummary>,
+  role: 'NORMAL_TRADER' | 'TOP_RISK_REVIEWER'
+): string {
+  const result = role === 'NORMAL_TRADER' ? row.normal_result : row.top_result
+  if (result?.model_meta?.error_type) return statusLabel(result.model_meta.error_type)
+  if (result?.status) return statusLabel(result.status)
+  const audit = [...(row.model_call_records || [])].reverse().find(item => item.role === role)
+  if (audit?.error_category) return statusLabel(audit.error_category)
+  return audit ? statusLabel(audit.structured_output_status) : statusLabel('NOT_REACHED')
+}
+
+function validationTokenTotal(row: Partial<RealModelValidationSummary>): number {
+  return (row.model_call_records || []).reduce(
+    (total, item) => total + Number(item.total_tokens || 0),
+    0
+  )
+}
+
+function validationTopContext(row: Partial<RealModelValidationSummary>): string {
+  const audit = [...(row.model_call_records || [])].reverse().find(
+    item => item.role === 'TOP_RISK_REVIEWER' && item.estimated_input_tokens != null
+  )
+  if (!audit) return '—'
+  return `${audit.estimated_input_tokens} + ${audit.configured_max_output_tokens ?? '—'} / ${audit.model_context_window ?? '—'}`
+}
+
+function contextWarningLabel(value?: ModelRunSummary['context_warning_level']): string {
+  if (!value || value === 'NONE') return '无'
+  return statusLabel(value)
+}
+
+function validationFailureLabel(row: Partial<RealModelValidationSummary>): string {
+  if (!row.failure_code) return '—'
+  const topError = row.top_result?.model_meta?.error_type
+  if (row.failure_code === 'TOP_MODEL_FAILED' && topError) {
+    return `风险终审模型：${statusLabel(topError)}`
+  }
+  return statusLabel(row.failure_code)
 }
 
 function shortHash(value?: string | null): string {

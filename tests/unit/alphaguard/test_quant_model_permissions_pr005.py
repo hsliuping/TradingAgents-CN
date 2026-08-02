@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 
 import pytest
@@ -113,7 +112,7 @@ def review_payload(status="CONFIRM", **overrides):
         "missing_evidence": [],
         "logical_conflicts": [],
         "risk_findings": [],
-        "adjusted_plan": None,
+        "proposed_changes": {},
         "material_change_fields": [],
         "review_reason": "fixed quant review",
     }
@@ -221,7 +220,7 @@ def test_quant_top_confirm_reads_context_plan_policy_and_not_legacy_reports():
     review = TopReviewDecision.model_validate(result["top_review_decision"])
     assert review.status == "CONFIRM"
     assert review.plan_id == plan.plan_id
-    assert review.model_meta.prompt_version == "top_review_decision_quant_v1"
+    assert review.model_meta.prompt_version == "top_review_decision_quant_v2"
     assert review.model_meta.context_hash == context.context_hash
     prompt = json.dumps(llm.messages, ensure_ascii=False)
     assert context.quant_proposal_id in prompt
@@ -233,21 +232,21 @@ def test_quant_top_confirm_reads_context_plan_policy_and_not_legacy_reports():
 def test_quant_top_accepts_provable_risk_only_adjustment():
     context = make_context()
     plan = make_plan(context)
-    adjusted = plan.model_dump(mode="json")
-    adjusted.update(
-        confidence=0.7,
-        initial_position_pct=0.04,
-        max_position_pct=0.08,
-        entry_zone={"lower": 99.5, "upper": 100.5, "currency": "CNY"},
-        stop_conditions=[
-            {"condition_id": "top-stop", "description": "additional stop"}
-        ],
-    )
+    proposed_changes = {
+        "confidence": 0.7,
+        "initial_position_pct": 0.04,
+        "max_position_pct": 0.08,
+        "entry_zone": {"lower": 99.5, "upper": 100.5, "currency": "CNY"},
+        "stop_conditions": [
+            item.model_dump(mode="json") for item in plan.stop_conditions
+        ]
+        + [{"condition_id": "top-stop", "description": "additional stop"}],
+    }
     result = run_top(
         context,
         plan,
         CapturingLLM(
-            review_payload(status="RISK_ADJUST", adjusted_plan=adjusted)
+            review_payload(status="RISK_ADJUST", proposed_changes=proposed_changes)
         ),
     )
     review = TopReviewDecision.model_validate(result["top_review_decision"])
@@ -272,13 +271,11 @@ def test_quant_top_accepts_provable_risk_only_adjustment():
 def test_quant_top_rejects_non_whitelisted_adjustments(field, value):
     context = make_context()
     plan = make_plan(context)
-    adjusted = plan.model_dump(mode="json")
-    adjusted[field] = value
     result = run_top(
         context,
         plan,
         CapturingLLM(
-            review_payload(status="RISK_ADJUST", adjusted_plan=adjusted)
+            review_payload(status="RISK_ADJUST", proposed_changes={field: value})
         ),
     )
     assert result["top_review_decision"]["status"] == "INVALID_OUTPUT"
@@ -298,15 +295,13 @@ def test_quant_top_rejects_non_whitelisted_adjustments(field, value):
 def test_material_revision_cannot_hide_a_risk_increase(field, value):
     context = make_context()
     plan = make_plan(context)
-    adjusted = plan.model_dump(mode="json")
-    adjusted[field] = value
     result = run_top(
         context,
         plan,
         CapturingLLM(
             review_payload(
                 status="MATERIAL_REVISION",
-                adjusted_plan=adjusted,
+                proposed_changes={field: value},
                 material_change_fields=[field],
             )
         ),

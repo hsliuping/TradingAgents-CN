@@ -9,7 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from tradingagents.alphaguard.evidence_schemas import (
     EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+    EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3,
     EvidenceSnapshot,
+)
+from tradingagents.alphaguard.decision_evidence_schemas import (
+    DecisionEvidencePackManifest,
 )
 from tradingagents.alphaguard.instruments import normalize_instrument
 from tradingagents.alphaguard.production_data_schemas import (
@@ -18,6 +22,7 @@ from tradingagents.alphaguard.production_data_schemas import (
 )
 
 from .benchmark_price_window_service import BenchmarkPriceWindowService
+from .decision_evidence_pack_service import DecisionEvidencePackService
 from .data_quality_gate import DataQualityGate, _as_datetime
 from .evidence_snapshot_service import EvidenceSnapshotService
 from .market_context_window_service import MarketContextWindowService
@@ -36,6 +41,9 @@ class ResolvedSnapshotData(BaseModel):
     prices: list[dict[str, Any]] = Field(default_factory=list)
     benchmark_prices: list[dict[str, Any]] = Field(default_factory=list)
     financials: list[dict[str, Any]] = Field(default_factory=list)
+    cashflows: list[dict[str, Any]] = Field(default_factory=list)
+    dividends: list[dict[str, Any]] = Field(default_factory=list)
+    corporate_actions: list[dict[str, Any]] = Field(default_factory=list)
     news: list[dict[str, Any]] = Field(default_factory=list)
     announcements: list[dict[str, Any]] = Field(default_factory=list)
     positions: list[dict[str, Any]] = Field(default_factory=list)
@@ -46,6 +54,7 @@ class ResolvedSnapshotData(BaseModel):
     market_context: list[dict[str, Any]] = Field(default_factory=list)
     market_context_window: list[dict[str, Any]] = Field(default_factory=list)
     benchmark_price_window: list[dict[str, Any]] = Field(default_factory=list)
+    decision_evidence_pack: list[dict[str, Any]] = Field(default_factory=list)
     trading_status: list[dict[str, Any]] = Field(default_factory=list)
     trading_calendar: list[dict[str, Any]] = Field(default_factory=list)
     input_refs: list[str]
@@ -122,6 +131,9 @@ class SnapshotDataResolver:
             "prices": [],
             "benchmark_prices": [],
             "financials": [],
+            "cashflows": [],
+            "dividends": [],
+            "corporate_actions": [],
             "news": [],
             "announcements": [],
             "positions": [],
@@ -132,6 +144,7 @@ class SnapshotDataResolver:
             "market_context": [],
             "market_context_window": [],
             "benchmark_price_window": [],
+            "decision_evidence_pack": [],
             "trading_status": [],
             "trading_calendar": [],
         }
@@ -143,6 +156,9 @@ class SnapshotDataResolver:
             "index_prices": "benchmark_prices",
             "financials": "financials",
             "financial_data": "financials",
+            "cashflow_evidence": "cashflows",
+            "dividend_evidence": "dividends",
+            "corporate_actions": "corporate_actions",
             "news": "news",
             "announcements": "announcements",
             "account_positions": "positions",
@@ -161,6 +177,7 @@ class SnapshotDataResolver:
             "market_breadth": "market_context",
             "market_context_window": "market_context_window",
             "benchmark_price_window": "benchmark_price_window",
+            "decision_evidence_pack": "decision_evidence_pack",
             "trading_status": "trading_status",
             "trading_calendar": "trading_calendar",
             "calendar": "trading_calendar",
@@ -221,6 +238,9 @@ class SnapshotDataResolver:
         if category in {
             "prices",
             "financials",
+            "cashflows",
+            "dividends",
+            "corporate_actions",
             "news",
             "announcements",
             "positions",
@@ -234,6 +254,7 @@ class SnapshotDataResolver:
             "market_context",
             "market_context_window",
             "benchmark_price_window",
+            "decision_evidence_pack",
         }:
             if category in {
                 "market_context_window",
@@ -248,13 +269,24 @@ class SnapshotDataResolver:
                 # insertion time, for temporal eligibility.
                 observed = _first_datetime(document, ("available_at",))
                 return _on_or_before(observed, snapshot.price_cutoff_at)
+            if category == "decision_evidence_pack":
+                source_date = _first_datetime(document, ("source_trade_date",))
+                decision_time = _first_datetime(document, ("decision_time",))
+                available = _first_datetime(document, ("available_at",))
+                return (
+                    source_date is not None
+                    and source_date.date() == snapshot.trade_date
+                    and decision_time is not None
+                    and decision_time.date() == snapshot.trade_date
+                    and _on_or_before(available, snapshot.announcement_cutoff_at)
+                )
             if not _date_on_or_before(document, snapshot.trade_date):
                 return False
             observed = _first_datetime(
                 document, ("timestamp", "as_of", "updated_at", "created_at")
             )
             return observed is None or _on_or_before(observed, snapshot.price_cutoff_at)
-        if category == "financials":
+        if category in {"financials", "cashflows"}:
             report = _first_datetime(document, ("report_period", "end_date"))
             disclosed = _first_datetime(
                 document,
@@ -270,7 +302,7 @@ class SnapshotDataResolver:
                 document, ("publish_time", "published_at", "timestamp")
             )
             return _on_or_before(published, snapshot.news_cutoff_at)
-        if category == "announcements":
+        if category in {"announcements", "dividends", "corporate_actions"}:
             published = _first_datetime(
                 document,
                 ("announcement_time", "published_at", "publish_time", "timestamp"),
@@ -324,7 +356,10 @@ class SnapshotDataResolver:
         snapshot: EvidenceSnapshot,
         accepted: dict[str, list[dict[str, Any]]],
     ) -> None:
-        if snapshot.schema_version != EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2:
+        if snapshot.schema_version not in {
+            EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+            EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3,
+        }:
             return
         if len(accepted["benchmark_price_window"]) != 1:
             raise SnapshotResolutionError(
@@ -424,6 +459,75 @@ class SnapshotDataResolver:
             raise SnapshotResolutionError(
                 "exact MarketContext identity/hash mismatch"
             )
+        if snapshot.schema_version != EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3:
+            return
+        if len(accepted["decision_evidence_pack"]) != 1:
+            raise SnapshotResolutionError(
+                "Decision Evidence Pack manifest is missing or ambiguous"
+            )
+        evidence_payload = dict(accepted["decision_evidence_pack"][0])
+        evidence_payload.pop("_reference", None)
+        evidence_payload.pop("_reference_date", None)
+        manifest = DecisionEvidencePackManifest.model_validate(evidence_payload)
+        if not DecisionEvidencePackService.verify_integrity(manifest):
+            raise SnapshotResolutionError(
+                "Decision Evidence Pack manifest content hash mismatch"
+            )
+        if (
+            manifest.manifest_id != snapshot.decision_evidence_pack_manifest_id
+            or manifest.manifest_hash
+            != snapshot.decision_evidence_pack_manifest_hash
+            or manifest.source_trade_date != snapshot.trade_date
+            or manifest.symbol != snapshot.symbol
+            or manifest.market != snapshot.market
+            or manifest.overall_status != "COMPLETE"
+            or manifest.evidence_completeness_matrix
+            != snapshot.evidence_completeness_matrix
+        ):
+            raise SnapshotResolutionError(
+                "Decision Evidence Pack identity, status, or matrix mismatch"
+            )
+        resolved_by_reference = {
+            str(document.get("_reference") or ""): str(
+                document.get("content_hash") or ""
+            )
+            for category in (
+                "financials",
+                "cashflows",
+                "dividends",
+                "corporate_actions",
+                "announcements",
+            )
+            for document in accepted[category]
+        }
+        for reference, expected_hash in zip(
+            manifest.ordered_evidence_refs,
+            manifest.ordered_evidence_hashes,
+        ):
+            if resolved_by_reference.get(reference) != expected_hash:
+                raise SnapshotResolutionError(
+                    "Decision Evidence Pack source identity/hash mismatch"
+                )
+        for category in (
+            "financials",
+            "cashflows",
+            "dividends",
+            "corporate_actions",
+            "announcements",
+        ):
+            for document in accepted[category]:
+                published = _first_datetime(
+                    document,
+                    (
+                        "published_at",
+                        "announcement_time",
+                        "publish_time",
+                    ),
+                )
+                if published is None or _utc(published) > _utc(manifest.decision_time):
+                    raise SnapshotResolutionError(
+                        "Decision Evidence Pack contains future or undated evidence"
+                    )
 
     @staticmethod
     def _matches_target(

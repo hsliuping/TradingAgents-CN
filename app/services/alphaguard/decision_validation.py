@@ -131,6 +131,7 @@ def validate_review_against_context(
     context: DecisionContext,
     *,
     model_runtime_context_hash: str | None = None,
+    additional_prompt_versions: set[str] | None = None,
 ) -> None:
     expected = {
         "analysis_id": context.analysis_id,
@@ -155,14 +156,18 @@ def validate_review_against_context(
     _validate_model_meta(
         review.model_meta,
         context=context,
-        prompt_versions={context.top_prompt_version},
+        prompt_versions={context.top_prompt_version}
+        | (additional_prompt_versions or set()),
         model_runtime_context_hash=model_runtime_context_hash,
     )
     if review.adjusted_plan is not None:
         validate_plan_against_context(
             review.adjusted_plan,
             context,
-            additional_prompt_versions={context.top_prompt_version},
+            additional_prompt_versions={
+                context.top_prompt_version,
+                review.model_meta.prompt_version,
+            },
             model_runtime_context_hash=model_runtime_context_hash,
         )
         if review.status == "MATERIAL_REVISION":

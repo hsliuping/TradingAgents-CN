@@ -209,7 +209,15 @@ export interface ModelRunSummary {
   prompt_id: string
   prompt_version: string
   structured_output_status: string
+  estimated_input_tokens?: number | null
+  input_tokens?: number | null
+  output_tokens?: number | null
   total_tokens?: number | null
+  model_context_window?: number | null
+  configured_max_output_tokens?: number | null
+  remaining_context_capacity?: number | null
+  context_usage_ratio?: number | null
+  context_warning_level?: 'NONE' | 'OVER_70' | 'OVER_85' | 'OVER_95' | null
   estimated_cost?: number | null
   latency_ms: number
   request_hash: string
@@ -227,14 +235,29 @@ export interface RealModelValidationSummary {
   sample_selection_version?: string | null
   actual_production_decision?: false
   actual_execution?: false
+  reused_from_validation_run_id?: string | null
+  reused_research_and_normal?: boolean
   symbol?: string | null
   source_trade_date?: string | null
   snapshot_id?: string | null
   context_hash?: string | null
   decision_context_hash?: string | null
   source_quant_proposal_id?: string | null
+  decision_evidence_pack_manifest_id?: string | null
+  decision_evidence_status?: 'COMPLETE' | 'PARTIAL' | null
+  decision_evidence_matrix?: Record<string, string> | null
+  benchmark_count?: number | null
   normal_model_run_id?: string | null
   top_model_run_id?: string | null
+  normal_result?: {
+    status?: string | null
+    action?: string | null
+    model_meta?: { error_type?: string | null } | null
+  } | null
+  top_result?: {
+    status?: string | null
+    model_meta?: { error_type?: string | null } | null
+  } | null
   consensus_status?: string | null
   hard_risk_status?: string | null
   execution_gate_status: 'BLOCKED_VALIDATION_MODE' | 'NOT_REACHED'

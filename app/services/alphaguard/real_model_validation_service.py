@@ -2,22 +2,31 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from app.schemas.alphaguard.decision import DecisionContext, canonical_hash
-from app.schemas.alphaguard.model_runtime import RealModelValidationRun
+from app.schemas.alphaguard.model_runtime import (
+    RealModelValidationRun,
+    ResearchAgentResult,
+)
 from app.schemas.alphaguard.quant import MarketRegimeResult, QuantTradeProposal
 from tradingagents.alphaguard.backfill_schemas import HistoricalResearchSnapshot
 from tradingagents.alphaguard.evidence_schemas import (
-    EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+    EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3,
 )
 from tradingagents.alphaguard.production_data_schemas import (
     BenchmarkPriceWindowManifest,
     MarketContextWindowManifest,
 )
+from tradingagents.alphaguard.decision_schemas import (
+    NormalTradePlan,
+    TopModelDecisionOutput,
+)
+from tradingagents.alphaguard.structured_output import model_output_schema
+from tradingagents.agents.managers.risk_manager import TOP_REQUEST_BUILDER_VERSION
 
 from .benchmark_price_window_service import BenchmarkPriceWindowService
 from .cn_trading_status_service import CNTradingStatusService
@@ -26,6 +35,7 @@ from .decision_context_builder import (
     DecisionContextBuilder,
     _refs,
 )
+from .decision_evidence_pack_service import DecisionEvidencePackService
 from .evidence_snapshot_service import EvidenceSnapshotService
 from .execution_mode_safety_gate import (
     ExecutionModeBlockedError,
@@ -34,6 +44,7 @@ from .execution_mode_safety_gate import (
 from .hard_risk_engine import HardRiskEngine
 from .market_context_window_service import MarketContextWindowService
 from .model_profile_registry import ModelProfileRegistry
+from .model_budget_service import ModelBudgetService
 from .model_runtime_context import build_model_runtime_context
 from .model_runtime_repository import ModelRuntimeRepository
 from .model_runtime_status_service import ModelRuntimeStatusService
@@ -55,8 +66,14 @@ from .snapshot_research_runtime import (
 VALIDATION_SNAPSHOT_COLLECTION = "ag_model_validation_evidence_snapshots"
 VALIDATION_QUALITY_COLLECTION = "ag_model_validation_quality_reports"
 VALIDATION_ACCOUNT_COLLECTION = "ag_model_validation_account_evidence"
-VALIDATION_CONTRACT_VERSION = "real-model-historical-evidence-v10"
-SAMPLE_SELECTION_VERSION = "triggered-date-desc-symbol-asc-proposal-asc-v1"
+VALIDATION_CONTRACT_VERSION = "real-model-historical-decision-evidence-v13"
+REUSABLE_VALIDATION_CONTRACT_VERSION = (
+    "real-model-historical-decision-evidence-v11"
+)
+TOKEN_ADMISSION_POLICY_VERSION = "model-context-window-only-v1"
+SAMPLE_SELECTION_VERSION = (
+    "evidence-completeness-factor-mean-date-symbol-proposal-v1"
+)
 EXPECTED_NORMAL_MODEL = "gpt-5.6-luna"
 EXPECTED_TOP_MODEL = "gpt-5.6-sol"
 VALIDATION_EVIDENCE_REFS_PER_CATEGORY = 5
@@ -90,12 +107,52 @@ def _stable_id(namespace: str, payload: Any) -> str:
     )
 
 
-def _sample_order_key(proposal: QuantTradeProposal) -> tuple[int, str, str]:
+def _proposal_selection_score(proposal: QuantTradeProposal) -> float:
+    scores = [
+        float(value)
+        for value in proposal.factor_summary.values()
+        if value is not None
+    ]
+    return round(sum(scores) / len(scores), 8) if scores else 0.0
+
+
+def _sample_order_key(
+    proposal: QuantTradeProposal,
+    completeness_score: float = 0.0,
+) -> tuple[float, float, int, str, str]:
     return (
-        -proposal.trade_date.toordinal(),
+        -float(completeness_score),
+        -_proposal_selection_score(proposal),
+        proposal.trade_date.toordinal(),
         proposal.symbol,
         proposal.proposal_id,
     )
+
+
+def _rank_deduplicate_samples(
+    samples: list[dict[str, Any]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    ranked = sorted(
+        samples,
+        key=lambda item: _sample_order_key(
+            item["proposal"],
+            item["evidence_completeness_score"],
+        ),
+    )
+    selected: list[dict[str, Any]] = []
+    seen_symbol_dates: set[tuple[str, date]] = set()
+    for item in ranked:
+        proposal = item["proposal"]
+        identity = (proposal.symbol, proposal.trade_date)
+        if identity in seen_symbol_dates:
+            continue
+        seen_symbol_dates.add(identity)
+        selected.append(item)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def _recent_documents(
@@ -123,6 +180,15 @@ def _recent_documents(
         return document_date, str(document.get("_reference") or "")
 
     return sorted(documents, key=key, reverse=True)[:limit]
+
+
+def _frozen_snapshot_prompt_version(
+    snapshot,
+    key: str,
+    fallback: str,
+) -> str:
+    value = str((snapshot.prompt_versions or {}).get(key) or "")
+    return value.rsplit("@", 1)[-1] if "@" in value else fallback
 
 
 def _decision_research_projection(result) -> dict[str, Any]:
@@ -179,12 +245,9 @@ class RealModelValidationService:
             except Exception:
                 continue
             candidates.append((proposal, raw))
-        # QuantTradeProposal has no ranking-score field. This stable ordering is
-        # versioned and uses only source proposal facts, never future returns.
-        candidates.sort(
-            key=lambda item: _sample_order_key(item[0])
-        )
-        selected: list[dict[str, Any]] = []
+        candidates.sort(key=lambda item: item[0].proposal_id)
+        eligible: list[dict[str, Any]] = []
+        evidence_service = DecisionEvidencePackService(self.db)
         for proposal, raw in candidates:
             wrapper_raw = await self.db["ag_research_snapshots"].find_one(
                 {
@@ -214,7 +277,12 @@ class RealModelValidationService:
                 if (parsed := _reference_date(reference)) is not None
             ):
                 continue
-            selected.append(
+            evidence_pack = await evidence_service.get_for_snapshot(
+                source_snapshot_id=wrapper.evidence_snapshot.snapshot_id,
+                symbol=proposal.symbol,
+                source_trade_date=proposal.trade_date,
+            )
+            eligible.append(
                 {
                     "sample_id": str(raw["sample_id"]),
                     "proposal": proposal,
@@ -222,11 +290,14 @@ class RealModelValidationService:
                     "regime": MarketRegimeResult.model_validate(
                         regime_raw["regime_result"]
                     ),
+                    "decision_evidence_pack": evidence_pack,
+                    "evidence_completeness_score": (
+                        evidence_pack.completeness_score if evidence_pack else 0.0
+                    ),
+                    "proposal_selection_score": _proposal_selection_score(proposal),
                 }
             )
-            if len(selected) >= limit:
-                break
-        return selected
+        return _rank_deduplicate_samples(eligible, limit=limit)
 
     async def _historical_sample(
         self,
@@ -237,15 +308,24 @@ class RealModelValidationService:
         samples = await self._historical_samples(
             proposal_id=proposal_id,
             user_id=user_id,
-            limit=1,
+            limit=100,
         )
-        return samples[0] if samples else None
+        return next(
+            (
+                sample
+                for sample in samples
+                if sample["decision_evidence_pack"] is not None
+                and sample["decision_evidence_pack"].overall_status == "COMPLETE"
+            ),
+            None,
+        )
 
     def _validation_contract_hash(self) -> str:
         manager_prompt = self.prompts.definition(
             "alphaguard_research_manager_snapshot",
             RESEARCH_MANAGER_CONTRACT_VERSION,
         )
+        top_prompt = self.prompts.definition("top_risk_review_prompt")
         return canonical_hash(
             {
                 "validation_contract_version": VALIDATION_CONTRACT_VERSION,
@@ -256,7 +336,158 @@ class RealModelValidationService:
                 "research_manager_schema_hash": RESEARCH_MANAGER_SCHEMA_HASH,
                 "research_manager_prompt_hash": manager_prompt.template_hash,
                 "sample_selection_version": SAMPLE_SELECTION_VERSION,
+                "decision_evidence_pack_schema_version": (
+                    "decision-evidence-pack-v3"
+                ),
+                "token_admission_policy_version": TOKEN_ADMISSION_POLICY_VERSION,
+                "top_model_payload_schema_version": (
+                    "top_model_decision_output_v1"
+                ),
+                "top_model_payload_schema_hash": canonical_hash(
+                    model_output_schema(TopModelDecisionOutput)
+                ),
+                "top_prompt_version": top_prompt.prompt_version,
+                "top_prompt_hash": top_prompt.template_hash,
+                "top_request_builder_version": TOP_REQUEST_BUILDER_VERSION,
+                "reusable_validation_contract_version": (
+                    REUSABLE_VALIDATION_CONTRACT_VERSION
+                ),
             }
+        )
+
+    async def _reusable_validation(
+        self,
+        *,
+        sample: dict[str, Any],
+    ) -> RealModelValidationRun:
+        proposal: QuantTradeProposal = sample["proposal"]
+        rows = await self.repository.list(
+            "validation_runs",
+            {
+                "validation_contract_version": REUSABLE_VALIDATION_CONTRACT_VERSION,
+                "source_quant_proposal_id": proposal.proposal_id,
+                "source_trade_date": mongo_date(proposal.trade_date),
+                "symbol": proposal.symbol,
+                "normal_result.status": "PROPOSE_TRADE",
+                "top_result.status": "MODEL_FAILED",
+                "top_result.model_meta.error_type": (
+                    "SNAPSHOT_TOKEN_BUDGET_EXCEEDED"
+                ),
+                "actual_production_decision": False,
+                "actual_execution": False,
+            },
+            limit=2,
+        )
+        if len(rows) != 1:
+            raise RealModelValidationError(
+                "REUSABLE_V11_VALIDATION_NOT_UNIQUE"
+            )
+        result = RealModelValidationRun.model_validate(rows[0])
+        if not result.snapshot_id or not result.context_hash:
+            raise RealModelValidationError("REUSABLE_V11_INPUT_IDENTITY_MISSING")
+        if not result.decision_context_hash or not result.normal_result:
+            raise RealModelValidationError("REUSABLE_V11_DECISION_MISSING")
+        if not result.research_result_ids:
+            raise RealModelValidationError("REUSABLE_V11_RESEARCH_MISSING")
+        return result
+
+    async def _reused_research(
+        self,
+        *,
+        predecessor: RealModelValidationRun,
+    ) -> list[ResearchAgentResult]:
+        results: list[ResearchAgentResult] = []
+        expected_analysis_id = f"real-model-validation:{predecessor.validation_run_id}"
+        for result_id in predecessor.research_result_ids:
+            raw = await self.repository.get(
+                "research_results", {"research_result_id": result_id}
+            )
+            if raw is None:
+                raise RealModelValidationError(
+                    "REUSABLE_V11_RESEARCH_RESULT_MISSING"
+                )
+            result = ResearchAgentResult.model_validate(raw)
+            if (
+                result.analysis_id != expected_analysis_id
+                or result.snapshot_id != predecessor.snapshot_id
+                or result.context_hash != predecessor.context_hash
+            ):
+                raise RealModelValidationError(
+                    "REUSABLE_V11_RESEARCH_IDENTITY_MISMATCH"
+                )
+            results.append(result)
+        return results
+
+    async def _reused_top_budget(
+        self,
+        *,
+        sample: dict[str, Any],
+        predecessor: RealModelValidationRun,
+        normal_profile,
+        top_profile,
+    ):
+        snapshot = await EvidenceSnapshotService(
+            db=self.db,
+            snapshot_collection=VALIDATION_SNAPSHOT_COLLECTION,
+            quality_collection=VALIDATION_QUALITY_COLLECTION,
+            enable_shadow_hook=False,
+        ).get(predecessor.snapshot_id, user_id=sample["proposal"].user_id)
+        if snapshot is None or not EvidenceSnapshotService.verify_integrity(snapshot):
+            raise RealModelValidationError(
+                "REUSABLE_V11_SNAPSHOT_INTEGRITY_FAILED"
+            )
+        if snapshot.immutable_hash != predecessor.snapshot_hash:
+            raise RealModelValidationError("REUSABLE_V11_SNAPSHOT_HASH_MISMATCH")
+        context, resolved, _ = await self._context(
+            validation_run_id=predecessor.validation_run_id,
+            sample=sample,
+            snapshot=snapshot,
+            normal_profile=normal_profile,
+            top_profile=top_profile,
+        )
+        verified_model_context = build_model_runtime_context(
+            context,
+            resolved,
+            include_resolved_refs=False,
+        )
+        if context.context_hash != predecessor.decision_context_hash:
+            raise RealModelValidationError("REUSABLE_V11_CONTEXT_HASH_MISMATCH")
+        research = await self._reused_research(predecessor=predecessor)
+        normal = NormalTradePlan.model_validate(predecessor.normal_result)
+        if normal.model_meta.context_hash != predecessor.context_hash:
+            raise RealModelValidationError(
+                "REUSABLE_V11_NORMAL_IDENTITY_MISMATCH"
+            )
+        policy = await RiskPolicyRegistry(self.db).get_active()
+        top_prompt_definition = self.prompts.definition(
+            top_profile.prompt_profile_id
+        )
+        top_prompt = await self.prompts.persisted(
+            top_prompt_definition.prompt_id,
+            top_prompt_definition.prompt_version,
+        )
+        rendered = ProfiledDecisionModelRunner.render_top_input(
+            context=context,
+            plan=normal,
+            risk_policy_summary=policy.model_dump(
+                mode="json", exclude={"created_at", "config_hash"}
+            ),
+            research_results=[
+                _decision_research_projection(item) for item in research
+            ],
+            model_runtime_context_hash=predecessor.context_hash,
+            top_prompt_version=top_prompt.prompt_version,
+            top_prompt_template=top_prompt.template,
+            structured_output_mode=top_profile.structured_output_mode,
+            run_mode="REAL_MODEL_VALIDATION",
+        )
+        if verified_model_context.snapshot_id != predecessor.snapshot_id:
+            raise RealModelValidationError("REUSABLE_V11_SNAPSHOT_ID_MISMATCH")
+        return await ModelBudgetService(self.db).check(
+            profile=top_profile,
+            analysis_id=context.analysis_id,
+            snapshot_id=context.snapshot_id,
+            rendered_input=rendered,
         )
 
     async def _source_context_count(self, trade_date: date) -> int:
@@ -301,17 +532,76 @@ class RealModelValidationService:
         if top is not None and top.model_name != EXPECTED_TOP_MODEL:
             blockers.append("TOP_MODEL_IDENTITY_MISMATCH")
         budget = status.get("budget") or {}
-        if int(budget.get("remaining_calls") or 0) < 8:
+        if int(budget.get("remaining_calls") or 0) < 1:
             blockers.append("RESOURCE_BUDGET_NOT_READY")
-        sample = await self._historical_sample(
+        if top is not None and top.max_input_tokens <= top.max_output_tokens:
+            blockers.append("TOP_MODEL_CONTEXT_WINDOW_NOT_READY")
+        ranked_samples = await self._historical_samples(
             proposal_id=proposal_id,
             user_id=user_id,
+            limit=100,
         )
+        sample = next(
+            (
+                item
+                for item in ranked_samples
+                if item["decision_evidence_pack"] is not None
+                and item["decision_evidence_pack"].overall_status == "COMPLETE"
+            ),
+            None,
+        )
+        evidence_gate = [
+            {
+                "source_proposal_id": item["proposal"].proposal_id,
+                "source_snapshot_id": item["proposal"].snapshot_id,
+                "symbol": item["proposal"].symbol,
+                "trade_date": item["proposal"].trade_date.isoformat(),
+                "proposal_selection_score": item["proposal_selection_score"],
+                "manifest_id": (
+                    item["decision_evidence_pack"].manifest_id
+                    if item["decision_evidence_pack"]
+                    else None
+                ),
+                "overall_status": (
+                    item["decision_evidence_pack"].overall_status
+                    if item["decision_evidence_pack"]
+                    else "MISSING"
+                ),
+                "completeness_score": item["evidence_completeness_score"],
+                "matrix": (
+                    item[
+                        "decision_evidence_pack"
+                    ].evidence_completeness_matrix.model_dump(mode="json")
+                    if item["decision_evidence_pack"]
+                    else None
+                ),
+            }
+            for item in ranked_samples
+        ]
         evidence: dict[str, Any] | None = None
-        if sample is None:
+        top_budget_decision = None
+        if not ranked_samples:
             blockers.append("NO_NATURAL_TRIGGERED_SAMPLE")
+        elif sample is None:
+            blockers.append("DECISION_EVIDENCE_PACK_NOT_READY")
         else:
             proposal = sample["proposal"]
+            predecessor = None
+            try:
+                predecessor = await self._reusable_validation(sample=sample)
+                if normal is not None and top is not None:
+                    top_budget_decision = await self._reused_top_budget(
+                        sample=sample,
+                        predecessor=predecessor,
+                        normal_profile=normal,
+                        top_profile=top,
+                    )
+                    if not top_budget_decision.allowed:
+                        blockers.append(
+                            top_budget_decision.reason_code or "BUDGET_BLOCKED"
+                        )
+            except RealModelValidationError as exc:
+                blockers.append(str(exc))
             context_count = await self._source_context_count(proposal.trade_date)
             if context_count < 61:
                 blockers.append("MARKET_CONTEXT_WINDOW_NOT_READY")
@@ -347,9 +637,46 @@ class RealModelValidationService:
                     "symbol": proposal.symbol,
                     "trade_date": proposal.trade_date.isoformat(),
                     "natural_trigger": True,
+                    "decision_evidence_pack_manifest_id": sample[
+                        "decision_evidence_pack"
+                    ].manifest_id,
+                    "decision_evidence_pack_status": sample[
+                        "decision_evidence_pack"
+                    ].overall_status,
                     "benchmark_count": benchmark["manifest"]["actual_count"],
                     "market_context_count": context["manifest"]["actual_count"],
                     "trading_status": trading_row["calculation_status"],
+                    "reusable_validation_run_id": (
+                        predecessor.validation_run_id if predecessor else None
+                    ),
+                    "reusable_snapshot_id": (
+                        predecessor.snapshot_id if predecessor else None
+                    ),
+                    "top_estimated_input_tokens": (
+                        top_budget_decision.estimated_input_tokens
+                        if top_budget_decision
+                        else None
+                    ),
+                    "top_configured_max_output_tokens": (
+                        top_budget_decision.estimated_output_tokens
+                        if top_budget_decision
+                        else None
+                    ),
+                    "top_model_context_window": (
+                        top_budget_decision.model_context_window
+                        if top_budget_decision
+                        else None
+                    ),
+                    "top_remaining_context_capacity": (
+                        top_budget_decision.remaining_context_capacity
+                        if top_budget_decision
+                        else None
+                    ),
+                    "top_context_warning_level": (
+                        top_budget_decision.context_warning_level
+                        if top_budget_decision
+                        else None
+                    ),
                 }
             except Exception as exc:
                 blockers.append(type(exc).__name__)
@@ -365,6 +692,15 @@ class RealModelValidationService:
             "decision_status": status.get("decision_status"),
             "normal_model": normal.model_name if normal else None,
             "top_model": top.model_name if top else None,
+            "top_model_context_window": (
+                top.max_input_tokens if top else None
+            ),
+            "top_configured_max_output_tokens": (
+                top.max_output_tokens if top else None
+            ),
+            "context_window_source": (
+                "MODEL_PROFILE_MAX_INPUT_TOKENS" if top else None
+            ),
             "budget": {
                 key: budget.get(key)
                 for key in (
@@ -376,6 +712,7 @@ class RealModelValidationService:
                 )
             },
             "evidence": evidence,
+            "evidence_gate": evidence_gate,
             "blocking_items": sorted(set(blockers)),
         }
 
@@ -473,6 +810,11 @@ class RealModelValidationService:
     ):
         proposal: QuantTradeProposal = sample["proposal"]
         source = sample["wrapper"].evidence_snapshot
+        decision_evidence = sample.get("decision_evidence_pack")
+        if decision_evidence is None or decision_evidence.overall_status != "COMPLETE":
+            raise RealModelValidationError(
+                "DECISION_EVIDENCE_PACK_NOT_READY: model calls are blocked"
+            )
         context_count = await self._source_context_count(proposal.trade_date)
         if context_count < 61:
             raise RealModelValidationError("historical MarketContext window is incomplete")
@@ -576,9 +918,20 @@ class RealModelValidationService:
             "benchmark_prices": [
                 f"index_daily:{quote_id}" for quote_id in benchmark.ordered_quote_ids
             ],
-            "financials": list(source.raw_refs.get("financials", [])),
+            "financials": list(decision_evidence.financial_evidence.source_refs),
+            "cashflow_evidence": list(
+                decision_evidence.cashflow_evidence.source_refs
+            ),
+            "dividend_evidence": list(
+                decision_evidence.dividend_evidence.source_refs
+            ),
             "news": list(source.raw_refs.get("news", [])),
-            "announcements": list(source.raw_refs.get("announcements", [])),
+            "announcements": list(
+                decision_evidence.announcement_evidence.source_refs
+            ),
+            "decision_evidence_pack": [
+                f"decision_evidence_pack:{decision_evidence.manifest_id}"
+            ],
             "market_context": [f"market_context:{market_context['context_id']}"],
             "market_context_window": [
                 f"market_context_window:{context_window.manifest_id}"
@@ -606,6 +959,9 @@ class RealModelValidationService:
                 "source_proposal_hash": proposal.input_hash,
                 "benchmark_manifest_hash": benchmark.manifest_hash,
                 "context_manifest_hash": context_window.manifest_hash,
+                "decision_evidence_pack_manifest_hash": (
+                    decision_evidence.manifest_hash
+                ),
                 "trading_status_hash": trading["content_hash"],
                 "account_evidence_hash": account_evidence["content_hash"],
                 "champion_version_refs": source.champion_version_refs,
@@ -628,6 +984,7 @@ class RealModelValidationService:
             "market_context",
             "market_context_window",
             "benchmark_price_window",
+            "decision_evidence_pack",
             "trading_status",
             "accounts",
             "instruments",
@@ -645,7 +1002,10 @@ class RealModelValidationService:
                 "news_cutoff_at": snapshot_cutoff,
                 "announcement_cutoff_at": snapshot_cutoff,
                 "price_data_version": source.price_data_version,
-                "financial_data_version": source.financial_data_version,
+                "financial_data_version": (
+                    f"{decision_evidence.schema_version}:"
+                    f"{decision_evidence.source_hash}"
+                ),
                 "news_data_version": source.news_data_version,
                 "market_context_id": str(market_context["context_id"]),
                 "market_context_hash": str(market_context["content_hash"]),
@@ -653,12 +1013,23 @@ class RealModelValidationService:
                 "market_context_window_manifest_hash": context_window.manifest_hash,
                 "benchmark_price_window_manifest_id": benchmark.manifest_id,
                 "benchmark_price_window_manifest_hash": benchmark.manifest_hash,
+                "decision_evidence_pack_manifest_id": (
+                    decision_evidence.manifest_id
+                ),
+                "decision_evidence_pack_manifest_hash": (
+                    decision_evidence.manifest_hash
+                ),
+                "evidence_completeness_matrix": (
+                    decision_evidence.evidence_completeness_matrix.model_dump(
+                        mode="python"
+                    )
+                ),
                 "required_benchmark_count": benchmark.required_count,
                 "actual_benchmark_count": benchmark.actual_count,
                 "evidence_contract_status": "COMPLETE",
                 "run_mode": "EVIDENCE_CONTRACT_VALIDATION",
                 "source_trade_date": proposal.trade_date,
-                "evidence_contract_version": "evidence-contract-v2",
+                "evidence_contract_version": "decision-evidence-pack-v3",
                 "reprocess_reason": VALIDATION_CONTRACT_VERSION,
                 "reprocess_input_hash": input_hash,
                 "original_realtime_run": False,
@@ -684,7 +1055,7 @@ class RealModelValidationService:
                 # announcements. The deterministic gate separately requires at
                 # least one of those two event-evidence categories.
                 "required_sources": required_sources,
-                "schema_version": EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+                "schema_version": EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3,
             },
         )
         return snapshot, account
@@ -777,7 +1148,7 @@ class RealModelValidationService:
             )[:VALIDATION_EVIDENCE_REFS_PER_CATEGORY],
             "financial_evidence": _refs(
                 _recent_documents(
-                    resolved.financials,
+                    resolved.financials + resolved.cashflows,
                     limit=VALIDATION_EVIDENCE_REFS_PER_CATEGORY,
                 ),
                 "financial",
@@ -791,7 +1162,9 @@ class RealModelValidationService:
             ),
             "announcement_evidence": _refs(
                 _recent_documents(
-                    resolved.announcements,
+                    resolved.announcements
+                    + resolved.dividends
+                    + resolved.corporate_actions,
                     limit=VALIDATION_EVIDENCE_REFS_PER_CATEGORY,
                 ),
                 "announcement",
@@ -801,8 +1174,12 @@ class RealModelValidationService:
             "data_quality_status": snapshot.data_quality.status,
             "risk_flags": sorted(set(proposal.risk_flags)),
             "missing_evidence": sorted(set(missing)),
-            "normal_prompt_version": normal_prompt.prompt_version,
-            "top_prompt_version": top_prompt.prompt_version,
+            "normal_prompt_version": _frozen_snapshot_prompt_version(
+                snapshot, "normal", normal_prompt.prompt_version
+            ),
+            "top_prompt_version": _frozen_snapshot_prompt_version(
+                snapshot, "top", top_prompt.prompt_version
+            ),
             "created_at": datetime.utcnow(),
             "schema_version": "decision-context-v1",
         }
@@ -837,9 +1214,15 @@ class RealModelValidationService:
             "model_profile_id",
             "model_profile_version",
             "structured_output_status",
+            "estimated_input_tokens",
             "input_tokens",
             "output_tokens",
             "total_tokens",
+            "model_context_window",
+            "configured_max_output_tokens",
+            "remaining_context_capacity",
+            "context_usage_ratio",
+            "context_warning_level",
             "latency_ms",
             "request_hash",
             "response_hash",
@@ -871,7 +1254,9 @@ class RealModelValidationService:
             "validation_runs", {"validation_run_id": validation_run_id}
         )
         if existing is not None:
-            return RealModelValidationRun.model_validate(existing)
+            return RealModelValidationRun.model_validate(existing).model_copy(
+                update={"idempotency_status": "REUSED"}
+            )
 
         started = datetime.now(timezone.utc)
         status = "CREATED"
@@ -879,6 +1264,7 @@ class RealModelValidationService:
         sample = None
         context = None
         model_context = None
+        runtime_context_hash = None
         validation_proposal_id = None
         research_ids: list[str] = []
         normal_run_id = top_run_id = None
@@ -888,6 +1274,8 @@ class RealModelValidationService:
         failure_code = None
         gate_invoked = False
         gate_status = "NOT_REACHED"
+        predecessor = None
+        reused_research_and_normal = False
         try:
             gate = await self.preflight(proposal_id=proposal_id, user_id=user_id)
             if gate["status"] != "READY":
@@ -903,13 +1291,34 @@ class RealModelValidationService:
                 if sample is None:
                     raise RealModelValidationError("natural historical sample disappeared")
                 normal_profile, top_profile = await self._profiles()
-                snapshot, account = await self._prepare_snapshot(
-                    sample=sample,
-                    normal_profile=normal_profile,
-                    top_profile=top_profile,
+                predecessor = await self._reusable_validation(sample=sample)
+                snapshot_service = EvidenceSnapshotService(
+                    db=self.db,
+                    snapshot_collection=VALIDATION_SNAPSHOT_COLLECTION,
+                    quality_collection=VALIDATION_QUALITY_COLLECTION,
+                    enable_shadow_hook=False,
                 )
+                snapshot = await snapshot_service.get(
+                    predecessor.snapshot_id,
+                    user_id=sample["proposal"].user_id,
+                )
+                if snapshot is None or not EvidenceSnapshotService.verify_integrity(
+                    snapshot
+                ):
+                    raise RealModelValidationError(
+                        "REUSABLE_V11_SNAPSHOT_INTEGRITY_FAILED"
+                    )
+                if snapshot.immutable_hash != predecessor.snapshot_hash:
+                    raise RealModelValidationError(
+                        "REUSABLE_V11_SNAPSHOT_HASH_MISMATCH"
+                    )
+                account = await self._account(sample["proposal"].user_id)
+                if account is None:
+                    raise RealModelValidationError(
+                        "formal validation account is unavailable"
+                    )
                 context, resolved, validation_proposal_id = await self._context(
-                    validation_run_id=validation_run_id,
+                    validation_run_id=predecessor.validation_run_id,
                     sample=sample,
                     snapshot=snapshot,
                     normal_profile=normal_profile,
@@ -920,20 +1329,22 @@ class RealModelValidationService:
                     resolved,
                     include_resolved_refs=False,
                 )
-                research_runtime = SnapshotResearchRuntime(self.db)
-                research = await research_runtime.run(
-                    analysis_id=context.analysis_id,
-                    context=model_context,
-                    run_mode="REAL_MODEL_VALIDATION",
-                    profile_override=normal_profile,
-                )
-                research.append(
-                    await research_runtime.disabled_social_result(
-                        analysis_id=context.analysis_id,
-                        context=model_context,
+                if (
+                    context.context_hash != predecessor.decision_context_hash
+                    or model_context.snapshot_id != predecessor.snapshot_id
+                ):
+                    raise RealModelValidationError(
+                        "REUSABLE_V11_CONTEXT_HASH_MISMATCH"
                     )
+                runtime_context_hash = predecessor.context_hash
+                research = await self._reused_research(
+                    predecessor=predecessor
                 )
                 research_ids = [item.research_result_id for item in research]
+                if research_ids != predecessor.research_result_ids:
+                    raise RealModelValidationError(
+                        "REUSABLE_V11_RESEARCH_ORDER_MISMATCH"
+                    )
                 if any(
                     item.status
                     not in {"SUCCESS", "INSUFFICIENT_DATA", "DISABLED_NOT_REQUIRED"}
@@ -945,72 +1356,84 @@ class RealModelValidationService:
                     research_projection = [
                         _decision_research_projection(item) for item in research
                     ]
+                    normal = NormalTradePlan.model_validate(
+                        predecessor.normal_result
+                    )
+                    if (
+                        normal.status != "PROPOSE_TRADE"
+                        or normal.analysis_id != context.analysis_id
+                        or normal.snapshot_id != context.snapshot_id
+                        or normal.decision_context_id != context.decision_context_id
+                        or normal.quant_proposal_id != context.quant_proposal_id
+                        or normal.model_meta.context_hash != runtime_context_hash
+                    ):
+                        raise RealModelValidationError(
+                            "REUSABLE_V11_NORMAL_IDENTITY_MISMATCH"
+                        )
+                    normal_result = normal.model_dump(mode="json")
+                    normal_run_id = predecessor.normal_model_run_id
+                    reused_research_and_normal = True
                     runner = await ProfiledDecisionModelRunner.create(
                         db=self.db,
                         run_mode="REAL_MODEL_VALIDATION",
                         automated_execution_allowed=False,
-                        model_runtime_context_hash=model_context.context_hash,
+                        model_runtime_context_hash=runtime_context_hash,
                         research_results=research_projection,
                     )
-                    normal = await runner.run_normal(
+                    policy = await RiskPolicyRegistry(self.db).get_active()
+                    top = await runner.run_top(
                         context=context,
-                        attempt_number=1,
+                        plan=normal,
+                        risk_policy_summary=policy.model_dump(
+                            mode="json", exclude={"created_at", "config_hash"}
+                        ),
+                        attempt_number=2,
                         trace_id=validation_run_id,
                     )
-                    normal_result = normal.model_dump(mode="json")
-                    if normal.status != "PROPOSE_TRADE":
-                        failure_code = f"NORMAL_{normal.status}"
+                    top_result = top.model_dump(mode="json")
+                    if top.status in {"MODEL_FAILED", "INVALID_OUTPUT"}:
+                        failure_code = f"TOP_{top.status}"
                         status = "FAILED"
                     else:
-                        policy = await RiskPolicyRegistry(self.db).get_active()
-                        top = await runner.run_top(
+                        validation_now = datetime.combine(
+                            context.trade_date,
+                            time(hour=15),
+                            tzinfo=timezone(timedelta(hours=8)),
+                        )
+                        consensus = ConsensusEngine().evaluate(
                             context=context,
                             plan=normal,
-                            risk_policy_summary=policy.model_dump(
-                                mode="json", exclude={"created_at", "config_hash"}
-                            ),
-                            attempt_number=1,
-                            trace_id=validation_run_id,
+                            review=top,
+                            now=validation_now,
                         )
-                        top_result = top.model_dump(mode="json")
-                        if top.status in {"MODEL_FAILED", "INVALID_OUTPUT"}:
-                            failure_code = f"TOP_{top.status}"
+                        consensus_status = consensus.status
+                        consensus_result = consensus.model_dump(mode="json")
+                        if consensus.status != "CONSENSUS_PASS":
+                            failure_code = f"CONSENSUS_{consensus.status}"
                             status = "FAILED"
                         else:
-                            consensus = ConsensusEngine().evaluate(
+                            hard_risk = HardRiskEngine().evaluate(
+                                data=resolved,
                                 context=context,
-                                plan=normal,
-                                review=top,
-                                now=datetime.now(timezone.utc),
+                                consensus=consensus,
+                                policy=policy,
+                                account_id=str(account["account_id"]),
+                                now=validation_now,
                             )
-                            consensus_status = consensus.status
-                            consensus_result = consensus.model_dump(mode="json")
-                            if consensus.status != "CONSENSUS_PASS":
-                                failure_code = f"CONSENSUS_{consensus.status}"
-                                status = "FAILED"
-                            else:
-                                hard_risk = HardRiskEngine().evaluate(
-                                    data=resolved,
-                                    context=context,
-                                    consensus=consensus,
-                                    policy=policy,
-                                    account_id=str(account["account_id"]),
-                                    now=datetime.now(timezone.utc),
+                            hard_risk_status = hard_risk.status
+                            hard_risk_result = hard_risk.model_dump(mode="json")
+                            try:
+                                ExecutionModeSafetyGate.assert_snapshot_allowed(
+                                    snapshot.model_dump(mode="python")
                                 )
-                                hard_risk_status = hard_risk.status
-                                hard_risk_result = hard_risk.model_dump(mode="json")
-                                try:
-                                    ExecutionModeSafetyGate.assert_snapshot_allowed(
-                                        snapshot.model_dump(mode="python")
-                                    )
-                                except ExecutionModeBlockedError:
-                                    gate_invoked = True
-                                    gate_status = "BLOCKED_VALIDATION_MODE"
-                                else:
-                                    raise RealModelValidationError(
-                                        "validation Snapshot escaped execution mode gate"
-                                    )
-                                status = "COMPLETED"
+                            except ExecutionModeBlockedError:
+                                gate_invoked = True
+                                gate_status = "BLOCKED_VALIDATION_MODE"
+                            else:
+                                raise RealModelValidationError(
+                                    "validation Snapshot escaped execution mode gate"
+                                )
+                            status = "COMPLETED"
                 call_records = await self._model_call_records(context.analysis_id)
                 normal_matches = [
                     item for item in call_records if item["role"] == "NORMAL_TRADER"
@@ -1022,7 +1445,11 @@ class RealModelValidationService:
                 top_run_id = top_matches[-1]["model_run_id"] if top_matches else None
         except Exception as exc:
             status = "FAILED"
-            failure_code = type(exc).__name__
+            failure_code = (
+                str(exc)
+                if isinstance(exc, RealModelValidationError)
+                else type(exc).__name__
+            )
 
         call_records = (
             await self._model_call_records(context.analysis_id) if context else []
@@ -1036,6 +1463,10 @@ class RealModelValidationService:
             "actual_production_decision": False,
             "actual_execution": False,
             "requested_by": requested_by,
+            "reused_from_validation_run_id": (
+                predecessor.validation_run_id if predecessor else None
+            ),
+            "reused_research_and_normal": reused_research_and_normal,
             "snapshot_id": snapshot.snapshot_id if snapshot else None,
             "snapshot_hash": snapshot.immutable_hash if snapshot else None,
             "source_snapshot_id": proposal.snapshot_id if proposal else None,
@@ -1044,7 +1475,7 @@ class RealModelValidationService:
             "source_trade_date": proposal.trade_date if proposal else None,
             "symbol": proposal.symbol if proposal else None,
             "quant_proposal_id": validation_proposal_id,
-            "context_hash": model_context.context_hash if model_context else None,
+            "context_hash": runtime_context_hash,
             "decision_context_hash": context.context_hash if context else None,
             "status": status,
             "research_result_ids": research_ids,
@@ -1064,17 +1495,19 @@ class RealModelValidationService:
             "input_hash": canonical_hash(identity),
             "created_at": started,
             "completed_at": datetime.now(timezone.utc),
-            "schema_version": "real_model_validation_v3",
+            "schema_version": "real_model_validation_v5",
         }
         result_payload["result_hash"] = canonical_hash(
             result_payload,
             exclude={"result_hash", "created_at", "completed_at"},
         )
         result = RealModelValidationRun.model_validate(result_payload)
-        saved, _ = await self.repository.save_immutable(
+        saved, created = await self.repository.save_immutable(
             "validation_runs",
             result,
             identity={"validation_run_id": validation_run_id},
             hash_field="result_hash",
         )
-        return saved
+        if created:
+            return saved
+        return saved.model_copy(update={"idempotency_status": "REUSED"})

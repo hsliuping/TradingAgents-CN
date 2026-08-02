@@ -333,6 +333,7 @@ class SnapshotResearchRuntime:
                     prompt=prompt,
                     request_hash=request_hash,
                     meta=meta,
+                    budget=budget,
                 )
                 result, _ = await self._save_result(
                     analysis_id=analysis_id,
@@ -382,6 +383,7 @@ class SnapshotResearchRuntime:
                     prompt=prompt,
                     request_hash=request_hash,
                     meta=meta,
+                    budget=budget,
                 )
             assert run is not None
             status = invocation.failure_status or "SUCCESS"

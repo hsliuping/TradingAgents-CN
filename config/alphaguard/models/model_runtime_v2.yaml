@@ -4,11 +4,8 @@ created_at: "2026-07-30T00:00:00+00:00"
 
 budget_policy:
   policy_id: alphaguard_model_budget
-  policy_version: v1
-  max_input_tokens_per_call: 24000
-  max_output_tokens_per_call: 4000
+  policy_version: v2
   max_calls_per_analysis: 10
-  max_tokens_per_snapshot: 80000
   max_daily_calls: 100
   max_daily_cost: 20.0
   currency: USD
@@ -105,18 +102,17 @@ prompts:
       runtime injects it. Do not propose a trade and do not use external data.
 
   - prompt_id: top_review_capability_prompt
-    prompt_version: v1
+    prompt_version: v2
     role: MODEL_CAPABILITY_CHECK
-    schema_target: TopReviewDecision
+    schema_target: TopModelDecisionOutput
     enabled: true
     template: |
-      This is a non-executable AlphaGuard TopReviewDecision capability check.
-      Return exactly one synthetic TopReviewDecision matching the supplied schema.
-      Use review_id "capability-top", snapshot_id "capability-snapshot",
-      plan_id "capability-normal", status "CONFIRM", scores between 0 and 1,
-      empty missing_evidence/logical_conflicts/risk_findings/material_change_fields,
-      adjusted_plan null, a non-empty review_reason, revision_round 0, and omit
-      model_meta because the runtime injects it. Do not create or modify a trade.
+      This is a non-executable AlphaGuard TopModelDecisionOutput capability check.
+      Return exactly one object matching the supplied schema. Use status "CONFIRM",
+      scores between 0 and 1, empty missing_evidence, logical_conflicts,
+      risk_findings and material_change_fields, proposed_changes {}, and a non-empty
+      review_reason. Never output plan_id, supersedes_plan_id, snapshot_id,
+      validation_run_id, review_id, or model_meta. Do not create or modify a trade.
 
   - prompt_id: alphaguard_research_snapshot
     prompt_version: v1
@@ -178,16 +174,26 @@ prompts:
       {research_json}
 
   - prompt_id: top_risk_review_prompt
-    prompt_version: alphaguard-top-review-v1
+    prompt_version: alphaguard-top-review-v3
     role: TOP_RISK_REVIEWER
-    schema_target: TopReviewDecision
+    schema_target: TopModelDecisionOutput
     enabled: true
     template: |
       You are AlphaGuard's Top risk reviewer. Review only the supplied Normal
       plan and immutable Snapshot v2 context. You may confirm, reduce risk,
       narrow conditions, reject, suspend, or request one material revision.
       Never reverse direction, increase position, loosen a stop, delete risk
-      conditions, or create an order. Return exactly one TopReviewDecision.
+      conditions, or create an order. Return exactly one TopModelDecisionOutput.
+      plan_id, supersedes_plan_id, snapshot_id, validation_run_id, review_id,
+      model_meta, and all other identity fields are server-owned. They may appear
+      in the read-only context but must never appear in your output. Put every
+      allowed Normal-plan edit in proposed_changes. When no edit is proposed,
+      return proposed_changes as an empty object instead of copying the plan.
+      CONFIRM, REJECT, and SUSPEND require proposed_changes {{}} and
+      material_change_fields []. RISK_ADJUST requires non-empty proposed_changes
+      and material_change_fields []. MATERIAL_REVISION requires non-empty
+      proposed_changes and must list every materially changed field in
+      material_change_fields.
 
       Snapshot-bound decision context:
       {context_json}

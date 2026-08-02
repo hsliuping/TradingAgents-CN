@@ -70,6 +70,28 @@ def test_technical_records_are_collapsed_and_read_only():
     assert "近期调用记录" in technical
 
 
+def test_validation_audit_distinguishes_model_calls_from_budget_blocks():
+    panel = _panel()
+    api = (ROOT / "frontend/src/api/alphaguardModels.ts").read_text(
+        encoding="utf-8"
+    )
+
+    assert "decision_evidence_pack_manifest_id" in api
+    assert "decision_evidence_status" in api
+    assert "决策证据" in panel
+    assert "validationRoleStatus(row, 'NORMAL_TRADER')" in panel
+    assert "validationRoleStatus(row, 'TOP_RISK_REVIEWER')" in panel
+    assert "超过模型上下文窗口" in panel
+    assert "终审上下文" in panel
+    assert "研究与普通模型已复用" in panel
+    assert "estimated_input_tokens" in api
+    assert "model_context_window" in api
+    assert "remaining_context_capacity" in api
+    assert "SNAPSHOT_TOKEN_BUDGET_EXCEEDED" not in panel
+    assert "validationTokenTotal(row)" in panel
+    assert "row.top_model_run_id ? '已调用'" not in panel
+
+
 def test_profile_status_is_scoped_to_exact_endpoint_version():
     panel = _panel()
     profile_projection = panel[

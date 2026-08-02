@@ -2,9 +2,9 @@
 
 ## 当前状态
 
-- 更新时间：2026-07-29 23:35 CST（Asia/Shanghai）
+- 更新时间：2026-08-02 15:15 CST（Asia/Shanghai）
 - 当前阶段：PR-010 Real Model Runtime & Dual-Model Decision Completion
-- 阶段状态：Level A runtime-ready；三个真实Profile认证失败，Level B未完成
+- 阶段状态：v13已拆分Top模型可写Payload与服务端Envelope并完成一次真实Top调用；有效重试受现有单分析调用次数预算阻断，Level B仍为NO_COMPLETE_DUAL_MODEL_PATH
 - PR-001 检查点提交：`5c6ae8f`
 - PR-001 检查点标签：`alphaguard-pr001-baseline`
 - PR-002 检查点提交：`09567a1`
@@ -20,10 +20,10 @@
 - PR-009 检查点标签：`alphaguard-pr009-mvp`
 - MVP Runtime Bring-up 提交：`943560f`
 - MVP Runtime Bring-up 标签：`alphaguard-bringup-runtime-ready`
-- 当前基线：`ff266683130366baf7a0ee02e61754a4c6ee78f6`
-- 当前基线标签：`alphaguard-production-evidence-v2`
-- 本阶段检查点：`alphaguard-pr010-model-runtime-ready`（Level A临时检查点）
-- 后续阶段：PR-010 Level B待有效凭证和核验价格Profile；PR-011未开始
+- 当前基线：`6162774aa362477f6229fa934c05f59186c01618`
+- 当前基线标签：`alphaguard-pr010-validation-v10`
+- 本阶段检查点：`alphaguard-pr010-validation-v10`（v10验证契约临时检查点）
+- 后续阶段：PR-010 Level B仍为`NO_COMPLETE_DUAL_MODEL_PATH`；PR-011未开始
 - 固定安全模式：`system_mode=SIM_AUTONOMOUS`
 - 实盘开关：`live_trading_enabled=false`
 - 数据迁移：未迁移人工模拟账户、现金、持仓、订单或成交数据
@@ -6604,3 +6604,276 @@ Secret。阶段验证为：经理契约专项`39 passed`，默认离线CI`652 pa
 queue-worker和analysis-worker在`live=true`下均以非零状态拒绝启动。PR-010 Level B仍未完成，
 阻断项是三个允许样本均未自然产生可进入Top的Normal交易计划，而不是Provider响应解析或
 经理Schema失败。
+
+### 24.13 Decision Evidence Pack v3 and v11 Validation
+
+本阶段没有修改策略、因子、Prompt、交易门槛、Consensus、HardRisk、Champion、费用、撮合
+或预算上限。新增不可变`Decision Evidence Pack v3`，按Snapshot决策时点锁定财务摘要、
+现金流摘要、分红及公司行为和公告证据；所有来源必须满足`published_at <= decision_time`，
+并保存稳定对象ID、内容hash、Manifest hash、Provider/计算版本和create-only身份。四类证据
+分别使用`COMPLETE / PARTIAL / MISSING / NOT_APPLICABLE / SOURCE_UNAVAILABLE`，Snapshot
+明确携带完整度矩阵，缺失字段不会用0或模型推测值补齐。DataQuality在当前Normal必需证据
+不完整时阻断模型调用，运行时只解析Snapshot锁定的Manifest及来源ID/hash，不查询latest。
+
+首次持久化安全发现两项实现问题：Mongo BSON不接受`datetime.date`，现统一经
+`to_mongo_value`转换；分红来源身份曾混入决策时点相关公司行为引用，现通过新的
+`decision-evidence-normalization-v2`计算版本修正。旧v1 Manifest保持不变；计算版本进入
+Manifest身份和唯一索引，相同身份同内容返回`REUSED`，不同内容返回
+`INTEGRITY_CONFLICT`，禁止覆盖。v2证据结果为：
+
+```text
+601318 / 2026-01-09  PARTIAL
+  financial=PARTIAL, cashflow=COMPLETE, dividend=COMPLETE, announcement=COMPLETE
+  missing=gross_margin/revenue/revenue_qoq/revenue_yoy
+300750 / 2026-05-08  COMPLETE（四类均COMPLETE或NOT_APPLICABLE）
+300750 / 2026-04-30  COMPLETE（四类均COMPLETE或NOT_APPLICABLE）
+000333 / 2026-06-12  COMPLETE（四类均COMPLETE或NOT_APPLICABLE）
+```
+
+四个样本重复增量同步全部返回`REUSED`，新增写入0、模型调用0。验证契约升级为
+`real-model-historical-decision-evidence-v11`；样本按证据完整度降序、现有
+`factor_summary`均值降序、日期、股票代码和Proposal ID稳定排序，不使用未来收益。
+Preflight对`300750 / 2026-05-08`返回`READY`：Normal为`gpt-5.6-luna`，Top为
+`gpt-5.6-sol`，Benchmark价格窗口61根，MarketContext窗口65根，调用次数和费用Dry Run
+均通过。验证身份和冻结输入为：
+
+```text
+validation_run_id=e9903a23-0958-52a3-b8bd-101691dad9c3
+snapshot_id=14986e2e-d560-5427-8874-e2471a7fcb72
+context_hash=4fd163617452d3184900d527d8f33f357e7856eceb591dfb186acd20b4071fdc
+run_mode=REAL_MODEL_VALIDATION
+automated_execution_allowed=false
+```
+
+六个TradingAgents研究角色均真实调用成功；Normal真实Provider调用严格解析成功，自然返回
+`PROPOSE_TRADE / BUY`。Top未发起网络请求，现有`max_tokens_per_snapshot=80000`资源门禁在
+调用前返回`MODEL_FAILED / SNAPSHOT_TOKEN_BUDGET_EXCEEDED`：研究角色约使用68k Token，
+Normal完成后该Snapshot累计审计Token为103509。该结果属于预算安全门正常阻断，不提高预算、
+不拆分Snapshot身份，也不对第二个具有相同结构预算路径的样本重复付费调用。因此Consensus、
+HardRisk和执行安全门均未到达，结论保持`NO_COMPLETE_DUAL_MODEL_PATH`。
+
+相同validation_run_id复跑直接返回不可变结果，模型审计仍为8条、Provider调用不增加，
+结果hash继续为`2f902ee5caf161c2df2e81bdba6a5e66293055343d09c4eb81f1ecafa1fc0fa4`。
+正式`OrderIntent / ExecutionOutbox / Order / Fill / Position / PositionLot / Reservation /
+Ledger / Settlement`均为0；三个模拟账户`cash_available=1000000.00`、`cash_reserved=0`，账户
+hash与调用前一致。
+
+验证结果：v3/runtime/frontend专项PASS；默认离线CI为`662 passed, 89 warnings`；前端
+`npm run type-check`、正式`npm run build`和`npx vite build`均PASS；Python compileall、
+`git diff --check`和敏感信息扫描PASS。MongoDB、Redis、FastAPI、queue-worker和
+analysis-worker均HEALTHY；FastAPI、queue-worker和analysis-worker在
+`ALPHAGUARD_LIVE_TRADING_ENABLED=true`时分别以退出码3/1/1拒绝启动。运行容器
+`/health/ready`仍如实为`DEGRADED_PAPER`，由既有Readiness阻断项造成。
+
+由于Top、Consensus、HardRisk和执行安全门未形成完整真实路径，本阶段不得创建
+`feat(alphaguard): complete real dual model runtime`提交或
+`alphaguard-pr010-real-model-runtime`标签，也不得开始PR-011。
+
+### 24.14 v12 Model Context Admission and Real Top Result
+
+v12只调整模型运行时资源准入和审计，不修改因子、策略、Prompt、交易参数、Consensus、
+HardRisk、Champion、费用或撮合。`model_runtime_v2.yaml`中的预算策略升级为v2，活动运行时
+不再读取`max_input_tokens_per_call`、`max_output_tokens_per_call`或
+`max_tokens_per_snapshot`，`SNAPSHOT_TOKEN_BUDGET_EXCEEDED`也不再参与新请求准入。
+调用次数、单分析调用次数、费用、并发、超时和重试限制继续有效；Token数量仅用于审计。
+
+新准入条件只比较：
+
+```text
+estimated_input_tokens + configured_max_output_tokens
+<= ModelProfile.model_context_window
+```
+
+并记录`OVER_70 / OVER_85 / OVER_95`非阻断告警。模型审计保留估算输入、Provider实报输入/
+输出/总Token、模型上下文窗口、配置最大输出、上下文余量和使用率。后调用审计优先使用
+Provider实报Token计算余量；旧审计对象保持不可变，不回填。
+
+v12严格复用v11的同一Snapshot、DecisionContext、七个研究结果和Normal结果：
+
+```text
+v11 validation_run_id=e9903a23-0958-52a3-b8bd-101691dad9c3
+v12 validation_run_id=a12fcd24-c473-5063-a958-8c5110855ceb
+symbol/trade_date=300750 / 2026-05-08
+snapshot_id=14986e2e-d560-5427-8874-e2471a7fcb72
+context_hash=4fd163617452d3184900d527d8f33f357e7856eceb591dfb186acd20b4071fdc
+TradingAgents=SUCCESS（复用）
+Normal=PROPOSE_TRADE / BUY（复用）
+run_mode=REAL_MODEL_VALIDATION
+automated_execution_allowed=false
+```
+
+Provider的认证`/models`响应只公布`gpt-5.6-luna`和`gpt-5.6-sol`模型ID，没有公布
+上下文窗口。当前Top Profile配置为`model_context_window=32000`、
+`max_output_tokens=4000`，来源只能标记为`MODEL_PROFILE_MAX_INPUT_TOKENS`，不能声称是
+Provider核验值。旧preflight只序列化数据对象，估算`10097`输入Token，遗漏了真实风险经理
+的系统Prompt、已登记模板、完整上下文约束Schema和用户消息。
+
+现已抽出风险经理唯一请求构造器，由preflight和真实节点共同使用同一消息与Schema。
+修正后的只读preflight估算`29568`输入Token，与本次Provider实报`30011`接近；加上配置
+最大输出4000后，按未核验的32k Profile会返回`MODEL_CONTEXT_WINDOW_EXCEEDED`。本次请求已在
+修正前由Provider接受，实际总量为33405，因此只能确认32k配置并非Provider公布的真实限制，
+不能据此擅自改成1M或其他数值，也不会再次调用模型验证。
+
+唯一真实Top请求结果为：
+
+```text
+model=gpt-5.6-sol
+model_run_id=cc9c8266-8661-5585-8725-668dd2493078
+HTTP=200
+input_tokens=30011
+output_tokens=3394
+total_tokens=33405
+latency_ms=83797.618
+request_hash=e904c718f3c263f989e651c0b3fc1211c337a6baebab9c42b5ec86e25248681d
+response_hash=656a075f0f756012e5c4d794346988bc2593f3ebd3754068b5e06fb9601f731f
+Top=INVALID_OUTPUT
+error_type=SCHEMA_VALIDATION_ERROR
+sanitized_reason=top model attempted forbidden identity changes: plan_id, supersedes_plan_id
+Consensus=NOT_REACHED
+HardRisk=NOT_REACHED
+ExecutionSafetyGate=NOT_REACHED
+```
+
+严格验证正确拒绝了模型试图修改的身份字段；没有修补JSON、补默认值、降低Schema校验、
+修改Prompt、转成HOLD或调用其他模型修复。v12失败对象保持不可变，正式结论为
+`NO_COMPLETE_DUAL_MODEL_PATH`。
+
+使用完全相同的`requested_by / idempotency_key`复跑返回`idempotency_status=REUSED`，在
+preflight和Provider调用前命中既有对象。复跑前后均为验证对象1条、该分析模型审计9条、
+结果hash `9007a5fa8def80195d475f080c89eded80488432a8c7a984d705baedfa9b38f3`，
+安全状态hash均为`c6839e2672e638cb148ff0545e80c9daf818b5ba1917641fbd61908ca2f4f0dc`。
+
+正式`OrderIntent / ExecutionOutbox / Order / Fill / Position / PositionLot / Reservation /
+Ledger / Settlement`全部保持0。`PAPER_QUANT / PAPER_NORMAL / PAPER_TOP_CONFIRMED`均为
+`cash_available=1000000.00`、`cash_reserved=0`、`realized_pnl=0`，无费用或账户变化。
+
+最终验证结果：
+
+```text
+PR-010 runtime专项=46 passed, 22 warnings
+默认离线CI=669 passed, 89 warnings
+frontend type-check=PASS
+正式 npm run build=PASS
+独立 npx vite build=PASS
+Python compileall=PASS
+git diff --check=PASS
+敏感信息扫描=PASS
+FastAPI live=true=exit 3
+queue-worker live=true=exit 1
+analysis-worker live=true=exit 1
+```
+
+由于Top未通过严格Schema，Consensus、HardRisk和执行安全门没有到达，不创建
+`feat(alphaguard): complete real dual model runtime`提交或
+`alphaguard-pr010-real-model-runtime`标签；PR-011仍未开始。
+
+### 24.15 v13 Top Model Payload Contract and Budget-Safe Stop
+
+v13根因归类为模型可写输出契约与持久化对象职责耦合：v12曾把服务端持久化
+`TopReviewDecision`直接作为模型响应Schema，使只读上下文中的`plan_id`和
+`supersedes_plan_id`出现在可返回对象结构中，模型因而尝试输出系统禁止字段。该问题属于
+Prompt/Schema职责不一致，不是Provider外层包装或JSON提取错误。v12失败对象和原始审计保持
+不可变，没有删除禁止字段、修补输出、替换计划ID、降低`extra=forbid`或回写成功状态。
+
+现将模型响应与持久化记录拆分为：
+
+```text
+TopModelDecisionOutput@top_model_decision_output_v1
+  = 模型可写业务Payload，不包含任何计划、Snapshot或运行身份
+TopReviewDecision@top_review_decision_v2
+  = 服务端持久化Envelope，绑定validation_run_id/snapshot_id/plan_id/
+    supersedes_plan_id及请求、响应审计身份
+```
+
+`TopPlanProposedChanges`只允许现有Top职责范围内的计划业务字段；嵌套或顶层
+`plan_id`、`supersedes_plan_id`及其他未知字段均严格失败。模型Payload通过严格校验后，应用层
+才从当前Normal计划和验证上下文绑定服务端身份，并保存原始结构化Payload、请求hash和响应hash
+以支持完整回放与审计关联。
+
+Top Prompt按create-only方式保留v1/v2并新增
+`top_risk_review_prompt@alphaguard-top-review-v3`。v3明确禁止输出计划身份或supersedes关系，
+要求所有允许修改只写入`proposed_changes`，没有修改时返回空对象，并明确各verdict与修改字段的
+合法配对。模型请求JSON Schema不再包含服务端身份字段；Provider仍使用现有严格结构化输出/
+JSON提取与Pydantic校验链，没有引入Provider专属宽松路径。
+
+同一样本`300750 / 2026-05-08`继续使用同一不可变Snapshot和context hash。v13通过正式恢复
+身份复用v11已持久化的TradingAgents和Normal成功结果，没有重复调用研究角色或Normal：
+
+```text
+validation_run_id=7f650226-781e-5b7b-b545-a8e462a53576
+reused_from_validation_run_id=e9903a23-0958-52a3-b8bd-101691dad9c3
+snapshot_id=14986e2e-d560-5427-8874-e2471a7fcb72
+context_hash=4fd163617452d3184900d527d8f33f357e7856eceb591dfb186acd20b4071fdc
+TradingAgents=SUCCESS（复用）
+Normal=PROPOSE_TRADE / BUY（复用）
+```
+
+v13使用Prompt v2完成了一次真实Top网络请求，Provider返回HTTP 200：
+
+```text
+model_run_id=e309b23b-ebb0-5a54-962d-3e8d3801e58f
+model=gpt-5.6-sol
+prompt=top_risk_review_prompt@alphaguard-top-review-v2
+estimated_input_tokens=27703
+actual_input_tokens=28786
+actual_output_tokens=1490
+total_tokens=30276
+model_context_window=32000（Profile配置，非Provider官方核验）
+configured_max_output_tokens=4000
+remaining_context_capacity=1724
+context_warning=OVER_85（非阻断）
+latency_ms=34411.251
+request_hash=67dd77608259e42ac51b128fe30d18d04c949f8ea558157a5e50dafae711b369
+response_hash=b3aa4193cd45f3790157a94707b9a6d221ab0abfdb0387599705466f0222e988
+Top=INVALID_OUTPUT / SCHEMA_VALIDATION_ERROR
+validation_path=root
+validation_type=value_error
+result_hash=8e26fa942b020e2eaacb9409f5048a5c3b4c0d7019cfbdfecc628fe584957194
+```
+
+该结果已不再包含v12的计划身份字段错误；它在`TopModelDecisionOutput`根级业务语义校验处
+失败。旧诊断仅持久化`root:value_error`，无法从不可变脱敏审计还原具体verdict/change冲突，
+因此没有猜测、修补或重放模型正文。未来失败诊断现会保存静态校验规则的脱敏说明，Prompt v3
+也显式列出相同语义规则。
+
+Prompt v3的只读preflight在任何网络请求前返回
+`ANALYSIS_CALL_BUDGET_EXCEEDED`：该analysis已有10条模型审计，达到必须继续生效的单分析
+调用次数限制。没有提高、重置或绕过调用预算，也没有发起第二次Top请求。阻断运行和幂等证据为：
+
+```text
+validation_run_id=e163a87a-fae3-55a6-ade9-75c2fe99ad80
+status=NO_ELIGIBLE_SAMPLE
+failure_code=ANALYSIS_CALL_BUDGET_EXCEEDED
+result_hash=c82e771f8c035f8505393b4564f48181ead85d41e4b895c7744b442627217be1
+exact rerun=REUSED
+model audit count=10 -> 10
+Consensus/HardRisk/ExecutionSafetyGate=NOT_REACHED
+```
+
+新增测试覆盖合法无身份Payload、顶层/嵌套计划身份拒绝、未知字段拒绝、服务端计划身份绑定、
+supersedes服务端版本逻辑、持久化回放、请求/响应审计关联、静态语义诊断以及冻结v11上下文
+兼容。最终验证结果：
+
+```text
+PR-010 runtime专项=55 passed, 22 warnings
+v13组合专项=109 passed, 22 warnings
+默认离线CI=678 passed, 89 warnings
+frontend type-check=PASS
+正式 npm run build=PASS
+独立 npx vite build=PASS
+Python compileall=PASS
+git diff --check=PASS
+敏感信息扫描=PASS
+MongoDB/Redis/FastAPI/queue-worker/analysis-worker=HEALTHY
+FastAPI live=true=exit 3
+queue-worker live=true=exit 1
+analysis-worker live=true=exit 1
+```
+
+正式`OrderIntent / ExecutionOutbox / Order / Fill / Position / PositionLot / Reservation /
+Ledger / Settlement`全部为0。三个模拟账户均保持`cash_available=1000000.00`、
+`cash_reserved=0`、`realized_pnl=0`，没有模型重试导致的交易或资金副作用。
+
+由于严格合法的Top重试被现有调用次数预算安全阻断，Consensus、HardRisk和执行安全门仍未
+真实到达，正式结论继续为`NO_COMPLETE_DUAL_MODEL_PATH`。不创建PR-010完成提交或
+`alphaguard-pr010-real-model-runtime`标签，PR-011仍未开始。

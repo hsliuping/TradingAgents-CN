@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 
 ExecutionStatus = Literal[
@@ -31,6 +31,35 @@ ReviewStatus = Literal[
     "SUSPEND",
     "MODEL_FAILED",
     "INVALID_OUTPUT",
+]
+TopModelReviewStatus = Literal[
+    "CONFIRM",
+    "RISK_ADJUST",
+    "MATERIAL_REVISION",
+    "REJECT",
+    "SUSPEND",
+]
+TopMutablePlanField = Literal[
+    "status",
+    "action",
+    "confidence",
+    "thesis",
+    "bullish_evidence",
+    "bearish_evidence",
+    "entry_zone",
+    "initial_position_pct",
+    "max_position_pct",
+    "add_conditions",
+    "stop_conditions",
+    "reduce_conditions",
+    "exit_conditions",
+    "invalidation_conditions",
+    "target_price",
+    "valid_until",
+    "main_risks",
+    "unresolved_questions",
+    "entry_zone_not_required_reason",
+    "valid_until_compatibility_reason",
 ]
 
 
@@ -322,10 +351,86 @@ class NormalTradePlan(AlphaGuardSchema):
         return self
 
 
+class TopPlanProposedChanges(AlphaGuardSchema):
+    """Model-authored plan changes; execution identity is intentionally absent."""
+
+    status: PlanStatus | None = None
+    action: PlanAction | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    thesis: str | None = Field(default=None, min_length=1)
+    bullish_evidence: list[EvidenceRef] | None = None
+    bearish_evidence: list[EvidenceRef] | None = None
+    entry_zone: PriceRange | None = None
+    initial_position_pct: float | None = Field(default=None, ge=0, le=1)
+    max_position_pct: float | None = Field(default=None, ge=0, le=1)
+    add_conditions: list[RuleCondition] | None = None
+    stop_conditions: list[RuleCondition] | None = None
+    reduce_conditions: list[RuleCondition] | None = None
+    exit_conditions: list[RuleCondition] | None = None
+    invalidation_conditions: list[RuleCondition] | None = None
+    target_price: float | None = Field(default=None, gt=0)
+    valid_until: datetime | None = None
+    main_risks: list[RiskItem] | None = None
+    unresolved_questions: list[str] | None = None
+    entry_zone_not_required_reason: str | None = None
+    valid_until_compatibility_reason: str | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_explicit_changes(self, handler):
+        serialized = handler(self)
+        return {
+            field: serialized[field]
+            for field in self.model_fields_set
+            if field in serialized
+        }
+
+
+class TopModelDecisionOutput(AlphaGuardSchema):
+    """Strict model-writable Top payload with no server-owned identity fields."""
+
+    status: TopModelReviewStatus
+    completeness_score: float = Field(ge=0, le=1)
+    logic_consistency_score: float = Field(ge=0, le=1)
+    risk_control_score: float = Field(ge=0, le=1)
+    missing_evidence: list[str]
+    logical_conflicts: list[str]
+    risk_findings: list[RiskItem]
+    proposed_changes: TopPlanProposedChanges
+    material_change_fields: list[TopMutablePlanField]
+    review_reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_decision_semantics(self) -> "TopModelDecisionOutput":
+        changed_fields = set(self.proposed_changes.model_fields_set)
+        if self.status in {"CONFIRM", "REJECT", "SUSPEND"} and changed_fields:
+            raise ValueError(f"{self.status} requires empty proposed_changes")
+        if self.status in {"RISK_ADJUST", "MATERIAL_REVISION"} and not changed_fields:
+            raise ValueError(f"{self.status} requires proposed_changes")
+        if self.status == "MATERIAL_REVISION":
+            if not self.material_change_fields:
+                raise ValueError(
+                    "MATERIAL_REVISION requires material_change_fields"
+                )
+            undeclared = set(self.material_change_fields) - changed_fields
+            if undeclared:
+                raise ValueError(
+                    "material_change_fields must reference proposed_changes"
+                )
+        elif self.material_change_fields:
+            raise ValueError(
+                "material_change_fields is only valid for MATERIAL_REVISION"
+            )
+        return self
+
+
 class TopReviewDecision(AlphaGuardSchema):
+    # The persistent envelope is server-owned. Optional defaults keep legacy
+    # records readable; every v13 formal runtime record binds these values.
     review_id: str = Field(min_length=1)
+    validation_run_id: str | None = None
     snapshot_id: str = Field(min_length=1)
     plan_id: str = Field(min_length=1)
+    supersedes_plan_id: str | None = None
     analysis_id: str | None = None
     decision_context_id: str | None = None
     quant_proposal_id: str | None = None
@@ -350,6 +455,10 @@ class TopReviewDecision(AlphaGuardSchema):
     review_reason: str = Field(min_length=1)
 
     model_meta: ModelExecutionMeta
+    model_decision_payload: TopModelDecisionOutput | None = None
+    created_at: datetime | None = None
+    schema_version: str = "top_review_decision_v1"
+    model_payload_schema_version: str | None = None
 
     @model_validator(mode="after")
     def validate_review_semantics(self) -> "TopReviewDecision":

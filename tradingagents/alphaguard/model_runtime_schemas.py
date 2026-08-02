@@ -310,16 +310,18 @@ class PromptProfile(_StrictFrozenModel):
 class ModelBudgetPolicy(_StrictFrozenModel):
     policy_id: str = Field(min_length=1)
     policy_version: str = Field(min_length=1)
-    max_input_tokens_per_call: int = Field(gt=0)
-    max_output_tokens_per_call: int = Field(gt=0)
+    # Deprecated v1 fields remain readable for immutable historical configs.
+    # Runtime token admission is based on the selected model context window.
+    max_input_tokens_per_call: int | None = Field(default=None, gt=0)
+    max_output_tokens_per_call: int | None = Field(default=None, gt=0)
     max_calls_per_analysis: int = Field(gt=0)
-    max_tokens_per_snapshot: int = Field(gt=0)
+    max_tokens_per_snapshot: int | None = Field(default=None, gt=0)
     max_daily_calls: int = Field(gt=0)
     max_daily_cost: float = Field(gt=0)
     currency: str = Field(min_length=1)
     policy_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     created_at: datetime
-    schema_version: str = "model_budget_policy_v1"
+    schema_version: str = "model_budget_policy_v2"
 
 
 class ModelCapabilityCheck(_StrictFrozenModel):
@@ -473,9 +475,15 @@ class ModelRunRecord(_StrictFrozenModel):
     request_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     response_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     structured_output_status: str = Field(min_length=1)
+    estimated_input_tokens: int | None = Field(default=None, ge=0)
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
+    model_context_window: int | None = Field(default=None, gt=0)
+    configured_max_output_tokens: int | None = Field(default=None, gt=0)
+    remaining_context_capacity: int | None = Field(default=None, ge=0)
+    context_usage_ratio: float | None = Field(default=None, ge=0)
+    context_warning_level: Literal["NONE", "OVER_70", "OVER_85", "OVER_95"] | None = None
     estimated_cost: float | None = Field(default=None, ge=0)
     cost_currency: str
     latency_ms: float = Field(ge=0)
@@ -485,7 +493,7 @@ class ModelRunRecord(_StrictFrozenModel):
     sanitized_message: str | None = None
     created_at: datetime
     record_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    schema_version: str = "model_run_v1"
+    schema_version: str = "model_run_v2"
 
     @model_validator(mode="after")
     def validate_execution_boundary(self) -> "ModelRunRecord":
@@ -534,6 +542,9 @@ class RealModelValidationRun(_StrictFrozenModel):
     contract_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     sample_selection_version: str | None = None
     requested_by: str
+    idempotency_status: Literal["CREATED", "REUSED"] = "CREATED"
+    reused_from_validation_run_id: str | None = None
+    reused_research_and_normal: bool = False
     snapshot_id: str | None = None
     snapshot_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     source_snapshot_id: str | None = None

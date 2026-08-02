@@ -1066,12 +1066,62 @@ async def model_validation_runs(
     current_user: dict = Depends(get_current_user),
 ):
     _require_admin(current_user)
-    items = await ModelRuntimeRepository(get_mongo_db()).list(
+    db = get_mongo_db()
+    items = await ModelRuntimeRepository(db).list(
         "validation_runs",
         {},
         sort=("created_at", -1),
         limit=limit,
     )
+    snapshot_ids = sorted(
+        {
+            str(item["snapshot_id"])
+            for item in items
+            if item.get("snapshot_id")
+        }
+    )
+    snapshot_rows = (
+        await db["ag_model_validation_evidence_snapshots"].find(
+            {"snapshot_id": {"$in": snapshot_ids}},
+            {
+                "_id": 0,
+                "snapshot_id": 1,
+                "decision_evidence_pack_manifest_id": 1,
+                "evidence_completeness_matrix": 1,
+                "actual_benchmark_count": 1,
+            },
+        ).to_list(length=None)
+        if snapshot_ids
+        else []
+    )
+    snapshots = {str(row["snapshot_id"]): row for row in snapshot_rows}
+    for item in items:
+        snapshot = snapshots.get(str(item.get("snapshot_id") or ""))
+        if snapshot is None:
+            continue
+        matrix = snapshot.get("evidence_completeness_matrix") or {}
+        complete = bool(
+            snapshot.get("decision_evidence_pack_manifest_id")
+            and isinstance(matrix, dict)
+            and set(matrix) == {
+                "financial_evidence",
+                "cashflow_evidence",
+                "dividend_evidence",
+                "announcement_evidence",
+            }
+            and all(
+                status in {"COMPLETE", "NOT_APPLICABLE"}
+                for status in matrix.values()
+            )
+        )
+        item["decision_evidence_pack_manifest_id"] = snapshot.get(
+            "decision_evidence_pack_manifest_id"
+        )
+        item["decision_evidence_status"] = (
+            "COMPLETE" if complete else "PARTIAL"
+        )
+        item["decision_evidence_matrix"] = matrix
+        item["benchmark_count"] = snapshot.get("actual_benchmark_count")
     return ok({"items": items})
 
 

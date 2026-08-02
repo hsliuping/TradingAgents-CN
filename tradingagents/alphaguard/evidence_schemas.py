@@ -8,11 +8,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .instruments import Market, normalize_instrument
+from .decision_evidence_schemas import EvidenceCompletenessMatrix
 
 
 DATA_QUALITY_SCHEMA_VERSION = "data-quality-report-v1"
 EVIDENCE_SNAPSHOT_SCHEMA_VERSION = "evidence-snapshot-v1"
 EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2 = "evidence-snapshot-v2"
+EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3 = "evidence-snapshot-v3"
 ALPHAGUARD_CODE_VERSION = "alphaguard-pr004-v1"
 
 
@@ -102,6 +104,11 @@ class EvidenceSnapshot(EvidenceSchema):
     benchmark_price_window_manifest_hash: str | None = Field(
         default=None, pattern=r"^[0-9a-f]{64}$"
     )
+    decision_evidence_pack_manifest_id: str | None = None
+    decision_evidence_pack_manifest_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    evidence_completeness_matrix: EvidenceCompletenessMatrix | None = None
     required_benchmark_count: int | None = Field(default=None, ge=61)
     actual_benchmark_count: int | None = Field(default=None, ge=0)
     evidence_contract_status: Literal[
@@ -191,7 +198,10 @@ class EvidenceSnapshot(EvidenceSchema):
             raise ValueError(
                 "Champion version refs must use explicit non-latest identifiers"
             )
-        if self.schema_version == EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2:
+        if self.schema_version in {
+            EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+            EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3,
+        }:
             required_v2 = (
                 self.market_context_id,
                 self.market_context_hash,
@@ -232,6 +242,31 @@ class EvidenceSnapshot(EvidenceSchema):
                 if self.raw_refs.get(category) != [reference]:
                     raise ValueError(
                         f"{category} reference does not match v2 contract"
+                    )
+            if self.schema_version == EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3:
+                if (
+                    not self.decision_evidence_pack_manifest_id
+                    or not self.decision_evidence_pack_manifest_hash
+                    or self.evidence_completeness_matrix is None
+                ):
+                    raise ValueError(
+                        "evidence-snapshot-v3 requires Decision Evidence Pack identity"
+                    )
+                if any(
+                    status not in {"COMPLETE", "NOT_APPLICABLE"}
+                    for status in self.evidence_completeness_matrix.model_dump(
+                        mode="python"
+                    ).values()
+                ):
+                    raise ValueError(
+                        "evidence-snapshot-v3 requires complete decision evidence"
+                    )
+                if self.raw_refs.get("decision_evidence_pack") != [
+                    "decision_evidence_pack:"
+                    f"{self.decision_evidence_pack_manifest_id}"
+                ]:
+                    raise ValueError(
+                        "Decision Evidence Pack reference does not match v3 contract"
                     )
         elif self.schema_version != EVIDENCE_SNAPSHOT_SCHEMA_VERSION:
             raise ValueError(

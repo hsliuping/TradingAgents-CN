@@ -8,6 +8,7 @@ from typing import Any
 from app.schemas.alphaguard.decision import DecisionContext, canonical_hash
 from tradingagents.alphaguard.evidence_schemas import (
     EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+    EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3,
 )
 
 from .snapshot_data_resolver import ResolvedSnapshotData
@@ -34,8 +35,11 @@ def build_model_runtime_context(
     snapshot = resolved.snapshot
     if context.snapshot_id != snapshot.snapshot_id:
         raise ModelRuntimeContextError("decision and evidence snapshots differ")
-    if snapshot.schema_version != EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2:
-        raise ModelRuntimeContextError("formal model runtime requires Snapshot v2")
+    if snapshot.schema_version not in {
+        EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+        EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3,
+    }:
+        raise ModelRuntimeContextError("formal model runtime requires Snapshot v2 or v3")
     if snapshot.evidence_contract_status != "COMPLETE":
         raise ModelRuntimeContextError("Snapshot evidence contract is incomplete")
     if (
@@ -47,6 +51,18 @@ def build_model_runtime_context(
         < (snapshot.required_benchmark_count or 61)
     ):
         raise ModelRuntimeContextError("Snapshot evidence windows are incomplete")
+    if snapshot.schema_version == EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3 and (
+        not snapshot.decision_evidence_pack_manifest_id
+        or not snapshot.decision_evidence_pack_manifest_hash
+        or snapshot.evidence_completeness_matrix is None
+        or any(
+            status not in {"COMPLETE", "NOT_APPLICABLE"}
+            for status in snapshot.evidence_completeness_matrix.model_dump(
+                mode="python"
+            ).values()
+        )
+    ):
+        raise ModelRuntimeContextError("Decision Evidence Pack v3 is incomplete")
     resolved_refs = sorted(resolved.input_refs)
     payload = {
         "decision_context": context.model_dump(mode="json"),
@@ -74,6 +90,22 @@ def build_model_runtime_context(
         "resolved_input_hash": resolved.input_hash,
         "resolved_input_ref_count": len(resolved_refs),
     }
+    if snapshot.schema_version == EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3:
+        payload["evidence_contract"].update(
+            {
+                "decision_evidence_pack_manifest_id": (
+                    snapshot.decision_evidence_pack_manifest_id
+                ),
+                "decision_evidence_pack_manifest_hash": (
+                    snapshot.decision_evidence_pack_manifest_hash
+                ),
+                "evidence_completeness_matrix": (
+                    snapshot.evidence_completeness_matrix.model_dump(
+                        mode="json"
+                    )
+                ),
+            }
+        )
     if include_resolved_refs:
         payload["resolved_input_refs"] = resolved_refs
     else:

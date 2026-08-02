@@ -1,4 +1,4 @@
-"""Fail-closed per-call, per-snapshot and daily model budgets."""
+"""Fail-closed model-context, call-count and daily-cost budgets."""
 
 from __future__ import annotations
 
@@ -21,6 +21,10 @@ class BudgetDecision:
     estimated_cost: float | None
     remaining_daily_calls: int
     remaining_daily_cost: float | None
+    model_context_window: int
+    remaining_context_capacity: int
+    context_usage_ratio: float
+    context_warning_level: str
     permitted_attempts: int = 1
     reason_code: str | None = None
 
@@ -54,16 +58,8 @@ class ModelBudgetService:
         analysis_rows = [
             row for row in daily_rows if row.get("analysis_id") == analysis_id
         ]
-        snapshot_rows = [
-            row
-            for row in daily_rows
-            if snapshot_id and row.get("snapshot_id") == snapshot_id
-        ]
         daily_cost = sum(
             float(row.get("estimated_cost") or 0) for row in daily_rows
-        )
-        snapshot_tokens = sum(
-            int(row.get("total_tokens") or 0) for row in snapshot_rows
         )
         remaining_calls = max(0, self.policy.max_daily_calls - len(daily_rows))
         remaining_cost = max(0.0, self.policy.max_daily_cost - daily_cost)
@@ -71,10 +67,20 @@ class ModelBudgetService:
             0,
             self.policy.max_calls_per_analysis - len(analysis_rows),
         )
-        remaining_snapshot_tokens = max(
-            0,
-            self.policy.max_tokens_per_snapshot - snapshot_tokens,
+        model_context_window = profile.max_input_tokens
+        estimated_context_tokens = estimated_input + estimated_output
+        remaining_context_capacity = max(
+            0, model_context_window - estimated_context_tokens
         )
+        context_usage_ratio = estimated_context_tokens / model_context_window
+        if context_usage_ratio > 0.95:
+            context_warning_level = "OVER_95"
+        elif context_usage_ratio > 0.85:
+            context_warning_level = "OVER_85"
+        elif context_usage_ratio > 0.70:
+            context_warning_level = "OVER_70"
+        else:
+            context_warning_level = "NONE"
 
         estimated_cost = None
         if (
@@ -88,20 +94,10 @@ class ModelBudgetService:
             ) / 1_000_000
 
         status = "READY"
-        if estimated_input > min(
-            profile.max_input_tokens,
-            self.policy.max_input_tokens_per_call,
-        ):
-            status = "INPUT_TOKEN_BUDGET_EXCEEDED"
-        elif estimated_output > self.policy.max_output_tokens_per_call:
-            status = "OUTPUT_TOKEN_BUDGET_EXCEEDED"
+        if estimated_context_tokens > model_context_window:
+            status = "MODEL_CONTEXT_WINDOW_EXCEEDED"
         elif len(analysis_rows) >= self.policy.max_calls_per_analysis:
             status = "ANALYSIS_CALL_BUDGET_EXCEEDED"
-        elif (
-            snapshot_tokens + estimated_input + estimated_output
-            > self.policy.max_tokens_per_snapshot
-        ):
-            status = "SNAPSHOT_TOKEN_BUDGET_EXCEEDED"
         elif len(daily_rows) >= self.policy.max_daily_calls:
             status = "DAILY_CALL_BUDGET_EXCEEDED"
         elif profile.cost_currency != self.policy.currency:
@@ -110,12 +106,6 @@ class ModelBudgetService:
             status = "BUDGET_PRICING_UNAVAILABLE"
         elif daily_cost + estimated_cost > self.policy.max_daily_cost:
             status = "DAILY_COST_BUDGET_EXCEEDED"
-        estimated_total = estimated_input + estimated_output
-        token_attempts = (
-            remaining_snapshot_tokens // estimated_total
-            if snapshot_id and estimated_total
-            else self.policy.max_calls_per_analysis
-        )
         cost_attempts = (
             int(remaining_cost // estimated_cost)
             if estimated_cost and estimated_cost > 0
@@ -128,7 +118,6 @@ class ModelBudgetService:
                 1 + profile.max_retries,
                 remaining_calls,
                 remaining_analysis_calls,
-                token_attempts,
                 cost_attempts,
             )
             if status == "READY"
@@ -142,6 +131,10 @@ class ModelBudgetService:
             estimated_cost=estimated_cost,
             remaining_daily_calls=remaining_calls,
             remaining_daily_cost=remaining_cost,
+            model_context_window=model_context_window,
+            remaining_context_capacity=remaining_context_capacity,
+            context_usage_ratio=context_usage_ratio,
+            context_warning_level=context_warning_level,
             permitted_attempts=max(0, permitted_attempts),
             reason_code=None if status == "READY" else status,
         )

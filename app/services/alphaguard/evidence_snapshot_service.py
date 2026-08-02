@@ -17,6 +17,7 @@ from tradingagents.alphaguard.evidence_schemas import (
     ALPHAGUARD_CODE_VERSION,
     EVIDENCE_SNAPSHOT_SCHEMA_VERSION,
     EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+    EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3,
     DataQualityReport,
     EvidenceSnapshot,
 )
@@ -82,6 +83,9 @@ def _canonical_value(value: Any) -> Any:
             "benchmark_price_window_manifest_hash",
             "required_benchmark_count",
             "actual_benchmark_count",
+            "decision_evidence_pack_manifest_id",
+            "decision_evidence_pack_manifest_hash",
+            "evidence_completeness_matrix",
             "evidence_contract_status",
             "run_mode",
             "source_trade_date",
@@ -229,7 +233,10 @@ class EvidenceSnapshotService:
         expected_manifest_hashes = dict(
             data.pop("expected_manifest_hashes", {}) or {}
         )
-        if schema_version == EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2:
+        if schema_version in {
+            EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V2,
+            EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3,
+        }:
             required_count = int(data.get("required_benchmark_count") or 0)
             required_source_counts["benchmark_prices"] = required_count
             required_source_counts["benchmark_price_window"] = 1
@@ -244,6 +251,11 @@ class EvidenceSnapshotService:
                     ),
                 }
             )
+            if schema_version == EVIDENCE_SNAPSHOT_SCHEMA_VERSION_V3:
+                required_source_counts["decision_evidence_pack"] = 1
+                expected_manifest_hashes["decision_evidence_pack"] = str(
+                    data.get("decision_evidence_pack_manifest_hash") or ""
+                )
         report = await self.gate.evaluate(
             db=self.db,
             symbol=symbol,
@@ -314,6 +326,15 @@ class EvidenceSnapshotService:
             ),
             "benchmark_price_window_manifest_hash": data.get(
                 "benchmark_price_window_manifest_hash"
+            ),
+            "decision_evidence_pack_manifest_id": data.get(
+                "decision_evidence_pack_manifest_id"
+            ),
+            "decision_evidence_pack_manifest_hash": data.get(
+                "decision_evidence_pack_manifest_hash"
+            ),
+            "evidence_completeness_matrix": data.get(
+                "evidence_completeness_matrix"
             ),
             "required_benchmark_count": data.get("required_benchmark_count"),
             "actual_benchmark_count": data.get("actual_benchmark_count"),

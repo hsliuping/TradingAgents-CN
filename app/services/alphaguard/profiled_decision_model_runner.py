@@ -7,12 +7,19 @@ import json
 from typing import Any
 from uuid import uuid4
 
-from tradingagents.agents.managers.risk_manager import create_risk_manager
+from tradingagents.agents.managers.risk_manager import (
+    build_top_review_model_request,
+    create_risk_manager,
+)
 from tradingagents.agents.trader.trader import create_trader
+from tradingagents.agents.utils.instrument_utils import build_instrument_context
 from tradingagents.alphaguard.decision_schemas import (
     ModelExecutionMeta,
     NormalTradePlan,
     TopReviewDecision,
+)
+from tradingagents.alphaguard.structured_output import (
+    render_structured_input_for_estimation,
 )
 
 from app.schemas.alphaguard.decision import DecisionContext, RevisionRequest, canonical_hash
@@ -355,8 +362,49 @@ class ProfiledDecisionModelRunner:
                 prompt=prompt,
                 request_hash=request_hash,
                 meta=meta,
+                budget=budget,
             )
         return plan
+
+    @staticmethod
+    def render_top_input(
+        *,
+        context: DecisionContext,
+        plan: NormalTradePlan,
+        risk_policy_summary: dict[str, Any],
+        research_results: list[dict[str, Any]],
+        model_runtime_context_hash: str,
+        top_prompt_version: str,
+        top_prompt_template: str,
+        structured_output_mode: str,
+        run_mode: str,
+    ) -> str:
+        state = ProfiledDecisionModelRunner._base_state(
+            context,
+            attempt_number=1,
+            trace_id=None,
+            research_results=research_results,
+            model_runtime_context_hash=model_runtime_context_hash,
+            run_mode=run_mode,
+        )
+        state["normal_trade_plan"] = plan.model_dump(mode="json")
+        state["risk_policy_summary"] = risk_policy_summary
+        request = build_top_review_model_request(
+            context=context,
+            normal_plan=plan,
+            state=state,
+            config={
+                "top_prompt_version": top_prompt_version,
+                "top_prompt_template": top_prompt_template,
+            },
+            prompt_version=top_prompt_version,
+            instrument_context=build_instrument_context(context.symbol),
+        )
+        return render_structured_input_for_estimation(
+            request.messages,
+            schema=request.output_schema,
+            structured_output_mode=structured_output_mode,
+        )
 
     async def run_top(
         self,
@@ -367,16 +415,16 @@ class ProfiledDecisionModelRunner:
         attempt_number: int,
         trace_id: str | None,
     ) -> TopReviewDecision:
-        rendered = json.dumps(
-            {
-                "context": context.model_dump(mode="json"),
-                "model_runtime_context_hash": self.model_runtime_context_hash,
-                "research": self.research_results,
-                "normal_plan": plan.model_dump(mode="json"),
-                "risk_policy_summary": risk_policy_summary,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
+        rendered = self.render_top_input(
+            context=context,
+            plan=plan,
+            risk_policy_summary=risk_policy_summary,
+            research_results=self.research_results,
+            model_runtime_context_hash=self.model_runtime_context_hash,
+            top_prompt_version=self.top_prompt.prompt_version,
+            top_prompt_template=self.top_prompt.template,
+            structured_output_mode=self.top_profile.structured_output_mode,
+            run_mode=self.run_mode,
         )
         budget = await self._check_budget(self.top_profile, context, rendered)
         if not budget.allowed:
@@ -456,5 +504,6 @@ class ProfiledDecisionModelRunner:
                 prompt=self.top_prompt,
                 request_hash=request_hash,
                 meta=meta,
+                budget=budget,
             )
         return review

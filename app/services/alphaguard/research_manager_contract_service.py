@@ -181,6 +181,7 @@ class ResearchManagerContractService:
                 prompt=prompt,
                 request_hash=request_hash,
                 meta=meta,
+                budget=budget,
             )
         else:
             model = llm or await self.provider_runtime.create_registered(
@@ -227,6 +228,7 @@ class ResearchManagerContractService:
                     prompt=prompt,
                     request_hash=request_hash,
                     meta=meta,
+                    budget=budget,
                 )
             fields, field_types = normalized_payload_shape(invocation.payload)
             if invocation.failure_status is not None:

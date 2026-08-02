@@ -383,10 +383,14 @@ class DecisionContextBuilder:
                 + _refs(data.trading_calendar, "trading_calendar"),
                 key=lambda item: item.evidence_id,
             )[:MAX_EVIDENCE_REFS_PER_CATEGORY],
-            "financial_evidence": _refs(data.financials, "financial"),
+            "financial_evidence": _refs(
+                data.financials + data.cashflows,
+                "financial",
+            ),
             "news_evidence": _refs(data.news, "news"),
             "announcement_evidence": _refs(
-                data.announcements, "announcement"
+                data.announcements + data.dividends + data.corporate_actions,
+                "announcement",
             ),
             "account_evidence": _refs(data.accounts, "account"),
             "portfolio_evidence": _refs(

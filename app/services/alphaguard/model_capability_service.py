@@ -14,7 +14,7 @@ from app.schemas.alphaguard.decision import canonical_hash
 from app.schemas.alphaguard.model_runtime import ModelCapabilityCheck
 from tradingagents.alphaguard.decision_schemas import (
     NormalTradePlan,
-    TopReviewDecision,
+    TopModelDecisionOutput,
 )
 from tradingagents.alphaguard.structured_output import invoke_json_object
 
@@ -86,7 +86,7 @@ class ModelCapabilityService:
         if profile.role == "NORMAL_TRADER":
             return "normal_trade_plan_capability_prompt", NormalTradePlan
         if profile.role == "TOP_RISK_REVIEWER":
-            return "top_review_capability_prompt", TopReviewDecision
+            return "top_review_capability_prompt", TopModelDecisionOutput
         return "model_capability_prompt", CapabilityEcho
 
     async def _provider_access_probe(
@@ -395,6 +395,7 @@ class ModelCapabilityService:
                                 prompt=capability_prompt,
                                 request_hash=request_hash,
                                 meta=meta,
+                                budget=budget,
                             )
                         latency_ms = invocation.model_meta.latency_ms
                         response_hash = invocation.model_meta.raw_output_hash

@@ -1,4 +1,3 @@
-from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
 
@@ -151,7 +150,7 @@ def review_payload(status="CONFIRM", **overrides):
         "missing_evidence": [],
         "logical_conflicts": [],
         "risk_findings": [],
-        "adjusted_plan": None,
+        "proposed_changes": {},
         "material_change_fields": [],
         "review_reason": "风险终审完成",
     }
@@ -248,7 +247,7 @@ def test_risk_judge_confirm():
     result = run_risk(FakeLLM(review_payload()))
     assert result["top_review_decision"]["status"] == "CONFIRM"
     assert result["top_review_decision"]["adjusted_plan"] is None
-    assert result["top_model_meta"]["prompt_version"] == "top_review_decision_v1"
+    assert result["top_model_meta"]["prompt_version"] == "top_review_decision_v2"
 
 
 @pytest.mark.parametrize(
@@ -259,12 +258,11 @@ def test_risk_judge_confirm():
     ],
 )
 def test_risk_judge_accepts_adjustments(status, material_fields):
-    adjusted = deepcopy(plan_payload(max_position_pct=0.15))
     result = run_risk(
         FakeLLM(
             review_payload(
                 status=status,
-                adjusted_plan=adjusted,
+                proposed_changes={"max_position_pct": 0.15},
                 material_change_fields=material_fields,
             )
         )
@@ -293,12 +291,11 @@ def test_risk_judge_failures_are_explicit(llm, expected_status, error_type):
 
 
 def test_risk_judge_rejects_opposite_direction():
-    adjusted = deepcopy(plan_payload(action="SELL", entry_zone=None))
     result = run_risk(
         FakeLLM(
             review_payload(
                 status="MATERIAL_REVISION",
-                adjusted_plan=adjusted,
+                proposed_changes={"action": "SELL", "entry_zone": None},
                 material_change_fields=["action"],
             )
         )

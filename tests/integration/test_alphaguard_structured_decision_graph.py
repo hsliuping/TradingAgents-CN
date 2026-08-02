@@ -95,7 +95,7 @@ def confirm_payload():
         "missing_evidence": [],
         "logical_conflicts": [],
         "risk_findings": [],
-        "adjusted_plan": None,
+        "proposed_changes": {},
         "material_change_fields": [],
         "review_reason": "确认普通模型计划",
     }

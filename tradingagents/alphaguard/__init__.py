@@ -7,6 +7,8 @@ from .decision_schemas import (
     PriceRange,
     RiskItem,
     RuleCondition,
+    TopModelDecisionOutput,
+    TopPlanProposedChanges,
     TopReviewDecision,
     validate_review_against_plan,
 )
@@ -64,6 +66,8 @@ __all__ = [
     "PriceRange",
     "RiskItem",
     "RuleCondition",
+    "TopModelDecisionOutput",
+    "TopPlanProposedChanges",
     "TopReviewDecision",
     "validate_review_against_plan",
     "CandidateEntry",
