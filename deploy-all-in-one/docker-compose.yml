@@ -38,6 +38,15 @@ services:
       # 安全配置（可选，不设则容器启动时自动生成并持久化）
       JWT_SECRET: "${JWT_SECRET:-}"
       CSRF_SECRET: "${CSRF_SECRET:-}"
+      # 🔧 京东云 Basic Auth 认证（必填！否则网关登录后会跳转到二次登录页）
+      # 格式：用户名:访问令牌（一用户一容器场景下配一条，多个用逗号分隔）
+      # 京东云网关会在请求头注入 Authorization: Basic base64(用户名:令牌)
+      # 首次启动必须配置正确的凭据；后续 token 变化不影响老用户登录
+      JDYUN_BASIC_AUTH_USERS: "${JDYUN_BASIC_AUTH_USERS:?JDYUN_BASIC_AUTH_USERS must be set in .env}"
+      # 京东云网关 IP 白名单（推荐配置，限制只有京东云网关的请求才能访问）
+      # 多个 IP 用逗号分隔，支持 CIDR 格式（如 10.0.0.1,172.16.0.0/12）
+      # 留空则不启用 IP 校验（仅依赖网络隔离，不推荐生产环境）
+      JDYUN_GATEWAY_IPS: "${JDYUN_GATEWAY_IPS:-}"
       # LLM 限速配置（应对京东云 API 限速，默认值已优化）
       JDYUN_LLM_MAX_RETRIES: "${JDYUN_LLM_MAX_RETRIES:-8}"
       JDYUN_LLM_MAX_RPM: "${JDYUN_LLM_MAX_RPM:-30}"

@@ -340,7 +340,15 @@ curl -u "jcloud-ugidvcp:8437F13D..." https://<容器地址>/api/auth/me
 
 ### Q7: 可以不用 Basic Auth 吗？
 
-可以。如果 `JDYUN_BASIC_AUTH_USERS` 留空，系统会回退到默认的 admin 账号登录（用户名/密码方式）。但不推荐生产环境使用。
+**不可以**。`JDYUN_BASIC_AUTH_USERS` 是京东云模式登录的核心配置，必须填写。
+
+如果留空，会导致以下问题：
+1. 京东云网关注入的 Basic Auth 凭据无法通过白名单校验
+2. 后端返回 401 未授权
+3. 前端收到 401 后跳转到**应用内登录页**（而非京东云平台登录页），出现"网关登录后又跳转到二次登录页"的现象
+4. 用户无法正常使用系统
+
+**正确做法**：即使一用户一容器场景下只有一条凭据，也必须配置 `JDYUN_BASIC_AUTH_USERS=<username>:<token>`。首次认证通过后，后续 token 变化不影响老用户登录（见第 7 节）。
 
 ---
 
@@ -351,8 +359,8 @@ curl -u "jcloud-ugidvcp:8437F13D..." https://<容器地址>/api/auth/me
 | 项目 | 内容 |
 |------|------|
 | 认证方式 | Basic Auth（京东云网关注入） |
-| 对接文档版本 | v1.0 |
-| 更新日期 | 2026-08-02 |
+| 对接文档版本 | v1.1 |
+| 更新日期 | 2026-08-03 |
 | 系统版本 | TradingAgents-CN Pro v3.0 JD Cloud Edition |
 
 ---
@@ -380,19 +388,21 @@ services:
       - ta-qdrant:/app/data
     environment:
       TZ: "Asia/Shanghai"
-      MONGODB_PASSWORD: "${MONGODB_PASSWORD}"
+      MONGODB_PASSWORD: "${MONGODB_PASSWORD:?MONGODB_PASSWORD must be set in .env}"
       JDYUN_MODE: "true"
       OPENAI_API_BASE: "${OPENAI_API_BASE:-https://modelservice.jdcloud.com/v1}"
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:?OPENAI_API_KEY must be set in .env}"
       OPENAI_MODEL: "${OPENAI_MODEL:-GLM-5}"
       EMBEDDING_API_BASE: "${EMBEDDING_API_BASE:-https://modelservice.jdcloud.com/v1}"
       EMBEDDING_API_KEY: "${EMBEDDING_API_KEY}"
       EMBEDDING_MODEL: "${EMBEDDING_MODEL:-Qwen3-Embedding-8B}"
       TUSHARE_TOKEN: "${TUSHARE_TOKEN}"
-      JWT_SECRET: "${JWT_SECRET}"
-      CSRF_SECRET: "${CSRF_SECRET}"
-      JDYUN_BASIC_AUTH_USERS: "${JDYUN_BASIC_AUTH_USERS}"
-      JDYUN_GATEWAY_IPS: "${JDYUN_GATEWAY_IPS}"
+      JWT_SECRET: "${JWT_SECRET:-}"
+      CSRF_SECRET: "${CSRF_SECRET:-}"
+      # 🔧 必填！京东云网关注入的 Basic Auth 凭据（留空会导致网关登录后跳转到二次登录页）
+      JDYUN_BASIC_AUTH_USERS: "${JDYUN_BASIC_AUTH_USERS:?JDYUN_BASIC_AUTH_USERS must be set in .env}"
+      # 推荐配置（留空则不启用 IP 校验，仅依赖网络隔离）
+      JDYUN_GATEWAY_IPS: "${JDYUN_GATEWAY_IPS:-}"
 
 volumes:
   ta-data:
