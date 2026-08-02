@@ -308,3 +308,131 @@ async def read_user_manual_section(
 
     header = f"📖 用户手册搜索结果（keyword='{section_name}', 当前模式: {current_manual_label}）:\n\n"
     return header + "\n\n---\n\n".join(parts)
+
+
+# ============================================================
+# 向量检索工具：基于语义匹配，解决自然语言问题匹配不到章节的问题
+# ============================================================
+
+
+@tool
+@register_tool(
+    tool_id="search_user_manual",
+    name="语义搜索用户手册",
+    description=(
+        "基于向量语义检索用户手册，用自然语言查找相关章节。"
+        "当用户用自然语言提问（如'怎么做分析''怎么研究一只股票''持仓分析怎么用''如何配置 Token'）时使用本工具，"
+        "它会返回语义最相关的 Top-5 章节。"
+        "本工具比 read_user_manual_section 更适合处理用户的自然语言提问，"
+        "建议优先使用本工具检索，再用 read_user_manual_section 按精确章节名读取完整内容。"
+    ),
+    category="assistant_ops",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    data_source_handling="local_only",
+    capability_tags=["usage_helper", "manual", "vector_search", "semantic_search", "user_guide"],
+    tool_role_hint="primary",
+    output_shape="text",
+    preferred_for=[
+        "怎么做分析", "怎么研究股票", "如何分析一只股票", "单股分析怎么用",
+        "分析在哪", "怎么发起分析", "研究流程", "怎么用平台做分析",
+        "持仓分析", "选股助手怎么用", "怎么配置 Token", "怎么加自选",
+    ],
+    when_to_use=(
+        "当用户用自然语言询问系统使用方法、功能流程、操作步骤时优先使用本工具。"
+        "本工具基于向量语义匹配，能理解'怎么做分析'等自然语言提问并召回相关章节。"
+    ),
+    returns="返回 Top-5 相关章节的标题和内容片段，按相似度降序排列。",
+)
+async def search_user_manual(
+    query: Annotated[
+        str,
+        "用户的自然语言问题，如'怎么做分析''怎么研究一只股票''持仓分析怎么用''如何配置 Token''429 限速怎么办'",
+    ],
+) -> str:
+    """基于向量语义检索用户手册，用自然语言查找相关章节。"""
+    try:
+        from core.knowledge.user_manual_manager import UserManualManager
+
+        manager = UserManualManager()
+
+        # 检查向量库是否可用
+        if not manager.available:
+            # 优雅降级：回退到 read_user_manual_section 的关键字匹配
+            logger.warning(
+                "[search_user_manual] 向量检索不可用，回退到关键字匹配。"
+                "建议检查 Embedding 配置或 Qdrant 服务状态。"
+            )
+            return (
+                "⚠️ 向量检索当前不可用（Embedding 或 Qdrant 未就绪），已回退到关键字匹配模式。\n\n"
+                "请尝试用更精确的章节名调用 read_user_manual_section 工具，"
+                "如 '单股研究'、'数据源配置'、'模拟交易' 等。"
+            )
+
+        # 检查索引是否已构建
+        count = manager.get_count()
+        if count == 0:
+            logger.warning("[search_user_manual] 手册索引为空，尝试触发重建")
+            # 同步触发一次重建（不阻塞太久，失败就降级）
+            try:
+                manager.ensure_indexed(force=False)
+            except Exception as e:
+                logger.error(f"[search_user_manual] 触发重建失败: {e}")
+
+            count = manager.get_count()
+            if count == 0:
+                return (
+                    "⚠️ 用户手册索引尚未构建完成，向量检索暂不可用。\n"
+                    "可改用 read_user_manual_section 工具按章节名精确读取。"
+                )
+
+        # 执行语义检索
+        results = manager.search(query, top_k=5)
+
+        if not results:
+            return (
+                f"❌ 未找到与 '{query}' 语义相关的手册章节。\n"
+                "可尝试用更具体的关键字调用 read_user_manual_section 工具。"
+            )
+
+        # 格式化输出
+        import os
+        is_jdyun = _is_jdyun_mode()
+        current_label = "京东云版专用手册" if is_jdyun else "标准版主手册"
+
+        lines = [
+            f"📖 用户手册语义检索结果（query='{query}', 当前模式: {current_label}）",
+            f"找到 {len(results)} 个相关章节（按相似度降序）：",
+            "",
+        ]
+
+        for i, r in enumerate(results, 1):
+            manual_label = "📕 京东云版" if r.manual_type == "jdyun" else "📘 标准版"
+            sim_pct = f"{r.similarity * 100:.0f}%"
+            parent_hint = f"（所属：{r.parent_title}）" if r.parent_title else ""
+
+            # 控制单个结果长度，避免总输出过长
+            content_display = r.content
+            if len(content_display) > 800:
+                content_display = content_display[:800] + "\n...(内容已截断，如需完整内容请用 read_user_manual_section 按标题读取)"
+
+            lines.append(f"━━━ #{i} {manual_label} | 相似度 {sim_pct} ━━━")
+            lines.append(f"📌 标题: {r.title}{parent_hint}")
+            lines.append(f"📄 内容:")
+            lines.append(content_display)
+            lines.append("")
+
+        lines.append(
+            "💡 如需查看某个章节的完整内容，可用 read_user_manual_section 工具按上述标题精确读取。"
+        )
+
+        return "\n".join(lines)
+
+    except ImportError:
+        logger.error("[search_user_manual] UserManualManager 模块未找到")
+        return "❌ 向量检索模块未安装。请改用 read_user_manual_section 工具。"
+    except Exception as e:
+        logger.error(f"[search_user_manual] 检索异常: {e}", exc_info=True)
+        return f"❌ 检索失败: {e}\n请改用 read_user_manual_section 工具按章节名精确读取。"
+

@@ -352,15 +352,17 @@ USAGE_HELPER_SYSTEM_PROMPT_TEMPLATE = """你是 TradingAgents-CN 平台的**使�
 1. `get_user_current_state` — 查询用户当前的关注列表股票数、历史任务数、最近任务、定时分析配置数
 2. `get_system_status` — 查询系统模式（标准版/京东云版）、当前默认大模型、数据源启用状态、版本号
 3. `get_user_recent_activity` — 查询用户最近的任务执行记录，包括失败任务的错误信息
-4. `read_user_manual_section` — 按章节名读取用户手册（支持"快速开始"、"安装部署"、"首次配置"、"基础功能"、"模拟交易"、"智能助手"、"License"、"数据源配置"、"定时分析"、"股票关注列表"等关键字）。**京东云版用户问操作流程时，本工具会自动读取京东云版专用手册**（包含京东云部署、429 限速、ta-mongo-data 卷名、批量并发限制等京东云特有章节），无需在 section_name 里加"京东云"前缀。如果当前章节在京东云手册找不到，会自动回退到主手册。
-5. `get_data_sync_status` — 查询 tushare/akshare 的数据同步状态（股票基础数据、历史行情、财务数据的最近同步时间、记录数、是否正在运行同步任务）。可传 symbol 参数查单只股票的同步状态。
-6. `get_paper_trading_status` — 查询模拟交易账户状态（总资产、可用资金、持仓市值、已实现盈亏、浮动盈亏、持仓股票数、盈利/亏损股票数、持仓明细）。无需参数。
-7. `get_token_usage` — 查询 Token 用量统计（已用 Token、配额上限、剩余配额、使用率、按模型分组消耗、每日趋势）。可选 days 参数（1=今日/7=本周/30=本月，默认 7）。
-8. `get_running_tasks` — 查询当前正在运行和排队的分析任务（当前步骤、进度百分比、已耗时、预估剩余时间、排队位置、最近完成任务）。无需参数。
+4. `search_user_manual` — **向量语义检索用户手册**（推荐优先使用）。当用户用自然语言提问（如"怎么做分析""怎么研究一只股票""持仓分析怎么用""如何配置 Token""429 限速怎么办"）时使用本工具，它会返回语义最相关的 Top-5 章节。本工具能理解自然语言意图，比 read_user_manual_section 更适合处理用户提问。
+5. `read_user_manual_section` — 按章节名精确读取用户手册（支持"快速开始"、"安装部署"、"首次配置"、"基础功能"、"模拟交易"、"智能助手"、"License"、"数据源配置"、"定时分析"、"股票关注列表"等关键字）。**京东云版用户问操作流程时，本工具会自动读取京东云版专用手册**。当用户已经明确提到某个章节名，或 search_user_manual 返回的某个章节需要查看完整内容时使用本工具。
+6. `get_data_sync_status` — 查询 tushare/akshare 的数据同步状态（股票基础数据、历史行情、财务数据的最近同步时间、记录数、是否正在运行同步任务）。可传 symbol 参数查单只股票的同步状态。
+7. `get_paper_trading_status` — 查询模拟交易账户状态（总资产、可用资金、持仓市值、已实现盈亏、浮动盈亏、持仓股票数、盈利/亏损股票数、持仓明细）。无需参数。
+8. `get_token_usage` — 查询 Token 用量统计（已用 Token、配额上限、剩余配额、使用率、按模型分组消耗、每日趋势）。可选 days 参数（1=今日/7=本周/30=本月，默认 7）。
+9. `get_running_tasks` — 查询当前正在运行和排队的分析任务（当前步骤、进度百分比、已耗时、预估剩余时间、排队位置、最近完成任务）。无需参数。
 
 【使用规则】
 - 当用户问到"为什么 XXX 不显示""怎么没有 XXX 功能""XXX 怎么用"等问题时，**优先调用 get_user_current_state 和 get_system_status 看真实状态**
-- 当用户问到操作流程时，**优先调用 read_user_manual_section 查对应章节**
+- 当用户问到操作流程、功能用法、系统使用方法时（如"怎么做分析""怎么研究股票""持仓分析怎么用""怎么配置 Token""429 限速怎么办"），**优先调用 search_user_manual 做向量语义检索**；如果检索结果中某个章节需要查看完整内容，再用 read_user_manual_section 按标题精确读取
+- 当用户明确提到某个章节名（如"看下'模拟交易'章节"）时，直接调用 read_user_manual_section
 - 当用户问到"我的任务去哪了""为什么报错"时，**优先调用 get_user_recent_activity 查最近记录**
 - 当用户问到"数据同步好了吗""数据是否最新""要不要重新同步""tushare 数据什么时候同步的""某股数据同步了吗"时，**必须调用 get_data_sync_status 查真实同步状态**，不要凭 FAQ 或任务记录猜测数据同步情况。这是用户最容易问错方向的话题，必须基于真实状态回答
 - 当用户问到某只股票的数据时（如"中国银行数据同步了吗"），**调用 get_data_sync_status 并传入 symbol 参数**查该股同步状态
@@ -1300,7 +1302,7 @@ class IntelligentAssistantService:
         registry = get_tool_registry()
         all_metadata = registry.list_all()
 
-        # v3.0 新增：使用问答机器人只注册 8 个系统感知工具
+        # v3.0 新增：使用问答机器人只注册 9 个系统感知工具
         # 不加载金融市场数据工具、不加载分析师 Agent 工具
         if self._assistant_role == "usage_helper":
             allowed_tool_ids = {
@@ -1308,13 +1310,14 @@ class IntelligentAssistantService:
                 "get_system_status",
                 "get_user_recent_activity",
                 "read_user_manual_section",
+                "search_user_manual",  # 向量语义检索（v3.0.1 新增，解决自然语言问题匹配）
                 "get_data_sync_status",
                 "get_paper_trading_status",
                 "get_token_usage",
                 "get_running_tasks",
             }
             all_metadata = [t for t in all_metadata if t.id in allowed_tool_ids]
-            logger.info(f"[智能助手·使用问答] 仅加载 {len(all_metadata)} 个系统感知工具（含数据同步/模拟交易/Token用量/任务进度）")
+            logger.info(f"[智能助手·使用问答] 仅加载 {len(all_metadata)} 个系统感知工具（含向量检索/数据同步/模拟交易/Token用量/任务进度）")
 
         self._openai_tools = tool_metadata_list_to_openai(all_metadata)
 

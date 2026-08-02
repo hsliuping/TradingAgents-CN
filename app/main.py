@@ -410,6 +410,46 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_sync_capability_index_background())
     logger.info("📋 能力索引同步已在后台启动")
 
+    # 启动期同步用户手册向量索引：手册内容变更后重启即自动重建，
+    # 让使用问答机器人能基于向量语义检索回答"怎么做分析"等自然语言问题
+    async def _sync_user_manual_index_background():
+        """后台异步构建用户手册向量索引，不阻塞启动"""
+        try:
+            from core.knowledge.user_manual_manager import UserManualManager
+
+            manager = UserManualManager()
+            if not manager.available:
+                logger.warning(
+                    "⚠️ [用户手册索引] 向量库/Embedding 不可用，跳过构建。"
+                    "使用问答机器人将回退到关键字匹配模式。"
+                )
+                return
+
+            # 非阻塞地执行重建（force=False 时会按签名比对决定是否重建）
+            result = manager.ensure_indexed(force=False)
+            if result["rebuilt"]:
+                logger.info(
+                    "✅ 用户手册索引构建完成: %d 个切片，来源 %d 份手册，签名=%s",
+                    result["sections_count"],
+                    result["manuals_count"],
+                    result["signature"][:8],
+                )
+            elif result["skipped"]:
+                logger.info(
+                    "📋 用户手册索引跳过重建（签名一致），现有 %d 个切片",
+                    result["sections_count"],
+                )
+            else:
+                logger.warning(
+                    "⚠️ 用户手册索引构建失败: %s",
+                    result.get("error", "未知原因"),
+                )
+        except Exception as e:
+            logger.error(f"❌ 用户手册索引同步失败: {e}", exc_info=True)
+
+    asyncio.create_task(_sync_user_manual_index_background())
+    logger.info("📖 用户手册索引同步已在后台启动")
+
     # 启动期同步系统默认提示词模板：将代码中的 fallback 提示词写入数据库统一管理
     try:
         from app.services.system_prompt_seed_service import ensure_system_prompt_templates
