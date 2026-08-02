@@ -62,6 +62,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useNotificationStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
@@ -73,6 +74,8 @@ import {
   Bell,
   QuestionFilled
 } from '@element-plus/icons-vue'
+
+const router = useRouter()
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
@@ -137,7 +140,7 @@ onUnmounted(() => {
 })
 
 function showHelp() {
-  window.open('https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw', '_blank')
+  router.push('/help')
 }
 </script>
 
