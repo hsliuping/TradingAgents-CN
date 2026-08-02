@@ -76,11 +76,16 @@ curl --header 'Authorization: Basic amNsb3VkLXVnaWR2Y3A6ODQzN0YxM0RBQkU4N0QwQkMx
 |----------|------|------|------|
 | `JDYUN_MODE` | ✅ | 京东云模式开关，必须为 `true` | `true` |
 | `JDYUN_BASIC_AUTH_USERS` | ✅ | Basic Auth 白名单（用户名:访问令牌） | `jcloud-ugidvcp:8437F13DABE87D0BC1D4DCCD4739C5A7` |
-| `OPENAI_API_BASE` | ✅ | 京东云模型服务地址 | `https://modelservice.jdcloud.com/v1` |
-| `OPENAI_API_KEY` | ✅ | 京东云 API Key（LLM + Embedding 共用） | `pk-xxxxxxxx` |
+| `OPENAI_API_BASE` | ✅ | 京东云 LLM 模型服务地址 | `https://modelservice.jdcloud.com/v1` |
+| `OPENAI_API_KEY` | ✅ | 京东云 API Key（LLM 对话用） | `pk-xxxxxxxx` |
 | `OPENAI_MODEL` | ✅ | 默认对话模型 | `GLM-5` 或 `DeepSeek-V4-Flash` |
+| `EMBEDDING_API_BASE` | ✅ | 京东云 Embedding 模型服务地址 | `https://modelservice.jdcloud.com/v1` |
+| `EMBEDDING_API_KEY` | ✅ | 京东云 API Key（Embedding 向量化用，通常与 OPENAI_API_KEY 相同） | `pk-xxxxxxxx` |
 | `EMBEDDING_MODEL` | ✅ | Embedding 模型 | `Qwen3-Embedding-8B` |
 | `TUSHARE_TOKEN` | ✅ | Tushare 数据源 Token | `<由用户提供>` |
+| `MONGODB_PASSWORD` | ✅ | MongoDB 数据库密码 | `<自定义强密码>` |
+| `JWT_SECRET` | ✅ | JWT 签名密钥（生成方式：`openssl rand -base64 48`） | `<随机字符串>` |
+| `CSRF_SECRET` | ✅ | CSRF 防护密钥（生成方式：`openssl rand -base64 48`） | `<随机字符串>` |
 
 ### 3.2 推荐配置的环境变量
 
@@ -193,8 +198,13 @@ JDYUN_GATEWAY_IPS=10.0.0.1,172.16.0.0/12
    OPENAI_API_BASE=https://modelservice.jdcloud.com/v1
    OPENAI_API_KEY=<京东云API Key>
    OPENAI_MODEL=<默认模型>
+   EMBEDDING_API_BASE=https://modelservice.jdcloud.com/v1
+   EMBEDDING_API_KEY=<京东云API Key>
    EMBEDDING_MODEL=Qwen3-Embedding-8B
    TUSHARE_TOKEN=<Tushare Token>
+   MONGODB_PASSWORD=<自定义强密码>
+   JWT_SECRET=<openssl rand -base64 48 生成的随机字符串>
+   CSRF_SECRET=<openssl rand -base64 48 生成的随机字符串>
    ```
 3. **配置网关**：京东云网关注入 `Authorization: Basic base64(<username>:<token>)`
 
@@ -336,3 +346,121 @@ curl -u "jcloud-ugidvcp:8437F13D..." https://<容器地址>/api/auth/me
 | 对接文档版本 | v1.0 |
 | 更新日期 | 2026-08-02 |
 | 系统版本 | TradingAgents-CN Pro v3.0 JD Cloud Edition |
+
+---
+
+## 11. 部署方式
+
+### 11.1 docker-compose 部署（推荐）
+
+京东云工程师可使用以下 `docker-compose.yml` 部署：
+
+```yaml
+services:
+  tradingagents:
+    image: agentengine-tradingagent-cn-north-1.jcr.service.jdcloud.com/tradingagent:3.0.0-jdyun
+    container_name: tradingagents-jdyun
+    hostname: tradingagents
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8082}:8082"
+    volumes:
+      - ta-data:/data/db
+      - ta-redis:/var/lib/redis
+      - ta-runtime:/app/runtime
+      - ta-logs:/app/logs
+      - ta-qdrant:/app/data
+    environment:
+      TZ: "Asia/Shanghai"
+      MONGODB_PASSWORD: "${MONGODB_PASSWORD}"
+      JDYUN_MODE: "true"
+      OPENAI_API_BASE: "${OPENAI_API_BASE:-https://modelservice.jdcloud.com/v1}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-GLM-5}"
+      EMBEDDING_API_BASE: "${EMBEDDING_API_BASE:-https://modelservice.jdcloud.com/v1}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY}"
+      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-Qwen3-Embedding-8B}"
+      TUSHARE_TOKEN: "${TUSHARE_TOKEN}"
+      JWT_SECRET: "${JWT_SECRET}"
+      CSRF_SECRET: "${CSRF_SECRET}"
+      JDYUN_BASIC_AUTH_USERS: "${JDYUN_BASIC_AUTH_USERS}"
+      JDYUN_GATEWAY_IPS: "${JDYUN_GATEWAY_IPS}"
+
+volumes:
+  ta-data:
+    driver: local
+  ta-redis:
+    driver: local
+  ta-runtime:
+    driver: local
+  ta-logs:
+    driver: local
+  ta-qdrant:
+    driver: local
+```
+
+### 11.2 .env 配置文件
+
+创建 `.env` 文件配置环境变量：
+
+```bash
+# 必填项
+MONGODB_PASSWORD=<自定义强密码>
+OPENAI_API_KEY=<京东云API Key>
+EMBEDDING_API_KEY=<京东云API Key>
+JWT_SECRET=$(openssl rand -base64 48)
+CSRF_SECRET=$(openssl rand -base64 48)
+JDYUN_BASIC_AUTH_USERS=<username>:<token>
+
+# 推荐配置
+JDYUN_GATEWAY_IPS=<京东云网关IP>
+
+# 可选（有默认值）
+HOST_PORT=8082
+OPENAI_API_BASE=https://modelservice.jdcloud.com/v1
+EMBEDDING_API_BASE=https://modelservice.jdcloud.com/v1
+OPENAI_MODEL=GLM-5
+EMBEDDING_MODEL=Qwen3-Embedding-8B
+TUSHARE_TOKEN=<用户的Tushare Token>
+```
+
+### 11.3 启动与验证
+
+```bash
+# 启动
+docker-compose up -d
+
+# 验证（替换实际凭据）
+curl -u "<username>:<token>" http://localhost:8082/api/auth/me
+
+# 预期返回
+# {"success":true,"data":{"username":"...","is_admin":true,"auth_method":"basic","provider":"jdyun"}}
+```
+
+### 11.4 镜像内置内容
+
+镜像 `tradingagent:3.0.0-jdyun` 已内置：
+
+| 内容 | 说明 |
+|------|------|
+| 前端构建产物 | Vite 编译好的静态文件 |
+| 后端 Python 代码 | FastAPI 应用 |
+| MongoDB 7.0 | 数据库 |
+| Redis 7 | 缓存 |
+| Nginx | 反向代理 |
+| s6-overlay | 进程管理 |
+| 用户手册 | 内置文档 |
+| 预生成向量索引 | 开箱即用，首次部署无需等待 embedding |
+| 能力索引 | 内置工具索引数据 |
+
+**数据持久化卷**（5 个）：
+
+| 卷名 | 容器路径 | 用途 |
+|------|---------|------|
+| `ta-data` | `/data/db` | MongoDB 数据 |
+| `ta-redis` | `/var/lib/redis` | Redis 数据 |
+| `ta-runtime` | `/app/runtime` | 运行时配置 |
+| `ta-logs` | `/app/logs` | 日志 |
+| `ta-qdrant` | `/app/data` | Qdrant 向量数据库 |
+
+容器删除重建后，只要数据卷保留，用户数据和索引都不会丢失。

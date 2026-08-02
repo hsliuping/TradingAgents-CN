@@ -233,6 +233,15 @@ async def get_or_create_jdyun_user(self, jdyun_username, is_admin=True):
 |----------|------|------|
 | `JDYUN_MODE` | 京东云模式开关 | `true` |
 | `JDYUN_BASIC_AUTH_USERS` | Basic Auth 白名单 | `jcloud-ugidvcp:8437F13D...` |
+| `OPENAI_API_BASE` | LLM 模型服务地址 | `https://modelservice.jdcloud.com/v1` |
+| `OPENAI_API_KEY` | LLM API Key | `pk-xxxxxxxx` |
+| `OPENAI_MODEL` | 默认对话模型 | `GLM-5` |
+| `EMBEDDING_API_BASE` | Embedding 模型服务地址 | `https://modelservice.jdcloud.com/v1` |
+| `EMBEDDING_API_KEY` | Embedding API Key（通常与 OPENAI_API_KEY 相同） | `pk-xxxxxxxx` |
+| `EMBEDDING_MODEL` | Embedding 模型 | `Qwen3-Embedding-8B` |
+| `MONGODB_PASSWORD` | MongoDB 数据库密码 | `<自定义强密码>` |
+| `JWT_SECRET` | JWT 签名密钥 | `openssl rand -base64 48` |
+| `CSRF_SECRET` | CSRF 防护密钥 | `openssl rand -base64 48` |
 
 ### 5.2 推荐配置（生产环境）
 
@@ -242,7 +251,8 @@ async def get_or_create_jdyun_user(self, jdyun_username, is_admin=True):
 
 ### 5.3 配置文件
 
-京东云版使用独立环境文件 `.env.jdyun`，由 `start_dev.ps1 backend jdyun` 自动加载。
+京东云版使用独立环境文件 `.env.docker.jdyun`，由 `start_dev.ps1 backend jdyun` 自动加载。
+生产环境通过 `docker-compose.yml` + `.env` 文件配置。
 
 ---
 
@@ -282,46 +292,37 @@ async def get_or_create_jdyun_user(self, jdyun_username, is_admin=True):
 **文件**: `frontend/mock-jdyun-gateway.mjs`
 
 模拟京东云网关完整行为：
-- 登录页 `/login` — 模拟京东云平台登录
-- Session 机制 — 登录成功后设置 `jdyun_session` cookie
-- 自动注入 Basic Auth — 后续所有 `/api` 请求从 cookie 提取凭据注入 Header
+- 登录页 `/login` - 模拟京东云平台登录（凭据写死 `testuser / Test@123456`）
+- Session 机制 - 登录成功后设置 `jdyun_session` cookie
+- 自动注入 Basic Auth - 后续所有 `/api` 请求从 cookie 提取凭据注入 Header
+- 统一目标 - 所有请求转发到单容器 `http://127.0.0.1:8082`（Nginx 内部区分前端/后端）
 
 ### 7.2 启动方式
 
 ```powershell
-# 终端1: Docker 依赖
+# 终端1: Docker 容器（单容器镜像，含 MongoDB + Redis + 后端 + 前端）
 .\start_dev.ps1 docker 3.0
+bash deploy-all-in-one/run.sh --jdyun
 
-# 终端2: 后端（JDYUN_MODE + Basic Auth + IP 白名单）
-$env:JDYUN_MODE = "true"
-$env:JDYUN_BASIC_AUTH_USERS = "jcloud-testuser:TestToken123"
-$env:JDYUN_GATEWAY_IPS = "127.0.0.1,::1"
-.\start_dev.ps1 backend 3.0
-
-# 终端3: 前端
-.\start_dev.ps1 frontend 3.0
-
-# 终端4: 模拟网关
-$env:JDYUN_AUTH_USER = "jcloud-testuser"
-$env:JDYUN_AUTH_PASS = "TestToken123"
+# 终端2: 模拟网关
 node frontend/mock-jdyun-gateway.mjs
 ```
 
 ### 7.3 浏览器测试
 
-打开 `http://localhost:3100`，输入 `jcloud-testuser` / `TestToken123`。
+打开 `http://localhost:3100`，输入 `testuser` / `Test@123456`。
 
 ### 7.4 API 测试
 
 ```bash
-# 新用户首次认证（严格校验）
-curl -u "jcloud-testuser:TestToken123" http://127.0.0.1:8002/api/auth/me
+# 新用户首次认证（严格校验，需用 .env.docker.jdyun 中的正确凭据）
+curl -u "jcloud-ugidvcp:8437F13DABE87D0BC1D4DCCD4739C5A7" http://127.0.0.1:8082/api/auth/me
 
 # 老用户免令牌（token 可变）
-curl -u "jcloud-testuser:AnyToken" http://127.0.0.1:8002/api/auth/me
+curl -u "jcloud-ugidvcp:AnyToken" http://127.0.0.1:8082/api/auth/me
 
 # 伪造用户被拒绝
-curl -u "fake-user:anything" http://127.0.0.1:8002/api/auth/me  # 401
+curl -u "fake-user:anything" http://127.0.0.1:8082/api/auth/me  # 401
 ```
 
 ---
