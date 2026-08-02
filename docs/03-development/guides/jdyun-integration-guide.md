@@ -84,16 +84,25 @@ curl --header 'Authorization: Basic amNsb3VkLXVnaWR2Y3A6ODQzN0YxM0RBQkU4N0QwQkMx
 | `EMBEDDING_MODEL` | ✅ | Embedding 模型 | `Qwen3-Embedding-8B` |
 | `TUSHARE_TOKEN` | ✅ | Tushare 数据源 Token | `<由用户提供>` |
 | `MONGODB_PASSWORD` | ✅ | MongoDB 数据库密码 | `<自定义强密码>` |
-| `JWT_SECRET` | ✅ | JWT 签名密钥（生成方式：`openssl rand -base64 48`） | `<随机字符串>` |
-| `CSRF_SECRET` | ✅ | CSRF 防护密钥（生成方式：`openssl rand -base64 48`） | `<随机字符串>` |
 
-### 3.2 推荐配置的环境变量
+### 3.2 可选环境变量（容器自动生成）
+
+以下变量不设时，容器启动时自动生成随机值并持久化到数据卷，重启后不会变化：
+
+| 环境变量 | 说明 | 自动生成方式 |
+|----------|------|-------------|
+| `JWT_SECRET` | JWT 签名密钥 | `head -c 32 /dev/urandom \| base64` |
+| `CSRF_SECRET` | CSRF 防护密钥 | `head -c 32 /dev/urandom \| base64` |
+
+> 如需自定义，可在 `.env` 中设置。不设则无需关心。
+
+### 3.3 推荐配置的环境变量
 
 | 环境变量 | 推荐 | 说明 | 示例 |
 |----------|------|------|------|
 | `JDYUN_GATEWAY_IPS` | ✅ 推荐 | 京东云网关 IP 白名单（第二道安全防线） | `10.0.0.1,172.16.0.0/12` |
 
-### 3.3 JDYUN_BASIC_AUTH_USERS 格式
+### 3.4 JDYUN_BASIC_AUTH_USERS 格式
 
 ```
 JDYUN_BASIC_AUTH_USERS=username1:token1,username2:token2
@@ -203,9 +212,8 @@ JDYUN_GATEWAY_IPS=10.0.0.1,172.16.0.0/12
    EMBEDDING_MODEL=Qwen3-Embedding-8B
    TUSHARE_TOKEN=<Tushare Token>
    MONGODB_PASSWORD=<自定义强密码>
-   JWT_SECRET=<openssl rand -base64 48 生成的随机字符串>
-   CSRF_SECRET=<openssl rand -base64 48 生成的随机字符串>
    ```
+   > JWT_SECRET / CSRF_SECRET 无需设置，容器启动时自动生成。
 3. **配置网关**：京东云网关注入 `Authorization: Basic base64(<username>:<token>)`
 
 ### 6.2 我们系统自动处理
@@ -408,12 +416,13 @@ volumes:
 MONGODB_PASSWORD=<自定义强密码>
 OPENAI_API_KEY=<京东云API Key>
 EMBEDDING_API_KEY=<京东云API Key>
-JWT_SECRET=$(openssl rand -base64 48)
-CSRF_SECRET=$(openssl rand -base64 48)
 JDYUN_BASIC_AUTH_USERS=<username>:<token>
 
 # 推荐配置
 JDYUN_GATEWAY_IPS=<京东云网关IP>
+
+# 可选（容器自动生成，无需设置）
+# JWT_SECRET / CSRF_SECRET：不设则容器启动时自动生成并持久化
 
 # 可选（有默认值）
 HOST_PORT=8082

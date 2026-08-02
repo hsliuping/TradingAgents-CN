@@ -240,16 +240,21 @@ async def get_or_create_jdyun_user(self, jdyun_username, is_admin=True):
 | `EMBEDDING_API_KEY` | Embedding API Key（通常与 OPENAI_API_KEY 相同） | `pk-xxxxxxxx` |
 | `EMBEDDING_MODEL` | Embedding 模型 | `Qwen3-Embedding-8B` |
 | `MONGODB_PASSWORD` | MongoDB 数据库密码 | `<自定义强密码>` |
-| `JWT_SECRET` | JWT 签名密钥 | `openssl rand -base64 48` |
-| `CSRF_SECRET` | CSRF 防护密钥 | `openssl rand -base64 48` |
 
-### 5.2 推荐配置（生产环境）
+### 5.2 可选配置（容器自动生成）
+
+| 环境变量 | 说明 | 自动生成方式 |
+|----------|------|-------------|
+| `JWT_SECRET` | JWT 签名密钥 | 不设则容器启动时 `head -c 32 /dev/urandom \| base64` 自动生成 |
+| `CSRF_SECRET` | CSRF 防护密钥 | 同上，自动生成并持久化 |
+
+### 5.3 推荐配置（生产环境）
 
 | 环境变量 | 说明 | 示例 |
 |----------|------|------|
 | `JDYUN_GATEWAY_IPS` | 京东云网关 IP 白名单 | `10.0.0.1,172.16.0.0/12` |
 
-### 5.3 配置文件
+### 5.4 配置文件
 
 京东云版使用独立环境文件 `.env.docker.jdyun`，由 `start_dev.ps1 backend jdyun` 自动加载。
 生产环境通过 `docker-compose.yml` + `.env` 文件配置。

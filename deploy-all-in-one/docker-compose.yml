@@ -35,9 +35,9 @@ services:
       EMBEDDING_API_KEY: "${EMBEDDING_API_KEY}"
       # 数据源
       TUSHARE_TOKEN: "${TUSHARE_TOKEN}"
-      # 安全配置（生产环境必须修改）
-      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set in .env, generate with: openssl rand -base64 48}"
-      CSRF_SECRET: "${CSRF_SECRET:?CSRF_SECRET must be set in .env, generate with: openssl rand -base64 48}"
+      # 安全配置（可选，不设则容器启动时自动生成并持久化）
+      JWT_SECRET: "${JWT_SECRET:-}"
+      CSRF_SECRET: "${CSRF_SECRET:-}"
       # LLM 限速配置（应对京东云 API 限速，默认值已优化）
       JDYUN_LLM_MAX_RETRIES: "${JDYUN_LLM_MAX_RETRIES:-8}"
       JDYUN_LLM_MAX_RPM: "${JDYUN_LLM_MAX_RPM:-30}"
