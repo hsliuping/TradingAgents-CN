@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="agent-studio-page">
     <header class="topbar">
       <div class="topbar-left">
@@ -818,6 +818,16 @@
                   </el-collapse>
                 </div>
                 <div v-else class="empty-note">该会话尚未执行缺口分析。请前往 Agent 工坊执行分析。</div>
+
+                <!-- v3.6.0 项6 路径B：Skill 生成 HITL 审核面板 -->
+                <SkillReviewCard
+                  v-if="currentWorkshopSessionId"
+                  :session-id="currentWorkshopSessionId"
+                  source-path="agent_workshop"
+                  @confirmed="handleSkillReviewUpdated"
+                  @rejected="handleSkillReviewUpdated"
+                  @updated="handleSkillReviewUpdated"
+                />
               </el-tab-pane>
             </el-tabs>
           </div>
@@ -833,7 +843,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { useAuthStore } from '@/stores/auth'
 import { isTokenValid } from '@/utils/auth'
 import embeddedNanobotApi, {
@@ -854,6 +864,7 @@ import agentWorkshopApi, {
   type AgentWorkshopSessionDetail,
   type AgentWorkshopVersionPrompt,
 } from '@/api/agentWorkshop'
+import SkillReviewCard from '@/components/Workflow/SkillReviewCard.vue'
 
 type NanobotToolEventCard = {
   key: string
@@ -872,8 +883,7 @@ type NanobotStudioPersistedState = {
   threadContext?: EmbeddedNanobotThreadContext | null
 }
 
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const AGENT_STUDIO_SESSION_PREFIX = 'embedded:agent-studio:'
 const NANOBOT_SKILLS = ['nanobot-agent-design']
 const AGENT_STUDIO_STATE_STORAGE_KEY = 'agent-studio:state'
@@ -1109,10 +1119,10 @@ const renderMarkdown = (content: string) => {
     // 如果尾部有表格行但没有分隔行，说明表格刚开始，暂不渲染表格部分
     if (lastTableStart >= 0 && !hasSeparator) {
       const beforeTable = lines.slice(0, lastTableStart).join('\n')
-      const rendered = marked.parse(beforeTable) as string
+      const rendered = safeMarkdown(beforeTable)
       return rendered + `<div class="streaming-table-hint" style="color:var(--el-text-color-placeholder);font-size:12px;margin-top:4px;">正在生成表格...</div>`
     }
-    return marked.parse(text) as string
+    return safeMarkdown(text)
   } catch {
     return String(content || '')
   }
@@ -2233,6 +2243,19 @@ const loadVersionDetail = async (versionId: string) => {
   versionDetailVersion.value = versionResult
   versionDetailPrompt.value = versionPromptResult
   versionDetailEvaluation.value = evaluationResult?.items?.[0] || null
+}
+
+// v3.6.0 项6 路径B：Skill 审核confirm/reject 后刷新会话状态
+const handleSkillReviewUpdated = async () => {
+  const sessionId = currentWorkshopSessionId.value
+  if (!sessionId) return
+  try {
+    // 刷新当前会话，让 gap_report 中的 generated_skill_id 同步更新
+    const updated = await agentWorkshopApi.getSession(sessionId)
+    currentSession.value = updated
+  } catch (err) {
+    // 静默失败，SkillReviewCard 内部已处理状态更新
+  }
 }
 
 const publishVersionFromDetail = async () => {

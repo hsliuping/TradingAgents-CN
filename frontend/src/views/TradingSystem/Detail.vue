@@ -51,6 +51,16 @@
       </div>
     </div>
 
+    <!-- 合规免责声明 -->
+    <el-alert
+      title="本功能仅为学习研究与个人计划工具"
+      type="info"
+      description="交易规则、止盈止损、仓位管理等设置由您自行定义，不构成任何投资建议。实际投资决策请结合多方信息独立判断。"
+      show-icon
+      :closable="false"
+      style="margin-bottom: 20px"
+    />
+
     <!-- 草稿提示 -->
     <el-alert
       v-if="system && system.status === 'published' && system.draft_data"

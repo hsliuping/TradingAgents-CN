@@ -76,7 +76,7 @@ async def demo_memory_manager():
     
     memories = [
         {
-            "content": "苹果公司Q3财报超预期，营收同比增长15%，建议买入",
+            "content": "苹果公司Q3财报超预期，营收同比增长15%，当前研究倾向乐观",
             "metadata": {"ticker": "AAPL", "stance": "bull", "date": "2024-01-15"}
         },
         {

@@ -198,8 +198,8 @@ async def get_report(
         summary = result.get("summary", "无摘要")
         return (
             f"# {symbol} 最近分析报告\n\n"
-            f"**投资建议**: {recommendation}\n"
-            f"**置信度**: {confidence}\n\n"
+            f"**研究结论倾向**: {recommendation}\n"
+            f"**把握程度**: {confidence}\n\n"
             f"## 摘要\n{summary}\n\n"
             f"💡 使用 get_report(task_id=\"{doc.get('task_id', '')}\") 获取完整详情。"
         )
@@ -413,8 +413,8 @@ def _format_report(task) -> str:
 
     lines = [
         f"# {symbol} 分析报告\n",
-        f"**投资建议**: {recommendation}",
-        f"**置信度**: {confidence}\n",
+        f"**研究结论倾向**: {recommendation}",
+        f"**把握程度**: {confidence}\n",
     ]
     if summary:
         lines.append(f"## 摘要\n{summary}\n")

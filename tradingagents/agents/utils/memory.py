@@ -34,6 +34,14 @@ class ChromaDBManager:
     def __init__(self):
         if not self._initialized:
             try:
+                # v3.6.0：添加环境变量开关，当 MEM0 启用时跳过 ChromaDB 初始化
+                # mem0 已迁移至 Qdrant，Chromadb 仅用于遗留代码路径
+                if os.environ.get("MEM0_ENABLED", "").lower() == "true":
+                    logger.info("[ChromaDB] MEM0 已启用，跳过 ChromaDB 初始化（使用 Qdrant）")
+                    self._client = None
+                    self._initialized = True
+                    return
+
                 # 使用统一的配置模块
                 from .chromadb_config import get_optimal_chromadb_client, is_windows_11
                 import platform

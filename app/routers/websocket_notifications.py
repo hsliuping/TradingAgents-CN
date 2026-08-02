@@ -3,9 +3,10 @@ WebSocket 通知系统
 替代 SSE + Redis PubSub，解决连接泄漏问题
 """
 import asyncio
+import base64
 import json
 import logging
-from typing import Dict, Set
+from typing import Dict, Optional, Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 from datetime import datetime
 
@@ -14,6 +15,87 @@ from app.services.user_service import user_service
 
 router = APIRouter()
 logger = logging.getLogger("webapi.websocket")
+
+
+async def _authenticate_websocket(websocket: WebSocket, token: Optional[str]) -> Optional[str]:
+    """
+    统一 WebSocket 认证（支持 JWT 和京东云 Basic Auth）
+
+    认证优先级：
+    1. JWT token（query 参数）— 非京东云模式的主路径
+    2. 京东云 Basic Auth（Authorization 头）— 京东云网关注入，WebSocket 握手时携带
+
+    Args:
+        websocket: WebSocket 连接对象
+        token: query 参数中的 JWT token（可为空）
+
+    Returns:
+        认证成功返回 user_id（字符串），失败返回 None
+    """
+    # 方式 1: JWT token 认证
+    if token:
+        token_data = AuthService.verify_token(token)
+        if token_data:
+            user = await user_service.get_user_by_username(token_data.sub)
+            if user:
+                return str(user.id)
+        logger.warning("❌ [WS] JWT token 验证失败，尝试京东云 Basic Auth")
+
+    # 方式 2: 京东云 Basic Auth 认证（WebSocket 握手时由京东云网关注入 Authorization 头）
+    from app.core.jdyun import (
+        is_jdyun_mode,
+        is_from_jdyun_gateway,
+        verify_jdyun_basic_auth,
+    )
+
+    if not is_jdyun_mode():
+        return None
+
+    authorization = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
+    if not authorization or not authorization.lower().startswith("basic "):
+        logger.debug("ℹ️ [WS] 京东云模式下未携带 Basic Auth 头")
+        return None
+
+    # IP 白名单校验（第二道防线）
+    client_ip = websocket.client.host if websocket.client else ""
+    if not is_from_jdyun_gateway(client_ip):
+        logger.warning(f"❌ [WS] 京东云 Basic Auth IP 不在网关白名单: {client_ip}")
+        return None
+
+    try:
+        encoded = authorization.split(" ", 1)[1]
+        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+        if ":" not in decoded:
+            logger.warning("❌ [WS] 京东云 Basic Auth 格式错误: 缺少分隔符")
+            return None
+        username, basic_token = decoded.split(":", 1)
+
+        # 分级校验：老用户免令牌，新用户严格校验
+        is_existing = user_service.is_existing_jdyun_user(username)
+        if is_existing:
+            auth_passed = True
+            logger.info(f"✅ [WS] 京东云老用户免令牌校验: user={username}")
+        else:
+            auth_passed = verify_jdyun_basic_auth(username, basic_token)
+            if not auth_passed:
+                logger.warning(f"❌ [WS] 京东云新用户首次认证失败: user={username}")
+
+        if not auth_passed:
+            return None
+
+        # 获取或创建用户
+        jdyun_user = await user_service.get_or_create_jdyun_user(
+            jdyun_username=username,
+            is_admin=True,
+        )
+        if jdyun_user:
+            logger.info(f"✅ [WS] 京东云 Basic Auth 认证成功: user={username} db_id={jdyun_user.id}")
+            return str(jdyun_user.id)
+        logger.error(f"❌ [WS] 京东云用户建档失败: {username}")
+        return None
+    except Exception as e:
+        logger.warning(f"❌ [WS] 京东云 Basic Auth 解析失败: {e}", exc_info=True)
+        return None
 
 # 🔥 全局 WebSocket 连接管理器
 class ConnectionManager:
@@ -110,13 +192,15 @@ manager = ConnectionManager()
 @router.websocket("/ws/notifications")
 async def websocket_notifications_endpoint(
     websocket: WebSocket,
-    token: str = Query(...)
+    token: Optional[str] = Query(None),
 ):
     """
     WebSocket 通知端点
-    
-    客户端连接: ws://localhost:8000/api/ws/notifications?token=<jwt_token>
-    
+
+    客户端连接:
+    - JWT 模式: ws://localhost:8000/api/ws/notifications?token=<jwt_token>
+    - 京东云模式: ws://localhost:8000/api/ws/notifications （无需 token，由网关注入 Basic Auth）
+
     消息格式:
     {
         "type": "notification",  // 消息类型: notification, heartbeat, connected
@@ -132,18 +216,11 @@ async def websocket_notifications_endpoint(
         }
     }
     """
-    # 验证 token
-    token_data = AuthService.verify_token(token)
-    if not token_data:
+    # 统一认证（JWT 或京东云 Basic Auth）
+    user_id = await _authenticate_websocket(websocket, token)
+    if not user_id:
         await websocket.close(code=1008, reason="Unauthorized")
         return
-
-    # 从 token_data.sub（用户名）查找数据库用户，获取真实 user_id
-    user = await user_service.get_user_by_username(token_data.sub)
-    if not user:
-        await websocket.close(code=1008, reason="User not found")
-        return
-    user_id = str(user.id)
 
     # 连接 WebSocket
     await manager.connect(websocket, user_id)
@@ -207,13 +284,15 @@ async def websocket_notifications_endpoint(
 async def websocket_task_progress_endpoint(
     websocket: WebSocket,
     task_id: str,
-    token: str = Query(...)
+    token: Optional[str] = Query(None),
 ):
     """
     WebSocket 任务进度端点
-    
-    客户端连接: ws://localhost:8000/api/ws/tasks/<task_id>?token=<jwt_token>
-    
+
+    客户端连接:
+    - JWT 模式: ws://localhost:8000/api/ws/tasks/<task_id>?token=<jwt_token>
+    - 京东云模式: ws://localhost:8000/api/ws/tasks/<task_id> （无需 token，由网关注入 Basic Auth）
+
     消息格式:
     {
         "type": "progress",  // 消息类型: progress, completed, error, heartbeat
@@ -227,18 +306,11 @@ async def websocket_task_progress_endpoint(
         }
     }
     """
-    # 验证 token
-    token_data = AuthService.verify_token(token)
-    if not token_data:
+    # 统一认证（JWT 或京东云 Basic Auth）
+    user_id = await _authenticate_websocket(websocket, token)
+    if not user_id:
         await websocket.close(code=1008, reason="Unauthorized")
         return
-
-    # 从 token_data.sub（用户名）查找数据库用户，获取真实 user_id
-    user = await user_service.get_user_by_username(token_data.sub)
-    if not user:
-        await websocket.close(code=1008, reason="User not found")
-        return
-    user_id = str(user.id)
     channel = f"task_progress:{task_id}"
     
     # 连接 WebSocket

@@ -235,22 +235,22 @@
 
               <!-- 旧逻辑：内置工作流硬编码 -->
               <template v-else>
-                <el-collapse-item title="最终决策详情" name="final" v-if="hasContent(getReportField('final_trade_decision'))">
+                <el-collapse-item title="最终研究结论详情" name="final" v-if="hasContent(getReportField('final_trade_decision'))">
                   <div class="report-content" v-html="formatReport(getReportField('final_trade_decision'))" />
                 </el-collapse-item>
                 <el-collapse-item title="风险评估" name="risk" v-if="hasContent(getReportField('risk_assessment'))">
                   <div class="report-content" v-html="formatReport(getReportField('risk_assessment'))" />
                 </el-collapse-item>
-                <el-collapse-item title="交易员计划" name="trader" v-if="hasContent(getReportField('trader_investment_plan'))">
+                <el-collapse-item title="研究简报" name="trader" v-if="hasContent(getReportField('trader_investment_plan'))">
                   <div class="report-content" v-html="formatReport(getReportField('trader_investment_plan'))" />
                 </el-collapse-item>
-                <el-collapse-item title="投资计划" name="investment" v-if="hasContent(getReportField('investment_plan'))">
+                <el-collapse-item title="综合研究结论" name="investment" v-if="hasContent(getReportField('investment_plan'))">
                   <div class="report-content" v-html="formatReport(getReportField('investment_plan'))" />
                 </el-collapse-item>
-                <el-collapse-item title="看涨研究" name="bull" v-if="hasContent(getReportField('bull_report')) || hasContent(getReportField('bull_opinion'))">
+                <el-collapse-item title="积极证据研究" name="bull" v-if="hasContent(getReportField('bull_report')) || hasContent(getReportField('bull_opinion'))">
                   <div class="report-content" v-html="formatReport(getReportField('bull_report') || getReportField('bull_opinion'))" />
                 </el-collapse-item>
-                <el-collapse-item title="看跌研究" name="bear" v-if="hasContent(getReportField('bear_report')) || hasContent(getReportField('bear_opinion'))">
+                <el-collapse-item title="谨慎证据研究" name="bear" v-if="hasContent(getReportField('bear_report')) || hasContent(getReportField('bear_opinion'))">
                   <div class="report-content" v-html="formatReport(getReportField('bear_report') || getReportField('bear_opinion'))" />
                 </el-collapse-item>
                 <el-collapse-item title="大盘分析" name="index" v-if="hasContent(getReportField('index_report'))">
@@ -271,13 +271,13 @@
                 <el-collapse-item title="情绪分析" name="sentiment" v-if="hasContent(getReportField('sentiment_report'))">
                   <div class="report-content" v-html="formatReport(getReportField('sentiment_report'))" />
                 </el-collapse-item>
-                <el-collapse-item title="激进风险观点" name="risky" v-if="hasContent(getReportField('risky_opinion'))">
+                <el-collapse-item title="高弹性情景研究观察" name="risky" v-if="hasContent(getReportField('risky_opinion'))">
                   <div class="report-content" v-html="formatReport(getReportField('risky_opinion'))" />
                 </el-collapse-item>
-                <el-collapse-item title="保守风险观点" name="safe" v-if="hasContent(getReportField('safe_opinion'))">
+                <el-collapse-item title="防御情景研究观察" name="safe" v-if="hasContent(getReportField('safe_opinion'))">
                   <div class="report-content" v-html="formatReport(getReportField('safe_opinion'))" />
                 </el-collapse-item>
-                <el-collapse-item title="中性风险观点" name="neutral" v-if="hasContent(getReportField('neutral_opinion'))">
+                <el-collapse-item title="基准情景研究观察" name="neutral" v-if="hasContent(getReportField('neutral_opinion'))">
                   <div class="report-content" v-html="formatReport(getReportField('neutral_opinion'))" />
                 </el-collapse-item>
               </template>
@@ -708,14 +708,89 @@ const goBack = () => {
   router.push('/workflow')
 }
 
+const _formatRiskAssessmentJson = (value: any): string | null => {
+  if (!value || typeof value !== 'object') return null
+  const riskLevel = value.risk_level || value.riskLevel
+  const riskScore = value.risk_score ?? value.riskScore
+  const reasoning = value.reasoning || value.conclusion || value.summary || value.assessment
+  const keyRisks = value.key_risks || value.keyRisks || value.risks
+  const riskControl = value.risk_control || value.riskControl || value.control || value.suggestions
+  const investmentAdjustment = value.investment_adjustment || value.investmentAdjustment || value.adjustment
+
+  if (riskLevel === undefined && riskScore === undefined && !reasoning && !riskControl && !investmentAdjustment) {
+    return null
+  }
+
+  const parts: string[] = []
+  if (riskLevel !== undefined) parts.push(`**风险等级**：${riskLevel}`)
+  if (riskScore !== undefined) {
+    const score = typeof riskScore === 'number' ? riskScore.toFixed(2) : riskScore
+    parts.push(`**风险评分**：${score}`)
+  }
+  if (reasoning) parts.push(`**评估结论**：${reasoning}`)
+  if (Array.isArray(keyRisks) && keyRisks.length > 0) {
+    parts.push('**核心风险**：')
+    keyRisks.forEach((risk: any) => { if (risk) parts.push(`- ${String(risk).trim()}`) })
+  }
+  if (riskControl) parts.push(`**风控建议**：${riskControl}`)
+  if (investmentAdjustment) parts.push(`**投资调整建议**：${investmentAdjustment}`)
+  return parts.join('\n\n')
+}
+
+const _stripJsonCodeFence = (text: string): string => {
+  let t = text.trim()
+  const fenceMatch = t.match(/^```(?:json|JSON)?\s*\n([\s\S]*?)\n```\s*$/i)
+  if (fenceMatch) {
+    t = fenceMatch[1].trim()
+  }
+  return t
+}
+
+const _looksLikeRiskJsonString = (text: string): boolean => {
+  const lowered = text.toLowerCase()
+  return text.startsWith('{') && (
+    lowered.includes('"risk_level"') ||
+    lowered.includes('"risk_score"') ||
+    lowered.includes('"reasoning"') ||
+    lowered.includes('"key_risks"') ||
+    lowered.includes('"risk_control"') ||
+    lowered.includes('"investment_adjustment"')
+  )
+}
+
 const extractContent = (value: any): string => {
   if (value == null) return ''
-  if (typeof value === 'string') return value
+
+  // 处理风险审阅 JSON 字符串/对象，渲染为可读 Markdown
+  if (typeof value === 'string') {
+    // 先剥离 ```json 代码块
+    const stripped = _stripJsonCodeFence(value.trim())
+    if (!stripped) return ''
+    if (_looksLikeRiskJsonString(stripped)) {
+      try {
+        const parsed = JSON.parse(stripped)
+        const riskText = _formatRiskAssessmentJson(parsed)
+        if (riskText) return riskText
+      } catch {
+        // 不是合法 JSON，按普通文本返回
+      }
+    }
+    // 如果原文是 ```json 代码块但不是风险 JSON，返回剥离后的内容
+    return stripped !== value.trim() ? stripped : value.trim()
+  }
+
   if (typeof value === 'object') {
-    const keys = ['content', 'markdown', 'text', 'message', 'report']
+    const riskText = _formatRiskAssessmentJson(value)
+    if (riskText) return riskText
+
+    // 真实数据结构: { content: "```json\n{...}\n```", success: true }
+    const keys = ['content', 'markdown', 'text', 'message', 'report', 'risk_assessment', 'risk_management_decision']
     for (const k of keys) {
       const v = (value as any)[k]
-      if (typeof v === 'string' && v.trim() !== '') return v
+      if (v) {
+        const nested = extractContent(v)
+        if (nested) return nested
+      }
     }
     try {
       return JSON.stringify(value)

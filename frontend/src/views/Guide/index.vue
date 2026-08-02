@@ -6,15 +6,166 @@
         <el-icon><Document /></el-icon>
         欢迎使用 TradingAgents-CN
       </h1>
-      <p class="guide-subtitle">按照以下步骤完成初始设置，开始学习AI辅助股票分析技术</p>
+      <p class="guide-subtitle">
+        {{ isJdyunModeRef ? '按照以下步骤完成初始设置，开始使用 AI 辅助股票分析' : '按照以下步骤完成初始设置，开始学习AI辅助股票分析技术' }}
+      </p>
       <el-button v-if="!loading" text type="primary" @click="loadAllStatus" class="refresh-btn">
         <el-icon><Refresh /></el-icon>
         刷新进度
       </el-button>
     </div>
 
-    <!-- 步骤列表 -->
-    <div class="steps-container" v-loading="loading" element-loading-text="正在检测配置进度...">
+    <!-- 京东云版引导：4 步 -->
+    <div v-if="isJdyunModeRef" class="steps-container" v-loading="loading" element-loading-text="正在检测配置进度...">
+      <el-steps :active="jdyunCurrentStep" direction="vertical" finish-status="success">
+        <!-- 京东云版步骤 1：欢迎（系统已就绪） -->
+        <el-step title="欢迎使用" description="您的系统已由管理员配置完成">
+          <template #description>
+            <div class="step-content">
+              <div class="jdyun-ready-list">
+                <div class="ready-item">
+                  <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                  <span>大模型：<strong>{{ jdyunStatus.current_model || 'GLM-5.1' }}</strong>（已就绪）</span>
+                </div>
+                <div class="ready-item">
+                  <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                  <span>数据源：<strong>Tushare + AKShare</strong>（已就绪）</span>
+                </div>
+                <div class="ready-item">
+                  <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                  <span>全功能开放（无需激活 License）</span>
+                </div>
+              </div>
+              <p class="step-tip" style="margin-top: 12px;">
+                接下来只需 3 步即可开始分析：同步数据 → 添加股票关注列表 → 完成首次研究
+              </p>
+            </div>
+          </template>
+        </el-step>
+
+        <!-- 京东云版步骤 2：同步股票数据 -->
+        <el-step title="同步股票数据" description="同步基础股票数据到系统">
+          <template #description>
+            <div class="step-content">
+              <p v-if="stepStatus.dataSynced" class="step-completed-tip">
+                <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                股票数据已同步完成
+              </p>
+              <template v-else>
+                <p>同步基础股票数据，获取最新的股票信息：</p>
+                <ul class="step-list">
+                  <li><strong>第一步：</strong>同步基础数据（股票列表、基本信息）</li>
+                  <li><strong>第二步：</strong>同步历史数据（K线、行情）</li>
+                  <li><strong>第三步：</strong>同步财务数据（财报、指标）</li>
+                  <li>
+                    <strong style="color: var(--el-color-warning);">注意：</strong>
+                    数据未同步完成时进行分析，可能因数据不全导致结果不准确
+                  </li>
+                </ul>
+              </template>
+              <el-button type="primary" @click="goToSync">
+                <el-icon><Refresh /></el-icon>
+                前往数据同步
+              </el-button>
+            </div>
+          </template>
+        </el-step>
+
+        <!-- 京东云版步骤 3：搜索并添加股票关注列表 -->
+        <el-step title="搜索并添加股票关注列表" description="搜索感兴趣的股票并添加到自选列表">
+          <template #description>
+            <div class="step-content">
+              <p v-if="stepStatus.hasFavorites" class="step-completed-tip">
+                <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                已添加股票关注列表
+              </p>
+              <template v-else>
+                <p>开始使用股票筛选功能：</p>
+                <ul class="step-list">
+                  <li>在"股票筛选"页面搜索股票代码或名称</li>
+                  <li>查看股票详情信息</li>
+                  <li>将感兴趣的股票添加到"股票关注列表"</li>
+                </ul>
+              </template>
+              <el-button type="primary" @click="goToScreening">
+                <el-icon><Search /></el-icon>
+                前往股票筛选
+              </el-button>
+            </div>
+          </template>
+        </el-step>
+
+        <!-- 京东云版步骤 4：完成首次分析 -->
+        <el-step title="完成第一次研究" description="对股票关注列表进行 AI 研究">
+          <template #description>
+            <div class="step-content">
+              <p v-if="stepStatus.hasAnalysis" class="step-completed-tip">
+                <el-icon color="#67c23a"><CircleCheck /></el-icon>
+                已完成首次研究分析
+              </p>
+              <template v-else>
+                <p>开始您的第一次 AI 股票研究：</p>
+                <ul class="step-list">
+                  <li>在"单股研究"页面输入股票代码（如：600519）</li>
+                  <li>选择研究深度（1-5 级，从快速到全面）</li>
+                  <li>点击"开始研究"，等待多智能体协作完成</li>
+                  <li>低深度约 5-8 分钟，高深度可能 15-20 分钟</li>
+                </ul>
+              </template>
+              <el-button type="primary" @click="goToAnalysis">
+                <el-icon><TrendCharts /></el-icon>
+                开始研究
+              </el-button>
+            </div>
+          </template>
+        </el-step>
+      </el-steps>
+
+      <!-- 完成引导按钮 -->
+      <div v-if="jdyunAllCompleted" class="jdyun-complete-section">
+        <el-alert
+          title="引导已完成"
+          type="success"
+          description="您已完成所有初始设置步骤，可以开始使用系统的全部功能了。"
+          :closable="false"
+          show-icon
+        />
+        <div class="complete-actions">
+          <el-button @click="goToLearning">
+            <el-icon><Reading /></el-icon>
+            查看学习中心
+          </el-button>
+          <el-button type="primary" size="large" @click="completeJdyunGuide">
+            进入仪表板
+            <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+      </div>
+
+      <!-- 跳过引导：未完成所有步骤时也允许进入仪表板，避免死循环 -->
+      <div v-else class="jdyun-complete-section">
+        <el-alert
+          title="您可以随时跳过引导"
+          type="info"
+          description="未完成所有步骤也可进入仪表板开始使用，后续可从侧边栏「使用指南」回来查看。"
+          :closable="false"
+          show-icon
+        />
+        <div class="complete-actions">
+          <el-button @click="goToLearning">
+            <el-icon><Reading /></el-icon>
+            查看学习中心
+          </el-button>
+          <el-button type="primary" size="large" @click="completeJdyunGuide">
+            进入仪表板
+            <el-icon class="el-icon--right"><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 标准版引导：7 步（原有逻辑保持不变） -->
+    <div v-else class="steps-container" v-loading="loading" element-loading-text="正在检测配置进度...">
       <el-steps :active="currentStep" direction="vertical" finish-status="success">
         <!-- 步骤1：获取大模型API密钥 -->
         <el-step title="获取大模型API密钥" description="选择并获取大语言模型的API密钥">
@@ -196,7 +347,7 @@
         </el-step>
 
         <!-- 步骤6：搜索股票 -->
-        <el-step title="搜索并添加自选股" description="搜索感兴趣的股票并添加到自选列表">
+        <el-step title="搜索并添加股票关注列表" description="搜索感兴趣的股票并添加到自选列表">
           <template #description>
             <div class="step-content">
               <p>开始使用股票筛选功能：</p>
@@ -219,7 +370,7 @@
         </el-step>
 
         <!-- 步骤7：完成第一次研究 -->
-        <el-step title="完成第一次研究" description="对自选股进行 AI 研究">
+        <el-step title="完成第一次研究" description="对股票关注列表进行 AI 研究">
           <template #description>
             <div class="step-content">
               <p v-if="stepStatus.hasAnalysis" class="step-completed-tip">
@@ -285,7 +436,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Document,
@@ -295,13 +446,22 @@ import {
   TrendCharts,
   Link,
   Key,
-  CircleCheck
+  CircleCheck,
+  Reading,
+  ArrowRight
 } from '@element-plus/icons-vue'
 import { ApiClient } from '@/api/request'
+import { isJdyunMode } from '@/utils/config'
 
 const router = useRouter()
+const isJdyunModeRef = isJdyunMode()
 const currentStep = ref(0)
 const loading = ref(true)
+
+// 京东云版状态
+const jdyunStatus = ref({
+  current_model: ''
+})
 
 // 各步骤完成状态
 const stepStatus = ref({
@@ -309,10 +469,66 @@ const stepStatus = ref({
   dataKey: false,       // 步骤2: 数据源Token
   configDone: false,    // 步骤3: 填写配置
   dataSynced: false,    // 步骤5: 数据同步
-  hasFavorites: false,  // 步骤6: 添加自选股
+  hasFavorites: false,  // 步骤6: 添加股票关注列表
   hasAnalysis: false,   // 步骤7: 完成研究
   licenseValid: false   // License激活
 })
+
+// 检查股票关注列表状态
+const checkFavorites = async () => {
+  try {
+    const resp = await ApiClient.get('/api/favorites')
+    if (resp.success && resp.data) {
+      const favorites = Array.isArray(resp.data) ? resp.data : (resp.data.items || resp.data.favorites || [])
+      stepStatus.value.hasFavorites = favorites.length > 0
+    }
+  } catch (e) {
+    console.error('检查股票关注列表失败:', e)
+  }
+}
+
+// 检查京东云版配置（当前模型名）
+const checkJdyunConfig = async () => {
+  try {
+    const resp = await ApiClient.get('/api/config/jdyun/status')
+    if (resp.success && resp.data) {
+      jdyunStatus.value.current_model = resp.data.current_model || resp.data.model || ''
+    }
+  } catch (e) {
+    // 接口不存在时使用默认值
+    jdyunStatus.value.current_model = 'GLM-5.1'
+  }
+}
+
+// 京东云版当前步骤（基于 stepStatus）
+const jdyunCurrentStep = computed(() => {
+  // 4 步：欢迎 → 同步 → 股票关注列表 → 首次分析
+  if (!stepStatus.value.dataSynced) return 1
+  if (!stepStatus.value.hasFavorites) return 2
+  if (!stepStatus.value.hasAnalysis) return 3
+  return 4
+})
+
+// 京东云版是否全部完成
+const jdyunAllCompleted = computed(() =>
+  stepStatus.value.dataSynced &&
+  stepStatus.value.hasFavorites &&
+  stepStatus.value.hasAnalysis
+)
+
+// 完成京东云版引导
+const completeJdyunGuide = () => {
+  try {
+    localStorage.setItem('jdyun_guide_completed', 'true')
+  } catch (e) {
+    console.warn('写入 localStorage 失败:', e)
+  }
+  router.push('/dashboard')
+}
+
+const goToLearning = () => {
+  router.push('/learning')
+}
 
 // 检测 LLM API 密钥配置状态
 const checkLLMKey = async () => {
@@ -385,12 +601,23 @@ const updateCurrentStep = () => {
 // 加载所有状态
 const loadAllStatus = async () => {
   loading.value = true
-  await Promise.allSettled([
-    checkLLMKey(),
-    checkDataSync(),
-    checkAnalysisHistory(),
-    checkLicense()
-  ])
+  if (isJdyunModeRef) {
+    // 京东云版：只检查同步、股票关注列表、分析历史
+    await Promise.allSettled([
+      checkDataSync(),
+      checkFavorites(),
+      checkAnalysisHistory(),
+      checkJdyunConfig()
+    ])
+  } else {
+    // 标准版：检查所有配置
+    await Promise.allSettled([
+      checkLLMKey(),
+      checkDataSync(),
+      checkAnalysisHistory(),
+      checkLicense()
+    ])
+  }
   updateCurrentStep()
   loading.value = false
 }
@@ -726,3 +953,49 @@ const goToLicense = () => {
   }
 }
 </style>
+
+// 京东云版引导样式
+.jdyun-ready-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+  margin-top: 8px;
+
+  .ready-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--el-text-color-regular);
+
+    strong {
+      color: var(--el-text-color-primary);
+    }
+  }
+}
+
+.step-completed-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--el-color-success);
+  font-weight: 500;
+}
+
+.jdyun-complete-section {
+  margin-top: 32px;
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(103, 194, 58, 0.05) 0%, rgba(64, 158, 255, 0.05) 100%);
+  border-radius: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+
+  .complete-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 16px;
+  }
+}

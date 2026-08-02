@@ -1,6 +1,6 @@
 <template>
   <div class="watchlist-groups-container">
-    <!-- 高级学员功能标识 -->
+    <!-- 高级功能标识 -->
     <el-alert
       type="success"
       :closable="false"
@@ -233,7 +233,7 @@
           <el-divider direction="vertical" />
           <el-button @click="importAllFavorites" :loading="importingAll">
             <el-icon><Star /></el-icon>
-            导入所有自选股
+            导入所有股票关注列表
           </el-button>
         </div>
         <el-table :data="currentGroup.stock_codes" style="margin-top: 20px" max-height="400">
@@ -328,7 +328,7 @@ const loadUserTags = async () => {
   }
 }
 
-// 加载自选股列表
+// 加载股票关注列表列表
 const loadFavorites = async () => {
   try {
     const res = await favoritesApi.list() as any
@@ -340,7 +340,7 @@ const loadFavorites = async () => {
       }))
     }
   } catch (error) {
-    console.error('加载自选股失败:', error)
+    console.error('加载股票关注列表失败:', error)
   }
 }
 
@@ -353,7 +353,7 @@ const importFromTag = async () => {
 
   importingTag.value = true
   try {
-    // 从自选股中筛选包含该标签的股票
+    // 从股票关注列表中筛选包含该标签的股票
     const stockCodes = allFavorites.value
       .filter(f => f.tags.includes(selectedTag.value))
       .map(f => f.stock_code)
@@ -385,7 +385,7 @@ const importFromTag = async () => {
   }
 }
 
-// 导入所有自选股
+// 导入所有股票关注列表
 const importAllFavorites = async () => {
   if (!currentGroup.value) {
     ElMessage.warning('请先选择分组')
@@ -393,13 +393,13 @@ const importAllFavorites = async () => {
   }
 
   if (allFavorites.value.length === 0) {
-    ElMessage.warning('您还没有添加任何自选股')
+    ElMessage.warning('您还没有添加任何股票关注列表')
     return
   }
 
   try {
     await ElMessageBox.confirm(
-      `确定要将所有 ${allFavorites.value.length} 只自选股导入到分组"${currentGroup.value.name}"吗？`,
+      `确定要将所有 ${allFavorites.value.length} 只股票关注列表导入到分组"${currentGroup.value.name}"吗？`,
       '确认导入',
       {
         confirmButtonText: '确定',
@@ -410,7 +410,7 @@ const importAllFavorites = async () => {
 
     importingAll.value = true
 
-    // 获取所有自选股的股票代码
+    // 获取所有股票关注列表的股票代码
     const stockCodes = allFavorites.value.map(f => f.stock_code)
 
     // 添加到分组
@@ -428,7 +428,7 @@ const importAllFavorites = async () => {
     }
   } catch (error: any) {
     if (error !== 'cancel') {
-      console.error('导入所有自选股失败:', error)
+      console.error('导入所有股票关注列表失败:', error)
       ElMessage.error('导入失败')
     }
   } finally {

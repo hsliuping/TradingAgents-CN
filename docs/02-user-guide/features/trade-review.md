@@ -75,7 +75,7 @@ async def _call_workflow_trade_review(
     """使用工作流引擎进行多维度交易复盘分析
     
     工作流包含:
-    1. 时机分析师 - 分析买卖时机
+    1. 时机分析师 - 分析操作时机
     2. 仓位分析师 - 分析仓位管理
     3. 情绪分析师 - 分析情绪控制
     4. 归因分析师 - 分析收益来源
@@ -209,7 +209,7 @@ async def analyze_position(
     流程：
     1. 调用现有单股分析服务获取完整的技术面、基本面、新闻面分析
     2. 将分析报告 + 持仓信息发给持仓分析专用LLM
-    3. 生成个性化的持仓操作建议
+    3. 生成个性化的持仓研究观察（非交易建议）
     """
 
     # 第一阶段：调用现有单股分析获取详细报告
@@ -315,8 +315,8 @@ async def _call_position_ai_analysis_workflow(
     使用持仓分析工作流，包含：
     1. 持仓技术面分析师 - 分析技术指标和走势
     2. 持仓基本面分析师 - 分析财务数据和估值
-    3. 持仓风险评估师 - 评估风险和止损建议
-    4. 持仓操作建议师 - 综合分析给出操作建议
+    3. 持仓风险评估师 - 评估风险并给出风险关注价格参考
+    4. 持仓研究观察员 - 综合分析给出持仓研究观察
     """
     from core.api.workflow_api import WorkflowAPI
 
@@ -344,10 +344,10 @@ async def _call_position_ai_analysis_workflow(
 POSITION_ANALYSIS_WORKFLOW_V2 = WorkflowDefinition(
     id="position_analysis_v2",
     name="持仓分析流程 v2.0",
-    description="基于 v2.0 Agent 架构的持仓分析流程。包含技术面分析、基本面分析、风险评估三个专业分析师并行分析，最后由操作建议师综合生成操作建议。",
+    description="基于 v2.0 Agent 架构的持仓分析流程。包含技术面分析、基本面分析、风险审阅三个专业分析师并行分析，最后由持仓研究观察员综合生成持仓研究观察。",
     version="2.0.0",
     is_template=True,
-    tags=["v2.0", "持仓", "分析", "多维度", "操作建议"],
+    tags=["v2.0", "持仓", "分析", "多维度", "研究观察"],
     nodes=[
         # 开始节点
         NodeDefinition(id="start", type=NodeType.START),
@@ -382,7 +382,7 @@ POSITION_ANALYSIS_WORKFLOW_V2 = WorkflowDefinition(
         # 合并节点
         NodeDefinition(id="merge", type=NodeType.MERGE),
 
-        # 持仓操作建议师 v2.0
+        # 持仓研究观察员 v2.0
         NodeDefinition(
             id="pa_advisor_v2",
             type=NodeType.MANAGER,
@@ -416,7 +416,7 @@ StockAnalysisEngine.analyze()
   ↓
 合并分析结果
   ↓
-持仓操作建议师 v2.0 → action_advice
+持仓研究观察员 v2.0 → action_advice
   ↓
 结束
 ```
@@ -434,10 +434,10 @@ StockAnalysisEngine.analyze()
 - **工作流 ID**：`position_analysis_v2`
 - **工作流名称**：持仓分析流程 v2.0
 - **版本**：2.0.0
-- **分析师数量**：4 个（3 个并行分析师 + 1 个操作建议师）
+- **分析师数量**：4 个（3 个并行分析师 + 1 个持仓研究观察员）
 - **输入**：单股分析报告 + 持仓信息（成本、持仓天数、仓位占比等）
-- **输出**：个性化的操作建议（加仓/减仓/止损/持有）
-- **执行模式**：并行分析 + 综合建议
+- **输出**：个性化的研究观察与风险跟踪参考（研究结论倾向、关键验证价位、风险关注价格、后续观察事项）
+- **执行模式**：并行分析 + 综合研究观察
 - **启用条件**：`USE_STOCK_ENGINE=true`
 
 **关键区别**：
@@ -460,5 +460,5 @@ StockAnalysisEngine.analyze()
 
 **不同点**：
 - 持仓分析需要先获取单股分析报告（技术面、基本面、新闻面）
-- 持仓分析会结合用户的持仓信息（成本、天数、仓位占比）给出个性化建议
+- 持仓分析会结合用户的持仓信息（成本、天数、仓位占比）给出个性化研究观察
 

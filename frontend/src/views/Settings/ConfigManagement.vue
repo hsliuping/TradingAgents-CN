@@ -12,7 +12,7 @@
         </p>
       </div>
       <div class="header-right">
-        <el-button type="success" @click="handleReloadConfig" :loading="reloadLoading">
+        <el-button v-if="!isJdyunMode()" type="success" @click="handleReloadConfig" :loading="reloadLoading">
           <el-icon><Refresh /></el-icon>
           重载配置
         </el-button>
@@ -28,55 +28,65 @@
             @select="handleMenuSelect"
             class="config-nav"
           >
-            <el-menu-item index="providers">
-              <el-icon><OfficeBuilding /></el-icon>
-              <span>厂家管理</span>
-            </el-menu-item>
-            <el-menu-item index="model-catalog">
-              <el-icon><Collection /></el-icon>
-              <span>模型目录</span>
-            </el-menu-item>
-            <el-menu-item index="llm">
-              <el-icon><Cpu /></el-icon>
-              <span>大模型配置</span>
-            </el-menu-item>
-            <el-menu-item index="datasource">
-              <el-icon><DataBoard /></el-icon>
-              <span>数据源配置</span>
-            </el-menu-item>
-            <el-menu-item index="database">
-              <el-icon><Coin /></el-icon>
-              <span>数据库配置</span>
-            </el-menu-item>
-            <el-menu-item index="system">
-              <el-icon><Tools /></el-icon>
-              <span>系统设置</span>
-            </el-menu-item>
-            <el-menu-item index="gateway">
-              <el-icon><Connection /></el-icon>
-              <span>Gateway 配置</span>
-            </el-menu-item>
-            <el-menu-item index="validation">
-              <el-icon><CircleCheck /></el-icon>
-              <span>配置验证</span>
-            </el-menu-item>
-            <!-- 隐藏的菜单项 -->
-            <!-- <el-menu-item index="api-keys">
-              <el-icon><Key /></el-icon>
-              <span>API密钥状态</span>
-            </el-menu-item> -->
-            <!-- <el-menu-item index="import-export">
-              <el-icon><Download /></el-icon>
-              <span>导入导出</span>
-            </el-menu-item> -->
+            <!-- 京东云模式：只显示数据源配置 -->
+            <template v-if="isJdyunMode()">
+              <el-menu-item index="datasource">
+                <el-icon><DataBoard /></el-icon>
+                <span>数据源配置</span>
+              </el-menu-item>
+            </template>
+            <!-- 非京东云模式：显示全部菜单 -->
+            <template v-else>
+              <el-menu-item index="providers">
+                <el-icon><OfficeBuilding /></el-icon>
+                <span>厂家管理</span>
+              </el-menu-item>
+              <el-menu-item index="model-catalog">
+                <el-icon><Collection /></el-icon>
+                <span>模型目录</span>
+              </el-menu-item>
+              <el-menu-item index="llm">
+                <el-icon><Cpu /></el-icon>
+                <span>大模型配置</span>
+              </el-menu-item>
+              <el-menu-item index="datasource">
+                <el-icon><DataBoard /></el-icon>
+                <span>数据源配置</span>
+              </el-menu-item>
+              <el-menu-item index="database">
+                <el-icon><Coin /></el-icon>
+                <span>数据库配置</span>
+              </el-menu-item>
+              <el-menu-item index="system">
+                <el-icon><Tools /></el-icon>
+                <span>系统设置</span>
+              </el-menu-item>
+              <el-menu-item index="gateway">
+                <el-icon><Connection /></el-icon>
+                <span>Gateway 配置</span>
+              </el-menu-item>
+              <el-menu-item index="validation">
+                <el-icon><CircleCheck /></el-icon>
+                <span>配置验证</span>
+              </el-menu-item>
+              <!-- 隐藏的菜单项 -->
+              <!-- <el-menu-item index="api-keys">
+                <el-icon><Key /></el-icon>
+                <span>API密钥状态</span>
+              </el-menu-item> -->
+              <!-- <el-menu-item index="import-export">
+                <el-icon><Download /></el-icon>
+                <span>导入导出</span>
+              </el-menu-item> -->
+            </template>
           </el-menu>
         </el-card>
       </el-col>
 
       <!-- 右侧：配置内容 -->
       <el-col :span="20">
-        <!-- Gateway 配置 -->
-        <el-card v-show="activeTab === 'gateway'" class="config-content" shadow="never">
+        <!-- Gateway 配置（京东云模式下隐藏） -->
+        <el-card v-if="!isJdyunMode()" v-show="activeTab === 'gateway'" class="config-content" shadow="never">
           <template #header>
             <div class="card-header">
               <h3>Gateway IM 平台配置</h3>
@@ -234,18 +244,18 @@
           </div>
         </el-card>
 
-        <!-- 配置验证 -->
-        <div v-show="activeTab === 'validation'">
+        <!-- 配置验证（京东云模式下隐藏） -->
+        <div v-if="!isJdyunMode()" v-show="activeTab === 'validation'">
           <ConfigValidator />
         </div>
 
-        <!-- 模型目录管理 -->
-        <div v-show="activeTab === 'model-catalog'">
+        <!-- 模型目录管理（京东云模式下隐藏） -->
+        <div v-if="!isJdyunMode()" v-show="activeTab === 'model-catalog'">
           <ModelCatalogManagement />
         </div>
 
-        <!-- 厂家管理 -->
-        <el-card v-show="activeTab === 'providers'" class="config-content" shadow="never">
+        <!-- 厂家管理（京东云模式下隐藏） -->
+        <el-card v-if="!isJdyunMode()" v-show="activeTab === 'providers'" class="config-content" shadow="never">
           <template #header>
             <div class="card-header">
               <h3>大模型厂家管理</h3>
@@ -347,15 +357,21 @@
           </div>
         </el-card>
 
-        <!-- 大模型配置 -->
-        <el-card v-show="activeTab === 'llm'" class="config-content" shadow="never">
+        <!-- 大模型配置（京东云模式下隐藏） -->
+        <el-card v-if="!isJdyunMode()" v-show="activeTab === 'llm'" class="config-content" shadow="never">
           <template #header>
             <div class="card-header">
               <h3>大模型配置</h3>
-              <el-button type="primary" @click="showAddLLMDialog">
-                <el-icon><Plus /></el-icon>
-                添加模型
-              </el-button>
+              <div>
+                <el-button type="success" plain @click="handleBatchImport" :loading="batchImporting">
+                  <el-icon><Download /></el-icon>
+                  一键导入
+                </el-button>
+                <el-button type="primary" @click="showAddLLMDialog">
+                  <el-icon><Plus /></el-icon>
+                  添加模型
+                </el-button>
+              </div>
             </div>
           </template>
 
@@ -533,8 +549,9 @@
           <template #header>
             <div class="card-header">
               <h3>数据源配置</h3>
+              <!-- 京东云模式下隐藏添加和管理分类按钮 -->
               <div class="header-actions">
-                <el-button @click="showMarketCategoryManagement">
+                <el-button v-if="!isJdyunMode()" @click="showMarketCategoryManagement">
                   <el-icon><Setting /></el-icon>
                   管理分类
                 </el-button>
@@ -617,8 +634,8 @@
           </div>
         </el-card>
 
-        <!-- 数据库配置 -->
-        <el-card v-show="activeTab === 'database'" class="config-content" shadow="never">
+        <!-- 数据库配置（京东云模式下隐藏） -->
+        <el-card v-if="!isJdyunMode()" v-show="activeTab === 'database'" class="config-content" shadow="never">
           <template #header>
             <div class="card-header">
               <h3>数据库配置</h3>
@@ -651,8 +668,8 @@
           </div>
         </el-card>
 
-        <!-- 系统设置 -->
-        <el-card v-show="activeTab === 'system'" class="config-content" shadow="never">
+        <!-- 系统设置（京东云模式下隐藏） -->
+        <el-card v-if="!isJdyunMode()" v-show="activeTab === 'system'" class="config-content" shadow="never">
           <template #header>
             <h3>系统设置</h3>
           </template>
@@ -720,7 +737,7 @@
                   </el-option>
                 </el-option-group>
               </el-select>
-              <div class="setting-description">用于研究管理者综合决策、风险管理者最终评估，推理能力强。可从所有已启用供应商的模型中选择</div>
+              <div class="setting-description">用于研究整合员综合决策、风险评估师最终评估，推理能力强。可从所有已启用供应商的模型中选择</div>
             </el-form-item>
 
             <el-form-item label="深度推理模型">
@@ -1119,8 +1136,8 @@
           </el-form>
         </el-card>
 
-        <!-- API密钥状态 -->
-        <el-card v-show="activeTab === 'api-keys'" class="config-content" shadow="never">
+        <!-- API密钥状态（京东云模式下隐藏） -->
+        <el-card v-if="!isJdyunMode()" v-show="activeTab === 'api-keys'" class="config-content" shadow="never">
           <template #header>
             <div class="card-header">
               <h3>API密钥状态</h3>
@@ -1235,8 +1252,8 @@
           </div>
         </el-card>
 
-        <!-- 导入导出 -->
-        <el-card v-show="activeTab === 'import-export'" class="config-content" shadow="never">
+        <!-- 导入导出（京东云模式下隐藏） -->
+        <el-card v-if="!isJdyunMode()" v-show="activeTab === 'import-export'" class="config-content" shadow="never">
           <template #header>
             <h3>导入导出</h3>
           </template>
@@ -1283,19 +1300,46 @@
       </el-col>
     </el-row>
 
-    <!-- 厂家管理对话框 -->
+    <!-- 厂家管理对话框（京东云模式下隐藏） -->
     <ProviderDialog
+      v-if="!isJdyunMode()"
       v-model:visible="providerDialogVisible"
       :provider="currentProvider"
       @success="handleProviderSuccess"
     />
 
-    <!-- 大模型配置对话框 -->
+    <!-- 大模型配置对话框（京东云模式下隐藏） -->
     <LLMConfigDialog
+      v-if="!isJdyunMode()"
       v-model:visible="llmDialogVisible"
       :config="currentLLMConfig"
       @success="handleLLMConfigSuccess"
     />
+
+    <!-- 一键导入对话框 -->
+    <el-dialog v-model="batchImportDialogVisible" title="一键导入大模型配置" width="480px">
+      <p style="margin-bottom: 16px; color: var(--el-text-color-regular); font-size: 14px;">
+        选择要导入的厂家，系统将自动从模型目录中导入该厂家下所有模型配置。
+      </p>
+      <el-checkbox-group v-model="selectedImportProviders">
+        <div v-for="p in importableProviders" :key="p.name" style="margin-bottom: 8px;">
+          <el-checkbox :label="p.name" :value="p.name">
+            {{ p.display_name }}
+            <el-tag v-if="p.extra_config?.has_api_key" size="small" type="success" style="margin-left: 4px;">已配置密钥</el-tag>
+            <el-tag v-else size="small" type="info" style="margin-left: 4px;">未配置密钥</el-tag>
+          </el-checkbox>
+        </div>
+      </el-checkbox-group>
+      <div v-if="importableProviders.length === 0" style="text-align: center; padding: 20px; color: var(--el-text-color-secondary);">
+        暂无已启用的厂家
+      </div>
+      <template #footer>
+        <el-button @click="batchImportDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchImporting" :disabled="selectedImportProviders.length === 0" @click="confirmBatchImport">
+          导入选中厂家
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 数据源配置对话框 -->
     <DataSourceConfigDialog
@@ -1304,8 +1348,9 @@
       @success="handleDataSourceConfigSuccess"
     />
 
-    <!-- 市场分类管理对话框 -->
+    <!-- 市场分类管理对话框（京东云模式下隐藏） -->
     <el-dialog
+      v-if="!isJdyunMode()"
       v-model="marketCategoryManagementVisible"
       title="市场分类管理"
       width="80%"
@@ -1321,8 +1366,9 @@
       @success="handleDataSourceGroupingSuccess"
     />
 
-    <!-- 数据库配置对话框 -->
+    <!-- 数据库配置对话框（京东云模式下隐藏） -->
     <el-dialog
+      v-if="!isJdyunMode()"
       v-model="databaseDialogVisible"
       title="编辑数据库配置"
       width="600px"
@@ -1414,8 +1460,9 @@
       </template>
     </el-dialog>
 
-    <!-- 🔧 向量迁移对话框 -->
+    <!-- 🔧 向量迁移对话框（京东云模式下隐藏） -->
     <el-dialog
+      v-if="!isJdyunMode()"
       v-model="migrationDialogVisible"
       title="迁移向量数据"
       width="780px"
@@ -1532,6 +1579,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { isJdyunMode } from '@/utils/config'
 import {
   Setting,
   Cpu,
@@ -2124,6 +2172,11 @@ const buildDataSourceGroups = () => {
   const groups: any[] = []
   const ungrouped: DataSourceConfig[] = []
 
+  // 京东云模式下：只显示 tushare 和 akshare 类型的数据源
+  const filteredConfigs = isJdyunMode()
+    ? dataSourceConfigs.value.filter(ds => ['tushare', 'akshare'].includes(ds.type?.toLowerCase() || ''))
+    : dataSourceConfigs.value
+
   // 按分类分组
   marketCategories.value.forEach(category => {
     const categoryGroupings = dataSourceGroupings.value.filter(
@@ -2133,7 +2186,7 @@ const buildDataSourceGroups = () => {
     if (categoryGroupings.length > 0) {
       const dataSources = categoryGroupings
         .map(grouping => {
-          const dataSource = dataSourceConfigs.value.find(
+          const dataSource = filteredConfigs.find(
             ds => ds.name === grouping.data_source_name
           )
           if (dataSource) {
@@ -2161,7 +2214,7 @@ const buildDataSourceGroups = () => {
     dataSourceGroupings.value.map(g => g.data_source_name)
   )
 
-  dataSourceConfigs.value.forEach(dataSource => {
+  filteredConfigs.forEach(dataSource => {
     if (!groupedDataSourceNames.has(dataSource.name)) {
       ungrouped.push(dataSource)
     }
@@ -2560,6 +2613,44 @@ const migrateFromEnv = async () => {
 const llmDialogVisible = ref(false)
 const currentLLMConfig = ref<LLMConfig | null>(null)
 const isEditingLLM = ref(false)
+const batchImporting = ref(false)
+const batchImportDialogVisible = ref(false)
+const selectedImportProviders = ref<string[]>([])
+const importableProviders = ref<LLMProvider[]>([])
+
+const handleBatchImport = async () => {
+  // 加载厂家列表
+  try {
+    const providers = await configApi.getLLMProviders()
+    importableProviders.value = providers.filter((p: LLMProvider) => p.is_active)
+  } catch {
+    ElMessage.error('加载厂家列表失败')
+    return
+  }
+  selectedImportProviders.value = []
+  batchImportDialogVisible.value = true
+}
+
+const confirmBatchImport = async () => {
+  if (selectedImportProviders.value.length === 0) return
+
+  batchImporting.value = true
+  try {
+    const result = await configApi.batchImportLLMConfigs(selectedImportProviders.value)
+    if (result.success) {
+      ElMessage.success(result.message)
+      batchImportDialogVisible.value = false
+      await loadLLMConfigs()
+    } else {
+      ElMessage.warning(result.message)
+    }
+  } catch (error) {
+    console.error('批量导入失败:', error)
+    ElMessage.error('批量导入失败')
+  } finally {
+    batchImporting.value = false
+  }
+}
 
 const showAddLLMDialog = () => {
   currentLLMConfig.value = null
@@ -3129,6 +3220,12 @@ watch(
 
 // 生命周期
 onMounted(async () => {
+  // 京东云模式下：只显示数据源配置标签页
+  if (isJdyunMode()) {
+    activeTab.value = 'datasource'
+    await loadDataSourceConfigs()
+    return
+  }
   // 先加载厂家信息，再加载其他数据
   await loadProviders()
   await loadProviderInfoMap()

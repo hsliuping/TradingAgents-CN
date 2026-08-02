@@ -342,8 +342,8 @@ def get_macd_divergence(
                 confirmation_status: 确认状态，取值 "confirmed" | "pending"
             summary: 汇总信息，子字段 —
                 total_divergences: 背离总数
-                bullish_count: 看涨背离数量
-                bearish_count: 看跌背离数量
+                bullish_count: 上行背离数量
+                bearish_count: 下行背离数量
                 strong_signals: 强信号数量
             data_quality: 数据质量，子字段 —
                 bars_analyzed: 分析的 K 线数量
@@ -542,8 +542,8 @@ def get_rsi_divergence(
                 strength: 信号强度，取值 "strong" | "moderate" | "weak"
             summary: 汇总信息，子字段 —
                 total_divergences: 背离总数
-                bullish_count: 看涨背离数量
-                bearish_count: 看跌背离数量
+                bullish_count: 上行背离数量
+                bearish_count: 下行背离数量
                 strong_signals: 强信号数量
             data_quality: 数据质量，子字段 —
                 bars_analyzed: 分析的 K 线数量
@@ -844,7 +844,7 @@ def get_volume_price_divergence(
             "recent_assessments": bar_assessments[-min(10, len(bar_assessments)):],
             "interpretation": {
                 "healthy_uptrend": "价涨量增，上涨趋势健康",
-                "bearish_divergence": "价涨量缩，上涨动能衰竭（卖出信号）",
+                "bearish_divergence": "价涨量缩，上涨动能衰竭（负向背离信号）",
                 "capitulation": "价跌量增，恐慌性抛售（可能接近底部）",
                 "low_interest": "价跌量缩，市场关注度低",
             },

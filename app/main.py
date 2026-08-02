@@ -128,17 +128,21 @@ async def _print_config_summary(logger):
         # .env 文件路径信息
         import os
         from pathlib import Path
-        
+
         current_dir = Path.cwd()
         logger.info(f"📁 Current working directory: {current_dir}")
-        
+
+        # 支持通过 DOTENV_FILE 环境变量指定不同的 .env 文件（如京东云模式用 .env.jdyun）
+        env_filename = os.getenv("DOTENV_FILE", ".env")
+        logger.info(f"📄 Environment file: {env_filename}")
+
         # 检查可能的 .env 文件位置
         env_files_to_check = [
-            current_dir / ".env",
-            current_dir / "app" / ".env",
-            Path(__file__).parent.parent / ".env",  # 项目根目录
+            current_dir / env_filename,
+            current_dir / "app" / env_filename,
+            Path(__file__).parent.parent / env_filename,  # 项目根目录
         ]
-        
+
         logger.info("🔍 Checking .env file locations:")
         env_file_found = False
         for env_file in env_files_to_check:
@@ -351,6 +355,13 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  配置桥接失败: {e}")
         logger.warning("⚠️  TradingAgents 将使用 .env 文件中的配置")
 
+    # 🔧 京东云合作版：首次启动时从环境变量初始化数据库配置
+    try:
+        from app.services.jdyun_init import init_jdyun_config
+        init_jdyun_config()
+    except Exception as e:
+        logger.warning(f"⚠️  京东云配置初始化失败: {e}")
+
     # 启动期同步能力索引：工具元数据变更后，重启即可增量写入向量库。
     # 改为后台异步任务，避免 Embedding 模型加载阻塞项目启动
     async def _sync_capability_index_background():
@@ -398,6 +409,51 @@ async def lifespan(app: FastAPI):
     # 创建后台任务，不阻塞启动
     asyncio.create_task(_sync_capability_index_background())
     logger.info("📋 能力索引同步已在后台启动")
+
+    # 启动期同步用户手册向量索引：手册内容变更后重启即自动重建，
+    # 让使用问答机器人能基于向量语义检索回答"怎么做分析"等自然语言问题
+    async def _sync_user_manual_index_background():
+        """后台异步构建用户手册向量索引，不阻塞启动"""
+        try:
+            from core.knowledge.user_manual_manager import UserManualManager
+
+            manager = UserManualManager()
+            if not manager.available:
+                logger.warning(
+                    "⚠️ [用户手册索引] 向量库/Embedding 不可用，跳过构建。"
+                    "使用问答机器人将回退到关键字匹配模式。"
+                )
+                return
+
+            # 延迟 3 秒，让 uvicorn 先完全启动并监听端口
+            await asyncio.sleep(3)
+
+            # 在独立线程中执行同步索引，避免阻塞事件循环
+            # ensure_indexed 是同步方法（含大量 embedding 请求），
+            # 直接在协程中调用会阻塞 uvicorn 监听端口
+            result = await asyncio.to_thread(manager.ensure_indexed, force=False)
+            if result["rebuilt"]:
+                logger.info(
+                    "✅ 用户手册索引构建完成: %d 个切片，来源 %d 份手册，签名=%s",
+                    result["sections_count"],
+                    result["manuals_count"],
+                    result["signature"][:8],
+                )
+            elif result["skipped"]:
+                logger.info(
+                    "📋 用户手册索引跳过重建（签名一致），现有 %d 个切片",
+                    result["sections_count"],
+                )
+            else:
+                logger.warning(
+                    "⚠️ 用户手册索引构建失败: %s",
+                    result.get("error", "未知原因"),
+                )
+        except Exception as e:
+            logger.error(f"❌ 用户手册索引同步失败: {e}", exc_info=True)
+
+    asyncio.create_task(_sync_user_manual_index_background())
+    logger.info("📖 用户手册索引同步已在后台启动")
 
     # 启动期同步系统默认提示词模板：将代码中的 fallback 提示词写入数据库统一管理
     try:
@@ -887,6 +943,50 @@ async def lifespan(app: FastAPI):
         )
         logger.info("🗓️ 交易日历缓存刷新任务已配置（每日 18:30 执行）")
 
+        # v3.5.0 项4 / v3.6.0 项6：HITL 待确认操作过期清理（每 30 分钟执行一次）
+        async def _expire_stale_hitl_operations():
+            try:
+                from app.core.database import get_mongo_db
+                from core.hitl.checkpoint_store import HITLCheckpointService
+                db = get_mongo_db()
+                if db is not None:
+                    svc = HITLCheckpointService(db)
+                    cleaned = await svc.expire_stale()
+                    if cleaned:
+                        logger.info(f"[HITL·定时] 已清理 {cleaned} 条过期待确认操作")
+            except Exception as _e:
+                logger.warning(f"[HITL·定时] 过期清理失败: {_e}")
+
+        scheduler.add_job(
+            _expire_stale_hitl_operations,
+            IntervalTrigger(minutes=30, timezone=settings.TIMEZONE),
+            id="hitl_expire_stale",
+            name="HITL 待确认操作过期清理（每30分钟）"
+        )
+        logger.info("🔄 HITL 待确认操作过期清理已配置（每 30 分钟）")
+
+        # v3.6.0：Skill 审核过期清理（每 30 分钟执行一次）
+        async def _expire_stale_skill_reviews():
+            try:
+                from app.core.database import get_mongo_db
+                from app.services.skill_review_service import SkillReviewService
+                db = get_mongo_db()
+                if db is not None:
+                    svc = SkillReviewService(db=db)
+                    cleaned = await svc.expire_stale_reviews()
+                    if cleaned:
+                        logger.info(f"[SkillReview·定时] 已过期 {cleaned} 条待审核 Skill 记录")
+            except Exception as _e:
+                logger.warning(f"[SkillReview·定时] 过期清理失败: {_e}")
+
+        scheduler.add_job(
+            _expire_stale_skill_reviews,
+            IntervalTrigger(minutes=30, timezone=settings.TIMEZONE),
+            id="skill_review_expire_stale",
+            name="Skill 审核过期清理（每30分钟）"
+        )
+        logger.info("🔄 Skill 审核过期清理已配置（每 30 分钟）")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
@@ -1251,6 +1351,8 @@ from app.routers import skill_gaps as skill_gaps_router
 from app.routers import skill_center as skill_center_router
 from app.routers import agent_workshop as agent_workshop_router
 from app.routers import workflow_generation as workflow_generation_router
+from app.routers import agent_assertions as agent_assertions_router
+from app.routers import execution_trace as execution_trace_router
 register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
 register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
 register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
@@ -1260,6 +1362,8 @@ register_router_with_log(app, skill_gaps_router.router, "Skill 缺口路由 (ski
 register_router_with_log(app, skill_center_router.router, "Skill 中心聚合路由 (skill-center)", tags=["skill-center"])
 register_router_with_log(app, agent_workshop_router.router, "Agent 工坊路由 (agent-workshop)", tags=["agent-workshop"])
 register_router_with_log(app, workflow_generation_router.router, "AI 工作流创建路由 (workflow-generation)", tags=["workflow-generation"])
+register_router_with_log(app, agent_assertions_router.router, "Agent 断言管理路由 (agent-assertions)", tags=["agent-assertions"])
+register_router_with_log(app, execution_trace_router.router, "执行轨迹路由 (execution-traces)", tags=["execution-traces"])
 
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router
@@ -1272,10 +1376,14 @@ register_router_with_log(app, unified_tasks_router.router, "统一任务中心�
 # MCP 路由
 from app.routers import mcp as mcp_router
 from app.routers import capability_index as capability_index_router
+from app.routers import quality_metrics as quality_metrics_router
 app.include_router(mcp_router.router)
 
 # 能力索引路由
 app.include_router(capability_index_router.router, prefix="/api", tags=["capability-index"])
+
+# 报告质量指标路由（v3.6.0 项5）
+app.include_router(quality_metrics_router.router)
 
 # 路由注册完成，打印总结
 logger.info("=" * 70)

@@ -150,7 +150,7 @@ class PostProcessorAgent(BaseAgent):
                 {
                     "field": "recommendation",
                     "operator": "in",
-                    "value": ["买入", "卖出"]
+                    "value": ["乐观", "审慎"]
                 }
             state: 工作流状态
 

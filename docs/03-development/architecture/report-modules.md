@@ -18,7 +18,7 @@ TradingAgents-CN 采用**多智能体协作**的方式生成股票分析报告�
        │                 │                 │                 │
        └─────────────────┴─────────────────┴─────────────────┘
                                  ↓
-第二阶段：研究团队辩论（1个综合报告）
+第二阶段：研究团队讨论（1个综合报告）
 ┌─────────────────────────────────────────────────────────────┐
 │              🔬 研究团队分析（research_team_decision）          │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
@@ -27,28 +27,29 @@ TradingAgents-CN 采用**多智能体协作**的方式生成股票分析报告�
 │  └──────────────┘  └──────────────┘  └──────────────┘      │
 └─────────────────────────────────────────────────────────────┘
                                  ↓
-第三阶段：交易团队（1个独立报告）
+第三阶段：研究整合团队（1个独立报告）
 ┌─────────────────────────────────────────────────────────────┐
-│              💼 交易员计划（trader_investment_plan）           │
+│              💼 研究整合员计划（trader_investment_plan）           │
 └─────────────────────────────────────────────────────────────┘
                                  ↓
-第四阶段：风险管理团队辩论（1个综合报告）
+第四阶段：风险管理团队审阅（1个综合报告）
 ┌─────────────────────────────────────────────────────────────┐
-│           👔 风险管理决策（risk_management_decision）          │
+│           👔 风险审阅结论（risk_management_decision）          │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │ ⚡ 激进分析师 │  │ 🛡️ 保守分析师 │  │ ⚖️ 中性分析师 │      │
+│  │ ⚡ 高弹性情景 │  │ 🛡️ 防御情景 │  │ ⚖️ 基准情景 │      │
+│  │  研究员      │  │  研究员      │  │  研究员      │      │
 │  │ risky_history│  │  safe_history│  │neutral_history│      │
 │  └──────────────┘  └──────────────┘  └──────────────┘      │
 │                    ┌──────────────┐                         │
-│                    │ 👔 投资组合   │                         │
-│                    │   经理决策    │                         │
+│                    │ 👔 风险评估师 │                         │
+│                    │  最终审阅     │                         │
 │                    │ judge_decision│                         │
 │                    └──────────────┘                         │
 └─────────────────────────────────────────────────────────────┘
                                  ↓
-第五阶段：最终决策（1个独立报告）
+第五阶段：最终研究结论（1个独立报告）
 ┌─────────────────────────────────────────────────────────────┐
-│              🎯 最终分析结果（final_trade_decision）           │
+│              🎯 最终研究结论（final_trade_decision）           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -78,7 +79,7 @@ TradingAgents-CN 采用**多智能体协作**的方式生成股票分析报告�
     // 第二阶段：研究团队分析（1个综合报告）
     "research_team_decision": "研究经理的综合决策内容（包含多空辩论摘要）...",
     
-    // 第三阶段：交易团队（1个独立报告）
+    // 第三阶段：研究整合团队（1个独立报告）
     "trader_investment_plan": "交易员计划内容...",
     
     // 第四阶段：风险管理决策（1个综合报告）
@@ -138,19 +139,19 @@ class InvestDebateState(TypedDict):
     count: int             # 对话轮数
 ```
 
-#### RiskDebateState（风险管理团队辩论）
+#### RiskDebateState（风险管理团队审阅）
 
 ```python
 class RiskDebateState(TypedDict):
-    risky_history: str              # 激进分析师的完整对话历史
-    safe_history: str               # 保守分析师的完整对话历史
-    neutral_history: str            # 中性分析师的完整对话历史
+    risky_history: str              # 高弹性情景研究员的完整对话历史
+    safe_history: str               # 防御情景研究员的完整对话历史
+    neutral_history: str            # 基准情景研究员的完整对话历史
     history: str                    # 整体对话历史
-    latest_speaker: str             # 最后发言的分析师
-    current_risky_response: str     # 激进分析师的最新回复
-    current_safe_response: str      # 保守分析师的最新回复
-    current_neutral_response: str   # 中性分析师的最新回复
-    judge_decision: str             # 投资组合经理的最终决策（保存到 risk_management_decision）
+    latest_speaker: str             # 最后发言的研究员
+    current_risky_response: str     # 高弹性情景研究员的最新回复
+    current_safe_response: str      # 防御情景研究员的最新回复
+    current_neutral_response: str   # 基准情景研究员的最新回复
+    judge_decision: str             # 风险评估师的最终审阅（保存到 risk_management_decision）
     count: int                      # 对话轮数
 ```
 
@@ -173,17 +174,17 @@ const nameMap: Record<string, string> = {
   bear_researcher: '🐻 空头研究员',           // 从 investment_debate_state.bear_history 提取
   research_team_decision: '🔬 研究经理分析',  // 从 investment_debate_state.judge_decision 提取
 
-  // 第三阶段：交易团队（1个独立报告）
-  trader_investment_plan: '💼 交易员计划',
+  // 第三阶段：研究整合团队（1个独立报告）
+  trader_investment_plan: '💼 研究整合员计划',
 
   // 第四阶段：风险管理团队（从 risk_management_decision 拆分展示）
-  risky_analyst: '⚡ 激进分析师',                    // 从 risk_debate_state.risky_history 提取
-  safe_analyst: '🛡️ 保守分析师',                    // 从 risk_debate_state.safe_history 提取
-  neutral_analyst: '⚖️ 中性分析师',                  // 从 risk_debate_state.neutral_history 提取
-  risk_management_decision: '👔 投资组合经理',       // 从 risk_debate_state.judge_decision 提取
+  risky_analyst: '⚡ 高弹性情景研究员',                    // 从 risk_debate_state.risky_history 提取
+  safe_analyst: '🛡️ 防御情景研究员',                    // 从 risk_debate_state.safe_history 提取
+  neutral_analyst: '⚖️ 基准情景研究员',                  // 从 risk_debate_state.neutral_history 提取
+  risk_management_decision: '👔 风险评估师',       // 从 risk_debate_state.judge_decision 提取
 
-  // 第五阶段：最终决策（1个独立报告）
-  final_trade_decision: '🎯 最终分析结果',
+  // 第五阶段：最终研究结论（1个独立报告）
+  final_trade_decision: '🎯 最终研究结论',
 
   // 兼容旧字段
   investment_plan: '📋 投资建议',
@@ -250,40 +251,40 @@ const nameMap: Record<string, string> = {
 
 **注意**：完整的辩论历史存储在 `investment_debate_state` 中，但不直接保存到 `reports` 字段。
 
-### 第三阶段：交易团队（1个报告）
+### 第三阶段：研究整合团队（1个报告）
 
-#### 6. 💼 交易员计划（trader_investment_plan）
-- 具体交易策略
-- 仓位管理建议
-- 买卖时机规划
-- 止损止盈设置
+#### 6. 💼 研究整合员计划（trader_investment_plan）
+- 研究结论汇总
+- 仓位管理参考
+- 关键验证区间
+- 风险关注与收益关注参考
 
-### 第四阶段：风险管理团队决策（1个综合报告）
+### 第四阶段：风险管理团队审阅（1个综合报告）
 
-#### 7. 👔 风险管理决策（risk_management_decision）
+#### 7. 👔 风险审阅结论（risk_management_decision）
 
-这个报告是投资组合经理的综合决策，通常会包含：
-- 激进分析师的主要观点摘要
-- 保守分析师的主要观点摘要
-- 中性分析师的主要观点摘要
-- 投资组合经理综合三方观点后的最终决策
-- 最终风险等级和投资组合建议
+这个报告是风险评估师综合审阅后的结论，通常会包含：
+- 高弹性情景研究员的主要观点摘要
+- 防御情景研究员的主要观点摘要
+- 基准情景研究员的主要观点摘要
+- 风险评估师综合三方观点后的最终审阅
+- 最终风险等级和研究观察
 
 **注意**：完整的辩论历史存储在 `risk_debate_state` 中，但不直接保存到 `reports` 字段。
 
-### 第五阶段：最终决策（1个报告）
+### 第五阶段：最终研究结论（1个报告）
 
-#### 8. 🎯 最终分析结果（final_trade_decision）
+#### 8. 🎯 最终研究结论（final_trade_decision）
 - 综合所有团队分析
-- 最终投资建议
+- 最终研究结论
 - 置信度评分
 - 风险等级
-- 执行计划
+- 后续跟踪要点
 
 ### 可选报告
 
-#### 9. 📋 投资建议（investment_plan）
-- 早期版本的投资建议
+#### 9. 📋 初步研究观察（investment_plan）
+- 早期版本的研究观察
 - 部分报告可能包含此字段
 - 在有研究团队分析时，此字段可能为空
 

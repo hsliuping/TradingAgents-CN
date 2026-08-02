@@ -20,7 +20,14 @@
 
 ## 快速导航
 
+### 完整使用手册
+
+- [v3.0 完整使用手册（标准版）](./02-user-guide/user-manual-v3.0.md)
+- [v3.0 京东云合作版使用手册](./02-user-guide/jdyun-user-manual-v3.0.md) ⭐ 京东云版用户专用
+
 ### 新用户入门
+0. [v3.0 系统介绍（技术文档版）](./01-product/v3.0-system-introduction.md)
+   - [v3.0 系统介绍（公众号传播版）](./01-product/v3.0-system-introduction-for-wechat.md)
 1. [快速开始](./02-user-guide/getting-started/quick-start.md)
 2. [安装指南](./02-user-guide/getting-started/installation.md)
 3. [数据库配置](./02-user-guide/getting-started/database-setup.md)
@@ -29,7 +36,7 @@
 
 ### 功能使用
 - [个股分析](./02-user-guide/features/stock-analysis.md)
-- [模拟交易](./02-user-guide/features/paper-trading.md)
+- [模拟交易（虚拟学习环境）](./02-user-guide/features/paper-trading.md)
 - [持仓分析](./02-user-guide/features/portfolio-analysis.md)
 - [定时分析](./02-user-guide/features/scheduled-analysis.md)
 - [报告导出](./02-user-guide/features/report-export.md)
@@ -46,6 +53,7 @@
 - [API 文档](./03-development/api/)
 - [开发流程](./03-development/workflow/development-workflow.md)
 - [分支策略](./03-development/workflow/branch-guide.md)
+- [京东云对接指南](./03-development/guides/jdyun-integration-guide.md) ⭐ 京东云工程师专用
 
 ### 运维部署
 - [Docker 部署](./04-operations/deployment/docker-deployment-guide.md)
@@ -55,6 +63,8 @@
 
 ### 产品演进（按版本号管理）
 - **[v3.0（当前版本）](./05-design/v3.0/)** - 当前发布版本的设计文档
+  - [京东云合作版定制设计](./05-design/v3.0/jdyun-edition-design.md)
+  - [京东云登录认证设计](./05-design/v3.0/jdyun-auth-design.md)
 - **[v4.0（下一版本）](./05-design/v4.0/)** - 下一版本规划
 - **[v5.0（远期愿景）](./05-design/v5.0/)** - 远期愿景
 - [前沿探索](./05-design/research/) - 不绑定版本的前沿研究

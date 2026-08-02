@@ -260,10 +260,10 @@ class NewsAnalystV2(AnalystAgent):
             )
         )
 
-        response = self._llm.invoke(final_messages)
+        response = self._invoke_llm_with_trace(final_messages)
         report = response.content if hasattr(response, "content") else str(response)
 
-        if "</tool_call>" in report or '"name": "get_stock_news_' in report:
+        if "```" in report or '"name": "get_stock_news_' in report:
             logger.warning("[NewsAnalystV2] 预取分析阶段仍返回伪工具调用，追加强约束后重试一次")
             final_messages.append(
                 HumanMessage(
@@ -273,7 +273,7 @@ class NewsAnalystV2(AnalystAgent):
                     )
                 )
             )
-            response = self._llm.invoke(final_messages)
+            response = self._invoke_llm_with_trace(final_messages)
             report = response.content if hasattr(response, "content") else str(response)
 
         # 兜底：若两次重试后 report 仍是工具调用 JSON/XML，降级为文本说明而非存入原始 JSON
@@ -286,8 +286,8 @@ class NewsAnalystV2(AnalystAgent):
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """覆盖执行逻辑以支持专用新闻分析提示词。"""
         try:
-            ticker = state.get("ticker") or state.get("company_of_interest")
-            analysis_date = state.get("analysis_date") or state.get("trade_date")
+            ticker, analysis_date = self._extract_common_params(state)
+
             market_type = state.get("market_type", "A股")
             context = state.get("context")
             overrides = state.get("prompt_overrides") or {}
@@ -295,8 +295,8 @@ class NewsAnalystV2(AnalystAgent):
             user_override = overrides.get("user")
             analysis_override = overrides.get("analysis")
 
-            if not ticker or not analysis_date:
-                raise ValueError("Missing required parameters: ticker or analysis_date")
+            if not ticker:
+                raise ValueError("Missing required parameters: ticker")
 
             system_prompt = system_override or self._build_system_prompt(market_type, context=context, state=state)
             user_prompt = user_override or self._build_user_prompt(ticker, analysis_date, {}, state)
@@ -335,7 +335,7 @@ class NewsAnalystV2(AnalystAgent):
                     elif self._langchain_tools:
                         report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
                     else:
-                        response = self._llm.invoke(messages)
+                        response = self._invoke_llm_with_trace(messages)
                         report = response.content if hasattr(response, "content") else str(response)
                 finally:
                     self._langchain_tools = original_tools

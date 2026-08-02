@@ -55,7 +55,19 @@
 
             <!-- 系统配置菜单 -->
             <template v-else-if="currentSection === 'config'">
-              <el-menu-item index="config">
+              <!-- 京东云模式：显示系统配置（只读状态页）+ 数据源配置 -->
+              <template v-if="isJdyunMode()">
+                <el-menu-item index="jdyun-config">
+                  <el-icon><Tools /></el-icon>
+                  <span>系统配置</span>
+                </el-menu-item>
+                <el-menu-item index="datasource-config">
+                  <el-icon><DataBoard /></el-icon>
+                  <span>数据源配置</span>
+                </el-menu-item>
+              </template>
+              <!-- 非京东云模式：显示完整的配置管理 -->
+              <el-menu-item v-else index="config">
                 <el-icon><Tools /></el-icon>
                 <span>配置管理</span>
               </el-menu-item>
@@ -269,10 +281,20 @@
           </template>
 
           <el-form label-width="120px">
-            <el-form-item label="修改密码">
+            <!-- 🔧 京东云模式：密码由京东云平台统一管理，本应用不支持修改密码 -->
+            <el-form-item v-if="!isJdyunMode()" label="修改密码">
               <el-button type="primary" @click="changePasswordDialogVisible = true">
                 修改密码
               </el-button>
+            </el-form-item>
+            <el-form-item v-else label="账号安全">
+              <el-alert
+                type="info"
+                :closable="false"
+                show-icon
+                title="账号由京东云平台统一管理"
+                description="您的访问凭证由京东云平台分配与管理，与本应用解耦。如需修改账号或凭证，请前往京东云平台控制台完成。"
+              />
             </el-form-item>
           </el-form>
         </el-card>
@@ -334,9 +356,7 @@
             style="margin-bottom: 20px;"
           />
 
-          <el-tabs v-model="commissionTab">
-            <el-tab-pane label="A股" name="CN">
-              <el-form :model="commissionCN" label-width="120px">
+          <el-form :model="commissionCN" label-width="120px">
                 <el-form-item label="佣金费率">
                   <el-input-number
                     v-model="commissionCN.rate"
@@ -381,48 +401,6 @@
                   </span>
                 </el-form-item>
               </el-form>
-            </el-tab-pane>
-
-            <el-tab-pane label="港股" name="HK">
-              <el-form :model="commissionHK" label-width="120px">
-                <el-form-item label="佣金费率">
-                  <el-input-number v-model="commissionHK.rate" :min="0" :max="1" :step="0.00001" :precision="5" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="最低佣金">
-                  <el-input-number v-model="commissionHK.min" :min="0" :step="0.5" :precision="2" controls-position="right" />
-                  <span class="setting-description" style="margin-left: 8px;">港币</span>
-                </el-form-item>
-                <el-form-item label="印花税">
-                  <el-input-number v-model="commissionHK.stampDutyRate" :min="0" :max="0.01" :step="0.0001" :precision="4" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="交易征费">
-                  <el-input-number v-model="commissionHK.transactionLevyRate" :min="0" :max="0.001" :step="0.000001" :precision="6" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="交易费">
-                  <el-input-number v-model="commissionHK.tradingFeeRate" :min="0" :max="0.001" :step="0.000001" :precision="6" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="结算费">
-                  <el-input-number v-model="commissionHK.settlementFeeRate" :min="0" :max="0.001" :step="0.000001" :precision="6" controls-position="right" />
-                </el-form-item>
-              </el-form>
-            </el-tab-pane>
-
-            <el-tab-pane label="美股" name="US">
-              <el-form :model="commissionUS" label-width="120px">
-                <el-form-item label="佣金费率">
-                  <el-input-number v-model="commissionUS.rate" :min="0" :max="1" :step="0.00001" :precision="5" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="最低佣金">
-                  <el-input-number v-model="commissionUS.min" :min="0" :step="0.5" :precision="2" controls-position="right" />
-                  <span class="setting-description" style="margin-left: 8px;">美元</span>
-                </el-form-item>
-                <el-form-item label="SEC费用">
-                  <el-input-number v-model="commissionUS.secFeeRate" :min="0" :max="0.001" :step="0.0000001" :precision="7" controls-position="right" />
-                  <span class="setting-description" style="margin-left: 8px;">仅卖出</span>
-                </el-form-item>
-              </el-form>
-            </el-tab-pane>
-          </el-tabs>
 
           <el-form label-width="120px" style="margin-top: 16px;">
             <el-form-item>
@@ -438,8 +416,9 @@
 
 
 
-        <!-- 配置管理 -->
-        <el-card v-show="activeTab === 'config'" class="settings-content" shadow="never">
+
+        <!-- 配置管理（非京东云模式） -->
+        <el-card v-if="!isJdyunMode()" v-show="activeTab === 'config'" class="settings-content" shadow="never">
           <template #header>
             <h3>配置管理</h3>
           </template>
@@ -454,6 +433,46 @@
             />
             <el-button type="primary" @click="goToConfigManagement">
               进入配置管理
+            </el-button>
+          </div>
+        </el-card>
+
+        <!-- 系统配置（京东云模式：只读状态页） -->
+        <el-card v-if="isJdyunMode()" v-show="activeTab === 'jdyun-config'" class="settings-content" shadow="never">
+          <template #header>
+            <h3>系统配置</h3>
+          </template>
+
+          <div class="config-content">
+            <el-alert
+              title="京东云合作版"
+              type="info"
+              description="本版本通过环境变量注入大模型和数据源配置，无需手动配置。如需修改，请联系管理员更新环境变量。"
+              :closable="false"
+              style="margin-bottom: 20px;"
+            />
+            <el-button type="primary" @click="goToJdyunConfig">
+              查看配置状态
+            </el-button>
+          </div>
+        </el-card>
+
+        <!-- 数据源配置（京东云模式） -->
+        <el-card v-if="isJdyunMode()" v-show="activeTab === 'datasource-config'" class="settings-content" shadow="never">
+          <template #header>
+            <h3>数据源配置</h3>
+          </template>
+
+          <div class="config-content">
+            <el-alert
+              title="京东云版数据源"
+              type="info"
+              description="京东云合作版仅支持 Tushare 和 AKShare 数据源。如需修改，请在数据源管理页面操作。"
+              :closable="false"
+              style="margin-bottom: 20px;"
+            />
+            <el-button type="primary" @click="goToDataSourceConfig">
+              管理数据源
             </el-button>
           </div>
         </el-card>
@@ -661,6 +680,7 @@ import { ElMessage } from 'element-plus'
 import type { FormRules } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { isJdyunMode } from '@/utils/config'
 import {
   Setting,
   User,
@@ -675,7 +695,8 @@ import {
   Refresh,
   DataAnalysis,
   ChatDotRound,
-  Collection
+  Collection,
+  DataBoard
 } from '@element-plus/icons-vue'
 import { getCapabilityIndexState, rebuildCapabilityIndex, type CapabilityIndexState } from '@/api/capabilityIndex'
 import request from '@/api/request'
@@ -735,6 +756,9 @@ const updateSectionFromRoute = () => {
   } else if (path === '/settings/config') {
     currentSection.value = 'config'
     activeTab.value = 'config'
+  } else if (path === '/settings/jdyun-config') {
+    currentSection.value = 'config'
+    activeTab.value = 'jdyun-config'
   } else if (path === '/settings/usage') {
     currentSection.value = 'config'
     activeTab.value = 'usage'
@@ -794,17 +818,12 @@ const assistantSettings = ref({
   customInstructions: authStore.user?.preferences?.assistant_settings?.custom_instructions || ''
 })
 
-// 交易费率设置
-const commissionTab = ref('CN')
+// 交易费率设置（仅A股）
 const commissionSaving = ref(false)
 
 const defaultCommissionCN = { rate: 0.0003, min: 5.0, stampDutyRate: 0.001, transferFeeRate: 0.00002 }
-const defaultCommissionHK = { rate: 0.0003, min: 3.0, stampDutyRate: 0.0013, transactionLevyRate: 0.00005, tradingFeeRate: 0.00005, settlementFeeRate: 0.00002 }
-const defaultCommissionUS = { rate: 0.0, min: 0.0, secFeeRate: 0.0000278 }
 
 const commissionCN = ref({ ...defaultCommissionCN })
-const commissionHK = ref({ ...defaultCommissionHK })
-const commissionUS = ref({ ...defaultCommissionUS })
 
 
 // 监听用户信息变化，同步更新设置
@@ -842,6 +861,16 @@ watch(() => authStore.user, (newUser) => {
 
 // 方法
 const handleMenuSelect = (index: string) => {
+  // 京东云模式：点击"系统配置"菜单项时跳转到独立的京东云配置页
+  if (index === 'jdyun-config') {
+    router.push('/settings/jdyun-config')
+    return
+  }
+  // 京东云模式：点击"数据源配置"菜单项时跳转到配置管理页（数据源标签页）
+  if (index === 'datasource-config') {
+    router.push('/settings/config?tab=datasource')
+    return
+  }
   activeTab.value = index
 }
 
@@ -966,40 +995,23 @@ const saveAssistantSettings = async () => {
   }
 }
 
-// 加载交易费率设置
+// 加载交易费率设置（仅A股）
 const loadCommissionSettings = async (useDefaults = false) => {
   if (useDefaults) {
     commissionCN.value = { ...defaultCommissionCN }
-    commissionHK.value = { ...defaultCommissionHK }
-    commissionUS.value = { ...defaultCommissionUS }
     return
   }
   try {
     const { data } = await request.get('/api/paper/market-rules')
     if (data && Array.isArray(data)) {
       for (const rule of data) {
-        const c = rule.rules?.commission || {}
         if (rule.market === 'CN') {
+          const c = rule.rules?.commission || {}
           commissionCN.value = {
             rate: c.rate ?? defaultCommissionCN.rate,
             min: c.min ?? defaultCommissionCN.min,
             stampDutyRate: c.stamp_duty_rate ?? defaultCommissionCN.stampDutyRate,
             transferFeeRate: c.transfer_fee_rate ?? defaultCommissionCN.transferFeeRate,
-          }
-        } else if (rule.market === 'HK') {
-          commissionHK.value = {
-            rate: c.rate ?? defaultCommissionHK.rate,
-            min: c.min ?? defaultCommissionHK.min,
-            stampDutyRate: c.stamp_duty_rate ?? defaultCommissionHK.stampDutyRate,
-            transactionLevyRate: c.transaction_levy_rate ?? defaultCommissionHK.transactionLevyRate,
-            tradingFeeRate: c.trading_fee_rate ?? defaultCommissionHK.tradingFeeRate,
-            settlementFeeRate: c.settlement_fee_rate ?? defaultCommissionHK.settlementFeeRate,
-          }
-        } else if (rule.market === 'US') {
-          commissionUS.value = {
-            rate: c.rate ?? defaultCommissionUS.rate,
-            min: c.min ?? defaultCommissionUS.min,
-            secFeeRate: c.sec_fee_rate ?? defaultCommissionUS.secFeeRate,
           }
         }
       }
@@ -1009,7 +1021,7 @@ const loadCommissionSettings = async (useDefaults = false) => {
   }
 }
 
-// 保存交易费率设置
+// 保存交易费率设置（仅A股）
 const saveCommissionSettings = async () => {
   commissionSaving.value = true
   try {
@@ -1021,25 +1033,6 @@ const saveCommissionSettings = async () => {
           min: commissionCN.value.min,
           stamp_duty_rate: commissionCN.value.stampDutyRate,
           transfer_fee_rate: commissionCN.value.transferFeeRate,
-        }
-      },
-      {
-        market: 'HK',
-        commission: {
-          rate: commissionHK.value.rate,
-          min: commissionHK.value.min,
-          stamp_duty_rate: commissionHK.value.stampDutyRate,
-          transaction_levy_rate: commissionHK.value.transactionLevyRate,
-          trading_fee_rate: commissionHK.value.tradingFeeRate,
-          settlement_fee_rate: commissionHK.value.settlementFeeRate,
-        }
-      },
-      {
-        market: 'US',
-        commission: {
-          rate: commissionUS.value.rate,
-          min: commissionUS.value.min,
-          sec_fee_rate: commissionUS.value.secFeeRate,
         }
       }
     ]
@@ -1059,6 +1052,14 @@ const saveCommissionSettings = async () => {
 // 导航函数
 const goToConfigManagement = () => {
   router.push('/settings/config')
+}
+
+const goToJdyunConfig = () => {
+  router.push('/settings/jdyun-config')
+}
+
+const goToDataSourceConfig = () => {
+  router.push('/settings/config?tab=datasource')
 }
 
 const goToUsageStatistics = () => {

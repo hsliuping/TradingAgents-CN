@@ -53,7 +53,7 @@ def _check_touched(
     检查最近 bars 根 K 线内价格是否触及过某个水平。
 
     Args:
-        level_price: 目标价格水平
+        level_price: 价格水平
         high: 最高价序列
         low: 最低价序列
         bars: 检查的最近 K 线根数

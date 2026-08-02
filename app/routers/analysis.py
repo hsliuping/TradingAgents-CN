@@ -46,17 +46,18 @@ def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
     1. recommendation 字段：使用合规术语，不包含具体价格
     2. key_points 字段：转换 JSON 字段名为中文描述
     3. decision 字段：支持新旧字段名
-    4. action 字段：将旧术语（买入/卖出/持有）映射为合规术语（看涨/看跌/中性）
+    4. action 字段：将旧术语（买入/卖出/持有）映射为合规术语（乐观/审慎/中性）
     """
     if not result_data:
         return result_data
 
     # 🔥 术语映射：将旧术语转换为合规术语
     ACTION_TRANSLATION = {
-        'BUY': '看涨', 'SELL': '看跌', 'HOLD': '中性',
-        'buy': '看涨', 'sell': '看跌', 'hold': '中性',
-        '买入': '看涨', '卖出': '看跌', '持有': '中性',  # 兼容旧数据
-        '看涨': '看涨', '看跌': '看跌', '中性': '中性',  # 保持新术语不变
+        'BUY': '乐观', 'SELL': '审慎', 'HOLD': '中性',
+        'buy': '乐观', 'sell': '审慎', 'hold': '中性',
+        '买入': '乐观', '卖出': '审慎', '持有': '中性',  # 兼容旧数据
+        '看涨': '乐观', '看跌': '审慎', '中性': '中性',  # 兼容旧数据
+        '乐观': '乐观', '审慎': '审慎', '中性': '中性',  # 保持新术语不变
     }
 
     # 1. 处理 decision 字段（支持新旧字段名）
@@ -254,8 +255,9 @@ async def submit_single_analysis(
     提交单股分析任务 - 支持 AB 测试
 
     通过 request.parameters.engine 参数选择引擎:
-    - legacy (默认): 使用旧引擎 TradingAgentsGraph
-    - unified: 使用新的统一引擎 WorkflowEngine (LangGraph 动态构建)
+    - v2 (默认): 使用新引擎 WorkflowEngine + v2 agent
+    - unified: 使用统一引擎 WorkflowEngine (LangGraph 动态构建)
+    - legacy: 已停用（v3.0 起封堵，返回 400）
     """
     try:
         logger.info("🎯 收到单股分析请求")
@@ -263,12 +265,20 @@ async def submit_single_analysis(
         logger.info(f"📊 请求数据: {request}")
 
         # 判断使用哪个引擎
-        engine_type = AnalysisEngine.LEGACY
+        # v3.0 起默认使用 V2 引擎（旧版 legacy 已停用）
+        engine_type = AnalysisEngine.V2
         if request.parameters and hasattr(request.parameters, "engine"):
             engine_type = request.parameters.engine
             logger.info(f"🔍 [引擎判断] 从 request.parameters.engine 获取: {engine_type} (类型: {type(engine_type)})")
+            # v3.0 起拒绝 legacy 引擎
+            if engine_type == AnalysisEngine.LEGACY:
+                raise HTTPException(
+                    status_code=400,
+                    detail="[已停用] legacy 引擎已停用，请改用 v2 引擎（request.parameters.engine='v2'）。"
+                    "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+                )
         else:
-            logger.warning(f"⚠️ [引擎判断] request.parameters 中没有 engine 字段，使用默认引擎: {engine_type.value}")
+            logger.info(f"ℹ️ [引擎判断] request.parameters 中没有 engine 字段，使用默认引擎: {engine_type.value}")
             if request.parameters:
                 logger.info(f"🔍 [引擎判断] request.parameters 类型: {type(request.parameters)}")
                 logger.info(f"🔍 [引擎判断] request.parameters 内容: {request.parameters}")
@@ -389,7 +399,8 @@ async def submit_single_analysis(
             task_id = task.task_id  # 使用 UUID task_id
             user_id = user["id"]
         else:
-            # legacy/unified 引擎：使用旧服务创建 AnalysisTask（已改为使用队列）
+            # unified 引擎：使用 simple_analysis_service 创建任务并入队
+            # （legacy 引擎已在前面拦截抛 400；unified 实际走 WorkflowEngine，属于新引擎路径）
             legacy_service = get_simple_analysis_service()
             result = await legacy_service.create_analysis_task(user["id"], request)
             # 🔥 注意：create_analysis_task 内部已经将任务提交到队列，不需要后台执行
@@ -1253,7 +1264,7 @@ async def get_task_result(
                         if isinstance(neutral_content, str) and len(neutral_content.strip()) > 10:
                             reports['neutral_analyst'] = neutral_content.strip()
 
-                        # 提取投资组合经理决策
+                        # 提取风险评估师决策
                         risk_decision = risk_debate_state.get('judge_decision', "")
                         if isinstance(risk_decision, str) and len(risk_decision.strip()) > 10:
                             reports['risk_management_decision'] = risk_decision.strip()
@@ -1659,8 +1670,9 @@ async def submit_batch_analysis(
     提交批量分析任务（真正的并发执行）- 支持 AB 测试
 
     通过 request.parameters.engine 参数选择引擎:
-    - legacy (默认): 使用旧引擎 TradingAgentsGraph
-    - unified: 使用新的统一引擎 WorkflowEngine
+    - v2 (默认): 使用新引擎 WorkflowEngine + v2 agent
+    - unified: 使用统一引擎 WorkflowEngine
+    - legacy: 已停用（v3.0 起封堵，返回 400）
 
     ⚠️ 注意：不使用 BackgroundTasks，因为它是串行执行的！
     改用 asyncio.create_task 实现真正的并发执行。
@@ -1669,9 +1681,17 @@ async def submit_batch_analysis(
         logger.info(f"🎯 [批量分析] 收到批量分析请求: title={request.title}")
 
         # 判断使用哪个引擎
-        engine_type = AnalysisEngine.LEGACY
+        # v3.0 起默认使用 V2 引擎（旧版 legacy 已停用）
+        engine_type = AnalysisEngine.V2
         if request.parameters and hasattr(request.parameters, "engine"):
             engine_type = request.parameters.engine
+            # v3.0 起拒绝 legacy 引擎
+            if engine_type == AnalysisEngine.LEGACY:
+                raise HTTPException(
+                    status_code=400,
+                    detail="[已停用] legacy 引擎已停用，请改用 v2 引擎（request.parameters.engine='v2'）。"
+                    "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+                )
 
         logger.info(f"🔧 [AB测试-批量] 使用引擎: {engine_type.value}")
 
@@ -1749,7 +1769,7 @@ async def submit_batch_analysis(
                     )
                     task_id = task.task_id  # 使用 UUID task_id，不是 ObjectId
                 else:
-                    # legacy/unified 引擎：使用旧服务
+                    # unified 引擎：使用 simple_analysis_service 创建任务（legacy 已在前面拦截）
                     create_res = await simple_service.create_analysis_task(user["id"], single_req)
                     task_id = create_res.get("task_id")
                     if not task_id:

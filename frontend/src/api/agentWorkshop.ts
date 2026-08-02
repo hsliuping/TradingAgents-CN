@@ -243,6 +243,45 @@ export interface AgentAutoResolvedGap {
   resolved_at?: string
 }
 
+// ================================================================
+// v3.6.0 项6：Skill 生成 HITL 审核相关类型
+// ================================================================
+
+export interface SkillReviewItem {
+  review_id: string
+  session_id: string
+  tool_id: string
+  display_name: string
+  description?: string
+  source_path: 'agent_workshop' | 'ai_workflow' | string
+  source_label?: string
+  status: 'pending_review' | 'confirmed_bound' | 'rejected_unbound' | string
+  skill_status?: string
+  code_snippet?: string
+  code_language?: string
+  test_summary?: {
+    passed?: boolean
+    score?: number
+    details?: Record<string, any>
+    error?: string
+  }
+  test_passed?: boolean
+  test_score?: number
+  agent_name?: string
+  agent_spec_id?: string
+  target_agent_id?: string
+  target_agent_name?: string
+  workflow_id?: string
+  blueprint_summary?: string
+  created_at?: string
+  updated_at?: string
+  review_note?: string
+  reviewer?: string
+  reviewed_at?: string
+  binding_error?: string
+  is_expired?: boolean
+}
+
 export interface AgentGapResolutionDeadLetterItem {
   job_id: string
   workshop_session_id: string
@@ -875,6 +914,64 @@ export const agentWorkshopApi = {
       started_at?: string
       updated_at?: string
     }>>(`/api/agent-workshop/test-progress/${versionId}`)
+    return (res as any).data
+  },
+
+  // ================================================================
+  // v3.6.0 项6 路径B/C：Skill 生成 HITL 审核接口
+  // ================================================================
+
+  listSkillReviews: async (sessionId: string, sourcePath?: string): Promise<{
+    session_id: string
+    source_path_filter: string | null
+    pending_count: number
+    items: SkillReviewItem[]
+  }> => {
+    const res = await request.get<ApiOk<{
+      session_id: string
+      source_path_filter: string | null
+      pending_count: number
+      items: SkillReviewItem[]
+    }>>(`${BASE}/skill-review/${sessionId}`, { params: { source_path: sourcePath } })
+    return (res as any).data
+  },
+
+  getSkillReviewDetail: async (sessionId: string, toolId: string): Promise<SkillReviewItem> => {
+    const res = await request.get<ApiOk<SkillReviewItem>>(`${BASE}/skill-review/${sessionId}/${toolId}`)
+    return (res as any).data
+  },
+
+  confirmSkillReview: async (sessionId: string, toolId: string, payload?: { note?: string; user_id?: string }): Promise<{
+    review_id: string
+    tool_id: string
+    status: string
+    binding_result?: Record<string, any>
+    message?: string
+    error?: string
+  }> => {
+    const res = await request.post<ApiOk<{
+      review_id: string
+      tool_id: string
+      status: string
+      binding_result?: Record<string, any>
+      message?: string
+      error?: string
+    }>>(`${BASE}/skill-review/${sessionId}/${toolId}/confirm`, payload || {})
+    return (res as any).data
+  },
+
+  rejectSkillReview: async (sessionId: string, toolId: string, payload?: { note?: string; user_id?: string }): Promise<{
+    review_id: string
+    tool_id: string
+    status: string
+    message?: string
+  }> => {
+    const res = await request.post<ApiOk<{
+      review_id: string
+      tool_id: string
+      status: string
+      message?: string
+    }>>(`${BASE}/skill-review/${sessionId}/${toolId}/reject`, payload || {})
     return (res as any).data
   },
 }

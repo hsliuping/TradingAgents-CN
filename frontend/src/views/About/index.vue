@@ -5,17 +5,29 @@
       <div class="hero-content">
         <div class="hero-text">
           <h1 class="hero-title">
-            TradingAgents-CN
-            <span class="version-badge">v3.0</span>
+            {{ isJdyun ? 'TradingAgents-CN 京东云合作版' : 'TradingAgents-CN' }}
+            <span class="version-badge">{{ isJdyun ? '京东云版' : 'v3.0' }}</span>
           </h1>
           <p class="hero-subtitle">
             AI辅助股票分析技术学习平台
           </p>
-          <p class="hero-description">
+          <p class="hero-description" v-if="!isJdyun">
             专注于AI辅助分析技术的学习与验证平台。通过优化的工作流引擎和全流程分析辅助，
             帮助您系统学习股票分析方法，提升分析能力。
           </p>
-          <div class="hero-positioning">
+          <p class="hero-description" v-else>
+            <strong>您是否还在被这些问题困扰？</strong><br/>
+            配 Key、选模型、搭环境，半天过去了还没开始研究；<br/>
+            研究做到一半模型被限流，结果出不来；<br/>
+            网上信息鱼龙混杂，不知道该信什么…
+          </p>
+          <p class="hero-description" v-else style="margin-top:-10px;">
+            <strong>京东云合作版帮您一键解决：</strong><br/>
+            开通即用，Key 和数据源全部预配置；<br/>
+            内置 429 限流应对，深度分析稳稳跑完全流程；<br/>
+            14 个维度的结构化研究报告 + 乐观/审慎双情景研究员，帮您系统建立自己的分析方法论。
+          </p>
+          <div class="hero-positioning" v-if="!isJdyun">
             <div class="positioning-item">
               <el-icon><CircleCheck /></el-icon>
               <span>用于学习AI股票分析技术</span>
@@ -29,7 +41,25 @@
               <span>实践学习方法论</span>
             </div>
           </div>
-          <div class="hero-acknowledgment">
+          <div class="hero-positioning" v-else>
+            <div class="positioning-item">
+              <el-icon><CircleCheck /></el-icon>
+              <span>0 配置，开通即用</span>
+            </div>
+            <div class="positioning-item">
+              <el-icon><CircleCheck /></el-icon>
+              <span>429 自动重试 8 次</span>
+            </div>
+            <div class="positioning-item">
+              <el-icon><CircleCheck /></el-icon>
+              <span>14 维度研究报告</span>
+            </div>
+            <div class="positioning-item">
+              <el-icon><CircleCheck /></el-icon>
+              <span>仅支持A 股</span>
+            </div>
+          </div>
+          <div class="hero-acknowledgment" v-if="!isJdyun">
             <el-icon><Star /></el-icon>
             <span>基于 <a href="https://github.com/TauricResearch/TradingAgents" target="_blank" rel="noopener noreferrer">TradingAgents</a> 项目开发，感谢原项目的贡献</span>
           </div>
@@ -82,14 +112,18 @@
       </div>
     </div>
 
-    <!-- 核心功能 -->
+    <!-- 核心功能 / 京东云版特色 -->
     <div class="features-section">
-      <div class="section-header">
+      <div class="section-header" v-if="!isJdyun">
         <h2 class="section-title">核心功能</h2>
         <p class="section-subtitle">优化分析引擎，全流程分析辅助，提升股票分析学习能力</p>
       </div>
+      <div class="section-header" v-else>
+        <h2 class="section-title">京东云版特色</h2>
+        <p class="section-subtitle">开箱即用、零配置、限速友好、合规研究，专为京东云用户定制</p>
+      </div>
 
-      <div class="features-grid">
+      <div class="features-grid" v-if="!isJdyun">
         <div class="feature-card">
           <div class="feature-header">
             <div class="feature-icon primary">
@@ -148,6 +182,69 @@
             <el-tag size="small">动态配置</el-tag>
             <el-tag size="small">可视化编辑</el-tag>
             <el-tag size="small">灵活调整</el-tag>
+          </div>
+        </div>
+      </div>
+
+      <!-- 京东云版特色卡片 -->
+      <div class="features-grid" v-else>
+        <div class="feature-card">
+          <div class="feature-header">
+            <div class="feature-icon primary">
+              <el-icon><Box /></el-icon>
+            </div>
+            <h3>开箱即用</h3>
+          </div>
+          <p>登录就能用，连 5 分钟都不用折腾。不用装环境、不用配数据库、不用敲一行命令，京东云都帮你搞定了</p>
+          <div class="feature-tags">
+            <el-tag size="small">免安装</el-tag>
+            <el-tag size="small">免部署</el-tag>
+            <el-tag size="small">登录即用</el-tag>
+          </div>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-header">
+            <div class="feature-icon success">
+              <el-icon><Key /></el-icon>
+            </div>
+            <h3>零配置</h3>
+          </div>
+          <p>不用懂 API 是什么、不用去申请 Key、不用纠结选哪个模型。模型、数据源、向量库全部京东云预配好，你只管用就行</p>
+          <div class="feature-tags">
+            <el-tag size="small" type="success">免Key</el-tag>
+            <el-tag size="small" type="success">免选模型</el-tag>
+            <el-tag size="small" type="success">零门槛</el-tag>
+          </div>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-header">
+            <div class="feature-icon warning">
+              <el-icon><DataAnalysis /></el-icon>
+            </div>
+            <h3>覆盖全流程</h3>
+          </div>
+          <p>想研究一只股票？想知道哪些股票值得看？想知道自己的操作对不对？单股分析、智能筛选、持仓复盘、交易计划，一个系统全搞定</p>
+          <div class="feature-tags">
+            <el-tag size="small" type="warning">单股研究</el-tag>
+            <el-tag size="small" type="warning">智能选股</el-tag>
+            <el-tag size="small" type="warning">持仓复盘</el-tag>
+          </div>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-header">
+            <div class="feature-icon info">
+              <el-icon><ChatDotRound /></el-icon>
+            </div>
+            <h3>不会用？问 AI 就行</h3>
+          </div>
+          <p>右下角那个小圆点就是你的随身助手。"报告怎么导出？""筛选条件怎么设？"——直接问它，比翻文档快多了</p>
+          <div class="feature-tags">
+            <el-tag size="small" type="info">随时提问</el-tag>
+            <el-tag size="small" type="info">看手册</el-tag>
+            <el-tag size="small" type="info">配操作</el-tag>
           </div>
         </div>
       </div>
@@ -326,8 +423,8 @@
       </div>
     </div>
 
-    <!-- 项目来源 -->
-    <div class="origin-section">
+    <!-- 项目来源（京东云版隐藏） -->
+    <div class="origin-section" v-if="!isJdyun">
       <div class="section-header">
         <h2 class="section-title">项目来源</h2>
         <p class="section-subtitle">致敬开源，感谢原项目的贡献</p>
@@ -402,8 +499,8 @@
       </div>
     </div>
 
-    <!-- 赞助商 -->
-    <div class="sponsor-section">
+    <!-- 赞助商（京东云版隐藏） -->
+    <div class="sponsor-section" v-if="!isJdyun">
       <div class="section-header">
         <h2 class="section-title">赞助商</h2>
         <p class="section-subtitle">感谢以下企业对本项目的赞助与支持</p>
@@ -432,85 +529,19 @@
       </div>
     </div>
 
-    <!-- 版本信息 -->
-    <div class="version-section">
-      <div class="section-header">
-        <h2 class="section-title">版本信息</h2>
-      </div>
-
-      <div class="version-info" v-loading="systemInfoLoading">
-        <div class="version-card">
-          <div class="version-main">
-            <div class="version-number">{{ systemInfo.version || 'v3.0' }}</div>
-            <div class="version-status">正式版</div>
-          </div>
-          <div class="version-details">
-            <div class="version-item" v-if="systemInfo.full_version">
-              <span class="label">完整版本</span>
-              <span class="value">{{ systemInfo.full_version }}</span>
-            </div>
-            <div class="version-item" v-if="systemInfo.build_date">
-              <span class="label">构建时间</span>
-              <span class="value">{{ formatBuildDate(systemInfo.build_date) }}</span>
-            </div>
-            <div class="version-item" v-if="systemInfo.build_type">
-              <span class="label">构建类型</span>
-              <span class="value">{{ formatBuildType(systemInfo.build_type) }}</span>
-            </div>
-            <div class="version-item" v-if="systemInfo.git_commit">
-              <span class="label">Git提交</span>
-              <span class="value code">{{ systemInfo.git_commit }}</span>
-            </div>
-            <div class="version-item" v-if="!systemInfo.build_date">
-              <span class="label">构建时间</span>
-              <span class="value">{{ buildTime }}</span>
-            </div>
-            <div class="version-item">
-              <span class="label">API版本</span>
-              <span class="value">v2.0</span>
-            </div>
-          </div>
-          <div class="version-actions" v-if="systemInfo.full_version">
-            <el-button type="primary" size="small" @click="copyVersionInfo" plain>
-              <el-icon><DocumentCopy /></el-icon>
-              复制版本信息
-            </el-button>
-          </div>
-        </div>
-
-        <div class="framework-info">
-          <h4>技术版本</h4>
-          <div class="framework-list">
-            <div class="framework-item">
-              <span class="name">Vue</span>
-              <span class="version">3.4.0</span>
-            </div>
-            <div class="framework-item">
-              <span class="name">Element Plus</span>
-              <span class="version">2.4.4</span>
-            </div>
-            <div class="framework-item">
-              <span class="name">FastAPI</span>
-              <span class="version">0.104.0</span>
-            </div>
-            <div class="framework-item">
-              <span class="name">Python</span>
-              <span class="version">3.10+</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- 联系我们 -->
+    <!-- 联系我们 / 京东云版支持渠道 -->
     <div class="contact-section">
-      <div class="section-header">
+      <div class="section-header" v-if="!isJdyun">
         <h2 class="section-title">联系我们</h2>
         <p class="section-subtitle">获取支持、反馈问题或加入社区讨论</p>
       </div>
+      <div class="section-header" v-else>
+        <h2 class="section-title">支持与反馈</h2>
+        <p class="section-subtitle">京东云合作版专属支持渠道</p>
+      </div>
 
-      <div class="contact-grid">
+      <!-- 标准版联系渠道 -->
+      <div class="contact-grid" v-if="!isJdyun">
         <div class="contact-card">
           <div class="contact-icon email">
             <el-icon><Message /></el-icon>
@@ -554,13 +585,61 @@
           <span class="contact-desc">完整的使用指南和API文档</span>
         </div>
       </div>
+
+      <!-- 京东云版支持渠道 -->
+      <div class="contact-grid" v-else>
+        <div class="contact-card">
+          <div class="contact-icon wechat">
+            <el-icon><ChatDotRound /></el-icon>
+          </div>
+          <h4>京东云技术支持</h4>
+          <p>联系您的京东云客户经理</p>
+          <span class="contact-desc">开通账号、权限、限速等问题</span>
+        </div>
+
+        <div class="contact-card">
+          <div class="contact-icon docs">
+            <el-icon><Document /></el-icon>
+          </div>
+          <h4>系统 Bug 反馈</h4>
+          <p>
+            <a href="https://github.com/hsliuping/TradingAgents-CN-Pro/issues"
+               target="_blank"
+               rel="noopener noreferrer"
+               class="doc-link">
+              GitHub Issues
+            </a>
+          </p>
+          <span class="contact-desc">提交系统缺陷与异常问题</span>
+        </div>
+
+        <div class="contact-card">
+          <div class="contact-icon email">
+            <el-icon><Message /></el-icon>
+          </div>
+          <h4>功能建议</h4>
+          <p>系统内"反馈"按钮</p>
+          <span class="contact-desc">右上角反馈入口提交建议</span>
+        </div>
+
+        <div class="contact-card">
+          <div class="contact-icon qq">
+            <el-icon><Reading /></el-icon>
+          </div>
+          <h4>使用文档</h4>
+          <p>京东云版使用手册</p>
+          <span class="contact-desc">系统内"帮助"按钮查看完整手册</span>
+        </div>
+      </div>
     </div>
 
     <!-- Footer -->
     <div class="footer-section">
       <div class="footer-content">
-        <p>&copy; 2025-2026 TradingAgents-CN. All rights reserved.</p>
-        <p>许可证说明：tradingagents 目录内的代码采用了部分原 TradingAgents 项目的代码，遵循 Apache 2.0 开源许可证；其他部分因 1.0 版开源后被盗用代码，因此不再开源。</p>
+        <p v-if="!isJdyun">&copy; 2025-2026 TradingAgents-CN. All rights reserved.</p>
+        <p v-else>&copy; 2025-2026 TradingAgents-CN 京东云合作版. All rights reserved.</p>
+        <p v-if="!isJdyun">许可证说明：tradingagents 目录内的代码采用了部分原 TradingAgents 项目的代码，遵循 Apache 2.0 开源许可证；其他部分因 1.0 版开源后被盗用代码，因此不再开源。</p>
+        <p v-else>本系统由京东云提供模型服务支持，仅供 A 股研究学习使用，所有输出不构成投资建议。</p>
       </div>
     </div>
   </div>
@@ -584,12 +663,17 @@ import {
   Link,
   CircleCheck,
   DocumentCopy,
+  Box,
+  Key,
+  DataAnalysis,
   Reading,
   ArrowRight
 } from '@element-plus/icons-vue'
 import { ApiClient } from '@/api/request'
+import { isJdyunMode } from '@/utils/config'
 
 const router = useRouter()
+const isJdyun = computed(() => isJdyunMode())
 const buildTime = ref(new Date().toLocaleString('zh-CN'))
 const systemInfoLoading = ref(false)
 const systemInfo = ref<{

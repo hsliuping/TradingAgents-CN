@@ -9,12 +9,23 @@
 # 3. 打包为压缩文件
 #
 # 使用方法：
-#   .\scripts\deployment\build_pro_package.ps1
-#   .\scripts\deployment\build_pro_package.ps1 -Version "v1.0.0"
+#   .\scripts\deployment\build_pro_package.ps1                         # 默认Pro版
+#   .\scripts\deployment\build_pro_package.ps1 -Version "v1.0.0"       # 指定版本号
+#   .\scripts\deployment\build_pro_package.ps1 -Edition jdyun          # 京东云合作版
+#   .\scripts\deployment\build_pro_package.ps1 -Edition jdyun -Version "v3.0.0"
+#
+# Edition 选项:
+#   pro    (默认): 完整专业版，包含配置管理界面
+#   jdyun        : 京东云合作版，隐藏配置管理，通过环境变量注入配置
+#                  - 前端使用 --mode jdyun 构建，加载 .env.jdyun
+#                  - 后端启用 JDYUN_MODE=true，短路逻辑和API端点保护
+#                  - 打包后需在部署环境配置 OPENAI_API_BASE/KEY/MODEL、TUSHARE_TOKEN
 # ============================================================================
 
 param(
     [string]$Version = "",
+    [ValidateSet("pro", "jdyun")]
+    [string]$Edition = "pro",
     [switch]$SkipSync = $false,
     [switch]$SkipEmbeddedPython = $false,
     [string]$PythonVersion = "3.11.9",
@@ -64,10 +75,19 @@ function Confirm-NextStep {
 }
 
 Write-Host "============================================================================" -ForegroundColor Cyan
-Write-Host "  Build TradingAgents-CN Pro Package" -ForegroundColor Cyan
+if ($Edition -eq "jdyun") {
+    Write-Host "  Build TradingAgents-CN JDYUN Package (京东云合作版)" -ForegroundColor Magenta
+} else {
+    Write-Host "  Build TradingAgents-CN Pro Package" -ForegroundColor Cyan
+}
 Write-Host "============================================================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "⚠️  Pro版打包 - 将保留高级课程正文，并排除PPT源文件、设计文档等敏感内容" -ForegroundColor Yellow
+if ($Edition -eq "jdyun") {
+    Write-Host "⚠️  京东云合作版打包 - 隐藏配置管理，通过环境变量注入配置" -ForegroundColor Magenta
+    Write-Host "   前端使用 --mode jdyun 构建，后端启用 JDYUN_MODE=true" -ForegroundColor Gray
+} else {
+    Write-Host "⚠️  Pro版打包 - 将保留高级课程正文，并排除PPT源文件、设计文档等敏感内容" -ForegroundColor Yellow
+}
 
 if ($Interactive) {
     Write-Host "🔧 Interactive mode enabled - will prompt after each step" -ForegroundColor Cyan
@@ -257,13 +277,18 @@ if (Test-Path $frontendDir) {
 
         # 构建前端
         Write-Host "  Building frontend..." -ForegroundColor Gray
-        $buildProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "cd /d `"$frontendDir`" && yarn vite build" -Wait -PassThru -NoNewWindow
+        $buildArgs = @("/c", "cd /d `"$frontendDir`" && yarn vite build")
+        if ($Edition -eq "jdyun") {
+            Write-Host "  [Jdyun] Using --mode jdyun to load .env.jdyun" -ForegroundColor Magenta
+            $buildArgs = @("/c", "cd /d `"$frontendDir`" && yarn vite build -- --mode jdyun")
+        }
+        $buildProcess = Start-Process -FilePath "cmd.exe" -ArgumentList $buildArgs -Wait -PassThru -NoNewWindow
 
         if ($buildProcess.ExitCode -ne 0) {
             Write-Host "  ❌ ERROR: Frontend build failed with exit code $($buildProcess.ExitCode)" -ForegroundColor Red
             throw "Frontend build failed"
         }
-        
+
         Write-Host "  ✅ Frontend build completed" -ForegroundColor Green
 
         # 检查构建产物是否存在
@@ -279,7 +304,73 @@ if (Test-Path $frontendDir) {
         }
         Copy-Item -Path $frontendDistSrc -Destination $frontendDistDest -Recurse -Force
         Write-Host "  ✅ Frontend dist copied" -ForegroundColor Green
-        
+
+        # 京东云版：创建环境变量配置示例文件
+        if ($Edition -eq "jdyun") {
+            Write-Host "  [Jdyun] Creating .env.jdyun.example in portable directory..." -ForegroundColor Magenta
+            $jdyunExamplePath = Join-Path $portableDir ".env.jdyun.example"
+            $jdyunExampleContent = @"
+# ============================================================================
+# 京东云合作版环境变量配置
+# ============================================================================
+# 部署时将此文件复制为 .env 并填入实际值
+# 所有配置通过环境变量注入，用户无需在界面配置大模型和数据源
+# ============================================================================
+
+# 京东云模式开关（必须为 true）
+JDYUN_MODE=true
+
+# 大模型服务配置（OpenAI 兼容接口）
+OPENAI_API_BASE=https://modelservice.jdcloud.com/v1
+OPENAI_API_KEY=your_jdyun_api_key_here
+OPENAI_MODEL=GLM-5
+
+# 可选模型（用户可在分析时切换）：GLM-5 / GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash
+
+# Embedding 模型配置
+EMBEDDING_MODEL=Qwen3-Embedding-8B
+
+# Tushare 数据源 Token（由京东云统一提供）
+TUSHARE_TOKEN=your_tushare_token_here
+
+# ============================================================================
+# LLM 限速配置（应对京东云 API 限速）
+# ============================================================================
+# 以下配置用于避免定时分析和多股分析时触发京东云 LLM 限速（429 错误）
+# 默认值已针对京东云限速优化，通常无需修改
+
+# LLM 调用最大重试次数（遇到 429 限速时指数退避重试，默认 8 次）
+# langchain ChatOpenAI 内置指数退避：1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s
+JDYUN_LLM_MAX_RETRIES=8
+
+# LLM 每分钟最大请求数（用于限速器配置，默认 30 RPM）
+# 京东云 LLM API 通常有 RPM 限制，此值用于主动限速
+JDYUN_LLM_MAX_RPM=30
+
+# 批量分析最大并发数（默认 1，避免并发 LLM 调用触发限速）
+# 同时分析多只股票时的最大并发数
+JDYUN_BATCH_MAX_CONCURRENT=1
+
+# Worker 最大并发任务数（默认 1，避免并发 LLM 调用触发限速）
+# Worker 同时执行的分析任务数
+JDYUN_WORKER_MAX_CONCURRENT=1
+
+# 定时分析股票间间隔秒数（默认 10 秒）
+# 每只股票分析完成后，等待指定秒数再开始下一只，避免连续密集 LLM 调用
+JDYUN_STOCK_INTERVAL_SECONDS=10
+"@
+            Set-Content -Path $jdyunExamplePath -Value $jdyunExampleContent -Encoding UTF8
+            Write-Host "  ✅ Created .env.jdyun.example" -ForegroundColor Green
+
+            # 同时在 portable 根目录创建 .env 模板（如果不存在）
+            $jdyunEnvPath = Join-Path $portableDir ".env"
+            if (-not (Test-Path $jdyunEnvPath)) {
+                Write-Host "  [Jdyun] Creating default .env from template..." -ForegroundColor Magenta
+                Set-Content -Path $jdyunEnvPath -Value $jdyunExampleContent -Encoding UTF8
+                Write-Host "  ✅ Created .env (please edit before deployment)" -ForegroundColor Green
+            }
+        }
+
     } catch {
         Write-Host "  ❌ Frontend build failed: $_" -ForegroundColor Red
         Write-Host "  Please check the error above and fix the frontend build issues." -ForegroundColor Yellow
@@ -328,14 +419,32 @@ Confirm-NextStep "Compile Python code" | Out-Null
 # ============================================================================
 
 Write-Host "============================================================================" -ForegroundColor Green
-Write-Host "  Pro Package Build Completed!" -ForegroundColor Green
+if ($Edition -eq "jdyun") {
+    Write-Host "  JDYUN Package Build Completed! (京东云合作版)" -ForegroundColor Magenta
+} else {
+    Write-Host "  Pro Package Build Completed!" -ForegroundColor Green
+}
 Write-Host "============================================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Portable directory ready at:" -ForegroundColor Cyan
 Write-Host "  $portableDir" -ForegroundColor White
 Write-Host ""
-Write-Host "Next steps:" -ForegroundColor Yellow
-Write-Host "  1. Test the portable version locally" -ForegroundColor Gray
-Write-Host "  2. Build installer: .\scripts\windows-installer\build\build_installer.ps1" -ForegroundColor Gray
+if ($Edition -eq "jdyun") {
+    Write-Host "JDYUN 部署须知:" -ForegroundColor Magenta
+    Write-Host "  1. 编辑 .env 文件，填入实际的 OPENAI_API_KEY 和 TUSHARE_TOKEN" -ForegroundColor Gray
+    Write-Host "  2. 确认 OPENAI_API_BASE 指向京东云模型服务地址" -ForegroundColor Gray
+    Write-Host "  3. 确认 OPENAI_MODEL 为京东云支持的模型（GLM-5/GLM-5.1/GLM-5.2/DeepSeek-V4-Flash）" -ForegroundColor Gray
+    Write-Host "  4. 启动时设置 JDYUN_MODE=true（.env 已预置）" -ForegroundColor Gray
+    Write-Host "  5. 用户无需在界面配置大模型和数据源，全部通过环境变量注入" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "Next steps:" -ForegroundColor Yellow
+    Write-Host "  1. Edit .env file with actual API keys" -ForegroundColor Gray
+    Write-Host "  2. Test the portable version locally" -ForegroundColor Gray
+    Write-Host "  3. Build installer: .\scripts\windows-installer\build\build_installer.ps1" -ForegroundColor Gray
+} else {
+    Write-Host "Next steps:" -ForegroundColor Yellow
+    Write-Host "  1. Test the portable version locally" -ForegroundColor Gray
+    Write-Host "  2. Build installer: .\scripts\windows-installer\build\build_installer.ps1" -ForegroundColor Gray
+}
 Write-Host ""
 

@@ -2996,7 +2996,7 @@ def prepare_agent_requirement_intake(
     valuation_method_scope: Annotated[str, "估值方法边界，如 仅PE/PB/PEG，不含DCF 或 综合估值"] = "",
     test_strategy: Annotated[str, "生成后是否允许自动测试；例如 只做配置校验，不跑真实股票样例"] = "",
     preview_mode: Annotated[str, "如果用户在问报告样式，是只看结构骨架，还是允许带占位符示例"] = "",
-    report_section_scope: Annotated[str, "报告章节边界，如 仅估值相关章节，不含技术面/交易计划/多空辩论"] = "",
+    report_section_scope: Annotated[str, "报告章节边界，如 仅估值相关章节，不含技术面/交易执行方案/多情景研究"] = "",
 ) -> str:
     """生成 Agent 创建前的需求采集提纲 —— 自动补全智能默认值，只将最关键决策提升给用户。"""
     try:
@@ -3034,7 +3034,7 @@ def prepare_agent_requirement_intake(
             "valuation_method_scope": "综合估值（行业对比PE/PB + 历史估值分位 + DCF），如用户指定则优先用户",
             "test_strategy": "auto_test",  # 默认允许自动跑样例验证
             "preview_mode": "structure_only",  # 报告样式预览只看结构骨架
-            "report_section_scope": "仅保留估值/分析相关章节，不扩展到技术面、交易计划、多空辩论",
+            "report_section_scope": "仅保留估值/分析相关章节，不扩展到技术面、交易执行方案、多情景研究",
         }
 
         # 确定实际值（用户提供 > 智能默认）
@@ -3207,7 +3207,7 @@ async def prepare_agent_generation_confirmation(
     valuation_method_scope: Annotated[str, "估值方法边界，如 仅PE/PB/PEG，不含DCF 或 综合估值"] = "",
     test_strategy: Annotated[str, "生成后是否允许自动测试；例如 只做配置校验，不跑真实股票样例"] = "",
     preview_mode: Annotated[str, "如果用户在问报告样式，是只看结构骨架，还是允许带占位符示例"] = "",
-    report_section_scope: Annotated[str, "报告章节边界，如 仅估值相关章节，不含技术面/交易计划/多空辩论"] = "",
+    report_section_scope: Annotated[str, "报告章节边界，如 仅估值相关章节，不含技术面/交易执行方案/多情景研究"] = "",
     status: Annotated[str, "目标模板状态，默认 active"] = "active",
 ) -> str:
     """生成 Agent 创建确认稿。"""
@@ -3248,7 +3248,7 @@ async def prepare_agent_generation_confirmation(
         if output_preview_request and _looks_unspecified(preview_mode):
             preview_mode = "structure_only"
         if stock_analysis_request and output_preview_request and _looks_unspecified(report_section_scope):
-            report_section_scope = "仅保留估值/分析相关章节，不扩展到技术面、交易计划、多空辩论"
+            report_section_scope = "仅保留估值/分析相关章节，不扩展到技术面、交易执行方案、多情景研究"
 
         registry = get_tool_registry()
         missing_tools = [tool_id for tool_id in resolved_tools if registry.get(tool_id) is None]
@@ -3297,8 +3297,8 @@ async def prepare_agent_generation_confirmation(
                 "preview_instruction": "确认阶段默认只展示章节骨架/字段模板，不填充真实内容；只有用户明确要求时才允许占位符 mock。",
                 "forbidden_expansions": [
                     "技术分析",
-                    "交易计划",
-                    "多空辩论",
+                    "交易执行方案",
+                    "多情景研究",
                     "目标价或区间",
                     "仓位建议",
                     "其他操作性指令",
@@ -6651,64 +6651,32 @@ async def resolve_agent_workshop_blocking_gaps(
                     "top_results": [_format_capability_hit(hit) for hit in capability_hits[:5]],
                 }
 
-                # Step B/C/D: 重新分析缺口 -> 生成工具计划 -> 构建版本；若已有 testing 版本，则改为同步工具，避免阶段门禁死锁
+                # Step B/C: 重新分析缺口 -> 生成工具计划
+                # v3.6.0 项6 路径B：生成完成后不再自动调用 build_version / sync_version_required_tools
+                # 改为写入 skill_review_queue 等待用户审核，用户确认后才触发绑定
                 gap_analysis_result = await ws_service.analyze_gaps(clean_session_id)
                 tooling_plan_result = await ws_service.generate_tooling_plan(clean_session_id)
                 phase_context = await _resolve_workshop_session_phase_context(db, clean_session_id)
                 current_version_id = str(phase_context.get("current_version_id") or "").strip()
                 current_version_status = str(phase_context.get("version_status") or "").strip().lower()
-                version = None
-                build_result = None
 
-                if current_version_id and current_version_status and current_version_status != "draft":
-                    version_collection = _get_collection(db, _WORKSHOP_VERSION_COLLECTION)
-                    version_doc = await version_collection.find_one({"version_id": current_version_id}) if version_collection is not None else None
-                    existing_required_tools = _parse_string_list(",".join(list((version_doc or {}).get("required_tools") or [])))
-                    completed_gap_tools = [
-                        str(item.get("skill_tool_id") or "").strip()
-                        for item in await ws_service._collect_auto_resolved_gaps_for_session(clean_session_id)
-                        if str(item.get("skill_tool_id") or "").strip()
-                    ]
-                    builtin_gap_tools: list[str] = []
-                    refreshed_gap_report = gap_analysis_result.get("gap_report") if isinstance(gap_analysis_result, dict) else None
-                    for gap_text in list(_read_mapping_or_attr(refreshed_gap_report, "blocking_gaps", []) or []):
-                        evidence = ws_service._builtin_tool_evidence_for_gap(str(gap_text or ""))
-                        if evidence:
-                            for tool_id in [str(evidence.get("skill_tool_id") or "").strip(), *[str(item or "").strip() for item in list(evidence.get("additional_tool_ids") or [])]]:
-                                if tool_id:
-                                    builtin_gap_tools.append(tool_id)
-                    resolved_result_tools = [
-                        str(item.get("skill_tool_id") or "").strip()
-                        for item in successful
-                        if str(item.get("skill_tool_id") or "").strip()
-                    ]
-                    synced_tools = _dedupe_string_list([
-                        *existing_required_tools,
-                        *completed_gap_tools,
-                        *builtin_gap_tools,
-                        *resolved_result_tools,
-                    ])
-                    sync_result = await ws_service.sync_version_required_tools(
-                        version_id=current_version_id,
-                        required_tools=synced_tools,
-                        default_tools=synced_tools[:4],
-                        max_tool_calls=max(6, len(synced_tools)),
+                # 写入待审核记录（路径B HITL）
+                pending_reviews: list[dict[str, Any]] = []
+                try:
+                    from app.services.skill_review_service import SkillReviewService
+                    review_service = SkillReviewService(db=db)
+                    pending_reviews = await review_service.create_pending_reviews_for_workshop(
+                        workshop_session_id=clean_session_id,
+                        agent_spec_id=agent_spec_id,
+                        agent_name=agent_name,
+                        user_id=effective_user_id,
+                        successful_items=successful,
                     )
-                    version = sync_result
-                    build_result = {
-                        "spec_id": sync_result.get("spec_id") if isinstance(sync_result, dict) else agent_spec_id,
-                        "version": sync_result,
-                        "synced_existing_version": True,
-                    }
-                    logger.info(
-                        "[resolve_gaps][auto_continue] synced_existing_testing_version session_id=%s version_id=%s tools=%s",
-                        clean_session_id,
-                        current_version_id,
-                        synced_tools,
+                except Exception as review_exc:
+                    logger.warning(
+                        "[resolve_gaps] 写入 skill_review_queue 失败（不阻塞）: %s",
+                        review_exc, exc_info=True,
                     )
-                else:
-                    build_result = await ws_service.build_version(clean_session_id)
-                    version = build_result.get("version") if isinstance(build_result, dict) else None
 
                 auto_continue["gap_analysis"] = {
                     "spec_id": gap_analysis_result.get("spec_id") if isinstance(gap_analysis_result, dict) else "",
@@ -6718,13 +6686,25 @@ async def resolve_agent_workshop_blocking_gaps(
                     "spec_id": tooling_plan_result.get("spec_id") if isinstance(tooling_plan_result, dict) else "",
                     "missing_capabilities": len(_read_mapping_or_attr(tooling_plan_result.get("tooling_plan") if isinstance(tooling_plan_result, dict) else None, "missing_capabilities", []) or []),
                 }
+                # build_version 字段保留向后兼容，但不再自动构建版本
                 auto_continue["build_version"] = {
-                    "spec_id": build_result.get("spec_id") if isinstance(build_result, dict) else "",
-                    "version_id": _read_mapping_or_attr(version, "version_id", "") if version is not None else "",
-                    "required_tools": len(_read_mapping_or_attr(version, "required_tools", []) or []) if version is not None else 0,
-                    "required_capabilities": len(_read_mapping_or_attr(version, "required_capabilities", []) or []) if version is not None else 0,
+                    "spec_id": agent_spec_id,
+                    "version_id": current_version_id,
+                    "existing_version_status": current_version_status,
+                    "skipped": True,
+                    "reason": "pending_user_review",
+                    "pending_review_count": len(pending_reviews),
                 }
-                auto_continue["status"] = "completed"
+                auto_continue["pending_user_review"] = {
+                    "count": len(pending_reviews),
+                    "tool_ids": [r.get("tool_id") for r in pending_reviews if r.get("tool_id")],
+                    "review_ids": [r.get("review_id") for r in pending_reviews if r.get("review_id")],
+                    "next_action": (
+                        "用户审核后调用 "
+                        "/api/agent-workshop/skill-review/{session_id}/{tool_id}/confirm 或 /reject"
+                    ),
+                }
+                auto_continue["status"] = "pending_user_review"
             except Exception as auto_exc:
                 logger.warning("[resolve_gaps] 自动续建失败: %s", auto_exc, exc_info=True)
                 auto_continue["status"] = "failed"
@@ -6773,14 +6753,15 @@ async def resolve_agent_workshop_blocking_gaps(
                 )
                 if pending_confirmation
                 else (
-                    "所有缺口已补全，且已自动完成能力重检与版本构建"
-                    if len(successful) == len(capped_gaps) and auto_continue.get("status") == "completed"
-                    else "所有缺口已处理（含复用），建议重新调用 build_agent_workshop_version 构建版本"
+                    # v3.6.0 项6 路径B：所有 Skill 生成后均需用户审核，不再自动绑定
+                    "所有缺口已补全，生成的 Skill 等待用户审核。请向用户展示每个 Skill 的代码和测试结果，"
+                    "用户确认后调用 /api/agent-workshop/skill-review/{session_id}/{tool_id}/confirm 绑定，"
+                    "或 /reject 拒绝（Skill 留在工坊）。所有 Skill 审核通过后再调用 build_agent_workshop_version 构建版本。"
                     if len(successful) == len(capped_gaps)
                     else (
                         f"已补全 {len(completed)}/{len(capped_gaps)} 个缺口，"
-                        "剩余缺口可能需要手动处理。建议调用 build_agent_workshop_version 构建版本，"
-                        "已生成的 Skill 会被自动绑定。"
+                        "剩余缺口可能需要手动处理。已生成的 Skill 等待用户审核（确认后才绑定），"
+                        "审核完成后建议调用 build_agent_workshop_version 构建版本。"
                     )
                 )
             ),
@@ -6812,16 +6793,18 @@ async def resolve_agent_workshop_blocking_gaps(
                     )
                     if pending_confirmation
                     else (
-                        f"已为 Agent「{agent_name}」自动补齐 {len(successful)} 个能力缺口："
-                        + ("、".join([
-                            f"「{r.get('skill_display_name') or r.get('skill_tool_id') or '?'}」({r.get('gap_description', '')})"
+                        # v3.6.0 项6 路径B：生成成功后不再自动绑定，提示用户审核
+                        f"已为 Agent「{agent_name}」自动补齐 {len(successful)} 个能力缺口：\n"
+                        + "\n".join([
+                            f"• 「{r.get('skill_display_name') or r.get('skill_tool_id') or '?'}」"
+                            + f"（缺口：{r.get('gap_description', '')}）"
                             for r in successful
-                        ]))
-                        + (
-                            "。所有 Skill 已验证通过，Agent 版本已自动续建/同步完成；请继续运行真数据测试并以评估结果决定是否可发布。"
-                            if auto_continue.get("status") == "completed"
-                            else "。请继续构建 Agent 版本以绑定这些 Skill，然后再运行真数据测试。"
-                        )
+                        ])
+                        + "\n\n这些 Skill 已通过质量门禁（语法/沙箱/评估），但不会自动绑定到 Agent。"
+                        "请向用户展示每个 Skill 的代码和测试结果，让用户决定是否绑定：\n"
+                        "  - 确认绑定：调用 /api/agent-workshop/skill-review/{session_id}/{tool_id}/confirm\n"
+                        "  - 拒绝绑定：调用 /api/agent-workshop/skill-review/{session_id}/{tool_id}/reject（Skill 留在工坊可后续复用）\n"
+                        "所有 Skill 审核完成后，再继续 Agent 版本构建流程。"
                         if successful
                         else "未能成功补齐任何缺口，请检查失败原因后重试。"
                     )

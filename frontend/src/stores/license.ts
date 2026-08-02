@@ -28,7 +28,7 @@ export interface LicenseInfo {
 export const PRO_FEATURES = [
   'advanced_courses',        // 高级学员课程
   'email_notification',      // 邮件通知
-  'watchlist_groups',        // 自选股分组
+  'watchlist_groups',        // 股票关注列表分组
   'scheduled_analysis',      // 定时分析
   'portfolio_analysis',      // 持仓研究
   'trade_review',            // 操作复盘
@@ -49,6 +49,9 @@ const FREE_ACCESS_FEATURES = new Set<ProFeature>([
 ])
 
 export const useLicenseStore = defineStore('license', () => {
+  // 🔧 京东云模式：所有功能开放，无需 License 验证
+  const isJdyunMode = import.meta.env.VITE_JDYUN_MODE === 'true'
+
   // 状态
   const appToken = ref<string | null>(localStorage.getItem('app-token'))
   const licenseInfo = ref<LicenseInfo | null>(null)
@@ -58,6 +61,8 @@ export const useLicenseStore = defineStore('license', () => {
 
   // 计算属性
   const isPro = computed(() => {
+    // 🔧 京东云模式：直接返回 true，所有功能开放
+    if (isJdyunMode) return true
     if (!licenseInfo.value) return false
     return licenseInfo.value.is_valid &&
            ['trial', 'pro', 'enterprise'].includes(licenseInfo.value.plan)
@@ -117,7 +122,17 @@ export const useLicenseStore = defineStore('license', () => {
     return error.value?.includes('网络') ?? false
   })
 
+  // 是否有老会员课程访问权限（平台内付费高级学员）
+  // 京东云用户永远没有，只有标准版 pro 用户才有
+  const hasLegacyCourseAccess = computed(() => {
+    if (isJdyunMode) return false
+    if (!licenseInfo.value) return false
+    return licenseInfo.value.is_valid && licenseInfo.value.plan === 'pro'
+  })
+
   const hasFeature = (_feature: ProFeature) => {
+    // 🔧 京东云模式：所有功能开放
+    if (isJdyunMode) return true
     if (FREE_ACCESS_FEATURES.has(_feature)) return true
     if (!licenseInfo.value?.is_valid) return false
     if (licenseInfo.value.features.includes(_feature)) return true
@@ -143,6 +158,20 @@ export const useLicenseStore = defineStore('license', () => {
   }
 
   const verifyLicense = async (force = false, authServer?: string): Promise<boolean> => {
+    // 🔧 京东云模式：跳过 License 验证，直接设置 PRO 状态
+    if (isJdyunMode) {
+      licenseInfo.value = {
+        email: '',
+        plan: 'pro',
+        features: [],
+        device_registered: false,
+        is_valid: true,
+        offline_mode: false
+      }
+      lastVerifiedAt.value = new Date()
+      return true
+    }
+
     loading.value = true
     error.value = null
 
@@ -222,6 +251,7 @@ export const useLicenseStore = defineStore('license', () => {
     isExpiringSoon,
     isExpired,
     isOffline,
+    hasLegacyCourseAccess,
     hasFeature,
     // Actions
     setAppToken,

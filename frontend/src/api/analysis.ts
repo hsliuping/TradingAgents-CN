@@ -39,6 +39,7 @@ export interface SingleAnalysisRequest {
     deep_analysis_model?: string
     engine?: AnalysisEngineType
     workflow_id?: string
+    enable_trace?: boolean
   }
 }
 

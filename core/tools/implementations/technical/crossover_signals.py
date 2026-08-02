@@ -305,18 +305,18 @@ def _detect_ma_alignment(df: pd.DataFrame) -> dict:
     if pd.isna(ma60):
         return {"status": "insufficient_data"}
 
-    # 多头排列：短期 MA > 长期 MA
+    # 上行排列：短期 MA > 长期 MA
     if ma5 > ma10 > ma20 > ma60:
         return {
-            "status": "多头排列",
+            "status": "上行排列",
             "direction": "bullish",
             "mas": {"MA5": round(float(ma5), 2), "MA10": round(float(ma10), 2),
                     "MA20": round(float(ma20), 2), "MA60": round(float(ma60), 2)},
         }
-    # 空头排列：短期 MA < 长期 MA
+    # 下行排列：短期 MA < 长期 MA
     elif ma5 < ma10 < ma20 < ma60:
         return {
-            "status": "空头排列",
+            "status": "下行排列",
             "direction": "bearish",
             "mas": {"MA5": round(float(ma5), 2), "MA10": round(float(ma10), 2),
                     "MA20": round(float(ma20), 2), "MA60": round(float(ma60), 2)},
@@ -426,10 +426,10 @@ def get_crossover_signals(
                     end: 结束日期
             signals_found: 检测到的信号总数
             summary: 汇总统计，子字段 —
-                bullish: 看涨信号数量
-                bearish: 看跌信号数量
+                bullish: 上行信号数量
+                bearish: 下行信号数量
             ma_alignment: 均线排列状态，子字段 —
-                status: 排列状态，取值 "多头排列" | "空头排列" | "均线交织" | "insufficient_data"
+                status: 排列状态，取值 "上行排列" | "下行排列" | "均线交织" | "insufficient_data"
                 direction: 方向，取值 "bullish" | "bearish" | "neutral"（数据不足时无此字段）
                 mas: 各均线值，子字段 — MA5、MA10、MA20、MA60
                 note: 可选，状态说明文本（仅 "均线交织" 时存在）

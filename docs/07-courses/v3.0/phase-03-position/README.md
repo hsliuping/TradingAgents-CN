@@ -1,0 +1,80 @@
+# 阶段 3:持仓——买了之后怎么管理?
+
+> **6 课** | **总课时**: 约 2.5 小时 | **难度**: ⭐⭐ 进阶
+
+## 🎯 阶段目标
+
+完成本阶段后,你能管理**真实持仓 + 模拟持仓**:
+- 在 `模拟交易` 纸上谈兵练手
+- 在 `持仓` 页面管理真仓
+- 用 **持仓研究** 跑持仓监控(系统调用持仓专属 Agent)
+- 跟踪**止盈止损告警**
+- 沉淀"操作经验"
+
+## 📍 阶段路线图
+
+```
+[阶段 2 输出: 自动跟踪中]
+   │
+   │  第 10 课: 模拟交易(纸上谈兵,无风险练手)
+   ↓
+模拟账户建立 + 模拟交易经验
+   │
+   │  第 11 课: 持仓研究(决策标签 + 风险评估)
+   ↓
+"AI 帮我监控我的持仓"
+   │
+   │  第 12 课: 加减仓决策
+   ↓
+"该不该加仓 / 减仓?"
+   │
+   │  第 13 课: 风险跟踪(止盈止损)
+   ↓
+止盈止损告警
+   │
+   │  第 14 课: 持仓阶段常见错误
+   ↓
+避雷清单
+   │
+   │  第 15 课: AI 智能助手在持仓阶段
+   ↓
+"AI 帮我汇总今天的持仓异动"
+   ↓
+[阶段 4:复盘]
+```
+
+## 📚 课程列表
+
+| 课 | 主题 | 时长 | 关键产出 |
+|----|------|------|---------|
+| [第 10 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-10-paper-trading.md) | 模拟交易(纸上练手) | 25 分钟 | 模拟账户 + 模拟交易经验 |
+| [第 11 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-11-position-research.md) | 持仓研究(决策标签 + 风险评估) | 25 分钟 | 持仓监控体系 |
+| [第 12 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-12-add-reduce-decision.md) | 加减仓决策 | 25 分钟 | 个人加仓/减仓规则 |
+| [第 13 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-13-risk-tracking.md) | 风险跟踪(止盈止损) | 25 分钟 | 止盈止损配置 |
+| [第 14 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-14-position-pitfalls.md) | 持仓阶段常见错误 | 20 分钟 | 避雷清单 |
+| [第 15 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-15-ai-assistant-position.md) | AI 智能助手在持仓阶段 | 15 分钟 | 持仓 AI 工作流 |
+
+## 🔑 阶段关键概念
+
+- **模拟交易** `/paper`:纸上谈兵,无风险练手,**A 股账户**
+- **真实持仓** `/portfolio`:管理真仓,**用户持仓 Tab**
+- **模拟持仓** `/portfolio` "模拟持仓" Tab:从模拟交易同步过来
+- **持仓研究**: 系统调用的持仓专属 Agent,输出"决策标签 + 风险评估"
+- **止盈止损告警** `/settings` 里配置
+
+## ⚠️ 阶段限制
+
+- ⚠️ **京东云版单并发**,持仓管理可能受队列影响
+- ⚠️ **平台仅支持 A 股和 ETF**
+- ⚠️ **模拟交易和真实持仓是分开的**,需要在两个页面分别看
+
+## 🎓 学完后能做什么
+
+- 用模拟交易无风险练手
+- 让 AI 帮你监控持仓
+- 配置止盈止损告警
+- 用 AI 助手汇总持仓异动
+
+## ⏭️ 下一步
+
+完成本阶段后,进入 [**阶段 4:复盘**](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-04-review/README.md)——持仓卖完了,怎么回顾?

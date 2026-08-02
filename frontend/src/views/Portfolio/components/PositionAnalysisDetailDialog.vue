@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <el-dialog
     v-model="visible"
     title="分析报告详情"
@@ -126,7 +126,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { type PositionAnalysisResult } from '@/api/portfolio'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 import { getMarketByStockCode } from '@/utils/market'
 
@@ -143,8 +143,7 @@ type PositionSnapshot = {
 }
 
 // 配置marked选项
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const props = defineProps<{
   modelValue: boolean
   report: (PositionAnalysisResult & { position_snapshot?: PositionSnapshot }) | null
@@ -180,7 +179,7 @@ const handleClose = () => emit('update:modelValue', false)
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   try {
-    return marked.parse(content) as string
+    return safeMarkdown(content)
   } catch (e) {
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
   }
@@ -221,22 +220,28 @@ const getActionClass = (action: string) => {
   return 'action-hold'
 }
 
-// 分析观点文本（兼容新旧术语）
+// 分析观点文本（兼容新旧术语，统一显示为研究结论倾向）
 const getActionText = (action: string) => {
   const map: Record<string, string> = {
-    // 旧术语（后端数据可能仍使用）
-    buy: '看涨',
-    add: '增持观点',
+    // 旧交易指令/市场观点术语
+    buy: '乐观',
+    add: '偏多',
     hold: '中性',
-    reduce: '减持观点',
-    sell: '看跌',
-    // 新术语
-    '看涨': '看涨',
-    '看跌': '看跌',
+    reduce: '偏空',
+    sell: '审慎',
+    // 旧市场观点术语
+    '看涨': '乐观',
+    '看跌': '审慎',
+    '增持观点': '偏多',
+    '减持观点': '偏空',
+    '观望观点': '待验证',
+    // 新合规术语
+    '乐观': '乐观',
+    '审慎': '审慎',
     '中性': '中性',
-    '增持观点': '增持观点',
-    '减持观点': '减持观点',
-    '观望观点': '观望观点'
+    '偏多': '偏多',
+    '偏空': '偏空',
+    '待验证': '待验证'
   }
   return map[action] || action
 }

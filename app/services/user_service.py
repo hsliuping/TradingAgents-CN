@@ -8,6 +8,7 @@ import sys
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+import bcrypt
 from pymongo import MongoClient
 from bson import ObjectId
 
@@ -24,6 +25,12 @@ except ImportError:
         return logging.getLogger(name)
 
 logger = get_logger('user_service')
+
+
+# 旧版 SHA-256 哈希前缀，用于识别需要升级的存量密码
+# SHA-256 输出为 64 位十六进制字符串；bcrypt 哈希以 $2 开头
+_LEGACY_SHA256_PREFIX = "sha256:"
+_BCRYPT_PREFIX = "$2"
 
 
 class UserService:
@@ -71,14 +78,47 @@ class UserService:
     
     @staticmethod
     def hash_password(password: str) -> str:
-        """密码哈希"""
-        # 使用 bcrypt 会更安全，但为了兼容性先使用 SHA-256
-        return hashlib.sha256(password.encode()).hexdigest()
-    
+        """密码哈希（使用 bcrypt + 自动加盐）
+
+        返回值以 `$2` 开头，可通过 `bcrypt.checkpw` 验证。
+        兼容旧版 SHA-256 哈希（验证时自动识别并升级）。
+        """
+        # bcrypt 自带盐，相同密码每次哈希结果不同，防止彩虹表攻击
+        # rounds=12 是 OWASP 2023 推荐值（约 250ms / hash）
+        rounds = getattr(settings, "BCRYPT_ROUNDS", 12)
+        salt = bcrypt.gensalt(rounds=rounds)
+        return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+
+    @staticmethod
+    def _hash_legacy_sha256(password: str) -> str:
+        """旧版 SHA-256 哈希（无盐，仅用于验证存量密码）"""
+        return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _is_bcrypt_hash(hashed: str) -> bool:
+        """判断是否为 bcrypt 哈希（以 $2 开头）"""
+        return bool(hashed) and hashed.startswith(_BCRYPT_PREFIX)
+
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """验证密码"""
-        return UserService.hash_password(plain_password) == hashed_password
+        """验证密码
+
+        自动识别 bcrypt 哈希和旧版 SHA-256 哈希：
+        - bcrypt 哈希：使用 bcrypt.checkpw 验证
+        - 旧版 SHA-256 哈希：用 SHA-256 比对（验证成功后调用方应负责升级）
+        """
+        if not hashed_password:
+            return False
+        if UserService._is_bcrypt_hash(hashed_password):
+            try:
+                return bcrypt.checkpw(
+                    plain_password.encode("utf-8"),
+                    hashed_password.encode("utf-8"),
+                )
+            except (ValueError, TypeError):
+                return False
+        # 旧版 SHA-256（无盐）兼容路径
+        return UserService._hash_legacy_sha256(plain_password) == hashed_password
     
     async def create_user(self, user_data: UserCreate) -> Optional[User]:
         """创建用户"""
@@ -158,17 +198,31 @@ class UserService:
 
             logger.info(f"🔍 [authenticate_user] 用户信息: username={user_doc.get('username')}, email={user_doc.get('email')}, is_active={user_doc.get('is_active')}")
 
-            # 验证密码
-            input_password_hash = self.hash_password(password)
-            stored_password_hash = user_doc["hashed_password"]
-            logger.info(f"🔍 [authenticate_user] 密码哈希对比:")
-            logger.info(f"   输入密码哈希: {input_password_hash[:20]}...")
-            logger.info(f"   存储密码哈希: {stored_password_hash[:20]}...")
-            logger.info(f"   哈希匹配: {input_password_hash == stored_password_hash}")
+            # 验证密码（自动识别 bcrypt / 旧版 SHA-256）
+            stored_hash = user_doc.get("hashed_password", "")
+            # ⚠️ 安全：禁止在日志中输出任何密码哈希内容（即使是前缀）
+            logger.info(f"🔍 [authenticate_user] 存储密码哈希类型: {'bcrypt' if self._is_bcrypt_hash(stored_hash) else 'legacy_sha256' if stored_hash else 'empty'}")
 
-            if not self.verify_password(password, user_doc["hashed_password"]):
+            if not self.verify_password(password, stored_hash):
                 logger.warning(f"❌ [authenticate_user] 密码错误: {username}")
                 return None
+
+            # 🔐 旧版 SHA-256 哈希自动升级到 bcrypt（透明升级，用户无感知）
+            if not self._is_bcrypt_hash(stored_hash):
+                try:
+                    new_bcrypt_hash = self.hash_password(password)
+                    self.users_collection.update_one(
+                        {"_id": user_doc["_id"]},
+                        {"$set": {
+                            "hashed_password": new_bcrypt_hash,
+                            "updated_at": datetime.utcnow(),
+                            "password_hash_algo": "bcrypt",
+                        }}
+                    )
+                    logger.info(f"🔐 [authenticate_user] 旧版 SHA-256 密码已自动升级到 bcrypt: {username}")
+                except Exception as upgrade_err:
+                    # 升级失败不影响登录，但需记录告警
+                    logger.warning(f"⚠️ [authenticate_user] 密码哈希升级失败（登录继续）: {username} error={upgrade_err}")
 
             # 检查用户是否激活
             if not user_doc.get("is_active", True):
@@ -183,7 +237,7 @@ class UserService:
 
             logger.info(f"✅ [authenticate_user] 用户认证成功: {username}")
             return User(**user_doc)
-            
+
         except Exception as e:
             logger.error(f"❌ 用户认证失败: {e}")
             return None
@@ -378,11 +432,12 @@ class UserService:
             
             result = self.users_collection.insert_one(admin_doc)
             admin_doc["_id"] = result.inserted_id
-            
+
             logger.info(f"✅ 管理员用户创建成功: {username}")
-            logger.info(f"   密码: {password}")
-            logger.info("   ⚠️  请立即修改默认密码！")
-            
+            # ⚠️ 安全：禁止在日志中输出明文密码；密码已通过环境变量传入，请用户自行记录
+            logger.info("   🔐 密码已使用 bcrypt 加密存储，请妥善保管您设置的管理员密码")
+            logger.info("   ⚠️  建议首次登录后立即修改密码！")
+
             return User(**admin_doc)
             
         except Exception as e:
@@ -465,6 +520,132 @@ class UserService:
                 
         except Exception as e:
             logger.error(f"❌ 激活用户失败: {e}")
+            return False
+
+    # =========================================================================
+    # 京东云 Basic Auth 用户 — 自动建档 + 老用户返回
+    # =========================================================================
+
+    async def get_or_create_jdyun_user(self, jdyun_username: str, is_admin: bool = True) -> Optional[User]:
+        """
+        京东云合作版：获取或创建京东云用户记录。
+
+        背景：
+          - 京东云网关代理的每个请求都会带 Authorization: Basic base64(username:token)
+          - username 是京东云平台分配的用户唯一标识（如 jcloud-ugidvcp / jdcloud-pid-test）
+          - token 是京东云平台为该用户生成的访问令牌（不是登录密码，与用户密码解耦）
+          - 我们需要在 users 集合中维护一条对应记录，以便任务/报告/权限等业务功能正常工作
+            （因为 30+ 处代码需要把 user["id"] 转成 MongoDB ObjectId）
+
+        逻辑：
+          1. 按 username 在 users 集合查找
+          2. 找到（老用户）：更新 last_login → 返回该用户（真实 ObjectId）
+          3. 未找到（新用户）：insert 一条新记录（is_admin=true，密码哈希占位，provider=jdyun）
+                      → 返回刚创建的用户（真实 ObjectId）
+
+        Args:
+            jdyun_username: 京东云平台 Basic Auth 解码后的 username
+            is_admin: 京东云用户默认视为管理员（默认 True）
+
+        Returns:
+            User 模型实例（id 为合法 MongoDB ObjectId），失败返回 None
+        """
+        if not jdyun_username or not jdyun_username.strip():
+            return None
+        username = jdyun_username.strip()
+        try:
+            existing = self.users_collection.find_one({"username": username})
+            if existing:
+                # ===== 老用户：刷新 last_login =====
+                self.users_collection.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {"last_login": datetime.utcnow(), "updated_at": datetime.utcnow()}},
+                )
+                existing["last_login"] = datetime.utcnow()
+                logger.info(f"✅ [京东云] 老用户登录: {username} (id={existing['_id']})")
+                return User(**existing)
+
+            # ===== 新用户：自动建档 =====
+            # 密码哈希占位：真实访问令牌由京东云网关保管验证，我们不需要存储
+            # 使用 bcrypt 哈希一个随机串作为占位（防暴力，也保证 User 模型 hashed_password 字段非空）
+            placeholder_password = f"__jdyun__{ObjectId()}__"  # 随机且每次不同
+            hashed_placeholder = self.hash_password(placeholder_password)
+
+            # 邮箱采用 username@jdyun.local（保证 email 格式合法且唯一）
+            safe_email = f"{username.replace('@', '_at_')}@jdyun.local"
+
+            new_user_doc = {
+                "username": username,
+                "email": safe_email,
+                "hashed_password": hashed_placeholder,
+                "password_hash_algo": "bcrypt",
+                "is_active": True,
+                "is_verified": True,          # 京东云平台认证过的，视为已验证
+                "is_admin": is_admin,
+                "provider": "jdyun",          # 来源标识：京东云合作版
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "last_login": datetime.utcnow(),
+                "preferences": {
+                    "assistant_settings": {"name": "分析助理", "tone": "professional", "custom_instructions": ""},
+                    "default_market": "A股",
+                    "default_depth": "3",
+                    "default_analysts": ["市场分析师", "基本面分析师"],
+                    "auto_refresh": True,
+                    "refresh_interval": 30,
+                    "risk_preference": "neutral",
+                    "ui_theme": "light",
+                    "sidebar_width": 240,
+                    "language": "zh-CN",
+                    "notifications_enabled": True,
+                    "email_notifications": False,
+                    "desktop_notifications": True,
+                    "analysis_complete_notification": True,
+                    "system_maintenance_notification": True,
+                },
+                "daily_quota": 1000,
+                "concurrent_limit": 3,
+                "total_analyses": 0,
+                "successful_analyses": 0,
+                "failed_analyses": 0,
+                "favorite_stocks": [],
+            }
+            result = self.users_collection.insert_one(new_user_doc)
+            new_user_doc["_id"] = result.inserted_id
+            logger.info(
+                f"✅ [京东云] 新用户自动建档成功: {username} "
+                f"(id={result.inserted_id}, admin={is_admin})"
+            )
+            return User(**new_user_doc)
+
+        except Exception as e:
+            logger.error(f"❌ [京东云] 用户建档失败 username={username}: {e}", exc_info=True)
+            return None
+
+    def is_existing_jdyun_user(self, jdyun_username: str) -> bool:
+        """
+        检查是否已建档的京东云用户（老用户）。
+
+        用于 Basic Auth 分级校验：
+          - 已建档（老用户）→ 只校验 username，不校验 token（token 可变）
+          - 未建档（新用户）→ 必须严格校验 username + token（防伪造）
+
+        Args:
+            jdyun_username: 京东云平台 Basic Auth 解码后的 username
+
+        Returns:
+            已建档返回 True，否则 False
+        """
+        if not jdyun_username or not jdyun_username.strip():
+            return False
+        try:
+            doc = self.users_collection.find_one({
+                "username": jdyun_username.strip(),
+                "provider": "jdyun",
+            })
+            return doc is not None
+        except Exception as e:
+            logger.error(f"❌ [京东云] 查询用户失败 username={jdyun_username}: {e}")
             return False
 
 

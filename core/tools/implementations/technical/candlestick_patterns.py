@@ -204,9 +204,9 @@ def _pattern_belt_hold(row: pd.Series) -> Optional[dict]:
     lower = _lower_shadow(row)
     if body / r > 0.7:
         if upper / r < 0.05 and _body_dir(row) == 1:
-            return {"name": "看涨捉腰带线", "direction": "bullish", "confidence": 0.7}
+            return {"name": "阳线捉腰带线", "direction": "bullish", "confidence": 0.7}
         if lower / r < 0.05 and _body_dir(row) == -1:
-            return {"name": "看跌捉腰带线", "direction": "bearish", "confidence": 0.7}
+            return {"name": "阴线捉腰带线", "direction": "bearish", "confidence": 0.7}
     return None
 
 
@@ -220,14 +220,14 @@ def _pattern_engulfing(prev: pd.Series, curr: pd.Series) -> Optional[dict]:
         prev_dir = _body_dir(prev)
         curr_dir = _body_dir(curr)
         if prev_dir == -1 and curr_dir == 1:
-            return {"name": "看涨吞没", "direction": "bullish", "confidence": 0.85}
+            return {"name": "阳线吞没", "direction": "bullish", "confidence": 0.85}
         elif prev_dir == 1 and curr_dir == -1:
-            return {"name": "看跌吞没", "direction": "bearish", "confidence": 0.85}
+            return {"name": "阴线吞没", "direction": "bearish", "confidence": 0.85}
     return None
 
 
 def _pattern_piercing(prev: pd.Series, curr: pd.Series) -> Optional[dict]:
-    """刺透形态（看涨）"""
+    """刺透形态（阳线）"""
     if _body_dir(prev) == -1 and _body_dir(curr) == 1:
         prev_close = prev["close"]
         prev_open = prev["open"]
@@ -241,7 +241,7 @@ def _pattern_piercing(prev: pd.Series, curr: pd.Series) -> Optional[dict]:
 
 
 def _pattern_dark_cloud(prev: pd.Series, curr: pd.Series) -> Optional[dict]:
-    """乌云盖顶（看跌）"""
+    """乌云盖顶（阴线）"""
     if _body_dir(prev) == 1 and _body_dir(curr) == -1:
         prev_close = prev["close"]
         prev_open = prev["open"]
@@ -263,13 +263,13 @@ def _pattern_harami(prev: pd.Series, curr: pd.Series) -> Optional[dict]:
             prev_dir = _body_dir(prev)
             curr_dir = _body_dir(curr)
             if prev_dir == -1 and curr_dir == 1:
-                return {"name": "看涨孕线", "direction": "bullish", "confidence": 0.7}
+                return {"name": "阳线孕线", "direction": "bullish", "confidence": 0.7}
             elif prev_dir == -1 and curr_dir == -1:
-                return {"name": "看涨孕线(阴)", "direction": "bullish", "confidence": 0.5}
+                return {"name": "阳线孕线(阴)", "direction": "bullish", "confidence": 0.5}
             elif prev_dir == 1 and curr_dir == -1:
-                return {"name": "看跌孕线", "direction": "bearish", "confidence": 0.7}
+                return {"name": "阴线孕线", "direction": "bearish", "confidence": 0.7}
             elif prev_dir == 1 and curr_dir == 1:
-                return {"name": "看跌孕线(阳)", "direction": "bearish", "confidence": 0.5}
+                return {"name": "阴线孕线(阳)", "direction": "bearish", "confidence": 0.5}
     return None
 
 
@@ -278,9 +278,9 @@ def _pattern_harami_cross(prev: pd.Series, curr: pd.Series) -> Optional[dict]:
     if _engulfs(curr, prev) and _body_ratio(curr, 0.03):
         prev_dir = _body_dir(prev)
         if prev_dir == -1:
-            return {"name": "看涨十字孕线", "direction": "bullish", "confidence": 0.8}
+            return {"name": "阳线十字孕线", "direction": "bullish", "confidence": 0.8}
         elif prev_dir == 1:
-            return {"name": "看跌十字孕线", "direction": "bearish", "confidence": 0.8}
+            return {"name": "阴线十字孕线", "direction": "bearish", "confidence": 0.8}
     return None
 
 
@@ -321,10 +321,10 @@ def _pattern_kicking(prev: pd.Series, curr: pd.Series) -> Optional[dict]:
     curr_dir = _body_dir(curr)
     if prev_dir == -1 and curr_dir == 1:
         if abs(prev["open"] - curr["open"]) < curr_body * 0.2:
-            return {"name": "看涨反击线", "direction": "bullish", "confidence": 0.7}
+            return {"name": "阳线反击线", "direction": "bullish", "confidence": 0.7}
     elif prev_dir == 1 and curr_dir == -1:
         if abs(prev["open"] - curr["open"]) < curr_body * 0.2:
-            return {"name": "看跌反击线", "direction": "bearish", "confidence": 0.7}
+            return {"name": "阴线反击线", "direction": "bearish", "confidence": 0.7}
     return None
 
 
@@ -563,13 +563,13 @@ def get_candlestick_patterns(
                     end: 结束日期
             patterns_found: 识别到的形态总数
             summary: 汇总统计，子字段 —
-                bullish: 看涨形态数量
-                bearish: 看跌形态数量
+                bullish: 阳线形态数量
+                bearish: 阴线形态数量
                 neutral: 中性形态数量
             patterns: 形态列表，每个元素结构 —
                 date: 交易日期
                 index: K 线索引
-                name: 形态名称（如 "十字星"、"锤子线"、"看涨吞没"）
+                name: 形态名称（如 "十字星"、"锤子线"、"阳线吞没"）
                 direction: 方向，取值 "bullish" | "bearish" | "neutral"
                 confidence: 置信度 (0-1)
                 close: 该日收盘价

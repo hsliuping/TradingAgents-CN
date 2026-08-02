@@ -148,6 +148,74 @@ async def _store_trade_pattern_memory(
         logger.warning(f"[trade_review] trade_pattern 写入异常: {e}", exc_info=True)
 
 
+async def _reflect_trade_review_lesson(
+    db,
+    user_id: str,
+    trade_info,
+    ai_review,
+    review_id: str,
+) -> None:
+    """复盘反思提炼（v3.5.0 项2）：把原文复盘结论转化为结构化经验。
+
+    在 _store_trade_pattern_memory 写入"原文 trade_pattern"之后调用，
+    用 LLM 提炼 4 维度结构化教训（reasoning/improvement/summary/query），
+    写入同一个 TRADE_PATTERN scope 但 metadata.memory_kind=trade_lesson，
+    便于下次同股票分析时优先召回结构化教训而非原文。
+
+    降级策略：
+    - LLM 超时/返回非 JSON → fallback 写入原文（memory_kind 仍为 trade_lesson，但 reflection_success=False）
+    - mem0 不可用 → 跳过，不阻塞主流程
+    """
+    if not user_id or ai_review is None or trade_info is None:
+        return
+
+    try:
+        from core.agents.reflection_helper import run_reflection
+        from core.agents.reflection_prompts import (
+            TRADE_REFLECTION_SYSTEM_PROMPT,
+            build_trade_reflection_user_prompt,
+        )
+        from core.memory.models import MemoryScope
+
+        code = str(getattr(trade_info, "code", "") or "").upper()
+        name = getattr(trade_info, "name", "") or ""
+
+        # 用原文 trade_pattern 内容作为 fallback（反思失败时仍写入可召回的原文）
+        summary = (getattr(ai_review, "summary", "") or "").strip()
+        fallback_parts = [f"交易复盘 {name}({code})"]
+        if summary:
+            fallback_parts.append(summary)
+        fallback_content = "\n".join(fallback_parts)
+
+        user_prompt = build_trade_reflection_user_prompt(trade_info, ai_review)
+        if not user_prompt.strip():
+            logger.info(f"[trade_review] 反思跳过：user_prompt 为空, review_id={review_id}")
+            return
+
+        success = await run_reflection(
+            db=db,
+            user_id=user_id,
+            agent_id="trade_review_reflection",
+            scope=MemoryScope.TRADE_PATTERN,
+            memory_kind="trade_lesson",
+            system_prompt=TRADE_REFLECTION_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            fallback_content=fallback_content,
+            fallback_metadata={
+                "review_id": review_id,
+                "symbol": code,
+                "name": name,
+                "source": "trade_review_reflection",
+            },
+        )
+        if success:
+            logger.info(
+                f"[trade_review] 已写入 trade_lesson 教训: user={user_id} symbol={code} review={review_id}"
+            )
+    except Exception as e:
+        logger.warning(f"[trade_review] trade_lesson 反思异常: {e}", exc_info=True)
+
+
 def _derive_risk_level(score) -> str:
     """根据综合评分推导风险等级"""
     if score is None:
@@ -403,8 +471,19 @@ class TradeReviewService:
 
             logger.info(f"✅ 交易复盘完成: {review_id}, 股票: {trade_info.code}")
 
-            # 注意：trade_pattern 记忆只在用户主动「保存到案例库」时写入
-            # 复盘完成时不自动写入，避免记忆库被低价值复盘填满
+            # v3.6.0 fix：复盘完成后自动触发反思提炼
+            # 注意：这里触发的是结构化教训提炼（trade_lesson），不是原文写入（trade_pattern）
+            # trade_pattern 原文仍在用户主动「保存到案例库」时写入
+            try:
+                await _reflect_trade_review_lesson(
+                    db=self.db,
+                    user_id=user_id,
+                    trade_info=trade_info,
+                    ai_review=ai_review,
+                    review_id=review_id,
+                )
+            except Exception as reflect_exc:
+                logger.warning(f"[创建复盘] 反思提炼失败（不阻塞）: {reflect_exc}")
 
             # 🔍 详细日志：检查返回的 TradeReviewResponse
             response = TradeReviewResponse(
@@ -569,8 +648,17 @@ class TradeReviewService:
 
             logger.info(f"✅ [交易复盘v2.0] 复盘完成: {review_id}, 任务ID: {task.task_id}")
 
-            # 注意：trade_pattern 记忆只在用户主动「保存到案例库」时写入
-            # 复盘完成时不自动写入，避免记忆库被低价值复盘填满
+            # v3.6.0 fix：复盘完成后自动触发反思提炼
+            try:
+                await _reflect_trade_review_lesson(
+                    db=self.db,
+                    user_id=user_id,
+                    trade_info=trade_info,
+                    ai_review=ai_review,
+                    review_id=review_id,
+                )
+            except Exception as reflect_exc:
+                logger.warning(f"[复盘v2.0] 反思提炼失败（不阻塞）: {reflect_exc}")
 
             # 11. 返回响应
             return TradeReviewResponse(
@@ -2113,6 +2201,11 @@ class TradeReviewService:
                     trade_info_obj = TradeInfo(**trade_info_dict) if trade_info_dict else None
                     if ai_review_obj and trade_info_obj:
                         await _store_trade_pattern_memory(
+                            self.db, user_id, trade_info_obj, ai_review_obj, review_id,
+                        )
+                        # v3.5.0 项2：复盘反思提炼（在原文写入后追加结构化教训）
+                        # 失败时 helper 内部已降级，不阻塞主流程
+                        await _reflect_trade_review_lesson(
                             self.db, user_id, trade_info_obj, ai_review_obj, review_id,
                         )
             except Exception as mem_err:

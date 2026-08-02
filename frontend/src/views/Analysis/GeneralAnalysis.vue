@@ -1,4 +1,4 @@
-<template>
+﻿﻿<template>
   <div class="general-analysis">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -630,16 +630,16 @@
             </el-collapse>
           </el-card>
 
-          <!-- 决策信息 -->
+          <!-- 研究结论信息 -->
           <el-card v-if="detailData.result?.decision" shadow="never" class="detail-section">
             <template #header>
               <div class="detail-card-header">
                 <el-icon><Tickets /></el-icon>
-                <span>决策信息</span>
+                <span>研究结论信息</span>
               </div>
             </template>
             <el-descriptions :column="2" border>
-              <el-descriptions-item label="操作建议">
+              <el-descriptions-item label="研究结论倾向">
                 <el-tag :type="getDecisionColor(detailData.result.decision.action)">
                   {{ detailData.result.decision.action || '—' }}
                 </el-tag>
@@ -652,7 +652,7 @@
               </el-descriptions-item>
               <el-descriptions-item
                 v-if="detailData.result.decision.reasoning"
-                label="决策理由"
+                label="研究依据"
                 :span="2"
               >
                 {{ detailData.result.decision.reasoning }}
@@ -714,7 +714,8 @@ import {
   type GeneralTaskListParams,
 } from '@/api/unifiedTasks'
 import { useAuthStore } from '@/stores/auth'
-import { marked } from 'marked'
+import { isJdyunMode, JDYUN_CHAT_MODELS, loadJdyunChatModels } from '@/utils/config'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 
 const router = useRouter()
 
@@ -818,10 +819,37 @@ const elapsedText = computed(() => {
 const loadModels = async () => {
   modelsLoading.value = true
   try {
+    // 🔥 京东云模式：先从后端加载可用模型列表，覆盖默认值
+    await loadJdyunChatModels()
+
     const response = await configApi.getLLMConfigs()
-    allModels.value = Array.isArray(response) ? response : []
+    let models = Array.isArray(response) ? response : []
+
+    // 🔧 京东云模式：仅保留预置的 4 个模型
+    if (isJdyunMode()) {
+      const jdyunModelSet = new Set<string>(JDYUN_CHAT_MODELS)
+      models = models.filter((m: any) => jdyunModelSet.has(m.model_name))
+      if (models.length === 0) {
+        models = JDYUN_CHAT_MODELS.map(name => ({
+          model_name: name,
+          model_display_name: name,
+          provider: 'jdyun',
+          enabled: true
+        })) as any
+      }
+    }
+    allModels.value = models
   } catch (error) {
     console.error('加载模型配置失败:', error)
+    // 京东云模式兜底
+    if (isJdyunMode()) {
+      allModels.value = JDYUN_CHAT_MODELS.map(name => ({
+        model_name: name,
+        model_display_name: name,
+        provider: 'jdyun',
+        enabled: true
+      })) as any
+    }
   } finally {
     modelsLoading.value = false
   }
@@ -853,6 +881,8 @@ const loadWorkflows = async () => {
 // 初始化表单默认值
 const initFormValues = async () => {
   const values: Record<string, any> = {}
+  // 京东云模式：预置模型白名单，用于校验默认模型
+  const jdyunModelSet = isJdyunMode() ? new Set<string>(JDYUN_CHAT_MODELS) : null
   for (const field of inputFields.value) {
     let defaultVal = field.default
     // 特殊处理模型字段：从系统配置加载默认模型
@@ -861,11 +891,19 @@ const initFormValues = async () => {
         const defaultModels = await configApi.getDefaultModels()
         defaultVal = defaultModels.quick_analysis_model || ''
       } catch { defaultVal = '' }
+      // 🔧 京东云模式：默认模型不在白名单内时回退到第一个预置模型
+      if (isJdyunMode() && defaultVal && jdyunModelSet && !jdyunModelSet.has(defaultVal)) {
+        defaultVal = JDYUN_CHAT_MODELS[0]
+      }
     } else if (field.name === 'deep_analysis_model' && !defaultVal) {
       try {
         const defaultModels = await configApi.getDefaultModels()
         defaultVal = defaultModels.deep_analysis_model || ''
       } catch { defaultVal = '' }
+      // 🔧 京东云模式：默认模型不在白名单内时回退到第一个预置模型
+      if (isJdyunMode() && defaultVal && jdyunModelSet && !jdyunModelSet.has(defaultVal)) {
+        defaultVal = JDYUN_CHAT_MODELS[0]
+      }
     } else if (field.name === 'research_depth' && !defaultVal) {
       try {
         const authStore = useAuthStore()
@@ -1219,7 +1257,7 @@ const getReportContent = (field: string) => {
 
 const renderMarkdown = (text: string) => {
   try {
-    return marked.parse(text)
+    return safeMarkdown(text)
   } catch {
     return text
   }
@@ -1228,9 +1266,14 @@ const renderMarkdown = (text: string) => {
 const getDecisionColor = (action: string) => {
   if (!action) return 'info'
   const a = action.toLowerCase()
-  if (a.includes('buy') || a.includes('做多') || a.includes('买入')) return 'success'
-  if (a.includes('sell') || a.includes('做空') || a.includes('卖出')) return 'danger'
-  return 'warning'
+  // 新合规术语"乐观/审慎/中性"优先匹配（语义为研究结论倾向，非交易指令）
+  if (a.includes('乐观')) return 'success'   // 绿色：积极倾向
+  if (a.includes('审慎')) return 'warning'   // 黄色：需要谨慎
+  if (a.includes('中性')) return 'info'      // 灰色：无明显倾向
+  // 旧市场观点术语"看涨/看跌" + 旧交易指令"买入/卖出"（兼容存量数据）
+  if (a.includes('buy') || a.includes('做多') || a.includes('买入') || a.includes('看涨')) return 'success'
+  if (a.includes('sell') || a.includes('做空') || a.includes('卖出') || a.includes('看跌')) return 'danger'
+  return 'info'
 }
 
 // ==================== 生命周期 ====================

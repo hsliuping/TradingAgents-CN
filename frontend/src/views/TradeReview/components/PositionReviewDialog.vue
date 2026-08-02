@@ -109,7 +109,7 @@
           </div>
           <div class="dimension-item">
             <el-tag type="info" size="large">情绪</el-tag>
-            <span class="dimension-desc">分析交易决策中的情绪因素和纪律执行</span>
+            <span class="dimension-desc">分析操作决策中的情绪因素和纪律执行</span>
           </div>
           <div class="dimension-item">
             <el-tag type="info" size="large">归因</el-tag>

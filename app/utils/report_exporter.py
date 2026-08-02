@@ -53,8 +53,8 @@ ANALYST_ID_TO_CHINESE: dict = {
     "safe_analyst_v2": "防御情景评估",
     "neutral_analyst": "基准情景评估",
     "neutral_analyst_v2": "基准情景评估",
-    "risk_manager": "风险治理汇总",
-    "risk_manager_v2": "风险治理汇总",
+    "risk_manager": "风险审阅汇总",
+    "risk_manager_v2": "风险审阅汇总",
     # 研究整合与复盘
     "trader": "用户版研究简报",
     "trader_v2": "用户版研究简报",
@@ -378,7 +378,7 @@ class ReportExporter:
             "investment_plan": "📋 研究经理简报",
             "trader_investment_plan": "🧩 用户版研究简报",
             "research_team_decision": "🤝 研究结论汇总",
-            "risk_management_decision": "🛡️ 风险治理结论",
+            "risk_management_decision": "🛡️ 风险审阅结论",
 
             # 研究团队研究员
             "bull_researcher": "🌤️ 乐观情景论证",

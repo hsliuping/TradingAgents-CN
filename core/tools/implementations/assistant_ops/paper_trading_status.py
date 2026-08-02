@@ -291,12 +291,12 @@ async def get_paper_trading_status() -> str:
     lines.append("")
     lines.append("💡 综合判断")
     if not enriched_positions:
-        lines.append("- 当前空仓，可用资金充足。可以到「模拟交易」页面买入股票")
+        lines.append("- 当前空仓，可用资金充足。可以到「模拟交易」页面进行虚拟操作练习")
     else:
         if floating_pnl_cny > 0:
-            lines.append(f"- 当前持仓整体浮盈 {_format_pnl(floating_pnl_cny)}，注意止盈")
+            lines.append(f"- 当前持仓整体浮盈 {_format_pnl(floating_pnl_cny)}，可关注收益关注价位")
         elif floating_pnl_cny < 0:
-            lines.append(f"- 当前持仓整体浮亏 {_format_pnl(floating_pnl_cny)}，注意止损")
+            lines.append(f"- 当前持仓整体浮亏 {_format_pnl(floating_pnl_cny)}，可关注风险关注价位")
         else:
             lines.append("- 当前持仓整体持平")
 

@@ -31,7 +31,7 @@ ASSISTANT_REPORT_INBOX_TITLE = "报告收纳"
 from core.tools import get_tool_registry, tool_metadata_list_to_openai
 from core.tools.context import set_current_assistant_thread_id, set_current_user_id
 from core.llm import UnifiedLLMClient
-from core.llm.models import LLMConfig, LLMProvider, Message, MessageRole
+from core.llm.models import LLMConfig, LLMProvider, Message, MessageRole, ToolCall, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -352,15 +352,17 @@ USAGE_HELPER_SYSTEM_PROMPT_TEMPLATE = """你是 TradingAgents-CN 平台的**使�
 1. `get_user_current_state` — 查询用户当前的关注列表股票数、历史任务数、最近任务、定时分析配置数
 2. `get_system_status` — 查询系统模式（标准版/京东云版）、当前默认大模型、数据源启用状态、版本号
 3. `get_user_recent_activity` — 查询用户最近的任务执行记录，包括失败任务的错误信息
-4. `read_user_manual_section` — 按章节名读取用户手册（支持"快速开始"、"安装部署"、"首次配置"、"基础功能"、"模拟交易"、"智能助手"、"License"、"数据源配置"、"定时分析"、"股票关注列表"等关键字）
-5. `get_data_sync_status` — 查询 tushare/akshare 的数据同步状态（股票基础数据、历史行情、财务数据的最近同步时间、记录数、是否正在运行同步任务）。可传 symbol 参数查单只股票的同步状态。
-6. `get_paper_trading_status` — 查询模拟交易账户状态（总资产、可用资金、持仓市值、已实现盈亏、浮动盈亏、持仓股票数、盈利/亏损股票数、持仓明细）。无需参数。
-7. `get_token_usage` — 查询 Token 用量统计（已用 Token、配额上限、剩余配额、使用率、按模型分组消耗、每日趋势）。可选 days 参数（1=今日/7=本周/30=本月，默认 7）。
-8. `get_running_tasks` — 查询当前正在运行和排队的分析任务（当前步骤、进度百分比、已耗时、预估剩余时间、排队位置、最近完成任务）。无需参数。
+4. `search_user_manual` — **向量语义检索用户手册**（推荐优先使用）。当用户用自然语言提问（如"怎么做分析""怎么研究一只股票""持仓分析怎么用""如何配置 Token""429 限速怎么办"）时使用本工具，它会返回语义最相关的 Top-5 章节。本工具能理解自然语言意图，比 read_user_manual_section 更适合处理用户提问。
+5. `read_user_manual_section` — 按章节名精确读取用户手册（支持"快速开始"、"安装部署"、"首次配置"、"基础功能"、"模拟交易"、"智能助手"、"License"、"数据源配置"、"定时分析"、"股票关注列表"等关键字）。**京东云版用户问操作流程时，本工具会自动读取京东云版专用手册**。当用户已经明确提到某个章节名，或 search_user_manual 返回的某个章节需要查看完整内容时使用本工具。
+6. `get_data_sync_status` — 查询 tushare/akshare 的数据同步状态（股票基础数据、历史行情、财务数据的最近同步时间、记录数、是否正在运行同步任务）。可传 symbol 参数查单只股票的同步状态。
+7. `get_paper_trading_status` — 查询模拟交易账户状态（总资产、可用资金、持仓市值、已实现盈亏、浮动盈亏、持仓股票数、盈利/亏损股票数、持仓明细）。无需参数。
+8. `get_token_usage` — 查询 Token 用量统计（已用 Token、配额上限、剩余配额、使用率、按模型分组消耗、每日趋势）。可选 days 参数（1=今日/7=本周/30=本月，默认 7）。
+9. `get_running_tasks` — 查询当前正在运行和排队的分析任务（当前步骤、进度百分比、已耗时、预估剩余时间、排队位置、最近完成任务）。无需参数。
 
 【使用规则】
 - 当用户问到"为什么 XXX 不显示""怎么没有 XXX 功能""XXX 怎么用"等问题时，**优先调用 get_user_current_state 和 get_system_status 看真实状态**
-- 当用户问到操作流程时，**优先调用 read_user_manual_section 查对应章节**
+- 当用户问到操作流程、功能用法、系统使用方法时（如"怎么做分析""怎么研究股票""持仓分析怎么用""怎么配置 Token""429 限速怎么办"），**优先调用 search_user_manual 做向量语义检索**；如果检索结果中某个章节需要查看完整内容，再用 read_user_manual_section 按标题精确读取
+- 当用户明确提到某个章节名（如"看下'模拟交易'章节"）时，直接调用 read_user_manual_section
 - 当用户问到"我的任务去哪了""为什么报错"时，**优先调用 get_user_recent_activity 查最近记录**
 - 当用户问到"数据同步好了吗""数据是否最新""要不要重新同步""tushare 数据什么时候同步的""某股数据同步了吗"时，**必须调用 get_data_sync_status 查真实同步状态**，不要凭 FAQ 或任务记录猜测数据同步情况。这是用户最容易问错方向的话题，必须基于真实状态回答
 - 当用户问到某只股票的数据时（如"中国银行数据同步了吗"），**调用 get_data_sync_status 并传入 symbol 参数**查该股同步状态
@@ -417,6 +419,8 @@ Q: 报告内容里有"<em>"这种字符怎么办?
 A: 已修复，强制刷新浏览器(Ctrl+F5)加载最新前端。
 Q: 今日任务/本周分析显示为 0?
 A: 已切换到新版 unified_analysis_tasks 集合，刷新浏览器即可恢复。如仍异常，调用 get_user_current_state 查真实任务数。
+Q: 京东云版怎么部署？怎么配置？操作流程和标准版一样吗？
+A: 不要凭记忆回答。调用 read_user_manual_section 工具，传入"快速开始"或"京东云部署"关键字。本工具会自动识别当前模式（通过 JDYUN_MODE 环境变量）：京东云版用户读取 jdyun-user-manual-v3.0.md（专用手册，含便携版/单容器/开发模式三种部署、5 个京东云专属 FAQ、4 项最佳实践）；标准版用户读取 user-manual-v3.0.md。
 Q: 数据同步好了吗?要不要重新同步?
 A: 不要凭记忆回答，必须调用 get_data_sync_status 工具查真实同步状态。该工具会检查股票基础数据、历史行情、财务数据三个维度的最近同步时间、记录数和正在运行的任务，并给出综合判断。京东云版仅支持 Tushare + AKShare，强制单并发，同步会比较慢。
 Q: 某只股票（如中国银行）的数据同步了吗?
@@ -450,6 +454,145 @@ def _format_user_context_block(user_context: dict) -> str:
             err_text = str(err)[:200]
             lines.append(f"    • {err_text}")
     return "\n".join(lines) if lines else "- (前端未传递有效上下文)"
+
+
+def _build_stock_scope_block(user_context: Optional[dict]) -> str:
+    """构建股票详情页上下文块（仅当从详情页进入时存在 user_context.stock_scope）
+
+    设计思路：注入"报告目录"而非截断摘要正文，让 LLM 根据用户问题自主判断
+    需要哪些模块的完整内容，通过工具调用按需获取，避免摘要截断导致分析失真。
+    """
+    if not user_context:
+        return ""
+    scope = user_context.get("stock_scope")
+    if not scope or not isinstance(scope, dict):
+        return ""
+
+    code = (scope.get("code") or "").strip()
+    name = (scope.get("stock_name") or "").strip()
+    if not code:
+        return ""
+
+    lines = ["【当前股票详情页上下文】"]
+    lines.append(f"- 用户正在「股票详情页」查看：{name}({code})")
+    lines.append("- 当前会话被限定在该股票的研究主题内")
+
+    # ── 报告目录（不注入正文，仅列出有哪些报告和模块） ──
+    reports = scope.get("reports") or {}
+    stale_notes = []
+    report_index_lines: List[str] = []
+
+    # 1) 单股分析报告
+    stock_info = reports.get("stock_report")
+    if stock_info:
+        task_id = stock_info.get("task_id") or ""
+        completed = stock_info.get("completed_at") or ""
+        is_stale = stock_info.get("is_stale")
+        stale_hours = stock_info.get("stale_hours")
+        existing_modules = stock_info.get("existing_modules") or []
+        available_modules = stock_info.get("available_modules") or []
+
+        if is_stale:
+            stale_notes.append(
+                f"  • 单股分析报告（{completed} 生成，已过期约 {stale_hours} 小时）"
+            )
+        else:
+            report_index_lines.append(f"1. 单股分析报告（task_id: {task_id}，{completed} 生成，未过期）")
+            if existing_modules:
+                report_index_lines.append("   包含模块：")
+                # 优先展示实际存在的模块，并附上简短描述
+                mod_desc_map = {m.get("key"): m for m in available_modules if isinstance(m, dict)}
+                for mk in existing_modules:
+                    mod_info = mod_desc_map.get(mk) or {}
+                    mod_title = mod_info.get("title") or mk
+                    mod_desc = mod_info.get("desc") or ""
+                    if mod_desc:
+                        report_index_lines.append(f"   • {mk}（{mod_title}：{mod_desc}）")
+                    else:
+                        report_index_lines.append(f"   • {mk}（{mod_title}）")
+            else:
+                report_index_lines.append("   （未提供模块清单，可调用工具获取）")
+
+    # 2) 持仓分析报告
+    position_info = reports.get("position_report")
+    if position_info:
+        analysis_id = position_info.get("analysis_id") or ""
+        completed = position_info.get("completed_at") or ""
+        is_stale = position_info.get("is_stale")
+        stale_hours = position_info.get("stale_hours")
+        if is_stale:
+            stale_notes.append(
+                f"  • 持仓分析报告（{completed} 生成，已过期约 {stale_hours} 小时）"
+            )
+        else:
+            report_index_lines.append(
+                f"2. 持仓分析报告（analysis_id: {analysis_id}，{completed} 生成，未过期）"
+            )
+            report_index_lines.append("   包含：持仓快照、研究观察、关键验证价位、风险审阅、分析详情")
+
+    # 3) 交易复盘报告
+    review = scope.get("review_summary")
+    if review:
+        review_id = review.get("review_id") or review.get("task_id") or ""
+        completed = review.get("completed_at") or ""
+        is_stale = review.get("is_stale")
+        stale_hours = review.get("stale_hours")
+        if is_stale:
+            stale_notes.append(
+                f"  • 交易复盘报告（{completed} 生成，已过期约 {stale_hours} 小时）"
+            )
+        else:
+            report_index_lines.append(
+                f"3. 交易复盘报告（review_id: {review_id}，{completed} 生成，未过期）"
+            )
+            report_index_lines.append("   包含：时机分析、仓位分析、情绪分析、归因分析、收益对比")
+
+    if report_index_lines:
+        lines.append("")
+        lines.append("【已关联报告清单】")
+        lines.extend(report_index_lines)
+
+    # ── 时效性提醒 ──
+    if stale_notes:
+        lines.append("")
+        lines.append("【⚠️ 报告时效性提醒】")
+        lines.append("以下报告已过期（超过 24 小时），不要基于这些旧报告给出结论：")
+        lines.extend(stale_notes)
+        lines.append("- 若用户询问这些维度的分析，请主动告知报告已过期，并询问是否需要重新发起分析。")
+        lines.append("- 用户确认后，可调用「触发股票分析」等工具生成新报告。")
+
+    # ── 行情快照 ──
+    quote = scope.get("current_quote")
+    if quote and quote.get("price") is not None:
+        pct = quote.get("change_percent")
+        pct_str = f"{pct:+.2f}%" if pct is not None else ""
+        lines.append(f"- 当前行情快照：现价 {quote['price']:.2f}（{pct_str}）")
+
+    # ── 按需取用指引（核心：引导 LLM 调工具取完整内容） ──
+    if report_index_lines:
+        lines.append("")
+        lines.append("【按需取用指引】")
+        lines.append("- 根据用户问题判断需要哪些模块的完整内容，不要盲目获取所有模块")
+        lines.append("- 简单问题（如「分析时间」「报告状态」）直接用上方元信息回答，不必调工具")
+        if stock_info and stock_info.get("task_id"):
+            lines.append(f"- 调用 get_report_detail(task_id=\"{stock_info['task_id']}\") 获取单股分析顶层摘要")
+            lines.append(f"- 调用 get_report_detail(task_id=\"{stock_info['task_id']}\", module_key=\"market_report\") 获取单股分析指定模块完整内容")
+            lines.append("  module_key 可选值：market_report/fundamentals_report/news_report/sentiment_report/trader_investment_plan/research_team_decision/risk_management_decision/final_trade_decision")
+        if position_info and position_info.get("analysis_id"):
+            lines.append(f"- 调用 get_position_analysis(code=\"{code}\", market=\"CN\") 获取持仓分析完整报告")
+        if review and (review.get("review_id") or review.get("task_id")):
+            review_id_val = review.get("review_id") or review.get("task_id")
+            lines.append(f"- 调用 get_trade_review_detail(review_id=\"{review_id_val}\") 获取交易复盘完整报告")
+
+    # ── 主题限定指令 ──
+    lines.append("")
+    lines.append("【主题限定】")
+    lines.append(f"- 当前主题仅围绕 {name}({code}) 这只股票")
+    lines.append('- 若用户询问其他股票，请回复：「当前在 XX 股票详情页，无法切换到其他股票。'
+                 '如需咨询其他标的，请前往「智能助手」主页面创建新主题。」')
+    lines.append("- 不要主动调用 search_reports 等工具去查询其他股票，除非用户明确要求并已确认切换主题。")
+
+    return "\n".join(lines)
 
 
 def _build_usage_helper_prompt(user_context: dict) -> str:
@@ -531,6 +674,11 @@ def _get_system_prompt(
 - 如果用户明确要求切换到别的主题，请先调用主题切换工具，再继续后续操作
 """
 
+    # 股票详情页上下文（仅当从详情页进入时存在 user_context.stock_scope）
+    stock_scope_block = _build_stock_scope_block(user_context)
+    if stock_scope_block:
+        stock_scope_block = "\n" + stock_scope_block + "\n"
+
     # 当存在记忆时，附加「多交易计划处理规则」指引；构造在 f-string 之外以避免 Py3.10 的反斜杠限制
     if memory_block:
         memory_directive = (
@@ -563,10 +711,10 @@ def _get_system_prompt(
 - **股票关注列表管理**：查看股票关注列表（即股票关注列表）、按标签理解用户关注池，并可添加/移除股票关注列表或管理股票关注列表分组
 - **数据查询**：直接获取个股行情、财务报表（利润表/资产负债表/现金流）、技术指标（MACD/RSI/布林带等）、新闻资讯等原始数据
 - **单股数据同步**：按股票代码同步单只股票的历史行情和财务数据，必要时补充基础数据，便于后续查询或分析使用最新数据
-- **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含操作建议、目标价位、风险评估）
+- **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含研究观察、关键验证价位、风险审阅）
 - **交易复盘**：查看复盘历史，获取复盘报告详情，或对指定交易发起一次新的 AI 复盘分析（评分、总结、改进建议、经验教训）
-- **投资计划**：查看用户创建的个人交易计划（投资纪律），获取当前激活计划的完整规则（选股、择时、仓位、止盈止损等）
-- **风险提醒**：为股票设置/查看/清除止损提醒，当价格接近或跌破止损线时自动发送通知
+- **投资计划**：查看用户创建的个人交易计划（投资纪律），获取当前激活计划的完整规则（选股、择时、仓位、收益关注/风险关注等）
+- **风险提醒**：为股票设置/查看/清除价格下限提醒，当价格接近或跌破价格下限时自动发送通知
 - **Agent 完整能力调用**：对已经沉淀成独立 Agent 的能力，可以直接调用对应 Agent 来完成完整任务，例如估值、研究、风控、复盘，而不是总是拆成多个底层工具重新组装
 你拥有的工具覆盖了上述所有操作，请根据用户意图自主选择合适的工具
 
@@ -671,6 +819,7 @@ def _get_system_prompt(
 - 对股票筛选/智能筛选类请求，如果筛选工具返回“未找到符合条件的股票”或明确空结果，必须直接告诉用户当前没有符合其条件的标的。
 - 在股票筛选空结果场景下，严禁为了“给点参考”而推荐其它不符合筛选条件的股票，严禁擅自放宽条件后再给出候选名单；只有用户明确要求你放宽条件或改条件时，才可以继续下一步。
 {topic_block}
+{stock_scope_block}
 {im_block}"""
 
 
@@ -1153,7 +1302,7 @@ class IntelligentAssistantService:
         registry = get_tool_registry()
         all_metadata = registry.list_all()
 
-        # v3.0 新增：使用问答机器人只注册 8 个系统感知工具
+        # v3.0 新增：使用问答机器人只注册 9 个系统感知工具
         # 不加载金融市场数据工具、不加载分析师 Agent 工具
         if self._assistant_role == "usage_helper":
             allowed_tool_ids = {
@@ -1161,13 +1310,14 @@ class IntelligentAssistantService:
                 "get_system_status",
                 "get_user_recent_activity",
                 "read_user_manual_section",
+                "search_user_manual",  # 向量语义检索（v3.0.1 新增，解决自然语言问题匹配）
                 "get_data_sync_status",
                 "get_paper_trading_status",
                 "get_token_usage",
                 "get_running_tasks",
             }
             all_metadata = [t for t in all_metadata if t.id in allowed_tool_ids]
-            logger.info(f"[智能助手·使用问答] 仅加载 {len(all_metadata)} 个系统感知工具（含数据同步/模拟交易/Token用量/任务进度）")
+            logger.info(f"[智能助手·使用问答] 仅加载 {len(all_metadata)} 个系统感知工具（含向量检索/数据同步/模拟交易/Token用量/任务进度）")
 
         self._openai_tools = tool_metadata_list_to_openai(all_metadata)
 
@@ -1191,6 +1341,49 @@ class IntelligentAssistantService:
         self._llm_client.inject_tools(self._tool_functions)
         logger.info(f"[智能助手] 已加载 {len(self._openai_tools)} 个工具")
         return True
+
+    def _build_tool_interceptor(self, conversation_id: str):
+        """构建 HITL 工具拦截器（v3.6.0：提取为类方法，供 chat/chat_stream 共用）。
+
+        对关键操作（触发分析/删除配置等）先保存 pending 到 MongoDB，
+        让用户确认后再执行，避免 LLM 在流式/非流式路径下绕过确认直接执行。
+        """
+        async def _intercept(tool_call) -> Optional[Any]:
+            from core.hitl.assistant_hitl import (
+                is_critical_tool,
+                save_pending_critical_action,
+                build_pending_confirmation_reply,
+            )
+
+            tool_id = tool_call.name
+            if not is_critical_tool(tool_id):
+                return None
+
+            pending_id = await save_pending_critical_action(
+                self._db,
+                user_id=self._user_id or "default",
+                conversation_id=conversation_id or "default",
+                tool_id=tool_id,
+                tool_arguments=tool_call.arguments,
+            )
+            if not pending_id:
+                # 保存失败时降级为直接执行
+                return None
+
+            confirmation_msg = build_pending_confirmation_reply(
+                tool_id=tool_id,
+                tool_arguments=tool_call.arguments,
+                pending_id=pending_id,
+            )
+            # 返回 ToolResult（兼容统一 LLM 客户端）
+            from core.llm.unified_client import ToolResult
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_id,
+                content=confirmation_msg,
+                is_error=False,
+            )
+        return _intercept
 
     async def chat(
         self,
@@ -1217,6 +1410,33 @@ class IntelligentAssistantService:
             {"reply": str, "tools_used": List[str], "data_refs": Optional[List]}
         """
         resolved_user_message = _rewrite_number_selection_reply(user_message, history_messages)
+
+        # v3.5.0 项4：智能助手 HITL —— 检查用户是否在确认/拒绝待确认操作
+        # 如果用户消息是确认/拒绝意图，且有 pending 操作，直接执行/丢弃，不进入 LLM 循环
+        try:
+            from core.hitl.assistant_hitl import try_resolve_pending_action
+            resolution = await try_resolve_pending_action(
+                self._db,
+                user_id=self._user_id or "default",
+                conversation_id=conversation_id or "default",
+                user_message=resolved_user_message,
+            )
+            if resolution:
+                if resolution.get("type") == "confirmed":
+                    result_text = resolution.get("result", "") or "操作已执行完成"
+                    return {
+                        "reply": f"✅ 已确认执行：{result_text}",
+                        "tools_used": [resolution.get("tool_id", "")],
+                        "data_refs": None,
+                    }
+                elif resolution.get("type") == "rejected":
+                    return {
+                        "reply": resolution.get("message", "已取消操作"),
+                        "tools_used": [],
+                        "data_refs": None,
+                    }
+        except Exception as e:
+            logger.warning(f"[智能助手] HITL 检查失败（降级为正常对话）: {e}")
 
         # 前置检查：不支持的品种类型
         from app.services.planned_analysis_service import _check_unsupported_asset
@@ -1310,6 +1530,9 @@ class IntelligentAssistantService:
 
         async def _do_chat():
             nonlocal tools_used
+
+            tool_interceptor = self._build_tool_interceptor(conversation_id or "default")
+
             resp = await self._llm_client.achat(
                 messages,
                 tools=self._openai_tools,
@@ -1317,6 +1540,7 @@ class IntelligentAssistantService:
                 max_tool_rounds=8,
                 tools_used=tools_used,
                 dry_run=False,
+                tool_interceptor=tool_interceptor,
             )
             await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
 
@@ -1344,6 +1568,7 @@ class IntelligentAssistantService:
                         tools_used=tools_used,
                         dry_run=False,
                         tool_choice="required",
+                        tool_interceptor=tool_interceptor,
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
                 except Exception as retry_err:
@@ -1355,6 +1580,7 @@ class IntelligentAssistantService:
                         max_tool_rounds=8,
                         tools_used=tools_used,
                         dry_run=False,
+                        tool_interceptor=tool_interceptor,
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
 
@@ -1415,6 +1641,30 @@ class IntelligentAssistantService:
 
         resolved_user_message = _rewrite_number_selection_reply(user_message, history_messages)
 
+        logger.info("[智能助手·流式] chat_stream 开始，user_message=%r", resolved_user_message[:50])
+
+        # v3.5.0 项4：智能助手 HITL —— 流式版本同样检查待确认操作
+        try:
+            from core.hitl.assistant_hitl import try_resolve_pending_action
+            resolution = await try_resolve_pending_action(
+                self._db,
+                user_id=self._user_id or "default",
+                conversation_id=conversation_id or "default",
+                user_message=resolved_user_message,
+            )
+            if resolution:
+                if resolution.get("type") == "confirmed":
+                    result_text = resolution.get("result", "") or "操作已执行完成"
+                    yield _sse("token", {"content": f"✅ 已确认执行：{result_text}"})
+                    yield _sse("done", {"tools_used": [resolution.get("tool_id", "")]})
+                    return
+                elif resolution.get("type") == "rejected":
+                    yield _sse("token", {"content": resolution.get("message", "已取消操作")})
+                    yield _sse("done", {"tools_used": []})
+                    return
+        except Exception as e:
+            logger.warning(f"[智能助手·流式] HITL 检查失败（降级为正常对话）: {e}")
+
         from app.services.planned_analysis_service import _check_unsupported_asset
         unsupported_msg = _check_unsupported_asset(resolved_user_message)
         if unsupported_msg:
@@ -1422,10 +1672,13 @@ class IntelligentAssistantService:
             yield _sse("done", {"tools_used": []})
             return
 
+        logger.info("[智能助手·流式] 准备调用 _ensure_client")
         if not await self._ensure_client():
+            logger.warning("[智能助手·流式] _ensure_client 返回 False，LLM 客户端创建失败")
             yield _sse("token", {"content": "智能助手暂时不可用，请检查 LLM 配置是否已在「设置」中正确配置。"})
             yield _sse("done", {"tools_used": []})
             return
+        logger.info("[智能助手·流式] _ensure_client 成功，开始处理对话")
 
         if _should_use_recent_search(resolved_user_message):
             try:
@@ -1475,6 +1728,7 @@ class IntelligentAssistantService:
 
         async def _do_chat():
             nonlocal tools_used
+            tool_interceptor = self._build_tool_interceptor(conversation_id or "default")
             resp = await self._llm_client.achat(
                 messages,
                 tools=self._openai_tools,
@@ -1483,6 +1737,7 @@ class IntelligentAssistantService:
                 tools_used=tools_used,
                 dry_run=False,
                 progress_callback=_progress,
+                tool_interceptor=tool_interceptor,
             )
             await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
             if not tools_used and _should_force_tool_retry(resolved_user_message):
@@ -1507,6 +1762,7 @@ class IntelligentAssistantService:
                         dry_run=False,
                         progress_callback=_progress,
                         tool_choice="required",
+                        tool_interceptor=tool_interceptor,
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
                 except Exception:
@@ -1518,6 +1774,7 @@ class IntelligentAssistantService:
                         tools_used=tools_used,
                         dry_run=False,
                         progress_callback=_progress,
+                        tool_interceptor=tool_interceptor,
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
             return resp.content
@@ -2038,7 +2295,7 @@ def _build_position_report_detail_content(report: Dict[str, Any]) -> str:
     if status:
         meta.append(f"- 状态: {status}")
     if action:
-        meta.append(f"- 操作建议: {action}")
+        meta.append(f"- 研究观察: {action}")
     if confidence is not None:
         meta.append(f"- 置信度: {confidence}")
     if meta:
@@ -2061,11 +2318,11 @@ def _build_position_report_detail_content(report: Dict[str, Any]) -> str:
 
     targets = report.get("price_targets") or {}
     target_lines: List[str] = []
-    for label, key in (("目标价", "target_price"), ("止损价", "stop_loss"), ("止盈价", "take_profit_price")):
+    for label, key in (("关键验证价位", "target_price"), ("风险关注价格", "stop_loss"), ("收益关注价格", "take_profit_price")):
         if targets.get(key) is not None:
             target_lines.append(f"- {label}: {targets[key]}")
     if target_lines:
-        lines.append("\n## 目标价位\n" + "\n".join(target_lines))
+        lines.append("\n## 关键价位\n" + "\n".join(target_lines))
 
     action_reason = str(report.get("action_reason") or "").strip()
     if action_reason:
@@ -2078,6 +2335,58 @@ def _build_position_report_detail_content(report: Dict[str, Any]) -> str:
     analysis_id = report.get("analysis_id")
     if analysis_id:
         lines.append(f"\n---\n分析ID: {analysis_id}")
+    return "\n".join(lines)
+
+
+def _build_review_report_detail_content(review_data: Dict[str, Any]) -> str:
+    """将交易复盘报告数据构建为 Markdown 详情内容。"""
+    trade_info = review_data.get("trade_info") or {}
+    code = trade_info.get("code") or "未知"
+    name = trade_info.get("name") or code
+    lines = [f"# {name}({code}) 交易复盘报告"]
+
+    status = review_data.get("status")
+    execution_time = review_data.get("execution_time")
+    meta: List[str] = []
+    if status:
+        meta.append(f"- 状态: {status}")
+    if execution_time is not None:
+        meta.append(f"- 执行耗时: {execution_time:.1f}s")
+    source = review_data.get("source")
+    if source:
+        meta.append(f"- 来源: {'实盘' if source == 'position' else '模拟'}")
+    if meta:
+        lines.append("\n## 核心信息\n" + "\n".join(meta))
+
+    # 交易概览
+    summary_lines: List[str] = []
+    if trade_info.get("code"):
+        summary_lines.append(f"- 股票代码: {trade_info['code']}")
+    if trade_info.get("name"):
+        summary_lines.append(f"- 股票名称: {trade_info['name']}")
+    if trade_info.get("realized_pnl") is not None:
+        summary_lines.append(f"- 实现盈亏: {trade_info['realized_pnl']}")
+    if trade_info.get("remaining_quantity") is not None:
+        summary_lines.append(f"- 剩余持仓: {trade_info['remaining_quantity']} 股")
+    if summary_lines:
+        lines.append("\n## 交易概览\n" + "\n".join(summary_lines))
+
+    # AI 复盘内容
+    ai_review = review_data.get("ai_review") or {}
+    if ai_review.get("summary"):
+        lines.append(f"\n## 复盘结论\n{ai_review['summary']}")
+    if ai_review.get("strengths"):
+        lines.append("\n## 做得好的地方\n" + "\n".join(f"- {s}" for s in ai_review["strengths"]))
+    if ai_review.get("weaknesses"):
+        lines.append("\n## 需要改进的地方\n" + "\n".join(f"- {w}" for w in ai_review["weaknesses"]))
+    if ai_review.get("suggestions"):
+        lines.append("\n## 后续观察点\n" + "\n".join(f"- {s}" for s in ai_review["suggestions"]))
+    if ai_review.get("plan_deviation"):
+        lines.append(f"\n## 计划偏离\n{ai_review['plan_deviation']}")
+
+    review_id = review_data.get("review_id")
+    if review_id:
+        lines.append(f"\n---\n复盘ID: {review_id}")
     return "\n".join(lines)
 
 
@@ -2150,6 +2459,20 @@ async def get_assistant_thread_report_detail(
         detail["created_at"] = _to_iso_datetime(report.get("created_at"))
         detail["content"] = _build_position_report_detail_content(report)
         detail["status"] = report.get("status") or detail["status"]
+        return detail
+
+    if ref_type == "review_report":
+        from app.services.trade_review_service import TradeReviewService
+
+        review_id = (target_ref.get("task_id") or report_key or "").strip()
+        service = TradeReviewService()
+        review = await service.get_review_detail(user_id, review_id)
+        if not review:
+            raise ValueError("原始交易复盘报告不存在或已被删除")
+        review_data = review.model_dump() if hasattr(review, "model_dump") else dict(review)
+        detail["created_at"] = _to_iso_datetime(review_data.get("created_at"))
+        detail["status"] = review_data.get("status") or detail["status"]
+        detail["content"] = _build_review_report_detail_content(review_data)
         return detail
 
     if ref_type == "position_task":
@@ -2260,6 +2583,39 @@ def _build_position_report_ref_from_report(report: Dict[str, Any]) -> Dict[str, 
     }
 
 
+def _build_review_report_ref_from_review(review: Any) -> Dict[str, Any]:
+    """从交易复盘报告对象构建主题关联引用。
+
+    兼容 TradeReviewReport 对象(Pydantic) 和字典两种形式。
+    """
+    if hasattr(review, "model_dump"):
+        data = review.model_dump()
+    elif hasattr(review, "dict"):
+        data = review.dict()
+    else:
+        data = dict(review)
+
+    trade_info = data.get("trade_info") or {}
+    code = (trade_info.get("code") or "").strip()
+    name = (trade_info.get("name") or "").strip()
+    title_prefix = f"{name}({code})" if name and code else name or code or "未知标的"
+
+    ai_review = data.get("ai_review") or {}
+    summary_text = (ai_review.get("summary") or "").strip()
+
+    return {
+        "ref_type": "review_report",
+        "report_key": data.get("review_id") or data.get("task_id") or "",
+        "source_collection": "trade_reviews",
+        "title": f"{title_prefix} 交易复盘",
+        "symbol": code or None,
+        "summary": summary_text[:600],
+        "status": data.get("status") or "completed",
+        "task_id": data.get("review_id") or data.get("task_id") or None,
+        "created_at": data.get("created_at"),
+    }
+
+
 async def search_assistant_attachable_reports(
     db,
     user_id: str,
@@ -2307,6 +2663,38 @@ async def search_assistant_attachable_reports(
                 continue
             results.append(_normalize_report_ref_item(_build_position_report_ref_from_report(report)))
         return [item for item in results if item][:limit]
+
+    if normalized_type == "review_report":
+        # 交易复盘报告候选：从 trade_reviews 集合查询
+        review_query: Dict[str, Any] = {
+            "user_id": user_id,
+        }
+        if normalized_keyword:
+            review_query["$or"] = [
+                {"trade_info.code": {"$regex": normalized_keyword, "$options": "i"}},
+                {"trade_info.name": {"$regex": normalized_keyword, "$options": "i"}},
+                {"review_id": {"$regex": normalized_keyword, "$options": "i"}},
+                {"ai_review.summary": {"$regex": normalized_keyword, "$options": "i"}},
+            ]
+
+        review_docs = await db["trade_reviews"].find(review_query).sort("created_at", -1).limit(limit).to_list(length=limit)
+        review_results: List[Dict[str, Any]] = []
+        from app.services.trade_review_service import TradeReviewService
+
+        review_service = TradeReviewService()
+        for doc in review_docs:
+            review_id = (doc.get("review_id") or "").strip()
+            if not review_id:
+                continue
+            review = await review_service.get_review_detail(user_id, review_id)
+            if not review:
+                continue
+            ref = _normalize_report_ref_item(_build_review_report_ref_from_review(review))
+            if ref:
+                review_results.append(ref)
+            if len(review_results) >= limit:
+                break
+        return review_results[:limit]
 
     from app.services.task_analysis_service import get_task_analysis_service
 
@@ -2394,6 +2782,14 @@ async def attach_existing_report_to_thread(
         if not report:
             raise ValueError("未找到可关联的持仓报告")
         ref = _normalize_report_ref_item(_build_position_report_ref_from_report(report))
+    elif normalized_type == "review_report":
+        from app.services.trade_review_service import TradeReviewService
+
+        service = TradeReviewService()
+        review = await service.get_review_detail(user_id, normalized_key)
+        if not review:
+            raise ValueError("未找到可关联的交易复盘报告")
+        ref = _normalize_report_ref_item(_build_review_report_ref_from_review(review))
     else:
         from app.services.task_analysis_service import get_task_analysis_service
 
@@ -3308,6 +3704,8 @@ async def stream_chat_with_assistant(
     if user_id:
         memory_block = await _recall_memory_block(db, user_id, user_message)
 
+    logger.info("[智能助手·流式] mem0 召回完成，memory_block 长度=%d，准备创建 service", len(memory_block))
+
     service = IntelligentAssistantService(
         db,
         preferred_models=_build_assistant_model_preferences(
@@ -3326,31 +3724,37 @@ async def stream_chat_with_assistant(
     collected_reply = ""
     collected_tools: List[str] = []
 
-    async for event_str in service.chat_stream(
-        user_message,
-        conversation_id,
-        assistant_settings,
-        history_messages=history_messages,
-        user_profile=user_profile,
-        current_topic_title=current_topic_title,
-        memory_block=memory_block,
-    ):
-        if event_str.startswith("event: done\n"):
-            try:
-                data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
-                data = json.loads(data_line)
-                collected_tools = data.get("tools_used", [])
-            except Exception:
-                pass
-            continue
-        if event_str.startswith("event: token\n"):
-            try:
-                data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
-                data = json.loads(data_line)
-                collected_reply += data.get("content", "")
-            except Exception:
-                pass
-        yield event_str
+    logger.info("[智能助手·流式] 准备调用 service.chat_stream")
+
+    try:
+        async for event_str in service.chat_stream(
+            user_message,
+            conversation_id,
+            assistant_settings,
+            history_messages=history_messages,
+            user_profile=user_profile,
+            current_topic_title=current_topic_title,
+            memory_block=memory_block,
+        ):
+            if event_str.startswith("event: done\n"):
+                try:
+                    data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
+                    data = json.loads(data_line)
+                    collected_tools = data.get("tools_used", [])
+                except Exception:
+                    pass
+                continue
+            if event_str.startswith("event: token\n"):
+                try:
+                    data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
+                    data = json.loads(data_line)
+                    collected_reply += data.get("content", "")
+                except Exception:
+                    pass
+            yield event_str
+    except Exception as e:
+        logger.error("[智能助手·流式] chat_stream 生成器抛出异常: %s", e, exc_info=True)
+        yield _sse("token", {"content": f"⚠️ 处理过程发生异常：{e}"})
 
     if user_id and collected_reply:
         try:

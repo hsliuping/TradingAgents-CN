@@ -10,7 +10,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -476,6 +476,7 @@ class UnifiedLLMClient:
         progress_callback: Optional[Callable] = None,
         log_payloads: bool = False,
         payload_log_label: Optional[str] = None,
+        tool_interceptor: Optional[Callable[[ToolCall], Awaitable[Optional[ToolResult]]]] = None,
         **kwargs
     ) -> LLMResponse:
         """
@@ -484,6 +485,7 @@ class UnifiedLLMClient:
         Args:
             tools_used: 可选，用于收集各轮工具调用名称（智能助手展示执行步骤用）
             dry_run: 若为 True，工具调用只记日志并返回模拟结果，不真正执行函数（用于意图路由测试）
+            tool_interceptor: 可选，在真正执行工具前调用；返回 ToolResult 则跳过默认执行
         """
         if log_payloads:
             self._log_llm_payload(
@@ -517,6 +519,7 @@ class UnifiedLLMClient:
                 progress_callback=progress_callback,
                 log_payloads=log_payloads,
                 payload_log_label=payload_log_label,
+                tool_interceptor=tool_interceptor,
                 **kwargs
             )
 
@@ -622,6 +625,7 @@ class UnifiedLLMClient:
         progress_callback: Optional[Callable] = None,
         log_payloads: bool = False,
         payload_log_label: Optional[str] = None,
+        tool_interceptor: Optional[Callable[[ToolCall], Awaitable[Optional[ToolResult]]]] = None,
         **kwargs
     ) -> LLMResponse:
         """异步执行工具调用循环，可选收集每轮调用的工具名称"""
@@ -643,6 +647,7 @@ class UnifiedLLMClient:
                 "tool_count": len(current_response.tool_calls),
             })
 
+            intercepted_any = False
             for tool_call in current_response.tool_calls:
                 if tools_used is not None:
                     tools_used.append(tool_call.name)
@@ -654,7 +659,22 @@ class UnifiedLLMClient:
                     "arguments": tool_call.arguments,
                 })
 
-                if dry_run:
+                # ── v3.5.0 项4：工具执行拦截器（如智能助手 HITL）──
+                intercepted_result: Optional[ToolResult] = None
+                if tool_interceptor is not None and not dry_run:
+                    try:
+                        intercepted_result = await tool_interceptor(tool_call)
+                        if intercepted_result is not None:
+                            intercepted_any = True
+                    except Exception as exc:
+                        logger.warning(
+                            "[UnifiedLLM·异步] tool_interceptor 异常，继续默认执行: %s",
+                            exc,
+                        )
+
+                if intercepted_result is not None:
+                    result = intercepted_result
+                elif dry_run:
                     # ── 测试模式：只记日志，返回模拟结果 ──
                     logger.info(
                         "[DRY_RUN] 🏷️ LLM 选择工具: %s | 参数: %s",
@@ -727,6 +747,17 @@ class UnifiedLLMClient:
                 from .models import LLMResponse
                 return LLMResponse(
                     content=f"[dry_run 测试模式] LLM 选择的工具: {', '.join(tools_used or [])}",
+                    model=current_response.model,
+                )
+
+            # 如果有工具被拦截（如 HITL 暂停），直接返回确认消息，不再继续后续轮次
+            if intercepted_any:
+                confirmation_contents = [
+                    msg.content for msg in current_messages
+                    if msg.role == "tool" and msg.content and "即将执行关键操作" in msg.content
+                ]
+                return LLMResponse(
+                    content="\n\n".join(confirmation_contents) or "有待确认的操作，请确认后继续。",
                     model=current_response.model,
                 )
 

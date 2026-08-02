@@ -43,14 +43,6 @@
           </div>
           
           <div class="action-section">
-            <el-button
-              v-if="canApplyToTrading"
-              type="success"
-              @click="applyToTrading"
-            >
-              <el-icon><ShoppingCart /></el-icon>
-              应用到交易
-            </el-button>
             <el-dropdown trigger="click" @command="downloadReport">
               <el-button type="primary">
                 <el-icon><Download /></el-icon>
@@ -171,11 +163,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, h, reactive } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, ElInputNumber } from 'element-plus'
-import { paperApi } from '@/api/paper'
-import { stocksApi } from '@/api/stocks'
+import { ElMessage } from 'element-plus'
 import { configApi, type LLMConfig } from '@/api/config'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 import {
@@ -186,7 +176,6 @@ import {
   Back,
   InfoFilled,
   Files,
-  ShoppingCart,
   WarningFilled,
   DataAnalysis,
   Cpu,
@@ -194,8 +183,6 @@ import {
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { marked } from 'marked'
-import { getMarketByStockCode } from '@/utils/market'
-import type { CurrencyAmount } from '@/api/paper'
 
 interface ReportDecision {
   action?: string
@@ -275,8 +262,8 @@ const analystNameMap: Record<string, string> = {
   safe_analyst_v2: '防御情景分析师',
   neutral_analyst: '基准情景分析师',
   neutral_analyst_v2: '基准情景分析师',
-  risk_manager: '风险经理',
-  risk_manager_v2: '风险经理',
+  risk_manager: '风险评估师',
+  risk_manager_v2: '风险评估师',
   market: '市场分析师',
   fundamentals: '基本面分析师',
   etf: 'ETF 分析师',
@@ -303,19 +290,19 @@ const moduleDisplayNameMap: Record<string, string> = {
   sentiment_report: '💬 社交媒体分析师',
   news_report: '📰 新闻分析师',
   fundamentals_report: '💰 基本面分析师',
-  bull_researcher: '🐂 乐观情景研究员',
-  bull_report: '🐂 乐观情景研究',
-  bear_researcher: '🐻 审慎情景研究员',
-  bear_report: '🐻 审慎情景研究',
-  research_team_decision: '🔬 研究经理',
+  bull_researcher: '🐂 积极证据研究员',
+  bull_report: '🐂 积极证据研究',
+  bear_researcher: '🐻 谨慎证据研究员',
+  bear_report: '🐻 谨慎证据研究',
+  research_team_decision: '🔬 研究整合员',
   trader_investment_plan: '🧩 研究整合员',
   risky_analyst: '⚡ 高弹性情景分析师',
-  risky_opinion: '⚡ 高弹性情景分析观点',
+  risky_opinion: '⚡ 高弹性情景研究观察',
   safe_analyst: '🛡️ 防御情景分析师',
-  safe_opinion: '🛡️ 防御情景分析观点',
+  safe_opinion: '🛡️ 防御情景研究观察',
   neutral_analyst: '⚖️ 基准情景分析师',
-  neutral_opinion: '⚖️ 基准情景分析观点',
-  risk_management_decision: '👔 风险经理',
+  neutral_opinion: '⚖️ 基准情景研究观察',
+  risk_management_decision: '👔 风险评估师',
   risk_assessment: '⚠️ 风险审阅',
   investment_plan: '🧾 研究简报',
   final_trade_decision: '🧾 综合研究结论',
@@ -340,9 +327,9 @@ const manifestDisplayNameAliasMap: Record<string, string> = {
   '舆情分析 v2': '💬 社交媒体分析师',
   '社交媒体分析师 v2': '💬 社交媒体分析师',
   '市场情绪分析': '💬 社交媒体分析师',
-  '研究经理分析': '🔬 研究经理',
-  '研究经理 v2': '🔬 研究经理',
-  '研究经理': '🔬 研究经理',
+  '研究经理分析': '🔬 研究整合员',
+  '研究经理 v2': '🔬 研究整合员',
+  '研究经理': '🔬 研究整合员',
   '交易员计划': '🧩 研究整合员',
   '交易员 v2': '🧩 研究整合员',
   '交易员': '🧩 研究整合员',
@@ -354,10 +341,10 @@ const manifestDisplayNameAliasMap: Record<string, string> = {
   '保守分析师 v2': '🛡️ 防御情景分析师',
   '中性分析师': '⚖️ 基准情景分析师',
   '中性分析师 v2': '⚖️ 基准情景分析师',
-  '风险管理者': '👔 风险经理',
-  '风险管理者 v2': '👔 风险经理',
-  '风险经理': '👔 风险经理',
-  '风险经理 v2': '👔 风险经理',
+  '风险管理者': '👔 风险评估师',
+  '风险管理者 v2': '👔 风险评估师',
+  '风险经理': '👔 风险评估师',
+  '风险经理 v2': '👔 风险评估师',
   '风险评估': '⚠️ 风险审阅',
   '最终分析结果': '🧾 综合研究结论'
 }
@@ -530,300 +517,6 @@ const getFileExtension = (format: string): string => {
   return extensions[format] || 'txt'
 }
 
-// 判断是否可以应用到交易
-const canApplyToTrading = computed(() => {
-  if (!report.value) return false
-  const rec = report.value.recommendation || ''
-  // 检查是否包含买入或卖出建议
-  return rec.includes('买入') || rec.includes('卖出') || rec.toLowerCase().includes('buy') || rec.toLowerCase().includes('sell')
-})
-
-// 解析投资建议
-const parseRecommendation = () => {
-  if (!report.value) return null
-
-  const rec = report.value.recommendation || ''
-  const traderPlan = report.value.reports?.trader_investment_plan || ''
-
-  // 解析操作类型
-  let action: 'buy' | 'sell' | null = null
-  if (rec.includes('买入') || rec.toLowerCase().includes('buy')) {
-    action = 'buy'
-  } else if (rec.includes('卖出') || rec.toLowerCase().includes('sell')) {
-    action = 'sell'
-  }
-
-  if (!action) return null
-
-  // 解析目标价格（从recommendation或trader_investment_plan中提取）
-  let targetPrice: number | null = null
-  const priceMatch = rec.match(/目标价[格]?[：:]\s*([0-9.]+)/) ||
-                     traderPlan.match(/目标价[格]?[：:]\s*([0-9.]+)/)
-  if (priceMatch) {
-    targetPrice = parseFloat(priceMatch[1])
-  }
-
-  return {
-    action,
-    targetPrice,
-    confidence: report.value.confidence_score || 0,
-    riskLevel: report.value.risk_level || '中等'
-  }
-}
-
-// 辅助函数：根据股票代码获取对应货币的现金金额
-const getCashByCurrency = (account: any, stockSymbol: string): number => {
-  const cash = account.cash
-
-  // 兼容旧格式（单一数字）
-  if (typeof cash === 'number') {
-    return cash
-  }
-
-  // 新格式（多货币对象）
-  if (typeof cash === 'object' && cash !== null) {
-    // 根据股票代码判断市场类型
-    const marketType = getMarketByStockCode(stockSymbol)
-
-    // 映射市场类型到货币
-    const currencyMap: Record<string, keyof CurrencyAmount> = {
-      'A股': 'CNY',
-    }
-
-    const currency = currencyMap[marketType] || 'CNY'
-    return cash[currency] || 0
-  }
-
-  return 0
-}
-
-// 应用到模拟交易
-const applyToTrading = async () => {
-  const recommendation = parseRecommendation()
-  if (!recommendation || !report.value) {
-    ElMessage.warning('无法解析投资建议，请检查报告内容')
-    return
-  }
-
-  const currentReport = report.value
-
-  try {
-    // 获取账户信息
-    const accountRes = await paperApi.getAccount()
-    if (!accountRes.success || !accountRes.data) {
-      ElMessage.error('获取账户信息失败')
-      return
-    }
-
-    const account = accountRes.data.account
-    const positions = accountRes.data.positions
-
-    // 查找当前持仓
-    const currentPosition = positions.find(p => p.code === currentReport.stock_symbol)
-
-    // 获取当前实时价格
-    let currentPrice = 10 // 默认价格
-    try {
-      const quoteRes = await stocksApi.getQuote(currentReport.stock_symbol)
-      if (quoteRes.success && quoteRes.data && quoteRes.data.price) {
-        currentPrice = quoteRes.data.price
-      }
-    } catch (error) {
-      console.warn('获取实时价格失败，使用默认价格')
-    }
-
-    // 获取对应货币的可用资金
-    const availableCash = getCashByCurrency(account, currentReport.stock_symbol)
-
-    // 计算建议交易数量
-    let suggestedQuantity = 0
-    let maxQuantity = 0
-
-    if (recommendation.action === 'buy') {
-      // 买入：根据可用资金和当前价格计算
-      maxQuantity = Math.floor(availableCash / currentPrice / 100) * 100 // 100股为单位
-      const suggested = Math.floor(maxQuantity * 0.2) // 建议使用20%资金
-      suggestedQuantity = Math.floor(suggested / 100) * 100 // 向下取整到100的倍数
-      suggestedQuantity = Math.max(100, suggestedQuantity) // 至少100股
-    } else {
-      // 卖出：根据当前持仓计算
-      if (!currentPosition || currentPosition.quantity === 0) {
-        ElMessage.warning('当前没有持仓，无法卖出')
-        return
-      }
-      maxQuantity = currentPosition.quantity
-      suggestedQuantity = Math.floor(maxQuantity / 100) * 100 // 向下取整到100的倍数
-      suggestedQuantity = Math.max(100, suggestedQuantity) // 至少100股
-    }
-
-    // 用户可修改的价格和数量（使用reactive）
-    const tradeForm = reactive({
-      price: currentPrice,
-      quantity: suggestedQuantity
-    })
-
-    // 显示可编辑的确认对话框
-    const actionText = recommendation.action === 'buy' ? '买入' : '卖出'
-    const actionColor = recommendation.action === 'buy' ? '#67C23A' : '#F56C6C'
-
-    // 创建一个响应式的消息组件
-    const MessageComponent = {
-      setup() {
-        // 计算预计金额
-        const estimatedAmount = computed(() => {
-          return (tradeForm.price * tradeForm.quantity).toFixed(2)
-        })
-
-        return () => h('div', { style: 'line-height: 2;' }, [
-          // 风险提示横幅
-          h('div', {
-            style: 'background-color: #FEF0F0; border: 1px solid #F56C6C; border-radius: 4px; padding: 12px; margin-bottom: 16px;'
-          }, [
-            h('div', { style: 'color: #F56C6C; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center;' }, [
-              h('span', { style: 'font-size: 16px; margin-right: 6px;' }, '⚠️'),
-              h('span', '风险提示')
-            ]),
-            h('div', { style: 'color: #606266; font-size: 12px; line-height: 1.6;' }, [
-              h('p', { style: 'margin: 4px 0;' }, '• 本交易基于AI分析结果，仅供参考，不构成投资建议'),
-              h('p', { style: 'margin: 4px 0;' }, '• 模拟交易使用虚拟资金，与实盘存在显著差异'),
-              h('p', { style: 'margin: 4px 0;' }, '• 股票与ETF投资均存在市场风险，可能导致本金损失'),
-              h('p', { style: 'margin: 4px 0;' }, '• 请勿将模拟结果作为实盘投资决策依据')
-            ])
-          ]),
-          h('p', [
-            h('strong', getMarketByStockCode(currentReport.stock_symbol) === 'ETF' ? 'ETF代码：' : '标的代码：'),
-            h('span', currentReport.stock_symbol)
-          ]),
-          h('p', [
-            h('strong', '操作类型：'),
-            h('span', { style: `color: ${actionColor}; font-weight: bold;` }, actionText)
-          ]),
-          recommendation.targetPrice ? h('p', [
-            h('strong', '目标价格：'),
-            h('span', { style: 'color: #E6A23C;' }, `${recommendation.targetPrice.toFixed(2)}元`),
-            h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(仅供参考)')
-          ]) : null,
-          h('p', [
-            h('strong', '当前价格：'),
-            h('span', `${currentPrice.toFixed(2)}元`)
-          ]),
-          h('div', { style: 'margin: 16px 0;' }, [
-            h('p', { style: 'margin-bottom: 8px;' }, [
-              h('strong', '交易价格：'),
-              h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(可修改)')
-            ]),
-            h(ElInputNumber, {
-              modelValue: tradeForm.price,
-              'onUpdate:modelValue': (val?: number) => { tradeForm.price = val ?? tradeForm.price },
-              min: 0.01,
-              max: 9999,
-              precision: 2,
-              step: 0.01,
-              style: 'width: 200px;',
-              controls: true
-            })
-          ]),
-          h('div', { style: 'margin: 16px 0;' }, [
-            h('p', { style: 'margin-bottom: 8px;' }, [
-              h('strong', '交易数量：'),
-              h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(可修改，100股为单位)')
-            ]),
-            h(ElInputNumber, {
-              modelValue: tradeForm.quantity,
-              'onUpdate:modelValue': (val?: number) => { tradeForm.quantity = val ?? tradeForm.quantity },
-              min: 100,
-              max: maxQuantity,
-              step: 100,
-              style: 'width: 200px;',
-              controls: true
-            })
-          ]),
-          h('p', [
-            h('strong', '预计金额：'),
-            h('span', { style: 'color: #409EFF; font-weight: bold;' }, `${estimatedAmount.value}元`)
-          ]),
-          h('p', [
-            h('strong', '模型置信度：'),
-            h('span', `${(recommendation.confidence * 100).toFixed(1)}%`),
-            h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(不代表实际成功率)')
-          ]),
-          h('p', [
-            h('strong', '风险评估：'),
-            h('span', recommendation.riskLevel),
-            h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(实际风险可能更高)')
-          ]),
-          recommendation.action === 'buy' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
-            `可用资金：${availableCash.toFixed(2)}元，最大可买：${maxQuantity}股`
-          ) : null,
-          recommendation.action === 'sell' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
-            `当前持仓：${maxQuantity}股`
-          ) : null
-        ])
-      }
-    }
-
-    await ElMessageBox({
-      title: '确认交易',
-      message: h(MessageComponent),
-      confirmButtonText: '确认下单',
-      cancelButtonText: '取消',
-      type: 'warning',
-      beforeClose: (action, _instance, done) => {
-        if (action === 'confirm') {
-          // 验证输入
-          if (tradeForm.quantity < 100 || tradeForm.quantity % 100 !== 0) {
-            ElMessage.error('交易数量必须是100的整数倍')
-            return
-          }
-          if (tradeForm.quantity > maxQuantity) {
-            ElMessage.error(`交易数量不能超过${maxQuantity}股`)
-            return
-          }
-          if (tradeForm.price <= 0) {
-            ElMessage.error('交易价格必须大于0')
-            return
-          }
-
-          // 检查资金是否充足
-          if (recommendation.action === 'buy') {
-            const totalAmount = tradeForm.price * tradeForm.quantity
-            if (totalAmount > availableCash) {
-              ElMessage.error('可用资金不足')
-              return
-            }
-          }
-        }
-        done()
-      }
-    })
-
-    // 执行交易
-    const orderRes = await paperApi.placeOrder({
-      code: currentReport.stock_symbol,
-      side: recommendation.action,
-      quantity: tradeForm.quantity,
-      market: getMarketByStockCode(currentReport.stock_symbol) === 'ETF' ? 'ETF' : 'CN',
-      analysis_id: String(currentReport.analysis_id || currentReport.id)
-    })
-
-    if (orderRes.success) {
-      ElMessage.success(`${actionText}订单已提交成功！`)
-      // 可选：跳转到模拟交易页面
-      setTimeout(() => {
-        router.push({ name: 'PaperTradingHome' })
-      }, 1500)
-    } else {
-      ElMessage.error(orderRes.message || '下单失败')
-    }
-
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      console.error('应用到交易失败:', error)
-      ElMessage.error(error.message || '操作失败')
-    }
-  }
-}
-
 // 返回列表
 const goBack = () => {
   router.push('/reports')
@@ -911,7 +604,7 @@ const moduleOrder = [
   'sentiment_report',
   'news_report',
 
-  // 第三阶段：研究团队（多空辩论 + 初步建议）
+  // 第三阶段：研究团队（多情景研究 + 初步研究观察）
   'bull_researcher',
   'bull_report',
   'bear_researcher',
@@ -932,8 +625,8 @@ const moduleOrder = [
   'risk_management_decision',
   'risk_assessment',
 
-  // 第六阶段：最终决策
-  'final_trade_decision',  // 🔑 最终分析结果（风险管理后）
+  // 第六阶段：最终研究结论
+  'final_trade_decision',  // 🔑 最终研究结论（风险管理后）
 
   // 兼容旧字段
   'investment_debate_state',
@@ -1007,18 +700,106 @@ const getModuleDisplayName = (moduleName: string) => {
   return normalizeModuleDisplayName(undefined, moduleName)
 }
 
+/**
+ * 将风险审阅 JSON 对象渲染为可读的 Markdown 文本。
+ * 字段与后端 risk_assessment / risk_management_decision 结构保持一致。
+ */
+const formatRiskAssessment = (value: any): string | null => {
+  if (!value || typeof value !== 'object') return null
+  const riskLevel = value.risk_level || value.riskLevel
+  const riskScore = value.risk_score ?? value.riskScore
+  const reasoning = value.reasoning || value.conclusion || value.summary || value.assessment
+  const keyRisks = value.key_risks || value.keyRisks || value.risks
+  const riskControl = value.risk_control || value.riskControl || value.control || value.suggestions
+  const investmentAdjustment = value.investment_adjustment || value.investmentAdjustment || value.adjustment
+
+  if (riskLevel === undefined && riskScore === undefined && !reasoning && !riskControl && !investmentAdjustment) {
+    return null
+  }
+
+  const parts: string[] = []
+  if (riskLevel !== undefined) {
+    parts.push(`**风险等级**：${riskLevel}`)
+  }
+  if (riskScore !== undefined) {
+    const score = typeof riskScore === 'number' ? riskScore.toFixed(2) : riskScore
+    parts.push(`**风险评分**：${score}`)
+  }
+  if (reasoning) {
+    parts.push(`**评估结论**：${reasoning}`)
+  }
+  if (Array.isArray(keyRisks) && keyRisks.length > 0) {
+    parts.push(`**核心风险**：`)
+    keyRisks.forEach((risk: any) => {
+      if (risk) parts.push(`- ${String(risk).trim()}`)
+    })
+  }
+  if (riskControl) {
+    parts.push(`**风控建议**：${riskControl}`)
+  }
+  if (investmentAdjustment) {
+    parts.push(`**投资调整建议**：${investmentAdjustment}`)
+  }
+
+  return parts.join('\n\n')
+}
+
+const _stripJsonCodeFence = (text: string): string => {
+  // 去除 ```json ... ``` 或 ``` ... ``` 代码块包裹
+  let t = text.trim()
+  const fenceMatch = t.match(/^```(?:json|JSON)?\s*\n([\s\S]*?)\n```\s*$/i)
+  if (fenceMatch) {
+    t = fenceMatch[1].trim()
+  }
+  return t
+}
+
+const _looksLikeRiskJson = (text: string): boolean => {
+  const lowered = text.toLowerCase()
+  return (
+    text.startsWith('{') &&
+    (lowered.includes('"risk_level"') ||
+      lowered.includes('"risk_score"') ||
+      lowered.includes('"reasoning"') ||
+      lowered.includes('"key_risks"') ||
+      lowered.includes('"risk_control"') ||
+      lowered.includes('"investment_adjustment"'))
+  )
+}
+
 const extractStructuredText = (value: any): string | null => {
   if (!value) return null
 
   if (typeof value === 'string') {
-    return value.trim() ? value : null
+    // 先剥离 ```json 代码块，再判断是否为风险审阅 JSON
+    const stripped = _stripJsonCodeFence(value.trim())
+    if (!stripped) return null
+
+    if (_looksLikeRiskJson(stripped)) {
+      try {
+        const parsed = JSON.parse(stripped)
+        const riskText = formatRiskAssessment(parsed)
+        if (riskText) return riskText
+      } catch {
+        // 不是合法 JSON，按普通文本返回
+      }
+    }
+    // 如果原文是 ```json 代码块但不是风险 JSON，返回剥离后的内容
+    return stripped !== value.trim() ? stripped : value.trim()
   }
 
   if (typeof value === 'object') {
-    for (const key of ['content', 'markdown', 'text', 'message', 'report', 'judge_decision']) {
+    // 风险审阅结构化对象直接渲染为可读文本
+    const riskText = formatRiskAssessment(value)
+    if (riskText) return riskText
+
+    // 对象里嵌套 content/text 字段时，递归尝试解析
+    // 真实数据结构: { content: "```json\n{...}\n```", success: true }
+    for (const key of ['content', 'markdown', 'text', 'message', 'report', 'judge_decision', 'risk_assessment', 'risk_management_decision']) {
       const item = value[key]
-      if (typeof item === 'string' && item.trim()) {
-        return item
+      if (item) {
+        const nested = extractStructuredText(item)
+        if (nested) return nested
       }
     }
   }
@@ -1040,9 +821,9 @@ const normalizeDisplayedResearchText = (content: string) => {
     [/行业板块分析/g, '行业板块研究'],
     [/市场情绪分析/g, '情绪研究'],
     [/新闻事件分析/g, '新闻研究'],
-    [/风险治理摘要/g, '风险治理结论'],
+    [/风险审阅摘要/g, '风险审阅结论'],
     [/综合研究简报/g, '综合研究结论'],
-    [/风险管理决策/g, '风险治理结论'],
+    [/风险管理决策/g, '风险审阅结论'],
     [/最终分析结果/g, '最终研究结论'],
     [/激进风险分析师/g, '高弹性情景分析师'],
     [/保守风险分析师/g, '防御情景分析师'],

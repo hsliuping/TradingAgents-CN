@@ -1,0 +1,15 @@
+#!/command/with-contenv bash
+# redis 服务 - 启动 Redis 缓存和任务队列
+
+cd /
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [redis] $1" | tee -a /var/log/redis/service.log
+}
+
+log "🚀 启动 Redis..."
+
+# 使用 gosu 降权到 redis 用户
+exec gosu redis redis-server /etc/redis/redis.conf \
+    --daemonize no \
+    --logfile /var/log/redis/redis.log

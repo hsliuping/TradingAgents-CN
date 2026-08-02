@@ -602,13 +602,13 @@ const getNodeTypeName = (type: string) => {
     end: '结束',
     analyst: '分析师',
     researcher: '研究员',
-    trader: '交易员',
+    trader: '研究整合员',
     risk: '风险分析',
-    manager: '经理',
+    manager: '管理',
     condition: '条件分支',
     parallel: '并行执行',
     merge: '合并',
-    debate: '辩论',
+    debate: '多情景研究',
     post_processor: '后处理器'
   }
   return names[type] || type

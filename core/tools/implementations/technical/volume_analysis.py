@@ -229,8 +229,8 @@ def get_obv_analysis(
             interpretation: 解读信息，子字段 —
                 obv_up: OBV 上升说明
                 obv_down: OBV 下降说明
-                bearish_divergence: 看跌背离说明
-                bullish_divergence: 看涨背离说明
+                bearish_divergence: 下行背离说明
+                bullish_divergence: 上行背离说明
             data_quality: 数据质量，子字段 —
                 bars_analyzed: 分析的 K 线数量
         异常时返回字段 —
@@ -341,8 +341,8 @@ def get_obv_analysis(
             "interpretation": {
                 "obv_up": "OBV 上升，成交量支持上涨趋势",
                 "obv_down": "OBV 下降，成交量支持下跌趋势",
-                "bearish_divergence": "价格上升但 OBV 下降/停滞，上涨缺乏成交量支持（卖出信号）",
-                "bullish_divergence": "价格下降但 OBV 上升/企稳，下跌缺乏成交量支持（买入信号）",
+                "bearish_divergence": "价格上升但 OBV 下降/停滞，上涨缺乏成交量支持（负向背离信号）",
+                "bullish_divergence": "价格下降但 OBV 上升/企稳，下跌缺乏成交量支持（正向背离信号）",
             },
             "data_quality": {
                 "bars_analyzed": len(df),
@@ -521,7 +521,7 @@ def get_turnover_analysis(
 @register_tool(
     tool_id="get_pivot_points",
     name="枢轴点计算",
-    description="基于经典枢轴点公式和斐波那契枢轴点公式计算关键支撑/阻力位，为日内交易提供参考。",
+    description="基于经典枢轴点公式和斐波那契枢轴点公式计算关键支撑/阻力位，为日内研究提供参考。",
     category="technical",
     is_online=False,
     auto_register=True,
@@ -530,7 +530,7 @@ def get_turnover_analysis(
     tool_role_hint="specialized",
     output_shape="structured_json",
     preferred_for=["pivot_points_calculation", "intraday_levels"],
-    when_to_use="当需要计算日内关键支撑阻力位、设置止损止盈参考时使用。",
+    when_to_use="当需要计算日内关键支撑阻力位、设置风险关注与收益关注参考时使用。",
     when_not_to_use="数据不足（少于 2 根 K 线）时无法计算；不适用于非日线级别的长周期分析。",
     returns="返回 JSON，包含 classic 和 fibonacci 两组枢轴点（PP/R1-3/S1-3）及当前价格。",
     example="get_pivot_points(symbol='600519', lookback_days=30)",
@@ -540,7 +540,7 @@ def get_pivot_points(
     symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
     lookback_days: Annotated[int, "回看天数用于枢轴点计算，默认 30"] = 30,
 ) -> str:
-    """计算经典枢轴点和斐波那契枢轴点，为日内交易提供支撑/阻力位参考。
+    """计算经典枢轴点和斐波那契枢轴点，为日内研究提供支撑/阻力位参考。
 
     Args:
         symbol: A 股股票代码，如 600519、000001
@@ -915,7 +915,7 @@ def get_volume_profile(
     tool_role_hint="specialized",
     output_shape="structured_json",
     preferred_for=["斐波那契扩展", "价格目标位"],
-    when_to_use="当需要在趋势行情中寻找潜在的扩展目标位、设置止盈参考时使用。",
+    when_to_use="当需要在趋势行情中寻找潜在的扩展价格位、设置收益关注参考时使用。",
     when_not_to_use="震荡市中扩展位参考价值有限；数据不足（少于 30 根 K 线）时结果不可靠。",
     returns="返回 JSON，包含 swing_analysis、extension_prices（各水平）、current_proximity。",
     example="get_fibonacci_extension(symbol='600519', lookback_days=120, extension_levels='1.272,1.382,1.618,2.0,2.618')",

@@ -73,7 +73,7 @@ class EmbeddingManager:
     def __init__(self, db=None):
         """
         初始化 Embedding 管理器
-        
+
         Args:
             db: MongoDB 数据库连接（用于读取配置）
         """
@@ -81,13 +81,24 @@ class EmbeddingManager:
         self._providers = []
         self._primary_provider = None
         self._fallback_providers = []
-        
+
+        # 🔥 熔断机制：连续失败超过阈值后直接返回，避免对每个文档都尝试调用
+        # 失败的 API（例如 300 个文档 × 2 个提供商 × 1秒/调用 = 10 分钟阻塞）
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 3  # 连续失败 3 次后熔断
+        self._circuit_broken = False
+
         # 初始化提供商
         self._init_providers()
     
     def _init_providers(self):
         """从数据库或环境变量初始化 Embedding 提供商"""
-        # 🔥 优先从数据库读取配置
+        # 🔥 京东云模式：优先使用环境变量配置（EMBEDDING_*）
+        # 数据库中的 jdyun provider 记录的是旧地址/旧 Key，环境变量才是部署时注入的最新配置
+        if os.getenv("JDYUN_MODE", "").lower() in ("true", "1", "yes"):
+            if self._init_from_jdyun_env():
+                return
+        # 原有逻辑：优先从数据库读取配置
         if self.db is not None:
             try:
                 self._init_from_database()
@@ -100,6 +111,33 @@ class EmbeddingManager:
         # 降级：从环境变量初始化
         self._init_from_env()
     
+    def _init_from_jdyun_env(self) -> bool:
+        """京东云模式：从环境变量初始化 Embedding 提供商
+
+        优先使用 EMBEDDING_* 环境变量，未设置时回退到 OPENAI_*。
+        返回 True 表示成功使用环境变量配置，False 表示未配置完整需走数据库。
+        """
+        api_base = os.getenv("EMBEDDING_API_BASE", "") or os.getenv("OPENAI_API_BASE", "")
+        api_key = os.getenv("EMBEDDING_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
+        model = os.getenv("EMBEDDING_MODEL", "") or "text-embedding-v3"
+
+        if not api_base or not api_key:
+            logger.warning("⚠️ 京东云模式：EMBEDDING_API_BASE/EMBEDDING_API_KEY 未配置，回退到数据库")
+            return False
+
+        provider_info = {
+            "name": "jdyun",
+            "api_key": api_key,
+            "base_url": api_base,
+            "model": model,
+            "display_name": "京东云",
+        }
+        self._providers = [provider_info]
+        self._primary_provider = provider_info
+        self._fallback_providers = []
+        logger.info(f"✅ 京东云模式：使用环境变量 Embedding 提供商 (模型: {model}, base: {api_base})")
+        return True
+
     def _init_from_database(self):
         """从数据库读取 Embedding 配置"""
         if self.db is None:
@@ -365,16 +403,32 @@ class EmbeddingManager:
             logger.warning("⚠️ 没有可用的 Embedding 提供商")
             return None, "no_provider"
 
+        # 🔥 熔断检查：连续失败超过阈值后直接返回，不再尝试调用
+        if self._circuit_broken:
+            return None, "circuit_broken"
+
         # 尝试主提供商
         embedding = self._call_provider(self._primary_provider, text)
         if embedding:
+            self._consecutive_failures = 0  # 成功则重置计数器
             return embedding, self._primary_provider['display_name']
+
+        # 主提供商失败，累计连续失败次数
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._max_consecutive_failures:
+            self._circuit_broken = True
+            logger.warning(
+                f"⚠️ Embedding 已熔断：连续失败 {self._consecutive_failures} 次，"
+                f"后续调用将直接跳过（需重启服务或修复 API Key 后恢复）"
+            )
+            return None, "circuit_broken"
 
         # 尝试备用提供商
         for provider in self._fallback_providers:
             logger.info(f"💡 尝试备用提供商: {provider['display_name']}")
             embedding = self._call_provider(provider, text)
             if embedding:
+                self._consecutive_failures = 0  # 成功则重置计数器
                 return embedding, provider['display_name']
 
         # 所有提供商都失败
@@ -400,8 +454,8 @@ class EmbeddingManager:
             elif provider_name == "local":
                 # 🔥 本地 sentence-transformers 模型，无需联网
                 return self._call_local(provider, text)
-            elif provider_name in ["openai", "deepseek", "zhipu", "ollama", "localai"]:
-                # 🔥 OpenAI 兼容的 API（包括智谱AI、DeepSeek、本地模型等）
+            elif provider_name in ["openai", "deepseek", "zhipu", "ollama", "localai", "jdyun"]:
+                # 🔥 OpenAI 兼容的 API（包括智谱AI、DeepSeek、京东云、本地模型等）
                 # 智谱AI 使用 OpenAI 兼容的 API，base_url: https://open.bigmodel.cn/api/paas/v4
                 return self._call_openai_compatible(provider, text)
             elif provider_name == "google":
@@ -556,10 +610,13 @@ class EmbeddingManager:
 
             # 🔥 本地模型（Ollama、LocalAI）通常不需要 API Key，使用 "ollama" 或空字符串
             api_key = provider.get('api_key') or "ollama"
-            
+
+            # 🔥 禁用 SDK 自动重试：401/网络错误时立即返回，由上层熔断机制统一处理
+            # 避免 300 个文档 × (1 原始 + 2 重试) × 1秒 = 15 分钟阻塞启动
             client = OpenAI(
                 api_key=api_key,  # 本地模型可以使用任意值或 "ollama"
-                base_url=provider['base_url']
+                base_url=provider['base_url'],
+                max_retries=0,
             )
 
             # 🔥 统一使用 1024 维，如果模型支持 dimensions 参数，直接指定

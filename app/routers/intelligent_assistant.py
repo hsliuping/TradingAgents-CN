@@ -478,3 +478,58 @@ async def planned_analysis_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ============================================================
+# v3.5.0 项4：智能助手 HITL（关键操作确认）API
+# ============================================================
+
+
+@router.get("/hitl/pending")
+async def list_pending_hitl(
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+    conversation_id: Optional[str] = Query(None),
+):
+    """列出当前用户待确认的关键操作（前端展示用）。"""
+    from core.hitl.assistant_hitl import list_pending_for_user
+
+    user_id = str(current_user.id) if hasattr(current_user, "id") else str(current_user.get("_id", ""))
+    items = await list_pending_for_user(
+        db,
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/hitl/{pending_id}/confirm")
+async def confirm_hitl(
+    pending_id: str,
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """确认执行待确认的关键操作。"""
+    from core.hitl.assistant_hitl import confirm_pending
+
+    user_id = str(current_user.id) if hasattr(current_user, "id") else str(current_user.get("_id", ""))
+    result = await confirm_pending(db, pending_id=pending_id, user_id=user_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "确认失败"))
+    return result
+
+
+@router.post("/hitl/{pending_id}/reject")
+async def reject_hitl(
+    pending_id: str,
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """拒绝执行待确认的关键操作。"""
+    from core.hitl.assistant_hitl import reject_pending
+
+    user_id = str(current_user.id) if hasattr(current_user, "id") else str(current_user.get("_id", ""))
+    result = await reject_pending(db, pending_id=pending_id, user_id=user_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "拒绝失败"))
+    return result

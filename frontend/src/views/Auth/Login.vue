@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="login-page">
     <div class="login-container">
       <div class="login-header">
@@ -121,7 +121,7 @@ import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -157,7 +157,7 @@ const showAgreementDialog = async () => {
       const response = await fetch('/legal/USER_AGREEMENT.md')
       if (response.ok) {
         const mdText = await response.text()
-        agreementHtml.value = await marked(mdText)
+        agreementHtml.value = renderMarkdown(mdText)
       } else {
         agreementHtml.value = '<p>用户协议加载失败，请稍后重试。</p>'
       }
@@ -175,7 +175,7 @@ const showPrivacyDialog = async () => {
       const response = await fetch('/legal/PRIVACY_POLICY.md')
       if (response.ok) {
         const mdText = await response.text()
-        privacyHtml.value = await marked(mdText)
+        privacyHtml.value = renderMarkdown(mdText)
       } else {
         privacyHtml.value = '<p>隐私政策加载失败，请稍后重试。</p>'
       }

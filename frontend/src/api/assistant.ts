@@ -4,11 +4,43 @@
 
 import { ApiClient, request } from './request'
 
+export interface StockScopeReport {
+  task_id?: string
+  analysis_id?: string
+  completed_at?: string
+  is_stale?: boolean
+  stale_hours?: number
+  summary?: string
+  recommendation?: string
+  conclusion?: string
+  action?: string
+  confidence?: number | null
+}
+
+export interface StockScope {
+  code?: string
+  stock_name?: string
+  thread_id?: string
+  reports?: {
+    stock_report?: StockScopeReport
+    position_report?: StockScopeReport
+  }
+  review_summary?: StockScopeReport & {
+    trade_count?: number | null
+  }
+  current_quote?: {
+    price?: number
+    change_percent?: number
+  }
+}
+
 export interface UserContext {
   current_route?: string
   is_jdyun_mode?: boolean
   guide_completed?: boolean
   recent_console_errors?: string[]
+  /** 股票详情页上下文（仅 general 角色从详情页进入时使用，用于主题限定与报告聚合解读） */
+  stock_scope?: StockScope
 }
 
 export interface ChatRequest {
@@ -18,7 +50,7 @@ export interface ChatRequest {
   model_config_id?: string
   /** 助手角色：general=通用分析助理（默认）/ usage_helper=使用问答机器人 */
   assistant_role?: 'general' | 'usage_helper'
-  /** 前端上下文（仅 usage_helper 模式使用） */
+  /** 前端上下文（usage_helper 模式传页面状态，general 模式从详情页进入时传 stock_scope） */
   user_context?: UserContext
 }
 

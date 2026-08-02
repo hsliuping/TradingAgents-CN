@@ -190,6 +190,23 @@ def get_provider_and_url_by_model_sync(
             model_name = parsed_model
             logger.info(f"🔧 [同步查询] 解析旧格式模型名: {parsed_provider}::{parsed_model} → provider={preferred_provider}, model={model_name}")
 
+        # 🔧 京东云模式：直接使用环境变量配置，跳过数据库查询
+        from app.core.jdyun import (
+            is_jdyun_mode, get_jdyun_api_base, get_jdyun_api_key,
+            get_jdyun_default_model, JDYUN_PROVIDER_NAME,
+        )
+        if is_jdyun_mode():
+            api_base = get_jdyun_api_base()
+            api_key = get_jdyun_api_key()
+            if api_base and api_key:
+                effective_model = model_name if model_name else get_jdyun_default_model()
+                logger.info(f"🔧 [京东云模式] 使用京东云配置: model={effective_model}, api_base={api_base}")
+                return {
+                    "provider": JDYUN_PROVIDER_NAME,
+                    "backend_url": api_base,
+                    "api_key": api_key,
+                }
+
         normalized_provider = str(preferred_provider or "").strip().lower()
         normalized_config_id = str(preferred_config_id or "").strip()
 
@@ -888,14 +905,20 @@ class SimpleAnalysisService:
             return PyObjectId(new_object_id)
 
     def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
-        """获取或创建TradingAgents实例
+        """获取或创建TradingAgents实例 — 已停用
 
-        ⚠️ 注意：为了避免并发执行时的数据混淆，每次都创建新实例
-        虽然这会增加一些初始化开销，但可以确保线程安全
+        v3.0 起旧版 TradingAgentsGraph 引擎已停用。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
 
-        TradingAgentsGraph 实例包含可变状态（self.ticker, self.curr_state等），
-        如果多个线程共享同一个实例，会导致数据混淆。
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
         """
+        raise RuntimeError(
+            "[已停用] SimpleAnalysisService._get_trading_graph 已停用，"
+            "TradingAgentsGraph 不再实例化。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         # 🔧 [并发安全] 每次都创建新实例，避免多线程共享状态
         # 不再使用缓存，因为 TradingAgentsGraph 有可变的实例变量
         logger.info(f"🔧 创建新的TradingAgents实例（并发安全模式）...")
@@ -1101,7 +1124,20 @@ class SimpleAnalysisService:
         user_id: str,
         request: SingleAnalysisRequest
     ):
-        """在后台执行分析任务"""
+        """在后台执行分析任务 — 已停用
+
+        v3.0 起旧版 legacy 引擎已停用，队列 Worker 应走 v2 引擎分支。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
+        """
+        raise RuntimeError(
+            "[已停用] SimpleAnalysisService.execute_analysis_background 已停用，"
+            "task_id=%s 应改用 v2 引擎（thread_worker 的 engine='v2' 分支）。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md" % task_id
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         # 🔧 使用 get_symbol() 方法获取股票代码（兼容 symbol 和 stock_code 字段）
         stock_code = request.get_symbol()
 
@@ -1421,7 +1457,20 @@ class SimpleAnalysisService:
         request: SingleAnalysisRequest,
         progress_tracker: Optional[RedisProgressTracker] = None
     ) -> Dict[str, Any]:
-        """同步执行分析（在共享线程池中运行）"""
+        """同步执行分析（在共享线程池中运行）— 已停用
+
+        v3.0 起旧版 legacy 引擎已停用。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
+        """
+        raise RuntimeError(
+            "[已停用] SimpleAnalysisService._execute_analysis_sync 已停用，"
+            "task_id=%s 应改用 v2 引擎。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md" % task_id
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         # 🔧 使用共享线程池，支持多个任务并发执行
         # 不再每次创建新的线程池，避免串行执行
         loop = asyncio.get_event_loop()
@@ -1445,7 +1494,20 @@ class SimpleAnalysisService:
         request: SingleAnalysisRequest,
         progress_tracker: Optional[RedisProgressTracker] = None
     ) -> Dict[str, Any]:
-        """同步执行分析的具体实现"""
+        """同步执行分析的具体实现 — 已停用
+
+        v3.0 起旧版 legacy 引擎已停用。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
+
+        Raises:
+            RuntimeError: 始终抛出（方法已停用）
+        """
+        raise RuntimeError(
+            "[已停用] SimpleAnalysisService._run_analysis_sync 已停用，"
+            "task_id=%s 应改用 v2 引擎。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md" % task_id
+        )
+        # pragma: no cover - 以下原代码保留但不执行，为 v4.0 删除做准备
         try:
             # 🔑 关键：在方法开始时提取股票代码（兼容 symbol 和 stock_code 字段）
             stock_code = request.get_symbol()
@@ -1687,12 +1749,12 @@ class SimpleAnalysisService:
 
                     # 研究团队阶段
                     time.sleep(10)
-                    progress_tracker.update_progress("🐂 看涨研究员构建论据")
+                    progress_tracker.update_progress("🐂 积极证据研究员构建论据")
 
                     time.sleep(8)
-                    progress_tracker.update_progress("🐻 看跌研究员识别风险")
+                    progress_tracker.update_progress("🐻 谨慎证据研究员识别风险")
 
-                    # 辩论阶段 - 根据5个级别确定辩论轮次
+                    # 多情景研究阶段 - 根据5个级别确定研究轮次
                     research_depth = request.parameters.research_depth if request.parameters else "标准"
                     if research_depth == "快速":
                         debate_rounds = 1
@@ -1709,27 +1771,27 @@ class SimpleAnalysisService:
 
                     for round_num in range(debate_rounds):
                         time.sleep(12)
-                        progress_tracker.update_progress(f"🎯 研究辩论 第{round_num+1}轮")
+                        progress_tracker.update_progress(f"🎯 多情景研究 第{round_num+1}轮")
 
                     time.sleep(8)
-                    progress_tracker.update_progress("👔 研究经理形成共识")
+                    progress_tracker.update_progress("👔 研究整合员形成共识")
 
-                    # 交易员阶段
+                    # 研究整合员阶段
                     time.sleep(10)
-                    progress_tracker.update_progress("💼 交易员制定策略")
+                    progress_tracker.update_progress("💼 研究整合员整理简报")
 
                     # 风险管理阶段
                     time.sleep(8)
-                    progress_tracker.update_progress("🔥 激进风险评估")
+                    progress_tracker.update_progress("🔥 高弹性情景风险评估")
 
                     time.sleep(6)
-                    progress_tracker.update_progress("🛡️ 保守风险评估")
+                    progress_tracker.update_progress("🛡️ 防御情景风险评估")
 
                     time.sleep(6)
-                    progress_tracker.update_progress("⚖️ 中性风险评估")
+                    progress_tracker.update_progress("⚖️ 基准情景风险评估")
 
                     time.sleep(8)
-                    progress_tracker.update_progress("🎯 风险经理制定策略")
+                    progress_tracker.update_progress("🎯 风险评估师制定策略")
 
                     # 最终阶段
                     time.sleep(5)
@@ -1750,17 +1812,17 @@ class SimpleAnalysisService:
                 "💼 基本面分析师": 45,       # 10% + 35%
                 "📰 新闻分析师": 27.5,       # 如果有3个分析师
                 "💬 社交媒体分析师": 27.5,   # 如果有4个分析师
-                # 研究辩论阶段 (45% → 70%)
-                "🐂 看涨研究员": 51.25,      # 45% + 6.25%
-                "🐻 看跌研究员": 57.5,       # 45% + 12.5%
+                # 多情景研究阶段 (45% → 70%)
+                "🐂 积极证据研究员": 51.25,      # 45% + 6.25%
+                "🐻 谨慎证据研究员": 57.5,       # 45% + 12.5%
                 "👔 研究经理": 70,           # 45% + 25%
-                # 交易员阶段 (70% → 78%)
-                "💼 交易员决策": 78,         # 70% + 8%
-                # 风险评估阶段 (78% → 93%)
-                "🔥 激进风险评估": 81.75,    # 78% + 3.75%
-                "🛡️ 保守风险评估": 85.5,    # 78% + 7.5%
-                "⚖️ 中性风险评估": 89.25,   # 78% + 11.25%
-                "🎯 风险经理": 93,           # 78% + 15%
+                # 研究整合阶段 (70% → 78%)
+                "🧩 研究整合员汇总": 78,         # 70% + 8%
+                # 风险情景研究阶段 (78% → 93%)
+                "🔥 高弹性情景研究": 81.75,    # 78% + 3.75%
+                "🛡️ 防御情景研究": 85.5,    # 78% + 7.5%
+                "⚖️ 基准情景研究": 89.25,   # 78% + 11.25%
+                "👔 风险评估师": 93,           # 78% + 15%
                 # 最终阶段 (93% → 100%)
                 "📊 生成报告": 97,           # 93% + 4%
             }
@@ -2007,7 +2069,7 @@ class SimpleAnalysisService:
                 if hasattr(state, 'risk_debate_state') or (isinstance(state, dict) and 'risk_debate_state' in state):
                     risk_state = getattr(state, 'risk_debate_state', None) if hasattr(state, 'risk_debate_state') else state.get('risk_debate_state')
                     if risk_state:
-                        # 提取激进分析师历史
+                        # 提取高弹性情景分析师历史
                         if hasattr(risk_state, 'risky_history'):
                             risky_content = getattr(risk_state, 'risky_history', "")
                         elif isinstance(risk_state, dict) and 'risky_history' in risk_state:
@@ -2019,7 +2081,7 @@ class SimpleAnalysisService:
                             reports['risky_analyst'] = risky_content.strip()
                             logger.info(f"📊 [REPORTS] 提取报告: risky_analyst - 长度: {len(risky_content.strip())}")
 
-                        # 提取保守分析师历史
+                        # 提取防御情景分析师历史
                         if hasattr(risk_state, 'safe_history'):
                             safe_content = getattr(risk_state, 'safe_history', "")
                         elif isinstance(risk_state, dict) and 'safe_history' in risk_state:
@@ -2043,7 +2105,7 @@ class SimpleAnalysisService:
                             reports['neutral_analyst'] = neutral_content.strip()
                             logger.info(f"📊 [REPORTS] 提取报告: neutral_analyst - 长度: {len(neutral_content.strip())}")
 
-                        # 提取投资组合经理决策
+                        # 提取风险评估师决策
                         if hasattr(risk_state, 'judge_decision'):
                             risk_decision = getattr(risk_state, 'judge_decision', "")
                         elif isinstance(risk_state, dict) and 'judge_decision' in risk_state:
@@ -2075,7 +2137,7 @@ class SimpleAnalysisService:
             formatted_decision = {}
             try:
                 if isinstance(decision, dict):
-                    # 处理目标价格
+                    # 处理验证价位（历史字段 target_price 仅作兼容）
                     target_price = decision.get('target_price')
                     if target_price is not None and target_price != 'N/A':
                         try:
@@ -2092,16 +2154,21 @@ class SimpleAnalysisService:
                     else:
                         target_price = None
 
-                    # 将英文投资建议转换为中文
+                    # 将英文/旧研究结论转换为中文合规术语
                     action_translation = {
-                        'BUY': '买入',
-                        'SELL': '卖出',
-                        'HOLD': '持有',
-                        'buy': '买入',
-                        'sell': '卖出',
-                        'hold': '持有'
+                        'BUY': '乐观',
+                        'SELL': '审慎',
+                        'HOLD': '中性',
+                        'buy': '乐观',
+                        'sell': '审慎',
+                        'hold': '中性',
+                        '买入': '乐观',
+                        '卖出': '审慎',
+                        '持有': '中性',
+                        '看涨': '乐观',
+                        '看跌': '审慎',
                     }
-                    action = decision.get('action', '持有')
+                    action = decision.get('action', '中性')
                     chinese_action = action_translation.get(action, action)
 
                     formatted_decision = {
@@ -2116,7 +2183,7 @@ class SimpleAnalysisService:
                 else:
                     # 处理其他类型
                     formatted_decision = {
-                        'action': '持有',
+                        'action': '中性',
                         'confidence': 0.5,
                         'risk_score': 0.3,
                         'target_price': None,
@@ -2126,7 +2193,7 @@ class SimpleAnalysisService:
             except Exception as e:
                 logger.error(f"❌ 格式化decision失败: {e}")
                 formatted_decision = {
-                    'action': '持有',
+                    'action': '中性',
                     'confidence': 0.5,
                     'risk_score': 0.3,
                     'target_price': None,
@@ -2163,7 +2230,7 @@ class SimpleAnalysisService:
                 price_range = formatted_decision.get('price_analysis_range') or formatted_decision.get('target_price')
                 reasoning = formatted_decision.get('reasoning', '')
 
-                # 🔥 合规修改：生成分析观点（不包含具体价格和操作建议）
+                # 🔥 合规修改：生成分析观点（不包含具体价格和研究观察）
                 recommendation_parts = []
                 if action and action != '中性':
                     recommendation_parts.append(f"分析观点：{action}")
@@ -3162,17 +3229,17 @@ class SimpleAnalysisService:
                 except Exception as e:
                     logger.warning(f"⚠️ 保存模块 {module_key} 失败: {e}")
 
-            # 保存最终决策报告 - 完全按照web目录的方式
+            # 保存最终研究结论报告 - 完全按照web目录的方式
             decision = result.get('decision', {})
             if decision:
-                decision_content = f"# {stock_symbol} 最终分析决策\n\n"
+                decision_content = f"# {stock_symbol} 最终研究结论\n\n"
 
                 if isinstance(decision, dict):
                     decision_content += f"## 市场分析\n\n"
                     decision_content += f"**分析观点**: {decision.get('action', 'N/A')}\n\n"
                     decision_content += f"**置信度**: {decision.get('confidence', 0):.1%}\n\n"
                     decision_content += f"**风险评分**: {decision.get('risk_score', 0):.1%}\n\n"
-                    decision_content += f"**目标价位**: {decision.get('target_price', 'N/A')}\n\n"
+                    decision_content += f"**关键验证价位**: {decision.get('target_price', 'N/A')}\n\n"
                     decision_content += f"## 分析推理\n\n{decision.get('reasoning', '暂无分析推理')}\n\n"
                 else:
                     decision_content += f"{str(decision)}\n\n"
@@ -3182,7 +3249,7 @@ class SimpleAnalysisService:
                     f.write(decision_content)
 
                 saved_files['final_trade_decision'] = str(decision_file)
-                logger.info(f"✅ 保存最终决策: {decision_file}")
+                logger.info(f"✅ 保存最终研究结论: {decision_file}")
 
             # 保存分析元数据文件 - 完全按照web目录的方式
             metadata = {

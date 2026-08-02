@@ -70,6 +70,121 @@ def _build_mem0_collection_name(embedder: Optional[Dict[str, Any]]) -> str:
     return f"{_QDRANT_COLLECTION}_{provider}_{model}_{dims or '0'}_{fingerprint}"
 
 
+def _backup_collection_payload(client, collection_name: str, base_path: str) -> Optional[str]:
+    """备份 collection 的所有 payload 到 JSON 文件，返回备份文件路径。
+
+    维度不匹配时旧向量无法直接迁移到新 collection，但 payload（用户记忆文本和元数据）
+    可以通过 migrate_mem0_collection.py 脚本用新 embedder 重新向量化后写入。
+    """
+    import json
+    from datetime import datetime
+
+    backup_dir = os.path.join(base_path, "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_file = os.path.join(backup_dir, f"{collection_name}_{timestamp}.json")
+
+    points = []
+    offset = None
+    while True:
+        batch, offset = client.scroll(
+            collection_name=collection_name,
+            limit=256,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if not batch:
+            break
+        for p in batch:
+            points.append({"id": str(p.id), "payload": p.payload})
+        if offset is None:
+            break
+
+    with open(backup_file, "w", encoding="utf-8") as f:
+        json.dump(
+            {"collection": collection_name, "count": len(points), "points": points},
+            f, ensure_ascii=False, indent=2,
+        )
+    return backup_file
+
+
+def _ensure_qdrant_collection_dimension(vector_store_cfg: Dict[str, Any], expected_dims: int) -> None:
+    """
+    确保本地 Qdrant collection 维度与 embedder 一致。
+
+    应在 mem0 初始化**之前**调用（此时无 QdrantClient 持有文件锁）。
+    若在 mem0 已初始化后调用（如 health_check 路径），会因 portalocker 文件锁失败——
+    但此时 mem0 已正常工作，说明维度必然匹配，失败可安全忽略。
+
+    行为：
+    1. 当前 collection 不存在 → mem0 自动创建，无需处理
+    2. 当前 collection 存在且维度匹配 → 无需处理
+    3. 当前 collection 存在但维度不匹配 → 先备份 payload 到 JSON，再删除重建
+    4. 扫描所有 mem0_memories* 旧 collection，提示用户手动迁移
+    """
+    from qdrant_client import QdrantClient
+
+    path = vector_store_cfg.get("path")
+    collection_name = vector_store_cfg.get("collection_name")
+    if not path or not collection_name:
+        return
+
+    try:
+        client = QdrantClient(path=path)
+        try:
+            collections = client.get_collections().collections
+
+            # 问题 5：扫描遗留的旧命名 collection，提示用户迁移
+            for col in collections:
+                name = col.name
+                if name == collection_name or not name.startswith(_QDRANT_COLLECTION):
+                    continue
+                logger.info(
+                    "mem0 config: 检测到历史 collection '%s'（当前使用 '%s'）。"
+                    "如需迁移数据，请执行：python app/scripts/migrate_mem0_collection.py --source %s",
+                    name, collection_name, name,
+                )
+
+            # 检查当前 collection 维度
+            if not any(col.name == collection_name for col in collections):
+                return  # collection 不存在，mem0 会自动创建
+
+            info = client.get_collection(collection_name)
+            actual_dims = int(info.config.params.vectors.size)
+            if actual_dims == expected_dims:
+                return  # 维度匹配，无需处理
+
+            # 问题 3：维度不匹配 → 先备份 payload，再删除
+            logger.warning(
+                "mem0 config: Qdrant collection %s 维度不匹配 (实际 %d, 期望 %d)，"
+                "先备份 payload 再删除旧集合并重建",
+                collection_name, actual_dims, expected_dims,
+            )
+            backup_path = _backup_collection_payload(client, collection_name, path)
+            if backup_path:
+                logger.warning(
+                    "mem0 config: 旧 collection payload 已备份到 %s",
+                    backup_path,
+                )
+            else:
+                logger.error(
+                    "mem0 config: 备份失败，拒绝删除 collection %s。"
+                    "请手动迁移后重启服务。",
+                    collection_name,
+                )
+                return  # 备份失败就不删除
+
+            client.delete_collection(collection_name)
+            # mem0 初始化时会按 expected_dims 自动创建新集合
+        finally:
+            client.close()
+    except Exception as e:
+        # 文件锁冲突（AlreadyLocked）说明 mem0 已初始化并在用此 collection，
+        # 维度必然匹配（否则写入早就报错），可安全忽略。
+        logger.debug("mem0 config: 检查/重建 Qdrant collection 时出错（已忽略）: %s", e)
+
+
 def _env(key: str, default: str = "") -> str:
     return (os.environ.get(key) or "").strip() or default
 
@@ -128,7 +243,16 @@ def _get_embedding_dimension(model_name: str) -> int:
         from core.llm.embedding_manager import EMBEDDING_DIMENSIONS
 
         model_key = (model_name or "").strip()
-        return int(EMBEDDING_DIMENSIONS.get(model_key, EMBEDDING_DIMENSIONS.get("default", 1024)))
+        dims = EMBEDDING_DIMENSIONS.get(model_key)
+        if dims is not None:
+            return int(dims)
+        logger.warning(
+            "mem0 config: Embedding 模型 '%s' 不在维度表中，默认使用 1024 维。"
+            "若实际维度不符（写入时报 ValueError: shapes not aligned），"
+            "请在 core/llm/embedding_manager.py 的 EMBEDDING_DIMENSIONS 中补充该模型的维度。",
+            model_key,
+        )
+        return int(EMBEDDING_DIMENSIONS.get("default", 1024))
     except Exception:
         return 1024
 
@@ -276,7 +400,19 @@ def _resolve_embedding_from_db(db_settings: dict) -> dict:
 
     # 本地 Embedding 模型：启动 Ollama 兼容代理，绕过外部 API
     if preferred_provider_name == _LOCAL_PROVIDER:
-        return _build_local_ollama_embedder(preferred_model_name)
+        try:
+            local_embedder = _build_local_ollama_embedder(preferred_model_name)
+            if local_embedder:
+                return local_embedder
+        except Exception as e:
+            logger.warning(
+                "mem0 config: 本地 Embedding 模型 %s 启动失败 (%s)，尝试回退到在线 Embedding provider",
+                preferred_model_name,
+                e,
+            )
+        # 本地模型不可用时，继续尝试在线 provider 兜底
+        preferred_provider_name = ""
+        preferred_model_name = ""
 
     sync_db = _get_sync_db()
     if sync_db is None:
@@ -327,6 +463,70 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
     LLM / Embedding 配置直接从数据库 system_configs + llm_providers 读取，
     与分析流程使用相同的模型和凭证。
     """
+    # 🔧 京东云模式：使用环境变量配置，跳过数据库查询
+    from app.core.jdyun import (
+        is_jdyun_mode, get_jdyun_api_base, get_jdyun_api_key,
+        get_jdyun_embedding_model, get_jdyun_default_model,
+        JDYUN_EMBEDDING_DIMS, JDYUN_PROVIDER_NAME,
+    )
+    if is_jdyun_mode():
+        jdyun_api_base = get_jdyun_api_base()
+        jdyun_api_key = get_jdyun_api_key()
+        jdyun_embedding_model = get_jdyun_embedding_model()
+        jdyun_chat_model = get_jdyun_default_model()
+
+        logger.info(
+            "mem0 config: 京东云模式 — embedding=%s, chat=%s, api_base=%s",
+            jdyun_embedding_model, jdyun_chat_model, jdyun_api_base,
+        )
+
+        # Embedder: 使用京东云 OpenAI 兼容接口
+        embedder = {
+            "provider": "openai",
+            "config": {
+                "model": jdyun_embedding_model,
+                "api_key": jdyun_api_key,
+                "openai_base_url": _normalize_openai_base_url(jdyun_api_base),
+                "embedding_dims": JDYUN_EMBEDDING_DIMS,
+            },
+        }
+        collection_name = _build_mem0_collection_name(embedder)
+
+        # Vector Store
+        qdrant_base = _env("QDRANT_DATA_DIR", "./data/qdrant")
+        mem0_qdrant_path = os.path.join(qdrant_base, "mem0")
+        vector_store = {
+            "provider": "qdrant",
+            "config": {
+                "path": mem0_qdrant_path,
+                "collection_name": collection_name,
+                "on_disk": True,
+            },
+        }
+
+        # LLM: 使用京东云 OpenAI 兼容接口
+        llm = {
+            "provider": "openai",
+            "config": {
+                "api_key": jdyun_api_key,
+                "model": jdyun_chat_model,
+                "openai_base_url": _normalize_openai_base_url(jdyun_api_base),
+                "temperature": 0.1,
+                "max_tokens": 2000,
+            },
+        }
+
+        from .prompts import FINANCIAL_FACT_EXTRACTION_PROMPT
+
+        return {
+            "vector_store": vector_store,
+            "llm": llm,
+            "embedder": embedder,
+            "custom_prompt": FINANCIAL_FACT_EXTRACTION_PROMPT,
+            "version": "v1.1",
+        }
+
+    # ===== 非京东云模式：原有逻辑 =====
     config_doc = _read_active_system_config(db)
     db_settings = config_doc.get("system_settings") or {}
     llm_configs = config_doc.get("llm_configs") or []
@@ -338,13 +538,24 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
     # --- Vector Store: 独立子目录，避免与现有 QdrantAdapter 文件锁冲突 ---
     qdrant_base = _env("QDRANT_DATA_DIR", "./data/qdrant")
     mem0_qdrant_path = os.path.join(qdrant_base, "mem0")
+    # Qdrant vector store 默认维度为 1536；必须显式传入 embedding_model_dims，
+    # 否则 collection 创建/复用时维度会与 embedder 输出不一致，导致写入/搜索失败。
+    embedding_dims = 1024
+    if embedder:
+        embedding_dims = int(embedder.get("config", {}).get("embedding_dims") or embedding_dims)
+
+    vector_store_cfg = {
+        "path": mem0_qdrant_path,
+        "collection_name": collection_name,
+        "embedding_model_dims": embedding_dims,
+        "on_disk": True,
+    }
+    # 注意：维度检查（_ensure_qdrant_collection_dimension）已移到
+    # MemoryService._ensure_init 中执行。build_mem0_config 应为纯函数，
+    # 不产生副作用。健康检查等路径调用 build_mem0_config 时不会触发文件锁冲突。
     vector_store = {
         "provider": "qdrant",
-        "config": {
-            "path": mem0_qdrant_path,
-            "collection_name": collection_name,
-            "on_disk": True,
-        },
+        "config": vector_store_cfg,
     }
 
     # --- LLM: 复用统一的系统模型选择与凭证解析逻辑 ---

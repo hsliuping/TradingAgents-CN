@@ -74,7 +74,7 @@ async def list_positions(
 @register_tool(
     tool_id="get_position_analysis",
     name="获取持仓分析报告",
-    description="获取某只持仓股票的最新 AI 分析报告，包含操作建议（加仓/减仓/持有/清仓）、目标价位、风险评估等。",
+    description="获取某只持仓股票的最新 AI 研究分析报告，包含研究观察倾向、关键验证价位、风险审阅要点等。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -83,9 +83,9 @@ async def list_positions(
     capability_tags=["position_analysis", "position", "query", "report", "assistant_ops", "ai_analysis", "position_report", "action_suggestion", "price_target", "risk_assessment", "holdings_analysis"],
     tool_role_hint="primary",
     output_shape="report",
-    preferred_for=["持仓分析报告查看", "操作建议查询", "目标价位确认", "持仓风险评估"],
-    when_to_use="当用户想查看某只持仓股票的最新 AI 分析报告、获取加仓/减仓/持有/清仓等操作建议时使用。",
-    returns="返回文本报告，包含操作建议、置信度、持仓摘要、目标价位、止损价和分析详情。",
+    preferred_for=["持仓分析报告查看", "研究观察查询", "关键价位确认", "持仓风险审阅"],
+    when_to_use="当用户想查看某只持仓股票的最新 AI 研究分析报告、获取研究观察与风险审阅参考时使用。",
+    returns="返回文本报告，包含研究观察倾向、置信度、持仓摘要、关键验证价位、风险关注价格和分析详情。",
 )
 async def get_position_analysis(
     code: Annotated[str, "股票代码，如 600519、00700"],
@@ -114,7 +114,7 @@ async def get_position_analysis(
         created = report.get("created_at", "")
 
         lines.append(f"{name}({code}) 持仓分析报告")
-        lines.append(f"状态: {status} | 操作建议: {action}" + (f" | 置信度: {confidence}%" if confidence else ""))
+        lines.append(f"状态: {status} | 研究观察: {action}" + (f" | 置信度: {confidence}%" if confidence else ""))
 
         # 持仓摘要
         summary = report.get("summary") or {}
@@ -127,12 +127,12 @@ async def get_position_analysis(
             if pnl is not None:
                 lines.append(f"浮动盈亏: {pnl:+.2f}" + (f" ({pnl_pct:+.2f}%)" if pnl_pct is not None else ""))
 
-        # 目标价位
+        # 关键验证价位
         pt = report.get("price_targets") or {}
         if pt.get("target_price") or pt.get("stop_loss"):
             tp = pt.get("target_price")
             sl = pt.get("stop_loss")
-            lines.append(f"目标价: {tp}" + (f" | 止损价: {sl}" if sl else ""))
+            lines.append(f"关键验证价位: {tp}" + (f" | 风险关注价格: {sl}" if sl else ""))
 
         # 操作理由
         reason = report.get("action_reason")
@@ -170,7 +170,7 @@ async def get_position_analysis(
 @register_tool(
     tool_id="trigger_position_analysis",
     name="发起持仓分析",
-    description="对某只持仓股票发起一次新的 AI 持仓分析任务，结合持仓成本、盈亏等信息生成操作建议（加仓/减仓/持有/清仓）、目标价位和风险评估。任务在后台异步执行（约2-5分钟），返回任务ID。",
+    description="对某只持仓股票发起一次新的 AI 持仓研究分析任务，结合持仓成本、盈亏等信息生成研究观察、关键验证价位和风险审阅。任务在后台异步执行（约2-5分钟），返回任务ID。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -179,8 +179,8 @@ async def get_position_analysis(
     capability_tags=["position_analysis", "position", "trigger", "create", "assistant_ops", "ai_analysis", "async_task", "position_analysis_task", "action_suggestion", "deep_analysis", "holdings_analysis"],
     tool_role_hint="primary",
     output_shape="text",
-    preferred_for=["持仓分析触发", "持仓 AI 分析发起", "操作建议生成", "持仓深度分析"],
-    when_to_use="当用户要求对某只持仓股票发起 AI 分析、生成操作建议和目标价位时使用，任务在后台异步执行（约2-5分钟）。",
+    preferred_for=["持仓分析触发", "持仓 AI 分析发起", "研究观察生成", "持仓深度分析"],
+    when_to_use="当用户要求对某只持仓股票发起 AI 研究分析、生成研究观察与关键验证价位时使用，任务在后台异步执行（约2-5分钟）。",
     returns="返回文本消息，包含任务ID、股票代码、市场、持仓类型、分析重点和预计完成时间。",
 )
 async def trigger_position_analysis(

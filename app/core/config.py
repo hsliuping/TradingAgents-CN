@@ -168,6 +168,22 @@ class Settings(BaseSettings):
     METRICS_ENABLED: bool = Field(default=True)
     HEALTH_CHECK_INTERVAL: int = Field(default=60)  # 60秒
 
+    # Agent 执行轨迹采集（P1: 机器可读执行轨迹）
+    AGENT_EXECUTION_TRACE_ENABLED: bool = Field(
+        default=False,
+        description="启用 Agent 执行轨迹采集（写入 MongoDB agent_execution_traces 集合）。默认关闭，排查问题时可开启，或通过分析任务的 enable_trace 参数单次开启。"
+    )
+
+    # Agent 断言执行（P2: 反思 lesson 升级为可执行断言）
+    AGENT_ASSERTION_ENABLED: bool = Field(
+        default=True,
+        description="启用 Agent 断言执行（从 agent_assertions 集合加载并执行断言）"
+    )
+    AGENT_ASSERTION_CACHE_TTL_SECONDS: int = Field(
+        default=60,
+        description="断言进程内缓存 TTL（秒），避免每次执行都查 MongoDB"
+    )
+
 
     # 配置真相来源（方案A）：file|db|hybrid
     # - file：以文件/env 为准（推荐，生产缺省）
@@ -220,6 +236,16 @@ class Settings(BaseSettings):
     TUSHARE_ENABLED: bool = Field(default=True, description="启用Tushare数据源")
     TUSHARE_TIER: str = Field(default="standard", description="Tushare积分等级 (free/basic/standard/premium/vip)")
     TUSHARE_RATE_LIMIT_SAFETY_MARGIN: float = Field(default=0.8, ge=0.1, le=1.0, description="速率限制安全边际")
+
+    # ==================== 京东云合作版配置 ====================
+    # 通过 JDYUN_MODE=true 启用京东云合作版模式
+    # 启用后，LLM 和数据源配置从京东云平台注入的环境变量读取：
+    # - OPENAI_API_BASE: 京东云模型服务地址
+    # - OPENAI_API_KEY: 京东云 API Key
+    # - OPENAI_MODEL: 默认对话模型（GLM-5 / GLM-5.1 / GLM-5.2 / DeepSeek-V4-Flash）
+    # - EMBEDDING_MODEL: Embedding 模型（默认 Qwen3-Embedding-8B）
+    # - TUSHARE_TOKEN: Tushare 数据源 Token
+    JDYUN_MODE: bool = Field(default=False, description="京东云合作版模式开关")
 
     # Tushare统一数据同步配置
     TUSHARE_UNIFIED_ENABLED: bool = Field(default=True)
@@ -396,8 +422,20 @@ class Settings(BaseSettings):
         return not self.DEBUG
 
     _DEFAULT_SECRETS = frozenset({
+        # 历史默认值
         "change-me-in-production",
         "change-me-csrf-secret",
+        # .env.example / .env.docker 中的可预测占位符（占位符不是真密钥，禁止直接使用）
+        "your-super-secret-jwt-key-change-in-production",
+        "your-csrf-secret-key-change-in-production",
+        "docker-jwt-secret-key-change-in-production-2024",
+        "docker-csrf-secret-key-change-in-production-2024",
+        # 京东云 docker-compose 中的不安全默认值，必须禁止在生产环境使用
+        "jdyun-jwt-secret-key-change-in-production-2024",
+        "jdyun-csrf-secret-key-change-in-production-2024",
+        # 新增占位符（防止用户直接复制 .env.example 而未修改）
+        "PLEASE_CHANGE_JWT_SECRET_USE_openssl_rand_base64_48",
+        "PLEASE_CHANGE_CSRF_SECRET_USE_openssl_rand_base64_48",
     })
 
     @model_validator(mode="after")
@@ -434,7 +472,9 @@ class Settings(BaseSettings):
         return self
 
     # Ignore any extra environment variables present in .env or process env
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    # 支持通过 DOTENV_FILE 环境变量指定不同的 .env 文件（如京东云模式用 .env.jdyun）
+    _env_file = os.getenv("DOTENV_FILE", ".env")
+    model_config = SettingsConfigDict(env_file=_env_file, env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()
 

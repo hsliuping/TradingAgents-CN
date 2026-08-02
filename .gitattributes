@@ -1,24 +1,3 @@
-# Shell 脚本强制使用 LF 换行符，避免 Linux/macOS 上 /bin/bash^M 错误
+deploy-all-in-one/s6-rc.d/**/run text eol=lf
+deploy-all-in-one/s6-rc.d/**/type text eol=lf
 *.sh text eol=lf
-
-# PowerShell 脚本使用 CRLF（Windows 标准）
-*.ps1 text eol=crlf
-
-# 其他文本文件自动处理
-*.md text
-*.yml text
-*.yaml text
-*.json text
-*.toml text
-*.txt text
-*.env text
-*.conf text
-*.py text
-
-# 二进制文件不转换
-*.png binary
-*.jpg binary
-*.ico binary
-*.exe binary
-*.zip binary
-*.gz binary

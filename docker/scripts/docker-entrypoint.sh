@@ -1,6 +1,7 @@
 #!/bin/bash
 # Docker Entrypoint Script for TradingAgents-CN Backend
 # 自动检测并执行数据库初始化（首次启动时）
+# 🔐 安全：以 root 启动处理挂载卷权限，然后用 gosu 切换到非 root 用户运行应用
 
 # 注意：不使用 set -e，因为初始化失败时仍需要启动服务
 set -u  # 只检查未定义变量
@@ -10,9 +11,30 @@ INIT_MARKER="/app/runtime/.config_imported"
 RUNTIME_DIR="/app/runtime"
 LOG_FILE="/app/logs/docker-entrypoint.log"
 
-# 确保目录存在
-mkdir -p "$RUNTIME_DIR"
-mkdir -p "$(dirname "$LOG_FILE")"
+# 🔐 安全：以 root 身份确保挂载卷目录权限正确，然后切换到 appuser
+# 宿主机挂载的 ./logs ./data ./runtime 目录可能由 root 拥有，需要 chown 给 appuser
+APP_USER="${APP_USER:-appuser}"
+APP_UID="${APP_UID:-1000}"
+APP_GID="${APP_GID:-1000}"
+
+if [ "$(id -u)" = "0" ]; then
+    # 确保 appuser 用户和组存在（与 Dockerfile 中一致）
+    if ! getent group "$APP_GID" >/dev/null 2>&1; then
+        groupadd --system --gid "$APP_GID" "$APP_USER" 2>/dev/null || true
+    fi
+    if ! id -u "$APP_USER" >/dev/null 2>&1; then
+        useradd --system --uid "$APP_UID" --gid "$APP_GID" \
+            --home-dir /app --shell /usr/sbin/nologin "$APP_USER" 2>/dev/null || true
+    fi
+
+    # 确保挂载卷目录存在并归属 appuser
+    mkdir -p "$RUNTIME_DIR" /app/logs /app/data 2>/dev/null || true
+    chown -R "$APP_USER":"$APP_GID" /app/logs /app/data /app/runtime 2>/dev/null || true
+fi
+
+# 确保目录存在（非 root 也能创建，因为已 chown）
+mkdir -p "$RUNTIME_DIR" 2>/dev/null || true
+mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
 
 # 日志函数：同时输出到 stdout 和日志文件
 log() {
@@ -38,9 +60,14 @@ from pymongo import MongoClient
 mongo_host = os.getenv('MONGODB_HOST', 'mongodb')
 mongo_port = os.getenv('MONGODB_PORT', '27017')
 mongo_username = os.getenv('MONGODB_USERNAME', 'admin')
-mongo_password = os.getenv('MONGODB_PASSWORD', 'tradingagents123')
+# 🔐 安全：移除硬编码弱密码默认值，必须通过环境变量提供
+mongo_password = os.getenv('MONGODB_PASSWORD', '')
 mongo_database = os.getenv('MONGODB_DATABASE', 'tradingagents')
 mongo_auth_source = os.getenv('MONGODB_AUTH_SOURCE', 'admin')
+
+if not mongo_password:
+    print('错误：MONGODB_PASSWORD 环境变量未设置', file=sys.stderr)
+    sys.exit(2)
 
 connection_string = f'mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}/{mongo_database}?authSource={mongo_auth_source}'
 client = MongoClient(connection_string, serverSelectionTimeoutMS=3000)
@@ -108,9 +135,9 @@ import traceback
 try:
     from pymongo import MongoClient
     from pymongo.errors import OperationFailure, ConfigurationError
-    
+
     print('正在连接 MongoDB...', file=sys.stderr)
-    
+
     # 尝试多种连接方式
     # 方式1: 使用 Docker Compose 服务名 'mongodb'
     # 方式2: 如果失败，尝试使用环境变量中的主机名
@@ -118,9 +145,14 @@ try:
     mongo_host = os.getenv('MONGODB_HOST', 'mongodb')
     mongo_port = os.getenv('MONGODB_PORT', '27017')
     mongo_username = os.getenv('MONGODB_USERNAME', 'admin')
-    mongo_password = os.getenv('MONGODB_PASSWORD', 'tradingagents123')
+    # 🔐 安全：移除硬编码弱密码默认值，必须通过环境变量提供
+    mongo_password = os.getenv('MONGODB_PASSWORD', '')
     mongo_database = os.getenv('MONGODB_DATABASE', 'tradingagents')
     mongo_auth_source = os.getenv('MONGODB_AUTH_SOURCE', 'admin')
+
+    if not mongo_password:
+        print('错误：MONGODB_PASSWORD 环境变量未设置', file=sys.stderr)
+        sys.exit(1)
     
     connection_string = f'mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}/{mongo_database}?authSource={mongo_auth_source}'
     print(f'连接字符串: mongodb://{mongo_username}:***@{mongo_host}:{mongo_port}/{mongo_database}?authSource={mongo_auth_source}', file=sys.stderr)
@@ -223,7 +255,7 @@ except Exception as e:
         log "   cd docker && docker-compose -f docker-compose.compiled.yml up -d"
         log ""
         log "4. 如果问题持续，尝试手动连接测试:"
-        log "   docker exec tradingagents-backend-pro python -c \"from pymongo import MongoClient; client = MongoClient('mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin', serverSelectionTimeoutMS=5000); print(client.server_info())\""
+        log "   docker exec tradingagents-backend-pro python -c \"from pymongo import MongoClient; import os; pwd=os.getenv('MONGODB_PASSWORD'); client = MongoClient(f'mongodb://admin:{pwd}@mongodb:27017/tradingagents?authSource=admin', serverSelectionTimeoutMS=5000); print(client.server_info())\""
         log ""
         log "继续启动服务，你可以稍后手动运行初始化脚本:"
         log "   docker exec -it tradingagents-backend-pro python scripts/import_config_and_create_user.py"
@@ -233,9 +265,11 @@ except Exception as e:
         # 等待 Redis（可选，不阻塞）
         if python -c "
 import sys
+import os
 try:
     import redis
-    r = redis.Redis(host='redis', port=6379, password='tradingagents123', socket_timeout=2)
+    redis_pwd = os.getenv('REDIS_PASSWORD', '')
+    r = redis.Redis(host='redis', port=6379, password=redis_pwd, socket_timeout=2)
     r.ping()
     sys.exit(0)
 except:
@@ -274,7 +308,7 @@ except:
                 log ""
                 log "📋 默认登录信息:"
                 log "   用户名: admin"
-                log "   密码: admin123"
+                log "   密码: 由 ADMIN_DEFAULT_PASSWORD 环境变量指定"
                 log "   ⚠️  请首次登录后立即修改密码！"
             else
                 log ""
@@ -314,5 +348,11 @@ log ""
 log "🚀 启动 FastAPI 后端服务..."
 log ""
 
-# 执行原始命令（CMD 或传入的参数）
-exec "$@"
+# 🔐 安全：以非 root 用户运行应用
+# 如果当前是 root，用 gosu 切换到 appuser；否则直接执行
+if [ "$(id -u)" = "0" ] && command -v gosu >/dev/null 2>&1; then
+    log "🔐 切换到非 root 用户运行: $APP_USER (UID=$APP_UID)"
+    exec gosu "$APP_USER" "$@"
+else
+    exec "$@"
+fi

@@ -1,0 +1,206 @@
+# TradingAgents-CN Pro Docker Compose 配置（京东云合作版）
+#
+# 使用方法:
+# 1. 复制 .env.jdyun.example 为 .env 并填写京东云提供的凭据
+# 2. 启动服务: docker-compose -f docker-compose.jdyun.yml up -d
+# 3. 访问: http://your-server:8082
+#
+# 京东云合作版特点:
+# - 通过环境变量注入大模型和数据源配置，用户无需在界面配置
+# - 仅支持京东云模型服务（OpenAI 兼容接口）
+# - 仅支持 Tushare 数据源
+# - 前端构建时注入 VITE_JDYUN_MODE=true，隐藏配置管理界面
+
+services:
+  # MongoDB 数据库
+  # 🔐 安全：使用 expose 仅暴露给容器内部网络，不映射到宿主机
+  # 📌 版本选择：8.0（2024-10 发布，EOL 2029-10，支持期最长）
+  # ⚠️ 注意：K8s 部署时需确认 Linux 内核版本不是 6.19（不兼容会导致启动崩溃）
+  mongodb:
+    image: mongo:8.0
+    container_name: tradingagents-jdyun-mongodb
+    restart: unless-stopped
+    expose:
+      - "27017"
+    volumes:
+      - tradingagents_jdyun_mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD must be set in .env}
+      MONGO_INITDB_DATABASE: tradingagents
+      TZ: "Asia/Shanghai"
+    networks:
+      - tradingagents-jdyun-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Redis 缓存
+  # 🔐 安全：使用 expose 仅暴露给容器内部网络，不映射到宿主机
+  redis:
+    image: redis:7-alpine
+    container_name: tradingagents-jdyun-redis
+    restart: unless-stopped
+    expose:
+      - "6379"
+    volumes:
+      - tradingagents_jdyun_redis_data:/data
+    environment:
+      TZ: "Asia/Shanghai"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    networks:
+      - tradingagents-jdyun-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # FastAPI 后端服务（京东云版）
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend.compiled.ubuntu
+      args:
+        COMPILE_DIR: docker/build/compiled
+    image: ${DOCKER_IMAGE_NAMESPACE:-hsliup}/tradingagents-jdyun-backend:${IMAGE_TAG:-3-latest}
+    container_name: tradingagents-jdyun-backend
+    restart: unless-stopped
+    expose:
+      - "8000"
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./runtime:/app/runtime
+    env_file:
+      - .env
+    environment:
+      TZ: "Asia/Shanghai"
+      TRADINGAGENTS_LOG_LEVEL: "INFO"
+      TRADINGAGENTS_LOG_DIR: "/app/logs"
+      TRADINGAGENTS_LOG_FILE: "/app/logs/tradingagents.log"
+      # MongoDB 配置
+      MONGODB_HOST: "mongodb"
+      MONGODB_PORT: "27017"
+      MONGODB_USERNAME: "admin"
+      MONGODB_PASSWORD: ${MONGO_PASSWORD}
+      MONGODB_DATABASE: "tradingagents"
+      MONGODB_AUTH_SOURCE: "admin"
+      MONGODB_URL: "mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/tradingagents?authSource=admin"
+      MONGODB_CONNECTION_STRING: "mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/tradingagents?authSource=admin"
+      # Redis 配置
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      DOCKER_CONTAINER: "true"
+      # 生产环境标识（禁用安全检查的 DEBUG 宽限）
+      DEBUG: "false"
+      # 安全配置（必须在 .env 中设置强随机值，否则启动会失败）
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set in .env, generate with: openssl rand -base64 48}"
+      JWT_ALGORITHM: "HS256"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "480"
+      REFRESH_TOKEN_EXPIRE_DAYS: "30"
+      CSRF_SECRET: "${CSRF_SECRET:?CSRF_SECRET must be set in .env, generate with: openssl rand -base64 48}"
+      BCRYPT_ROUNDS: "12"
+      # CORS 配置：生产环境必须指定具体前端地址
+      # ⚠️ 京东云部署时，请在 .env 中设置 ALLOWED_ORIGINS 为实际访问地址
+      # 示例：ALLOWED_ORIGINS=["http://your-domain.com", "http://your-ip:${NGINX_PORT}"]
+      # 如果未设置，默认仅允许 localhost（外部访问会失败）
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-[\"http://localhost:3000\", \"http://localhost:8082\"]}"
+      # 🔧 京东云合作版核心配置（通过环境变量注入）
+      JDYUN_MODE: "true"
+      OPENAI_API_BASE: "${OPENAI_API_BASE:-https://modelservice.jdcloud.com/v1}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-GLM-5}"
+      EMBEDDING_MODEL: "${EMBEDDING_MODEL:-Qwen3-Embedding-8B}"
+      EMBEDDING_API_BASE: "${EMBEDDING_API_BASE:-https://modelservice.jdcloud.com/v1}"
+      EMBEDDING_API_KEY: "${EMBEDDING_API_KEY}"
+      # 数据源配置（仅 Tushare）
+      TUSHARE_TOKEN: "${TUSHARE_TOKEN}"
+      TUSHARE_ENABLED: "true"
+      AKSHARE_ENABLED: "false"
+      BAOSTOCK_ENABLED: "false"
+      FINNHUB_ENABLED: "false"
+      # 向量数据库配置
+      VECTOR_STORE_BACKEND: "qdrant"
+      QDRANT_DATA_DIR: "/app/data/qdrant"
+      MEMORY_ENABLED: "${MEMORY_ENABLED:-true}"
+      # 🔧 LLM 限速配置（应对京东云 API 限速，默认值已优化，通常无需修改）
+      JDYUN_LLM_MAX_RETRIES: "${JDYUN_LLM_MAX_RETRIES:-8}"
+      JDYUN_LLM_MAX_RPM: "${JDYUN_LLM_MAX_RPM:-30}"
+      JDYUN_BATCH_MAX_CONCURRENT: "${JDYUN_BATCH_MAX_CONCURRENT:-1}"
+      JDYUN_WORKER_MAX_CONCURRENT: "${JDYUN_WORKER_MAX_CONCURRENT:-1}"
+      JDYUN_STOCK_INTERVAL_SECONDS: "${JDYUN_STOCK_INTERVAL_SECONDS:-10}"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tradingagents-jdyun-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Vue 3 前端服务（京东云版，多阶段构建自动注入 VITE_JDYUN_MODE=true）
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend.jdyun
+    image: ${DOCKER_IMAGE_NAMESPACE:-hsliup}/tradingagents-jdyun-frontend:${IMAGE_TAG:-3-latest}
+    container_name: tradingagents-jdyun-frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+    environment:
+      TZ: "Asia/Shanghai"
+      VITE_API_BASE_URL: "/api"
+    depends_on:
+      - backend
+    networks:
+      - tradingagents-jdyun-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:80 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: tradingagents-jdyun-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-8082}:80"
+    volumes:
+      - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - tradingagents-jdyun-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  tradingagents_jdyun_mongodb_data:
+    driver: local
+  tradingagents_jdyun_redis_data:
+    driver: local
+
+networks:
+  tradingagents-jdyun-network:
+    driver: bridge

@@ -45,6 +45,27 @@ def _reload_runtime_bridge(reason: str) -> None:
         logger.warning(f"⚠️ 刷新运行时配置桥接失败（忽略）: {reason}, error={e}")
 
 
+def _check_jdyun_mode_protected():
+    """京东云模式下禁用大模型和数据源的增删改操作"""
+    from app.core.jdyun import is_jdyun_mode
+    if is_jdyun_mode():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="京东云合作版不支持修改大模型和数据源配置，请通过环境变量配置"
+        )
+
+
+# ===== 京东云合作版状态端点 =====
+
+@router.get("/jdyun/status", summary="获取京东云配置状态")
+async def get_jdyun_status(
+    current_user: User = Depends(get_current_user)
+):
+    """获取京东云合作版的配置状态（不含敏感信息）"""
+    from app.core.jdyun import get_jdyun_status as _get_status
+    return _get_status()
+
+
 # ===== Gateway 平台配置端点 =====
 
 class GatewayConfigRequest(BaseModel):
@@ -615,6 +636,7 @@ async def add_llm_provider(
     current_user: User = Depends(get_current_user)
 ):
     """添加大模型厂家"""
+    _check_jdyun_mode_protected()
     try:
         from app.utils.api_key_utils import should_skip_api_key_update
 
@@ -674,6 +696,7 @@ async def update_llm_provider(
     request: LLMProviderRequest,
     current_user: User = Depends(get_current_user)
 ):
+    _check_jdyun_mode_protected()
     """更新大模型厂家"""
     try:
         from app.utils.api_key_utils import should_skip_api_key_update
@@ -741,6 +764,7 @@ async def delete_llm_provider(
     current_user: User = Depends(get_current_user)
 ):
     """删除大模型厂家"""
+    _check_jdyun_mode_protected()
     try:
         success = await config_service.delete_llm_provider(provider_id)
 
@@ -964,6 +988,7 @@ async def add_llm_config(
     current_user: User = Depends(get_current_user)
 ):
     """添加或更新大模型配置"""
+    _check_jdyun_mode_protected()
     try:
         logger.info(f"🔧 添加/更新大模型配置开始")
         logger.info(f"📊 请求数据: {request.model_dump()}")
@@ -1052,6 +1077,7 @@ async def add_data_source_config(
     current_user: User = Depends(get_current_user)
 ):
     """添加数据源配置"""
+    _check_jdyun_mode_protected()
     try:
         # 开源版本：所有用户都可以修改配置
 
@@ -1415,6 +1441,7 @@ async def delete_llm_config(
     current_user: User = Depends(get_current_user)
 ):
     """删除大模型配置"""
+    _check_jdyun_mode_protected()
     try:
         logger.info(f"🗑️ 删除大模型配置请求 - provider: {provider}, model_name: {model_name}")
         success = await config_service.delete_llm_config(provider, model_name)
@@ -1495,6 +1522,41 @@ async def set_default_llm(
         )
 
 
+class BatchImportRequest(BaseModel):
+    providers: List[str] = Field(default=[], description="要导入的厂家列表，为空则导入所有已配置API密钥的厂家")
+
+
+@router.post("/llm/batch-import", response_model=dict)
+async def batch_import_llm_configs(
+    request: BatchImportRequest = BatchImportRequest(),
+    current_user: User = Depends(get_current_user)
+):
+    """一键导入：从模型目录和厂家配置批量创建大模型配置（按厂家）"""
+    try:
+        result = await config_service.batch_import_llm_configs(request.providers)
+
+        # 审计日志
+        try:
+            await log_operation(
+                user_id=str(getattr(current_user, "id", "")),
+                username=getattr(current_user, "username", "unknown"),
+                action_type=ActionType.CONFIG_MANAGEMENT,
+                action="batch_import_llm_configs",
+                details=result,
+                success=True,
+            )
+        except Exception:
+            pass
+
+        return result
+    except Exception as e:
+        logger.error(f"批量导入大模型配置失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"批量导入失败: {str(e)}"
+        )
+
+
 @router.get("/datasource", response_model=List[DataSourceConfig])
 async def get_data_source_configs(
     current_user: User = Depends(get_current_user)
@@ -1519,6 +1581,7 @@ async def update_data_source_config(
     current_user: User = Depends(get_current_user)
 ):
     """更新数据源配置"""
+    _check_jdyun_mode_protected()
     try:
         # 获取当前配置
         config = await config_service.get_system_config()
@@ -1728,6 +1791,7 @@ async def delete_data_source_config(
     current_user: User = Depends(get_current_user)
 ):
     """删除数据源配置"""
+    _check_jdyun_mode_protected()
     try:
         # 获取当前配置
         config = await config_service.get_system_config()

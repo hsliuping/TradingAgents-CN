@@ -45,7 +45,7 @@ EXPECTED_METADATA = {
     },
     "core/agents/adapters/research_manager_v2.py": {
         "id": "research_manager_v2",
-        "name": "研究经理 v2.0",
+        "name": "研究整合员 v2.0",
         "description": "综合乐观与审慎情景研究，形成平衡研究结论与观察重点",
         "category": "MANAGER",
         "version": "2.0.0",
@@ -54,12 +54,12 @@ EXPECTED_METADATA = {
     },
     "core/agents/adapters/risk_manager_v2.py": {
         "id": "risk_manager_v2",
-        "name": "风险管理者 v2.0",
-        "description": "主持稳健性审阅，综合多方观点，形成风险审阅后的综合研究结论",
+        "name": "风险评估师 v2.0",
+        "description": "主持稳健性审阅，综合多方观点，形成风险审阅后的综合研究结论（输出研究观察，不构成投资建议）",
         "category": "MANAGER",
         "version": "2.0.0",
         "license_tier": "FREE",
-        "report_label": "【风险治理结论 v2】",
+        "report_label": "【风险审阅结论 v2】",
     },
     "core/agents/adapters/risky_analyst_v2.py": {
         "id": "risky_analyst_v2",
@@ -68,7 +68,7 @@ EXPECTED_METADATA = {
         "category": "RISK",
         "version": "2.0.0",
         "license_tier": "FREE",
-        "report_label": "【激进风险评估】",
+        "report_label": "【高弹性情景研究】",
     },
     "core/agents/adapters/safe_analyst_v2.py": {
         "id": "safe_analyst_v2",
@@ -77,7 +77,7 @@ EXPECTED_METADATA = {
         "category": "RISK",
         "version": "2.0.0",
         "license_tier": "FREE",
-        "report_label": "【保守风险评估】",
+        "report_label": "【防御情景研究】",
     },
     "core/agents/adapters/neutral_analyst_v2.py": {
         "id": "neutral_analyst_v2",

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="advanced-lesson-wrapper">
     <el-page-header @back="goBack" :content="sampleTitle">
       <template #extra>
@@ -41,7 +41,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Download } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown'
 import sample000001Content from '../../../../docs/07-courses/advanced/expanded/000001_研究报告_2026-04-30.md?raw'
 
 type SampleDefinition = {
@@ -111,7 +111,7 @@ const loadSample = async () => {
 
   try {
     const markdown = sample.value.content
-    const html = marked(stripLeadingHeading(markdown))
+    const html = renderMarkdown(stripLeadingHeading(markdown))
     sampleContent.value = html as string
 
     await nextTick()

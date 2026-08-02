@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div v-if="growthPanelEnabled" class="growth-panel">
     <el-collapse v-model="activeCollapse" class="growth-collapse">
       <el-collapse-item name="growth">
@@ -136,14 +136,13 @@ import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Collection } from '@element-plus/icons-vue'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const renderMarkdown = (content: string): string => {
   if (!content?.trim()) return ''
   try {
-    return marked.parse(content) as string
+    return safeMarkdown(content)
   } catch {
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
   }

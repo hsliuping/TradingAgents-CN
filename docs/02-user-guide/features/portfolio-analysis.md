@@ -107,7 +107,7 @@ fundamentals_report = reports_data.get("fundamentals_report", "暂无基本面�
   ├─→ 持仓基本面分析师（参考单股分析的基本面报告）
   └─→ 持仓风险评估师
   ↓
-持仓操作建议师
+持仓研究观察员
 ```
 
 **优势**：
@@ -130,7 +130,7 @@ fundamentals_report = reports_data.get("fundamentals_report", "暂无基本面�
   ├─→ 持仓基本面分析师（基于持仓信息直接分析）
   └─→ 持仓风险评估师
   ↓
-持仓操作建议师
+持仓研究观察员
 ```
 
 **优势**：
@@ -149,7 +149,7 @@ fundamentals_report = reports_data.get("fundamentals_report", "暂无基本面�
   ├─→ 持仓基本面分析师（基于持仓信息直接分析）
   └─→ 持仓风险评估师
   ↓
-持仓操作建议师
+持仓研究观察员
 ```
 
 **优势**：

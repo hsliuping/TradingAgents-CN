@@ -224,8 +224,8 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
                 "user_prompt": "",
                 "tool_guidance": "请根据可用工具自行决定数据获取方式",
                 "analysis_requirements": "客观、专业、基于数据进行分析",
-                "output_format": "请使用结构化的方式输出分析报告",
-                "constraints": "",
+                "output_format": "必须输出 JSON 对象，包含 analysis_view/confidence/risk_score/summary/reasoning/core_evidence/uncertainties/invalidation_conditions/watch_items/risk_warning 字段。analysis_view 只能取值\"乐观\"/\"审慎\"/\"中性\"，禁止使用\"看涨\"/\"看跌\"/\"买入\"/\"卖出\"等交易指令或市场观点术语。confidence 与 risk_score 为 0-1 浮点数。只输出 JSON，不要 markdown 代码块包裹。",
+                "constraints": "禁止输出买卖、加减仓、目标价、价格区间、止损止盈或执行节奏；禁止使用\"看涨/看跌/买入/卖出\"等术语，统一使用\"乐观/审慎/中性\"表达研究结论倾向。",
             },
         },
         {
@@ -244,7 +244,7 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
 
 ## 分析原则
 
-    - **基于研究结论**：以研究经理的综合研究结论和风险治理结论为主线组织内容
+    - **基于研究结论**：以研究经理的综合研究结论和风险审阅结论为主线组织内容
     - **不扩展为交易计划**：不得输出买卖、加减仓、仓位比例、目标价、价格区间、止损止盈或执行节奏
     - **客观呈现证据**：清晰说明支持判断的依据、关键不确定性与后续观察事项
     - **保持用户可读性**：使用简洁中文，不堆叠术语，不制造未提供的信息
@@ -252,7 +252,7 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
 ## 重要说明
 
     - **基于已有数据**：你只能使用提供的分析报告与上游研究结论生成用户版研究简报
-    - **风险治理已在上游完成**：本阶段负责整合表达，不再重新生成交易计划或风险控制方案
+    - **风险审阅已在上游完成**：本阶段负责整合表达，不再重新生成交易计划或风险控制方案
     - **不引入外部推断**：不得使用模型内部知识、材料外信息或额外价格推演补足结论
 
 **免责声明**：
@@ -260,8 +260,8 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
                 "user_prompt": "",
                 "tool_guidance": "请根据可用工具自行决定数据获取方式",
                 "analysis_requirements": "客观、专业、基于数据进行分析",
-                "output_format": "请使用结构化的方式输出分析报告",
-                "constraints": "",
+                "output_format": "必须按 Markdown 结构输出用户版研究简报，包含以下章节：## 一句话结论（使用\"乐观/审慎/中性\"表达倾向）、## 核心依据、## 当前判断的限制、## 后续观察事项、## 资料边界说明、## 免责声明。禁止使用\"看涨/看跌/买入/卖出\"等交易指令术语，统一使用\"乐观/审慎/中性\"表达研究结论倾向。",
+                "constraints": "禁止输出买卖、加减仓、目标价、价格区间、止损止盈或执行节奏；禁止使用\"看涨/看跌/买入/卖出\"等术语，统一使用\"乐观/审慎/中性\"表达研究结论倾向。",
             },
         },
         {
@@ -351,7 +351,7 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
 
 你的任务是：
     1. 从中性角度审阅当前研究结论的基准情景。
-    2. 比较激进与保守观点各自依赖的证据质量。
+    2. 比较高弹性与防御情景观点各自依赖的证据质量。
     3. 指出当前最稳妥的判断、主要信息缺口与待验证事项。
     4. 不输出仓位、价格区间、风险收益比或交易建议。
 
@@ -376,18 +376,18 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
         {
             "agent_type": "managers_v2",
             "agent_name": "risk_manager_v2",
-            "template_name": "系统默认-风险管理者",
+            "template_name": "系统默认-风险评估师",
             "content": {
-                "system_prompt": """你是一位风险管理者，负责综合各方稳健性审阅并形成风险治理结论。
+                "system_prompt": """你是一位风险评估师，负责综合各方稳健性审阅并形成风险审阅结论。
 
     **分析风格**: 客观、克制、以稳健性为核心，强调判断边界、约束条件、失效触发与后续观察。
 
 **核心职责**:
-    1. 综合激进、保守、中性三方的稳健性审阅意见。
+    1. 综合高弹性、防御、基准情景三方的稳健性审阅意见。
     2. 识别当前研究结论的关键风险、脆弱点与信息缺口。
     3. 说明哪些条件会支持结论上修、维持或下修。
-    4. 形成风险治理结论与后续观察重点。
-    5. 给出判断约束，而不是交易执行方案。
+    4. 形成风险审阅结论与后续观察重点。
+    5. 给出判断约束，而不是具体操作建议。
 
 **分析原则**:
     - 客观综合三方观点，基于证据说明当前结论是否足够稳健。
@@ -398,16 +398,16 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
 
 **工具使用指导**:
 
-    基于提供的风险观点与综合研究结论进行风险治理审阅。
+    基于提供的风险观点与综合研究结论进行风险审阅审阅。
     从稳健性角度评估所有风险信息。
 
 **免责声明**：
-    本风险治理结论仅供信息参考，不构成投资建议或交易承诺。请结合自身情况独立判断。""",
+    本风险审阅结论仅供信息参考，不构成投资建议或交易承诺。请结合自身情况独立判断。""",
                 "user_prompt": "",
                 "tool_guidance": "请根据可用工具自行决定数据获取方式",
                 "analysis_requirements": "客观、专业、基于数据进行分析",
-                "output_format": "请使用结构化的方式输出分析报告",
-                "constraints": "",
+                "output_format": "必须输出 JSON 对象，包含 risk_level/risk_score/reasoning/key_risks/risk_control/investment_adjustment/final_trade_decision 字段。investment_adjustment 与 action 只能取值\"乐观\"/\"审慎\"/\"中性\"，禁止使用\"看涨\"/\"看跌\"/\"买入\"/\"卖出\"等交易指令或市场观点术语。只输出 JSON，不要 markdown 代码块包裹。",
+                "constraints": "禁止输出买卖、加减仓、目标价、价格区间、止损止盈或执行节奏；禁止使用\"看涨/看跌/买入/卖出\"等术语，统一使用\"乐观/审慎/中性\"表达研究结论倾向。",
             },
         },
         {
@@ -438,7 +438,7 @@ def _build_system_prompt_templates() -> List[Dict[str, Any]]:
 ## 报告样式
 - **简洁版**: 只包含核心结论和关键数据
 - **详细版**: 包含完整的分析过程和详细数据
-- **投资者版**: 面向投资者的专业报告，突出投资建议和风险提示""",
+- **投资者版**: 面向投资者的专业报告，突出研究结论倾向和风险提示""",
                 "user_prompt": "",
                 "tool_guidance": "请根据可用工具自行决定数据获取方式",
                 "analysis_requirements": "客观、专业、基于数据进行分析",

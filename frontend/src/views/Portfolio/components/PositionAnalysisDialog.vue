@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <el-dialog
     v-model="visible"
     width="1000px"
@@ -338,20 +338,19 @@ import { WarningFilled, StarFilled, WalletFilled, Loading, Refresh, Clock, InfoF
 import { portfolioApi, type PositionItem, type PositionAnalysisResult, type PositionAnalysisParams, type AccountSummary } from '@/api/portfolio'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { getMarketByStockCode } from '@/utils/market'
 import { workflowApi, type WorkflowSummary } from '@/api/workflow'
 import PositionAnalysisHistoryDialog from './PositionAnalysisHistoryDialog.vue'
 
 // 配置marked选项
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 // Markdown渲染函数（后端已经转换为Markdown格式，前端直接渲染）
 const renderMarkdown = (content: string) => {
   if (!content) return ''
   
   try {
-    return marked.parse(content) as string
+    return safeMarkdown(content)
   } catch (e) {
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
   }

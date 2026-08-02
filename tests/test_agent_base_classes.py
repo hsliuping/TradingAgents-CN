@@ -64,7 +64,7 @@ class TestMarketAnalystV2:
 
 
 class TestBullResearcherV2:
-    """测试看涨研究员V2"""
+    """测试乐观情景研究员V2"""
     
     def test_import(self):
         """测试导入"""
@@ -100,7 +100,7 @@ class TestBullResearcherV2:
             ticker="AAPL",
             analysis_date="2024-12-15",
             reports={
-                "market_report": "市场看涨",
+                "market_report": "市场偏乐观",
                 "news_report": "利好消息"
             },
             historical_context=None,
@@ -108,7 +108,7 @@ class TestBullResearcherV2:
         )
         
         assert "AAPL" in prompt
-        assert "看涨" in prompt or "市场" in prompt
+        assert "乐观" in prompt or "市场" in prompt
 
 
 class TestResearchManagerV2:
@@ -124,7 +124,7 @@ class TestResearchManagerV2:
         from core.agents.adapters import ResearchManagerV2
 
         assert ResearchManagerV2.metadata.id == "research_manager_v2"
-        assert ResearchManagerV2.metadata.name == "研究经理 v2.0"
+        assert ResearchManagerV2.metadata.name == "研究整合员 v2.0"
         assert ResearchManagerV2.manager_type == "research"
         assert ResearchManagerV2.output_field == "investment_plan"
     
@@ -147,15 +147,15 @@ class TestResearchManagerV2:
             ticker="AAPL",
             analysis_date="2024-12-15",
             inputs={
-                "bull_report": "看涨观点",
-                "bear_report": "看跌观点"
+                "bull_report": "积极证据",
+                "bear_report": "谨慎证据"
             },
             debate_summary=None,
             state={}
         )
         
         assert "AAPL" in prompt
-        assert "看涨" in prompt or "看跌" in prompt
+        assert "积极" in prompt or "谨慎" in prompt
 
     def test_delegate_to_agent_uses_compatible_invoke_path(self):
         """测试委托子 Agent 时不会因缺少 invoke_agent 而失败"""
@@ -185,7 +185,7 @@ class TestResearchManagerV2:
 
 
 class TestTraderV2:
-    """测试交易员V2"""
+    """测试研究整合员V2"""
     
     def test_import(self):
         """测试导入"""
@@ -208,14 +208,14 @@ class TestTraderV2:
         prompt = agent._build_user_prompt(
             ticker="AAPL",
             analysis_date="2024-12-15",
-            investment_plan={"recommendation": "买入"},
+            investment_plan={"recommendation": "乐观"},
             all_reports={"market_report": "市场分析"},
             historical_trades=None,
             state={}
         )
         
         assert "AAPL" in prompt
-        assert "买入" in prompt or "投资计划" in prompt
+        assert "乐观" in prompt or "研究计划" in prompt
 
 
 # ============================================================
@@ -368,7 +368,7 @@ class TestIndexAnalystV2:
 
 
 class TestBearResearcherV2:
-    """测试看跌研究员V2"""
+    """测试审慎情景研究员V2"""
 
     def test_import(self):
         """测试导入"""
@@ -386,7 +386,7 @@ class TestBearResearcherV2:
 
 
 class TestRiskManagerV2:
-    """测试风险管理者V2"""
+    """测试风险评估师V2"""
 
     def test_import(self):
         """测试导入"""
@@ -398,7 +398,7 @@ class TestRiskManagerV2:
         from core.agents.adapters import RiskManagerV2
 
         assert RiskManagerV2.metadata.id == "risk_manager_v2"
-        assert RiskManagerV2.metadata.name == "风险管理者 v2.0"
+        assert RiskManagerV2.metadata.name == "风险评估师 v2.0"
         assert RiskManagerV2.manager_type == "risk"
         assert RiskManagerV2.output_field == "risk_assessment"
 

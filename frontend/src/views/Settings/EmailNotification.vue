@@ -1,6 +1,6 @@
 <template>
   <div class="email-notification-page">
-    <!-- 高级学员功能标识 -->
+    <!-- 高级功能标识 -->
     <el-alert
       type="success"
       :closable="false"

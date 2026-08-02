@@ -135,12 +135,20 @@ import DataSourceStatus from '@/components/Sync/DataSourceStatus.vue'
 import SyncControl from '@/components/Sync/SyncControl.vue'
 import SyncRecommendations from '@/components/Sync/SyncRecommendations.vue'
 import SyncHistory from '@/components/Sync/SyncHistory.vue'
+import { isJdyunMode } from '@/utils/config'
 
 // 响应式数据
 const testing = ref(false)
 const testDialogVisible = ref(false)
 const testResults = ref<DataSourceTestResult[] | null>(null)
 const dataSourceStatusRef = ref()
+
+// 京东云版只展示 Tushare 和 AKShare
+const JDYUN_ALLOWED_SOURCES = new Set(['tushare', 'akshare'])
+const filterJdyunResults = (results: DataSourceTestResult[]) => {
+  if (!isJdyunMode()) return results
+  return results.filter(r => JDYUN_ALLOWED_SOURCES.has(r.name?.toLowerCase()))
+}
 
 // 运行全面测试
 const runFullTest = async () => {
@@ -151,7 +159,7 @@ const runFullTest = async () => {
     // 不传递 sourceName，测试所有数据源
     const response = await testDataSources()
     if (response.success) {
-      testResults.value = response.data.test_results
+      testResults.value = filterJdyunResults(response.data.test_results || [])
       testDialogVisible.value = true
       const availableCount = testResults.value.filter(r => r.available).length
       ElMessage.success(`全面测试完成: ${availableCount}/${testResults.value.length} 数据源可用`)
@@ -182,7 +190,7 @@ const getOverallTestResult = (): 'success' | 'warning' | 'info' | 'error' => {
 // 导出测试结果
 const exportTestResults = () => {
   if (!testResults.value) return
-  
+
   const data = {
     timestamp: new Date().toISOString(),
     results: testResults.value

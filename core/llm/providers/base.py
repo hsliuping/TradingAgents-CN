@@ -132,7 +132,9 @@ class BaseAdapter(ABC):
     @property
     def provider_name(self) -> str:
         """提供商名称"""
-        return self.config.provider.value
+        # 兼容 use_enum_values=True：config.provider 可能是字符串也可能是枚举
+        provider = self.config.provider
+        return provider.value if hasattr(provider, "value") else str(provider)
     
     @property
     def model_name(self) -> str:

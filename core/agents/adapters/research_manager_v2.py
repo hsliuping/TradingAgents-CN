@@ -1,18 +1,82 @@
 """
-研究经理 v2.0
+研究整合员 v2.0
 
-基于ManagerAgent基类实现的研究经理
+基于ManagerAgent基类实现的研究整合员
 综合乐观与审慎情景研究，形成平衡研究结论
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field, ValidationError
 
 from ..manager import ManagerAgent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
 
 logger = logging.getLogger(__name__)
+
+
+# ==================== Schema 契约定义 ====================
+# 目的：让 LLM 从"自由决策输出格式"降级为"翻译一份预定义 schema"，
+# 从源头消除格式不一致（参考桥水 Pat 的"规格驱动"思路，与 risk_manager_v2 同构）。
+# 合规要求：analysis_view 只能取值 "乐观"/"审慎"/"中性"，
+# 禁止使用"看涨/看跌/买入/卖出"等交易指令或市场观点术语。
+
+
+class ResearchManagerOutput(BaseModel):
+    """研究整合员平衡研究结论 schema"""
+    # 合规术语：乐观/审慎/中性（禁止使用"看涨/看跌/买入/卖出"等交易指令或市场观点术语）
+    analysis_view: Literal["乐观", "审慎", "中性"]
+    confidence: float = Field(ge=0, le=1)
+    risk_score: float = Field(ge=0, le=1)
+    summary: str
+    reasoning: str
+    core_evidence: List[str] = Field(default_factory=list)
+    uncertainties: List[str] = Field(default_factory=list)
+    invalidation_conditions: List[str] = Field(default_factory=list)
+    watch_items: List[str] = Field(default_factory=list)
+    risk_warning: str = ""
+
+
+# 研究整合员输出格式契约。
+# 按硬约束"system prompt 必须将格式要求放在最前面"，此常量会被前置到
+# _build_system_prompt 返回值的最前面，确保 LLM 优先看到格式与合规约束。
+RESEARCH_MANAGER_SCHEMA_PROMPT = """【输出格式契约·必须严格遵守】
+你的输出必须是一个 JSON 对象，包含以下字段。只输出 JSON，不要包裹在 markdown 代码块中，不要有任何额外文字。
+
+{
+  "analysis_view": "乐观" | "审慎" | "中性",
+  "confidence": 0.0-1.0 之间的浮点数,
+  "risk_score": 0.0-1.0 之间的浮点数,
+  "summary": "50-120字的结论摘要，说明当前更偏向哪一侧及主因",
+  "reasoning": "200-500字，建议按乐观情景最强依据、审慎情景最强依据、共识点、分歧根源、最终判断来说明证据如何权衡",
+  "core_evidence": ["核心依据1", "核心依据2", "核心依据3"],
+  "uncertainties": ["关键不确定性1", "关键不确定性2"],
+  "invalidation_conditions": ["判断下修或失效前提1", "判断下修或失效前提2"],
+  "watch_items": ["后续观察事项1", "后续观察事项2", "后续观察事项3"],
+  "risk_warning": "100字以内的关键风险提示或主要反证"
+}
+
+【合规性约束·必须遵守】
+1. analysis_view 字段只能取值 "乐观" / "审慎" / "中性"。
+2. 禁止使用 "看涨" / "看跌" / "买入" / "卖出" / "加仓" / "减仓" / "持有" / "清仓" 等交易指令或市场观点术语。
+3. "乐观/审慎/中性" 表达的是研究结论的倾向性，不构成任何交易建议或操作指令。
+4. 禁止给出具体目标价或止损价，不得延伸为价格区间、上涨/下跌空间、风险收益比或操作建议。
+5. 禁止承诺收益或保证盈利，必须提示风险。
+6. 所有结论必须严格基于提供的报告内容，不得补造信息。
+
+字段约束：
+- analysis_view: 研究结论倾向，只能是"乐观"/"审慎"/"中性"
+- confidence: 0-1 之间的浮点数（不要写 0-100）
+- risk_score: 0-1 之间的浮点数（不要写 0-100）
+- core_evidence / uncertainties / invalidation_conditions / watch_items: 字符串数组，尽量提供 2-5 条
+- reasoning 应显式体现：乐观情景最强依据、审慎情景最强依据、双方共识、关键分歧根源，以及为何当前判断偏向某侧或保持中性
+- 所有字段都必须服务于研究判断，不能出现交易执行语言
+
+输出必须是合法 JSON，不要在 JSON 前后添加任何文字或代码块标记。
+
+"""
 
 # 尝试导入工具函数
 try:
@@ -34,7 +98,7 @@ except (ImportError, KeyError):
 @register_agent
 class ResearchManagerV2(ManagerAgent):
     """
-    研究经理 v2.0
+    研究整合员 v2.0
     
     功能：
     - 综合乐观与审慎情景研究
@@ -66,7 +130,7 @@ class ResearchManagerV2(ManagerAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="research_manager_v2",
-        name="研究经理 v2.0",
+        name="研究整合员 v2.0",
         description="综合乐观与审慎情景研究，形成平衡研究结论与观察重点",
         category=AgentCategory.MANAGER,
         version="2.0.0",
@@ -126,7 +190,7 @@ class ResearchManagerV2(ManagerAgent):
                 normalized_target,
                 {**state, **delegated_outputs},
                 payload={
-                    "task_description": "补充筹码分布与持仓成本结构上下文，供研究经理做综合投资判断",
+                    "task_description": "补充筹码分布与持仓成本结构上下文，供研究整合员做综合研究判断",
                 },
                 metadata={
                     "delegation_role": "research_enrichment",
@@ -139,7 +203,7 @@ class ResearchManagerV2(ManagerAgent):
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行研究经理分析
+        执行研究整合员分析
 
         重写父类方法以添加 investment_debate_state 输出，
         确保与报告格式化器兼容
@@ -154,22 +218,22 @@ class ResearchManagerV2(ManagerAgent):
         bear_report = state.get("bear_report", "")
 
         logger.info(f"📊 股票代码: {ticker}")
-        logger.info(f"📈 看涨报告类型: {type(bull_report)}, 长度: {len(str(bull_report))} 字符")
-        logger.info(f"📉 看跌报告类型: {type(bear_report)}, 长度: {len(str(bear_report))} 字符")
+        logger.info(f"📈 积极证据报告类型: {type(bull_report)}, 长度: {len(str(bull_report))} 字符")
+        logger.info(f"📉 谨慎证据报告类型: {type(bear_report)}, 长度: {len(str(bear_report))} 字符")
 
         # 转换为字符串（如果不是）
         bull_report_str = str(bull_report) if bull_report else ""
         bear_report_str = str(bear_report) if bear_report else ""
 
         if bull_report_str and len(bull_report_str) > 10:
-            logger.info(f"📈 看涨报告前200字符: {bull_report_str[:200]}...")
+            logger.info(f"📈 积极证据报告前200字符: {bull_report_str[:200]}...")
         else:
-            logger.warning("⚠️ 看涨报告为空或过短！")
+            logger.warning("⚠️ 积极证据报告为空或过短！")
 
         if bear_report_str and len(bear_report_str) > 10:
-            logger.info(f"📉 看跌报告前200字符: {bear_report_str[:200]}...")
+            logger.info(f"📉 谨慎证据报告前200字符: {bear_report_str[:200]}...")
         else:
-            logger.warning("⚠️ 看跌报告为空或过短！")
+            logger.warning("⚠️ 谨慎证据报告为空或过短！")
 
         # 🔥 ETF工作流兜底：若无辩论报告，将三份分析师报告合成为研究材料
         if not bull_report_str and not bear_report_str:
@@ -213,20 +277,86 @@ class ResearchManagerV2(ManagerAgent):
         logger.info(f"📝 决策内容类型: {type(decision_value)}")
         logger.info(f"📝 决策内容长度: {len(str(decision_value))} 字符")
 
-        # 🔥 修复：如果是字典（包含 content 字段），提取 content
+        # 提取纯文本用于校验（兼容字典/字符串两种输出形态）
         if isinstance(decision_value, dict):
-            decision_content = decision_value.get("content", "")
-            logger.info(f"📝 从字典中提取 content: {len(decision_content)} 字符")
+            decision_text = decision_value.get("content", "") or decision_value.get("markdown", "") or str(decision_value)
         else:
-            decision_content = decision_value
-            logger.info(f"📝 直接使用决策内容: {len(decision_content)} 字符")
+            decision_text = str(decision_value) if decision_value else ""
+
+        # 🔥 新增：schema 校验（让错误显式化，不再静默兜底）
+        import json
+        validated_dict, validation_error = self._validate_research_output(decision_text)
+
+        if validation_error is None:
+            # ✅ 校验通过：存储为 JSON 字符串（保持 type=string 兼容下游消费者）
+            logger.info("✅ [ResearchManagerV2] schema 校验通过")
+            result[self.output_field] = json.dumps(validated_dict, ensure_ascii=False)
+
+            # 🔥 P2: 执行断言（非阻塞），合并结果到 validation_status
+            assertion_result = self._run_assertions(
+                raw_text=decision_text, parsed=validated_dict
+            )
+            assertion_violations_dump = [v.model_dump() for v in assertion_result.violations]
+            if assertion_violations_dump:
+                result["investment_plan_assertion_violations"] = assertion_violations_dump
+
+            if assertion_result.has_error_violation:
+                logger.warning(
+                    f"⚠️ [ResearchManagerV2] 断言 error 违规 {assertion_result.error_count} 条，降级 validation_status"
+                )
+                result["investment_plan_validation_status"] = "failed"
+                result["investment_plan_validation_error"] = (
+                    f"断言违规: {assertion_result.error_count} 条 error"
+                )
+                self._record_trace_validation(
+                    validation_status="failed",
+                    validation_error=result["investment_plan_validation_error"],
+                    validation_details={
+                        "analysis_view": validated_dict.get("analysis_view"),
+                        "confidence": validated_dict.get("confidence"),
+                        "assertion_violations": assertion_violations_dump,
+                    },
+                )
+            else:
+                result["investment_plan_validation_status"] = "passed"
+                self._record_trace_validation(
+                    validation_status="passed",
+                    validation_details={
+                        "analysis_view": validated_dict.get("analysis_view"),
+                        "confidence": validated_dict.get("confidence"),
+                        "assertion_violations": assertion_violations_dump,
+                    },
+                )
+            decision_content = result[self.output_field]
+        else:
+            # ❌ 校验失败：显式上报（不静默兜底），保留原始输出供排查
+            logger.error(f"❌ [ResearchManagerV2] schema 校验失败: {validation_error}")
+            logger.error(f"❌ [ResearchManagerV2] 原始输出前 500 字符: {decision_text[:500]}")
+            result[self.output_field] = decision_text
+            result["investment_plan_validation_status"] = "failed"
+            result["investment_plan_validation_error"] = validation_error
+
+            # 🔥 P2: 校验失败时也执行断言（用于累积命中统计）
+            assertion_result = self._run_assertions(
+                raw_text=decision_text, parsed=None
+            )
+            assertion_violations_dump = [v.model_dump() for v in assertion_result.violations]
+            self._record_trace_validation(
+                validation_status="failed",
+                validation_error=validation_error,
+                validation_details={
+                    "raw_output_preview": decision_text[:500],
+                    "assertion_violations": assertion_violations_dump,
+                },
+            )
+            decision_content = decision_text
 
         # 从 state 中获取现有的 investment_debate_state（如果有）
         existing_debate_state = state.get("investment_debate_state", {})
 
         # 构建新的 investment_debate_state，包含 judge_decision
         new_debate_state = {
-            "judge_decision": decision_content,  # ✅ 关键：添加 judge_decision 字段
+            "judge_decision": decision_content,  # ✅ 关键：保留 LLM 输出（JSON 字符串或原始文本）
             "history": existing_debate_state.get("history", ""),
             "bull_history": existing_debate_state.get("bull_history", ""),
             "bear_history": existing_debate_state.get("bear_history", ""),
@@ -243,7 +373,47 @@ class ResearchManagerV2(ManagerAgent):
             **result,
             "investment_debate_state": new_debate_state,
         }
-    
+
+    def _validate_research_output(self, text: str) -> tuple:
+        """
+        校验 LLM 输出是否符合 ResearchManagerOutput schema。
+
+        Args:
+            text: LLM 输出的研究结论文本（可能是纯 JSON、markdown 代码块包裹的 JSON、或纯文本）
+
+        Returns:
+            (validated_dict, None): 校验通过，dict 可直接序列化为 JSON
+            (None, error_msg): 校验失败，error_msg 描述失败原因
+        """
+        import json
+        import re
+
+        if not text or not text.strip():
+            return None, "输出为空"
+
+        # 兼容 markdown 代码块包裹的 JSON（```json ... ``` 或 ``` ... ```）
+        text = text.strip()
+        json_str = text
+        json_match = re.search(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1).strip()
+
+        # 解析 JSON
+        try:
+            json_obj = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            return None, f"JSON 解析失败: {e}"
+
+        if not isinstance(json_obj, dict):
+            return None, f"JSON 顶层不是对象，实际类型: {type(json_obj).__name__}"
+
+        # pydantic schema 校验（含合规术语枚举约束、数值范围约束）
+        try:
+            validated = ResearchManagerOutput(**json_obj)
+            return validated.model_dump(), None
+        except ValidationError as e:
+            return None, f"Schema 校验失败: {e}"
+
     def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:
         """
         构建系统提示词（参考 fundamentals_analyst_v2 的实现）
@@ -289,7 +459,11 @@ class ResearchManagerV2(ManagerAgent):
 
         # 检查是否成功获取提示词
         if prompt:
-            logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
+            # 🔥 按硬约束"system prompt 必须将格式要求放在最前面"，
+            # 将 schema 契约前置到 prompt 最前面，确保 LLM 优先看到格式与合规约束，
+            # 不依赖数据库迁移即可立即生效。
+            prompt = RESEARCH_MANAGER_SCHEMA_PROMPT + prompt
+            logger.info(f"📝 系统提示词长度: {len(prompt)} 字符（含 schema 契约）")
             logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
 
             # 检查是否包含新的研究简报结构指导
@@ -298,13 +472,13 @@ class ResearchManagerV2(ManagerAgent):
             else:
                 logger.warning("⚠️ 系统提示词不包含【研究简报结构】指导（可能使用旧版提示词）")
 
-            logger.debug(f"✅ 从模板系统获取研究经理系统提示词")
+            logger.debug(f"✅ 从模板系统获取研究整合员系统提示词")
             return prompt
         else:
             logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
-        
-        # 默认提示词（合规版本）
-        return """你是一位中性的研究经理，负责把乐观情景研究与审慎情景研究整理成平衡研究结论。
+
+        # 默认提示词（合规版本）— 同样前置 schema 契约，保证 fallback 路径也受约束
+        return RESEARCH_MANAGER_SCHEMA_PROMPT + """你是一位中性的研究整合员，负责把乐观情景研究与审慎情景研究整理成平衡研究结论。
 
     **分析风格**: 客观、克制、基于证据，强调 strongest case 对比、分歧根源、信息缺口与后续观察。
 
@@ -356,7 +530,7 @@ class ResearchManagerV2(ManagerAgent):
         logger.info(f"📅 分析日期: {analysis_date}")
         logger.info(f"📝 输入字段: {list(inputs.keys())}")
 
-        # 检查看涨和看跌报告
+        # 检查积极和谨慎报告
         bull_report = inputs.get("bull_report", "")
         bear_report = inputs.get("bear_report", "")
 
@@ -364,26 +538,26 @@ class ResearchManagerV2(ManagerAgent):
         bull_report_str = str(bull_report) if bull_report else ""
         bear_report_str = str(bear_report) if bear_report else ""
 
-        logger.info(f"📈 看涨报告类型: {type(bull_report)}, 长度: {len(bull_report_str)} 字符")
-        logger.info(f"📉 看跌报告类型: {type(bear_report)}, 长度: {len(bear_report_str)} 字符")
+        logger.info(f"📈 积极证据报告类型: {type(bull_report)}, 长度: {len(bull_report_str)} 字符")
+        logger.info(f"📉 谨慎证据报告类型: {type(bear_report)}, 长度: {len(bear_report_str)} 字符")
 
         if bull_report_str and len(bull_report_str) > 10:
             # 检查是否包含价格信息
             if "价位" in bull_report_str or "价格" in bull_report_str or "¥" in bull_report_str:
-                logger.info("✅ 看涨报告包含价格信息")
+                logger.info("✅ 积极证据报告包含价格信息")
             else:
-                logger.warning("⚠️ 看涨报告可能不包含价格信息")
+                logger.warning("⚠️ 积极证据报告可能不包含价格信息")
         else:
-            logger.warning("⚠️ 看涨报告为空或过短！")
+            logger.warning("⚠️ 积极证据报告为空或过短！")
 
         if bear_report_str and len(bear_report_str) > 10:
             # 检查是否包含价格信息
             if "价位" in bear_report_str or "价格" in bear_report_str or "¥" in bear_report_str:
-                logger.info("✅ 看跌报告包含价格信息")
+                logger.info("✅ 谨慎证据报告包含价格信息")
             else:
-                logger.warning("⚠️ 看跌报告可能不包含价格信息")
+                logger.warning("⚠️ 谨慎证据报告可能不包含价格信息")
         else:
-            logger.warning("⚠️ 看跌报告为空或过短！")
+            logger.warning("⚠️ 谨慎证据报告为空或过短！")
 
         # 获取公司名称
         if StockUtils:
@@ -406,8 +580,8 @@ class ResearchManagerV2(ManagerAgent):
         bull_report_content = extract_content(inputs.get("bull_report"))
         bear_report_content = extract_content(inputs.get("bear_report"))
 
-        logger.info(f"📈 看涨报告内容长度: {len(bull_report_content)} 字符")
-        logger.info(f"📉 看跌报告内容长度: {len(bear_report_content)} 字符")
+        logger.info(f"📈 积极证据报告内容长度: {len(bull_report_content)} 字符")
+        logger.info(f"📉 谨慎证据报告内容长度: {len(bear_report_content)} 字符")
 
         # 🆕 检测辩论模式并获取辩论历史
         debate_history = ""
@@ -455,7 +629,7 @@ class ResearchManagerV2(ManagerAgent):
             prompt_type="user"  # 🆕 指定获取用户提示词
         )
         if prompt:
-            logger.info(f"✅ 从模板系统获取研究经理用户提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取研究整合员用户提示词 (长度: {len(prompt)})")
             return prompt
         
         market_name = state.get("market_name", "")
@@ -473,8 +647,8 @@ class ResearchManagerV2(ManagerAgent):
             f"- 分析日期：{analysis_date}\n"
             f"- 货币单位：{currency_name}（{currency_symbol}）\n"
             f"- 当前价格上下文：{current_price}\n"
-            f"- 看涨观点：{bull_report_content}\n"
-            f"- 看跌观点：{bear_report_content}\n"
+            f"- 乐观情景观点：{bull_report_content}\n"
+            f"- 审慎情景观点：{bear_report_content}\n"
             f"- 辩论总结：{debate_summary or '材料未提供'}\n"
         )
 
@@ -485,8 +659,8 @@ class ResearchManagerV2(ManagerAgent):
         prompt += f"""
 
 任务重点：
-- 先用最强版本概括看涨理由，再用最强版本概括看跌理由，不要把任一方写成稻草人。
-- 客观权衡看涨和看跌观点，先概括共识，再写最关键的分歧，形成当前研究判断：看涨 / 中性 / 看跌。
+- 先用最强版本概括乐观情景理由，再用最强版本概括审慎情景理由，不要把任一方写成稻草人。
+- 客观权衡乐观和审慎观点，先概括共识，再写最关键的分歧，形成当前研究判断：乐观 / 审慎 / 中性。
 - 明确哪些内容是双方共识，哪些是关键分歧，以及分歧主要来自数据解读、前提假设、时间维度还是市场定价反映程度。
 - 说明当前更有支撑的一侧；若保持中性，要解释为何双方证据仍然平衡或都未被充分验证。
 - 提炼支持判断的核心依据，突出最关键的证据而非罗列所有信息。
@@ -505,11 +679,11 @@ class ResearchManagerV2(ManagerAgent):
 请使用 JSON 输出，字段如下：
 ```json
 {{
-    "analysis_view": "看涨|中性|看跌",
-    "confidence": 0-100,
+    "analysis_view": "乐观|审慎|中性",
+    "confidence": 0.0-1.0,
     "risk_score": 0.0-1.0,
     "summary": "50-120字的结论摘要，说明当前更偏向哪一侧及主因",
-    "reasoning": "200-500字，建议按多方最强依据、空方最强依据、共识点、分歧根源、最终判断来说明多空证据如何权衡",
+    "reasoning": "200-500字，建议按乐观情景最强依据、审慎情景最强依据、共识点、分歧根源、最终判断来说明证据如何权衡",
     "core_evidence": ["核心依据1", "核心依据2", "核心依据3"],
     "uncertainties": ["关键不确定性1", "关键不确定性2"],
     "invalidation_conditions": ["判断下修或失效前提1", "判断下修或失效前提2"],
@@ -521,7 +695,8 @@ class ResearchManagerV2(ManagerAgent):
 字段要求：
 - `analysis_view`、`confidence`、`summary`、`reasoning` 为必填。
 - `core_evidence`、`uncertainties`、`invalidation_conditions`、`watch_items` 为数组，尽量提供 2-5 条。
-- `reasoning` 应显式体现：多方最强依据、空方最强依据、双方共识、关键分歧根源，以及为何当前判断偏向某侧或保持中性。
+- `analysis_view` 只能取值"乐观"/"审慎"/"中性"，禁止使用"看涨/看跌/买入/卖出"等术语。
+- `reasoning` 应显式体现：乐观情景最强依据、审慎情景最强依据、双方共识、关键分歧根源，以及为何当前判断偏向某侧或保持中性。
 - 所有字段都必须服务于研究判断，不能出现交易执行语言。
 """
 

@@ -724,7 +724,7 @@ class TradingPlanEvaluationService:
         if timing.sector_condition:
             lines.append(f"- 行业条件：{json.dumps(timing.sector_condition, ensure_ascii=False)}")
         if timing.entry_signals:
-            lines.append(f"- 买入信号：{len(timing.entry_signals)}条")
+            lines.append(f"- 正向研究信号：{len(timing.entry_signals)}条")
             for i, signal in enumerate(timing.entry_signals[:3], 1):
                 signal_name = signal.get('signal', '')
                 signal_detail = signal.get('condition') or signal.get('description', '')

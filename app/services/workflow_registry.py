@@ -208,7 +208,7 @@ def initialize_builtin_workflows() -> None:
         task_type=AnalysisTaskType.STOCK_ANALYSIS,
         workflow_id="v2_stock_analysis",
         name="股票完整分析",
-        description="基于v2.0 Agent架构的完整多智能体协作分析流程。包含6个专业分析师并行分析，2个研究员辩论，研究经理综合评估，研究整合员汇总结论，风险经理把控风险。",
+        description="基于v2.0 Agent架构的完整多智能体协作分析流程。包含6个专业分析师并行分析，2个研究员多情景研究，研究整合员综合评估并汇总结论，风险评估师把控风险。",
         default_engine="workflow",
         supported_engines=["workflow", "legacy"],
         required_params=["symbol", "market_type"],
@@ -248,7 +248,7 @@ def initialize_builtin_workflows() -> None:
         max_retries=3,
         supports_preference=True,
         version="1.0.0",
-        tags=["持仓", "操作建议", "风险评估"],
+        tags=["持仓", "研究观察", "风险审阅"],
         is_active=True
     ))
 

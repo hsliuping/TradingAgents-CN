@@ -73,13 +73,13 @@
         <el-tag type="primary" size="small" style="margin-left: 4px; transform: scale(0.85);">迭代</el-tag>
       </el-menu-item>
       <el-menu-item index="/workflow/skills">
-        Skill 中心
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/mcp-servers">
-        MCP 服务器
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
+          Skill 中心
+          <el-tag v-if="isAdvancedMenuItem('/workflow/skills')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/workflow/mcp-servers">
+          MCP 服务器
+          <el-tag v-if="isAdvancedMenuItem('/workflow/mcp-servers')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        </el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/tasks/unified">
@@ -139,7 +139,7 @@
         </el-menu-item>
         <el-menu-item index="/settings/channel-configs">
           渠道推送
-          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/channel-configs')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/watchlist-groups">
           定时分析分组
@@ -149,7 +149,7 @@
           定时分析配置
           <el-tag v-if="isAdvancedMenuItem('/settings/scheduled-analysis')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
-        <el-menu-item index="/settings/license">
+        <el-menu-item v-if="!isJdyunMode()" index="/settings/license">
           授权管理
           <el-icon style="margin-left: 4px;"><Key /></el-icon>
         </el-menu-item>
@@ -158,7 +158,10 @@
       <!-- 系统配置 -->
       <el-sub-menu index="/settings-config">
         <template #title>系统配置</template>
-        <el-menu-item index="/settings/config">配置管理</el-menu-item>
+        <!-- 京东云模式：显示京东云配置状态页（只读），隐藏配置管理 -->
+        <el-menu-item v-if="isJdyunMode()" index="/settings/jdyun-config">系统配置</el-menu-item>
+        <!-- 非京东云模式：显示完整的配置管理 -->
+        <el-menu-item v-else index="/settings/config">配置管理</el-menu-item>
         <el-menu-item index="/settings/cache">缓存管理</el-menu-item>
       </el-sub-menu>
 
@@ -171,11 +174,11 @@
         </el-menu-item>
         <el-menu-item index="/settings/prompt-policies">
           注入策略管理
-          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/prompt-policies')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/prompt-design">
           Prompt 设计助手
-          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/prompt-design')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/analysis-profiles">
           行业/个股配置
@@ -195,7 +198,7 @@
         <el-menu-item index="/settings/social-media">社媒消息管理</el-menu-item>
         <el-menu-item index="/settings/data-import">
           数据导入管理
-          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+          <el-tag v-if="isAdvancedMenuItem('/settings/data-import')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/usage">使用统计</el-menu-item>
         <el-menu-item index="/settings/update">系统更新</el-menu-item>
@@ -213,6 +216,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { isJdyunMode } from '@/utils/config'
 import {
   Odometer,
   Reading,
@@ -242,14 +246,22 @@ const advancedMenuItems = new Set([
   '/workflow',
   '/workflow/tools',
   '/workflow/agents',
+  '/workflow/skills',
+  '/workflow/mcp-servers',
   '/settings/templates',
   '/settings/email',
+  '/settings/channel-configs',
   '/settings/watchlist-groups',
   '/settings/scheduled-analysis',
+  '/settings/prompt-policies',
+  '/settings/prompt-design',
   '/settings/data-import'
 ])
 
-const isAdvancedMenuItem = (index: string) => advancedMenuItems.has(index)
+const isAdvancedMenuItem = (index: string) => {
+  // 所有模式统一显示"高级"标签，京东云模式下功能同样可用（不收费、不认证）
+  return advancedMenuItems.has(index)
+}
 
 const activeMenu = computed(() => {
   if (route.path.startsWith('/workflow/agent-studio')) return '/workflow/agent-workshop'

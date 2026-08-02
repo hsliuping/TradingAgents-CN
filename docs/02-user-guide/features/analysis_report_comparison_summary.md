@@ -23,15 +23,15 @@
 | 多头研究员分析 | ✅ | ✅ | ✅ 一致 | `bull_history` in `investment_debate_state` |
 | 空头研究员分析 | ✅ | ✅ | ✅ 一致 | `bear_history` in `investment_debate_state` |
 | 研究经理分析 | ✅ | ✅ | ✅ 一致 | `judge_decision` in `investment_debate_state` |
-| **交易团队报告** | | | | |
-| 交易员计划 | ✅ | ✅ | ✅ 一致 | `trader_investment_plan` |
+| **研究整合团队报告** | | | | |
+| 研究整合员计划 | ✅ | ✅ | ✅ 一致 | `trader_investment_plan` |
 | **风险管理团队报告** | | | | |
-| 激进分析师评估 | ✅ | ✅ | ✅ 一致 | `risky_history` in `risk_debate_state` |
-| 保守分析师评估 | ✅ | ✅ | ✅ 一致 | `safe_history` in `risk_debate_state` |
-| 中性分析师评估 | ✅ | ✅ | ✅ 一致 | `neutral_history` in `risk_debate_state` |
-| 投资组合经理决策 | ✅ | ✅ | ✅ 一致 | `judge_decision` in `risk_debate_state` |
-| **最终决策** | | | | |
-| 最终分析结果 | ✅ | ✅ | ✅ 一致 | `final_trade_decision` |
+| 高弹性情景研究员评估 | ✅ | ✅ | ✅ 一致 | `risky_history` in `risk_debate_state` |
+| 防御情景研究员评估 | ✅ | ✅ | ✅ 一致 | `safe_history` in `risk_debate_state` |
+| 基准情景研究员评估 | ✅ | ✅ | ✅ 一致 | `neutral_history` in `risk_debate_state` |
+| 风险评估师审阅 | ✅ | ✅ | ✅ 一致 | `judge_decision` in `risk_debate_state` |
+| **最终研究结论** | | | | |
+| 最终研究结论 | ✅ | ✅ | ✅ 一致 | `final_trade_decision` |
 
 **总计**: 13个报告模块，全部实现 ✅
 
@@ -103,9 +103,9 @@ def _format_team_decision_content(content: Dict[str, Any], module_key: str) -> s
 def _add_team_decision_reports(self, md_content: str, state: Dict[str, Any]) -> str:
     """添加团队决策报告部分"""
     # II. 研究团队分析 (第270-290行)
-    # III. 交易团队计划 (第292-296行)
-    # IV. 风险管理团队决策 (第298-323行)
-    # V. 最终分析结果 (第325-329行)
+    # III. 研究整合团队计划 (第292-296行)
+    # IV. 风险管理团队审阅 (第298-323行)
+    # V. 最终研究结论 (第325-329行)
 ```
 
 ---
@@ -172,17 +172,17 @@ II. 研究团队分析
    - 📉 空头研究员分析 (Bear Researcher)
    - 🎯 研究经理综合决策 (Research Manager)
 
-III. 交易团队计划
-   - 💼 交易员计划 (Trader Plan)
+III. 研究整合团队计划
+   - 💼 研究整合员计划 (Research Integration Plan)
 
-IV. 风险管理团队决策
-   - 🚀 激进分析师评估 (Aggressive Analyst)
-   - 🛡️ 保守分析师评估 (Conservative Analyst)
-   - ⚖️ 中性分析师评估 (Neutral Analyst)
-   - 🎯 投资组合经理最终决策 (Portfolio Manager)
+IV. 风险管理团队审阅
+   - 🚀 高弹性情景研究员评估 (High-Elasticity Scenario)
+   - 🛡️ 防御情景研究员评估 (Defensive Scenario)
+   - ⚖️ 基准情景研究员评估 (Baseline Scenario)
+   - 👔 风险评估师最终审阅 (Risk Assessor)
 
-V. 最终分析结果
-   - 🎯 最终分析结果 (Final Trade Decision)
+V. 最终研究结论
+   - 🎯 最终研究结论 (Final Research Conclusion)
 ```
 
 ---
@@ -231,19 +231,19 @@ def _format_team_decision_content(content: Dict[str, Any], module_key: str) -> s
     elif module_key == 'risk_debate_state':
         # 风险管理团队决策格式化
         if content.get('risky_history'):
-            formatted_content += "## 🚀 激进分析师评估\n\n"
+            formatted_content += "## 🚀 高弹性情景研究员评估\n\n"
             formatted_content += f"{content['risky_history']}\n\n"
 
         if content.get('safe_history'):
-            formatted_content += "## 🛡️ 保守分析师评估\n\n"
+            formatted_content += "## 🛡️ 防御情景研究员评估\n\n"
             formatted_content += f"{content['safe_history']}\n\n"
 
         if content.get('neutral_history'):
-            formatted_content += "## ⚖️ 中性分析师评估\n\n"
+            formatted_content += "## ⚖️ 基准情景研究员评估\n\n"
             formatted_content += f"{content['neutral_history']}\n\n"
 
         if content.get('judge_decision'):
-            formatted_content += "## 🎯 投资组合经理最终决策\n\n"
+            formatted_content += "## 👔 风险评估师最终审阅\n\n"
             formatted_content += f"{content['judge_decision']}\n\n"
 
     return formatted_content

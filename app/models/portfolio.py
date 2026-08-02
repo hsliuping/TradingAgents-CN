@@ -27,11 +27,11 @@ class PortfolioAnalysisStatus(str, Enum):
 
 
 class PositionAction(str, Enum):
-    """持仓操作建议"""
-    ADD = "add"           # 加仓
-    REDUCE = "reduce"     # 减仓
-    HOLD = "hold"         # 持有
-    CLEAR = "clear"       # 清仓
+    """持仓研究观察映射（历史字段名，仅供学习研究参考，不构成交易建议）"""
+    ADD = "add"           # 乐观/加仓
+    REDUCE = "reduce"     # 审慎/减仓
+    HOLD = "hold"         # 中性/持有
+    CLEAR = "clear"       # 审慎/清仓
 
 
 class CapitalTransactionType(str, Enum):
@@ -584,11 +584,11 @@ class PositionAnalysisByCodeRequest(BaseModel):
 
 
 class PriceTarget(BaseModel):
-    """价格目标"""
-    stop_loss_price: Optional[float] = None      # 止损价
-    stop_loss_pct: Optional[float] = None        # 止损比例
-    take_profit_price: Optional[float] = None    # 止盈价
-    take_profit_pct: Optional[float] = None      # 止盈比例
+    """价格关注目标（仅供学习研究参考，不构成交易建议）"""
+    stop_loss_price: Optional[float] = None      # 风险关注价格（历史字段名）
+    stop_loss_pct: Optional[float] = None        # 风险关注比例
+    take_profit_price: Optional[float] = None    # 收益关注价格（历史字段名）
+    take_profit_pct: Optional[float] = None      # 收益关注比例
     breakeven_price: Optional[float] = None      # 回本价
 
 
@@ -622,14 +622,14 @@ class PositionAppendixSection(BaseModel):
 
 class PositionAnalysisResult(BaseModel):
     """单股持仓AI分析结果"""
-    action: PositionAction = PositionAction.HOLD    # 操作建议
-    action_reason: str = ""                         # 建议理由
+    action: PositionAction = PositionAction.HOLD    # 研究结论倾向映射（历史字段名）
+    action_reason: str = ""                         # 研究观察理由
     confidence: float = 0.0                         # 置信度 0-100
     price_targets: PriceTarget = Field(default_factory=PriceTarget)
-    risk_assessment: str = ""                       # 风险评估
+    risk_assessment: str = ""                       # 风险审阅
     opportunity_assessment: str = ""                # 机会评估
-    suggested_quantity: Optional[int] = None        # 建议操作数量
-    suggested_amount: Optional[float] = None        # 建议操作金额
+    suggested_quantity: Optional[int] = None        # 建议操作数量（已废弃，固定为0）
+    suggested_amount: Optional[float] = None        # 建议操作金额（已废弃，固定为0）
     detailed_analysis: str = ""                     # 详细分析
     # 风险指标（基于资金总量计算）
     risk_metrics: Optional[PositionRiskMetrics] = None
@@ -638,7 +638,7 @@ class PositionAnalysisResult(BaseModel):
 
     # 工作流引擎扩展字段
     summary: str = ""                               # 分析摘要（综合各智能体结果）
-    recommendation: str = ""                        # 操作建议详情（操作建议师输出）
+    recommendation: str = ""                        # 研究观察详情（研究观察员输出）
     source: str = "legacy"                          # 分析来源: legacy(旧版LLM)/workflow_engine_v2(工作流引擎)
 
 

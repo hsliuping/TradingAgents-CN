@@ -30,6 +30,26 @@ $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $portableDir = Join-Path $root "release\TradingAgentsCN-portable"
 $setFrontendVersionScript = Join-Path $PSScriptRoot "set_frontend_version_env.ps1"
 
+# ============================================================================
+# 临时目录优化：优先使用 D 盘，避免 C 盘空间不足导致打包失败
+# ============================================================================
+try {
+    $dDrive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='D:'" -ErrorAction SilentlyContinue
+    if ($dDrive -and $dDrive.FreeSpace -gt 20GB) {
+        $tempDir = "D:\Temp"
+        if (-not (Test-Path $tempDir)) {
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+        }
+        $env:TEMP = $tempDir
+        $env:TMP = $tempDir
+        Write-Host "  📝 临时目录已切换到 D 盘: $tempDir" -ForegroundColor Gray
+    } else {
+        Write-Host "  📝 D 盘空间不足或未找到，继续使用默认临时目录: $env:TEMP" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "  📝 临时目录切换失败，使用默认值: $env:TEMP" -ForegroundColor Yellow
+}
+
 Write-Host "============================================================================" -ForegroundColor Cyan
 Write-Host "  Build TradingAgents-CN Portable Package" -ForegroundColor Cyan
 Write-Host "============================================================================" -ForegroundColor Cyan

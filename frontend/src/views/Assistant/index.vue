@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="assistant-page">
     <div class="page-header">
       <div class="header-left">
@@ -476,7 +476,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ChatDotRound, Delete, Document, Expand, Fold, FolderOpened, Plus, Setting, User } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 
 import { assistantApi } from '@/api/assistant'
@@ -493,12 +493,11 @@ import type {
 } from '@/api/assistant'
 import type { LLMConfig } from '@/api/config'
 
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 const renderMarkdown = (content: string): string => {
   if (!content?.trim()) return ''
   try {
-    return marked.parse(content) as string
+    return safeMarkdown(content)
   } catch {
     return content
   }

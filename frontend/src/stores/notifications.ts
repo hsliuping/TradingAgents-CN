@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { notificationsApi, type NotificationItem } from '@/api/notifications'
 import { useAuthStore } from '@/stores/auth'
+import { isJdyunMode } from '@/utils/config'
 
 type NotificationSocketState = {
   socket: WebSocket | null
@@ -118,7 +119,11 @@ export const useNotificationStore = defineStore('notifications', () => {
     try {
       const authStore = useAuthStore()
       const token = authStore.token || localStorage.getItem('auth-token') || ''
-      if (!token) {
+      const jdyun = isJdyunMode()
+
+      // 京东云模式：无 JWT token 也可连接，由网关注入 Basic Auth 认证
+      // 非京东云模式：必须有 JWT token
+      if (!token && !jdyun) {
         console.warn('[WS] 未找到 token，无法连接 WebSocket')
         disconnectWebSocket()
         return
@@ -132,10 +137,12 @@ export const useNotificationStore = defineStore('notifications', () => {
         return
       }
 
+      // 京东云模式下 token 为空时用占位符标识，保证 currentToken 比较逻辑一致
+      const connKey = token || (jdyun ? '__jdyun_basic_auth__' : '')
       if (
         state.socket
         && (state.socket.readyState === WebSocket.OPEN || state.socket.readyState === WebSocket.CONNECTING)
-        && state.currentToken === token
+        && state.currentToken === connKey
       ) {
         console.debug('[WS] 复用现有通知连接')
         syncSocketRefs()
@@ -156,15 +163,18 @@ export const useNotificationStore = defineStore('notifications', () => {
 
       // WebSocket 连接地址
       // 🔥 统一使用当前访问的服务器地址（开发环境通过 Vite 代理，生产环境通过 Nginx 代理）
+      // 京东云模式无 token 时不传 token 参数，由网关注入的 Basic Auth 头认证
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
       const host = window.location.host
-      const wsUrl = `${wsProtocol}//${host}/api/ws/notifications?token=${encodeURIComponent(token)}`
+      const wsUrl = token
+        ? `${wsProtocol}//${host}/api/ws/notifications?token=${encodeURIComponent(token)}`
+        : `${wsProtocol}//${host}/api/ws/notifications`
 
-      console.log('[WS] 连接到:', wsUrl)
+      console.log('[WS] 连接到:', wsUrl, jdyun && !token ? '(京东云 Basic Auth)' : '')
 
       const socket = new WebSocket(wsUrl)
       state.socket = socket
-      state.currentToken = token
+      state.currentToken = connKey
       state.isConnecting = true
       syncSocketRefs()
 

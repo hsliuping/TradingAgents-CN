@@ -471,6 +471,11 @@ export const configApi = {
     return ApiClient.post('/api/config/llm/set-default', { name }) as any
   },
 
+  // 一键导入大模型配置（按厂家）
+  batchImportLLMConfigs(providers?: string[]): Promise<{ success: boolean; message: string; imported: number; skipped: number; errors: string[] }> {
+    return ApiClient.post('/api/config/llm/batch-import', { providers: providers || [] }) as any
+  },
+
   // 获取所有数据源配置
   getDataSourceConfigs(): Promise<DataSourceConfig[]> {
     return ApiClient.get('/api/config/datasource').then((response: any) => response.data ?? response)
@@ -729,6 +734,23 @@ export const configApi = {
   // 删除空 collection
   deleteCollection(collection_name: string, source: 'main' | 'mem0'): Promise<{ success: boolean; message: string }> {
     return ApiClient.post('/api/config/qdrant/delete-collection', { collection_name, source }) as any
+  },
+
+  // ========== 京东云合作版 ==========
+
+  // 获取京东云配置状态
+  getJdyunStatus(): Promise<{
+    jdyun_mode: boolean
+    api_base: string
+    api_key_configured: boolean
+    current_model: string
+    available_models: string[]
+    embedding_model: string
+    embedding_dims: number
+    tushare_token_configured: boolean
+    akshare_available: boolean
+  }> {
+    return ApiClient.get('/api/config/jdyun/status').then((response: any) => response.data ?? response)
   }
 }
 

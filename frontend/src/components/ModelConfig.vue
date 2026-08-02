@@ -49,7 +49,7 @@
         <div class="model-item">
           <div class="model-label">
             <span>深度决策模型</span>
-            <el-tooltip content="用于研究管理者综合决策、风险管理者最终评估" placement="top">
+            <el-tooltip content="用于研究整合员综合决策、风险评估师最终评估" placement="top">
               <el-icon class="help-icon"><InfoFilled /></el-icon>
             </el-tooltip>
           </div>

@@ -7,6 +7,7 @@ import AdvancedSampleReport from '@/views/Learning/AdvancedSampleReport.vue'
 import { ElMessage } from 'element-plus'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
+import { isJdyunMode } from '@/utils/config'
 
 // 配置NProgress
 NProgress.configure({
@@ -46,6 +47,29 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Dashboard/index.vue'),
         meta: {
           title: '仪表板',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
+    path: '/help',
+    name: 'Help',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '使用手册',
+      icon: 'QuestionFilled',
+      requiresAuth: true,
+      hideInMenu: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'HelpHome',
+        component: () => import('@/views/Help/index.vue'),
+        meta: {
+          title: '使用手册',
           requiresAuth: true
         }
       }
@@ -186,8 +210,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Learning/Advanced.vue'),
         meta: {
           title: '从散户到系统交易者：AI赋能的可进化投资法',
-          requiresAuth: false,
-          requiresPro: true
+          requiresAuth: false
         }
       },
       {
@@ -196,8 +219,7 @@ const routes: RouteRecordRaw[] = [
         component: AdvancedSampleReport,
         meta: {
           title: '高级课程示例报告',
-          requiresAuth: false,
-          requiresPro: true
+          requiresAuth: false
         }
       },
       {
@@ -206,8 +228,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Learning/AdvancedLesson.vue'),
         meta: {
           title: '从散户到系统交易者：AI赋能的可进化投资法',
-          requiresAuth: false,
-          requiresPro: true
+          requiresAuth: false
         }
       }
     ]
@@ -655,6 +676,12 @@ const routes: RouteRecordRaw[] = [
         name: 'PromptDesignWorkspace',
         component: () => import('@/views/Settings/PromptDesignWorkspace.vue'),
         meta: { title: 'Prompt 设计助手', requiresAuth: true, requiresPro: true }
+      },
+      {
+        path: 'jdyun-config',
+        name: 'JdyunConfig',
+        component: () => import('@/views/Settings/JdyunConfig.vue'),
+        meta: { title: '系统配置', requiresAuth: true }
       }
     ]
   },
@@ -1064,6 +1091,25 @@ router.beforeEach(async (to, _from, next) => {
   if (authStore.isAuthenticated && to.name === 'Login') {
     next('/dashboard')
     return
+  }
+
+  // 京东云版首次登录引导：未完成引导且访问仪表板时跳转到 /guide
+  if (authStore.isAuthenticated && isJdyunMode()) {
+    const guideCompleted = (() => {
+      try {
+        return localStorage.getItem('jdyun_guide_completed') === 'true'
+      } catch {
+        return false
+      }
+    })()
+
+    // 用户主动点击"查看引导"或已经在 /guide 页面，不拦截
+    const goingToGuide = to.path === '/guide'
+
+    if (!guideCompleted && to.path === '/dashboard' && !goingToGuide) {
+      next('/guide?mode=jdyun')
+      return
+    }
   }
 
   // PRO 功能路由检查

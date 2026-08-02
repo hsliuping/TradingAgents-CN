@@ -19,7 +19,7 @@
           <el-step title="获取API Token" description="获取大模型和数据源的API密钥" />
           <el-step title="填写Token配置" description="在设置页面填写您的API密钥" />
           <el-step title="同步股票数据" description="同步基础股票数据到系统" />
-          <el-step title="搜索并添加自选股" description="搜索感兴趣的股票并添加到股票关注列表" />
+          <el-step title="搜索并添加股票关注列表" description="搜索感兴趣的股票并添加到股票关注列表" />
           <el-step title="完成第一次分析" description="对自己关注股票进行AI分析" />
         </el-steps>
       </div>
@@ -52,6 +52,7 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Document } from '@element-plus/icons-vue'
+import { isJdyunMode } from '@/utils/config'
 
 const props = defineProps<{
   modelValue: boolean
@@ -67,8 +68,9 @@ const emit = defineEmits<{
 const router = useRouter()
 const dontShowAgain = ref(false)
 
+// 京东云版不显示弹窗（首次登录由路由守卫直接跳转 /guide）
 const visible = computed({
-  get: () => props.modelValue,
+  get: () => !isJdyunMode() && props.modelValue,
   set: (val) => emit('update:modelValue', val)
 })
 

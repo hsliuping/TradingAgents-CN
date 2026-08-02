@@ -150,7 +150,9 @@ class ModelCapabilityService:
                         features_enum = []
                         for feature_str in features_str:
                             try:
-                                # 将字符串转换为 ModelFeature 枚举
+                                # 兼容旧版 function_calling -> tool_calling
+                                if feature_str == "function_calling":
+                                    feature_str = "tool_calling"
                                 features_enum.append(ModelFeature(feature_str))
                             except ValueError:
                                 logger.warning(f"⚠️ 未知的特性值: {feature_str}")

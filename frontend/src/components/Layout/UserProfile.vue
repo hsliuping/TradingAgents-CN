@@ -58,6 +58,9 @@ import { useAuthStore } from '@/stores/auth'
 import { useLicenseStore } from '@/stores/license'
 import { User, Setting, SwitchButton, Star, UserFilled } from '@element-plus/icons-vue'
 
+// 🔧 京东云模式
+const isJdyunMode = import.meta.env.VITE_JDYUN_MODE === 'true'
+
 const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
@@ -73,6 +76,8 @@ const userRole = computed(() => {
 
 // 学员等级相关
 const licenseLabel = computed(() => {
+  // 🔧 京东云模式：显示"京东云版"
+  if (isJdyunMode) return '京东云版'
   const plan = licenseStore.plan
   if (plan === 'enterprise') return '终身高级学员'
   if (plan === 'pro') return '高级学员'
@@ -81,6 +86,8 @@ const licenseLabel = computed(() => {
 })
 
 const licenseTagType = computed(() => {
+  // 🔧 京东云模式：使用 primary 样式
+  if (isJdyunMode) return 'primary'
   const plan = licenseStore.plan
   if (['enterprise', 'pro'].includes(plan)) return 'success'
   if (plan === 'trial') return 'warning'
@@ -88,6 +95,8 @@ const licenseTagType = computed(() => {
 })
 
 const licenseIconColor = computed(() => {
+  // 🔧 京东云模式：使用蓝色
+  if (isJdyunMode) return '#409eff'
   const plan = licenseStore.plan
   if (['enterprise', 'pro'].includes(plan)) return '#67c23a'
   if (plan === 'trial') return '#e6a23c'
@@ -95,6 +104,8 @@ const licenseIconColor = computed(() => {
 })
 
 const goToLicense = () => {
+  // 🔧 京东云模式：不跳转授权页
+  if (isJdyunMode) return
   router.push('/settings/license')
 }
 
@@ -104,9 +115,16 @@ const handleCommand = async (command: string) => {
       router.push('/settings')
       break
     case 'logout':
-      await authStore.logout()
-      ElMessage.success('已退出登录')
-      router.push('/login')
+      if (isJdyunMode) {
+        // 京东云模式：跳转到网关 /logout 清除 jdyun_session cookie
+        // 网关清除 cookie 后会 302 跳转到 /login，用户下次需重新登录
+        authStore.clearAuthInfo()
+        window.location.href = '/logout'
+      } else {
+        await authStore.logout()
+        ElMessage.success('已退出登录')
+        router.push('/login')
+      }
       break
   }
 }

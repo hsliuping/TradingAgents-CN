@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 import logging
 
 from app.core.database import get_mongo_db
+from app.core.jdyun import is_jdyun_mode
 from app.core.response import ok, fail
 from app.routers.auth_db import get_current_user
 from app.services.license_service import get_license_service, LicenseInfo
@@ -163,6 +164,20 @@ async def get_license_status(
     """
     logger.info(f"✅ /api/license/status 路由已匹配，开始处理请求")
     try:
+        # 🔧 京东云模式：所有功能开放，返回 PRO 状态
+        if is_jdyun_mode():
+            logger.info("🔧 [京东云模式] 返回 PRO 授权状态，无需 License 验证")
+            return ok({
+                "has_token": False,
+                "auth_server": None,
+                "auth_server_options": [],
+                "plan": "pro",
+                "is_valid": True,
+                "features": [],
+                "message": "京东云合作版，所有功能已开放",
+                "offline_mode": False
+            })
+
         db = get_mongo_db()
         user_id = str(user.get("id", "unknown"))
         username = user.get("username", "unknown")

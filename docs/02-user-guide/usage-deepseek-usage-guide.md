@@ -84,7 +84,7 @@ streamlit run web/app.py
 5. **开始分析**：点击"开始分析"按钮
 
 #### 结果查看
-- **决策摘要**：投资建议和关键指标
+- **研究摘要**：研究观察和关键指标
 - **详细报告**：完整的基本面分析
 - **Token统计**：实时的使用量和成本
 - **配置信息**：使用的模型和参数
@@ -165,7 +165,7 @@ response = llm.invoke(
 ```python
 # 示例输出
 {
-    "investment_advice": "买入",
+    "analysis_view": "乐观",
     "confidence": 0.75,
     "risk_score": 0.3,
     "fundamental_score": 7.5,

@@ -89,13 +89,15 @@ class ConfigManager:
     def _load_env_file(self):
         """加载.env文件（保持向后兼容）"""
         # 尝试从项目根目录加载.env文件
+        # 支持通过 DOTENV_FILE 环境变量指定不同的 .env 文件（如京东云模式用 .env.jdyun）
         project_root = Path(__file__).parent.parent.parent
-        env_file = project_root / ".env"
+        env_filename = os.getenv("DOTENV_FILE", ".env")
+        env_file = project_root / env_filename
 
         if env_file.exists():
             # 🔧 [修复] override=False 确保环境变量优先级高于 .env 文件
             # 这样 Docker 容器中的环境变量不会被 .env 文件中的占位符覆盖
-            logger.info(f"🔍 [ConfigManager] 加载 .env 文件: {env_file}")
+            logger.info(f"🔍 [ConfigManager] 加载环境文件: {env_file}")
             logger.info(f"🔍 [ConfigManager] 加载前 DASHSCOPE_API_KEY: {'有值' if os.getenv('DASHSCOPE_API_KEY') else '空'}")
 
             load_dotenv(env_file, override=False)

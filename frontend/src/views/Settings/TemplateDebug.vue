@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="ta-debug">
     <div class="ta-toolbar">
       <el-button link @click="goBack">
@@ -653,19 +653,18 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { configApi } from '@/api/config'
 import { fetchTaskResultWithRetry } from '@/utils/taskResult'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
-import { marked } from 'marked'
+import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { ArrowLeft } from '@element-plus/icons-vue'
 
 const DEBUG_PREFILL_STORAGE_PREFIX = 'template-debug-prefill:'
 
 // 配置 marked 选项
-marked.setOptions({ breaks: true, gfm: true })
-
+// marked 配置已由 @/utils/markdown 统一管理
 // Markdown 渲染函数
 const renderMarkdown = (content: string): string => {
   if (!content) return '<p>暂无内容</p>'
   try {
-    return marked.parse(content) as string
+    return safeMarkdown(content)
   } catch (e) {
     console.error('Markdown 渲染失败:', e)
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
@@ -1034,8 +1033,8 @@ const formatAgentCategory = (value?: DebugAgentInfo['category']): string => {
     analyst: '分析师',
     researcher: '研究员',
     risk: '风险',
-    manager: '经理',
-    trader: '交易员',
+    manager: '管理',
+    trader: '研究整合员',
     post_processor: '后处理'
   }
   return labels[value || 'analyst'] || (value || 'analyst')

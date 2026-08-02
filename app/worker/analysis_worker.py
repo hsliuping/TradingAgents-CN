@@ -25,6 +25,7 @@ from app.core.config import settings
 from app.models.analysis import AnalysisTask, AnalysisParameters, AnalysisStatus
 from app.services.config_provider import provider as config_provider
 from app.services.queue import DEFAULT_USER_CONCURRENT_LIMIT, GLOBAL_CONCURRENT_LIMIT, VISIBILITY_TIMEOUT_SECONDS
+from app.core.jdyun import is_jdyun_mode, get_jdyun_worker_max_concurrent, get_jdyun_stock_interval_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -528,12 +529,27 @@ class AnalysisWorker:
             try:
                 # 🔥 Worker 并发数配置（从系统设置读取，默认3）
                 self.max_concurrent_tasks = int(effective_settings.get("worker_max_concurrent_tasks", 3))
+                # 🔧 京东云模式：降低 Worker 并发数，避免 LLM 限速（429）
+                if is_jdyun_mode():
+                    jdyun_max = get_jdyun_worker_max_concurrent()
+                    if self.max_concurrent_tasks > jdyun_max:
+                        logger.info(f"🔧 [京东云模式] Worker 并发数 {self.max_concurrent_tasks} → {jdyun_max}（避免 LLM 限速）")
+                        self.max_concurrent_tasks = jdyun_max
                 # 初始化 Semaphore
                 self.semaphore = asyncio.Semaphore(self.max_concurrent_tasks)
                 logger.info(f"🔧 Worker 并发数设置为: {self.max_concurrent_tasks}")
-                
+
                 self.queue_service.user_concurrent_limit = int(effective_settings.get("max_concurrent_tasks", DEFAULT_USER_CONCURRENT_LIMIT))
                 self.queue_service.global_concurrent_limit = int(effective_settings.get("max_concurrent_tasks", GLOBAL_CONCURRENT_LIMIT))
+                # 🔧 京东云模式：降低用户/全局并发限制，避免 LLM 限速（429）
+                if is_jdyun_mode():
+                    jdyun_max = get_jdyun_worker_max_concurrent()
+                    if self.queue_service.user_concurrent_limit > jdyun_max:
+                        logger.info(f"🔧 [京东云模式] 用户并发限制 {self.queue_service.user_concurrent_limit} → {jdyun_max}")
+                        self.queue_service.user_concurrent_limit = jdyun_max
+                    if self.queue_service.global_concurrent_limit > jdyun_max:
+                        logger.info(f"🔧 [京东云模式] 全局并发限制 {self.queue_service.global_concurrent_limit} → {jdyun_max}")
+                        self.queue_service.global_concurrent_limit = jdyun_max
                 self.queue_service.visibility_timeout = int(effective_settings.get("default_analysis_timeout", VISIBILITY_TIMEOUT_SECONDS))
                 # Worker intervals
                 self.heartbeat_interval = int(effective_settings.get("worker_heartbeat_interval_seconds", self.heartbeat_interval))
@@ -542,6 +558,12 @@ class AnalysisWorker:
             except Exception:
                 # 如果配置读取失败，使用默认值
                 self.max_concurrent_tasks = 3
+                # 🔧 京东云模式：异常情况下也应用降并发逻辑
+                if is_jdyun_mode():
+                    jdyun_max = get_jdyun_worker_max_concurrent()
+                    if self.max_concurrent_tasks > jdyun_max:
+                        logger.info(f"🔧 [京东云模式] 异常恢复 Worker 并发数 {self.max_concurrent_tasks} → {jdyun_max}")
+                        self.max_concurrent_tasks = jdyun_max
                 self.semaphore = asyncio.Semaphore(self.max_concurrent_tasks)
                 logger.warning(f"⚠️ 使用默认 Worker 并发数: {self.max_concurrent_tasks}")
             # 🔥 Worker启动时恢复卡住的任务（进程重启后）
@@ -639,6 +661,12 @@ class AnalysisWorker:
         try:
             async with self.semaphore:  # 🔥 并发控制：最多同时执行 max_concurrent_tasks 个任务
                 await self._process_task(task_data)
+                # 🔧 京东云模式：任务完成后添加间隔，避免连续密集 LLM 调用触发限速（429）
+                if is_jdyun_mode():
+                    interval = get_jdyun_stock_interval_seconds()
+                    if interval > 0:
+                        logger.info(f"⏳ [京东云模式] 任务 {task_id} 完成，等待 {interval}s 后继续下一个任务（避免 LLM 限速）")
+                        await asyncio.sleep(interval)
         except Exception as e:
             # 🔥 确保任务级别的异常不会导致 Worker 进程崩溃
             logger.error(f"❌ 任务处理包装器捕获异常: {task_id} - {e}")

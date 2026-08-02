@@ -60,7 +60,9 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Download, Clock, View, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import { renderMarkdown } from '@/utils/markdown'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 const route = useRoute()
 const router = useRouter()
@@ -289,6 +291,8 @@ async function loadArticle(id: string) {
       } else if (typeof text === 'string') {
         htmlText = marked.parseInline(text) as string
       }
+      // 🔐 安全：净化 heading 内的 HTML，防止 XSS
+      htmlText = DOMPurify.sanitize(htmlText) as string
       const plain = (htmlText || '').replace(/<[^>]+>/g, '')
       const id = plain
         .toLowerCase()
@@ -296,8 +300,8 @@ async function loadArticle(id: string) {
         .replace(/^-+|-+$/g, '')
       return `<h${depth} class="article-heading" id="${id}">${htmlText}</h${depth}>`
     }
-    marked.setOptions({ renderer })
-    let html = marked.parse(md) as string
+    // 🔐 安全：使用 renderMarkdown 统一渲染（含 DOMPurify 净化）
+    let html = renderMarkdown(md)
     // 转换本地文章链接
     html = convertLocalLinks(html)
     // 重写图片资源路径，确保从仓库根目录的 assets/ 正确加载

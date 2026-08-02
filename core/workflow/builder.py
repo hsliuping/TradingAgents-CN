@@ -29,6 +29,143 @@ from .models import (
     NodeType,
     EdgeType,
 )
+
+
+# ============================================================
+# v3.6.0 项8：辩论反思触发器（模块级函数）
+# ============================================================
+
+def _trigger_debate_reflection(
+    *,
+    state: Dict[str, Any],
+    result: Dict[str, Any],
+    debate_state_field: str,
+    debate_type: str,
+    agent_id: str,
+    node_id: str,
+) -> None:
+    """辩论结束后触发反思提炼。
+
+    在 research_manager / risk_manager 节点执行后调用，从 state 和 result
+    中提取辩论历史与裁决，调用 run_reflection_sync 提炼为结构化 debate_lesson，
+    写入 AGENT_EXPERIENCE scope（memory_kind=debate_lesson）。
+
+    降级策略：
+    - 辩论历史为空 → 跳过
+    - LLM 超时/返回非 JSON → fallback 写入辩论历史摘要
+    - mem0 不可用 → 跳过
+    - 任何异常 → 不阻塞主流程（caller 已 try/except）
+    """
+    try:
+        # 合并 state 和 result（管理者返回的 result 包含更新后的 debate_state）
+        merged = dict(state or {})
+        if isinstance(result, dict):
+            merged.update(result)
+
+        debate_state = merged.get(debate_state_field) or {}
+        if not isinstance(debate_state, dict):
+            return
+
+        debate_history = str(debate_state.get("history", "") or "").strip()
+        # judge_decision 可能存在于 debate_state 或顶层字段（如 investment_plan / final_trade_decision）
+        conclusion = str(debate_state.get("judge_decision", "") or "").strip()
+        if not conclusion:
+            # 兜底：从 result 中取管理者输出
+            if debate_state_field == "risk_debate_state":
+                conclusion = str(merged.get("final_trade_decision", "") or "").strip()
+            else:
+                conclusion = str(merged.get("investment_plan", "") or "").strip()
+
+        if not debate_history and not conclusion:
+            logger.debug("[辩论反思] 跳过：辩论历史和裁决均为空 node=%s", node_id)
+            return
+
+        # 提取 ticker（兼容多种字段名）
+        ticker = (
+            merged.get("ticker")
+            or merged.get("symbol")
+            or merged.get("stock_code")
+            or merged.get("code")
+            or ""
+        )
+        ticker = str(ticker).strip() if ticker else ""
+
+        # 提取 user_id（用于 mem0 元数据）
+        user_id = str(merged.get("user_id") or merged.get("userId") or "default_user")
+
+        # 获取 db 句柄
+        db = merged.get("_db") or merged.get("db")
+        if db is None:
+            try:
+                from app.core.database import get_mongo_db_sync
+                db = get_mongo_db_sync()
+            except Exception as exc:
+                logger.debug("[辩论反思] 获取 db 句柄失败: %s", exc)
+                return
+        if db is None:
+            return
+
+        # 构造 fallback 内容
+        fallback_parts = [f"辩论反思 {ticker} ({debate_type})"]
+        if debate_history:
+            # 仅保留末尾 800 字，避免 fallback 过长
+            fallback_parts.append(debate_history[-800:])
+        if conclusion:
+            fallback_parts.append(f"最终裁决: {conclusion[:300]}")
+        fallback_content = "\n\n".join(fallback_parts)
+
+        from core.agents.reflection_helper import run_reflection_sync
+        from core.agents.reflection_prompts import (
+            DEBATE_REFLECTION_SYSTEM_PROMPT,
+            build_debate_reflection_user_prompt,
+        )
+        from core.memory.models import MemoryScope
+
+        user_prompt = build_debate_reflection_user_prompt(
+            ticker=ticker,
+            debate_history=debate_history,
+            conclusion=conclusion,
+            debate_type=debate_type,
+        )
+        if not user_prompt.strip():
+            return
+
+        success = run_reflection_sync(
+            db=db,
+            user_id=user_id,
+            agent_id=agent_id,
+            scope=MemoryScope.AGENT_EXPERIENCE,
+            memory_kind="debate_lesson",
+            system_prompt=DEBATE_REFLECTION_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            fallback_content=fallback_content,
+            fallback_metadata={
+                "symbol": str(ticker).upper() if ticker else "",
+                "debate_type": debate_type,
+                "agent_id": agent_id,
+                "node_id": node_id,
+                "source": "debate_reflection",
+            },
+        )
+        if success:
+            logger.info(
+                "[辩论反思] 已写入 debate_lesson 教训: ticker=%s type=%s node=%s",
+                ticker, debate_type, node_id,
+            )
+    except Exception as exc:
+        logger.warning("[辩论反思] 异常: %s", exc, exc_info=True)
+
+
+# v3.6.0 项8 fix：管理者 agent_id 前缀匹配，覆盖 v2 变体
+_MANAGER_AGENT_PREFIXES = ("research_manager", "risk_manager")
+
+
+def _is_manager_agent(agent_id: str) -> bool:
+    """判断 agent_id 是否属于管理者节点（含 v2 变体）。"""
+    agent_id = str(agent_id or "").strip()
+    return any(agent_id.startswith(prefix) for prefix in _MANAGER_AGENT_PREFIXES)
+
+
 from ..agents import AgentRegistry, AgentFactory, AgentConfig
 from ..collaboration_runtime import (
     InvocationArtifactRef,
@@ -182,14 +319,24 @@ class LegacyDependencyProvider:
 
         logger.info(f"[依赖提供者] 用户传入配置: quick_model={quick_model}, deep_model={deep_model}")
 
-        # 如果用户没有传入模型名称，从数据库获取默认配置
-        if not quick_model or not deep_model:
-            db_default = self._get_default_llm_config_from_db()
+        # 🔧 京东云模式：如果没有传入模型名称，使用环境变量中的默认模型，跳过数据库查询
+        from app.core.jdyun import is_jdyun_mode, get_jdyun_default_model
+        if is_jdyun_mode():
+            jdyun_default = get_jdyun_default_model()
             if not quick_model:
-                quick_model = db_default.get("quick_think_llm", "qwen-flash")
+                quick_model = jdyun_default
             if not deep_model:
-                deep_model = db_default.get("deep_think_llm", "qwen-plus")
-            logger.info(f"[依赖提供者] 使用数据库默认配置补充: quick_model={quick_model}, deep_model={deep_model}")
+                deep_model = jdyun_default
+            logger.info(f"[依赖提供者] 京东云模式: quick_model={quick_model}, deep_model={deep_model}")
+        else:
+            # 如果用户没有传入模型名称，从数据库获取默认配置
+            if not quick_model or not deep_model:
+                db_default = self._get_default_llm_config_from_db()
+                if not quick_model:
+                    quick_model = db_default.get("quick_think_llm", "qwen-flash")
+                if not deep_model:
+                    deep_model = db_default.get("deep_think_llm", "qwen-plus")
+                logger.info(f"[依赖提供者] 使用数据库默认配置补充: quick_model={quick_model}, deep_model={deep_model}")
 
         # 根据模型名称从数据库获取完整配置（provider, url, api_key）
         # 复用 simple_analysis_service 中已有的统一查询函数
@@ -229,15 +376,30 @@ class LegacyDependencyProvider:
             logger.info(f"  - Deep API Key: 空")
 
         try:
+            # 🔧 从数据库读取模型配置（max_tokens, temperature, timeout, reasoning_effort）
+            # 优先级：用户显式指定(self._config) > 数据库配置 > 默认值
+            # 修复：之前 builder 不读 DB 的 max_tokens，导致 UI 配置的 Token 数不生效
+            from app.services.simple_analysis_service import _load_model_config_from_db
+            quick_db_cfg = _load_model_config_from_db(quick_model)
+            deep_db_cfg = _load_model_config_from_db(deep_model)
+
+            quick_max_tokens = self._config.get("quick_max_tokens") or quick_db_cfg.get("max_tokens", 2000)
+            deep_max_tokens = self._config.get("deep_max_tokens") or deep_db_cfg.get("max_tokens", 4000)
+            logger.info(
+                f"🔧 [依赖提供者] max_tokens: quick={quick_model}={quick_max_tokens}, "
+                f"deep={deep_model}={deep_max_tokens}"
+            )
+
             # 创建快速模型
             self._quick_llm = create_llm_by_provider(
                 provider=quick_provider,
                 model=quick_model,
                 backend_url=quick_url,
-                temperature=self._config.get("quick_temperature", 0.1),
-                max_tokens=self._config.get("quick_max_tokens", 2000),
-                timeout=self._config.get("quick_timeout", 60),
-                api_key=quick_api_key
+                temperature=self._config.get("quick_temperature") or quick_db_cfg.get("temperature", 0.1),
+                max_tokens=quick_max_tokens,
+                timeout=self._config.get("quick_timeout") or quick_db_cfg.get("timeout", 60),
+                api_key=quick_api_key,
+                reasoning_effort=quick_db_cfg.get("reasoning_effort"),
             )
 
             # 创建深度模型
@@ -245,10 +407,11 @@ class LegacyDependencyProvider:
                 provider=deep_provider,
                 model=deep_model,
                 backend_url=deep_url,
-                temperature=self._config.get("deep_temperature", 0.1),
-                max_tokens=self._config.get("deep_max_tokens", 4000),
-                timeout=self._config.get("deep_timeout", 120),
-                api_key=deep_api_key
+                temperature=self._config.get("deep_temperature") or deep_db_cfg.get("temperature", 0.1),
+                max_tokens=deep_max_tokens,
+                timeout=self._config.get("deep_timeout") or deep_db_cfg.get("timeout", 120),
+                api_key=deep_api_key,
+                reasoning_effort=deep_db_cfg.get("reasoning_effort"),
             )
 
             logger.info("[依赖提供者] LLM 实例创建成功")
@@ -297,18 +460,22 @@ class LegacyDependencyProvider:
         api_key_from_db = config.get("api_key")
         api_key = api_key_from_config or api_key_from_db
 
-        # 使用默认参数，并允许 Agent 级覆盖
+        # 🔧 从数据库读取模型配置（max_tokens, temperature, timeout, reasoning_effort）
+        # 优先级：显式参数 > self._config > 数据库配置 > 默认值
+        from app.services.simple_analysis_service import _load_model_config_from_db
+        db_cfg = _load_model_config_from_db(model)
+
         resolved_temperature = (
             temperature if temperature is not None
-            else self._config.get(f"{llm_type}_temperature", 0.1)
+            else self._config.get(f"{llm_type}_temperature") or db_cfg.get("temperature", 0.1)
         )
         resolved_max_tokens = (
             max_tokens if max_tokens is not None
-            else self._config.get(f"{llm_type}_max_tokens", 2000 if llm_type == "quick" else 4000)
+            else self._config.get(f"{llm_type}_max_tokens") or db_cfg.get("max_tokens", 2000 if llm_type == "quick" else 4000)
         )
         resolved_timeout = (
             timeout if timeout is not None
-            else self._config.get(f"{llm_type}_timeout", 60 if llm_type == "quick" else 120)
+            else self._config.get(f"{llm_type}_timeout") or db_cfg.get("timeout", 60 if llm_type == "quick" else 120)
         )
 
         logger.info(
@@ -328,7 +495,8 @@ class LegacyDependencyProvider:
             temperature=resolved_temperature,
             max_tokens=resolved_max_tokens,
             timeout=resolved_timeout,
-            api_key=api_key
+            api_key=api_key,
+            reasoning_effort=db_cfg.get("reasoning_effort"),
         )
 
     def _get_llm_config_from_db(self) -> Dict[str, Any]:
@@ -900,6 +1068,17 @@ class WorkflowBuilder:
             if node.id in participant_debate_keys:
                 debate_key = participant_debate_keys[node.id]
                 node_func = self._create_debate_participant_wrapper(node, debate_key)
+            elif _is_manager_agent(node.agent_id):
+                # v3.6.0 项8：管理者节点（research_manager / risk_manager 及其 v2 变体）
+                # 在管理者产出裁决后触发辩论反思，把辩论历史+裁决提炼为
+                # 结构化 debate_lesson 教训，写入 AGENT_EXPERIENCE scope。
+                debate_state_field = (
+                    "risk_debate_state" if node.agent_id.startswith("risk_manager")
+                    else "investment_debate_state"
+                )
+                node_func = self._create_manager_with_debate_reflection(
+                    node, debate_state_field=debate_state_field
+                )
             else:
                 node_func = self._create_node_function(node)
 
@@ -1258,13 +1437,17 @@ class WorkflowBuilder:
             # key: analyst_type 或 agent_id，value: Markdown 格式的摘要文本
             tool_call_summaries: Annotated[dict, merge_dict]
 
+            # 🆕 v3.5.0 质量门禁标记（各分析师报告的质量检查结果，供下游和监控引用）
+            # 每个元素是 {agent_id, analyst_type, ticker, reason, severity, retried} 字典
+            quality_flags: Annotated[list, keep_latest_list]
+
             # 研究结果
             bull_report: Annotated[str, keep_non_empty]
             bear_report: Annotated[str, keep_non_empty]
             investment_plan: Annotated[str, keep_non_empty]
             trader_investment_plan: Annotated[str, keep_non_empty]
 
-            # 最终决策
+            # 最终研究结论
             final_decision: Annotated[str, keep_non_empty]
             risk_assessment: Annotated[str, keep_non_empty]
             final_trade_decision: Annotated[str, keep_non_empty]
@@ -1857,6 +2040,7 @@ class WorkflowBuilder:
         )
         started_at = utc_now()
 
+        _trace_recorder = None  # 🔑 统一执行轨迹埋点：提前初始化，确保 finally 可用
         try:
             agent_state = state
             if isinstance(state, dict):
@@ -1875,12 +2059,32 @@ class WorkflowBuilder:
             import time as _time
             _agent_start = _time.time()
             logger.info(f"[节点执行] ⏳ {node_id} ({node_label}) - 调用 agent_callable...")
+            # 🔑 统一执行轨迹埋点：在节点执行层面启动轨迹采集
+            # 这样无论适配器是否覆盖 execute，都能记录轨迹
+            _agent_obj = agent_callable if hasattr(agent_callable, 'execute') else None
+            _trace_recorder = None
+            if _agent_obj is not None:
+                from core.agents.execution_trace_recorder import start_execution_trace, is_trace_enabled
+                if is_trace_enabled():
+                    try:
+                        _trace_recorder = start_execution_trace(_agent_obj, agent_state)
+                        _agent_obj._last_trace_id = _trace_recorder.trace_id
+                    except Exception as _trace_err:
+                        logger.warning(f"⚠️ [节点执行] 启动轨迹采集失败（不影响执行）: {_trace_err}")
+
             raw_result = agent_callable(agent_state)
             _agent_elapsed = _time.time() - _agent_start
             logger.info(f"[节点执行] ⏱️ {node_id} ({node_label}) - agent_callable 执行完成, 耗时: {_agent_elapsed:.1f}s")
             result = raw_result if isinstance(raw_result, dict) else {
                 (output_field or f"{agent_id}_report"): raw_result
             }
+
+            # 🔑 统一执行轨迹埋点：记录解析后的输出
+            if _trace_recorder:
+                try:
+                    _trace_recorder.record_parsed_output(result)
+                except Exception:
+                    pass
 
             logger.info(f"[节点执行] 📝 {node_id} ({node_label}) - 返回字段: {list(result.keys())}")
 
@@ -1927,6 +2131,13 @@ class WorkflowBuilder:
             logger.info(f"[节点执行] ✅ {node_id} ({node_label}) - 执行完成")
             return result
         except Exception as exc:
+            # 🔑 统一执行轨迹埋点：记录异常
+            if _trace_recorder:
+                try:
+                    _trace_recorder.record_error(exc)
+                except Exception:
+                    pass
+
             invocation_result = InvocationResult(
                 invocation_id=invocation_request.invocation_id,
                 target_type=InvocationTargetType.AGENT,
@@ -1969,17 +2180,34 @@ class WorkflowBuilder:
                 f"[节点执行] ⚠️ {node_id} ({node_label}) - 降级处理，工作流继续执行"
             )
             return degraded
+        finally:
+            # 🔑 统一执行轨迹埋点：完成采集并写入 MongoDB（非阻塞）
+            if _trace_recorder:
+                try:
+                    _trace_recorder.finish()
+                except Exception:
+                    pass
 
     def _try_create_legacy_agent(self, agent_id: str) -> Optional[Callable]:
         """
-        尝试使用遗留适配器创建智能体
+        尝试使用遗留适配器创建智能体 — 已停用
+
+        v3.0 起旧版 agent（不带 _v2 后缀）不再维护，所有入口已封堵。
+        详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md
 
         Args:
             agent_id: 智能体 ID
 
         Returns:
-            可调用的节点函数，如果不支持则返回 None
+            始终返回 None（旧版 agent 已停用，走 placeholder_node 占位）
         """
+        logger.warning(
+            "[已停用] _try_create_legacy_agent 已停用，agent_id=%s 应使用对应的 _v2 版本。"
+            "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md",
+            agent_id,
+        )
+        return None
+        # pragma: no cover - 以下旧版 factory_map 代码保留但不执行，为 v4.0 删除做准备
         # 智能体到工厂函数的映射
         factory_map = {
             # 分析师
@@ -1993,7 +2221,7 @@ class WorkflowBuilder:
             # 研究员
             "bull_researcher": ("tradingagents.agents.researchers.bull_researcher", "create_bull_researcher", "bull_memory"),
             "bear_researcher": ("tradingagents.agents.researchers.bear_researcher", "create_bear_researcher", "bear_memory"),
-            # 交易员
+            # 研究整合员
             "trader": ("tradingagents.agents.trader.trader", "create_trader", "trader_memory"),
             # 管理者
             "research_manager": ("tradingagents.agents.managers.research_manager", "create_research_manager", "invest_judge_memory"),
@@ -2173,6 +2401,51 @@ class WorkflowBuilder:
             result = original_func(state)
             # 返回增量 1（会被 operator.add 累加到当前值）
             result[debate_key] = 1
+            return result
+
+        return wrapped
+
+    def _create_manager_with_debate_reflection(
+        self,
+        node: NodeDefinition,
+        debate_state_field: str,
+    ) -> Callable:
+        """为管理者节点（research_manager / risk_manager）包装执行函数。
+
+        v3.6.0 项8：管理者产出裁决后，触发辩论反思节点，把辩论历史+裁决
+        提炼为结构化 debate_lesson 教训，写入 AGENT_EXPERIENCE scope。
+
+        反思在独立线程中执行（run_reflection_sync 内部处理 sync→async），
+        失败时 helper 内部降级，不阻塞主工作流。
+        """
+        original_func = self._create_agent_node(node)
+        node_id = node.id
+        agent_id = node.agent_id or node_id
+        debate_type = (
+            "risk_debate_state" if debate_state_field == "risk_debate_state"
+            else "investment_debate_state"
+        )
+
+        def wrapped(state):
+            # 1. 先执行管理者原始逻辑（产出 judge_decision / final_trade_decision 等）
+            result = original_func(state)
+
+            # 2. 触发辩论反思（失败不影响主流程）
+            try:
+                _trigger_debate_reflection(
+                    state=state,
+                    result=result,
+                    debate_state_field=debate_state_field,
+                    debate_type=debate_type,
+                    agent_id=agent_id,
+                    node_id=node_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[辩论反思] 触发失败 node=%s agent=%s: %s",
+                    node_id, agent_id, exc,
+                )
+
             return result
 
         return wrapped
