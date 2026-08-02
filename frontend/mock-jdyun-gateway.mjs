@@ -223,8 +223,11 @@ function forwardUpgrade(req, socket, head) {
   const isBackend = isBackendPath(pathname)
   const target = isBackend ? BACKEND_TARGET : FRONTEND_TARGET
   const t = parseTarget(target)
+  // 复制原始头，覆盖 host，显式设置升级头（避免 Node.js http 客户端覆盖 Connection）
   const headers = { ...req.headers, host: t.host }
   if (isBackend) headers.authorization = `Basic ${CREDENTIAL_B64}`
+  headers.connection = 'Upgrade'
+  headers.upgrade = 'websocket'
 
   console.log(`🔌 [WS] ${req.url} → ${target}`)
 
@@ -233,15 +236,35 @@ function forwardUpgrade(req, socket, head) {
     method: req.method || 'GET', path: req.url, headers,
   })
 
+  // 后端返回 101 Switching Protocols → 转发升级响应
   proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
     const rawHeaders = Object.entries(proxyRes.headers)
       .map(([k, v]) => (Array.isArray(v) ? v.map((x) => `${k}: ${x}`).join('\r\n') : `${k}: ${v}`))
       .join('\r\n')
-    socket.write('HTTP/1.1 101 Switching Protocols\r\n' + rawHeaders + '\r\n')
+    // 注意：头结束后需要 \r\n\r\n（空行表示头结束）
+    socket.write('HTTP/1.1 101 Switching Protocols\r\n' + rawHeaders + '\r\n\r\n')
     if (proxyHead && proxyHead.length) socket.write(proxyHead)
     if (head && head.length) proxySocket.write(head)
     proxySocket.pipe(socket)
     socket.pipe(proxySocket)
+    console.log(`✅ [WS] 升级成功: ${req.url}`)
+  })
+
+  // 后端返回普通 HTTP 响应（如 403/401 拒绝升级）→ 转发给客户端
+  proxyReq.on('response', (proxyRes) => {
+    const chunks = []
+    proxyRes.on('data', (chunk) => chunks.push(chunk))
+    proxyRes.on('end', () => {
+      const body = Buffer.concat(chunks)
+      const statusLine = `HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage || ''}\r\n`
+      const rawHeaders = Object.entries(proxyRes.headers)
+        .map(([k, v]) => (Array.isArray(v) ? v.map((x) => `${k}: ${x}`).join('\r\n') : `${k}: ${v}`))
+        .join('\r\n')
+      socket.write(statusLine + rawHeaders + '\r\n\r\n')
+      if (body.length) socket.write(body)
+      socket.end()
+      console.log(`⚠️ [WS] 后端拒绝升级 (HTTP ${proxyRes.statusCode}): ${req.url}`)
+    })
   })
 
   proxyReq.on('error', (err) => {
