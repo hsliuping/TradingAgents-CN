@@ -29,6 +29,7 @@ ALLOWED_OPERATIONS_JOBS = frozenset(
         "EXPERIMENT_RECONCILIATION",
         "PROMOTION_SAGA_RECOVERY",
         "INTEGRITY_CHECK",
+        "RECOMMENDATION_DATA_SYNC",
         "CANDIDATE_RECOMMENDATION_SCAN",
     }
 )
@@ -100,6 +101,7 @@ class OperationsJobService:
             "EXPERIMENT_RECONCILIATION": {"as_of_trade_date"},
             "PROMOTION_SAGA_RECOVERY": set(),
             "INTEGRITY_CHECK": set(),
+            "RECOMMENDATION_DATA_SYNC": {"as_of_trade_date"},
             "CANDIDATE_RECOMMENDATION_SCAN": {"as_of_trade_date"},
         }
         unexpected = set(payload) - allowed[job_name]
@@ -228,6 +230,65 @@ class OperationsJobService:
             return {"task_run_id": task.task_run_id, "status": task.status}
         if request.job_name == "INTEGRITY_CHECK":
             return await operations.integrity()
+        if request.job_name == "RECOMMENDATION_DATA_SYNC":
+            from app.services.alphaguard.candidate_recommendation_policy import (
+                CandidateRecommendationPolicyRegistry,
+            )
+            from app.services.alphaguard.candidate_recommendation_service import (
+                CandidateRecommendationService,
+            )
+            from app.services.alphaguard.recommendation_data_service import (
+                RecommendationDataService,
+            )
+
+            recommendation_service = CandidateRecommendationService(self.db)
+            trade_date = (
+                date.fromisoformat(request.payload["as_of_trade_date"])
+                if request.payload.get("as_of_trade_date")
+                else await recommendation_service.resolve_latest_trade_date()
+            )
+            now = datetime.utcnow()
+            policy = await CandidateRecommendationPolicyRegistry(self.db).get_active()
+            universe = await recommendation_service.build_universe_manifest(
+                universe_date=trade_date,
+                policy=policy,
+                now=now,
+            )
+            data_service = RecommendationDataService(self.db)
+            sync = await data_service.sync_full_market(
+                universe=universe,
+                trade_date=trade_date,
+                execute=True,
+                now=now,
+            )
+            universe = await recommendation_service.build_universe_manifest(
+                universe_date=trade_date,
+                policy=policy,
+                now=now,
+            )
+            securities = {
+                str(row.get("code") or row.get("symbol")): row
+                for row in await recommendation_service._load_universe_rows()
+            }
+            coverage = await data_service.prepare_coverage(
+                universe=universe,
+                securities=securities,
+                policy=policy,
+                trade_date=trade_date,
+                execute=True,
+                now=now,
+                sync_summary=sync,
+            )
+            return {
+                "sync_run_id": sync["sync_run_id"],
+                "coverage_id": coverage.coverage_id,
+                "coverage_status": coverage.status,
+                "recommendation_data_ready": coverage.recommendation_data_ready,
+                "provider_supported_count": sync["provider_supported_count"],
+                "failed_symbol_count": coverage.failed_symbol_count,
+                "created_count": sync["created_count"],
+                "resumed_count": sync["resumed_count"],
+            }
         if request.job_name == "CANDIDATE_RECOMMENDATION_SCAN":
             from app.services.alphaguard.candidate_recommendation_service import (
                 CandidateRecommendationService,

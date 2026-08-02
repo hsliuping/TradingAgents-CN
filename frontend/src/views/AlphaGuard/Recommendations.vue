@@ -29,6 +29,33 @@
       <span>⑤ 保留历史记录</span>
     </section>
 
+    <section class="coverage" aria-label="推荐数据覆盖">
+      <div class="coverage-heading">
+        <div>
+          <strong>数据覆盖</strong>
+          <span>{{ coverageStatusLabel }}</span>
+        </div>
+        <el-tag :type="coverage?.recommendation_data_ready ? 'success' : 'warning'">
+          {{ formatCoverage(coverage?.coverage_percentage) }}
+        </el-tag>
+      </div>
+      <div class="coverage-metrics">
+        <div><span>证券总数</span><strong>{{ coverage?.universe_count ?? 0 }}</strong></div>
+        <div><span>行情完整</span><strong>{{ coverage?.adjusted_history_ready_count ?? 0 }}</strong></div>
+        <div><span>交易状态完整</span><strong>{{ coverage?.trade_status_ready_count ?? 0 }}</strong></div>
+        <div><span>数据质量通过</span><strong>{{ coverage?.data_quality_pass_count ?? 0 }}</strong></div>
+        <div><span>符合最低合同</span><strong>{{ coverage?.minimum_contract_ready_count ?? 0 }}</strong></div>
+        <div><span>今日推荐</span><strong>{{ latestRun?.recommended_securities ?? 0 }}</strong></div>
+      </div>
+      <el-alert
+        v-if="coveragePrimaryReason"
+        :type="coverage?.recommendation_data_ready ? 'info' : 'warning'"
+        :closable="false"
+        :title="`当前阻断：${coveragePrimaryReason}`"
+        :description="coverageNextStep"
+      />
+    </section>
+
     <section class="summary" aria-label="推荐摘要">
       <div><span>证券池</span><strong>{{ latestRun?.total_securities ?? 0 }}</strong></div>
       <div><span>符合资格</span><strong>{{ latestRun?.eligible_securities ?? 0 }}</strong></div>
@@ -128,6 +155,7 @@ import { useAuthStore } from '@/stores/auth'
 import {
   alphaguardRecommendationsApi,
   type CandidateRecommendation,
+  type RecommendationDataCoverage,
   type RecommendationRun,
   type RecommendationStatus
 } from '@/api/alphaguardRecommendations'
@@ -139,6 +167,7 @@ const loading = ref(false)
 const running = ref(false)
 const rows = ref<CandidateRecommendation[]>([])
 const runs = ref<RecommendationRun[]>([])
+const coverage = ref<RecommendationDataCoverage | null>(null)
 const selectedRows = ref<CandidateRecommendation[]>([])
 const selected = ref<CandidateRecommendation | null>(null)
 const detailVisible = ref(false)
@@ -153,19 +182,36 @@ const statusOptions = [
 ]
 const latestRun = computed(() => runs.value[0] || null)
 const pendingCount = computed(() => rows.value.filter(row => row.status === 'PENDING_REVIEW').length)
+const coverageStatusLabel = computed(() => ({ READY: '已就绪', DEGRADED: '已达到门槛，部分证券降级', PARTIAL: '部分就绪', NOT_READY: '未就绪' } as Record<string, string>)[coverage.value?.status || 'NOT_READY'])
+const coverageReasonLabels: Record<string, string> = {
+  ADJUSTED_HISTORY_INSUFFICIENT: '历史复权行情尚未补齐',
+  RAW_HISTORY_INSUFFICIENT: '历史原始行情尚未补齐',
+  TRADING_STATUS_NOT_READY: '目标交易日状态尚未补齐',
+  TARGET_QUOTE_MISSING: '目标交易日日线缺失',
+  LISTING_DATE_MISSING: '上市日期缺失',
+  PRICE_VERSION_DISCONTINUITY: '行情版本不连续',
+  BENCHMARK_NOT_READY: '沪深300基准窗口未就绪',
+  PRICE_DATA_ANOMALY: '行情字段异常',
+  COVERAGE_NOT_BUILT: '尚未生成数据覆盖报告'
+}
+const coveragePrimaryCode = computed(() => Object.entries(coverage.value?.blocking_reason_counts || {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || '')
+const coveragePrimaryReason = computed(() => coverageReasonLabels[coveragePrimaryCode.value] || coveragePrimaryCode.value)
+const coverageNextStep = computed(() => coverage.value?.recommendation_data_ready ? '未覆盖证券已保留明确原因，不影响已就绪证券扫描。' : '下一步：等待或由管理员启动全市场数据同步。')
 
 async function load() {
   loading.value = true
   try {
-    const [recommendationResponse, runResponse] = await Promise.all([
+    const [recommendationResponse, runResponse, coverageResponse] = await Promise.all([
       alphaguardRecommendationsApi.list({
         status: activeStatus.value === 'ALL' ? undefined : activeStatus.value,
         limit: 500
       }),
-      alphaguardRecommendationsApi.runs({ limit: 20 })
+      alphaguardRecommendationsApi.runs({ limit: 20 }),
+      alphaguardRecommendationsApi.coverage()
     ])
     rows.value = recommendationResponse.data.items
     runs.value = runResponse.data.items
+    coverage.value = coverageResponse.data
     selectedRows.value = []
     tableRef.value?.clearSelection()
   } catch (error: any) {
@@ -230,6 +276,7 @@ async function batchReject() {
 }
 
 function displayTime(value: string) { return value.replace('T', ' ').slice(0, 19) }
+function formatCoverage(value?: string) { return `${(Number(value || 0) * 100).toFixed(1)}%` }
 function statusLabel(value: RecommendationStatus) { return ({ PENDING_REVIEW: '待审核', ACCEPTED: '已加入', REJECTED: '已拒绝', IGNORED: '暂不处理', EXPIRED: '已过期', SUPERSEDED: '已被替代' } as Record<string, string>)[value] || value }
 function statusType(value: RecommendationStatus) { return value === 'ACCEPTED' ? 'success' : value === 'REJECTED' ? 'danger' : value === 'PENDING_REVIEW' ? 'warning' : 'info' }
 function regimeLabel(value: string | null) { return ({ TREND_UP: '趋势向上', RANGE_STRONG: '强势震荡', RANGE_WEAK: '弱势震荡', TREND_DOWN: '趋势向下', EXTREME_RISK: '极端风险' } as Record<string, string>)[value || ''] || '暂无' }
@@ -263,6 +310,14 @@ onMounted(async () => {
 .summary > div:last-child { border-right: 0; }
 .summary span, small { color: var(--el-text-color-secondary); font-size: 12px; }
 .summary strong { overflow-wrap: anywhere; }
+.coverage { display: grid; gap: 12px; border-block: 1px solid var(--el-border-color-light); padding: 14px 0; }
+.coverage-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.coverage-heading > div { display: flex; align-items: baseline; gap: 10px; }
+.coverage-heading span { color: var(--el-text-color-secondary); font-size: 13px; }
+.coverage-metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.coverage-metrics > div { display: grid; gap: 5px; padding: 8px 12px; border-right: 1px solid var(--el-border-color-light); }
+.coverage-metrics > div:last-child { border-right: 0; }
+.coverage-metrics span { color: var(--el-text-color-secondary); font-size: 12px; }
 .toolbar, .batch-actions, .detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .el-table small { display: block; margin-top: 2px; }
 .score, .detail-score { font-variant-numeric: tabular-nums; color: var(--el-color-primary); font-weight: 700; }
@@ -279,5 +334,7 @@ h4 { margin: 22px 0 10px; }
   .workflow, .summary { grid-template-columns: 1fr; }
   .workflow span, .summary > div { border-right: 0; border-bottom: 1px solid var(--el-border-color-light); text-align: left; }
   .metric-list { grid-template-columns: 1fr; }
+  .coverage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .coverage-metrics > div:nth-child(2n) { border-right: 0; }
 }
 </style>

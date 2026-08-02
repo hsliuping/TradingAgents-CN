@@ -795,9 +795,11 @@ def test_credential_host_loads_only_model_apis_and_opens_models_tab():
     ).read_text(encoding="utf-8")
 
     credential_branch = operations.index("if (modelsOnly.value) return")
-    operations_request = operations.index("alphaguardOperationsApi.readiness()")
+    operations_request = operations.index("alphaguardOperationsApi.overview()")
 
     assert credential_branch < operations_request
+    assert "alphaguardOperationsApi.readiness()" not in operations
+    assert "overviewResponse.data.readiness" in operations
     assert "const modelsOnly = computed(() => props.modelsOnly || isCredentialHost)" in operations
     assert "const activeOperationTab = ref(modelsOnly.value ? 'models' : 'services')" in operations
     assert 'v-model="activeOperationTab"' in operations

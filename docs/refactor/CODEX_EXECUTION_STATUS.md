@@ -7302,3 +7302,173 @@ Paper账户、Champion/Challenger或历史推荐审核证据。
 `feat(alphaguard): add governed candidate recommendations`并创建附注标签
 `alphaguard-pr012-candidate-recommendations`。提交范围不包含Secret、`.env`、Keychain、日志、
 数据库备份/运行文件、浏览器认证状态或构建缓存；提交后工作区必须clean并停止，不开始下一阶段。
+
+## 27. PR-013 Full-Market Recommendation Data Activation
+
+### 27.1 原始过滤原因
+
+PR-012基线运行对5535只证券逐只保存了资格诊断：DataQuality不可用5535、TradingStatus未就绪
+5535、上市日期缺失5530、低流动性5530、价格历史不足5530、ST不允许208、当日行情缺失2。
+因此当时确实存在两个全市场共同阻断项，而不是最低推荐分55造成零结果。补数后的v3资格结果不再
+存在全市场统一阻断，主过滤原因为上市日期缺失329、ST不允许208、DataQuality失败97、上市历史
+不足15、停牌5、交易状态未就绪1、低流动性1，共656只；所有命中原因另包括DataQuality失败469、
+价格历史不足347、低流动性339、交易状态未就绪335、上市日期缺失332、ST不允许208、长期无成交
+19、上市历史不足15、停牌6和当日行情缺失1。
+
+### 27.2 根因
+
+根因是全市场推荐最低数据未按独立合同持久化：绝大多数证券没有连续61个交易日RAW/QFQ、目标日
+交易状态和推荐DataQuality证据。PR-012正确地fail-closed，但把完整交易Snapshot的数据准备程度
+直接反映为全市场初筛不可用。PR-013没有降低阈值，而是补建低成本、批量、可断点续传的推荐数据
+管道，并让扫描只读取本地不可变证据。
+
+### 27.3 最低数据合同
+
+`recommendation-data-contract-v1`要求CN证券基础信息、目标日行情和交易状态、61个连续交易日的RAW
+与QFQ OHLC/volume/amount、同窗口沪深300基准，以及版本/hash连续的推荐DataQuality结果。行业映射
+只在实际评分可用时参与，当前`industry_required=false`。财务正文、公告全文、新闻研究、Normal、
+Top、Consensus和HardRisk属于后续深度分析或交易决策证据，不阻断推荐初筛。推荐Policy升级为
+`candidate-recommendation-policy-v2`只锁定新数据合同，权重、最低分55、每日15只上限和全部交易
+规则均未改变。
+
+### 27.4 行情覆盖
+
+2026-07-30不可变Coverage为`61eb8d55-779b-5304-8e98-d88c2a6a5335`：Universe 5535，基础信息
+5203，目标日行情5203，61根RAW完整5188，未覆盖469。全市场扫描不逐只访问外部网络，所有行情先
+由BaoStock增量同步并持久化，再由DataQuality和推荐扫描读取。
+
+### 27.5 交易状态覆盖
+
+目标日TradingStatus完整5200。状态证据绑定`status_date <= 2026-07-30`，包含上市日期、上市状态、
+ST、停牌和可交易状态；无法从Provider确定的证券保持未就绪，不默认成正常。策略门禁最终识别ST
+208只、停牌6只及1只交易状态未就绪证券。
+
+### 27.6 复权数据覆盖
+
+QFQ连续61根完整5188，与RAW完整数一致；推荐趋势、动量和相对强度使用明确的QFQ版本，RAW用于
+目标日和完整性校验。同一窗口不混用复权版本，交易日断点或版本断点均进入DataQuality失败原因，
+不会运行时回退到其他复权模式。
+
+### 27.7 基准覆盖
+
+沪深300基准为61/61，覆盖推荐合同完整窗口，日期不晚于推荐日且按交易日有序。相对基准强度只从
+这组持久化引用计算，不使用网络临时响应或候选股票替代全市场基准。
+
+### 27.8 行业覆盖
+
+当前可用行业映射为5，`industry_required=false`。现行推荐评分不把行业映射作为硬门禁，缺失时按
+版本化降级路径继续，不会因少量映射导致全市场资格归零；没有用当前行业映射静默回填历史。
+
+### 27.9 DataQuality
+
+DataQuality PASS为5066，FAIL或不完整为469，最低合同覆盖率为
+`5066 / 5535 = 91.5266485998%`，高于配置门槛90%。Coverage状态为`DEGRADED`以保留未覆盖事实，
+同时`RECOMMENDATION_DATA_READY=true`；未覆盖主要来自RAW/QFQ历史不足347、版本或交易日不连续、
+上市日期缺失332、目标日行情缺失332和交易状态未就绪335。
+
+### 27.10 最终符合资格
+
+最低数据合同就绪5066只；再经过既有ST、停牌、上市60个交易日、流动性、长期无成交和价格异常等
+资格规则后，正式扫描符合资格4879只并全部完成评分。`candidate-input-v3`将Coverage和不可变
+RecommendationFactorEvidence纳入输入身份；没有修改已有Candidate、持仓或订单排除规则。
+
+### 27.11 推荐数量
+
+正式运行`b2df7c18-d120-5876-85d6-52a1e3491315`自然产生15条`PENDING_REVIEW`推荐：
+000333、000676、300795、601169、000779、002958、300759、000651、601168、600036、600015、
+600941、601939、600285和600000。没有自动接受、没有自动写入候选池，也没有创建交易计划或订单。
+
+### 27.12 推荐分数分布
+
+4879个分数最小2.66、最大63.61、平均26.6594，P50=25.40、P75=37.35、P90=45.26、P95=48.53。
+区间分布为0-39.99共3932、40-49.99共788、50-59.99共155、60-69.99共4、70以上0。正式推荐
+列表按现有阈值和上限确定，没有降低分数门槛强行扩大结果。
+
+### 27.13 模型调用变化
+
+正式扫描前后`ag_model_runs=130 -> 130`。重复同一输入返回`REUSED`，run ID、input/output hash保持
+不变，FactorEvidence、Run、Eligibility、Score、Recommendation、Evaluation和ModelRun增量均为0；
+本阶段没有调用任何Provider或模型。
+
+### 27.14 候选池变化
+
+Candidates保持5，生产候选身份和状态没有变化。`AUTO_CANDIDATE_ACCEPT=false`，15条推荐只等待
+用户审核，扫描、同步和Operations管理员入口均不能绕过人工确认。
+
+### 27.15 四账户资产
+
+`PAPER_QUANT / PAPER_NORMAL / PAPER_TOP_CONFIRMED / PAPER_CHALLENGER`均保持
+`cash_available=1000000.00`、`cash_reserved=0`、`realized_pnl=0`、`total_fees=0`。OrderIntent、
+Outbox、Order、Fill、Position、PositionLot、Reservation、Ledger和Settlement集合全部为0。
+
+### 27.16 Champion
+
+ACTIVE Champion Assignment保持5，内容hash仍为
+`ffd866856ca6267f267f17af0ed79fdb9dbd4d27838158188d359d397c1ebd4e`。本阶段未修改Champion、
+Factor、Regime、策略权重、阈值、Prompt、Consensus、HardRisk、费用、撮合或交易参数。
+
+### 27.17 Challenger
+
+Challenger Assignment=0、Challenger Run=0，未启动或晋升挑战者，也未改变PAPER_CHALLENGER账户。
+PR-011的研究隔离和人工晋升边界保持不变。
+
+### 27.18 同步性能
+
+最终断点续传运行`24b24ae6-e801-58c0-98b7-0f509abe0ed6`处理Provider支持的5203只证券，53个批次，
+耗时75681ms，约68.7只/秒；5138只从检查点恢复，8958条create-only记录复用，重试0、失败0、
+完整性冲突0。该最终恢复段新建数为0，因为数据已由前序批次持久化；重复身份同内容只复用，内容
+冲突不会覆盖。Provider不支持的332只明确留在未覆盖集合。
+
+### 27.19 扫描性能
+
+正式扫描总耗时120557ms，处理5535只、符合资格并评分4879只、失败证券0，约45.9只Universe/秒、
+40.5只评分证券/秒。实现按批查询、批写和create-only去重，不一次性加载全市场历史；幂等复跑耗时
+26615ms且所有业务集合增量为0。
+
+### 27.20 前端
+
+`候选池 -> 股票推荐`新增中文数据覆盖区，显示91.5%、证券池5535、最低合同5066、最终资格4879、
+今日推荐15及主要阻断原因；空状态会给出下一步同步建议。浏览器最终验证无控制台错误、无失败推荐
+请求、无`undefined`、无限加载或布局异常。Docker Nginx新增同源`/api/` HTTP/WebSocket代理，前端
+容器健康检查固定访问`127.0.0.1/health`。
+
+### 27.21 Operations
+
+Operations显示推荐运行时可用、推荐数据已就绪但部分降级、覆盖91.5%、RAW/QFQ 5188、交易状态
+5200、DataQuality 5066、证券池5535、最终资格4879、推荐15、未覆盖469、最高分63.61和扫描耗时。
+全市场数据入库后，旧实现并发请求overview/readiness/services/data-readiness并在后端以
+`to_list(length=None)`加载完整行情集合，浏览器打开页面可稳定触发容器`exitCode=137 / OOM`。
+现已改为数据库端计数和最多16条的有界日期边界查询；前端复用`overview.readiness`，不再重复执行
+完整Readiness。部署后backend restart=0、OOM=false，内存约326.6MiB。
+
+### 27.22 测试
+
+PR-012+PR-013专项35项通过，Operations联合回归45项通过；最终默认离线CI为
+`731 passed, 89 warnings`。前端type-check、正式`npm run build`、独立Vite build（2615 modules）、
+本阶段修改Python文件`py_compile`、`docker compose config --quiet`、`git diff --check`和新增差异
+敏感信息扫描均PASS。MongoDB、Redis、FastAPI、queue-worker、analysis-worker和frontend容器均为
+HEALTHY；FastAPI、queue-worker、analysis-worker在`live=true`下分别exit 3/1/1拒绝启动。
+
+### 27.23 已知限制
+
+469只证券仍未达到最低合同，其中332只不在当前BaoStock支持映射或缺少可靠上市日期；行业映射仅5
+只但当前不是硬依赖。系统总体Readiness继续因既有实验样本和容器模型配置显示`DEGRADED_PAPER`，
+`LIVE_READY=false`，不影响`RECOMMENDATION_RUNTIME_READY=true`和
+`RECOMMENDATION_DATA_READY=true`。全仓compileall仍有既有无关脚本
+`scripts/补充行业信息_akshare.py:81`语法错误，本阶段未修改。通知WebSocket/未读数问题继续作为独立
+技术债，不混入PR-013。
+
+### 27.24 回退
+
+如需回退代码，使用本检查点提交的`git revert`关闭PR-013 API、同步任务、索引声明和前端覆盖展示，
+并先停用`RECOMMENDATION_DATA_SYNC`受控任务。已写入的Coverage、DataQuality、FactorEvidence、
+Eligibility、Score、Run和Recommendation均是create-only审计对象，应保留而不自动删除。回退不得
+修改5个既有候选、四个Paper账户、Champion/Challenger或任何交易对象。
+
+### 27.25 Git状态
+
+本阶段从clean的`97f697f398834fc79c406df9d7d2f950896e061e`和
+`alphaguard-pr012-candidate-recommendations`开始；全部PR-013代码、配置、测试和本文档一次性提交为
+`feat(alphaguard): activate full market recommendation data`并创建附注标签
+`alphaguard-pr013-recommendation-data-ready`。提交范围不包含Secret、`.env`、Keychain、日志、数据库
+备份/运行文件、浏览器认证状态或构建缓存；提交后工作区必须clean并停止，不开始下一阶段。

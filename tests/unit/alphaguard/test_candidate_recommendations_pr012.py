@@ -36,7 +36,9 @@ def _quote(symbol: str, trade_date: date, offset: int) -> dict:
         "ref_id": f"quote-{symbol}-{trade_date}",
         "data_ref": f"stock_daily_quotes:quote-{symbol}-{trade_date}",
         "symbol": symbol,
+        "market": "CN",
         "trade_date": datetime.combine(trade_date, datetime.min.time()),
+        "period": "daily",
         "open": close - Decimal("0.2"),
         "high": close + Decimal("0.5"),
         "low": close - Decimal("0.5"),
@@ -45,9 +47,18 @@ def _quote(symbol: str, trade_date: date, offset: int) -> dict:
         "adjusted_high": close + Decimal("0.5"),
         "adjusted_low": close - Decimal("0.5"),
         "adjusted_close": close,
+        "prev_close": close - Decimal("0.1"),
         "volume": 1_000_000,
         "amount": 100_000_000,
+        "turnover_rate": Decimal("1.0"),
+        "suspended": False,
+        "st_status": False,
         "price_adjustment_mode": "QFQ",
+        "price_data_version": "test:qfq:v1",
+        "raw_data_version": "test:raw:v1",
+        "normalization_version": "recommendation-data-normalization-v1",
+        "provider": "test",
+        "provider_version": "v1",
         "content_hash": f"{offset + 1:064x}",
     }
 
@@ -55,6 +66,7 @@ def _quote(symbol: str, trade_date: date, offset: int) -> dict:
 async def _seed_eligible(db: FakeDB, symbol: str = "600001") -> None:
     await db["stock_basic_info"].insert_one(
         {
+            "ref_id": f"security-{symbol}",
             "code": symbol,
             "symbol": symbol,
             "name": "测试股份",
@@ -62,6 +74,7 @@ async def _seed_eligible(db: FakeDB, symbol: str = "600001") -> None:
             "market": "主板",
             "list_date": "2020-01-01",
             "source": "akshare",
+            "security_master_data_version": "test-master-v1",
         }
     )
     calendar_start = TRADE_DATE - timedelta(days=120)
@@ -79,6 +92,15 @@ async def _seed_eligible(db: FakeDB, symbol: str = "600001") -> None:
         "stock_daily_quotes",
         [_quote(symbol, price_start + timedelta(days=index), index) for index in range(61)],
     )
+    if not await db["stock_daily_quotes"].count_documents({"symbol": "000300"}):
+        await _insert(
+            db,
+            "stock_daily_quotes",
+            [
+                _quote("000300", price_start + timedelta(days=index), index + 1000)
+                for index in range(61)
+            ],
+        )
     await db["market_quotes"].insert_one(
         {
             "symbol": symbol,
@@ -163,6 +185,9 @@ async def _seed_eligible(db: FakeDB, symbol: str = "600001") -> None:
 
 async def _seed_trade_day(db: FakeDB, symbol: str, trade_date: date, offset: int) -> None:
     await db["stock_daily_quotes"].insert_one(_quote(symbol, trade_date, offset))
+    await db["stock_daily_quotes"].insert_one(
+        _quote("000300", trade_date, offset + 1000)
+    )
     await db["market_quotes"].insert_one(
         {
             "symbol": symbol,
@@ -282,6 +307,31 @@ async def test_policy_universe_and_run_are_deterministic_and_model_free():
 
 
 @pytest.mark.asyncio
+async def test_incomplete_legacy_factor_set_uses_recommendation_factor_evidence():
+    db = FakeDB()
+    await _seed_eligible(db)
+    db["ag_factor_results"].documents = [
+        row
+        for row in db["ag_factor_results"].documents
+        if row.get("factor_id") != "relative_strength_hs300_20d_v1"
+    ]
+
+    run, created = await CandidateRecommendationService(db).run(
+        user_id=USER_ID,
+        trade_date=TRADE_DATE,
+        now=datetime(2026, 8, 1, 18, 30),
+    )
+
+    assert created is True
+    assert run.data_version.startswith("candidate-input-v3:")
+    assert run.eligible_securities == run.scored_securities == 1
+    evidences = db["ag_recommendation_factor_evidence"].documents
+    assert len(evidences) == 1
+    recommendation = db["ag_candidate_recommendations"].documents[0]
+    assert recommendation["factor_result_refs"] == [evidences[0]["evidence_id"]]
+
+
+@pytest.mark.asyncio
 async def test_eligibility_records_explicit_reasons_and_existing_candidate_exclusion():
     db = FakeDB()
     await _seed_eligible(db)
@@ -371,11 +421,13 @@ async def test_core_eligibility_filters_are_explicit(case: str, reason: str):
     db = FakeDB()
     await _seed_eligible(db)
     if case == "suspended":
-        db["ag_security_trading_statuses"].documents[0]["is_suspended"] = True
+        for row in db["stock_daily_quotes"].documents:
+            if row.get("symbol") == "600001":
+                row["suspended"] = True
     elif case == "history":
         db["stock_daily_quotes"].documents = db["stock_daily_quotes"].documents[-10:]
     elif case == "quality":
-        db["ag_data_quality_reports"].documents[0]["status"] = "FAIL"
+        db["stock_daily_quotes"].documents[0]["adjusted_close"] = None
     elif case == "liquidity":
         for row in db["stock_daily_quotes"].documents:
             row["amount"] = 1

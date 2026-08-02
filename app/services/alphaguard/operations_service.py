@@ -100,6 +100,47 @@ async def _count_negative(collection, field: str) -> int:
     return count
 
 
+async def _date_bounds(
+    collection,
+    date_fields: tuple[str, ...],
+    *,
+    query: dict[str, Any] | None = None,
+) -> tuple[date | None, date | None]:
+    """Read bounded date samples so readiness never materializes market history."""
+    starts: list[date] = []
+    ends: list[date] = []
+    for field in date_fields:
+        field_query = dict(query or {})
+        field_query[field] = {"$nin": [None, ""]}
+        ascending = (
+            await collection.find(field_query, {field: 1, "_id": 0})
+            .sort(field, 1)
+            .limit(16)
+            .to_list(length=16)
+        )
+        descending = (
+            await collection.find(field_query, {field: 1, "_id": 0})
+            .sort(field, -1)
+            .limit(16)
+            .to_list(length=16)
+        )
+        parsed_starts = [
+            parsed
+            for row in ascending
+            if (parsed := _as_date(row.get(field))) is not None
+        ]
+        parsed_ends = [
+            parsed
+            for row in descending
+            if (parsed := _as_date(row.get(field))) is not None
+        ]
+        if parsed_starts:
+            starts.append(min(parsed_starts))
+        if parsed_ends:
+            ends.append(max(parsed_ends))
+    return (min(starts) if starts else None, max(ends) if ends else None)
+
+
 def _as_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -476,31 +517,20 @@ class AlphaGuardOperationsService:
                 blocking_reasons=["INDUSTRY_HISTORY_MISSING"],
                 last_checked_at=now,
             )
-        rows = await self.db[chosen].find({}).to_list(length=None)
-        dates = [
-            value
-            for row in rows
-            if (
-                value := _as_date(
-                    row.get("effective_from")
-                    or row.get("trade_date")
-                    or row.get("date")
-                )
-            )
-            is not None
-        ]
-        current_only = sum(
-            str(row.get("history_coverage_status") or "").upper()
-            == "CURRENT_ONLY"
-            for row in rows
+        coverage_start, coverage_end = await _date_bounds(
+            self.db[chosen],
+            ("effective_from", "trade_date", "date"),
         )
-        complete = bool(dates) and current_only == 0
+        current_only = await _count(
+            self.db[chosen], {"history_coverage_status": "CURRENT_ONLY"}
+        )
+        complete = coverage_start is not None and current_only == 0
         return DataReadinessStatus(
             component="INDUSTRY_HISTORY",
             status="READY" if complete else "PARTIAL",
             market="CN",
-            coverage_start=min(dates) if dates else None,
-            coverage_end=max(dates) if dates else None,
+            coverage_start=coverage_start,
+            coverage_end=coverage_end,
             record_count=count,
             required_for=["ATTRIBUTION", "INDUSTRY_EXPOSURE"],
             blocking_reasons=(
@@ -541,53 +571,48 @@ class AlphaGuardOperationsService:
                 blocking_reasons=[empty_reason],
                 last_checked_at=now,
             )
-        rows = await self.db[chosen].find({}).to_list(length=None)
-        dates = [
-            parsed
-            for row in rows
-            for field in date_fields
-            if (parsed := _as_date(row.get(field))) is not None
-        ]
+        coverage_start, coverage_end = await _date_bounds(
+            self.db[chosen], date_fields
+        )
         return DataReadinessStatus(
             component=component,
-            status="READY" if dates else "PARTIAL",
+            status="READY" if coverage_start is not None else "PARTIAL",
             market=market,
-            coverage_start=min(dates) if dates else None,
-            coverage_end=max(dates) if dates else None,
+            coverage_start=coverage_start,
+            coverage_end=coverage_end,
             record_count=count,
             required_for=required_for,
-            blocking_reasons=[] if dates else [f"{component}_DATE_COVERAGE_UNKNOWN"],
+            blocking_reasons=(
+                []
+                if coverage_start is not None
+                else [f"{component}_DATE_COVERAGE_UNKNOWN"]
+            ),
             warnings=[f"source_collection={chosen}"],
             last_checked_at=now,
         )
 
     async def _qfq_readiness(self, now: datetime) -> DataReadinessStatus:
-        rows = await self.db["stock_daily_quotes"].find({}).to_list(length=None)
-        qfq = [
-            row
-            for row in rows
-            if str(
-                row.get("price_adjustment_mode")
-                or row.get("adjustment_mode")
-                or ""
-            ).upper()
-            == "QFQ"
-            and row.get("price_data_version")
-        ]
-        dates = [
-            value
-            for row in qfq
-            if (value := _as_date(row.get("trade_date"))) is not None
-        ]
+        query = {
+            "$or": [
+                {"price_adjustment_mode": {"$in": ["QFQ", "qfq"]}},
+                {"adjustment_mode": {"$in": ["QFQ", "qfq"]}},
+            ],
+            "price_data_version": {"$nin": [None, ""]},
+        }
+        count = await _count(self.db["stock_daily_quotes"], query)
+        coverage_start, coverage_end = await _date_bounds(
+            self.db["stock_daily_quotes"], ("trade_date",), query=query
+        )
+        ready = bool(count and coverage_start is not None)
         return DataReadinessStatus(
             component="QFQ_PRICE_DATA",
-            status="READY" if qfq and dates else "NOT_READY",
+            status="READY" if ready else "NOT_READY",
             market="CN",
-            coverage_start=min(dates) if dates else None,
-            coverage_end=max(dates) if dates else None,
-            record_count=len(qfq),
+            coverage_start=coverage_start,
+            coverage_end=coverage_end,
+            record_count=count,
             required_for=["EVALUATION", "HISTORICAL_REPLAY"],
-            blocking_reasons=[] if qfq and dates else ["QFQ_DATA_MISSING"],
+            blocking_reasons=[] if ready else ["QFQ_DATA_MISSING"],
             last_checked_at=now,
         )
 
@@ -603,25 +628,22 @@ class AlphaGuardOperationsService:
             "available_at": {"$lte": now},
             "collected_at": {"$lte": now},
         }
-        rows = await self.db["ag_market_contexts"].find(query).to_list(
-            length=None
+        count = await _count(self.db["ag_market_contexts"], query)
+        coverage_start, coverage_end = await _date_bounds(
+            self.db["ag_market_contexts"], ("trade_date",), query=query
         )
-        dates = [
-            value
-            for row in rows
-            if (value := _as_date(row.get("trade_date"))) is not None
-        ]
+        ready = bool(count and coverage_start is not None)
         return DataReadinessStatus(
             component="MARKET_CONTEXT",
-            status="READY" if rows and dates else "NOT_READY",
+            status="READY" if ready else "NOT_READY",
             market="CN",
-            coverage_start=min(dates) if dates else None,
-            coverage_end=max(dates) if dates else None,
-            record_count=len(rows),
+            coverage_start=coverage_start,
+            coverage_end=coverage_end,
+            record_count=count,
             required_for=["REGIME"],
             blocking_reasons=(
                 []
-                if rows and dates
+                if ready
                 else ["MARKET_CONTEXT_CURRENT_VERSION_MISSING"]
             ),
             warnings=[

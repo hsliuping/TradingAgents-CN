@@ -1,0 +1,12 @@
+contract_id: RECOMMENDATION_DATA_CN_V1
+contract_version: recommendation-data-contract-v1
+normalization_version: recommendation-data-normalization-v1
+market: CN
+benchmark_symbol: "000300"
+price_adjustment_mode: QFQ
+required_history_days: 61
+sync_history_sessions: 65
+coverage_threshold: 0.90
+batch_size: 100
+max_attempts: 3
+industry_required: false

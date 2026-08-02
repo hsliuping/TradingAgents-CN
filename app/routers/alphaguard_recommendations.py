@@ -82,6 +82,14 @@ async def list_recommendation_runs(
     return ok({"items": [item.model_dump(mode="json") for item in items]})
 
 
+@router.get("/coverage", response_model=dict)
+async def recommendation_data_coverage(
+    trade_date: date | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    return ok(await _service().coverage(trade_date=trade_date))
+
+
 @router.get("/runs/{run_id}", response_model=dict)
 async def get_recommendation_run(
     run_id: str,

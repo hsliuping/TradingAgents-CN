@@ -13,6 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 RECOMMENDATION_SCHEMA_VERSION = "candidate-recommendation-v1"
+RECOMMENDATION_DATA_CONTRACT_VERSION = "recommendation-data-contract-v1"
+RECOMMENDATION_ELIGIBILITY_SCHEMA_VERSION = "candidate-eligibility-v2"
 
 
 def _json_default(value: Any) -> Any:
@@ -125,6 +127,10 @@ class CandidateEligibilityResult(RecommendationSchema):
     security_type: Literal["A_SHARE", "EXCHANGE_TRADED_FUND"]
     eligible: bool
     filter_reason_codes: list[str]
+    primary_filter_reason: str | None = None
+    required_history_days: int = Field(default=0, ge=0)
+    available_history_days: int | None = Field(default=None, ge=0)
+    data_version: str = "legacy"
     data_quality_status: Literal["PASS", "WARN", "FAIL", "NOT_AVAILABLE"]
     history_count: int = Field(ge=0)
     average_amount: Decimal | None = Field(default=None, ge=0)
@@ -141,6 +147,158 @@ class CandidateEligibilityResult(RecommendationSchema):
             raise ValueError("eligible security cannot retain filter reasons")
         if not self.eligible and not self.filter_reason_codes:
             raise ValueError("ineligible security requires filter reasons")
+        if self.eligible and self.primary_filter_reason is not None:
+            raise ValueError("eligible security cannot retain a primary filter reason")
+        if not self.eligible and self.primary_filter_reason not in self.filter_reason_codes:
+            raise ValueError("primary filter reason must be one of all filter reasons")
+        if (
+            self.available_history_days is not None
+            and self.available_history_days != self.history_count
+        ):
+            raise ValueError("available history must match history_count")
+        return self
+
+
+class RecommendationDataQualityReport(RecommendationSchema):
+    quality_report_id: str = Field(min_length=1)
+    symbol: str = Field(pattern=r"^\d{6}$")
+    market: Literal["CN"] = "CN"
+    trade_date: date
+    status: Literal["PASS", "FAIL"]
+    required_history_days: int = Field(ge=20)
+    available_history_days: int = Field(ge=0)
+    price_adjustment_mode: Literal["QFQ"] = "QFQ"
+    price_data_versions: list[str]
+    target_quote_ref: str | None = None
+    target_quote_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    trading_status_id: str | None = None
+    trading_status_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    benchmark_count: int = Field(ge=0)
+    benchmark_manifest_ref: str | None = None
+    missing_fields: list[str]
+    blocking_reasons: list[str]
+    data_version: str = Field(min_length=1)
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    immutable_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    checked_at: datetime
+    schema_version: str = RECOMMENDATION_DATA_CONTRACT_VERSION
+
+    @model_validator(mode="after")
+    def validate_quality(self) -> "RecommendationDataQualityReport":
+        if self.status == "PASS" and (self.missing_fields or self.blocking_reasons):
+            raise ValueError("PASS recommendation data quality cannot list blockers")
+        if self.status == "FAIL" and not self.blocking_reasons:
+            raise ValueError("FAIL recommendation data quality requires blockers")
+        if self.status == "PASS" and self.available_history_days < self.required_history_days:
+            raise ValueError("PASS recommendation data quality lacks required history")
+        return self
+
+
+class RecommendationDataCoverage(RecommendationSchema):
+    coverage_id: str = Field(min_length=1)
+    market: Literal["CN"] = "CN"
+    trade_date: date
+    universe_manifest_id: str = Field(min_length=1)
+    universe_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    universe_count: int = Field(ge=0)
+    basic_info_ready_count: int = Field(ge=0)
+    target_quote_ready_count: int = Field(ge=0)
+    trade_status_ready_count: int = Field(ge=0)
+    raw_history_ready_count: int = Field(ge=0)
+    adjusted_history_ready_count: int = Field(ge=0)
+    benchmark_ready_count: int = Field(ge=0)
+    industry_ready_count: int = Field(ge=0)
+    data_quality_pass_count: int = Field(ge=0)
+    minimum_contract_ready_count: int = Field(ge=0)
+    eligible_count: int = Field(ge=0)
+    failed_symbol_count: int = Field(ge=0)
+    required_history_days: int = Field(ge=20)
+    coverage_threshold: Decimal = Field(ge=0, le=1)
+    coverage_percentage: Decimal = Field(ge=0, le=1)
+    blocking_reason_counts: dict[str, int]
+    status: Literal["NOT_READY", "PARTIAL", "READY", "DEGRADED"]
+    recommendation_data_ready: bool
+    industry_required: bool
+    data_version: str = Field(min_length=1)
+    source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    coverage_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sync_run_id: str | None = None
+    sync_started_at: datetime | None = None
+    sync_completed_at: datetime | None = None
+    sync_duration_ms: int = Field(default=0, ge=0)
+    sync_created_count: int = Field(default=0, ge=0)
+    sync_reused_count: int = Field(default=0, ge=0)
+    sync_retry_count: int = Field(default=0, ge=0)
+    sync_resumed_count: int = Field(default=0, ge=0)
+    created_at: datetime
+    schema_version: str = RECOMMENDATION_DATA_CONTRACT_VERSION
+
+    @model_validator(mode="after")
+    def validate_coverage(self) -> "RecommendationDataCoverage":
+        counts = (
+            self.basic_info_ready_count,
+            self.target_quote_ready_count,
+            self.trade_status_ready_count,
+            self.raw_history_ready_count,
+            self.adjusted_history_ready_count,
+            self.industry_ready_count,
+            self.data_quality_pass_count,
+            self.minimum_contract_ready_count,
+            self.eligible_count,
+        )
+        if any(value > self.universe_count for value in counts):
+            raise ValueError("recommendation coverage count exceeds universe")
+        if self.recommendation_data_ready != (
+            self.coverage_percentage >= self.coverage_threshold
+            and self.benchmark_ready_count >= self.required_history_days
+        ):
+            raise ValueError("recommendation data readiness does not match coverage gate")
+        if self.status == "READY" and self.failed_symbol_count:
+            raise ValueError("READY recommendation coverage cannot retain failures")
+        return self
+
+
+class RecommendationFactorEvidence(RecommendationSchema):
+    evidence_id: str = Field(min_length=1)
+    symbol: str = Field(pattern=r"^\d{6}$")
+    market: Literal["CN"] = "CN"
+    trade_date: date
+    factor_set_version: str = Field(min_length=1)
+    factor_definition_versions: dict[str, str]
+    factor_code_hashes: dict[str, str]
+    normalized_scores: dict[str, Decimal | None]
+    group_scores: dict[str, Decimal | None]
+    quote_refs: list[str]
+    quote_hashes: list[str]
+    benchmark_refs: list[str]
+    benchmark_hashes: list[str]
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    output_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime
+    schema_version: str = "recommendation-factor-evidence-v1"
+
+
+class CandidateRecommendationScoreResult(RecommendationSchema):
+    score_result_id: str = Field(min_length=1)
+    recommendation_run_id: str = Field(min_length=1)
+    symbol: str = Field(pattern=r"^\d{6}$")
+    trade_date: date
+    recommendation_score: Decimal = Field(ge=0, le=100)
+    score_components: dict[str, Decimal]
+    risk_penalties: dict[str, Decimal]
+    meets_threshold: bool
+    minimum_recommendation_score: Decimal = Field(ge=0, le=100)
+    evidence_refs: list[str]
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    output_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    created_at: datetime
+    schema_version: str = "candidate-recommendation-score-v1"
+
+    @model_validator(mode="after")
+    def validate_score(self) -> "CandidateRecommendationScoreResult":
+        expected = self.recommendation_score >= self.minimum_recommendation_score
+        if self.meets_threshold != expected:
+            raise ValueError("score threshold status is inconsistent")
         return self
 
 

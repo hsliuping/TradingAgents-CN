@@ -104,6 +104,35 @@ ALPHAGUARD_INDEX_SPECS = {
         },
         {"keys": [("status", 1), ("trade_date", 1)], "name": "idx_candidate_recommendation_evaluation_maturity"},
     ],
+    "ag_recommendation_data_quality_reports": [
+        {"keys": [("quality_report_id", 1)], "name": "uniq_recommendation_data_quality", "unique": True},
+        {
+            "keys": [("symbol", 1), ("market", 1), ("trade_date", -1), ("data_version", 1)],
+            "name": "idx_recommendation_quality_symbol_date",
+        },
+        {"keys": [("trade_date", -1), ("status", 1)], "name": "idx_recommendation_quality_status"},
+    ],
+    "ag_recommendation_data_coverages": [
+        {"keys": [("coverage_id", 1)], "name": "uniq_recommendation_data_coverage", "unique": True},
+        {"keys": [("trade_date", -1), ("created_at", -1)], "name": "idx_recommendation_coverage_date"},
+        {"keys": [("coverage_hash", 1)], "name": "idx_recommendation_coverage_hash"},
+    ],
+    "ag_recommendation_factor_evidence": [
+        {"keys": [("evidence_id", 1)], "name": "uniq_recommendation_factor_evidence", "unique": True},
+        {
+            "keys": [("symbol", 1), ("trade_date", -1), ("factor_set_version", 1)],
+            "name": "idx_recommendation_factor_symbol_date",
+        },
+    ],
+    "ag_candidate_recommendation_score_results": [
+        {"keys": [("score_result_id", 1)], "name": "uniq_candidate_recommendation_score", "unique": True},
+        {
+            "keys": [("recommendation_run_id", 1), ("symbol", 1)],
+            "name": "uniq_candidate_run_symbol_score",
+            "unique": True,
+        },
+        {"keys": [("trade_date", -1), ("recommendation_score", -1)], "name": "idx_candidate_score_date"},
+    ],
     "ag_evidence_snapshots": [
         {"keys": [("snapshot_id", 1)], "name": "uniq_snapshot_id", "unique": True},
         {

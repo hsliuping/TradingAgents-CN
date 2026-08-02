@@ -65,6 +65,30 @@ export interface RecommendationRun {
   run_action?: 'CREATED' | 'REUSED'
 }
 
+export interface RecommendationDataCoverage {
+  coverage_id?: string
+  trade_date?: string
+  status: 'NOT_READY' | 'PARTIAL' | 'READY' | 'DEGRADED'
+  recommendation_data_ready: boolean
+  universe_count?: number
+  basic_info_ready_count?: number
+  target_quote_ready_count?: number
+  trade_status_ready_count?: number
+  raw_history_ready_count?: number
+  adjusted_history_ready_count?: number
+  benchmark_ready_count?: number
+  industry_ready_count?: number
+  data_quality_pass_count?: number
+  minimum_contract_ready_count?: number
+  eligible_count?: number
+  failed_symbol_count?: number
+  required_history_days?: number
+  coverage_percentage?: string
+  blocking_reason_counts: Record<string, number>
+  sync_completed_at?: string | null
+  sync_duration_ms?: number
+}
+
 interface Items<T> { items: T[]; count?: number }
 
 export const alphaguardRecommendationsApi = {
@@ -78,6 +102,12 @@ export const alphaguardRecommendationsApi = {
   },
   runs(params?: { limit?: number }) {
     return ApiClient.get<Items<RecommendationRun>>('/api/alphaguard/recommendations/runs', params)
+  },
+  coverage(tradeDate?: string) {
+    return ApiClient.get<RecommendationDataCoverage>(
+      '/api/alphaguard/recommendations/coverage',
+      tradeDate ? { trade_date: tradeDate } : undefined
+    )
   },
   run(tradeDate?: string) {
     return ApiClient.post<RecommendationRun>('/api/alphaguard/recommendations/run', {

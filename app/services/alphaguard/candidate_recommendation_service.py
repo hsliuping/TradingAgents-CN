@@ -26,11 +26,18 @@ from tradingagents.alphaguard.recommendation_schemas import (
     CandidateRecommendationPolicy,
     CandidateRecommendationReviewEvent,
     CandidateRecommendationRun,
+    CandidateRecommendationScoreResult,
     CandidateUniverseManifest,
+    RECOMMENDATION_ELIGIBILITY_SCHEMA_VERSION,
+    RecommendationFactorEvidence,
     recommendation_hash,
 )
 
 from .candidate_recommendation_policy import CandidateRecommendationPolicyRegistry
+from .recommendation_data_service import (
+    RecommendationDataService,
+    recommendation_data_contract,
+)
 
 
 _Q = Decimal("0.01")
@@ -49,6 +56,28 @@ _STATUS_BY_ACTION = {
     "SUPERSEDED": "SUPERSEDED",
     "EXPIRED": "EXPIRED",
 }
+_CANDIDATE_INPUT_CONTRACT_VERSION = "candidate-input-v3"
+_FILTER_PRIORITY = (
+    "DELISTED",
+    "DELISTING_PERIOD",
+    "ST_NOT_ALLOWED",
+    "LISTING_DATE_MISSING",
+    "LISTING_HISTORY_INSUFFICIENT",
+    "TRADE_DATE_QUOTE_MISSING",
+    "TRADING_STATUS_NOT_READY",
+    "SUSPENDED",
+    "DATA_QUALITY_FAILED",
+    "DATA_QUALITY_NOT_AVAILABLE",
+    "PRICE_HISTORY_INSUFFICIENT",
+    "PRICE_DATA_ANOMALY",
+    "LOW_LIQUIDITY",
+    "LONG_NO_TRADE",
+    "ALREADY_IN_CANDIDATE_POOL",
+    "POSITION_REQUIRES_MONITORING",
+    "UNFINISHED_ORDER",
+    "ACTIVE_TRADE_PLAN",
+    "PENDING_EVALUATION",
+)
 
 
 class RecommendationIntegrityConflict(RuntimeError):
@@ -193,6 +222,7 @@ class CandidateRecommendationService:
         universe_date: date,
         policy: CandidateRecommendationPolicy,
         now: datetime,
+        execute: bool = True,
     ) -> CandidateUniverseManifest:
         rows = await self._load_universe_rows()
         records = []
@@ -249,56 +279,36 @@ class CandidateRecommendationService:
             if stored.universe_hash != manifest.universe_hash:
                 raise RecommendationIntegrityConflict("candidate universe manifest changed content")
             return stored
-        await self.db["ag_candidate_universe_manifests"].insert_one(model_document(manifest))
+        if execute:
+            await self.db["ag_candidate_universe_manifests"].insert_one(
+                model_document(manifest)
+            )
         return manifest
 
-    async def _load_scan_inputs(
-        self,
-        *,
-        user_id: str,
-        trade_date: date,
-        symbols: list[str],
+    async def _load_global_scan_inputs(
+        self, *, user_id: str, trade_date: date
     ) -> dict[str, Any]:
-        symbol_query = {"symbol": {"$in": symbols}}
-        daily_rows = [
-            clean_document(row)
-            for row in await self.db["stock_daily_quotes"].find(symbol_query).to_list(length=None)
-            if _quote_mode(row) == "QFQ"
-            and (row_date := _quote_date(row)) is not None
-            and row_date <= trade_date
-        ]
-        market_rows = [
-            clean_document(row)
-            for row in await self.db["market_quotes"].find(symbol_query).to_list(length=None)
-            if _quote_date(row) == trade_date
-        ]
-        status_rows = [
-            clean_document(row)
-            for row in await self.db["ag_security_trading_statuses"].find(
-                {**symbol_query, "market": "CN"}
-            ).to_list(length=None)
-            if _quote_date(row) == trade_date
-        ]
-        quality_rows = [
-            clean_document(row)
-            for row in await self.db["ag_data_quality_reports"].find(symbol_query).to_list(length=None)
-            if _quote_date(row) == trade_date
-        ]
-        factor_rows = [
-            clean_document(row)
-            for row in await self.db["ag_factor_results"].find(symbol_query).to_list(length=None)
-            if (_as_date(row.get("trade_date")) or date.min) <= trade_date
-        ]
+        normalization_version = str(
+            recommendation_data_contract()["normalization_version"]
+        )
         regime_rows = [
             clean_document(row)
             for row in await self.db["ag_regime_results"].find({}).to_list(length=None)
             if (_as_date(row.get("trade_date")) or date.min) <= trade_date
         ]
-        proposal_rows = [
+        benchmark_rows = [
             clean_document(row)
-            for row in await self.db["ag_quant_proposals"].find(symbol_query).to_list(length=None)
-            if (_as_date(row.get("trade_date")) or date.min) <= trade_date
+            for row in await self.db["stock_daily_quotes"].find(
+                {
+                    "symbol": "000300",
+                    "market": "CN",
+                    "period": "daily",
+                    "normalization_version": normalization_version,
+                }
+            ).to_list(length=None)
+            if (_quote_date(row) or date.max) <= trade_date
         ]
+        benchmark_rows.sort(key=lambda row: _quote_date(row) or date.min)
         candidates = [
             clean_document(row)
             for row in await self.db["ag_candidates"].find(
@@ -344,7 +354,9 @@ class CandidateRecommendationService:
         pending_labels = await self.db["ag_eval_horizon_labels"].find(
             {"status": "PENDING"}
         ).to_list(length=None)
-        subject_ids = sorted({str(row.get("subject_id")) for row in pending_labels if row.get("subject_id")})
+        subject_ids = sorted(
+            {str(row.get("subject_id")) for row in pending_labels if row.get("subject_id")}
+        )
         pending_subjects = (
             await self.db["ag_eval_subjects"].find(
                 {"subject_id": {"$in": subject_ids}, "user_id": str(user_id)}
@@ -377,13 +389,8 @@ class CandidateRecommendationService:
             ).to_list(length=None)
         ]
         return {
-            "daily_rows": daily_rows,
-            "market_rows": market_rows,
-            "status_rows": status_rows,
-            "quality_rows": quality_rows,
-            "factor_rows": factor_rows,
             "regime_rows": regime_rows,
-            "proposal_rows": proposal_rows,
+            "benchmark_rows": benchmark_rows,
             "candidates": candidates,
             "positions": positions,
             "orders": orders,
@@ -394,6 +401,96 @@ class CandidateRecommendationService:
             "recommendations": recommendations,
         }
 
+    async def _load_symbol_scan_inputs(
+        self,
+        *,
+        trade_date: date,
+        history_start: date,
+        symbols: list[str],
+    ) -> dict[str, Any]:
+        symbol_query = {"symbol": {"$in": symbols}}
+        contract = recommendation_data_contract()
+        normalization_version = str(contract["normalization_version"])
+        daily_rows = [
+            clean_document(row)
+            for row in await self.db["stock_daily_quotes"].find(
+                {
+                    **symbol_query,
+                    "normalization_version": normalization_version,
+                    "trade_date": {
+                        "$gte": mongo_date(history_start),
+                        "$lte": mongo_date(trade_date),
+                    },
+                }
+            ).to_list(length=None)
+            if _quote_mode(row) == "QFQ"
+            and (row_date := _quote_date(row)) is not None
+            and history_start <= row_date <= trade_date
+        ]
+        market_rows = [
+            clean_document(row)
+            for row in await self.db["market_quotes"].find(symbol_query).to_list(length=None)
+            if _quote_date(row) == trade_date
+        ]
+        status_rows = [
+            clean_document(row)
+            for row in await self.db["ag_security_trading_statuses"].find(
+                {**symbol_query, "market": "CN"}
+            ).to_list(length=None)
+            if _quote_date(row) == trade_date
+        ]
+        quality_rows = [
+            clean_document(row)
+            for row in await self.db[
+                "ag_recommendation_data_quality_reports"
+            ].find(
+                {
+                    **symbol_query,
+                    "schema_version": str(contract["contract_version"]),
+                }
+            ).to_list(length=None)
+            if _quote_date(row) == trade_date
+        ]
+        factor_rows = [
+            clean_document(row)
+            for row in await self.db["ag_factor_results"].find(symbol_query).to_list(length=None)
+            if (_as_date(row.get("trade_date")) or date.min) <= trade_date
+        ]
+        proposal_rows = [
+            clean_document(row)
+            for row in await self.db["ag_quant_proposals"].find(symbol_query).to_list(length=None)
+            if (_as_date(row.get("trade_date")) or date.min) <= trade_date
+        ]
+        return {
+            "daily_rows": daily_rows,
+            "market_rows": market_rows,
+            "status_rows": status_rows,
+            "quality_rows": quality_rows,
+            "factor_rows": factor_rows,
+            "proposal_rows": proposal_rows,
+        }
+
+    async def _load_scan_inputs(
+        self,
+        *,
+        user_id: str,
+        trade_date: date,
+        symbols: list[str],
+    ) -> dict[str, Any]:
+        global_inputs = await self._load_global_scan_inputs(
+            user_id=user_id, trade_date=trade_date
+        )
+        eligible_dates = [item for item in global_inputs["calendar"] if item <= trade_date]
+        history_start = (
+            eligible_dates[-61] if len(eligible_dates) >= 61 else eligible_dates[0]
+        )
+        symbol_inputs = await self._load_symbol_scan_inputs(
+            trade_date=trade_date,
+            history_start=history_start,
+            symbols=symbols,
+        )
+        return {**global_inputs, **symbol_inputs}
+
     @staticmethod
     def _group_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
         grouped: dict[str, Any] = {}
@@ -402,17 +499,53 @@ class CandidateRecommendationService:
             for row in inputs[key]:
                 values[str(row.get("symbol") or row.get("code") or "")].append(row)
             grouped[key] = values
-        for key in ("market_rows", "status_rows", "quality_rows"):
+        for key in ("market_rows", "quality_rows"):
             values = {}
-            for row in inputs[key]:
+            ordering_field = "checked_at" if key == "quality_rows" else "created_at"
+            for row in sorted(
+                inputs[key], key=lambda item: str(item.get(ordering_field) or "")
+            ):
                 symbol = str(row.get("symbol") or row.get("code") or "")
                 if symbol:
                     values[symbol] = row
             grouped[key] = values
+        statuses: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in inputs["status_rows"]:
+            symbol = str(row.get("symbol") or row.get("code") or "")
+            if symbol:
+                statuses[symbol].append(row)
+        grouped["status_rows"] = {}
+        for symbol, rows in statuses.items():
+            expected_id = str(
+                (grouped["quality_rows"].get(symbol) or {}).get("trading_status_id")
+                or ""
+            )
+            chosen = next(
+                (
+                    row
+                    for row in rows
+                    if expected_id
+                    and str(row.get("trading_status_id") or "") == expected_id
+                ),
+                None,
+            )
+            if chosen is None:
+                chosen = max(
+                    rows,
+                    key=lambda item: (
+                        str(item.get("calculation_status") or "") == "READY",
+                        str(item.get("collected_at") or ""),
+                    ),
+                )
+            grouped["status_rows"][symbol] = chosen
         snapshot_to_regime = {
             str(row.get("snapshot_id")): row for row in inputs["regime_rows"]
         }
         grouped["regime_by_snapshot"] = snapshot_to_regime
+        grouped["benchmark_rows"] = inputs.get("benchmark_rows", [])
+        grouped["recommendation_factor_by_symbol"] = inputs.get(
+            "recommendation_factor_by_symbol", {}
+        )
         grouped["candidate_symbols"] = {
             str(row.get("symbol") or row.get("code")) for row in inputs["candidates"]
         }
@@ -531,6 +664,10 @@ class CandidateRecommendationService:
             if symbol in values:
                 reasons.append(code)
         reasons = sorted(set(reasons))
+        primary_reason = next(
+            (code for code in _FILTER_PRIORITY if code in reasons),
+            reasons[0] if reasons else None,
+        )
         evidence_refs = sorted(
             {
                 value
@@ -562,8 +699,11 @@ class CandidateRecommendationService:
         output_payload = {
             "eligible": not reasons,
             "filter_reason_codes": reasons,
+            "primary_filter_reason": primary_reason,
             "data_quality_status": quality_status,
             "history_count": len(rows),
+            "required_history_days": policy.minimum_data_history,
+            "data_version": str((quality or {}).get("data_version") or "NOT_AVAILABLE"),
             "average_amount": average_amount,
             "evidence_refs": evidence_refs,
         }
@@ -577,6 +717,10 @@ class CandidateRecommendationService:
             security_type=security["_recommendation_security_type"],
             eligible=not reasons,
             filter_reason_codes=reasons,
+            primary_filter_reason=primary_reason,
+            required_history_days=policy.minimum_data_history,
+            available_history_days=len(rows),
+            data_version=str((quality or {}).get("data_version") or "NOT_AVAILABLE"),
             data_quality_status=(
                 quality_status if quality_status in {"PASS", "WARN", "FAIL"} else "NOT_AVAILABLE"
             ),
@@ -587,6 +731,7 @@ class CandidateRecommendationService:
             input_hash=input_hash,
             output_hash=output_hash,
             created_at=now,
+            schema_version=RECOMMENDATION_ELIGIBILITY_SCHEMA_VERSION,
         )
 
     @staticmethod
@@ -615,6 +760,21 @@ class CandidateRecommendationService:
         ]
         return sum(values, Decimal("0")) / Decimal(len(values)) if values else None
 
+    @classmethod
+    def _factor_set_supports_recommendation_scoring(
+        cls, rows: list[dict[str, Any]]
+    ) -> bool:
+        if not rows:
+            return False
+        required_groups = ("TREND", "MOMENTUM", "LIQUIDITY")
+        if any(cls._mean_score(rows, group) is None for group in required_groups):
+            return False
+        return any(
+            str(row.get("factor_id") or "").startswith("relative_strength_")
+            and row.get("normalized_score") is not None
+            for row in rows
+        )
+
     def _score(
         self,
         *,
@@ -628,22 +788,46 @@ class CandidateRecommendationService:
         run_id: str,
         expires_at: datetime,
         now: datetime,
-    ) -> CandidateRecommendation | None:
+    ) -> tuple[CandidateRecommendationScoreResult | None, CandidateRecommendation | None]:
         factors = self._latest_factor_set(symbol, grouped, trade_date)
-        if not factors:
-            return None
-        snapshot_id = str(factors[0].get("snapshot_id") or "")
-        factor_scores = {
-            group: self._mean_score(factors, group)
-            for group in ("TREND", "MOMENTUM", "LIQUIDITY", "VOLATILITY_RISK", "EVENT_RISK")
-        }
-        relative_values = [
-            _decimal(row.get("normalized_score"))
-            for row in factors
-            if str(row.get("factor_id") or "").startswith("relative_strength_")
-            and row.get("normalized_score") is not None
-        ]
-        relative = relative_values[0] if relative_values else None
+        recommendation_factor = grouped["recommendation_factor_by_symbol"].get(symbol)
+        use_snapshot_factors = self._factor_set_supports_recommendation_scoring(factors)
+        if not use_snapshot_factors and recommendation_factor is None:
+            return None, None
+        snapshot_id = str(factors[0].get("snapshot_id") or "") if factors else ""
+        if use_snapshot_factors:
+            factor_scores = {
+                group: self._mean_score(factors, group)
+                for group in (
+                    "TREND",
+                    "MOMENTUM",
+                    "LIQUIDITY",
+                    "VOLATILITY_RISK",
+                    "EVENT_RISK",
+                )
+            }
+            relative_values = [
+                _decimal(row.get("normalized_score"))
+                for row in factors
+                if str(row.get("factor_id") or "").startswith("relative_strength_")
+                and row.get("normalized_score") is not None
+            ]
+            relative = relative_values[0] if relative_values else None
+        else:
+            assert isinstance(recommendation_factor, RecommendationFactorEvidence)
+            factor_scores = {
+                group: recommendation_factor.group_scores.get(group)
+                for group in (
+                    "TREND",
+                    "MOMENTUM",
+                    "LIQUIDITY",
+                    "VOLATILITY_RISK",
+                    "EVENT_RISK",
+                )
+            }
+            relative = recommendation_factor.normalized_scores.get(
+                "relative_strength_hs300_20d_v1"
+            )
         regime = grouped["regime_by_snapshot"].get(snapshot_id)
         proposals = sorted(
             grouped["proposal_rows"].get(symbol, []),
@@ -653,7 +837,7 @@ class CandidateRecommendationService:
         proposal = next((row for row in proposals if str(row.get("snapshot_id")) == snapshot_id), None)
         required = [factor_scores["TREND"], factor_scores["MOMENTUM"], factor_scores["LIQUIDITY"], relative]
         if any(value is None for value in required):
-            return None
+            return None, None
         regime_score = {
             "TREND_UP": Decimal("100"),
             "RANGE_STRONG": Decimal("80"),
@@ -718,8 +902,6 @@ class CandidateRecommendationService:
                 ),
             )
         )
-        if score < policy.minimum_recommendation_score:
-            return None
         reason_codes: list[str] = []
         reasons: list[str] = []
         if raw_components["TREND"] >= 60:
@@ -754,7 +936,11 @@ class CandidateRecommendationService:
         if eligibility.data_quality_status != "PASS":
             risk_codes.append("DATA_QUALITY_WARNING")
             risk_reasons.append("部分数据质量证据需要人工复核")
-        factor_refs = sorted(str(row.get("result_id")) for row in factors if row.get("result_id"))
+        factor_refs = (
+            sorted(str(row.get("result_id")) for row in factors if row.get("result_id"))
+            if use_snapshot_factors
+            else [recommendation_factor.evidence_id]
+        )
         evidence_refs = sorted(
             set(eligibility.evidence_refs)
             | set(factor_refs)
@@ -769,7 +955,11 @@ class CandidateRecommendationService:
         )
         input_payload = {
             "eligibility_hash": eligibility.output_hash,
-            "factor_input_hashes": [str(row.get("input_hash") or "") for row in factors],
+            "factor_input_hashes": (
+                [str(row.get("input_hash") or "") for row in factors]
+                if use_snapshot_factors
+                else [recommendation_factor.input_hash]
+            ),
             "regime_input_hash": str((regime or {}).get("input_hash") or ""),
             "proposal_input_hash": str((proposal or {}).get("input_hash") or ""),
             "policy_hash": policy.config_hash,
@@ -783,10 +973,36 @@ class CandidateRecommendationService:
             "risk_codes": risk_codes,
         }
         output_hash = recommendation_hash(output_payload)
+        score_result_payload = {
+            "score_result_id": _stable_id(
+                "candidate-recommendation-score", f"{run_id}:{symbol}:{input_hash}"
+            ),
+            "recommendation_run_id": run_id,
+            "symbol": symbol,
+            "trade_date": trade_date,
+            "recommendation_score": score,
+            "score_components": score_components,
+            "risk_penalties": risk_penalties,
+            "meets_threshold": score >= policy.minimum_recommendation_score,
+            "minimum_recommendation_score": policy.minimum_recommendation_score,
+            "evidence_refs": evidence_refs,
+            "input_hash": input_hash,
+            "output_hash": "0" * 64,
+            "created_at": now,
+        }
+        score_result_payload["output_hash"] = recommendation_hash(
+            score_result_payload,
+            exclude={"output_hash", "created_at", "schema_version"},
+        )
+        score_result = CandidateRecommendationScoreResult.model_validate(
+            score_result_payload
+        )
+        if score < policy.minimum_recommendation_score:
+            return score_result, None
         recommendation_id = _stable_id(
             "candidate-recommendation", f"{run_id}:{symbol}:{input_hash}"
         )
-        return CandidateRecommendation(
+        return score_result, CandidateRecommendation(
             recommendation_id=recommendation_id,
             recommendation_run_id=run_id,
             user_id=str(user_id),
@@ -985,33 +1201,34 @@ class CandidateRecommendationService:
             str(row.get("code") or row.get("symbol")): row
             for row in await self._load_universe_rows()
         }
-        inputs = await self._load_scan_inputs(
-            user_id=str(user_id), trade_date=trade_date, symbols=universe.ordered_symbols
+        data_service = RecommendationDataService(self.db)
+        coverage = await data_service.prepare_coverage(
+            universe=universe,
+            securities=securities,
+            policy=policy,
+            trade_date=trade_date,
+            execute=True,
+            now=now,
         )
-        source_summary = {
-            "universe_hash": universe.universe_hash,
-            "daily": sorted(
-                str(row.get("content_hash") or recommendation_hash(row))
-                for row in inputs["daily_rows"]
-            ),
-            "market": sorted(recommendation_hash(row) for row in inputs["market_rows"]),
-            "status": sorted(str(row.get("content_hash") or recommendation_hash(row)) for row in inputs["status_rows"]),
-            "quality": sorted(str(row.get("immutable_hash") or recommendation_hash(row)) for row in inputs["quality_rows"]),
-            "factors": sorted(str(row.get("input_hash") or recommendation_hash(row)) for row in inputs["factor_rows"]),
-            "user_constraints": recommendation_hash(
-                {
-                    key: inputs[key]
-                    for key in (
-                        "candidates",
-                        "positions",
-                        "orders",
-                        "active_plans",
-                        "pending_subjects",
-                    )
-                }
-            ),
-        }
-        data_version = f"candidate-input-v1:{recommendation_hash(source_summary)[:24]}"
+        global_inputs = await self._load_global_scan_inputs(
+            user_id=str(user_id), trade_date=trade_date
+        )
+        user_constraints_hash = recommendation_hash(
+            {
+                key: global_inputs[key]
+                for key in (
+                    "candidates",
+                    "positions",
+                    "orders",
+                    "active_plans",
+                    "pending_subjects",
+                )
+            }
+        )
+        data_version = (
+            f"{_CANDIDATE_INPUT_CONTRACT_VERSION}:{coverage.coverage_hash[:24]}:"
+            f"{user_constraints_hash[:16]}"
+        )
         identity = (
             f"{user_id}:{trade_date.isoformat()}:{universe.universe_version}:"
             f"{policy.policy_version}:{data_version}"
@@ -1024,61 +1241,107 @@ class CandidateRecommendationService:
         )
         if existing_run:
             return CandidateRecommendationRun.model_validate(existing_run), False
-        grouped = self._group_inputs(inputs)
         model_calls_before = await self.db["ag_model_runs"].count_documents({})
-        eligibility = [
-            self._eligibility(
-                run_id=run_id,
-                symbol=symbol,
-                security=securities[symbol],
-                trade_date=trade_date,
-                policy=policy,
-                grouped=grouped,
-                now=now,
-            )
-            for symbol in universe.ordered_symbols
+        eligible_dates = [
+            item for item in global_inputs["calendar"] if item <= trade_date
         ]
-        await self._create_only_many(
-            "ag_candidate_eligibility_results",
-            eligibility,
-            id_field="eligibility_result_id",
-            hash_field="output_hash",
+        history_start = eligible_dates[-policy.minimum_data_history]
+        expires_at = self._expiry(
+            trade_date,
+            global_inputs["calendar"],
+            policy.recommendation_ttl_days,
         )
-        expires_at = self._expiry(trade_date, grouped["calendar"], policy.recommendation_ttl_days)
-        scored: list[CandidateRecommendation] = []
+        eligibility: list[CandidateEligibilityResult] = []
+        score_results: list[CandidateRecommendationScoreResult] = []
+        candidates_above_threshold: list[CandidateRecommendation] = []
         failed_symbols: list[str] = []
-        for result in eligibility:
-            if not result.eligible:
-                continue
-            try:
-                recommendation = self._score(
-                    user_id=str(user_id),
-                    symbol=result.symbol,
-                    security=securities[result.symbol],
-                    eligibility=result,
+        batch_size = int(data_service.contract["batch_size"])
+        for offset in range(0, len(universe.ordered_symbols), batch_size):
+            symbols = universe.ordered_symbols[offset : offset + batch_size]
+            symbol_inputs = await self._load_symbol_scan_inputs(
+                trade_date=trade_date,
+                history_start=history_start,
+                symbols=symbols,
+            )
+            grouped = self._group_inputs({**global_inputs, **symbol_inputs})
+            batch_eligibility = [
+                self._eligibility(
+                    run_id=run_id,
+                    symbol=symbol,
+                    security=securities[symbol],
                     trade_date=trade_date,
                     policy=policy,
                     grouped=grouped,
-                    run_id=run_id,
-                    expires_at=expires_at,
                     now=now,
                 )
-            except Exception:
-                failed_symbols.append(result.symbol)
-                continue
-            if recommendation is not None:
-                governed = self._apply_review_governance(
-                    recommendation,
-                    grouped=grouped,
-                    policy=policy,
+                for symbol in symbols
+            ]
+            await self._create_only_many(
+                "ag_candidate_eligibility_results",
+                batch_eligibility,
+                id_field="eligibility_result_id",
+                hash_field="output_hash",
+            )
+            eligibility.extend(batch_eligibility)
+            factor_evidences: list[RecommendationFactorEvidence] = []
+            for result in batch_eligibility:
+                factors = self._latest_factor_set(result.symbol, grouped, trade_date)
+                if not result.eligible or self._factor_set_supports_recommendation_scoring(
+                    factors
+                ):
+                    continue
+                evidence = data_service.build_factor_evidence(
+                    symbol=result.symbol,
+                    trade_date=trade_date,
+                    price_rows=grouped["daily_rows"].get(result.symbol, []),
+                    benchmark_rows=global_inputs["benchmark_rows"],
                     now=now,
                 )
-                if governed is not None:
-                    scored.append(governed)
-        scored.sort(
+                if evidence is not None:
+                    factor_evidences.append(evidence)
+            grouped["recommendation_factor_by_symbol"].update(
+                await data_service.persist_factor_evidence_many(factor_evidences)
+            )
+            for result in batch_eligibility:
+                if not result.eligible:
+                    continue
+                try:
+                    score_result, recommendation = self._score(
+                        user_id=str(user_id),
+                        symbol=result.symbol,
+                        security=securities[result.symbol],
+                        eligibility=result,
+                        trade_date=trade_date,
+                        policy=policy,
+                        grouped=grouped,
+                        run_id=run_id,
+                        expires_at=expires_at,
+                        now=now,
+                    )
+                except Exception:
+                    failed_symbols.append(result.symbol)
+                    continue
+                if score_result is not None:
+                    score_results.append(score_result)
+                if recommendation is not None:
+                    governed = self._apply_review_governance(
+                        recommendation,
+                        grouped=grouped,
+                        policy=policy,
+                        now=now,
+                    )
+                    if governed is not None:
+                        candidates_above_threshold.append(governed)
+        await self._create_only_many(
+            "ag_candidate_recommendation_score_results",
+            score_results,
+            id_field="score_result_id",
+            hash_field="output_hash",
+        )
+        candidates_above_threshold.sort(
             key=lambda item: (-item.recommendation_score, item.trade_date, item.symbol)
         )
-        selected = scored[: policy.daily_result_limit]
+        selected = candidates_above_threshold[: policy.daily_result_limit]
         await self._create_only_many(
             "ag_candidate_recommendations",
             selected,
@@ -1103,6 +1366,7 @@ class CandidateRecommendationService:
                 "identity": identity,
                 "policy_hash": policy.config_hash,
                 "universe_hash": universe.universe_hash,
+                "coverage_hash": coverage.coverage_hash,
                 "eligibility_hashes": [item.output_hash for item in eligibility],
             }
         )
@@ -1110,6 +1374,7 @@ class CandidateRecommendationService:
             {
                 "recommendation_ids": [item.recommendation_id for item in selected],
                 "recommendation_hashes": [item.output_hash for item in selected],
+                "score_result_hashes": [item.output_hash for item in score_results],
                 "failed_symbols": failed_symbols,
             }
         )
@@ -1125,7 +1390,7 @@ class CandidateRecommendationService:
             data_version=data_version,
             total_securities=len(eligibility),
             eligible_securities=sum(item.eligible for item in eligibility),
-            scored_securities=len(scored),
+            scored_securities=len(score_results),
             recommended_securities=len(selected),
             filtered_reason_counts=dict(sorted(reason_counts.items())),
             failed_symbols=sorted(failed_symbols),
@@ -1468,18 +1733,30 @@ class CandidateRecommendationService:
             else source_security_count
         )
         quote_count = await self.db["market_quotes"].count_documents({})
-        quality_count = await self.db["ag_data_quality_reports"].count_documents({})
         open_calendar_count = await self.db["trading_calendar"].count_documents(
             {"is_open": True}
         )
         policy = await self.policy_registry.get_active(persist_if_missing=False)
+        coverage = await RecommendationDataService(self.db).latest_coverage()
+        score_rows = (
+            await self.db["ag_candidate_recommendation_score_results"].find(
+                {"recommendation_run_id": str(latest_run.get("recommendation_run_id"))}
+            ).to_list(length=None)
+            if latest_run
+            else []
+        )
+        scores = sorted(
+            (_decimal(row.get("recommendation_score")) for row in score_rows),
+            reverse=True,
+        )
+        runtime_ready = bool(
+            source_security_count and quote_count and open_calendar_count and policy.enabled
+        )
         return {
-            "recommendation_ready": bool(
-                source_security_count
-                and quote_count
-                and quality_count
-                and open_calendar_count
-                and policy.enabled
+            "recommendation_ready": runtime_ready,
+            "recommendation_runtime_ready": runtime_ready,
+            "recommendation_data_ready": bool(
+                coverage and coverage.recommendation_data_ready
             ),
             "auto_candidate_accept": False,
             "security_count": security_count,
@@ -1495,7 +1772,49 @@ class CandidateRecommendationService:
             "failed_symbol_count": len((latest_run or {}).get("failed_symbols") or []),
             "policy_version": (latest_run or {}).get("policy_version")
             or policy.policy_version,
+            "coverage_status": coverage.status if coverage else "NOT_READY",
+            "coverage_percentage": (
+                coverage.coverage_percentage if coverage else Decimal("0")
+            ),
+            "history_ready_count": (
+                coverage.adjusted_history_ready_count if coverage else 0
+            ),
+            "trade_status_ready_count": (
+                coverage.trade_status_ready_count if coverage else 0
+            ),
+            "data_quality_pass_count": (
+                coverage.data_quality_pass_count if coverage else 0
+            ),
+            "coverage_failed_symbol_count": (
+                coverage.failed_symbol_count if coverage else security_count
+            ),
+            "blocking_reason_counts": (
+                coverage.blocking_reason_counts if coverage else {}
+            ),
+            "last_sync_at": (
+                coverage.sync_completed_at if coverage else None
+            ),
+            "top_score": scores[0] if scores else None,
+            "score_distribution": {
+                "gte_70": sum(value >= Decimal("70") for value in scores),
+                "55_to_70": sum(
+                    Decimal("55") <= value < Decimal("70") for value in scores
+                ),
+                "below_55": sum(value < Decimal("55") for value in scores),
+            },
         }
+
+    async def coverage(self, *, trade_date: date | None = None) -> dict[str, Any]:
+        coverage = await RecommendationDataService(self.db).latest_coverage(
+            trade_date=trade_date
+        )
+        if coverage is None:
+            return {
+                "status": "NOT_READY",
+                "recommendation_data_ready": False,
+                "blocking_reason_counts": {"COVERAGE_NOT_BUILT": 1},
+            }
+        return coverage.model_dump(mode="json")
 
     async def refresh_evaluations(
         self, *, as_of_trade_date: date

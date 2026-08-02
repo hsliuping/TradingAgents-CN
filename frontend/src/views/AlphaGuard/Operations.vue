@@ -42,17 +42,33 @@
         <div><span>评价成熟度</span><strong>{{ challengerStatus?.mature_evaluation_count ?? 0 }} / {{ challengerStatus?.evaluation_subject_count ?? 0 }}</strong></div>
       </section>
       <section class="recommendation-status" aria-label="候选推荐运维状态">
-        <div><span>推荐运行</span><strong>{{ recommendationStatus?.recommendation_ready ? '已就绪' : '未就绪' }}</strong></div>
+        <div><span>推荐运行时</span><strong>{{ recommendationStatus?.recommendation_runtime_ready ? '可用' : '未就绪' }}</strong></div>
+        <div><span>推荐数据</span><strong>{{ recommendationDataLabel }}</strong></div>
+        <div><span>全市场覆盖率</span><strong>{{ formatCoverage(recommendationStatus?.coverage_percentage) }}</strong></div>
+        <div><span>行情 / 状态完整</span><strong>{{ recommendationStatus?.history_ready_count ?? 0 }} / {{ recommendationStatus?.trade_status_ready_count ?? 0 }}</strong></div>
+        <div><span>数据质量通过</span><strong>{{ recommendationStatus?.data_quality_pass_count ?? 0 }}</strong></div>
         <div><span>证券池</span><strong>{{ recommendationStatus?.security_count ?? 0 }}</strong></div>
         <div><span>符合资格</span><strong>{{ recommendationStatus?.eligible_count ?? 0 }}</strong></div>
         <div><span>今日推荐</span><strong>{{ recommendationStatus?.today_recommendation_count ?? 0 }}</strong></div>
         <div><span>待审核</span><strong>{{ recommendationStatus?.pending_review_count ?? 0 }}</strong></div>
         <div><span>已接受 / 已拒绝</span><strong>{{ recommendationStatus?.accepted_count ?? 0 }} / {{ recommendationStatus?.rejected_count ?? 0 }}</strong></div>
-        <div><span>最近运行</span><strong>{{ displayTime(recommendationStatus?.last_success_at) }}</strong></div>
-        <div><span>耗时 / 失败证券</span><strong>{{ recommendationStatus?.last_duration_ms ?? 0 }} ms / {{ recommendationStatus?.failed_symbol_count ?? 0 }}</strong></div>
+        <div><span>最近扫描</span><strong>{{ displayTime(recommendationStatus?.last_success_at) }}</strong></div>
+        <div><span>最近同步</span><strong>{{ displayTime(recommendationStatus?.last_sync_at) }}</strong></div>
+        <div><span>同步未覆盖证券</span><strong>{{ recommendationStatus?.coverage_failed_symbol_count ?? 0 }}</strong></div>
+        <div><span>主要阻断</span><strong>{{ recommendationBlocker }}</strong></div>
+        <div><span>最高分</span><strong>{{ recommendationStatus?.top_score ?? '暂无' }}</strong></div>
+        <div><span>扫描耗时 / 失败</span><strong>{{ recommendationStatus?.last_duration_ms ?? 0 }} ms / {{ recommendationStatus?.failed_symbol_count ?? 0 }}</strong></div>
         <div><span>策略版本</span><strong>{{ recommendationStatus?.policy_version || '未登记' }}</strong></div>
         <div><span>自动加入候选池</span><strong>永久关闭</strong></div>
       </section>
+      <div v-if="canRunAdminOperations" class="recommendation-actions">
+        <el-button
+          type="primary"
+          :loading="runningJob === 'RECOMMENDATION_DATA_SYNC'"
+          @click="runRecommendationDataSync"
+        >启动全市场数据同步</el-button>
+        <span>同步只写版本化行情、交易状态和数据质量，不会调用模型或加入候选池。</span>
+      </div>
     </template>
 
     <el-tabs
@@ -193,9 +209,31 @@ const statusType = computed(() => readiness.value?.overall_status === 'READY_FOR
   : readiness.value?.overall_status === 'UNSAFE'
     ? 'danger'
     : 'warning')
+const recommendationDataLabel = computed(() => ({
+  READY: '已就绪',
+  DEGRADED: '已就绪（部分降级）',
+  PARTIAL: '部分就绪',
+  NOT_READY: '未就绪'
+} as Record<string, string>)[recommendationStatus.value?.coverage_status || 'NOT_READY'])
+const recommendationReasonLabels: Record<string, string> = {
+  ADJUSTED_HISTORY_INSUFFICIENT: '历史复权行情不足',
+  RAW_HISTORY_INSUFFICIENT: '历史原始行情不足',
+  TRADING_STATUS_NOT_READY: '交易状态未就绪',
+  TARGET_QUOTE_MISSING: '目标交易日日线缺失',
+  LISTING_DATE_MISSING: '上市日期缺失',
+  PRICE_VERSION_DISCONTINUITY: '行情版本不连续',
+  BENCHMARK_NOT_READY: '沪深300窗口未就绪',
+  PRICE_DATA_ANOMALY: '行情字段异常'
+}
+const recommendationBlocker = computed(() => {
+  const item = Object.entries(recommendationStatus.value?.blocking_reason_counts || {})
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]
+  return item ? `${recommendationReasonLabels[item[0]] || item[0]}（${item[1]}）` : '无'
+})
 
 const short = (value?: string) => value ? value.slice(0, 12) : '—'
 const displayTime = (value?: string | null) => value ? value.replace('T', ' ').slice(0, 19) : '暂无'
+const formatCoverage = (value?: string) => `${(Number(value || 0) * 100).toFixed(1)}%`
 const pretty = (value: unknown) => JSON.stringify(value, null, 2)
 
 async function loadOperations() {
@@ -203,24 +241,20 @@ async function loadOperations() {
   loading.value = true
   loadError.value = ''
   try {
-    const [overviewResponse, readinessResponse, servicesResponse, dataResponse, jobsResponse, alertsResponse, versionsResponse, integrityResponse] = await Promise.all([
+    const [overviewResponse, jobsResponse, versionsResponse, integrityResponse] = await Promise.all([
       alphaguardOperationsApi.overview(),
-      alphaguardOperationsApi.readiness(),
-      alphaguardOperationsApi.services(),
-      alphaguardOperationsApi.dataReadiness(),
       alphaguardOperationsApi.jobs(),
-      alphaguardOperationsApi.alerts(),
       alphaguardOperationsApi.versions(),
       alphaguardOperationsApi.integrity()
     ])
     challengerStatus.value = overviewResponse.data.challenger_status
     recommendationStatus.value = overviewResponse.data.recommendation_status
-    readiness.value = readinessResponse.data
-    services.value = servicesResponse.data.items
-    dataStatuses.value = dataResponse.data.items
+    readiness.value = overviewResponse.data.readiness
+    services.value = overviewResponse.data.readiness.service_health
+    dataStatuses.value = overviewResponse.data.readiness.data_readiness
     jobs.value = jobsResponse.data.items
     manualJobs.value = jobsResponse.data.allowed_manual_jobs || []
-    alerts.value = alertsResponse.data.items
+    alerts.value = overviewResponse.data.open_alerts
     versions.value = versionsResponse.data
     integrity.value = integrityResponse.data
   } catch {
@@ -241,6 +275,19 @@ async function runJob(name: string) {
   } finally {
     runningJob.value = ''
   }
+}
+
+async function runRecommendationDataSync() {
+  try {
+    await ElMessageBox.confirm(
+      '将从正式 Provider 分批补齐推荐最低行情窗口。任务支持断点续传，不会调用模型或自动加入候选池。',
+      '启动全市场数据同步',
+      { confirmButtonText: '启动同步', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  await runJob('RECOMMENDATION_DATA_SYNC')
 }
 
 async function ack(row: Record<string, unknown>) {
@@ -303,6 +350,8 @@ onMounted(loadOperations)
 .challenger-status span, .recommendation-status span { color: var(--el-text-color-secondary); font-size: 12px; }
 .challenger-status strong, .recommendation-status strong { min-width: 0; overflow-wrap: anywhere; }
 .admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--el-border-color-light); }
+.recommendation-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.recommendation-actions span { color: var(--el-text-color-secondary); font-size: 12px; }
 pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--el-fill-color-light); border-radius: 6px; white-space: pre-wrap; }
 :deep(.operations-tabs--embedded) { border: 0; box-shadow: none; }
 :deep(.operations-tabs--embedded > .el-tabs__header) { display: none; }

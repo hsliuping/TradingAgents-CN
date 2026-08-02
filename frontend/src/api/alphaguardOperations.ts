@@ -95,6 +95,8 @@ export interface OperationsOverview {
 
 export interface RecommendationOperationsStatus {
   recommendation_ready: boolean
+  recommendation_runtime_ready: boolean
+  recommendation_data_ready: boolean
   auto_candidate_accept: false
   security_count: number
   eligible_count: number
@@ -108,6 +110,16 @@ export interface RecommendationOperationsStatus {
   last_duration_ms: number
   failed_symbol_count: number
   policy_version: string
+  coverage_status: 'NOT_READY' | 'PARTIAL' | 'READY' | 'DEGRADED'
+  coverage_percentage: string
+  history_ready_count: number
+  trade_status_ready_count: number
+  data_quality_pass_count: number
+  coverage_failed_symbol_count: number
+  blocking_reason_counts: Record<string, number>
+  last_sync_at: string | null
+  top_score: string | null
+  score_distribution: Record<string, number>
 }
 
 export interface ChallengerOperationsStatus {

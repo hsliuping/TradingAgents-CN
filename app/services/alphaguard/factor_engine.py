@@ -251,6 +251,16 @@ def _calculate(factor_id: str, data: ResolvedSnapshotData, parameters: dict) -> 
     raise FactorCalculationError(f"unsupported factor: {factor_id}")
 
 
+def calculate_factor_value(
+    factor_id: str,
+    data: ResolvedSnapshotData,
+    parameters: dict[str, Any],
+) -> float | None:
+    """Expose the registered pure calculation for non-trading research consumers."""
+
+    return _calculate(factor_id, data, parameters)
+
+
 def _normalize(value: float, method: str, parameters: dict[str, Any]) -> float:
     lower = float(parameters["lower"])
     upper = float(parameters["upper"])
@@ -271,6 +281,16 @@ def _normalize(value: float, method: str, parameters: dict[str, Any]) -> float:
     else:
         score = 100 * (value - lower) / (upper - lower)
     return max(0.0, min(100.0, score))
+
+
+def normalize_factor_value(
+    value: float,
+    method: str,
+    parameters: dict[str, Any],
+) -> float:
+    """Use the same normalization contract as persisted FactorResult."""
+
+    return _normalize(value, method, parameters)
 
 
 def _direction(score: float, group: str) -> str:

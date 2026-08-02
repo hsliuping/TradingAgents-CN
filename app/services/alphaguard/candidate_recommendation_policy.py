@@ -20,7 +20,7 @@ _POLICY_PATH = (
     / "config"
     / "alphaguard"
     / "recommendations"
-    / "candidate_recommendation_v1.yaml"
+    / "candidate_recommendation_v2.yaml"
 )
 
 
