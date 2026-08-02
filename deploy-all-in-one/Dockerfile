@@ -126,6 +126,13 @@ COPY scripts /app/scripts
 COPY install /app/install
 COPY migrations /app/migrations
 
+# 用户手册文件（向量索引用，打包到镜像，容器内路径 /app/docs/02-user-guide/）
+COPY docs/02-user-guide/user-manual-v3.0.md /app/docs/02-user-guide/
+COPY docs/02-user-guide/jdyun-user-manual-v3.0.md /app/docs/02-user-guide/
+
+# 预生成的向量索引种子数据（首次启动时从 /app/qdrant-seed 导入到持久化卷，避免全量 embedding 请求）
+COPY deploy-all-in-one/qdrant-seed /app/qdrant-seed
+
 # ------------------------------------------------------------------------------
 # 复制 s6-overlay 服务定义和配置文件
 # ------------------------------------------------------------------------------

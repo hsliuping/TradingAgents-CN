@@ -23,6 +23,7 @@ mkdir -p /data/db           # MongoDB 数据
 mkdir -p /var/lib/redis     # Redis 数据
 mkdir -p /app/runtime       # 标记文件、临时文件
 mkdir -p /app/logs          # 应用日志
+mkdir -p /app/data          # Qdrant 向量数据（挂载到持久化卷）
 
 # 日志目录
 mkdir -p /var/log/mongodb /var/log/redis /var/log/nginx
@@ -54,8 +55,8 @@ chown -R redis:redis /var/lib/redis /var/log/redis
 chmod 750 /var/lib/redis
 
 # 应用数据和日志
-chown -R appuser:appuser /app/runtime /app/logs
-chmod 750 /app/runtime /app/logs
+chown -R appuser:appuser /app/runtime /app/logs /app/data
+chmod 750 /app/runtime /app/logs /app/data
 
 # Nginx 日志
 chown -R appuser:appuser /var/log/nginx
@@ -64,6 +65,33 @@ chown -R appuser:appuser /var/log/nginx
 touch /var/run/mongodb.pid /var/run/redis.pid 2>/dev/null || true
 chown mongodb:mongodb /var/run/mongodb.pid 2>/dev/null || true
 chown redis:redis /var/run/redis.pid 2>/dev/null || true
+
+# ------------------------------------------------------------------------------
+# 2.5 导入预生成的向量索引种子数据（首次启动时）
+# ------------------------------------------------------------------------------
+# /app/data 是持久化卷挂载点，全新部署时为空。
+# /app/qdrant-seed 是镜像内预生成的索引数据（随镜像分发）。
+# 首次启动时从种子复制到持久化卷，后续重启卷已有数据则跳过。
+# 这样全新部署不需要发送几百次 embedding 请求，秒级可用。
+QDRANT_DATA="/app/data/qdrant"
+QDRANT_SEED="/app/qdrant-seed"
+
+if [ -d "$QDRANT_SEED" ]; then
+    # 判断 Qdrant 数据是否已存在（卷非空）
+    if [ -f "$QDRANT_DATA/meta.json" ] && [ -d "$QDRANT_DATA/collection" ]; then
+        log "ℹ️  Qdrant 数据已存在，跳过种子导入"
+    else
+        log "📦 首次启动，导入预生成的向量索引种子数据..."
+        mkdir -p "$QDRANT_DATA"
+        cp -r "$QDRANT_SEED"/* "$QDRANT_DATA/"
+        # 不复制 .lock 文件（Qdrant 本地模式的文件锁）
+        rm -f "$QDRANT_DATA/.lock" 2>/dev/null || true
+        chown -R appuser:appuser "$QDRANT_DATA"
+        log "   ✅ 种子数据已导入（Qdrant 向量索引，$(du -sh "$QDRANT_DATA" | cut -f1)）"
+    fi
+else
+    log "⚠️  未找到 Qdrant 种子数据 ($QDRANT_SEED)，首次启动将全量构建索引"
+fi
 
 # ------------------------------------------------------------------------------
 # 3. 验证环境变量

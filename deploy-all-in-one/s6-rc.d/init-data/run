@@ -420,6 +420,59 @@ else
     log "ℹ️  跳过初始化（数据库已有数据）"
 fi
 
+# ------------------------------------------------------------------------------
+# 8. 导入预生成的能力索引状态（首次启动时）
+# ------------------------------------------------------------------------------
+# 能力索引的指纹和 document_hashes 存在 MongoDB 中（capability_index_state 集合）。
+# 全新部署时数据库为空，没有状态 -> ensure_index() 会全量重建（323 次 embedding 请求）。
+# 从种子导入状态后，指纹匹配 -> 跳过重建，秒级可用。
+CAP_STATE_SEED="/app/qdrant-seed/capability_index_state.json"
+
+if [ -f "$CAP_STATE_SEED" ]; then
+    # 检查 capability_index_state 是否已有数据
+    STATE_EXISTS=$(python3 -c "
+import sys
+from pymongo import MongoClient
+try:
+    client = MongoClient(
+        'mongodb://${MONGODB_USERNAME}:${MONGODB_PASSWORD}@${MONGODB_HOST}:${MONGODB_PORT}/${MONGODB_DATABASE}?authSource=${MONGODB_AUTH_SOURCE}',
+        serverSelectionTimeoutMS=3000
+    )
+    doc = client['${MONGODB_DATABASE}']['capability_index_state'].find_one({'_id': 'default'})
+    client.close()
+    print('true' if doc else 'false')
+except Exception:
+    print('false')
+" 2>/dev/null)
+
+    if [ "$STATE_EXISTS" = "false" ]; then
+        log "📦 导入预生成的能力索引状态..."
+        if gosu appuser python3 -c "
+import json
+from pymongo import MongoClient
+client = MongoClient(
+    'mongodb://${MONGODB_USERNAME}:${MONGODB_PASSWORD}@${MONGODB_HOST}:${MONGODB_PORT}/${MONGODB_DATABASE}?authSource=${MONGODB_AUTH_SOURCE}',
+    serverSelectionTimeoutMS=5000
+)
+with open('$CAP_STATE_SEED', 'r') as f:
+    state = json.load(f)
+# 确保 _id 正确
+state['_id'] = 'default'
+client['${MONGODB_DATABASE}']['capability_index_state'].replace_one(
+    {'_id': 'default'}, state, upsert=True
+)
+client.close()
+print('OK')
+" 2>&1 | tee -a "$LOG_FILE" | grep -q "OK"; then
+            log "   ✅ 能力索引状态已导入（指纹 + 309 个工具索引）"
+        else
+            log "   ⚠️ 能力索引状态导入失败（首次启动将全量重建）"
+        fi
+    else
+        log "ℹ️  能力索引状态已存在，跳过导入"
+    fi
+fi
+
 log ""
 log "=========================================="
 log "✅ init-data 完成"

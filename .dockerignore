@@ -127,6 +127,13 @@ coverage/
 !docs/paper/**
 !docs/courses/advanced/*.md
 !docs/courses/advanced/expanded/**
+# 用户手册（向量索引用，打包到镜像）
+!docs/02-user-guide/user-manual-v3.0.md
+!docs/02-user-guide/jdyun-user-manual-v3.0.md
+
+# 预生成的向量索引种子数据（打包到镜像，首次启动时导入）
+!deploy-all-in-one/qdrant-seed/**
+!deploy-all-in-one/qdrant-seed/**/*.sqlite
 
 # Docker相关
 Dockerfile.legacy
