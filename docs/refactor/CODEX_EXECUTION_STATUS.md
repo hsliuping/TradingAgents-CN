@@ -2,9 +2,9 @@
 
 ## 当前状态
 
-- 更新时间：2026-08-02 15:15 CST（Asia/Shanghai）
+- 更新时间：2026-08-02 17:35 CST（Asia/Shanghai）
 - 当前阶段：PR-010 Real Model Runtime & Dual-Model Decision Completion
-- 阶段状态：v13已拆分Top模型可写Payload与服务端Envelope并完成一次真实Top调用；有效重试受现有单分析调用次数预算阻断，Level B仍为NO_COMPLETE_DUAL_MODEL_PATH
+- 阶段状态：PR-010 Level B真实双模型路径完成；Top严格校验通过，Consensus、HardRisk和执行安全门均已真实到达
 - PR-001 检查点提交：`5c6ae8f`
 - PR-001 检查点标签：`alphaguard-pr001-baseline`
 - PR-002 检查点提交：`09567a1`
@@ -20,10 +20,10 @@
 - PR-009 检查点标签：`alphaguard-pr009-mvp`
 - MVP Runtime Bring-up 提交：`943560f`
 - MVP Runtime Bring-up 标签：`alphaguard-bringup-runtime-ready`
-- 当前基线：`6162774aa362477f6229fa934c05f59186c01618`
-- 当前基线标签：`alphaguard-pr010-validation-v10`
-- 本阶段检查点：`alphaguard-pr010-validation-v10`（v10验证契约临时检查点）
-- 后续阶段：PR-010 Level B仍为`NO_COMPLETE_DUAL_MODEL_PATH`；PR-011未开始
+- 本阶段提交前基线：`2b905c7`（v11-v13稳定运行时）
+- 本阶段提交前标签：`alphaguard-pr010-validation-v13`
+- PR-010完成标签：`alphaguard-pr010-real-model-runtime`
+- 后续阶段：PR-010 Level B已完成；PR-011未开始
 - 固定安全模式：`system_mode=SIM_AUTONOMOUS`
 - 实盘开关：`live_trading_enabled=false`
 - 数据迁移：未迁移人工模拟账户、现金、持仓、订单或成交数据
@@ -6877,3 +6877,90 @@ Ledger / Settlement`全部为0。三个模拟账户均保持`cash_available=1000
 由于严格合法的Top重试被现有调用次数预算安全阻断，Consensus、HardRisk和执行安全门仍未
 真实到达，正式结论继续为`NO_COMPLETE_DUAL_MODEL_PATH`。不创建PR-010完成提交或
 `alphaguard-pr010-real-model-runtime`标签，PR-011仍未开始。
+
+### 24.16 Top Compatibility Resolution and Complete Level B Path
+
+本轮停止扩展验证框架，没有创建新的契约、Prompt或Schema版本，也没有更换样本。提交前基线
+为`2b905c7`和`alphaguard-pr010-validation-v13`；固定复用`300750 / 2026-05-08`的
+Snapshot、TradingAgents研究结果和Normal交易计划，只为新的验证身份执行一次真实Top调用。
+
+兼容修复保持既有版本不变：
+
+```text
+Prompt=alphaguard-top-review-v3
+model payload schema=top_model_decision_output_v1
+persisted record schema=top_review_decision_v2
+```
+
+Prompt、JSON Schema和Pydantic规则现在使用相同业务语义：`CONFIRM / REJECT / SUSPEND`
+要求空`proposed_changes`，`RISK_ADJUST / MATERIAL_REVISION`要求非空修改，且
+`MATERIAL_REVISION`的`material_change_fields`必须与修改字段完全一致。严格
+`extra=forbid`继续生效，未补默认值、未删除未知字段、未修补模型输出，也未修改交易规则。
+
+Top持久化记录新增脱敏后的标准化Payload及其hash。字段结构错误按`PYDANTIC_FIELD`保存精确
+路径、Pydantic错误类型和静态消息；业务语义错误按`BUSINESS_SEMANTIC`保存路径`$`、错误类型
+和静态规则说明。Secret值统一替换为固定`[REDACTED]`，但字段名不会被静默删除，因此仍可准确
+诊断禁止字段。合法Payload的`validation_errors`为空；服务端Envelope继续从可信执行上下文
+绑定计划身份和审计身份。
+
+最终真实验证结果：
+
+```text
+validation_run_id=c99af166-57f7-5c65-acc2-3c02a86d433e
+symbol/trade_date=300750 / 2026-05-08
+snapshot_id=14986e2e-d560-5427-8874-e2471a7fcb72
+reused_research_and_normal=true
+TradingAgents=SUCCESS（复用）
+Normal=PROPOSE_TRADE / BUY（复用）
+Top=RISK_ADJUST（真实Provider调用，严格Schema校验通过）
+Consensus=CONSENSUS_PASS
+HardRisk=REJECT
+ExecutionSafetyGate=BLOCKED_VALIDATION_MODE
+status=COMPLETED
+failure_code=null
+result_hash=f9c5139d8762efb10a4ea4764084a8da187f9feca8ca01e5899496b627d0933c
+```
+
+本次唯一新增Top调用审计为：
+
+```text
+model_run_id=f8ae2fe1-3ad2-5ec6-824b-2db72532932b
+model=gpt-5.6-sol
+prompt=alphaguard-top-review-v3
+actual_input_tokens=28906
+actual_output_tokens=1055
+total_tokens=29961
+latency_ms=34425.444
+request_hash=26f75fbe3ee0fd107b22dfe73383276dcea08163e6e5b2412af8509dc833d60a
+response_hash=3b2ac59f0d2c836a7e45208109c6a6071dde8613ab061f11ab3acf86e48a738a
+standardized_payload_hash=fd5c8d0383e49669ec6cfbec66b423931df44839bbb7f1ad80b4b7c862fde63a
+validation_errors=[]
+```
+
+相同`validation_run_id`复跑返回`REUSED`，Top审计保持`1 -> 1`，结果hash不变，没有再次调用
+任何模型。`OrderIntent / ExecutionOutbox / Order / Fill / Position / Reservation / Ledger /
+Settlement`全部为0；三个模拟账户均为`cash_available=1000000.00`、`cash_reserved=0`、
+`realized_pnl=0`。
+
+最终验证结果：
+
+```text
+Top/Consensus专项=120 passed, 22 warnings
+默认离线CI=683 passed, 89 warnings
+frontend type-check=PASS
+正式 npm run build=PASS
+独立 npx vite build=PASS
+修改Python文件 py_compile=PASS
+全仓 compileall=仅存量 scripts/补充行业信息_akshare.py:81 SyntaxError
+git diff --check=PASS
+敏感信息扫描=PASS
+MongoDB/Redis/FastAPI/queue-worker/analysis-worker=HEALTHY
+FastAPI live=true=exit 3
+queue-worker live=true=exit 1
+analysis-worker live=true=exit 1
+```
+
+运行中的`/health/ready`仍如实为`DEGRADED_PAPER`，阻断项是既有实验样本和容器内模型配置
+Readiness，不影响本次显式`REAL_MODEL_VALIDATION`运行记录及五个运行组件的健康状态。PR-010
+Level B满足真实Top调用、严格校验、Consensus、HardRisk、验证模式执行阻断、幂等和零交易
+副作用要求；完成检查点后停止，PR-011未开始。

@@ -40,6 +40,7 @@ class ConsensusEngine:
         plan: NormalTradePlan,
         review: TopReviewDecision,
         now: datetime | None = None,
+        additional_top_prompt_versions: set[str] | None = None,
     ) -> ConsensusDecision:
         now = now or datetime.utcnow()
         errors: list[str] = []
@@ -59,6 +60,7 @@ class ConsensusEngine:
                 plan,
                 context,
                 model_runtime_context_hash=runtime_context_hash,
+                additional_prompt_versions=additional_top_prompt_versions,
             )
         except ValueError as exc:
             errors.append(str(exc))

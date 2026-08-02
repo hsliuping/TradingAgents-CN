@@ -71,6 +71,7 @@ from app.services.alphaguard.snapshot_research_runtime import (
 from app.services.alphaguard.decision_model_runner import (
     ExistingProviderDecisionModelRunner,
 )
+from app.services.alphaguard.consensus_engine import ConsensusEngine
 from app.services.alphaguard.decision_validation import (
     validate_plan_against_context,
 )
@@ -380,7 +381,6 @@ def test_top_server_envelope_binds_plan_lineage_and_replays_completely():
         },
     )(state)
     review = TopReviewDecision.model_validate(result["top_review_decision"])
-
     assert review.status == "CONFIRM"
     assert review.plan_id == plan.plan_id
     assert review.supersedes_plan_id == "server-owned-original-plan"
@@ -439,6 +439,12 @@ def test_top_node_never_strips_or_repairs_forbidden_model_fields(
     assert "extra_forbidden" in result["decision_error"]["error_message"]
     expected_field = next(iter(forbidden_payload))
     assert expected_field in result["decision_error"]["error_message"]
+    review = TopReviewDecision.model_validate(result["top_review_decision"])
+    assert expected_field in review.standardized_model_payload
+    assert review.standardized_model_payload_hash
+    assert review.validation_errors[0].stage == "PYDANTIC_FIELD"
+    assert review.validation_errors[0].error_type == "extra_forbidden"
+    assert expected_field in review.validation_errors[0].path
 
 
 def test_top_semantic_failure_keeps_static_rule_without_model_text():
@@ -471,6 +477,155 @@ def test_top_semantic_failure_keeps_static_rule_without_model_text():
     message = result["decision_error"]["error_message"]
     assert "CONFIRM requires empty proposed_changes" in message
     assert secret_text not in message
+    review = TopReviewDecision.model_validate(result["top_review_decision"])
+    assert review.standardized_model_payload["review_reason"] == secret_text
+    assert review.validation_errors[0].stage == "BUSINESS_SEMANTIC"
+    assert review.validation_errors[0].path == "$"
+    assert review.validation_errors[0].error_type == "value_error"
+    assert (
+        review.validation_errors[0].message
+        == "Value error, CONFIRM requires empty proposed_changes"
+    )
+
+
+def test_top_standardized_payload_redacts_secret_values_without_field_stripping():
+    context = make_context()
+    plan = make_plan(context)
+    payload = review_payload()
+    payload["api_key"] = "sk-" + "x" * 32
+    state = ProfiledDecisionModelRunner._base_state(
+        context,
+        attempt_number=1,
+        trace_id="validation-top-redaction",
+        research_results=[],
+        model_runtime_context_hash="8" * 64,
+        run_mode="REAL_MODEL_VALIDATION",
+    )
+    state["normal_trade_plan"] = plan.model_dump(mode="json")
+    state["risk_policy_summary"] = {}
+
+    result = create_risk_manager(
+        StructuredLLM(payload),
+        None,
+        {
+            "deep_provider": "compatible",
+            "deep_think_llm": "top-model",
+            "top_structured_output_mode": "NATIVE_SCHEMA",
+        },
+    )(state)
+    review = TopReviewDecision.model_validate(result["top_review_decision"])
+
+    assert review.status == "INVALID_OUTPUT"
+    assert review.standardized_model_payload["api_key"] == "[REDACTED]"
+    assert review.validation_errors[0].path == "api_key"
+    assert review.validation_errors[0].error_type == "extra_forbidden"
+    assert "x" * 16 not in json.dumps(review.model_dump(mode="json"))
+
+
+def test_top_prompt_schema_and_pydantic_semantics_are_consistent():
+    prompt = PromptProfileRegistry().definition("top_risk_review_prompt")
+    context = make_context()
+    schema = _context_bound_review_schema(context, make_plan(context))
+    schema_text = json.dumps(schema, sort_keys=True)
+
+    assert prompt.prompt_version == "alphaguard-top-review-v3"
+    assert prompt.schema_target == "TopModelDecisionOutput"
+    assert "plan_id" not in schema_text
+    assert "supersedes_plan_id" not in schema_text
+    prompt_text = " ".join(prompt.template.split())
+    for rule in (
+        "CONFIRM, REJECT, and SUSPEND require proposed_changes {{}}",
+        "RISK_ADJUST requires non-empty proposed_changes",
+        "MATERIAL_REVISION requires non-empty proposed_changes",
+    ):
+        assert rule in prompt_text
+
+    for status in ("CONFIRM", "REJECT", "SUSPEND"):
+        assert TopModelDecisionOutput.model_validate(
+            review_payload(status=status)
+        ).status == status
+    assert TopModelDecisionOutput.model_validate(
+        review_payload(
+            status="RISK_ADJUST",
+            proposed_changes={"confidence": 0.5},
+        )
+    ).status == "RISK_ADJUST"
+    assert TopModelDecisionOutput.model_validate(
+        review_payload(
+            status="MATERIAL_REVISION",
+            proposed_changes={"confidence": 0.5},
+            material_change_fields=["confidence"],
+        )
+    ).status == "MATERIAL_REVISION"
+    with pytest.raises(
+        ValidationError,
+        match="material_change_fields must exactly match proposed_changes",
+    ):
+        TopModelDecisionOutput.model_validate(
+            review_payload(
+                status="MATERIAL_REVISION",
+                proposed_changes={"confidence": 0.5, "max_position_pct": 0.04},
+                material_change_fields=["confidence"],
+            )
+        )
+
+
+def test_consensus_accepts_only_explicitly_registered_recovery_prompt():
+    context = make_context()
+    plan = make_plan(context)
+    state = ProfiledDecisionModelRunner._base_state(
+        context,
+        attempt_number=1,
+        trace_id="validation-top-prompt-compatibility",
+        research_results=[],
+        model_runtime_context_hash=plan.model_meta.context_hash,
+        run_mode="REAL_MODEL_VALIDATION",
+    )
+    state["normal_trade_plan"] = plan.model_dump(mode="json")
+    state["risk_policy_summary"] = {}
+    prompt = PromptProfileRegistry().definition("top_risk_review_prompt")
+    result = create_risk_manager(
+        StructuredLLM(review_payload()),
+        None,
+        {
+            "deep_provider": "compatible",
+            "deep_think_llm": "top-model",
+            "top_prompt_version": prompt.prompt_version,
+            "top_prompt_template": prompt.template,
+            "top_structured_output_mode": "NATIVE_SCHEMA",
+        },
+    )(state)
+    review = TopReviewDecision.model_validate(result["top_review_decision"])
+    assert review.model_meta.context_hash == plan.model_meta.context_hash
+    assert review.model_meta.prompt_version == prompt.prompt_version
+    assert review.model_meta.template_hash
+    assert review.model_meta.input_hash
+    assert review.model_meta.raw_output_hash
+    assert review.model_meta.request_id or review.model_meta.trace_id
+    evaluation_time = datetime.combine(
+        context.trade_date,
+        datetime.min.time(),
+        tzinfo=timezone.utc,
+    )
+
+    rejected = ConsensusEngine().evaluate(
+        context=context,
+        plan=plan,
+        review=review,
+        now=evaluation_time,
+    )
+    accepted = ConsensusEngine().evaluate(
+        context=context,
+        plan=plan,
+        review=review,
+        now=evaluation_time,
+        additional_top_prompt_versions={prompt.prompt_version},
+    )
+
+    assert rejected.status == "CONSENSUS_INVALID"
+    assert rejected.validation_errors == ["model execution metadata is incomplete"]
+    assert accepted.status == "CONSENSUS_PASS", accepted.validation_errors
+    assert accepted.validation_errors == []
 
 
 @pytest.mark.asyncio
@@ -533,6 +688,9 @@ async def test_top_audit_hashes_link_model_payload_to_server_envelope():
     assert record.snapshot_id == review.snapshot_id
     assert record.request_hash == review.model_meta.input_hash
     assert record.response_hash == review.model_meta.raw_output_hash
+    assert review.standardized_model_payload == review_payload()
+    assert review.standardized_model_payload_hash
+    assert review.validation_errors == []
 
 
 def test_research_manager_v2_contract_is_strict_and_hash_stable():
@@ -1295,6 +1453,134 @@ async def test_snapshot_token_history_is_audited_but_never_blocks_next_call():
     assert decision.allowed is True
     assert decision.reason_code is None
     assert decision.model_context_window == 32000
+
+
+@pytest.mark.asyncio
+async def test_new_validation_identity_reuses_context_without_old_call_count():
+    db = FakeDB()
+    old_analysis_id = "real-model-validation:old-run"
+    new_analysis_id = "real-model-validation:new-run"
+    for index in range(10):
+        await db["ag_model_runs"].insert_one(
+            {
+                "analysis_id": old_analysis_id,
+                "created_at": datetime.now(timezone.utc),
+                "estimated_cost": 0,
+                "attempt": index + 1,
+            }
+        )
+    profile = ModelProfileRegistry().for_role("TOP_RISK_REVIEWER").model_copy(
+        update={
+            "input_cost_per_million": 0.0,
+            "output_cost_per_million": 0.0,
+            "cost_currency": "USD",
+            "max_input_tokens": 32000,
+            "max_output_tokens": 4000,
+        }
+    )
+    prompt = PromptProfileRegistry().definition("top_risk_review_prompt")
+    context = make_context().model_copy(update={"analysis_id": old_analysis_id})
+    runner = ProfiledDecisionModelRunner(
+        db=db,
+        normal_node=None,
+        top_node=create_risk_manager(
+            StructuredLLM(review_payload()),
+            None,
+            {
+                "deep_provider": profile.provider,
+                "deep_think_llm": profile.model_name,
+                "top_prompt_version": prompt.prompt_version,
+                "top_prompt_template": prompt.template,
+                "top_structured_output_mode": "NATIVE_SCHEMA",
+                "top_profile_id": profile.profile_id,
+                "top_profile_version": profile.profile_version,
+                "top_prompt_id": prompt.prompt_id,
+            },
+        ),
+        normal_profile=profile,
+        top_profile=profile,
+        normal_prompt=prompt,
+        top_prompt=prompt,
+        revision_prompt=prompt,
+        run_mode="REAL_MODEL_VALIDATION",
+        automated_execution_allowed=False,
+        model_runtime_context_hash="8" * 64,
+        model_call_analysis_id=new_analysis_id,
+    )
+
+    old_budget = await ModelBudgetService(db).check(
+        profile=profile,
+        analysis_id=old_analysis_id,
+        snapshot_id=context.snapshot_id,
+        rendered_input="same immutable context",
+    )
+    new_budget = await runner._check_budget(
+        profile,
+        context,
+        "same immutable context",
+    )
+
+    assert old_budget.reason_code == "ANALYSIS_CALL_BUDGET_EXCEEDED"
+    assert new_budget.allowed is True
+    assert new_budget.permitted_attempts >= 1
+
+
+@pytest.mark.asyncio
+async def test_validation_top_continuation_disables_network_retry():
+    db = FakeDB()
+    context = make_context()
+    plan = make_plan(context)
+    profile = ModelProfileRegistry().for_role("TOP_RISK_REVIEWER").model_copy(
+        update={
+            "input_cost_per_million": 0.0,
+            "output_cost_per_million": 0.0,
+            "cost_currency": "USD",
+            "max_retries": 1,
+        }
+    )
+    prompt = PromptProfileRegistry().definition("top_risk_review_prompt")
+    model = StructuredLLM(error=TimeoutError("single allowed attempt"))
+    runner = ProfiledDecisionModelRunner(
+        db=db,
+        normal_node=None,
+        top_node=create_risk_manager(
+            model,
+            None,
+            {
+                "deep_provider": profile.provider,
+                "deep_think_llm": profile.model_name,
+                "top_prompt_version": prompt.prompt_version,
+                "top_prompt_template": prompt.template,
+                "top_structured_output_mode": "NATIVE_SCHEMA",
+                "top_max_retries": profile.max_retries,
+                "top_profile_id": profile.profile_id,
+                "top_profile_version": profile.profile_version,
+                "top_prompt_id": prompt.prompt_id,
+            },
+        ),
+        normal_profile=profile,
+        top_profile=profile,
+        normal_prompt=prompt,
+        top_prompt=prompt,
+        revision_prompt=prompt,
+        run_mode="REAL_MODEL_VALIDATION",
+        automated_execution_allowed=False,
+        model_runtime_context_hash=plan.model_meta.context_hash,
+        model_call_analysis_id="real-model-validation:one-top-attempt",
+        top_attempt_limit=1,
+    )
+
+    review = await runner.run_top(
+        context=context,
+        plan=plan,
+        risk_policy_summary={},
+        attempt_number=2,
+        trace_id="one-top-attempt",
+    )
+
+    assert review.status == "MODEL_FAILED"
+    assert review.model_meta.error_type == "TIMEOUT"
+    assert model.invocations == 1
 
 
 @pytest.mark.asyncio

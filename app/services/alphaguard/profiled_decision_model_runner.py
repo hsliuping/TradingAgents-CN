@@ -47,6 +47,8 @@ class ProfiledDecisionModelRunner:
         automated_execution_allowed: bool,
         model_runtime_context_hash: str,
         research_results: list[dict[str, Any]] | None = None,
+        model_call_analysis_id: str | None = None,
+        top_attempt_limit: int | None = None,
     ):
         self.db = db
         self.normal_node = normal_node
@@ -60,6 +62,8 @@ class ProfiledDecisionModelRunner:
         self.automated_execution_allowed = automated_execution_allowed
         self.model_runtime_context_hash = model_runtime_context_hash
         self.research_results = research_results or []
+        self.model_call_analysis_id = model_call_analysis_id
+        self.top_attempt_limit = top_attempt_limit
         self.budget = ModelBudgetService(db)
         self.audit = ModelAuditService(db)
 
@@ -73,6 +77,8 @@ class ProfiledDecisionModelRunner:
         model_runtime_context_hash: str,
         research_results: list[dict[str, Any]] | None = None,
         provider_runtime: ModelProviderRuntime | None = None,
+        model_call_analysis_id: str | None = None,
+        top_attempt_limit: int | None = None,
     ) -> "ProfiledDecisionModelRunner":
         profiles = ModelProfileRegistry(db)
         prompts = PromptProfileRegistry(db)
@@ -159,6 +165,8 @@ class ProfiledDecisionModelRunner:
             automated_execution_allowed=automated_execution_allowed,
             model_runtime_context_hash=model_runtime_context_hash,
             research_results=research_results,
+            model_call_analysis_id=model_call_analysis_id,
+            top_attempt_limit=top_attempt_limit,
         )
 
     @staticmethod
@@ -278,7 +286,7 @@ class ProfiledDecisionModelRunner:
     async def _check_budget(self, profile, context, rendered):
         return await self.budget.check(
             profile=profile,
-            analysis_id=context.analysis_id,
+            analysis_id=self.model_call_analysis_id or context.analysis_id,
             snapshot_id=context.snapshot_id,
             rendered_input=rendered,
         )
@@ -351,7 +359,7 @@ class ProfiledDecisionModelRunner:
         )
         for meta in attempt_metas:
             await self.audit.record(
-                analysis_id=context.analysis_id,
+                analysis_id=self.model_call_analysis_id or context.analysis_id,
                 snapshot_id=context.snapshot_id,
                 context_hash=self.model_runtime_context_hash,
                 run_mode=self.run_mode,
@@ -474,6 +482,11 @@ class ProfiledDecisionModelRunner:
             state["model_max_retries"] = max(
                 0, budget.permitted_attempts - 1
             )
+            if self.top_attempt_limit is not None:
+                state["model_max_retries"] = min(
+                    state["model_max_retries"],
+                    max(0, self.top_attempt_limit - 1),
+                )
             state["normal_trade_plan"] = plan.model_dump(mode="json")
             state["risk_policy_summary"] = risk_policy_summary
             result = self.top_node(state)
@@ -493,7 +506,7 @@ class ProfiledDecisionModelRunner:
         )
         for meta in attempt_metas:
             await self.audit.record(
-                analysis_id=context.analysis_id,
+                analysis_id=self.model_call_analysis_id or context.analysis_id,
                 snapshot_id=context.snapshot_id,
                 context_hash=self.model_runtime_context_hash,
                 run_mode=self.run_mode,

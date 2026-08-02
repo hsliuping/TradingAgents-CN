@@ -425,6 +425,7 @@ class RealModelValidationService:
         predecessor: RealModelValidationRun,
         normal_profile,
         top_profile,
+        model_call_analysis_id: str | None = None,
     ):
         snapshot = await EvidenceSnapshotService(
             db=self.db,
@@ -485,7 +486,7 @@ class RealModelValidationService:
             raise RealModelValidationError("REUSABLE_V11_SNAPSHOT_ID_MISMATCH")
         return await ModelBudgetService(self.db).check(
             profile=top_profile,
-            analysis_id=context.analysis_id,
+            analysis_id=model_call_analysis_id or context.analysis_id,
             snapshot_id=context.snapshot_id,
             rendered_input=rendered,
         )
@@ -517,6 +518,7 @@ class RealModelValidationService:
         *,
         proposal_id: str | None = None,
         user_id: str | None = None,
+        model_call_analysis_id: str | None = None,
     ) -> dict[str, Any]:
         status = await ModelRuntimeStatusService(self.db).status(admin=True)
         blockers: list[str] = []
@@ -595,6 +597,7 @@ class RealModelValidationService:
                         predecessor=predecessor,
                         normal_profile=normal,
                         top_profile=top,
+                        model_call_analysis_id=model_call_analysis_id,
                     )
                     if not top_budget_decision.allowed:
                         blockers.append(
@@ -1197,15 +1200,26 @@ class RealModelValidationService:
         )
         return DecisionContext.model_validate(payload), resolved, proposal_id
 
-    async def _model_call_records(self, analysis_id: str) -> list[dict[str, Any]]:
+    async def _model_call_records(
+        self, analysis_id: str | list[str]
+    ) -> list[dict[str, Any]]:
+        analysis_query = (
+            {"$in": list(dict.fromkeys(analysis_id))}
+            if isinstance(analysis_id, list)
+            else analysis_id
+        )
         rows = await self.repository.list(
             "runs",
-            {"analysis_id": analysis_id, "run_mode": "REAL_MODEL_VALIDATION"},
+            {
+                "analysis_id": analysis_query,
+                "run_mode": "REAL_MODEL_VALIDATION",
+            },
             sort=("created_at", 1),
             limit=100,
         )
         keys = (
             "model_run_id",
+            "analysis_id",
             "snapshot_id",
             "context_hash",
             "role",
@@ -1259,6 +1273,7 @@ class RealModelValidationService:
             )
 
         started = datetime.now(timezone.utc)
+        model_call_analysis_id = f"real-model-validation:{validation_run_id}"
         status = "CREATED"
         snapshot = None
         sample = None
@@ -1277,7 +1292,11 @@ class RealModelValidationService:
         predecessor = None
         reused_research_and_normal = False
         try:
-            gate = await self.preflight(proposal_id=proposal_id, user_id=user_id)
+            gate = await self.preflight(
+                proposal_id=proposal_id,
+                user_id=user_id,
+                model_call_analysis_id=model_call_analysis_id,
+            )
             if gate["status"] != "READY":
                 failure_code = ",".join(gate["blocking_items"])
                 status = "MODEL_NOT_CONFIGURED" if (
@@ -1379,6 +1398,8 @@ class RealModelValidationService:
                         automated_execution_allowed=False,
                         model_runtime_context_hash=runtime_context_hash,
                         research_results=research_projection,
+                        model_call_analysis_id=model_call_analysis_id,
+                        top_attempt_limit=1,
                     )
                     policy = await RiskPolicyRegistry(self.db).get_active()
                     top = await runner.run_top(
@@ -1405,12 +1426,19 @@ class RealModelValidationService:
                             plan=normal,
                             review=top,
                             now=validation_now,
+                            additional_top_prompt_versions={
+                                runner.top_prompt.prompt_version
+                            },
                         )
                         consensus_status = consensus.status
                         consensus_result = consensus.model_dump(mode="json")
                         if consensus.status != "CONSENSUS_PASS":
-                            failure_code = f"CONSENSUS_{consensus.status}"
-                            status = "FAILED"
+                            hard_risk_status = "NOT_REACHED_BY_DESIGN"
+                            hard_risk_result = {
+                                "reason_code": "CONSENSUS_DID_NOT_PASS",
+                                "consensus_status": consensus.status,
+                                "consensus_id": consensus.consensus_id,
+                            }
                         else:
                             hard_risk = HardRiskEngine().evaluate(
                                 data=resolved,
@@ -1422,19 +1450,21 @@ class RealModelValidationService:
                             )
                             hard_risk_status = hard_risk.status
                             hard_risk_result = hard_risk.model_dump(mode="json")
-                            try:
-                                ExecutionModeSafetyGate.assert_snapshot_allowed(
-                                    snapshot.model_dump(mode="python")
-                                )
-                            except ExecutionModeBlockedError:
-                                gate_invoked = True
-                                gate_status = "BLOCKED_VALIDATION_MODE"
-                            else:
-                                raise RealModelValidationError(
-                                    "validation Snapshot escaped execution mode gate"
-                                )
-                            status = "COMPLETED"
-                call_records = await self._model_call_records(context.analysis_id)
+                        try:
+                            ExecutionModeSafetyGate.assert_snapshot_allowed(
+                                snapshot.model_dump(mode="python")
+                            )
+                        except ExecutionModeBlockedError:
+                            gate_invoked = True
+                            gate_status = "BLOCKED_VALIDATION_MODE"
+                        else:
+                            raise RealModelValidationError(
+                                "validation Snapshot escaped execution mode gate"
+                            )
+                        status = "COMPLETED"
+                call_records = await self._model_call_records(
+                    [context.analysis_id, model_call_analysis_id]
+                )
                 normal_matches = [
                     item for item in call_records if item["role"] == "NORMAL_TRADER"
                 ]
@@ -1452,7 +1482,11 @@ class RealModelValidationService:
             )
 
         call_records = (
-            await self._model_call_records(context.analysis_id) if context else []
+            await self._model_call_records(
+                [context.analysis_id, model_call_analysis_id]
+            )
+            if context
+            else []
         )
         proposal = sample["proposal"] if sample else None
         result_payload = {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 from uuid import uuid4
@@ -19,6 +20,7 @@ from tradingagents.alphaguard.decision_schemas import (
     ModelExecutionMeta,
     NormalTradePlan,
     TopModelDecisionOutput,
+    TopPayloadValidationIssue,
     TopReviewDecision,
     validate_review_against_plan,
 )
@@ -37,6 +39,74 @@ TOP_REVIEW_QUANT_PROMPT_VERSION = "top_review_decision_quant_v2"
 TOP_MODEL_PAYLOAD_SCHEMA_VERSION = "top_model_decision_output_v1"
 TOP_REVIEW_RECORD_SCHEMA_VERSION = "top_review_decision_v2"
 TOP_REQUEST_BUILDER_VERSION = "top-review-model-request-v2"
+
+_SENSITIVE_PAYLOAD_KEY = re.compile(
+    r"(?i)(authorization|api[_ -]?key|access[_ -]?token|cookie|credential|secret)"
+)
+
+
+def _sanitize_top_payload(value: Any, *, key: str | None = None) -> Any:
+    """Keep the normalized model payload useful without retaining credentials."""
+
+    if key and _SENSITIVE_PAYLOAD_KEY.search(key):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {
+            str(child_key): _sanitize_top_payload(child, key=str(child_key))
+            for child_key, child in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, list):
+        return [_sanitize_top_payload(item) for item in value]
+    if isinstance(value, str):
+        text = re.sub(
+            r"(?i)(authorization|api[-_ ]?key|access[-_ ]?token|bearer)"
+            r"(\s*[:=]\s*|\s+)[^\s,;]+",
+            r"\1=[REDACTED]",
+            value,
+        )
+        return re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED]", text)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)
+
+
+def _top_validation_issues(
+    error: ValidationError | ValueError,
+) -> list[TopPayloadValidationIssue]:
+    if isinstance(error, ValidationError):
+        issues: list[TopPayloadValidationIssue] = []
+        for item in error.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        ):
+            location = item.get("loc") or ()
+            path = ".".join(str(part) for part in location) or "$"
+            error_type = str(item.get("type") or "validation_error")
+            stage = (
+                "BUSINESS_SEMANTIC"
+                if not location and error_type == "value_error"
+                else "PYDANTIC_FIELD"
+            )
+            message = str(item.get("msg") or error_type).strip()
+            issues.append(
+                TopPayloadValidationIssue(
+                    stage=stage,
+                    path=path,
+                    error_type=error_type,
+                    message=_sanitize_top_payload(message)[:500],
+                )
+            )
+        return issues
+    message = str(error).replace("\n", " ").strip() or error.__class__.__name__
+    return [
+        TopPayloadValidationIssue(
+            stage="BUSINESS_SEMANTIC",
+            path="$",
+            error_type="value_error",
+            message=_sanitize_top_payload(message)[:500],
+        )
+    ]
 
 
 @dataclass(frozen=True)
@@ -235,6 +305,9 @@ def _failure_review(
     revision_round: int = 0,
     validation_run_id: str | None = None,
     supersedes_plan_id: str | None = None,
+    standardized_model_payload: dict[str, Any] | None = None,
+    standardized_model_payload_hash: str | None = None,
+    validation_errors: list[TopPayloadValidationIssue] | None = None,
 ) -> TopReviewDecision:
     return TopReviewDecision(
         review_id=str(uuid4()),
@@ -263,6 +336,9 @@ def _failure_review(
         review_reason=reason,
         model_meta=model_meta,
         model_decision_payload=None,
+        standardized_model_payload=standardized_model_payload,
+        standardized_model_payload_hash=standardized_model_payload_hash,
+        validation_errors=validation_errors or [],
         created_at=model_meta.finished_at,
         schema_version=TOP_REVIEW_RECORD_SCHEMA_VERSION,
         model_payload_schema_version=TOP_MODEL_PAYLOAD_SCHEMA_VERSION,
@@ -496,6 +572,8 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                         "error_message": invocation.error_message,
                     }
                 else:
+                    standardized_payload = _sanitize_top_payload(invocation.payload)
+                    standardized_payload_hash = canonical_hash(standardized_payload)
                     try:
                         decision = TopModelDecisionOutput.model_validate(
                             invocation.payload
@@ -554,6 +632,11 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                             review_reason=decision.review_reason,
                             model_meta=invocation.model_meta,
                             model_decision_payload=decision,
+                            standardized_model_payload=standardized_payload,
+                            standardized_model_payload_hash=(
+                                standardized_payload_hash
+                            ),
+                            validation_errors=[],
                             created_at=invocation.model_meta.finished_at,
                             schema_version=TOP_REVIEW_RECORD_SCHEMA_VERSION,
                             model_payload_schema_version=(
@@ -586,14 +669,12 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                                 if violations:
                                     raise ValueError("; ".join(violations))
                     except (ValidationError, ValueError) as exc:
-                        if isinstance(exc, ValidationError):
-                            reason = ", ".join(
-                                f"{'.'.join(str(part) for part in item['loc'])}:"
-                                f"{item['type']}:{item['msg']}"
-                                for item in exc.errors(include_input=False)
-                            )[:240]
-                        else:
-                            reason = str(exc).replace("\n", " ").strip()[:240]
+                        validation_errors = _top_validation_issues(exc)
+                        reason = "; ".join(
+                            f"{item.stage}:{item.path}:{item.error_type}:"
+                            f"{item.message}"
+                            for item in validation_errors
+                        )[:400]
                         message = (
                             "TopModelDecisionOutput schema/permission validation failed: "
                             f"{exc.__class__.__name__}"
@@ -620,12 +701,25 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                                 )
                             ),
                             supersedes_plan_id=normal_plan.supersedes_plan_id,
+                            standardized_model_payload=standardized_payload,
+                            standardized_model_payload_hash=(
+                                standardized_payload_hash
+                            ),
+                            validation_errors=validation_errors,
                         )
                         decision_error = {
                             "stage": "RISK_JUDGE",
                             "status": "INVALID_OUTPUT",
                             "error_type": "SCHEMA_VALIDATION_ERROR",
                             "error_message": message,
+                            "standardized_model_payload": standardized_payload,
+                            "standardized_model_payload_hash": (
+                                standardized_payload_hash
+                            ),
+                            "validation_errors": [
+                                item.model_dump(mode="json")
+                                for item in validation_errors
+                            ],
                         }
 
         rendered = _render_review(review)

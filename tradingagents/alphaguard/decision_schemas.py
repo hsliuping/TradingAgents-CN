@@ -5,7 +5,14 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    model_serializer,
+    model_validator,
+)
 
 
 ExecutionStatus = Literal[
@@ -411,16 +418,25 @@ class TopModelDecisionOutput(AlphaGuardSchema):
                 raise ValueError(
                     "MATERIAL_REVISION requires material_change_fields"
                 )
-            undeclared = set(self.material_change_fields) - changed_fields
-            if undeclared:
+            declared_fields = set(self.material_change_fields)
+            if declared_fields != changed_fields:
                 raise ValueError(
-                    "material_change_fields must reference proposed_changes"
+                    "material_change_fields must exactly match proposed_changes"
                 )
         elif self.material_change_fields:
             raise ValueError(
                 "material_change_fields is only valid for MATERIAL_REVISION"
             )
         return self
+
+
+class TopPayloadValidationIssue(AlphaGuardSchema):
+    """Secret-free diagnostic for an untrusted normalized Top payload."""
+
+    stage: Literal["PYDANTIC_FIELD", "BUSINESS_SEMANTIC"]
+    path: str = Field(min_length=1)
+    error_type: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=500)
 
 
 class TopReviewDecision(AlphaGuardSchema):
@@ -456,12 +472,28 @@ class TopReviewDecision(AlphaGuardSchema):
 
     model_meta: ModelExecutionMeta
     model_decision_payload: TopModelDecisionOutput | None = None
+    standardized_model_payload: dict[str, JsonValue] | None = None
+    standardized_model_payload_hash: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    validation_errors: list[TopPayloadValidationIssue] = Field(default_factory=list)
     created_at: datetime | None = None
     schema_version: str = "top_review_decision_v1"
     model_payload_schema_version: str | None = None
 
     @model_validator(mode="after")
     def validate_review_semantics(self) -> "TopReviewDecision":
+        if (self.standardized_model_payload is None) != (
+            self.standardized_model_payload_hash is None
+        ):
+            raise ValueError(
+                "standardized model payload and hash must be recorded together"
+            )
+        if self.validation_errors and self.status != "INVALID_OUTPUT":
+            raise ValueError(
+                "model payload validation errors require INVALID_OUTPUT"
+            )
         if self.status == "CONFIRM" and self.adjusted_plan is not None:
             raise ValueError("CONFIRM must not contain adjusted_plan")
         if self.status == "RISK_ADJUST" and self.adjusted_plan is None:
