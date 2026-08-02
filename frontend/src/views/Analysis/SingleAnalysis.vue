@@ -1002,26 +1002,6 @@ function parseVersion(v: string | number): number[] {
 }
 const selectedWorkflowId = ref<string>('v2_stock_analysis')
 
-// 监听市场类型变化，自动切换到对应类型的默认流程
-watch(
-  () => analysisForm.market,
-  (newMarket) => {
-    const expectedType = newMarket === 'ETF' ? 'etf_analysis' : 'stock_analysis'
-    const targetWorkflows = workflows.value.filter(w => w.workflow_type === expectedType)
-    
-    if (targetWorkflows.length > 0) {
-      // 优先找 is_default 的
-      const defaultWf = targetWorkflows.find(w => w.is_default)
-      if (defaultWf) {
-        selectedWorkflowId.value = defaultWf.id
-      } else {
-        // 没找到的话选第一个（最高版本）
-        selectedWorkflowId.value = targetWorkflows[0].id
-      }
-    }
-  }
-)
-
 // 🆕 模型推荐提示
 const modelRecommendation = ref<{
   title: string
@@ -1045,6 +1025,26 @@ const analysisForm = reactive<AnalysisForm>({
   engine: 'v2',  // 固定使用 v2.0 引擎
   enableTrace: false  // 执行轨迹：默认关闭，排查问题时可开启
 })
+
+// 监听市场类型变化，自动切换到对应类型的默认流程
+watch(
+  () => analysisForm.market,
+  (newMarket) => {
+    const expectedType = newMarket === 'ETF' ? 'etf_analysis' : 'stock_analysis'
+    const targetWorkflows = workflows.value.filter(w => w.workflow_type === expectedType)
+    
+    if (targetWorkflows.length > 0) {
+      // 优先找 is_default 的
+      const defaultWf = targetWorkflows.find(w => w.is_default)
+      if (defaultWf) {
+        selectedWorkflowId.value = defaultWf.id
+      } else {
+        // 没找到的话选第一个（最高版本）
+        selectedWorkflowId.value = targetWorkflows[0].id
+      }
+    }
+  }
+)
 
 // 股票代码验证相关
 const stockCodeError = ref<string>('')
