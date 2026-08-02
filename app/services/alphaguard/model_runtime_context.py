@@ -28,6 +28,8 @@ class ModelRuntimeContext:
 def build_model_runtime_context(
     context: DecisionContext,
     resolved: ResolvedSnapshotData,
+    *,
+    include_resolved_refs: bool = True,
 ) -> ModelRuntimeContext:
     snapshot = resolved.snapshot
     if context.snapshot_id != snapshot.snapshot_id:
@@ -45,6 +47,7 @@ def build_model_runtime_context(
         < (snapshot.required_benchmark_count or 61)
     ):
         raise ModelRuntimeContextError("Snapshot evidence windows are incomplete")
+    resolved_refs = sorted(resolved.input_refs)
     payload = {
         "decision_context": context.model_dump(mode="json"),
         "evidence_contract": {
@@ -69,12 +72,43 @@ def build_model_runtime_context(
             "snapshot_immutable_hash": snapshot.immutable_hash,
         },
         "resolved_input_hash": resolved.input_hash,
-        "resolved_input_refs": sorted(resolved.input_refs),
+        "resolved_input_ref_count": len(resolved_refs),
     }
+    if include_resolved_refs:
+        payload["resolved_input_refs"] = resolved_refs
+    else:
+        selected_refs = {
+            item.evidence_id
+            for group in (
+                context.price_evidence,
+                context.financial_evidence,
+                context.news_evidence,
+                context.announcement_evidence,
+                context.account_evidence,
+                context.portfolio_evidence,
+            )
+            for item in group
+        }
+        if not selected_refs or not selected_refs.issubset(set(resolved_refs)):
+            raise ModelRuntimeContextError(
+                "compact model evidence refs are not locked by Snapshot"
+            )
+        derived_refs = {
+            context.quant_proposal_id,
+            context.regime_result_id,
+            *context.factor_result_ids,
+        }
+        if any(not item for item in derived_refs):
+            raise ModelRuntimeContextError(
+                "compact model derived evidence identities are incomplete"
+            )
+        payload["allowed_raw_evidence_refs"] = sorted(selected_refs)
+        payload["allowed_derived_evidence_refs"] = sorted(derived_refs)
+        payload["allowed_evidence_refs"] = sorted(selected_refs | derived_refs)
     context_hash = canonical_hash(payload)
     return ModelRuntimeContext(
         snapshot_id=snapshot.snapshot_id,
         context_hash=context_hash,
         payload=payload,
-        evidence_refs=tuple(sorted(resolved.input_refs)),
+        evidence_refs=tuple(resolved_refs),
     )

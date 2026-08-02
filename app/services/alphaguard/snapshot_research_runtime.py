@@ -14,7 +14,10 @@ from app.schemas.alphaguard.model_runtime import (
     ResearchAgentResult,
 )
 from tradingagents.alphaguard.decision_schemas import ModelExecutionMeta
-from tradingagents.alphaguard.structured_output import invoke_json_object
+from tradingagents.alphaguard.structured_output import (
+    invoke_json_object,
+    model_output_schema,
+)
 
 from .model_audit_service import ModelAuditService
 from .model_budget_service import ModelBudgetService
@@ -42,6 +45,22 @@ class ResearchAgentOutput(BaseModel):
     findings: list[str]
     risks: list[str]
     evidence_refs: list[str]
+
+
+def _context_bound_research_schema(
+    context: ModelRuntimeContext,
+) -> dict[str, Any]:
+    schema = model_output_schema(ResearchAgentOutput)
+    allowed = sorted(
+        context.payload.get("allowed_evidence_refs") or context.evidence_refs
+    )
+    schema["properties"]["evidence_refs"] = {
+        "description": "Citations selected only from immutable Snapshot evidence IDs.",
+        "items": {"enum": allowed, "type": "string"},
+        "title": "Evidence Refs",
+        "type": "array",
+    }
+    return schema
 
 
 def _failure_meta(
@@ -138,16 +157,23 @@ class SnapshotResearchRuntime:
         context: ModelRuntimeContext,
         run_mode: str,
         llm: Any | None = None,
+        profile_override: Any | None = None,
     ) -> list[ResearchAgentResult]:
-        profile = await self.profiles.persisted_for_role("RESEARCH_AGENT")
+        profile = profile_override or await self.profiles.persisted_for_role(
+            "RESEARCH_AGENT"
+        )
+        research_prompt = self.prompts.definition(
+            "alphaguard_research_snapshot"
+        )
         prompt = await self.prompts.persisted(
-            profile.prompt_profile_id,
-            self.prompts.definition(profile.prompt_profile_id).prompt_version,
+            research_prompt.prompt_id,
+            research_prompt.prompt_version,
         )
         model = llm or await self.provider_runtime.create_registered(
             profile, db=self.db
         )
         results: list[ResearchAgentResult] = []
+        output_schema = _context_bound_research_schema(context)
         for agent_name, agent_role in RESEARCH_ROLES:
             rendered = prompt.template.format(
                 agent_role=agent_role,
@@ -222,6 +248,7 @@ class SnapshotResearchRuntime:
                 cost_currency=profile.cost_currency,
                 max_retries=max(0, budget.permitted_attempts - 1),
                 retry_backoff_seconds=profile.retry_backoff_seconds,
+                schema_override=output_schema,
             )
             run = None
             for meta in invocation.attempt_metas or (invocation.model_meta,):
@@ -246,16 +273,27 @@ class SnapshotResearchRuntime:
                 parsed = ResearchAgentOutput.model_validate(
                     invocation.payload or {}
                 )
-                unknown = set(parsed.evidence_refs) - set(context.evidence_refs)
-                if unknown:
-                    raise ValueError("research references evidence outside Snapshot")
-                status = parsed.status
-                summary = parsed.model_dump(mode="json")
-                evidence_refs = parsed.evidence_refs
-            except (ValidationError, ValueError):
+            except ValidationError:
                 status = "INVALID_OUTPUT"
-                summary = {"reason": "STRICT_SCHEMA_OR_EVIDENCE_VALIDATION_FAILED"}
+                summary = {"reason": "STRICT_SCHEMA_VALIDATION_FAILED"}
                 evidence_refs = []
+            else:
+                allowed = set(
+                    context.payload.get("allowed_evidence_refs")
+                    or context.evidence_refs
+                )
+                unknown = set(parsed.evidence_refs) - allowed
+                if unknown:
+                    status = "INVALID_OUTPUT"
+                    summary = {
+                        "reason": "UNKNOWN_EVIDENCE_REFS",
+                        "unknown_evidence_refs": sorted(unknown),
+                    }
+                    evidence_refs = []
+                else:
+                    status = parsed.status
+                    summary = parsed.model_dump(mode="json")
+                    evidence_refs = parsed.evidence_refs
             result, _ = await self._save_result(
                 analysis_id=analysis_id,
                 context=context,

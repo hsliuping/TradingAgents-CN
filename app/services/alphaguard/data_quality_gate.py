@@ -29,6 +29,7 @@ _REFERENCE_COLLECTIONS = {
     # Versioned AlphaGuard paper accounts live in the PR-006 collection.
     # This separate reference type avoids changing legacy snapshot resolution.
     "ag_paper_account": "ag_paper_accounts",
+    "model_validation_account": "ag_model_validation_account_evidence",
     "paper_position": "paper_positions",
     "paper_positions": "paper_positions",
     "paper_order": "paper_orders",

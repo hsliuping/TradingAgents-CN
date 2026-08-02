@@ -124,6 +124,7 @@ class HardRiskEngine:
                 plan,
                 context,
                 additional_prompt_versions={context.top_prompt_version},
+                model_runtime_context_hash=plan.model_meta.context_hash,
             )
         except ValueError:
             integrity_errors.append("DecisionContext hash/schema mismatch")

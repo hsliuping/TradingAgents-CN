@@ -161,10 +161,26 @@ class EvidenceSnapshotService:
         data = dict(payload)
         internal_snapshot_id = data.pop("_internal_snapshot_id", None)
         if internal_snapshot_id is not None:
-            if data.get("run_mode") != "PRODUCTION_REPROCESS":
+            deterministic_modes = {
+                "PRODUCTION_REPROCESS",
+                "EVIDENCE_CONTRACT_VALIDATION",
+            }
+            if data.get("run_mode") not in deterministic_modes:
                 raise ValueError(
                     "deterministic internal snapshot identity is restricted "
-                    "to PRODUCTION_REPROCESS"
+                    "to non-executable evidence repair/validation modes"
+                )
+            if (
+                data.get("run_mode") == "EVIDENCE_CONTRACT_VALIDATION"
+                and self.snapshot_collection == "ag_evidence_snapshots"
+            ):
+                raise ValueError(
+                    "evidence-contract validation snapshot must use an "
+                    "isolated collection"
+                )
+            if data.get("automated_execution_allowed") is not False:
+                raise ValueError(
+                    "deterministic validation snapshot must disable execution"
                 )
             existing = await self.db[self.snapshot_collection].find_one(
                 {"snapshot_id": str(internal_snapshot_id)}
@@ -175,7 +191,7 @@ class EvidenceSnapshotService:
                 )
                 if (
                     not self.verify_integrity(stored)
-                    or stored.run_mode != "PRODUCTION_REPROCESS"
+                    or stored.run_mode != data.get("run_mode")
                     or stored.reprocess_input_hash
                     != data.get("reprocess_input_hash")
                 ):
@@ -250,13 +266,18 @@ class EvidenceSnapshotService:
         if report.status == "FAIL":
             raise DataQualityBlockedError(report)
 
-        champion_version_refs: dict[str, str] = {}
+        validation_mode = data.get("run_mode") == "EVIDENCE_CONTRACT_VALIDATION"
+        champion_version_refs: dict[str, str] = (
+            dict(data.get("champion_version_refs") or {})
+            if validation_mode
+            else {}
+        )
         if data.get("factor_version_set") and data.get("strategy_version"):
             has_pr008_registry = (
                 await self.db["ag_exp_champion_assignments"].find_one({})
                 is not None
             )
-            if has_pr008_registry:
+            if has_pr008_registry and not validation_mode:
                 from .champion_resolver import ChampionResolver
 
                 champion_version_refs = (

@@ -1311,6 +1311,31 @@ ALPHAGUARD_INDEX_SPECS = {
         {"keys": [("status", 1), ("created_at", -1)], "name": "idx_model_validation_status"},
         {"keys": [("snapshot_id", 1), ("created_at", -1)], "name": "idx_model_validation_snapshot"},
     ],
+    "ag_model_validation_evidence_snapshots": [
+        {
+            "keys": [("snapshot_id", 1)],
+            "name": "uniq_model_validation_snapshot_id",
+            "unique": True,
+        },
+        {
+            "keys": [("source_trade_date", 1), ("symbol", 1)],
+            "name": "idx_model_validation_snapshot_source",
+        },
+    ],
+    "ag_model_validation_quality_reports": [
+        {
+            "keys": [("quality_report_id", 1)],
+            "name": "uniq_model_validation_quality_id",
+            "unique": True,
+        },
+    ],
+    "ag_model_validation_account_evidence": [
+        {
+            "keys": [("ref_id", 1)],
+            "name": "uniq_model_validation_account_ref",
+            "unique": True,
+        },
+    ],
     "ag_model_credentials": [
         {
             "keys": [("credential_id", 1)],

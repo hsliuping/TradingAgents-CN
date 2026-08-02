@@ -212,7 +212,30 @@ export interface ModelRunSummary {
   total_tokens?: number | null
   estimated_cost?: number | null
   latency_ms: number
+  request_hash: string
+  response_hash?: string | null
   error_category?: string | null
+  created_at: string
+}
+
+export interface RealModelValidationSummary {
+  validation_run_id: string
+  run_mode: 'REAL_MODEL_VALIDATION'
+  status: string
+  symbol?: string | null
+  source_trade_date?: string | null
+  snapshot_id?: string | null
+  context_hash?: string | null
+  decision_context_hash?: string | null
+  source_quant_proposal_id?: string | null
+  normal_model_run_id?: string | null
+  top_model_run_id?: string | null
+  consensus_status?: string | null
+  hard_risk_status?: string | null
+  execution_gate_status: 'BLOCKED_VALIDATION_MODE' | 'NOT_REACHED'
+  execution_gate_invoked: boolean
+  model_call_records: ModelRunSummary[]
+  failure_code?: string | null
   created_at: string
 }
 
@@ -239,6 +262,11 @@ export interface ResearchResultSummary {
 export const alphaguardModelsApi = {
   status() {
     return ApiClient.get<ModelRuntimeStatus>('/api/alphaguard/models/status')
+  },
+  validationRuns(limit = 20) {
+    return ApiClient.get<{ items: RealModelValidationSummary[] }>(
+      `/api/alphaguard/models/validation-runs?limit=${limit}`
+    )
   },
   credentials() {
     return ApiClient.get<{

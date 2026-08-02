@@ -328,6 +328,24 @@
             <el-table-column prop="model_name" label="模型" />
             <el-table-column label="状态"><template #default="{ row }">{{ statusLabel(row.structured_output_status) }}</template></el-table-column>
             <el-table-column prop="total_tokens" label="Token 数" />
+            <el-table-column label="延迟"><template #default="{ row }">{{ row.latency_ms }} ms</template></el-table-column>
+            <el-table-column label="请求哈希" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.request_hash) }}</span></template></el-table-column>
+            <el-table-column label="响应哈希" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.response_hash) }}</span></template></el-table-column>
+          </el-table>
+
+          <h4>真实双模型验证</h4>
+          <el-empty v-if="!validationRuns.length" description="尚无验证记录" :image-size="56" />
+          <el-table v-else :data="validationRuns" size="small">
+            <el-table-column prop="created_at" label="时间" min-width="190" />
+            <el-table-column label="样本" min-width="150"><template #default="{ row }">{{ row.symbol || '—' }} · {{ row.source_trade_date || '—' }}</template></el-table-column>
+            <el-table-column label="状态"><template #default="{ row }">{{ statusLabel(row.status) }}</template></el-table-column>
+            <el-table-column label="普通模型"><template #default="{ row }">{{ row.normal_model_run_id ? '已调用' : '未到达' }}</template></el-table-column>
+            <el-table-column label="终审模型"><template #default="{ row }">{{ row.top_model_run_id ? '已调用' : '未到达' }}</template></el-table-column>
+            <el-table-column label="共识"><template #default="{ row }">{{ statusLabel(row.consensus_status || 'NOT_REACHED') }}</template></el-table-column>
+            <el-table-column label="硬风控"><template #default="{ row }">{{ statusLabel(row.hard_risk_status || 'NOT_REACHED') }}</template></el-table-column>
+            <el-table-column label="执行安全门" min-width="150"><template #default="{ row }">{{ statusLabel(row.execution_gate_status) }}</template></el-table-column>
+            <el-table-column label="Snapshot" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.snapshot_id) }}</span></template></el-table-column>
+            <el-table-column label="Context Hash" min-width="150"><template #default="{ row }"><span class="hash-value">{{ shortHash(row.context_hash) }}</span></template></el-table-column>
           </el-table>
         </el-collapse-item>
       </el-collapse>
@@ -563,6 +581,7 @@ import {
   type EndpointPriceVersion,
   type ModelCredentialStatus,
   type ModelProfileStatus,
+  type RealModelValidationSummary,
   type ModelRunSummary,
   type ModelRuntimeStatus,
   type ProviderConfigurationStatus,
@@ -593,6 +612,7 @@ const prices = ref<EndpointPriceVersion[]>([])
 const modelStatus = ref<ModelRuntimeStatus | null>(null)
 const configurationStatus = ref<ProviderConfigurationStatus | null>(null)
 const modelRuns = ref<ModelRunSummary[]>([])
+const validationRuns = ref<RealModelValidationSummary[]>([])
 const secretStoreStatus = ref<'READY' | 'UNAVAILABLE'>('UNAVAILABLE')
 const selectedEndpointIdentity = ref('')
 const normalModelIdentity = ref('')
@@ -998,6 +1018,11 @@ function roleLabel(role?: string): string {
 
 function statusLabel(status?: string | null): string {
   return status ? STATUS_LABELS[status] || status : '未配置'
+}
+
+function shortHash(value?: string | null): string {
+  if (!value) return '—'
+  return value.length <= 16 ? value : `${value.slice(0, 8)}…${value.slice(-6)}`
 }
 
 function componentLabel(key: string): string {
@@ -1720,8 +1745,12 @@ function isDialogCancellation(error: unknown): boolean {
 async function loadAuditData() {
   if (!advancedSections.value.includes('technical') || auditLoaded.value || !canManage.value) return
   try {
-    const response = await alphaguardModelsApi.runs(100)
-    modelRuns.value = response.data.items
+    const [runsResponse, validationResponse] = await Promise.all([
+      alphaguardModelsApi.runs(100),
+      alphaguardModelsApi.validationRuns(20)
+    ])
+    modelRuns.value = runsResponse.data.items
+    validationRuns.value = validationResponse.data.items
     auditLoaded.value = true
   } catch (error) {
     showActionError('加载审计记录失败', error)
@@ -1758,6 +1787,7 @@ onMounted(load)
 .setting-value { display: grid; gap: 3px; min-width: 0; flex: 1; }
 .setting-value span { color: var(--el-text-color-secondary); font-size: 12px; overflow-wrap: anywhere; }
 .setting-value--mono span { font-family: var(--el-font-family); }
+.hash-value { font-family: var(--el-font-family); white-space: nowrap; }
 .setting-control { width: min(440px, 100%); margin-right: auto; }
 .role-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 18px 0 14px 44px; }
 .role-field { display: grid; gap: 9px; min-width: 0; }

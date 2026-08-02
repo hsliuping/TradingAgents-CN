@@ -56,12 +56,37 @@ class RiskContextResolver:
             if is_open and session and session.date() > data.snapshot.trade_date:
                 future_sessions.append(session)
         future_sessions.sort()
+        instrument = dict(data.instruments[-1]) if data.instruments else {}
+        if data.trading_status:
+            status = dict(data.trading_status[-1])
+            if "is_suspended" in status:
+                status["suspended"] = status["is_suspended"]
+            latest_close = None
+            if data.prices:
+                try:
+                    latest_close = float(data.prices[-1].get("close"))
+                except (TypeError, ValueError):
+                    latest_close = None
+            for target, limit_field in (
+                ("at_limit_up", "upper_limit_price"),
+                ("at_limit_down", "lower_limit_price"),
+            ):
+                try:
+                    limit = float(status.get(limit_field))
+                except (TypeError, ValueError):
+                    limit = None
+                status[target] = bool(
+                    latest_close is not None
+                    and limit is not None
+                    and abs(latest_close - limit) <= 0.005
+                )
+            instrument.update(status)
         return RiskContext(
             account=accounts[0] if accounts else None,
             target_positions=tuple(data.positions),
             portfolio_positions=tuple(data.portfolio_positions),
             orders=tuple(data.orders),
-            instrument=data.instruments[-1] if data.instruments else None,
+            instrument=instrument or None,
             latest_price=data.prices[-1] if data.prices else None,
             next_open_session=future_sessions[0] if future_sessions else None,
         )

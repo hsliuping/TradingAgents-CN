@@ -99,6 +99,12 @@ def model_output_schema_json(schema_model: Type[BaseModel]) -> str:
     )
 
 
+def model_output_schema(schema_model: Type[BaseModel]) -> dict[str, Any]:
+    """Return a mutable copy of the runtime-owned-field-free output schema."""
+
+    return _json_schema_without_execution_meta(schema_model)
+
+
 def _model_name(llm: Any, configured_name: str | None) -> str:
     return str(
         configured_name
@@ -352,6 +358,7 @@ def _invoke_json_object_once(
     input_cost_per_million: float | None = None,
     output_cost_per_million: float | None = None,
     cost_currency: str = "USD",
+    schema_override: dict[str, Any] | None = None,
 ) -> StructuredInvocation:
     """Invoke the model exactly once and return one strict JSON object.
 
@@ -362,7 +369,11 @@ def _invoke_json_object_once(
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     name = _model_name(llm, configured_model_name)
-    schema = _json_schema_without_execution_meta(schema_model)
+    schema = (
+        deepcopy(schema_override)
+        if schema_override is not None
+        else _json_schema_without_execution_meta(schema_model)
+    )
     runnable = None
     effective_mode: str | None = None
     invocation_messages = messages
@@ -789,6 +800,7 @@ def invoke_json_object(
     cost_currency: str = "USD",
     max_retries: int = 0,
     retry_backoff_seconds: float = 0,
+    schema_override: dict[str, Any] | None = None,
 ) -> StructuredInvocation:
     """Invoke with explicit, auditable retries for transient failures only.
 
@@ -825,6 +837,7 @@ def invoke_json_object(
             input_cost_per_million=input_cost_per_million,
             output_cost_per_million=output_cost_per_million,
             cost_currency=cost_currency,
+            schema_override=schema_override,
         )
         attempts.append(result.model_meta)
         if (

@@ -22,7 +22,7 @@ from tradingagents.alphaguard.decision_schemas import (
 )
 from tradingagents.alphaguard.structured_output import (
     invoke_json_object,
-    model_output_schema_json,
+    model_output_schema,
 )
 from tradingagents.utils.logging_init import get_logger
 
@@ -62,6 +62,75 @@ def _invalid_meta(
         error_message=error_message[:500],
     )
     return ModelExecutionMeta.model_validate(data)
+
+
+def _validation_failure_detail(exc: Exception) -> str:
+    if not isinstance(exc, ValidationError):
+        reason = str(exc).replace("\n", " ").strip()[:240]
+        return f"{exc.__class__.__name__}:{reason}" if reason else exc.__class__.__name__
+    details = []
+    for item in exc.errors(
+        include_url=False,
+        include_context=True,
+        include_input=False,
+    ):
+        location = ".".join(str(part) for part in item.get("loc") or ()) or "root"
+        error_type = str(item.get("type") or "validation_error")
+        detail = f"{location}:{error_type}"
+        # Pydantic's root validators otherwise collapse every semantic failure
+        # to the same ``root:value_error`` marker.  The context contains the
+        # validator's static ValueError, while ``include_input=False`` above
+        # guarantees that no model payload or evidence text is retained.
+        context = item.get("ctx")
+        validator_error = context.get("error") if isinstance(context, dict) else None
+        if validator_error is not None:
+            safe_reason = str(validator_error).replace("\n", " ").strip()[:240]
+            if safe_reason:
+                detail = f"{detail}:{safe_reason}"
+        details.append(detail)
+    return "ValidationError[" + ",".join(details[:8]) + "]"
+
+
+def _context_bound_plan_schema(context: DecisionContext | None) -> dict[str, Any]:
+    """Compile existing DecisionContext limits into the model-facing schema."""
+
+    schema = model_output_schema(NormalTradePlan)
+    if context is None:
+        return schema
+    proposal = context.quant_proposal
+    properties = schema["properties"]
+    allowed_actions = [proposal.action_candidate, "NONE", "HOLD", "WAIT"]
+    properties["action"] = {
+        "description": (
+            "For PROPOSE_TRADE the only allowed action is the immutable "
+            f"QuantTradeProposal action {proposal.action_candidate}; passive "
+            "outcomes use NONE, HOLD, or WAIT according to status."
+        ),
+        "enum": list(dict.fromkeys(allowed_actions)),
+        "title": "Action",
+        "type": "string",
+    }
+    for field, maximum in (
+        ("initial_position_pct", proposal.initial_position_pct),
+        ("max_position_pct", proposal.max_position_pct),
+    ):
+        properties[field]["anyOf"] = [
+            {"maximum": maximum, "minimum": 0, "type": "number"},
+            {"type": "null"},
+        ]
+        properties[field]["description"] += (
+            f" Snapshot-bound maximum: {maximum}."
+        )
+    evidence = schema.get("$defs", {}).get("EvidenceRef", {})
+    evidence_properties = evidence.get("properties", {})
+    if "evidence_id" in evidence_properties:
+        evidence_properties["evidence_id"] = {
+            "description": "Must be one of the immutable Snapshot evidence IDs.",
+            "enum": sorted(context.evidence_ids()),
+            "title": "Evidence Id",
+            "type": "string",
+        }
+    return schema
 
 
 def _failure_plan(
@@ -210,6 +279,10 @@ def create_trader(llm, memory, config: dict[str, Any] | None = None):
             if revision
             else ""
         )
+        output_schema = _context_bound_plan_schema(context)
+        output_schema_json = json.dumps(
+            output_schema, ensure_ascii=False, sort_keys=True
+        )
         system_content = f"""你是 AlphaGuard 的普通模型 Trader。唯一正式输出是严格 JSON，不得输出 JSON 以外文本。
 Prompt：{NORMAL_TRADE_PROMPT_NAME}@{prompt_version}
 - 证据不足：INSUFFICIENT_DATA + NONE。
@@ -223,7 +296,7 @@ Prompt：{NORMAL_TRADE_PROMPT_NAME}@{prompt_version}
 {quant_rules}
 {revision_rules}
 JSON Schema：
-{model_output_schema_json(NormalTradePlan)}
+{output_schema_json}
 标的约束：
 {instrument_context}"""
         user_payload = (
@@ -234,6 +307,7 @@ JSON Schema：
                 ),
                 "revision_request": revision,
                 "original_plan": state.get("original_normal_trade_plan"),
+                "evaluation_clock": state.get("evaluation_clock"),
             }
             if context
             else {
@@ -274,7 +348,7 @@ JSON Schema：
             )
             system_content += (
                 "\n\nExact model-facing JSON Schema:\n"
-                + model_output_schema_json(NormalTradePlan)
+                + output_schema_json
             )
         messages = [
             {"role": "system", "content": system_content},
@@ -322,6 +396,7 @@ JSON Schema：
             retry_backoff_seconds=float(
                 config.get("normal_retry_backoff_seconds") or 0
             ),
+            schema_override=output_schema,
         )
 
         decision_error = None
@@ -379,11 +454,14 @@ JSON Schema：
                         revision_request_id=(
                             revision.get("revision_request_id") if revision else None
                         ),
+                        model_runtime_context_hash=state.get(
+                            "model_runtime_context_hash"
+                        ),
                     )
             except (ValidationError, ValueError) as exc:
                 message = (
                     "NormalTradePlan schema/context validation failed: "
-                    f"{exc.__class__.__name__}"
+                    f"{_validation_failure_detail(exc)}"
                 )
                 plan = _failure_plan(
                     state=state,

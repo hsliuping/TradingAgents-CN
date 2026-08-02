@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 import json
 from typing import Any
 from uuid import uuid4
@@ -162,8 +162,9 @@ class ProfiledDecisionModelRunner:
         trace_id: str | None,
         research_results: list[dict[str, Any]],
         model_runtime_context_hash: str,
+        run_mode: str,
     ) -> dict[str, Any]:
-        return {
+        state = {
             "analysis_id": context.analysis_id,
             "snapshot_id": context.snapshot_id,
             "company_of_interest": context.symbol,
@@ -177,7 +178,19 @@ class ProfiledDecisionModelRunner:
             "risk_debate_state": {},
             "tradingagents_research": research_results,
             "model_runtime_context_hash": model_runtime_context_hash,
+            "run_mode": run_mode,
         }
+        if run_mode == "REAL_MODEL_VALIDATION":
+            cst = timezone(timedelta(hours=8))
+            state["evaluation_clock"] = {
+                "mode": "HISTORICAL_SNAPSHOT_CLOSE",
+                "as_of_trade_date": context.trade_date.isoformat(),
+                "as_of_at": datetime.combine(
+                    context.trade_date, time(hour=15), tzinfo=cst
+                ).isoformat(),
+                "current_wall_clock_allowed": False,
+            }
+        return state
 
     @staticmethod
     def _failure_meta(
@@ -306,6 +319,7 @@ class ProfiledDecisionModelRunner:
                 trace_id=trace_id,
                 research_results=self.research_results,
                 model_runtime_context_hash=self.model_runtime_context_hash,
+                run_mode=self.run_mode,
             )
             state["model_max_retries"] = max(
                 0, budget.permitted_attempts - 1
@@ -407,6 +421,7 @@ class ProfiledDecisionModelRunner:
                 trace_id=trace_id,
                 research_results=self.research_results,
                 model_runtime_context_hash=self.model_runtime_context_hash,
+                run_mode=self.run_mode,
             )
             state["model_max_retries"] = max(
                 0, budget.permitted_attempts - 1

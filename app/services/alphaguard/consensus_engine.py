@@ -44,12 +44,22 @@ class ConsensusEngine:
         now = now or datetime.utcnow()
         errors: list[str] = []
         reasons: list[str] = []
+        runtime_context_hash = plan.model_meta.context_hash
         try:
-            validate_plan_against_context(plan, context)
+            validate_plan_against_context(
+                plan,
+                context,
+                model_runtime_context_hash=runtime_context_hash,
+            )
         except ValueError as exc:
             errors.append(str(exc))
         try:
-            validate_review_against_context(review, plan, context)
+            validate_review_against_context(
+                review,
+                plan,
+                context,
+                model_runtime_context_hash=runtime_context_hash,
+            )
         except ValueError as exc:
             errors.append(str(exc))
         if context.quant_proposal.status != "TRIGGERED":

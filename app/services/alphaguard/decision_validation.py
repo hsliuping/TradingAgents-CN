@@ -21,8 +21,10 @@ def _validate_model_meta(
     *,
     context: DecisionContext,
     prompt_versions: set[str],
+    model_runtime_context_hash: str | None = None,
 ) -> None:
-    if meta.context_hash != context.context_hash:
+    expected_context_hash = model_runtime_context_hash or context.context_hash
+    if meta.context_hash != expected_context_hash:
         raise ValueError("model execution context_hash mismatch")
     if (
         not meta.provider
@@ -47,6 +49,7 @@ def validate_plan_against_context(
     original_plan: NormalTradePlan | None = None,
     revision_request_id: str | None = None,
     additional_prompt_versions: set[str] | None = None,
+    model_runtime_context_hash: str | None = None,
 ) -> None:
     required = {
         "analysis_id": (plan.analysis_id, context.analysis_id),
@@ -99,6 +102,7 @@ def validate_plan_against_context(
             "normal_trade_plan_revision_v1",
         }
         | (additional_prompt_versions or set()),
+        model_runtime_context_hash=model_runtime_context_hash,
     )
 
     if original_plan is None:
@@ -125,6 +129,8 @@ def validate_review_against_context(
     review: TopReviewDecision,
     plan: NormalTradePlan,
     context: DecisionContext,
+    *,
+    model_runtime_context_hash: str | None = None,
 ) -> None:
     expected = {
         "analysis_id": context.analysis_id,
@@ -150,12 +156,14 @@ def validate_review_against_context(
         review.model_meta,
         context=context,
         prompt_versions={context.top_prompt_version},
+        model_runtime_context_hash=model_runtime_context_hash,
     )
     if review.adjusted_plan is not None:
         validate_plan_against_context(
             review.adjusted_plan,
             context,
             additional_prompt_versions={context.top_prompt_version},
+            model_runtime_context_hash=model_runtime_context_hash,
         )
         if review.status == "MATERIAL_REVISION":
             violations = validate_material_revision_authority(

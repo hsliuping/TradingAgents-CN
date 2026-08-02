@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -492,7 +492,17 @@ class RealModelValidationRun(_StrictFrozenModel):
     automated_execution_allowed: Literal[False] = False
     requested_by: str
     snapshot_id: str | None = None
+    snapshot_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_snapshot_id: str | None = None
+    source_quant_proposal_id: str | None = None
+    source_sample_id: str | None = None
+    source_trade_date: date | None = None
+    symbol: str | None = None
     quant_proposal_id: str | None = None
+    context_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    decision_context_hash: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     status: Literal[
         "CREATED",
         "NO_ELIGIBLE_SAMPLE",
@@ -503,13 +513,24 @@ class RealModelValidationRun(_StrictFrozenModel):
         "INTEGRITY_CONFLICT",
     ]
     research_result_ids: list[str]
+    model_run_ids: list[str] = Field(default_factory=list)
+    model_call_records: list[dict[str, Any]] = Field(default_factory=list)
     normal_model_run_id: str | None = None
     top_model_run_id: str | None = None
+    normal_result: dict[str, Any] | None = None
+    top_result: dict[str, Any] | None = None
     consensus_status: str | None = None
+    consensus_result: dict[str, Any] | None = None
     hard_risk_status: str | None = None
-    execution_gate_status: Literal["BLOCKED_VALIDATION_MODE"]
+    hard_risk_result: dict[str, Any] | None = None
+    failure_code: str | None = None
+    execution_gate_invoked: bool = False
+    execution_gate_status: Literal[
+        "BLOCKED_VALIDATION_MODE",
+        "NOT_REACHED",
+    ]
     input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     result_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     created_at: datetime
     completed_at: datetime | None = None
-    schema_version: str = "real_model_validation_v1"
+    schema_version: str = "real_model_validation_v2"

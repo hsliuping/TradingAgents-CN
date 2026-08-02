@@ -25,10 +25,23 @@ CONFIRMATION = "RUN NON-EXECUTABLE MODEL VALIDATION"
 
 
 async def run(args) -> int:
+    client = AsyncIOMotorClient(settings.MONGO_URI, serverSelectionTimeoutMS=5000)
+    if args.preflight:
+        try:
+            await client.admin.command("ping")
+            result = await RealModelValidationService(
+                client[settings.MONGO_DB]
+            ).preflight(
+                proposal_id=args.proposal_id,
+                user_id=args.user_id,
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0 if result["status"] == "READY" else 2
+        finally:
+            client.close()
     if args.confirm != CONFIRMATION:
         print(f"blocked: --confirm must be exactly {CONFIRMATION!r}")
         return 2
-    client = AsyncIOMotorClient(settings.MONGO_URI, serverSelectionTimeoutMS=5000)
     try:
         await client.admin.command("ping")
         result = await RealModelValidationService(
@@ -57,5 +70,6 @@ if __name__ == "__main__":
     parser.add_argument("--idempotency-key", required=True)
     parser.add_argument("--proposal-id")
     parser.add_argument("--user-id")
-    parser.add_argument("--confirm", required=True)
+    parser.add_argument("--confirm")
+    parser.add_argument("--preflight", action="store_true")
     raise SystemExit(asyncio.run(run(parser.parse_args())))

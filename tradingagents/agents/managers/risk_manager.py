@@ -22,7 +22,7 @@ from tradingagents.alphaguard.decision_schemas import (
 )
 from tradingagents.alphaguard.structured_output import (
     invoke_json_object,
-    model_output_schema_json,
+    model_output_schema,
     not_run_meta,
 )
 from tradingagents.utils.logging_init import get_logger
@@ -54,6 +54,40 @@ def _invalid_meta(
         error_message=error_message[:500],
     )
     return ModelExecutionMeta.model_validate(data)
+
+
+def _context_bound_review_schema(
+    context: DecisionContext | None,
+    normal_plan: NormalTradePlan,
+) -> dict[str, Any]:
+    schema = model_output_schema(TopReviewDecision)
+    if context is None:
+        return schema
+    definitions = schema.get("$defs", {})
+    evidence = definitions.get("EvidenceRef", {}).get("properties", {})
+    if "evidence_id" in evidence:
+        evidence["evidence_id"] = {
+            "description": "Must be one of the immutable Snapshot evidence IDs.",
+            "enum": sorted(context.evidence_ids()),
+            "title": "Evidence Id",
+            "type": "string",
+        }
+    adjusted = definitions.get("NormalTradePlan", {}).get("properties", {})
+    if adjusted:
+        adjusted["action"] = {
+            "description": "Must not reverse or change the Normal plan direction.",
+            "enum": list(dict.fromkeys([normal_plan.action, "NONE", "HOLD", "WAIT"])),
+            "title": "Action",
+            "type": "string",
+        }
+        for field in ("initial_position_pct", "max_position_pct"):
+            maximum = getattr(normal_plan, field)
+            if maximum is not None and field in adjusted:
+                adjusted[field]["anyOf"] = [
+                    {"maximum": maximum, "minimum": 0, "type": "number"},
+                    {"type": "null"},
+                ]
+    return schema
 
 
 def _failure_review(
@@ -232,6 +266,10 @@ def create_risk_manager(llm, memory, config: dict[str, Any] | None = None):
                     "error_message": message,
                 }
             else:
+                output_schema = _context_bound_review_schema(context, normal_plan)
+                output_schema_json = json.dumps(
+                    output_schema, ensure_ascii=False, sort_keys=True
+                )
                 quant_rules = ""
                 if context:
                     quant_rules = """
@@ -252,7 +290,7 @@ Prompt：{TOP_REVIEW_PROMPT_NAME}@{prompt_version}
 - 不得生成 model_meta，不得创建订单。
 {quant_rules}
 JSON Schema：
-{model_output_schema_json(TopReviewDecision)}
+{output_schema_json}
 标的约束：
 {instrument_context}"""
                 user_payload = (
@@ -272,6 +310,7 @@ JSON Schema：
                             for item in context.portfolio_evidence
                         ],
                         "risk_policy_summary": state.get("risk_policy_summary"),
+                        "evaluation_clock": state.get("evaluation_clock"),
                     }
                     if context
                     else {
@@ -302,7 +341,7 @@ JSON Schema：
                     )
                     system_content += (
                         "\n\nExact model-facing JSON Schema:\n"
-                        + model_output_schema_json(TopReviewDecision)
+                        + output_schema_json
                     )
                 invocation = invoke_json_object(
                     llm=llm,
@@ -351,6 +390,7 @@ JSON Schema：
                     retry_backoff_seconds=float(
                         config.get("top_retry_backoff_seconds") or 0
                     ),
+                    schema_override=output_schema,
                 )
                 decision_error = None
                 if invocation.failure_status:
@@ -451,7 +491,12 @@ JSON Schema：
                             )
 
                             validate_review_against_context(
-                                review, normal_plan, context
+                                review,
+                                normal_plan,
+                                context,
+                                model_runtime_context_hash=state.get(
+                                    "model_runtime_context_hash"
+                                ),
                             )
                             if (
                                 review.status == "RISK_ADJUST"
@@ -463,9 +508,11 @@ JSON Schema：
                                 if violations:
                                     raise ValueError("; ".join(violations))
                     except (ValidationError, ValueError) as exc:
+                        reason = str(exc).replace("\n", " ").strip()[:240]
                         message = (
                             "TopReviewDecision schema/permission validation failed: "
                             f"{exc.__class__.__name__}"
+                            + (f":{reason}" if reason else "")
                         )
                         review = _failure_review(
                             status="INVALID_OUTPUT",

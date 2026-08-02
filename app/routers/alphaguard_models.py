@@ -1060,6 +1060,21 @@ async def model_run(
     return ok(item)
 
 
+@router.get("/validation-runs", response_model=dict)
+async def model_validation_runs(
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+):
+    _require_admin(current_user)
+    items = await ModelRuntimeRepository(get_mongo_db()).list(
+        "validation_runs",
+        {},
+        sort=("created_at", -1),
+        limit=limit,
+    )
+    return ok({"items": items})
+
+
 @router.get("/snapshots/{snapshot_id}/runs", response_model=dict)
 async def model_snapshot_runs(
     snapshot_id: str,
@@ -1067,6 +1082,8 @@ async def model_snapshot_runs(
 ):
     db = get_mongo_db()
     snapshot = await db["ag_evidence_snapshots"].find_one(
+        {"snapshot_id": snapshot_id}
+    ) or await db["ag_model_validation_evidence_snapshots"].find_one(
         {"snapshot_id": snapshot_id}
     )
     if snapshot is None:

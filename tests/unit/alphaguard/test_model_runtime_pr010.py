@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.services.alphaguard.model_audit_service import sanitize_model_message
 from app.services.alphaguard.model_budget_service import BudgetDecision
@@ -21,6 +22,9 @@ from app.services.alphaguard.model_credential_service import (
 )
 from app.services.alphaguard.model_profile_registry import (
     ModelProfileRegistry,
+)
+from app.services.alphaguard.profiled_decision_model_runner import (
+    ProfiledDecisionModelRunner,
 )
 from app.services.alphaguard.model_runtime_config import (
     load_model_runtime_config,
@@ -39,13 +43,18 @@ from app.services.alphaguard.prompt_profile_registry import (
 )
 from app.services.alphaguard.real_model_validation_service import (
     RealModelValidationService,
+    _decision_research_projection,
 )
 from app.services.alphaguard.snapshot_research_runtime import (
     RESEARCH_ROLES,
     SnapshotResearchRuntime,
+    _context_bound_research_schema,
 )
 from app.services.alphaguard.decision_model_runner import (
     ExistingProviderDecisionModelRunner,
+)
+from app.services.alphaguard.decision_validation import (
+    validate_plan_against_context,
 )
 from scripts.init_alphaguard_model_runtime_indexes import MODEL_COLLECTIONS
 from tests.unit.alphaguard._fakes import FakeDB
@@ -54,8 +63,15 @@ from tests.unit.alphaguard.test_structured_nodes import (
     plan_payload,
     review_payload,
 )
-from tradingagents.agents.managers.risk_manager import create_risk_manager
-from tradingagents.agents.trader.trader import create_trader
+from tradingagents.agents.managers.risk_manager import (
+    _context_bound_review_schema,
+    create_risk_manager,
+)
+from tradingagents.agents.trader.trader import (
+    _context_bound_plan_schema,
+    _validation_failure_detail,
+    create_trader,
+)
 from tradingagents.alphaguard.decision_schemas import (
     ModelExecutionMeta,
     NormalTradePlan,
@@ -667,7 +683,8 @@ async def test_validation_is_idempotent_and_never_writes_trade_objects(monkeypat
     )
     assert first.validation_run_id == second.validation_run_id
     assert first.status == "MODEL_NOT_CONFIGURED"
-    assert first.execution_gate_status == "BLOCKED_VALIDATION_MODE"
+    assert first.execution_gate_status == "NOT_REACHED"
+    assert first.execution_gate_invoked is False
     assert db["ag_model_validation_runs"].count() == 1
     for collection in (
         "ag_order_intents",
@@ -772,6 +789,15 @@ def _runtime_context(schema_version="evidence-snapshot-v2"):
     context = SimpleNamespace(
         snapshot_id="snapshot-v2",
         model_dump=lambda mode: {"snapshot_id": "snapshot-v2", "value": 1},
+        price_evidence=[SimpleNamespace(evidence_id="price:1")],
+        financial_evidence=[SimpleNamespace(evidence_id="financial:1")],
+        news_evidence=[],
+        announcement_evidence=[],
+        account_evidence=[],
+        portfolio_evidence=[],
+        quant_proposal_id="proposal:1",
+        regime_result_id="regime:1",
+        factor_result_ids=["factor:1"],
     )
     resolved = SimpleNamespace(
         snapshot=snapshot,
@@ -787,9 +813,63 @@ def test_model_context_is_snapshot_v2_only_and_hash_stable():
     second = build_model_runtime_context(context, resolved)
     assert first.context_hash == second.context_hash
     assert first.evidence_refs == ("financial:1", "price:1")
+    compact = build_model_runtime_context(
+        context,
+        resolved,
+        include_resolved_refs=False,
+    )
+    assert compact.evidence_refs == first.evidence_refs
+    assert compact.payload["resolved_input_ref_count"] == 2
+    assert "resolved_input_refs" not in compact.payload
+    assert compact.payload["allowed_raw_evidence_refs"] == [
+        "financial:1",
+        "price:1",
+    ]
+    assert compact.payload["allowed_derived_evidence_refs"] == [
+        "factor:1",
+        "proposal:1",
+        "regime:1",
+    ]
+    assert compact.context_hash != first.context_hash
     legacy_context, legacy = _runtime_context("evidence-snapshot-v1")
     with pytest.raises(ModelRuntimeContextError, match="Snapshot v2"):
         build_model_runtime_context(legacy_context, legacy)
+
+
+def test_validation_snapshot_contract_preserves_historical_champion_refs():
+    service_source = (
+        ROOT / "app/services/alphaguard/evidence_snapshot_service.py"
+    ).read_text(encoding="utf-8")
+    validation_source = (
+        ROOT / "app/services/alphaguard/real_model_validation_service.py"
+    ).read_text(encoding="utf-8")
+    assert 'data.get("run_mode") == "EVIDENCE_CONTRACT_VALIDATION"' in service_source
+    assert "if has_pr008_registry and not validation_mode" in service_source
+    assert '"champion_version_refs": source.champion_version_refs' in validation_source
+
+
+def test_decision_research_projection_is_bounded_and_keeps_identity():
+    result = SimpleNamespace(
+        research_result_id="research-1",
+        agent_name="market_analyst",
+        agent_role="MARKET_ANALYST",
+        status="SUCCESS",
+        snapshot_id="snapshot-v2",
+        context_hash="f" * 64,
+        structured_summary={
+            "summary": "bounded summary",
+            "findings": [f"finding-{index}" for index in range(6)],
+            "risks": [f"risk-{index}" for index in range(6)],
+        },
+        evidence_refs=[f"price:{index}" for index in range(20)],
+        result_hash="e" * 64,
+    )
+    projected = _decision_research_projection(result)
+    assert projected["snapshot_id"] == "snapshot-v2"
+    assert projected["context_hash"] == "f" * 64
+    assert "findings" not in projected
+    assert "risks" not in projected
+    assert len(projected["evidence_refs"]) == 8
 
 
 @pytest.mark.asyncio
@@ -956,6 +1036,129 @@ def test_normal_and_top_use_the_unified_snapshot_runtime_context_hash():
     assert top_result["top_model_meta"]["context_hash"] == runtime_hash
 
 
+def test_pr010_validation_accepts_only_the_explicit_runtime_context_hash():
+    context = make_context()
+    runtime_hash = "9" * 64
+    plan = make_plan(context)
+    plan = plan.model_copy(
+        update={
+            "model_meta": plan.model_meta.model_copy(
+                update={"context_hash": runtime_hash}
+            )
+        }
+    )
+    validate_plan_against_context(
+        plan,
+        context,
+        model_runtime_context_hash=runtime_hash,
+    )
+    with pytest.raises(ValueError, match="context_hash mismatch"):
+        validate_plan_against_context(plan, context)
+
+
+def test_real_validation_context_uses_locked_profile_prompt_versions():
+    source = (
+        ROOT / "app/services/alphaguard/real_model_validation_service.py"
+    ).read_text(encoding="utf-8")
+    assert '"normal_prompt_version": normal_prompt.prompt_version' in source
+    assert '"top_prompt_version": top_prompt.prompt_version' in source
+    assert '"normal_prompt_version": NORMAL_QUANT_PROMPT_VERSION' not in source
+    assert '"top_prompt_version": TOP_QUANT_PROMPT_VERSION' not in source
+
+
+def test_real_validation_freezes_model_evaluation_clock_at_snapshot_close():
+    context = make_context()
+    state = ProfiledDecisionModelRunner._base_state(
+        context,
+        attempt_number=1,
+        trace_id="trace",
+        research_results=[],
+        model_runtime_context_hash="8" * 64,
+        run_mode="REAL_MODEL_VALIDATION",
+    )
+    assert state["evaluation_clock"] == {
+        "mode": "HISTORICAL_SNAPSHOT_CLOSE",
+        "as_of_trade_date": context.trade_date.isoformat(),
+        "as_of_at": f"{context.trade_date.isoformat()}T15:00:00+08:00",
+        "current_wall_clock_allowed": False,
+    }
+    production = ProfiledDecisionModelRunner._base_state(
+        context,
+        attempt_number=1,
+        trace_id="trace",
+        research_results=[],
+        model_runtime_context_hash="8" * 64,
+        run_mode="PRODUCTION",
+    )
+    assert "evaluation_clock" not in production
+
+
+def test_trader_validation_detail_reports_static_root_reason_without_payload():
+    context = make_context()
+    plan = make_plan(context).model_dump(mode="python")
+    secret_payload_text = "MODEL-OUTPUT-MUST-NOT-BE-AUDITED"
+    plan.update(
+        status="PROPOSE_TRADE",
+        action="BUY",
+        thesis=secret_payload_text,
+        valid_until=None,
+        valid_until_compatibility_reason=None,
+    )
+    with pytest.raises(ValidationError) as captured:
+        NormalTradePlan.model_validate(plan)
+    detail = _validation_failure_detail(captured.value)
+    assert "PROPOSE_TRADE requires valid_until" in detail
+    assert secret_payload_text not in detail
+
+
+def test_normal_trade_plan_machine_schema_exposes_existing_semantic_contract():
+    schema = NormalTradePlan.model_json_schema()
+    properties = schema["properties"]
+    assert "Status/action contract" in properties["status"]["description"]
+    assert "at least one" in properties["stop_conditions"]["description"]
+    assert "Required for PROPOSE_TRADE" in properties["valid_until"]["description"]
+
+
+def test_normal_trade_plan_schema_is_bound_to_snapshot_and_proposal():
+    context = make_context()
+    schema = _context_bound_plan_schema(context)
+    properties = schema["properties"]
+    assert context.quant_proposal.action_candidate in properties["action"]["enum"]
+    assert properties["initial_position_pct"]["anyOf"][0]["maximum"] == (
+        context.quant_proposal.initial_position_pct
+    )
+    assert properties["max_position_pct"]["anyOf"][0]["maximum"] == (
+        context.quant_proposal.max_position_pct
+    )
+    evidence_ids = schema["$defs"]["EvidenceRef"]["properties"]["evidence_id"][
+        "enum"
+    ]
+    assert evidence_ids == sorted(context.evidence_ids())
+
+
+def test_research_and_top_schemas_are_bound_to_snapshot_evidence():
+    context = make_context()
+    runtime_context = SimpleNamespace(
+        payload={"allowed_evidence_refs": sorted(context.evidence_ids())},
+        evidence_refs=tuple(sorted(context.evidence_ids())),
+    )
+    research_schema = _context_bound_research_schema(runtime_context)
+    assert research_schema["properties"]["evidence_refs"]["items"]["enum"] == (
+        sorted(context.evidence_ids())
+    )
+    plan = make_plan(context)
+    top_schema = _context_bound_review_schema(context, plan)
+    evidence_ids = top_schema["$defs"]["EvidenceRef"]["properties"][
+        "evidence_id"
+    ]["enum"]
+    assert evidence_ids == sorted(context.evidence_ids())
+    adjusted = top_schema["$defs"]["NormalTradePlan"]["properties"]
+    assert adjusted["action"]["enum"][0] == plan.action
+    assert adjusted["max_position_pct"]["anyOf"][0]["maximum"] == (
+        plan.max_position_pct
+    )
+
+
 def test_model_indexes_frontend_modes_and_secret_boundary():
     assert set(MODEL_COLLECTIONS) == {
         name for name in ALPHAGUARD_INDEX_SPECS if name.startswith("ag_model_")
@@ -983,6 +1186,14 @@ def test_model_indexes_frontend_modes_and_secret_boundary():
         ).read_text(encoding="utf-8")
     assert "TradingAgents 研究" in decisions
     assert "模型与 API" in operations
+    model_panel = (
+        ROOT / "frontend/src/components/alphaguard/ModelConfigurationPanel.vue"
+    ).read_text(encoding="utf-8")
+    assert "真实双模型验证" in model_panel
+    assert "validationRuns(20)" in model_panel
+    assert "执行安全门" in model_panel
+    assert "请求哈希" in model_panel
+    assert "响应哈希" in model_panel
     assert "credential_ref" not in router
     assert "api_key: SecretStr" in router
 

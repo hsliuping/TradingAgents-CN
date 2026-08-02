@@ -146,26 +146,76 @@ class NormalTradePlan(AlphaGuardSchema):
     supersedes_plan_id: str | None = None
     revision_request_id: str | None = None
 
-    status: PlanStatus
-    action: PlanAction
+    status: PlanStatus = Field(
+        description=(
+            "Status/action contract: PROPOSE_TRADE uses BUY, SELL, or REDUCE; "
+            "WAIT uses WAIT; NO_TRADE uses NONE or HOLD; INSUFFICIENT_DATA, "
+            "MODEL_FAILED, and INVALID_OUTPUT use NONE."
+        )
+    )
+    action: PlanAction = Field(
+        description="Must match the status/action contract declared by status."
+    )
     confidence: float = Field(ge=0, le=1)
     thesis: str = Field(min_length=1)
 
     bullish_evidence: list[EvidenceRef]
     bearish_evidence: list[EvidenceRef]
 
-    entry_zone: PriceRange | None
-    initial_position_pct: float | None = Field(default=None, ge=0, le=1)
-    max_position_pct: float | None = Field(default=None, ge=0, le=1)
+    entry_zone: PriceRange | None = Field(
+        description=(
+            "Required for a PROPOSE_TRADE BUY unless "
+            "entry_zone_not_required_reason is non-empty."
+        )
+    )
+    initial_position_pct: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description=(
+            "Required for PROPOSE_TRADE, null for non-executable failure "
+            "statuses, and never greater than max_position_pct."
+        ),
+    )
+    max_position_pct: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description=(
+            "Required for PROPOSE_TRADE and null for non-executable failure "
+            "statuses."
+        ),
+    )
 
     add_conditions: list[RuleCondition]
-    stop_conditions: list[RuleCondition]
+    stop_conditions: list[RuleCondition] = Field(
+        description=(
+            "For PROPOSE_TRADE, at least one of stop_conditions, "
+            "exit_conditions, or invalidation_conditions must be non-empty."
+        )
+    )
     reduce_conditions: list[RuleCondition]
-    exit_conditions: list[RuleCondition]
-    invalidation_conditions: list[RuleCondition]
+    exit_conditions: list[RuleCondition] = Field(
+        description=(
+            "For PROPOSE_TRADE, at least one of stop_conditions, "
+            "exit_conditions, or invalidation_conditions must be non-empty."
+        )
+    )
+    invalidation_conditions: list[RuleCondition] = Field(
+        description=(
+            "For PROPOSE_TRADE, at least one of stop_conditions, "
+            "exit_conditions, or invalidation_conditions must be non-empty."
+        )
+    )
 
     target_price: float | None = Field(default=None, gt=0)
-    valid_until: datetime | None
+    valid_until: datetime | None = Field(
+        description=(
+            "Required for PROPOSE_TRADE unless "
+            "valid_until_compatibility_reason is non-empty; null for "
+            "non-executable failure statuses."
+        )
+    )
 
     main_risks: list[RiskItem]
     unresolved_questions: list[str]
@@ -174,8 +224,14 @@ class NormalTradePlan(AlphaGuardSchema):
 
     # PR-003 can now provide a real EvidenceSnapshot. QuantTradeProposal and
     # its time-horizon context remain explicit compatibility gaps until PR-004.
-    entry_zone_not_required_reason: str | None = None
-    valid_until_compatibility_reason: str | None = None
+    entry_zone_not_required_reason: str | None = Field(
+        default=None,
+        description="Only explains why a PROPOSE_TRADE BUY omits entry_zone.",
+    )
+    valid_until_compatibility_reason: str | None = Field(
+        default=None,
+        description="Only explains why a PROPOSE_TRADE plan omits valid_until.",
+    )
 
     @model_validator(mode="after")
     def validate_plan_semantics(self) -> "NormalTradePlan":

@@ -77,9 +77,18 @@ def _date_on_or_before(document: dict[str, Any], trade_date: date) -> bool:
 class SnapshotDataResolver:
     """Fail closed: no symbol/latest queries and no external data access."""
 
-    def __init__(self, db):
+    def __init__(
+        self,
+        db,
+        *,
+        snapshot_collection: str = "ag_evidence_snapshots",
+    ):
         self.db = db
-        self.snapshot_service = EvidenceSnapshotService(db=db)
+        self.snapshot_service = EvidenceSnapshotService(
+            db=db,
+            snapshot_collection=snapshot_collection,
+            enable_shadow_hook=False,
+        )
         self.gate = DataQualityGate()
 
     async def resolve(
