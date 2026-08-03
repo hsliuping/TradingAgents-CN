@@ -25,15 +25,50 @@ async def list_notifications(
     svc = get_notifications_service()
     s = status if status in ("read","unread") else None
     t = type if type in ("analysis","alert","system") else None
-    data = await svc.list(user_id=user["id"], status=s, ntype=t, page=page, page_size=page_size)
-    return ok(data=data.model_dump(), message="ok")
+    try:
+        data = await svc.list(
+            user_id=user["id"], status=s, ntype=t, page=page, page_size=page_size
+        )
+    except Exception as exc:
+        logger.warning(
+            "通知列表服务降级: error_type=%s", exc.__class__.__name__
+        )
+        return ok(
+            data={
+                "items": [],
+                "total": 0,
+                "page": page,
+                "page_size": page_size,
+                "service_status": "DEGRADED",
+                "error_code": "NOTIFICATION_SERVICE_UNAVAILABLE",
+            },
+            message="通知服务暂不可用，不影响AlphaGuard核心功能",
+        )
+    payload = data.model_dump()
+    payload.update({"service_status": "READY", "error_code": None})
+    return ok(data=payload, message="ok")
 
 
 @router.get("/notifications/unread_count")
 async def get_unread_count(user: dict = Depends(get_current_user)):
     svc = get_notifications_service()
-    cnt = await svc.unread_count(user_id=user["id"])
-    return ok(data={"count": cnt})
+    try:
+        cnt = await svc.unread_count(user_id=user["id"])
+    except Exception as exc:
+        logger.warning(
+            "通知未读数服务降级: error_type=%s", exc.__class__.__name__
+        )
+        return ok(
+            data={
+                "count": 0,
+                "service_status": "DEGRADED",
+                "error_code": "NOTIFICATION_SERVICE_UNAVAILABLE",
+            },
+            message="通知服务暂不可用，不影响AlphaGuard核心功能",
+        )
+    return ok(
+        data={"count": cnt, "service_status": "READY", "error_code": None}
+    )
 
 
 @router.post("/notifications/{notif_id}/read")

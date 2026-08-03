@@ -7472,3 +7472,65 @@ Eligibility、Score、Run和Recommendation均是create-only审计对象，应保
 `feat(alphaguard): activate full market recommendation data`并创建附注标签
 `alphaguard-pr013-recommendation-data-ready`。提交范围不包含Secret、`.env`、Keychain、日志、数据库
 备份/运行文件、浏览器认证状态或构建缓存；提交后工作区必须clean并停止，不开始下一阶段。
+
+## 28. 技术债检查点：通知接口异常降级
+
+### 28.1 原问题
+
+`GET /api/notifications`和`GET /api/notifications/unread_count`直接等待通知服务访问MongoDB；底层服务、
+数据库或依赖异常会穿透路由并形成未处理HTTP 500。PR-012和PR-013浏览器验收均观察到通知未读数
+接口在后端重建窗口内失败，但该问题不影响AlphaGuard推荐核心链路，因此在PR-013完成后作为独立
+技术债处理，没有开始新的功能PR。
+
+### 28.2 修改内容
+
+仅修改`app/routers/notifications.py`的通知列表和未读数两个只读端点。正常路径继续调用原
+`NotificationsService.list`与`NotificationsService.unread_count`，保留标准`success/data/message/
+timestamp`响应和原有列表、分页、数量字段，并增加`service_status=READY / error_code=null`。
+
+异常路径不再向客户端传播底层异常，而是记录端点上下文和异常类型，返回稳定空结果、
+`service_status=DEGRADED`及固定`error_code=NOTIFICATION_SERVICE_UNAVAILABLE`。日志不记录异常正文、
+堆栈、数据库地址、查询内容或凭证；响应只包含固定用户提示。现有已读、全部已读、WebSocket和调试
+端点不在本检查点范围内，行为未改。
+
+### 28.3 接口契约
+
+- 通知列表正常：HTTP 200，原`items/total/page/page_size`保持不变，并返回`READY`。
+- 未读数正常：HTTP 200，原`count`保持不变，并返回`READY`。
+- 通知列表降级：HTTP 200，`items=[] / total=0`，保留请求分页，返回`DEGRADED`和固定错误码。
+- 未读数降级：HTTP 200，`count=0`，返回`DEGRADED`和固定错误码。
+- 正常与降级均使用统一成功响应外壳；调用方可用`service_status`区分真实结果与降级占位。
+- 客户端响应和服务端日志均不包含底层异常正文或敏感连接信息。
+
+### 28.4 测试命令与结果
+
+```text
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest \
+  tests/unit/alphaguard/test_notifications_degraded.py -q
+= 4 passed, 4 warnings
+
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c \
+  "import ast, pathlib; p=pathlib.Path('app/routers/notifications.py'); \
+   ast.parse(p.read_text(encoding='utf-8'), filename=str(p))"
+= PASS
+
+git diff --check
+= PASS
+```
+
+专项测试通过最小FastAPI应用和认证依赖覆盖执行真实HTTP路由，覆盖列表正常、未读数正常、列表异常、
+未读数异常、HTTP状态、字段结构、状态值、错误码以及异常详情不进入响应或日志。测试首次运行发现
+查询参数`type`遮蔽Python内置`type()`会使列表降级日志再次异常，已在范围内改为读取异常类名并
+通过复测。
+
+### 28.5 风险与回滚
+
+降级响应仍为HTTP 200，因此客户端必须读取`service_status`，不能把空列表或0未读数解释为已确认的
+底层真实状态；这是避免非核心通知故障阻断AlphaGuard页面的显式契约。异常正文不进入日志会降低
+单次错误细节，但保留端点、异常类和发生时间，可结合数据库及服务健康日志定位。
+
+代码回滚可恢复`app/routers/notifications.py`到本检查点前的PR-013状态，并删除
+`tests/unit/alphaguard/test_notifications_degraded.py`及本节；没有数据库迁移、数据写入或集合变化。
+本检查点从`b9d55d662ea82d3c3e251cf89eae3999798718f4`开始，独立提交为
+`fix(notifications): degrade gracefully on backend failures`，标签为
+`alphaguard-td-notifications-degraded`。行业补充脚本的既有未提交修改不进入本提交。
