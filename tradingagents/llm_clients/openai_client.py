@@ -40,6 +40,7 @@ _PROVIDER_CONFIG = {
     "volcengine_coding": ("https://ark.cn-beijing.volces.com/api/coding/v3", "VOLCENGINE_CODING_API_KEY"),
     "ollama": ("http://localhost:11434/v1", None),
     "custom_openai": (None, "CUSTOM_OPENAI_API_KEY"),
+    "atlascloud": ("https://api.atlascloud.ai/v1", ("ATLASCLOUD_API_KEY", "ATLAS_CLOUD_API_KEY")),
 }
 
 
@@ -62,9 +63,23 @@ class OpenAIClient(BaseLLMClient):
 
         if self.provider in _PROVIDER_CONFIG:
             default_base_url, api_key_env = _PROVIDER_CONFIG[self.provider]
-            llm_kwargs["base_url"] = self.base_url or default_base_url
+            atlas_base_url = None
+            if self.provider == "atlascloud" and not self.base_url:
+                atlas_base_url = (
+                    os.environ.get("ATLASCLOUD_API_BASE")
+                    or os.environ.get("ATLASCLOUD_BASE_URL")
+                    or os.environ.get("ATLAS_CLOUD_API_BASE")
+                    or os.environ.get("ATLAS_CLOUD_BASE_URL")
+                )
+            llm_kwargs["base_url"] = self.base_url or atlas_base_url or default_base_url
             if api_key_env:
-                api_key = self.kwargs.get("api_key") or os.environ.get(api_key_env)
+                api_key = self.kwargs.get("api_key")
+                env_names = (api_key_env,) if isinstance(api_key_env, str) else api_key_env
+                if not api_key:
+                    api_key = next(
+                        (os.environ.get(env_name) for env_name in env_names if os.environ.get(env_name)),
+                        None,
+                    )
                 if api_key:
                     llm_kwargs["api_key"] = api_key
             else:

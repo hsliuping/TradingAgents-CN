@@ -342,19 +342,19 @@ def _get_env_api_key_for_provider(provider: str) -> str:
     """
     import os
 
-    from tradingagents.llm_clients.provider_keys import env_key_for_provider, normalize_provider_key
+    from tradingagents.llm_clients.provider_keys import env_keys_for_provider, normalize_provider_key
 
     provider_key = normalize_provider_key(provider)
-    env_key_name = env_key_for_provider(provider_key)
-    if not env_key_name and provider_key == "302ai":
-        env_key_name = "AI302_API_KEY"
-    if not env_key_name and provider_key == "aihubmix":
-        env_key_name = "AIHUBMIX_API_KEY"
-    if not env_key_name and provider_key == "volcengine":
-        env_key_name = "VOLCENGINE_API_KEY"
-    if not env_key_name and provider_key == "volcengine_coding":
-        env_key_name = "VOLCENGINE_CODING_API_KEY"
-    if env_key_name:
+    env_key_names = env_keys_for_provider(provider_key)
+    if not env_key_names and provider_key == "302ai":
+        env_key_names = ["AI302_API_KEY"]
+    if not env_key_names and provider_key == "aihubmix":
+        env_key_names = ["AIHUBMIX_API_KEY"]
+    if not env_key_names and provider_key == "volcengine":
+        env_key_names = ["VOLCENGINE_API_KEY"]
+    if not env_key_names and provider_key == "volcengine_coding":
+        env_key_names = ["VOLCENGINE_CODING_API_KEY"]
+    for env_key_name in env_key_names:
         api_key = os.getenv(env_key_name)
         if api_key and api_key.strip() and api_key != "your-api-key":
             return api_key
@@ -403,6 +403,10 @@ def _get_default_provider_by_model(model_name: str) -> str:
         'qwen-max': 'qwen',
         'qwen-plus-latest': 'qwen',
         'qwen-max-longcontext': 'qwen',
+
+        # Atlas Cloud
+        'qwen/qwen3.5-flash': 'atlascloud',
+        'deepseek-ai/deepseek-v4-pro': 'atlascloud',
 
         # OpenAI
         'gpt-3.5-turbo': 'openai',

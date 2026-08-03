@@ -106,6 +106,17 @@ async def init_providers():
             "supported_features": ["chat", "completion", "embedding", "function_calling", "streaming"]
         },
         {
+            "name": "atlascloud",
+            "display_name": "Atlas Cloud",
+            "description": "Atlas Cloud 提供 OpenAI 兼容的统一模型接口，可接入多种文本模型。",
+            "website": "https://www.atlascloud.ai",
+            "api_doc_url": "https://www.atlascloud.ai/docs",
+            "default_base_url": "https://api.atlascloud.ai/v1",
+            "aliases": canonical_aliases("atlascloud"),
+            "is_active": True,
+            "supported_features": ["chat", "completion", "vision", "function_calling", "streaming"]
+        },
+        {
             "name": "302ai",
             "display_name": "302.AI",
             "description": "302.AI是企业级AI聚合平台，提供多种主流大模型的统一接口",

@@ -9,6 +9,8 @@ _PROVIDER_ALIASES = {
     "alibaba": "qwen",
     "zhipu": "glm",
     "siliconflow": "openai",
+    "atlas": "atlascloud",
+    "atlas-cloud": "atlascloud",
 }
 
 _OPENAI_COMPATIBLE = {
@@ -23,6 +25,7 @@ _OPENAI_COMPATIBLE = {
     "volcengine_coding",
     "ollama",
     "custom_openai",
+    "atlascloud",
 }
 
 

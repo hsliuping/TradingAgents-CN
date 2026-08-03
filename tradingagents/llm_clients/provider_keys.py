@@ -23,11 +23,16 @@ _ALIASES = {
     "qianfan": "qianfan",
     "custom_openai": "custom_openai",
     "siliconflow": "siliconflow",
+    "atlascloud": "atlascloud",
+    "atlas": "atlascloud",
+    "atlas-cloud": "atlascloud",
+    "atlas cloud": "atlascloud",
 }
 
 _CANONICAL_ALIASES = {
     "qwen": ["dashscope", "alibaba", "阿里百炼", "百炼"],
     "glm": ["zhipu", "智谱", "智谱ai"],
+    "atlascloud": ["atlas", "atlas-cloud", "Atlas Cloud", "ATLAS_CLOUD"],
 }
 
 
@@ -48,23 +53,29 @@ def normalize_provider_key(provider: str) -> str:
     return _ALIASES.get(lowered, lowered)
 
 
-def env_key_for_provider(provider: str) -> str:
+def env_keys_for_provider(provider: str) -> list[str]:
     key = normalize_provider_key(provider)
     env_key_map = {
-        "google": "GOOGLE_API_KEY",
-        "qwen": "DASHSCOPE_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "deepseek": "DEEPSEEK_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-        "openrouter": "OPENROUTER_API_KEY",
-        "aihubmix": "AIHUBMIX_API_KEY",
-        "volcengine": "VOLCENGINE_API_KEY",
-        "volcengine_coding": "VOLCENGINE_CODING_API_KEY",
-        "siliconflow": "SILICONFLOW_API_KEY",
-        "qianfan": "QIANFAN_API_KEY",
-        "glm": "ZHIPU_API_KEY",
+        "google": ["GOOGLE_API_KEY"],
+        "qwen": ["DASHSCOPE_API_KEY"],
+        "openai": ["OPENAI_API_KEY"],
+        "deepseek": ["DEEPSEEK_API_KEY"],
+        "anthropic": ["ANTHROPIC_API_KEY"],
+        "openrouter": ["OPENROUTER_API_KEY"],
+        "aihubmix": ["AIHUBMIX_API_KEY"],
+        "volcengine": ["VOLCENGINE_API_KEY"],
+        "volcengine_coding": ["VOLCENGINE_CODING_API_KEY"],
+        "siliconflow": ["SILICONFLOW_API_KEY"],
+        "qianfan": ["QIANFAN_API_KEY"],
+        "glm": ["ZHIPU_API_KEY"],
+        "atlascloud": ["ATLASCLOUD_API_KEY", "ATLAS_CLOUD_API_KEY"],
     }
-    return env_key_map.get(key, "")
+    return env_key_map.get(key, [])
+
+
+def env_key_for_provider(provider: str) -> str:
+    env_keys = env_keys_for_provider(provider)
+    return env_keys[0] if env_keys else ""
 
 
 def default_backend_url(provider: str) -> str:
@@ -87,6 +98,7 @@ def default_backend_url(provider: str) -> str:
         "qianfan": "https://qianfan.baidubce.com/v2",
         "siliconflow": "https://api.siliconflow.cn/v1",
         "glm": "https://open.bigmodel.cn/api/paas/v4/",
+        "atlascloud": "https://api.atlascloud.ai/v1",
     }
     return default_urls.get(key, "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
