@@ -89,8 +89,38 @@ export interface OperationsOverview {
   sample_counts: Record<string, number>
   challenger_status: ChallengerOperationsStatus
   recommendation_status: RecommendationOperationsStatus
+  mvp_acceptance: MvpAcceptanceReport
+  backup_status: { latest_backup_id: string | null; status: 'READY' | 'NOT_READY' }
+  consistency_status: 'PASS' | 'WARNING' | 'FAIL' | 'NOT_RUN'
   open_alerts: OperationalAlert[]
   safety_notice: string
+}
+
+export type MvpAcceptanceStatus = '可用' | '降级可用' | '未就绪' | '已阻断' | '不适用'
+export interface MvpAcceptanceItem {
+  item_id: string
+  item_name: string
+  status: MvpAcceptanceStatus
+  last_success_at: string | null
+  last_failure_at: string | null
+  latest_object_id: string | null
+  blocking_reason: string | null
+  verification_evidence: string[]
+  version: string
+  owner_module: string
+  advanced: Record<string, unknown>
+}
+export interface MvpAcceptanceReport {
+  report_id: string
+  generated_at: string
+  overall_status: 'MVP_PAPER_READY' | 'DEGRADED' | 'NOT_READY' | 'BLOCKED'
+  items: MvpAcceptanceItem[]
+  summary: Record<MvpAcceptanceStatus, number>
+  state_flags: Record<string, boolean>
+  latest_daily_run_id: string | null
+  latest_backup_id: string | null
+  consistency_status: 'PASS' | 'WARNING' | 'FAIL' | 'NOT_RUN'
+  report_hash: string
 }
 
 export interface RecommendationOperationsStatus {
@@ -164,6 +194,9 @@ export const alphaguardOperationsApi = {
   },
   integrity() {
     return ApiClient.get<Record<string, unknown>>('/api/alphaguard/operations/integrity')
+  },
+  mvpAcceptance() {
+    return ApiClient.get<MvpAcceptanceReport>('/api/alphaguard/operations/mvp-acceptance')
   },
   runJob(jobName: string, payload: { as_of_trade_date?: string; idempotency_key?: string } = {}) {
     return ApiClient.post(

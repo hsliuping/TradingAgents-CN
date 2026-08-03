@@ -3,11 +3,11 @@ from datetime import datetime, timedelta, timezone
 from app.utils.timezone import now_tz
 from typing import Optional
 import jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.core.config import settings
 
 class TokenData(BaseModel):
-    sub: str
+    sub: str = Field(min_length=1)
     exp: int
 
 class AuthService:
@@ -24,41 +24,31 @@ class AuthService:
         return token
 
     @staticmethod
-    def verify_token(token: str) -> Optional[TokenData]:
+    def verify_token(token: str | None) -> Optional[TokenData]:
         import logging
         logger = logging.getLogger(__name__)
 
         try:
-            logger.debug(f"🔍 开始验证token")
-            logger.debug(f"📝 Token长度: {len(token)}")
-            logger.debug(
-                f"🔑 JWT密钥已配置: {bool(settings.JWT_SECRET)}, "
-                f"长度: {len(settings.JWT_SECRET)}"
-            )
-            logger.debug(f"🔧 JWT算法: {settings.JWT_ALGORITHM}")
-
+            if not token:
+                return None
             payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-            logger.debug(f"✅ Token解码成功")
-            logger.debug(f"📋 Payload: {payload}")
 
             token_data = TokenData(sub=payload.get("sub"), exp=int(payload.get("exp", time.time())))
-            logger.debug(f"🎯 Token数据: sub={token_data.sub}, exp={token_data.exp}")
 
             # 检查是否过期
             current_time = int(time.time())
             if token_data.exp < current_time:
-                logger.warning(f"⏰ Token已过期: exp={token_data.exp}, now={current_time}")
+                logger.warning("访问令牌已过期")
                 return None
 
-            logger.debug(f"✅ Token验证成功")
             return token_data
 
         except jwt.ExpiredSignatureError:
             logger.warning("⏰ Token已过期")
             return None
-        except jwt.InvalidTokenError as e:
-            logger.warning(f"❌ Token无效: {str(e)}")
+        except jwt.InvalidTokenError:
+            logger.warning("访问令牌无效")
             return None
-        except Exception as e:
-            logger.error(f"❌ Token验证异常: {str(e)}")
+        except Exception as exc:
+            logger.error("访问令牌验证异常: error_type=%s", type(exc).__name__)
             return None

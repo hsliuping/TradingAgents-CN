@@ -1,4 +1,4 @@
-import { request } from './request'
+import { ApiClient } from './request'
 
 export interface NotificationItem {
   id: string
@@ -16,16 +16,19 @@ export interface NotificationListResponse {
   total?: number
   page?: number
   page_size?: number
+  service_status: 'READY' | 'DEGRADED'
+  error_code?: string | null
+}
+
+export interface NotificationUnreadResponse {
+  count: number
+  service_status: 'READY' | 'DEGRADED'
+  error_code?: string | null
 }
 
 export const notificationsApi = {
-  async getUnreadCount(): Promise<{ success: boolean; data: { count: number } }> {
-    // 后端尚未提供时兜底为0
-    try {
-      return await request.get('/api/notifications/unread_count')
-    } catch {
-      return { success: true, data: { count: 0 } }
-    }
+  async getUnreadCount(): Promise<{ success: boolean; data: NotificationUnreadResponse; message?: string }> {
+    return await ApiClient.get('/api/notifications/unread_count', undefined, { skipErrorHandler: true })
   },
 
   async getList(params?: { status?: 'unread' | 'all'; page?: number; page_size?: number; type?: string }): Promise<{ success: boolean; data: NotificationListResponse }> {
@@ -35,27 +38,14 @@ export const notificationsApi = {
     if (params?.page_size) query.set('page_size', String(params.page_size))
     if (params?.type) query.set('type', params.type)
     const url = query.toString() ? `/api/notifications?${query.toString()}` : '/api/notifications'
-    try {
-      return await request.get(url)
-    } catch {
-      return { success: true, data: { items: [], total: 0, page: params?.page ?? 1, page_size: params?.page_size ?? 20 } }
-    }
+    return await ApiClient.get(url, undefined, { skipErrorHandler: true })
   },
 
   async markRead(id: string): Promise<{ success: boolean }> {
-    try {
-      return await request.post(`/api/notifications/${id}/read`)
-    } catch {
-      return { success: true }
-    }
+    return await ApiClient.post(`/api/notifications/${id}/read`, undefined, { skipErrorHandler: true })
   },
 
   async markAllRead(): Promise<{ success: boolean }> {
-    try {
-      return await request.post('/api/notifications/read_all')
-    } catch {
-      return { success: true }
-    }
+    return await ApiClient.post('/api/notifications/read_all', undefined, { skipErrorHandler: true })
   }
 }
-

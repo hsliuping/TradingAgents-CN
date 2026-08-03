@@ -7604,3 +7604,204 @@ git diff --check
 `tests/unit/alphaguard/test_industry_enrichment_dry_run.py`及本节；没有数据库迁移、集合或索引变化。
 本检查点独立提交为`fix(data): make industry enrichment dry-run by default`，标签为
 `alphaguard-td-industry-dry-run-safe`。通知检查点已经独立提交，不进入本提交差异。
+
+## 30. PR-014：MVP封板与端到端运行验收
+
+### 30.1 MVP完成矩阵
+
+在正式备份恢复出的隔离数据库`tradingagentscn_v0_banana_mvp_rc1_restore_20260803`完成24项中文
+MVP验收。22项为“可用”：候选池、推荐系统、数据中心、EvidenceSnapshot、FactorEngine、
+MarketRegime、StrategyEngine、TradingAgents、Normal模型、Top模型、Consensus、HardRisk、模拟账户、
+评价归因、Experiment Lab、PAPER_CHALLENGER、前端、Operations、数据一致性、调度、备份恢复和安全门禁。
+2项为“降级可用”：订单与撮合当前没有自然业务对象；通知故障独立降级且不影响核心交易安全链。
+“未就绪”“已阻断”“不适用”均为0。
+
+隔离报告`overall_status=MVP_PAPER_READY`，报告hash为
+`d300a74af291f32a9be407af220d2da043a263479333fc659c1ebf9573f493c6`。状态Flag为：
+`MVP_CODE_COMPLETE=true`、`MVP_RUNTIME_READY=true`、`RECOMMENDATION_READY=true`、
+`RECOMMENDATION_DATA_READY=true`、`REAL_MODEL_RUNTIME_READY=true`、`DUAL_MODEL_READY=true`、
+`PAPER_READY=true`、`EVALUATION_READY=true`、`EXPERIMENT_READY=true`、`CHALLENGER_READY=true`；
+`ACTIVE_CHALLENGER=false`、`AUTO_CANDIDATE_ACCEPT=false`、`LIVE_READY=false`。
+
+### 30.2 Python存量错误修复
+
+`scripts/补充行业信息_akshare.py:81`已在前置技术债检查点修复为合法异步函数，并增加默认dry-run、
+显式`--execute`授权、参数校验和10项最小测试。PR-014复核全仓`compileall`通过，不再保留“存量语法
+错误”豁免；旧脚本没有接入正式自动任务，也没有改变行业数据查询、更新字段、批次、延迟或重试规则。
+
+### 30.3 通知系统
+
+通知REST继续使用`READY / DEGRADED`显式契约；列表或未读数失败返回稳定空结果和中文降级提示，不阻断
+主页面。通知WebSocket不再把Token放入URL，而是通过`Sec-WebSocket-Protocol`传递短期认证子协议；
+服务端使用JWT `sub`并注册数据库用户ID别名，保持既有通知投递兼容。鉴权失败、权限不足和服务不可用
+分别使用4401、4403和1013分类，前端最多重试6次并采用有限指数退避，公开连接状态、最后成功时间、
+重试次数和降级状态。任务进度WebSocket同时移除query Token、硬编码`admin`和消息正文日志；认证日志
+不再输出JWT Payload、Token长度、密钥长度、Cookie或异常正文。
+
+### 30.4 每日调度
+
+新增唯一的20阶段盘后编排：交易日历确认、证券基础数据同步、RAW/QFQ行情同步、基准和行业数据同步、
+交易状态同步、DataQuality、推荐数据覆盖、全市场推荐、候选池Snapshot、Factor与Regime、
+QuantProposal、TradingAgents与双模型链、OrderIntent安全门、次交易日模拟订单处理、成交与结算、
+Evaluation、Attribution、Challenger、Operations汇总、通知。每一阶段显式依赖前一阶段，依赖未完成时
+不得继续；失败阶段之后的全部阶段持久化为`BLOCKED / UPSTREAM_NOT_COMPLETED`。
+
+阶段审计统一记录`job_id`、`daily_run_id`、`trading_date`、`input_version`、`input_hash`、`status`、
+`started_at`、`completed_at`、`retry_count`、`error_code`、`output_count`和`idempotency_key`。相同交易日、
+输入版本和阶段的复跑返回`REUSED`；非交易日从日历阶段开始把余下阶段安全标记为`SKIPPED`。FastAPI
+Scheduler在18:40注册`alphaguard_daily_run`，既有细粒度任务继续作为幂等恢复工作器。
+
+### 30.5 一键运行入口
+
+新增`python scripts/alphaguard_daily_run.py --trade-date YYYY-MM-DD`。默认只生成dry-run计划，只有显式
+`--execute`才进入写路径；支持`--dry-run`、`--resume`、`--status`、`--from-stage`、`--to-stage`和
+`--input-version`。恢复或指定阶段运行会从`ag_daily_job_runs`中重建执行器缓存，进程重启后也不会因
+内存状态丢失重复推荐、模型调用或订单处理。命令永久拒绝`--live`、`--live=true`和`live=true`，并以
+中文汇总数据同步、推荐、候选池、决策、模型、风控、订单、评价和异常。
+
+### 30.6 场景A结果
+
+隔离`NO_SIGNAL`场景通过：完整依赖链运行，模型阶段输出0次调用，OrderIntent、订单和Fill均为0，
+Evaluation正常产生验收对象。重复相同输入时20阶段全部`REUSED`，没有制造正式推荐、候选或交易对象。
+
+### 30.7 场景B结果
+
+隔离`MODEL_REJECT`场景通过：受控TRIGGERED测试样本进入模型决策并保留拒绝状态，随后OrderIntent、
+订单和Fill保持0；拒绝证据通过阶段结果和持久化审计链可追溯。没有修改Prompt、模型输出、阈值、
+Consensus或HardRisk规则来制造通过或拒绝。
+
+### 30.8 场景C结果
+
+隔离`FULL_FILL`场景通过：受控测试数据依次产生唯一OrderIntent、T+1模拟订单、唯一Fill和100股隔离
+Position，并继续到Evaluation。相同输入在模拟服务重启后全部`REUSED`，订单和Fill仍各1个。所有对象
+只存在于测试隔离命名空间/数据库，正式数据库的OrderIntent、Outbox、Order、Fill、Position、
+Reservation、Ledger和Settlement前后均为0。
+
+### 30.9 场景D结果
+
+中断恢复场景通过：在RAW/QFQ阶段前模拟进程中断，前置交易日历和证券基础同步已持久化；新执行器使用
+`--resume --from-stage RAW_QFQ_PRICE_SYNC --to-stage RAW_QFQ_PRICE_SYNC`恢复时先重建依赖状态，再只执行
+目标阶段。另覆盖失败后下游全量`BLOCKED`和必须显式`--resume`的安全断点，未出现重复同步、重复模型、
+重复下单或重复成交。
+
+### 30.10 场景E结果
+
+服务重启场景通过：新建执行器从持久化候选Snapshot结果恢复proposal、triggered、decision和终态聚合，
+Factor/Regime、QuantProposal及模型链能够继续；相同输入的完整重启复跑返回20个`REUSED`。测试同时验证
+组件卸载/连接代次会取消通知重连，避免重启窗口形成无限连接风暴。正式四账户资产和幂等键保持不变。
+
+### 30.11 备份
+
+有效正式只读备份位于`backups/alphaguard-mvp-rc1-20260803-221200`，`backup_id`为
+`fe84dd4b-2373-5a9e-b774-fd4d64994506`，Manifest hash为
+`23e85ea5645239a7f60fcb903a967740bc99f87bb0797a670f8ec78f72a307eb`。备份格式为
+`alphaguard-bson-stream-v2`，覆盖138个集合、119043个文档、2030874941字节，源提交为
+`c48333d421999ce1be633405bcae3960b5e1476d`，源标签为`alphaguard-td-industry-dry-run-safe`。
+
+备份使用流式BSON，Manifest包含`backup_id`、`created_at`、`schema_version`、逐集合数量和hash、
+`manifest_hash`、`source_commit`和`source_tag`。Secret扫描允许`risk-*`等业务规则ID，但拒绝Secret字段、
+API Key、私钥和明文凭证；macOS Keychain仅保留`credential_ref`。第一次中断形成的无效部分备份已移至
+系统废纸篓`AlphaGuard-partial-backup-20260803-220906`，不会被列为有效备份。
+
+### 30.12 隔离恢复
+
+备份已恢复到`tradingagentscn_v0_banana_mvp_rc1_restore_20260803`。恢复器默认拒绝源正式库和未显式
+隔离命名的目标库，逐集合最多100个文档或8 MiB分批写入；任何恢复或校验失败都会自动清理新建目标库。
+138个集合数量与Manifest完全一致，输出`restore_drill=PASS`；隔离库完成425个create-only索引初始化。
+正式源库全程只读，恢复演练没有覆盖或修改正式数据。
+
+### 30.13 数据一致性
+
+新增统一只读一致性服务，覆盖19项：账户资产守恒、现金非负、冻结资金非负、持仓非负、订单/成交数量、
+Ledger重建、Snapshot引用、模型调用引用、决策链、推荐接受与CandidateEntry、Challenger账户隔离、
+Champion指针、必要/唯一索引、孤立Reservation、重复Fill、跨账户Position及关联约束。服务只生成
+`PASS / WARNING / FAIL`、最多50条脱敏证据和人工建议，`auto_repair_performed=false`。
+
+隔离恢复库19项全部PASS，一致性报告hash为
+`35379a14f6f61e92f05f9673233e6311a74830846744224407bca03374f76906`。正式库仍缺PR-014新增的10个
+create-only索引：`ag_daily_job_runs` 4个、`ag_mvp_acceptance_reports` 3个、`ag_consistency_reports` 3个。
+由于正式验收只读，本阶段没有创建这些索引；发布启动时由既有create-only索引初始化统一创建，不删除
+或修改现有索引和业务数据。
+
+### 30.14 Operations
+
+Operations首页新增中文“MVP验收状态”，展示24项状态、最近成功/失败、阻断原因和验证证据；同时汇总
+系统运行、今日数据、推荐、候选池、模型、模拟账户、订单/成交、评价成熟度、挑战者、调度、通知、备份、
+一致性和MVP状态。异常统一解释“发生了什么、是否影响核心功能、建议怎么处理”；对象ID、版本、Hash、
+owner和状态Flag收进“高级信息”。新增`GET /api/alphaguard/operations/mvp-acceptance`只读端点，overview
+复用同一报告，不引入正式业务写入。
+
+### 30.15 用户文档
+
+更新`ALPHAGUARD_QUICK_START.md`和`ALPHAGUARD_FRONTEND_GUIDE.md`；新增
+`ALPHAGUARD_DAILY_OPERATIONS.md`、`ALPHAGUARD_BACKUP_RESTORE.md`和
+`ALPHAGUARD_TROUBLESHOOTING.md`。中文手册覆盖启动、登录、推荐审核、候选、决策、模拟交易、评价、
+Challenger、任务暂停/恢复、错误查看、备份、隔离恢复和安全关闭；普通操作不要求理解内部对象ID。
+
+### 30.16 正式数据库影响
+
+正式环境只执行只读覆盖、对象数量、不变量、健康、备份源读取和幂等状态检查；没有自动接受推荐、添加
+候选、触发模型、创建测试交易、修改Champion、启用Challenger或改变账户资产。前后固定投影均为：
+候选5、最新待审核推荐15、推荐总数45、模型运行130、真实模型成功证据93、Challenger Assignment/Run
+为0/0，所有交易/持仓/资金流水集合为0。正式数据库只保留原有数据，10个新索引等待发布启动创建。
+
+### 30.17 四个账户资产
+
+`PAPER_QUANT`、`PAPER_NORMAL`、`PAPER_TOP_CONFIRMED`、`PAPER_CHALLENGER`均保持
+`cash_available=1000000.00`、`cash_reserved=0`、`realized_pnl=0`、`total_fees=0`。正式只读验收固定投影
+hash前后均为`15fb08a877ff3fc74c635d1a8d719b4977feb73ea9c45f2e76983229fea163f1`；没有Reservation、
+Ledger、Settlement、Position或PositionLot增量。
+
+### 30.18 Champion
+
+ACTIVE Champion Assignment保持5，正式只读验收固定投影hash前后均为
+`1c170fb6001d756738ad6506ebc06ec79c5f66126a956254861c044022039ed0`。没有修改Champion指针、组件版本、
+策略、Factor、Regime、阈值、Prompt、Consensus、HardRisk、费用、撮合或交易参数。
+
+### 30.19 Challenger
+
+Challenger Assignment=0、Run=0，`ACTIVE_CHALLENGER=false`。PAPER_CHALLENGER专用账户和隔离能力可用，
+但本阶段没有创建、运行、晋升或切换Challenger，也没有向其他Paper账户写入任何Challenger lineage。
+
+### 30.20 推荐系统
+
+正式推荐保持总数45，最新一轮15条仍等待人工审核；候选池保持5，
+`AUTO_CANDIDATE_ACCEPT=false`。统一每日编排只调用既有推荐服务及策略版本，未修改资格规则、数据质量
+门槛、评分项、风险扣分、排序、上限或推荐分数，也未为了验收自动接受推荐或增加候选。
+
+### 30.21 模型调用变化
+
+正式`ag_model_runs`前后均为130，其中真实模型成功证据93；PR-014正式验收新增模型调用为0。隔离场景
+只使用受控回调和既有持久化Level B证据验证Normal、Top、Consensus和HardRisk契约，不访问Provider，
+不更改Prompt或模型输出，不把隔离结果写回正式模型集合。
+
+### 30.22 测试
+
+PR-014专项测试26项通过；默认离线CI为`771 passed, 89 warnings`。前端`npm run type-check`、正式
+`npm run build`、独立`npx vite build`、全仓Python `compileall`、`docker compose config --quiet`和
+`git diff --check`均通过。专项覆盖20阶段依赖、REUSED、失败下游BLOCKED、断点恢复、执行器重建、
+非交易日、安全场景A～E、一致性、MVP矩阵、live拒绝、中文Operations/手册、WebSocket认证/错误分类、
+有限退避、备份Secret扫描、Manifest校验、流式分批和隔离恢复。
+
+### 30.23 已知限制
+
+正式数据没有自然OrderIntent、订单或Fill，因此订单与撮合在MVP矩阵为“降级可用”；完整成交只在隔离
+测试数据中验证。通知为非核心降级服务，无法连接时最多重试6次后停止，用户仍可继续核心Paper流程。
+正式库缺10个PR-014索引，必须在发布启动时完成create-only初始化后再把正式索引一致性判为PASS。
+`LIVE_READY=false`、不提供真实券商接口、前端无实盘按钮；本阶段不承诺实盘运行。
+
+### 30.24 回退步骤
+
+如需回退，先停用Scheduler中的`alphaguard_daily_run`统一任务，再对本阶段提交执行`git revert`，恢复
+Operations、通知WebSocket、认证日志、备份/恢复和索引声明到`c48333d`后的状态。已创建的本机备份和
+隔离恢复库属于审计/演练证据，可保留；如需删除隔离库必须单独确认目标名称，绝不能删除正式库。已经
+由发布启动创建的10个索引是create-only且兼容旧代码，回退时无需删除。不得回滚或修改5个候选、45条
+推荐、四账户、Champion/Challenger和任何正式审计对象。
+
+### 30.25 Git状态
+
+PR-014在保留两个已完成技术债检查点的`c48333d421999ce1be633405bcae3960b5e1476d`上实施，没有回退用户
+后续提交。全部代码、前端、测试、中文文档和本执行记录使用提交信息
+`feat(alphaguard): finalize mvp operational release`一次提交，并创建附注标签`alphaguard-mvp-rc1`。
+提交范围不包含`.env`、Keychain、API Key、Cookie、日志、构建缓存、正式数据库文件或本机BSON备份；
+提交和标签完成后工作区必须clean，并停止，不开始新的功能PR。

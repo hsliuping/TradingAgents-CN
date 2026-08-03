@@ -109,18 +109,33 @@ curl --fail http://localhost:8000/health/ready
 
 停止真实环境使用 `docker compose down`；停止演示环境时在两个演示终端分别按 `Ctrl-C`。
 
+## 9. 每日运行、错误与备份
+
+盘后统一任务在 18:40 按 20 个显式依赖阶段运行。普通用户在“运维中心”查看中文状态；管理员
+需要手工预览或恢复时使用默认 dry-run 的统一入口：
+
+```bash
+.venv/bin/python scripts/alphaguard_daily_run.py --trade-date 2026-08-03
+.venv/bin/python scripts/alphaguard_daily_run.py --trade-date 2026-08-03 --status
+```
+
+不要使用 live 参数，也不要为了验收强制产生模型调用、买入或成交。详细步骤见：
+
+- [每日运行手册](ALPHAGUARD_DAILY_OPERATIONS.md)
+- [备份与恢复](ALPHAGUARD_BACKUP_RESTORE.md)
+- [故障排查](ALPHAGUARD_TROUBLESHOOTING.md)
+
 ## 当前验收状态
 
 - 前端验收检查点：`alphaguard-frontend-acceptance-v1`；
-- 真实系统状态：`DEGRADED_PAPER`，表示部分能力安全关闭，不是系统故障；
-- `CHALLENGER_READY=false`、`LIVE_READY=false`，页面没有实盘入口；
+- MVP 运行封板提供统一日常编排、恢复、备份、隔离恢复和中文验收矩阵；
+- `ACTIVE_CHALLENGER=false`、`AUTO_CANDIDATE_ACCEPT=false`、`LIVE_READY=false`，页面没有实盘入口；
 - 演示数据库与生产数据库完全隔离，演示中的订单、成交和收益不是生产数据；
 - 前端类型安全检查点 `alphaguard-frontend-type-safe` 已清除原34个
   `DefaultRow TS2345`；`npm run type-check`、正式 `npm run build` 和
   `npx vite build` 均可通过；
-- 模型运行时目前完成兼容Provider注册层，但`MODEL_PROVIDER=NOT_CONFIGURED`；安全凭证
-  页面和最小能力检查完成不等于Level B完成。Endpoint、模型、价格、凭证与两个Profile
-  全部READY后，仍需用户确认再继续真实Normal、Top、Consensus和HardRisk验证；
+- PR-010 已保存真实双模型 Level B 证据；日常任务仍只在 Proposal 自然触发且全部配置门禁通过时
+  调用模型，不会为验收制造新调用；
 - API Key只能在本机安全后端对应的“API凭证”表单中手工输入，不要发送到聊天、终端参数、
   文档或截图中。
 

@@ -7,6 +7,43 @@
         <div><span>实盘执行</span><el-tag type="danger">{{ readiness?.live_execution_allowed ?? false }}</el-tag></div>
       </section>
 
+      <section class="operations-summary" aria-label="AlphaGuard运维摘要">
+        <div v-for="item in operationalSummary" :key="item.label">
+          <span>{{ item.label }}</span>
+          <strong>{{ item.value }}</strong>
+        </div>
+      </section>
+
+      <el-card shadow="never" aria-label="MVP验收状态">
+        <template #header>
+          <div class="header-row">
+            <strong>MVP验收状态</strong>
+            <el-tag :type="mvpStatusType">{{ mvpAcceptance?.overall_status || 'NOT_READY' }}</el-tag>
+          </div>
+        </template>
+        <el-table :data="mvpAcceptance?.items || []" size="small">
+          <el-table-column prop="item_name" label="验收项" min-width="150" />
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }"><el-tag :type="acceptanceType(row.status)">{{ row.status }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="最近成功" min-width="165">
+            <template #default="{ row }">{{ displayTime(row.last_success_at) }}</template>
+          </el-table-column>
+          <el-table-column label="最近失败" min-width="165">
+            <template #default="{ row }">{{ displayTime(row.last_failure_at) }}</template>
+          </el-table-column>
+          <el-table-column prop="blocking_reason" label="阻断原因" min-width="250" />
+          <el-table-column label="验证证据" min-width="280">
+            <template #default="{ row }">{{ row.verification_evidence.join('；') }}</template>
+          </el-table-column>
+        </el-table>
+        <el-collapse class="advanced-info">
+          <el-collapse-item title="高级信息：对象ID、版本、Hash与状态标志" name="mvp-advanced">
+            <pre>{{ pretty({ report_id: mvpAcceptance?.report_id, report_hash: mvpAcceptance?.report_hash, state_flags: mvpAcceptance?.state_flags, latest_daily_run_id: mvpAcceptance?.latest_daily_run_id, items: (mvpAcceptance?.items || []).map(item => ({ item: item.item_name, object_id: item.latest_object_id, version: item.version, owner: item.owner_module })) }) }}</pre>
+          </el-collapse-item>
+        </el-collapse>
+      </el-card>
+
       <el-card shadow="never">
         <template #header>
           <div class="header-row">
@@ -134,6 +171,9 @@
           <el-table-column prop="severity" label="级别" width="100" />
           <el-table-column prop="code" label="代码" min-width="220" />
           <el-table-column prop="sanitized_message" label="脱敏摘要" min-width="280" />
+          <el-table-column label="发生了什么 / 是否影响核心功能 / 建议" min-width="380">
+            <template #default="{ row }">{{ alertExplanation(row) }}</template>
+          </el-table-column>
           <el-table-column prop="occurrence_count" label="次数" width="80" />
           <el-table-column prop="status" label="状态" width="130" />
           <el-table-column v-if="canRunAdminOperations" label="操作" width="150">
@@ -151,10 +191,18 @@
       </el-tab-pane>
 
       <el-tab-pane v-if="!modelsOnly" label="完整性与版本" name="integrity">
-        <h4>完整性</h4>
-        <pre>{{ pretty(integrity) }}</pre>
-        <h4>版本（已脱敏）</h4>
-        <pre>{{ pretty(versions) }}</pre>
+        <h4>数据一致性检查</h4>
+        <el-table :data="integrityChecks" size="small">
+          <el-table-column prop="name" label="检查项" min-width="210" />
+          <el-table-column prop="status" label="结果" width="100" />
+          <el-table-column prop="count" label="异常数" width="90" />
+          <el-table-column prop="suggestion" label="处理建议" min-width="300" />
+        </el-table>
+        <el-collapse class="advanced-info">
+          <el-collapse-item title="高级信息：一致性证据与版本" name="integrity-advanced">
+            <pre>{{ pretty({ integrity, versions }) }}</pre>
+          </el-collapse-item>
+        </el-collapse>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -172,9 +220,12 @@ import {
   type JobHealth,
   type OperationalAlert,
   type ServiceHealth,
-  type SystemReadiness
+  type SystemReadiness,
+  type MvpAcceptanceReport
 } from '@/api/alphaguardOperations'
 import { useAuthStore } from '@/stores/auth'
+import { useNotificationStore } from '@/stores/notifications'
+import { storeToRefs } from 'pinia'
 
 const props = withDefaults(defineProps<{
   modelsOnly?: boolean
@@ -185,6 +236,8 @@ const props = withDefaults(defineProps<{
 })
 
 const authStore = useAuthStore()
+const notificationStore = useNotificationStore()
+const { connectionStatus: notificationConnectionStatus, lastSuccessAt: notificationLastSuccessAt, retryCount: notificationRetryCount, degraded: notificationDegraded } = storeToRefs(notificationStore)
 const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 const isCredentialHost = import.meta.env.VITE_ALPHAGUARD_CREDENTIAL_HOST === 'true'
 const modelsOnly = computed(() => props.modelsOnly || isCredentialHost)
@@ -203,6 +256,9 @@ const alerts = ref<OperationalAlert[]>([])
 const manualJobs = ref<string[]>([])
 const versions = ref<Record<string, unknown>>({})
 const integrity = ref<Record<string, unknown>>({})
+const mvpAcceptance = ref<MvpAcceptanceReport | null>(null)
+const backupStatus = ref<{ latest_backup_id: string | null; status: string }>({ latest_backup_id: null, status: 'NOT_READY' })
+const consistencyStatus = ref('NOT_RUN')
 
 const statusType = computed(() => readiness.value?.overall_status === 'READY_FOR_PAPER'
   ? 'success'
@@ -230,11 +286,37 @@ const recommendationBlocker = computed(() => {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]
   return item ? `${recommendationReasonLabels[item[0]] || item[0]}（${item[1]}）` : '无'
 })
+const mvpStatusType = computed(() => mvpAcceptance.value?.overall_status === 'MVP_PAPER_READY' ? 'success' : mvpAcceptance.value?.overall_status === 'BLOCKED' ? 'danger' : 'warning')
+const integrityChecks = computed(() => Array.isArray(integrity.value.checks) ? integrity.value.checks as Array<Record<string, unknown>> : [])
+const operationalSummary = computed(() => [
+  { label: '系统运行状态', value: readiness.value?.overall_status || 'UNKNOWN' },
+  { label: '今日数据状态', value: recommendationStatus.value?.recommendation_data_ready ? '已就绪' : '未就绪' },
+  { label: '推荐状态', value: `${recommendationStatus.value?.today_recommendation_count ?? 0} 条` },
+  { label: '候选池数量', value: String((mvpAcceptance.value?.items.find(item => item.item_id === 'candidate_pool')?.advanced.object_count as number) ?? 0) },
+  { label: '模型状态', value: mvpAcceptance.value?.state_flags.DUAL_MODEL_READY ? '双模型就绪' : '受控降级' },
+  { label: '模拟账户状态', value: readiness.value?.paper_execution_ready ? '可用' : '未就绪' },
+  { label: '订单和成交', value: `${challengerStatus.value?.order_count ?? 0} / ${challengerStatus.value?.fill_count ?? 0}` },
+  { label: '评价成熟度', value: `${challengerStatus.value?.mature_evaluation_count ?? 0} / ${challengerStatus.value?.evaluation_subject_count ?? 0}` },
+  { label: '挑战者状态', value: readiness.value?.active_challenger ? '运行中' : '未启用' },
+  { label: '调度状态', value: mvpAcceptance.value?.items.find(item => item.item_id === 'scheduler')?.status || '未就绪' },
+  { label: '通知状态', value: notificationDegraded.value ? '降级可用' : notificationConnectionStatus.value },
+  { label: '通知最后成功', value: displayTime(notificationLastSuccessAt.value) },
+  { label: '通知重试次数', value: String(notificationRetryCount.value) },
+  { label: '通知降级状态', value: notificationDegraded.value ? '是（不影响核心）' : '否' },
+  { label: '备份状态', value: backupStatus.value.status === 'READY' ? '已校验' : '未就绪' },
+  { label: '一致性状态', value: consistencyStatus.value },
+  { label: 'MVP验收状态', value: mvpAcceptance.value?.overall_status || 'NOT_READY' }
+])
 
 const short = (value?: string) => value ? value.slice(0, 12) : '—'
 const displayTime = (value?: string | null) => value ? value.replace('T', ' ').slice(0, 19) : '暂无'
 const formatCoverage = (value?: string) => `${(Number(value || 0) * 100).toFixed(1)}%`
 const pretty = (value: unknown) => JSON.stringify(value, null, 2)
+const acceptanceType = (status: string) => status === '可用' ? 'success' : status === '已阻断' ? 'danger' : status === '不适用' ? 'info' : 'warning'
+const alertExplanation = (row: Record<string, unknown>) => {
+  const coreImpact = ['EXECUTION', 'ACCOUNT', 'RISK', 'SECURITY', 'INTEGRITY'].includes(String(row.category || ''))
+  return `发生了什么：${row.title || row.code}。是否影响核心功能：${coreImpact ? '可能影响，需按门禁处理' : '通常不影响核心交易安全链'}。建议：${coreImpact ? '先暂停相关受控任务并查看高级信息' : '恢复对应服务后重试，不要修改交易阈值'}。`
+}
 
 async function loadOperations() {
   if (modelsOnly.value) return
@@ -249,6 +331,9 @@ async function loadOperations() {
     ])
     challengerStatus.value = overviewResponse.data.challenger_status
     recommendationStatus.value = overviewResponse.data.recommendation_status
+    mvpAcceptance.value = overviewResponse.data.mvp_acceptance
+    backupStatus.value = overviewResponse.data.backup_status
+    consistencyStatus.value = overviewResponse.data.consistency_status
     readiness.value = overviewResponse.data.readiness
     services.value = overviewResponse.data.readiness.service_health
     dataStatuses.value = overviewResponse.data.readiness.data_readiness
@@ -342,13 +427,16 @@ onMounted(loadOperations)
 .safety-strip span { color: var(--el-text-color-secondary); font-size: 12px; }
 .header-row, .status-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .status-line > span { min-width: 0; flex: 1 1 280px; overflow-wrap: anywhere; }
+.operations-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--el-border-color-light); border-radius: 6px; overflow: hidden; }
 .challenger-status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--el-border-color-light); border-radius: 6px; overflow: hidden; }
 .recommendation-status { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--el-border-color-light); border-radius: 6px; overflow: hidden; }
-.challenger-status > div, .recommendation-status > div { min-height: 68px; padding: 11px 14px; border-right: 1px solid var(--el-border-color-light); border-bottom: 1px solid var(--el-border-color-light); display: grid; gap: 6px; }
+.operations-summary > div, .challenger-status > div, .recommendation-status > div { min-height: 68px; padding: 11px 14px; border-right: 1px solid var(--el-border-color-light); border-bottom: 1px solid var(--el-border-color-light); display: grid; gap: 6px; }
+.operations-summary > div:nth-child(4n) { border-right: 0; }
 .challenger-status > div:nth-child(4n) { border-right: 0; }
 .recommendation-status > div:nth-child(5n) { border-right: 0; }
-.challenger-status span, .recommendation-status span { color: var(--el-text-color-secondary); font-size: 12px; }
-.challenger-status strong, .recommendation-status strong { min-width: 0; overflow-wrap: anywhere; }
+.operations-summary span, .challenger-status span, .recommendation-status span { color: var(--el-text-color-secondary); font-size: 12px; }
+.operations-summary strong, .challenger-status strong, .recommendation-status strong { min-width: 0; overflow-wrap: anywhere; }
+.advanced-info { margin-top: 12px; }
 .admin-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--el-border-color-light); }
 .recommendation-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .recommendation-actions span { color: var(--el-text-color-secondary); font-size: 12px; }
@@ -359,7 +447,8 @@ pre { max-height: 420px; overflow: auto; padding: 12px; background: var(--el-fil
 @media (max-width: 700px) {
   .safety-strip { grid-template-columns: 1fr; }
   .challenger-status { grid-template-columns: 1fr; }
+  .operations-summary { grid-template-columns: 1fr; }
   .recommendation-status { grid-template-columns: 1fr; }
-  .challenger-status > div, .recommendation-status > div { border-right: 0; }
+  .operations-summary > div, .challenger-status > div, .recommendation-status > div { border-right: 0; }
 }
 </style>

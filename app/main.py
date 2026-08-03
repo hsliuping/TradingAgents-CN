@@ -771,6 +771,21 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
             max_instances=1,
         )
+        # PR-014 canonical post-market orchestration.  Existing granular jobs
+        # remain as idempotent recovery workers; this job records and enforces
+        # the end-to-end dependency chain for one trading date/input version.
+        from app.services.alphaguard.daily_jobs import (
+            scheduled_alphaguard_daily_run,
+        )
+
+        scheduler.add_job(
+            scheduled_alphaguard_daily_run,
+            CronTrigger(hour=18, minute=40, timezone=settings.TIMEZONE),
+            id="alphaguard_daily_run",
+            name="AlphaGuard每日盘后统一编排",
+            replace_existing=True,
+            max_instances=1,
+        )
 
         scheduler.start()
 

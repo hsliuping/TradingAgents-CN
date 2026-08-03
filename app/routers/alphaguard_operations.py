@@ -232,6 +232,19 @@ async def operations_integrity(
     return ok(await service.integrity())
 
 
+@router.get("/mvp-acceptance", response_model=dict)
+async def operations_mvp_acceptance(
+    current_user: dict = Depends(get_current_user),
+    service: AlphaGuardOperationsService = Depends(get_operations_service),
+):
+    from app.services.alphaguard.mvp_acceptance_service import MvpAcceptanceService
+
+    report = await MvpAcceptanceService(
+        get_mongo_db(), operations_service=service
+    ).report(persist=False)
+    return ok(report.model_dump(mode="json"), "AlphaGuard MVP验收状态")
+
+
 @router.post("/check", response_model=dict)
 async def operations_check(
     current_user: dict = Depends(get_current_user),
@@ -322,4 +335,3 @@ async def operations_reconcile(
         {"job": request.model_dump(mode="json"), "created": created},
         "账户完整性核对已进入幂等队列",
     )
-

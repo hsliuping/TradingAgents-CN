@@ -35,6 +35,14 @@
 
     <!-- 通知抽屉（方案B） -->
     <el-drawer v-model="drawerVisible" direction="rtl" size="360px" :with-header="true" title="消息中心">
+      <el-alert
+        v-if="degraded"
+        type="warning"
+        :closable="false"
+        show-icon
+        :title="degradedMessage || '通知服务已降级，核心功能不受影响。'"
+        class="notif-degraded"
+      />
       <div class="notif-toolbar">
         <el-segmented v-model="filter" :options="[{label: '全部', value: 'all'}, {label: '未读', value: 'unread'}]" size="small" />
         <el-button size="small" text type="primary" @click="onMarkAllRead" :disabled="unreadCount===0">全部已读</el-button>
@@ -80,7 +88,7 @@ const notifStore = useNotificationStore()
 const isDemo = import.meta.env.VITE_ALPHAGUARD_DEMO === 'true'
 const isCredentialHost =
   import.meta.env.VITE_ALPHAGUARD_CREDENTIAL_HOST === 'true'
-const { unreadCount, items } = storeToRefs(notifStore)
+const { unreadCount, items, degraded, degradedMessage } = storeToRefs(notifStore)
 const drawerVisible = ref(false)
 const filter = ref<'all' | 'unread'>('all')
 let timerCount: any = null
@@ -104,12 +112,10 @@ function toLocal(iso: string) { try { return new Date(iso).toLocaleString() } ca
 function go(n: any) { if (n.link) window.open(n.link, '_blank') }
 
 onMounted(() => {
-  // The Keychain-only host has no notification responsibility. More
-  // importantly, the legacy WebSocket puts its auth token in the query
-  // string, so never construct that URL in credential-management mode.
+  // The Keychain-only host and the isolated demo have no notification duty.
   if (isDemo || isCredentialHost) return
   notifStore.refreshUnreadCount()
-  // 🔥 建立 WebSocket 连接（优先），失败自动降级到 SSE
+  // 建立有限退避的 WebSocket；失败仅降级通知，不影响核心功能。
   notifStore.connect()
 
   timerCount = setInterval(() => notifStore.refreshUnreadCount(), 30000)
@@ -133,7 +139,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (timerCount) clearInterval(timerCount)
   if (timerList) clearInterval(timerList)
-  // 🔥 断开所有连接（WebSocket 和 SSE）
+  // 显式断开，阻止组件卸载后的竞态重连。
   if (!isDemo) notifStore.disconnect()
 })
 
@@ -173,6 +179,7 @@ function showHelp() {
 
 /* 通知抽屉样式 */
 .notif-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.notif-degraded { margin-bottom: 10px; }
 .notif-list { display: flex; flex-direction: column; gap: 12px; }
 .notif-item { padding: 10px 8px; border-radius: 8px; border: 1px solid var(--el-border-color-lighter); }
 .notif-item.unread { background: var(--el-fill-color-light); }

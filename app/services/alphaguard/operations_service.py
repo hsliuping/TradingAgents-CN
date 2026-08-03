@@ -837,6 +837,13 @@ class AlphaGuardOperationsService:
         return result
 
     async def integrity(self) -> dict[str, Any]:
+        from app.services.alphaguard.consistency_service import (
+            AlphaGuardConsistencyService,
+        )
+
+        return await AlphaGuardConsistencyService(self.db).run(persist=False)
+
+    async def _legacy_integrity(self) -> dict[str, Any]:
         checks: list[dict[str, Any]] = []
         checks.append(
             {
@@ -1173,11 +1180,24 @@ class AlphaGuardOperationsService:
             "ag_candidate_recommendations",
         ):
             counts[name] = await _count(self.db[name])
+        from app.services.alphaguard.mvp_acceptance_service import (
+            MvpAcceptanceService,
+        )
+
+        acceptance = await MvpAcceptanceService(
+            self.db, operations_service=self
+        ).report(persist=False)
         return {
             "readiness": report,
             "sample_counts": counts,
             "challenger_status": await self.challenger_operations_status(),
             "recommendation_status": await CandidateRecommendationService(self.db).metrics(),
+            "mvp_acceptance": acceptance,
+            "backup_status": {
+                "latest_backup_id": acceptance.latest_backup_id,
+                "status": "READY" if acceptance.latest_backup_id else "NOT_READY",
+            },
+            "consistency_status": acceptance.consistency_status,
             "open_alerts": alerts,
             "safety_notice": "PAPER ONLY — live execution is unavailable",
         }

@@ -1206,6 +1206,44 @@ ALPHAGUARD_INDEX_SPECS = {
         {"keys": [("status", 1), ("created_at", 1)], "name": "idx_ops_job_pending"},
         {"keys": [("job_name", 1), ("created_at", -1)], "name": "idx_ops_job_name"},
     ],
+    "ag_daily_job_runs": [
+        {"keys": [("job_id", 1)], "name": "uniq_daily_job_id", "unique": True},
+        {
+            "keys": [("idempotency_key", 1)],
+            "name": "uniq_daily_job_idempotency",
+            "unique": True,
+        },
+        {
+            "keys": [("daily_run_id", 1), ("stage_id", 1)],
+            "name": "uniq_daily_run_stage",
+            "unique": True,
+        },
+        {
+            "keys": [("trading_date", -1), ("status", 1)],
+            "name": "idx_daily_job_date_status",
+        },
+    ],
+    "ag_mvp_acceptance_reports": [
+        {
+            "keys": [("report_id", 1)],
+            "name": "uniq_mvp_acceptance_report",
+            "unique": True,
+        },
+        {"keys": [("report_hash", 1)], "name": "idx_mvp_acceptance_hash"},
+        {"keys": [("generated_at", -1)], "name": "idx_mvp_acceptance_time"},
+    ],
+    "ag_consistency_reports": [
+        {
+            "keys": [("report_id", 1)],
+            "name": "uniq_consistency_report",
+            "unique": True,
+        },
+        {"keys": [("report_hash", 1)], "name": "idx_consistency_hash"},
+        {
+            "keys": [("status", 1), ("checked_at", -1)],
+            "name": "idx_consistency_status_time",
+        },
+    ],
     # Historical backfill is a research-only namespace.  These indexes are
     # create-only and intentionally do not touch PR-006 execution/account
     # collections or PR-003 production snapshots/results.

@@ -11,7 +11,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from bson import decode_file_iter
+from bson import BSON, decode_file_iter
 from pymongo import MongoClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +19,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.core.config import settings  # noqa: E402
-from scripts.alphaguard_backup import BACKUP_COLLECTIONS  # noqa: E402
+from scripts.alphaguard_backup import (  # noqa: E402
+    BACKUP_COLLECTIONS,
+    load_manifest,
+    verify_backup,
+)
 
 
 def _sha256(path: Path) -> str:
@@ -31,18 +35,38 @@ def _sha256(path: Path) -> str:
 
 
 def _load_manifest(source: Path) -> dict:
-    manifest_path = source.resolve() / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("format") != "alphaguard-bson-stream-v1":
-        raise RuntimeError("unsupported backup format")
-    names = tuple(sorted(manifest.get("collections", {})))
-    if names != BACKUP_COLLECTIONS:
-        raise RuntimeError("backup collection scope does not match this release")
-    for name, metadata in manifest["collections"].items():
-        path = source / metadata["file"]
-        if not path.is_file() or _sha256(path) != metadata["sha256"]:
-            raise RuntimeError(f"backup integrity failure: {name}")
-    return manifest
+    verify_backup(source)
+    return load_manifest(source)
+
+
+def _restore_bson_stream(
+    collection,
+    path: Path,
+    *,
+    max_documents: int = 100,
+    max_bytes: int = 8 * 1024 * 1024,
+) -> int:
+    """Restore bounded batches so large collections cannot exhaust memory."""
+    restored = 0
+    batch = []
+    batch_bytes = 0
+    with path.open("rb") as handle:
+        for document in decode_file_iter(handle):
+            document_size = len(BSON.encode(document))
+            if batch and (
+                len(batch) >= max_documents
+                or batch_bytes + document_size > max_bytes
+            ):
+                collection.insert_many(batch, ordered=True)
+                restored += len(batch)
+                batch = []
+                batch_bytes = 0
+            batch.append(document)
+            batch_bytes += document_size
+        if batch:
+            collection.insert_many(batch, ordered=True)
+            restored += len(batch)
+    return restored
 
 
 def run(
@@ -52,6 +76,8 @@ def run(
     execute: bool,
     overwrite_current: bool,
     confirmation: str | None,
+    drill: bool = False,
+    client_factory=MongoClient,
 ) -> int:
     source = source.expanduser().resolve()
     manifest = _load_manifest(source)
@@ -68,6 +94,8 @@ def run(
             )
     elif overwrite_current:
         raise RuntimeError("--overwrite-current only applies to the configured database")
+    if drill and is_current:
+        raise RuntimeError("restore drill is only allowed for an isolated database")
     print(
         f"backup_source_database={source_database} "
         f"target_database={target_database} collections={len(BACKUP_COLLECTIONS)}"
@@ -77,7 +105,7 @@ def run(
         print("dry-run: no database writes; pass --execute to restore")
         return 0
 
-    client = MongoClient(settings.MONGO_URI, serverSelectionTimeoutMS=5000)
+    client = client_factory(settings.MONGO_URI, serverSelectionTimeoutMS=5000)
     try:
         client.admin.command("ping")
         db = client[target_database]
@@ -90,16 +118,35 @@ def run(
             if is_current:
                 db[name].delete_many({})
             path = source / manifest["collections"][name]["file"]
-            with path.open("rb") as handle:
-                documents = list(decode_file_iter(handle))
-            if documents:
-                db[name].insert_many(documents, ordered=True)
-            print(f"restored {name} count={len(documents)}")
+            restored = _restore_bson_stream(db[name], path)
+            print(f"restored {name} count={restored}")
+        restored_counts = {
+            name: db[name].count_documents({}) for name in BACKUP_COLLECTIONS
+        }
+        expected_counts = {
+            name: int(manifest["collections"][name]["count"])
+            for name in BACKUP_COLLECTIONS
+        }
+        if restored_counts != expected_counts:
+            raise RuntimeError("restore count verification failed")
         print(
             "restore_complete; run scripts/verify_champion_assignments.py and "
             "scripts/alphaguard_readiness_report.py before use"
         )
+        if drill:
+            print(
+                "restore_drill=PASS target_database="
+                f"{target_database} collections={len(restored_counts)}"
+            )
         return 0
+    except Exception:
+        if not is_current and hasattr(client, "drop_database"):
+            client.drop_database(target_database)
+            print(
+                "restore_failed_isolated_cleanup=complete "
+                f"target_database={target_database}"
+            )
+        raise
     finally:
         client.close()
 
@@ -114,6 +161,7 @@ if __name__ == "__main__":
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--overwrite-current", action="store_true")
     parser.add_argument("--confirmation")
+    parser.add_argument("--drill", action="store_true")
     args = parser.parse_args()
     raise SystemExit(
         run(
@@ -122,5 +170,6 @@ if __name__ == "__main__":
             execute=args.execute,
             overwrite_current=args.overwrite_current,
             confirmation=args.confirmation,
+            drill=args.drill,
         )
     )

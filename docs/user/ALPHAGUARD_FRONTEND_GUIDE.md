@@ -157,6 +157,11 @@ API Key输入框为password、不自动填充；组件状态在网络请求开�
 浏览器也不会直接访问OpenAI或第三方Provider。后端使用数据库中的`is_admin`执行最终
 权限判断，接收Secret后只在请求和Provider传输内存中短暂使用。
 
+页面顶部新增中文“MVP 验收状态”，集中显示候选池、推荐、数据、Snapshot、Factor、Regime、
+策略、TradingAgents、双模型、Consensus、HardRisk、模拟账户、订单、评价、实验、Challenger、
+前端、Operations、通知、调度、备份和安全门禁。技术 ID、Hash、版本与错误码只在“高级信息”中
+展示。通知区域显示连接状态、最后成功时间、重试次数和降级状态；通知故障不会显示为核心交易故障。
+
 ### 使用本机Keychain配置模型Provider
 
 完整Compose后端在容器中运行，无法访问宿主macOS Keychain，所以容器入口会显示
@@ -233,26 +238,30 @@ Base URL必须是HTTPS且解析到公网地址。后端会检查输入URL、DNS�
 - Proposal 存在但没有模型结果：查看 Proposal 是否 `TRIGGERED`，以及模型供应商健康状态。
 - HardRisk `PASS` 但没有订单：继续检查执行安全门、幂等身份和下一交易日。
 - 演示页无法写入：这是设计边界；切换真实环境也只能使用已有的受控管理员接口。
+- 通知显示降级：仍可使用推荐、候选、决策和模拟交易页面；实时连接最多重试6次。
+- 每日任务中断：管理员先查看运维中心，再按每日手册用同一日期执行`--status`和`--resume`。
 
 验收截图位于 [`docs/ux/screenshots`](../ux/screenshots/)。生产运维细节见
-[`ALPHAGUARD_RUNBOOK.md`](../operations/ALPHAGUARD_RUNBOOK.md)。
+[`ALPHAGUARD_RUNBOOK.md`](../operations/ALPHAGUARD_RUNBOOK.md)。日常操作、备份和故障处理见
+[每日运行手册](ALPHAGUARD_DAILY_OPERATIONS.md)、
+[备份与恢复](ALPHAGUARD_BACKUP_RESTORE.md)和
+[故障排查](ALPHAGUARD_TROUBLESHOOTING.md)。
 
 ## 已验收边界
 
 `alphaguard-frontend-acceptance-v1` 已通过真实浏览器验收。登录、退出、路由保护、总览、
-五个候选及详情、完整决策时间线、三个自动模拟账户、T+1 lot、Fill与费用、评价筛选、
+五个候选及详情、完整决策时间线、四个自动模拟账户、T+1 lot、Fill与费用、评价筛选、
 实验泄漏失败、禁用晋升、运维告警、404和API异常提示均已实际操作验证。
 
 演示数据库只包含一条确定性 fixture；生产 Candidate、Snapshot、Proposal、账户、订单、
 Fill、持仓和评价数量在演示前后保持不变。Demo 顶部横幅不可关闭，演示 API 不启动
 Scheduler/Worker，也不提供生产写入口。演示数据不得用于投资判断或正式评价结论。
 
-当前生产状态为 `DEGRADED_PAPER`，`CHALLENGER_READY=false`、`LIVE_READY=false`。
+当前安全边界保持 `ACTIVE_CHALLENGER=false`、`AUTO_CANDIDATE_ACCEPT=false`、`LIVE_READY=false`。
 FastAPI和两个Worker继续在live配置下fail-closed。前端类型安全检查点
 `alphaguard-frontend-type-safe` 已清除原34个 `DefaultRow TS2345`，正式
 `npm run type-check`、`npm run build` 和 `npx vite build` 均通过。
 
-模型运行时当前为Level A准备态：Profile、Prompt、Credential引用、能力探测、预算、
-审计、严格结构化输出和前端可见性已就绪；三个真实Profile的供应商访问探测均返回脱敏的
-认证失败，因此未执行付费结构化生成，也没有真实Normal→Top结果。Demo的模型状态是
-`STRUCTURAL_FIXTURE_ONLY`，不属于真实模型效果或生产数据。
+模型运行时已完成 PR-010 Level B 真实 Normal、Top、Consensus 与 HardRisk 路径验证。日常运行
+仍由自然 Proposal、Profile、Prompt、Credential、价格、预算和结构化输出门禁共同控制；没有触发
+时不会调用模型。Demo 的模型状态是 `STRUCTURAL_FIXTURE_ONLY`，不属于真实模型效果或生产数据。

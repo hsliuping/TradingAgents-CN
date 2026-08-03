@@ -154,13 +154,20 @@ class ProductionObservationService:
         cutoff_at: datetime,
         execute: bool,
         trace_id: str,
+        minimum_symbols: int = 3,
+        maximum_symbols: int = 5,
     ) -> dict[str, Any]:
         normalized = sorted(
             {normalize_instrument(symbol, "CN")[1] for symbol in symbols}
         )
-        if not 3 <= len(normalized) <= 5:
+        if not 1 <= minimum_symbols <= maximum_symbols <= 50:
             raise ProductionObservationError(
-                "production observation requires the 3 to 5 selected candidates"
+                "production observation symbol bounds must be within 1..50"
+            )
+        if not minimum_symbols <= len(normalized) <= maximum_symbols:
+            raise ProductionObservationError(
+                "production observation requires "
+                f"{minimum_symbols} to {maximum_symbols} selected candidates"
             )
         if cutoff_at.date() != trade_date or cutoff_at.hour < 15:
             raise ProductionObservationError(

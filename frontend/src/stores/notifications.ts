@@ -3,30 +3,68 @@ import { ref, computed } from 'vue'
 import { notificationsApi, type NotificationItem } from '@/api/notifications'
 import { useAuthStore } from '@/stores/auth'
 
+export type NotificationConnectionStatus =
+  | 'DISCONNECTED'
+  | 'CONNECTING'
+  | 'CONNECTED'
+  | 'RETRYING'
+  | 'DEGRADED'
+  | 'UNAUTHENTICATED'
+  | 'FORBIDDEN'
+  | 'SERVICE_UNAVAILABLE'
+
+const WS_PROTOCOL = 'alphaguard.notifications.v1'
+
 export const useNotificationStore = defineStore('notifications', () => {
   const items = ref<NotificationItem[]>([])
   const unreadCount = ref(0)
   const loading = ref(false)
   const drawerVisible = ref(false)
-
-  // 🔥 WebSocket 连接状态
   const ws = ref<WebSocket | null>(null)
-  const wsConnected = ref(false)
-  let wsReconnectTimer: any = null
-  let wsReconnectAttempts = 0
-  const maxReconnectAttempts = 10  // 增加重连次数
+  const connectionStatus = ref<NotificationConnectionStatus>('DISCONNECTED')
+  const lastSuccessAt = ref<string | null>(null)
+  const retryCount = ref(0)
+  const degradedMessage = ref('')
+  const restServiceStatus = ref<'READY' | 'DEGRADED' | 'UNKNOWN'>('UNKNOWN')
+  let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let connectionGeneration = 0
+  let manuallyDisconnected = false
+  const maxReconnectAttempts = 6
 
-  // 连接状态
-  const connected = computed(() => wsConnected.value)
-
+  const connected = computed(() => connectionStatus.value === 'CONNECTED')
+  const wsConnected = connected
+  const degraded = computed(() =>
+    restServiceStatus.value === 'DEGRADED'
+    || ['DEGRADED', 'SERVICE_UNAVAILABLE'].includes(connectionStatus.value)
+  )
   const hasUnread = computed(() => unreadCount.value > 0)
+
+  function classifyHttpFailure(error: any) {
+    const status = Number(error?.response?.status || 0)
+    if (status === 401) {
+      connectionStatus.value = 'UNAUTHENTICATED'
+      degradedMessage.value = '登录已失效，通知已停止；核心功能不受影响。'
+    } else if (status === 403) {
+      connectionStatus.value = 'FORBIDDEN'
+      degradedMessage.value = '当前账号无通知权限；核心功能不受影响。'
+    } else {
+      connectionStatus.value = connectionStatus.value === 'CONNECTED' ? 'CONNECTED' : 'SERVICE_UNAVAILABLE'
+      degradedMessage.value = '通知服务暂不可用，页面与交易安全链可继续使用。'
+    }
+    restServiceStatus.value = 'DEGRADED'
+  }
 
   async function refreshUnreadCount() {
     try {
       const res = await notificationsApi.getUnreadCount()
       unreadCount.value = res?.data?.count ?? 0
-    } catch {
-      // noop
+      restServiceStatus.value = res?.data?.service_status || 'READY'
+      if (restServiceStatus.value === 'DEGRADED') {
+        degradedMessage.value = res.message || '通知未读数暂不可用，已安全显示为0。'
+      }
+    } catch (error) {
+      unreadCount.value = 0
+      classifyHttpFailure(error)
     }
   }
 
@@ -35,198 +73,158 @@ export const useNotificationStore = defineStore('notifications', () => {
     try {
       const res = await notificationsApi.getList({ status, page: 1, page_size: 20 })
       items.value = res?.data?.items ?? []
-    } catch {
+      restServiceStatus.value = res?.data?.service_status || 'READY'
+      if (restServiceStatus.value === 'DEGRADED') {
+        degradedMessage.value = '通知列表暂不可用，核心功能不受影响。'
+      }
+    } catch (error) {
       items.value = []
+      classifyHttpFailure(error)
     } finally {
       loading.value = false
     }
   }
 
   async function markRead(id: string) {
-    await notificationsApi.markRead(id)
-    const idx = items.value.findIndex(x => x.id === id)
-    if (idx !== -1) items.value[idx].status = 'read'
-    if (unreadCount.value > 0) unreadCount.value -= 1
+    try {
+      await notificationsApi.markRead(id)
+      const idx = items.value.findIndex(x => x.id === id)
+      if (idx !== -1) items.value[idx].status = 'read'
+      if (unreadCount.value > 0) unreadCount.value -= 1
+    } catch (error) {
+      classifyHttpFailure(error)
+    }
   }
 
   async function markAllRead() {
-    await notificationsApi.markAllRead()
-    items.value = items.value.map(x => ({ ...x, status: 'read' }))
-    unreadCount.value = 0
+    try {
+      await notificationsApi.markAllRead()
+      items.value = items.value.map(x => ({ ...x, status: 'read' }))
+      unreadCount.value = 0
+    } catch (error) {
+      classifyHttpFailure(error)
+    }
   }
 
   function addNotification(n: Omit<NotificationItem, 'id' | 'status' | 'created_at'> & { id?: string; created_at?: string; status?: 'unread' | 'read' }) {
     const id = n.id || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const created_at = n.created_at || new Date().toISOString()
-    const item: NotificationItem = {
-      id,
-      title: n.title,
-      content: n.content,
-      type: n.type,
-      status: n.status ?? 'unread',
-      created_at,
-      link: n.link,
-      source: n.source
-    }
+    const item: NotificationItem = { ...n, id, created_at, status: n.status ?? 'unread' }
     items.value.unshift(item)
     if (item.status === 'unread') unreadCount.value += 1
   }
 
-  // 🔥 连接 WebSocket（优先）
-  function connectWebSocket() {
-    try {
-      // 若已存在连接，先关闭
-      if (ws.value) {
-        try { ws.value.close() } catch {}
-        ws.value = null
-      }
-      if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null }
+  function clearReconnectTimer() {
+    if (wsReconnectTimer) clearTimeout(wsReconnectTimer)
+    wsReconnectTimer = null
+  }
 
-      const authStore = useAuthStore()
-      const token = authStore.token || localStorage.getItem('auth-token') || ''
-      if (!token) {
-        console.warn('[WS] 未找到 token，无法连接 WebSocket')
+  function scheduleReconnect(generation: number) {
+    if (manuallyDisconnected || generation !== connectionGeneration) return
+    if (retryCount.value >= maxReconnectAttempts) {
+      connectionStatus.value = 'DEGRADED'
+      degradedMessage.value = '通知实时连接重试已停止；仍可手动刷新，核心功能不受影响。'
+      return
+    }
+    const delay = Math.min(1000 * 2 ** retryCount.value, 30000)
+    connectionStatus.value = 'RETRYING'
+    retryCount.value += 1
+    clearReconnectTimer()
+    wsReconnectTimer = setTimeout(() => {
+      if (generation === connectionGeneration && !manuallyDisconnected) connectWebSocket(false)
+    }, delay)
+  }
+
+  function connectWebSocket(resetAttempts = true) {
+    const authStore = useAuthStore()
+    const token = authStore.token || localStorage.getItem('auth-token') || ''
+    connectionGeneration += 1
+    const generation = connectionGeneration
+    manuallyDisconnected = false
+    clearReconnectTimer()
+    if (resetAttempts) retryCount.value = 0
+    if (ws.value) {
+      const previous = ws.value
+      ws.value = null
+      try { previous.close(1000, 'REPLACED') } catch {}
+    }
+    if (!token) {
+      connectionStatus.value = 'UNAUTHENTICATED'
+      degradedMessage.value = '未登录，通知连接未启动。'
+      return
+    }
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${wsProtocol}//${window.location.host}/api/ws/notifications`
+    connectionStatus.value = 'CONNECTING'
+    const socket = new WebSocket(wsUrl, [WS_PROTOCOL, `auth.${token}`])
+    ws.value = socket
+
+    socket.onopen = () => {
+      if (generation !== connectionGeneration) return
+      connectionStatus.value = 'CONNECTED'
+      lastSuccessAt.value = new Date().toISOString()
+      retryCount.value = 0
+      degradedMessage.value = ''
+    }
+    socket.onclose = event => {
+      if (generation !== connectionGeneration) return
+      ws.value = null
+      if (manuallyDisconnected || event.code === 1000) {
+        connectionStatus.value = 'DISCONNECTED'
         return
       }
-
-      // WebSocket 连接地址
-      // 🔥 统一使用当前访问的服务器地址（开发环境通过 Vite 代理，生产环境通过 Nginx 代理）
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = window.location.host
-      const wsUrl = `${wsProtocol}//${host}/api/ws/notifications?token=${encodeURIComponent(token)}`
-
-      console.log('[WS] 连接到:', wsUrl)
-
-      const socket = new WebSocket(wsUrl)
-      ws.value = socket
-
-      socket.onopen = () => {
-        console.log('[WS] 连接成功')
-        wsConnected.value = true
-        wsReconnectAttempts = 0
+      if (event.code === 4401 || event.code === 1008) {
+        connectionStatus.value = 'UNAUTHENTICATED'
+        degradedMessage.value = '通知鉴权失败，请重新登录；核心功能不受影响。'
+        return
       }
-
-      socket.onclose = (event) => {
-        console.log('[WS] 连接关闭:', event.code, event.reason)
-        wsConnected.value = false
-        ws.value = null
-
-        // 自动重连
-        if (wsReconnectAttempts < maxReconnectAttempts) {
-          const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000)
-          console.log(`[WS] ${delay}ms 后重连 (尝试 ${wsReconnectAttempts + 1}/${maxReconnectAttempts})`)
-
-          wsReconnectTimer = setTimeout(() => {
-            wsReconnectAttempts++
-            connectWebSocket()
-          }, delay)
-        } else {
-          console.error('[WS] 达到最大重连次数，停止重连')
+      if (event.code === 4403) {
+        connectionStatus.value = 'FORBIDDEN'
+        degradedMessage.value = '当前账号无通知权限；核心功能不受影响。'
+        return
+      }
+      connectionStatus.value = 'SERVICE_UNAVAILABLE'
+      degradedMessage.value = '通知实时连接中断，正在有限重试。'
+      scheduleReconnect(generation)
+    }
+    socket.onerror = () => {
+      if (generation === connectionGeneration) connectionStatus.value = 'SERVICE_UNAVAILABLE'
+    }
+    socket.onmessage = event => {
+      if (generation !== connectionGeneration) return
+      try {
+        const message = JSON.parse(event.data)
+        if (message.type === 'connected' || message.type === 'heartbeat') {
+          lastSuccessAt.value = new Date().toISOString()
+        } else if (message.type === 'notification' && message.data?.title && message.data?.type) {
+          addNotification({ ...message.data, status: message.data.status || 'unread' })
         }
+      } catch {
+        degradedMessage.value = '收到无法识别的通知消息，已忽略。'
       }
-
-      socket.onerror = (error) => {
-        console.error('[WS] 连接错误:', error)
-        wsConnected.value = false
-      }
-
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data)
-          handleWebSocketMessage(message)
-        } catch (error) {
-          console.error('[WS] 解析消息失败:', error)
-        }
-      }
-    } catch (error) {
-      console.error('[WS] 连接失败:', error)
-      wsConnected.value = false
     }
   }
 
-  // 处理 WebSocket 消息
-  function handleWebSocketMessage(message: any) {
-    console.log('[WS] 收到消息:', message)
-
-    switch (message.type) {
-      case 'connected':
-        console.log('[WS] 连接确认:', message.data)
-        break
-
-      case 'notification':
-        // 处理通知
-        if (message.data && message.data.title && message.data.type) {
-          addNotification({
-            id: message.data.id,
-            title: message.data.title,
-            content: message.data.content,
-            type: message.data.type,
-            link: message.data.link,
-            source: message.data.source,
-            created_at: message.data.created_at,
-            status: message.data.status || 'unread'
-          })
-        }
-        break
-
-      case 'heartbeat':
-        // 心跳消息，无需处理
-        break
-
-      default:
-        console.warn('[WS] 未知消息类型:', message.type)
-    }
-  }
-
-  // 断开 WebSocket
   function disconnectWebSocket() {
-    if (wsReconnectTimer) {
-      clearTimeout(wsReconnectTimer)
-      wsReconnectTimer = null
-    }
-
+    manuallyDisconnected = true
+    connectionGeneration += 1
+    clearReconnectTimer()
     if (ws.value) {
-      try { ws.value.close() } catch {}
+      try { ws.value.close(1000, 'CLIENT_DISCONNECT') } catch {}
       ws.value = null
     }
-
-    wsConnected.value = false
-    wsReconnectAttempts = 0
+    connectionStatus.value = 'DISCONNECTED'
+    retryCount.value = 0
   }
 
-  // 🔥 连接 WebSocket
-  function connect() {
-    console.log('[Notifications] 开始连接...')
-    connectWebSocket()
-  }
-
-  // 🔥 断开 WebSocket
-  function disconnect() {
-    console.log('[Notifications] 断开连接...')
-    disconnectWebSocket()
-  }
-
-  function setDrawerVisible(v: boolean) {
-    drawerVisible.value = v
-  }
+  function connect() { connectWebSocket(true) }
+  function disconnect() { disconnectWebSocket() }
+  function setDrawerVisible(v: boolean) { drawerVisible.value = v }
 
   return {
-    items,
-    unreadCount,
-    hasUnread,
-    loading,
-    drawerVisible,
-    connected,
-    wsConnected,
-    refreshUnreadCount,
-    loadList,
-    markRead,
-    markAllRead,
-    addNotification,
-    connect,
-    disconnect,
-    connectWebSocket,
-    disconnectWebSocket,
-    setDrawerVisible
+    items, unreadCount, hasUnread, loading, drawerVisible, connected, wsConnected,
+    connectionStatus, lastSuccessAt, retryCount, degraded, degradedMessage, restServiceStatus,
+    refreshUnreadCount, loadList, markRead, markAllRead, addNotification,
+    connect, disconnect, connectWebSocket, disconnectWebSocket, setDrawerVisible
   }
 })
