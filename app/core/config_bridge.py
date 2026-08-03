@@ -45,6 +45,12 @@ def bridge_config_to_env():
             os.environ["MONGODB_CONNECTION_STRING"] = mongodb_conn_str
             logger.info(f"  ✓ 桥接 MONGODB_CONNECTION_STRING (长度: {len(mongodb_conn_str)})")
             bridged_count += 1
+        else:
+            # 自动从 MONGODB_HOST/PORT/USERNAME/PASSWORD 构建
+            from app.core.config import settings
+            os.environ["MONGODB_CONNECTION_STRING"] = settings.MONGO_URI
+            logger.info(f"  ✓ 自动构建 MONGODB_CONNECTION_STRING from MONGO_URI")
+            bridged_count += 1
 
         # 桥接 MongoDB 数据库名称
         from app.core.config import settings

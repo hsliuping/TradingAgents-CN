@@ -24,6 +24,11 @@ _PASSTHROUGH_KWARGS = (
     "http_async_client",
 )
 
+# 🔧 默认超时时间（秒）—— 推理模型可能需要长时间思考
+DEFAULT_TIMEOUT = 300
+# 🔧 默认重试次数
+DEFAULT_MAX_RETRIES = 2
+
 _PROVIDER_CONFIG = {
     "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
     "qwen": ("https://dashscope.aliyuncs.com/compatible-mode/v1", "DASHSCOPE_API_KEY"),
@@ -31,6 +36,8 @@ _PROVIDER_CONFIG = {
     "qianfan": ("https://qianfan.baidubce.com/v2", "QIANFAN_API_KEY"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
     "aihubmix": ("https://aihubmix.com/v1", "AIHUBMIX_API_KEY"),
+    "volcengine": ("https://ark.cn-beijing.volces.com/api/v3", "VOLCENGINE_API_KEY"),
+    "volcengine_coding": ("https://ark.cn-beijing.volces.com/api/coding/v3", "VOLCENGINE_CODING_API_KEY"),
     "ollama": ("http://localhost:11434/v1", None),
     "custom_openai": (None, "CUSTOM_OPENAI_API_KEY"),
     "atlascloud": ("https://api.atlascloud.ai/v1", ("ATLASCLOUD_API_KEY", "ATLAS_CLOUD_API_KEY")),
@@ -86,6 +93,30 @@ class OpenAIClient(BaseLLMClient):
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
+
+        # 🔧 设置默认超时和重试参数
+        if "timeout" not in llm_kwargs:
+            llm_kwargs["timeout"] = DEFAULT_TIMEOUT
+        if "max_retries" not in llm_kwargs:
+            llm_kwargs["max_retries"] = DEFAULT_MAX_RETRIES
+
+        # 🔧 reasoning_effort: 火山方舟推理模型支持，控制思考深度
+        # 取值: none / minimal / low / medium / high / xhigh / max
+        # 通过 model_kwargs 传递，最终会加到 API 请求体中
+        model_kwargs = {}
+        if "reasoning_effort" in self.kwargs and self.kwargs["reasoning_effort"]:
+            model_kwargs["reasoning_effort"] = self.kwargs["reasoning_effort"]
+        if model_kwargs:
+            llm_kwargs["model_kwargs"] = model_kwargs
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"🔧 [OpenAIClient] provider={self.provider}, model={self.model}, "
+            f"timeout={llm_kwargs.get('timeout')}, max_retries={llm_kwargs.get('max_retries')}"
+        )
+        if model_kwargs:
+            logger.info(f"🔧 [OpenAIClient] model_kwargs={model_kwargs}")
 
         return NormalizedChatOpenAI(**llm_kwargs)
 

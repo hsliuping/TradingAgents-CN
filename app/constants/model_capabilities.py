@@ -416,6 +416,26 @@ AGGREGATOR_PROVIDERS = {
         "model_name_format": "{model}",
         "supported_providers": ["openai", "anthropic", "google", "deepseek", "qwen"]
     },
+    "volcengine": {
+        "display_name": "火山方舟",
+        "description": "火山方舟 Agent Plan 模型订阅套餐集成了包含 Doubao-Seed、Doubao-Seedance、Doubao-Seedream 等在内的字节跳动自研 SOTA 级模型，覆盖文本、代码、图像、视频等多模态任务。最新支持 MiniMax-M3、DeepSeek-V4 系列、GLM-5.2、Doubao-Seed-2.0 系列、Kimi-K2.7 等模型，工具不限。超全模态模型与 Harness 升级一步到位，深度支持 Agent 框架与 AI 编程工具。一次订阅，可以为不同任务切换合适的 AI 引擎。",
+        "website": "https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=TradingAgents-CN",
+        "api_doc_url": "https://ark.volcengine.com/docs",
+        "default_base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "model_name_format": "{model}",
+        "supported_providers": ["doubao", "minimax", "deepseek", "glm", "kimi"],
+        "default_embedding_model": "doubao-seed-evolving"
+    },
+    "volcengine_coding": {
+        "display_name": "火山方舟编程",
+        "description": "火山方舟 Coding Plan 是为开发者量身定制的 AI 编程订阅服务，支持 Doubao-Seed-Code、DeepSeek-V4 系列、GLM-5.2、Kimi-K2.7 等主流编程模型按需切换。兼容 Claude Code、Cursor、Cline、OpenCode、TRAE 等主流编程工具，套餐额度共享。提供 Lite（40元/月）和 Pro（200元/月）两档套餐。注意：Coding Plan 仅限 AI 编程工具使用，Base URL 与 Agent Plan 不同。",
+        "website": "https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=TradingAgents-CN",
+        "api_doc_url": "https://www.volcengine.com/docs/82379/1925114",
+        "default_base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "model_name_format": "{model}",
+        "supported_providers": ["doubao", "deepseek", "glm", "kimi", "minimax"],
+        "default_embedding_model": "doubao-embedding-vision"
+    },
     "oneapi": {
         "display_name": "One API",
         "description": "One API 开源聚合平台",

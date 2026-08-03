@@ -5,7 +5,17 @@ import warnings
 
 def normalize_content(response):
     """Normalize typed content blocks returned by some providers to plain text."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # 打印完整响应对象的结构，帮助调试
+    logger.debug(f"[normalize_content] 原始响应对象: type={type(response)}, dir={dir(response)}")
+    if hasattr(response, '__dict__'):
+        logger.debug(f"[normalize_content] 响应对象内容: {response.__dict__}")
+    
     content = getattr(response, "content", None)
+    logger.debug(f"[normalize_content] 原始 content: type={type(content)}, value={content}")
+    
     if isinstance(content, list):
         texts = [
             item.get("text", "") if isinstance(item, dict) and item.get("type") == "text"
@@ -13,6 +23,7 @@ def normalize_content(response):
             for item in content
         ]
         response.content = "\n".join(text for text in texts if text)
+        logger.debug(f"[normalize_content] 处理后的 content: {response.content}")
     return response
 
 

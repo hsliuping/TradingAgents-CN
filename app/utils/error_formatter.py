@@ -41,6 +41,8 @@ class ErrorFormatter:
         "openai": "OpenAI",
         "openrouter": "OpenRouter",
         "aihubmix": "AiHubMix",
+        "volcengine": "火山方舟",
+        "volcengine_coding": "火山方舟编程",
         "anthropic": "Anthropic Claude",
         "glm": "智谱AI",
         "zhipu": "智谱AI",

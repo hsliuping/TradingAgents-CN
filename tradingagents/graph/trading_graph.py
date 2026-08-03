@@ -58,8 +58,9 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     normalized_provider = normalize_provider_key(provider)
 
     if normalized_provider in {
-        "openai", "siliconflow", "openrouter", "aihubmix", "ollama",
-        "deepseek", "qwen", "glm", "custom_openai", "qianfan", "atlascloud",
+        "openai", "siliconflow", "openrouter", "aihubmix", "volcengine",
+        "volcengine_coding", "ollama", "deepseek", "qwen", "glm",
+        "custom_openai", "qianfan", "atlascloud",
     }:
         if not api_key:
             if normalized_provider == "siliconflow":
@@ -239,6 +240,18 @@ class TradingAgentsGraph:
         deep_temperature = deep_config.get("temperature", 0.7)
         deep_timeout = deep_config.get("timeout", 180)
 
+        # 🔧 reasoning_effort: 火山方舟推理模型思考深度控制
+        quick_reasoning_effort = quick_config.get("reasoning_effort")
+        deep_reasoning_effort = deep_config.get("reasoning_effort")
+
+        # 构建 extra_kwargs，统一传递 reasoning_effort
+        _quick_extra = {}
+        _deep_extra = {}
+        if quick_reasoning_effort:
+            _quick_extra["reasoning_effort"] = quick_reasoning_effort
+        if deep_reasoning_effort:
+            _deep_extra["reasoning_effort"] = deep_reasoning_effort
+
         # 🔧 检查是否为混合模式（快速模型和深度模型来自不同厂家）
         quick_provider = self.config.get("quick_provider")
         deep_provider = self.config.get("deep_provider")
@@ -262,7 +275,8 @@ class TradingAgentsGraph:
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
                 timeout=quick_timeout,
-                api_key=self.config.get("quick_api_key")  # 🔥 传递 API Key
+                api_key=self.config.get("quick_api_key"),  # 🔥 传递 API Key
+                **_quick_extra,
             )
 
             self.deep_thinking_llm = create_llm_by_provider(
@@ -272,12 +286,16 @@ class TradingAgentsGraph:
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout,
-                api_key=self.config.get("deep_api_key")  # 🔥 传递 API Key
+                api_key=self.config.get("deep_api_key"),  # 🔥 传递 API Key
+                **_deep_extra,
             )
 
             logger.info(f"✅ [混合模式] LLM 实例创建成功")
 
-        elif normalized_provider in {"openai", "siliconflow", "openrouter", "aihubmix", "ollama", "atlascloud"}:
+        elif normalized_provider in {
+            "openai", "siliconflow", "openrouter", "aihubmix", "volcengine",
+            "volcengine_coding", "ollama", "atlascloud",
+        }:
             provider = normalized_provider
             logger.info(f"🔧 [{provider}-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [{provider}-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
@@ -295,6 +313,14 @@ class TradingAgentsGraph:
                 api_key = os.getenv('AIHUBMIX_API_KEY')
                 if not api_key:
                     raise ValueError("使用AiHubMix需要设置AIHUBMIX_API_KEY环境变量")
+            elif provider == "volcengine":
+                api_key = os.getenv('VOLCENGINE_API_KEY') or os.getenv('ARK_API_KEY')
+                if not api_key:
+                    raise ValueError("使用火山方舟需要设置VOLCENGINE_API_KEY或ARK_API_KEY环境变量")
+            elif provider == "volcengine_coding":
+                api_key = os.getenv('VOLCENGINE_CODING_API_KEY')
+                if not api_key:
+                    raise ValueError("使用火山方舟编程需要设置VOLCENGINE_CODING_API_KEY环境变量")
             elif provider == "atlascloud":
                 api_key = next(
                     (os.getenv(env_key) for env_key in env_keys_for_provider("atlascloud") if os.getenv(env_key)),
@@ -316,6 +342,8 @@ class TradingAgentsGraph:
                 deep_timeout=deep_timeout,
                 backend_url=self.config["backend_url"],
                 api_key=api_key,
+                quick_extra_kwargs=_quick_extra if _quick_extra else None,
+                deep_extra_kwargs=_deep_extra if _deep_extra else None,
             )
         elif normalized_provider == "anthropic":
             from langchain_anthropic import ChatAnthropic
@@ -358,6 +386,11 @@ class TradingAgentsGraph:
             else:
                 logger.info(f"🔧 [Google AI] 未配置 backend_url，使用默认端点")
 
+            # 合并 Google 特殊的 transport 参数和 reasoning_effort
+            _google_quick_extra = {"transport": "rest"}
+            if _quick_extra:
+                _google_quick_extra.update(_quick_extra)
+
             self.deep_thinking_llm, self.quick_thinking_llm = _create_provider_pair(
                 provider="google",
                 config=self.config,
@@ -369,7 +402,8 @@ class TradingAgentsGraph:
                 deep_timeout=deep_timeout,
                 backend_url=backend_url if backend_url else None,
                 api_key=google_api_key,
-                quick_extra_kwargs={"transport": "rest"},
+                quick_extra_kwargs=_google_quick_extra,
+                deep_extra_kwargs=_deep_extra if _deep_extra else None,
             )
 
             logger.info(f"✅ [Google AI] 已启用优化的工具调用和内容格式处理并应用用户配置的模型参数")
@@ -385,6 +419,8 @@ class TradingAgentsGraph:
                 deep_max_tokens=deep_max_tokens,
                 deep_timeout=deep_timeout,
                 backend_url=self.config.get("backend_url"),
+                quick_extra_kwargs=_quick_extra if _quick_extra else None,
+                deep_extra_kwargs=_deep_extra if _deep_extra else None,
             )
             logger.info("✅ [阿里百炼] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
         elif normalized_provider == "deepseek":
@@ -404,6 +440,8 @@ class TradingAgentsGraph:
                 deep_timeout=deep_timeout,
                 backend_url=deepseek_base_url,
                 api_key=deepseek_api_key,
+                quick_extra_kwargs=_quick_extra if _quick_extra else None,
+                deep_extra_kwargs=_deep_extra if _deep_extra else None,
             )
             logger.info("✅ [DeepSeek] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
         elif normalized_provider == "custom_openai":
@@ -424,6 +462,8 @@ class TradingAgentsGraph:
                 deep_timeout=deep_timeout,
                 backend_url=custom_base_url,
                 api_key=custom_api_key,
+                quick_extra_kwargs=_quick_extra if _quick_extra else None,
+                deep_extra_kwargs=_deep_extra if _deep_extra else None,
             )
             logger.info("✅ [自定义OpenAI] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
         elif normalized_provider == "qianfan":
@@ -439,6 +479,8 @@ class TradingAgentsGraph:
                 deep_temperature=deep_temperature,
                 deep_max_tokens=deep_max_tokens,
                 deep_timeout=deep_timeout,
+                quick_extra_kwargs=_quick_extra if _quick_extra else None,
+                deep_extra_kwargs=_deep_extra if _deep_extra else None,
             )
             logger.info("✅ [千帆] 文心一言适配器已配置成功并应用用户配置的模型参数")
         elif normalized_provider == "glm":
@@ -481,6 +523,8 @@ class TradingAgentsGraph:
                 deep_timeout=deep_timeout,
                 backend_url=backend_url,
                 api_key=zhipu_api_key,
+                quick_extra_kwargs=_quick_extra if _quick_extra else None,
+                deep_extra_kwargs=_deep_extra if _deep_extra else None,
             )
             
             logger.info("✅ [智谱AI] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")

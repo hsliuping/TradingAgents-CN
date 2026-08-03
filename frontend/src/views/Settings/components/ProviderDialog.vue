@@ -99,6 +99,16 @@
         />
       </el-form-item>
 
+      <el-form-item label="测试模型" prop="test_model">
+        <el-input
+          v-model="formData.test_model"
+          placeholder="API连接测试时使用的模型，如：gpt-3.5-turbo"
+        />
+        <div class="form-tip">
+          用于验证API密钥是否有效，选择稳定、成本低的模型
+        </div>
+      </el-form-item>
+
       <el-alert
         title="🔒 安全提示"
         type="info"
@@ -232,6 +242,28 @@ const openRegisterUrl = () => {
 
 // 预设厂家数据
 const presetProviders = [
+  {
+    name: 'volcengine',
+    display_name: '火山方舟',
+    description: '火山方舟集成了字节自研豆包模型+满血版开源 SOTA模型，覆盖文本、VLM、图像生成，全模态一站配齐：Seed-2.1、Seedream-5.0、GLM-5.2、DeepSeek等。不止编程、更能解决 Agent 复杂长程任务',
+    website: 'https://www.volcengine.com/product/ark?utm_campaign=hw&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN',
+    api_doc_url: 'https://docs.volcengine.com/docs/82379/2373738?lang=zh&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN',
+    default_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+    supported_features: ['chat', 'completion', 'embedding', 'image', 'vision', 'function_calling', 'streaming'],
+    register_url: 'https://www.volcengine.com/product/ark?utm_campaign=hw&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN',
+    register_guide: '如果您还没有火山方舟账号，请先注册并获取 API Key：'
+  },
+  {
+    name: 'volcengine_coding',
+    display_name: '火山方舟编程',
+    description: '火山方舟 Coding Plan 是为开发者量身定制的 AI 编程订阅服务，支持 Doubao-Seed-Code、DeepSeek-V4 系列、GLM-5.2、Kimi-K2.7 等主流编程模型按需切换。兼容 Claude Code、Cursor、Cline、OpenCode、TRAE 等主流编程工具，套餐额度共享。提供 Lite（40元/月）和 Pro（200元/月）两档套餐。注意：Coding Plan 仅限 AI 编程工具使用，Base URL 与 Agent Plan 不同。',
+    website: 'https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=TradingAgents-CN',
+    api_doc_url: 'https://www.volcengine.com/docs/82379/1925114',
+    default_base_url: 'https://ark.cn-beijing.volces.com/api/coding/v3',
+    supported_features: ['chat', 'completion', 'embedding', 'function_calling', 'streaming'],
+    register_url: 'https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=TradingAgents-CN',
+    register_guide: '如果您还没有火山方舟 Coding Plan 订阅，请先订阅并获取 API Key：'
+  },
   {
     name: 'aihubmix',
     display_name: 'AIHubMix',

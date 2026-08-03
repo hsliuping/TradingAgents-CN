@@ -104,6 +104,37 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Custom model ID", "custom"),
         ],
     },
+    "volcengine": {
+        "quick": [
+            ("Doubao-Seed-2.0-Lite", "doubao-seed-2.0-lite"),
+            ("Doubao-1.5-Lite-32k", "doubao-1.5-lite-32k"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("Doubao-Seed-2.0-Pro", "doubao-seed-2.1-pro-260628"),
+            ("Doubao-1.5-Pro-32k", "doubao-1.5-pro-32k"),
+            ("DeepSeek-V4", "deepseek-v4"),
+            ("GLM-5.2", "glm-5.2"),
+            ("Kimi-K2.7", "kimi-k2.7"),
+            ("MiniMax-M3", "minimax-m3"),
+            ("Custom model ID", "custom"),
+        ],
+    },
+    "volcengine_coding": {
+        "quick": [
+            ("Doubao-Seed-2.0-Code", "doubao-seed-2.0-code"),
+            ("DeepSeek-V4-Flash", "deepseek-v4-flash"),
+            ("Custom model ID", "custom"),
+        ],
+        "deep": [
+            ("Doubao-Seed-2.0-Pro", "doubao-seed-2.0-pro"),
+            ("DeepSeek-V4-Pro", "deepseek-v4-pro"),
+            ("GLM-5.2", "glm-5.2"),
+            ("Kimi-K2.7", "kimi-k2.7"),
+            ("MiniMax-M3", "minimax-m3"),
+            ("Custom model ID", "custom"),
+        ],
+    },
     "ollama": {
         "quick": [
             ("llama3.1", "llama3.1"),

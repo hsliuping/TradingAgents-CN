@@ -63,6 +63,16 @@ PROVIDER_OPTIONS: List[Dict[str, str]] = [
         "base_url": "https://aihubmix.com/v1",
     },
     {
+        "label": "火山方舟",
+        "key": "volcengine",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    },
+    {
+        "label": "火山方舟编程",
+        "key": "volcengine_coding",
+        "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+    },
+    {
         "label": "Ollama",
         "key": "ollama",
         "base_url": "http://localhost:11434/v1",

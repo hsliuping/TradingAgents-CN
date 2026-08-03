@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-v1.0.1-green.svg)](./VERSION)
+[![Version](https://img.shields.io/badge/Version-v1.1.0-green.svg)](./VERSION)
 [![Documentation](https://img.shields.io/badge/docs-中文文档-green.svg)](./docs/)
 [![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/TauricResearch/TradingAgents)
 
@@ -28,15 +28,22 @@
 
 ### 📋 版本授权说明
 
-#### v1.0.1（当前稳定版本）
+#### v1.1.0（已开源）
 - ✅ **个人使用**：完全开源，可自由使用
 - ❌ **商业使用**：**必须获得商业授权**，未经授权禁止商业使用
 - 📧 **授权联系**：[hsliup@163.com](mailto:hsliup@163.com)
 
-#### v2.0.0（开发中）
-- 🔄 **开发状态**：已完成两轮内测，接近完工上线阶段
-- ⚠️ **开源计划**：**因存在盗版问题，v2.0 版本暂时不进行开源**
-- 📢 **发布方式**：将通过官方渠道发布，敬请关注
+#### v2.0（即将开源）
+- 🔄 **开发状态**：已开发完成，稳定运行中
+- 🔓 **开源计划**：**v2.0 将完整开源**（Apache 2.0 + 商业使用限制条款）
+- 📢 **开源时间**：v3.0 正式发布后，v2.0 开源
+- ⚠️ **商业使用**：开源后商业使用仍需获得授权
+
+#### v3.0（即将发布）
+- 🎉 **开发状态**：开发完成，内测启动中
+- ✨ **新功能**：AI 工作流设计器、复盘研究、持仓研究、Skill 系统、智能助手等
+- 🚀 **版本定位**：最新版本，包含全部专业功能
+- 📧 **内测申请**：[hsliup@163.com](mailto:hsliup@163.com)
 
 ### 📄 许可证详情
 
@@ -45,6 +52,38 @@
 - 🔒 **专有部分**（需商业授权）：`app/`（FastAPI后端）和 `frontend/`（Vue前端）目录
 
 详细说明请查看：[版权声明](./COPYRIGHT.md) | [许可证文件](./LICENSE)
+
+### 🤝 贡献者招募
+
+我们正在寻找核心贡献者！贡献代码可获得 Pro 版授权和收入分成：
+- 合并 1 个 PR → Pro 版 3 个月授权
+- 合并 3 个 PR → Pro 版 1 年授权
+- 核心贡献者 → 永久授权 + 收入分成
+
+详见：[贡献指南](./docs/development/CONTRIBUTING.md)
+
+### ⚖️ 免责声明
+
+> **本工具仅提供数据分析，不构成任何投资建议。**
+> 投资有风险，决策需谨慎。分析结果由 AI 生成，仅供参考，用户需自行判断并承担投资风险。
+> 本平台不提供实盘交易指令，定位为学习与研究用途。
+
+### 🗺️ 项目路线图
+
+我们坚持**逐步开源**策略，旧版本会在新版本稳定后逐步开源：
+
+| 版本 | 状态 | 说明 |
+|------|------|------|
+| v1.0 | ✅ 已开源 | 基础功能，吸引社区参与 |
+| v2.0 | 🔓 即将开源 | 完整功能，建立用户习惯 |
+| v3.0 | 🚀 即将发布 | 最新版本，专业功能 |
+
+**开源承诺**：旧版本会逐步免费开源，使用最新版本的用户始终能获得最新的功能和优先支持。
+
+**长期方向**：
+- 持续完善 AI 多智能体分析能力
+- 探索策略回测、知识图谱等专业方向
+- 建设开源社区，欢迎贡献者参与
 
 ---
 
@@ -60,9 +99,9 @@
 
 **🎯 我们的定位与使命**: 专注学习与研究，提供中文化学习中心与工具，合规友好，支持 A股/港股/美股 的分析与教学，推动 AI 金融技术在中文社区的普及与正确使用。
 
-## 🎉 v1.0.1 版本说明 - 配置体验与同步稳定性增强
+## 🎉 v1.1.0 版本说明 - 火山方舟集成与开发体验增强
 
-> 🚀 **当前推荐版本**: `v1.0.1` 已正式可用，在 `v1.0.0-preview` 架构基础上，重点增强配置管理、聚合厂家、页面切换、单股同步和上游能力吸收。
+> 🚀 **当前推荐版本**: `v1.1.0` 已正式可用，在 v1.0.1 基础上，重点集成火山方舟模型服务、增强推理模型支持、统一开发启动脚本，并完善项目文档体系。
 
 ### ✨ 核心特性
 
@@ -72,14 +111,13 @@
 - **数据库优化**: MongoDB + Redis 双数据库架构，性能提升 10 倍
 - **容器化部署**: 完整的 Docker 多架构支持（amd64 + arm64）
 
-#### 🚀 **v1.0.1 重点增强**
-- **配置管理优化**: 新增厂家、模型目录和大模型配置支持按最新添加顺序置顶显示
-- **聚合厂家增强**: 新增 `AiHubMix` 聚合 LLM 厂家，并支持聚合渠道初始化能力
-- **模型选择统一排序**: 配置页、对话框和分析页中的模型列表顺序保持一致
-- **页面切换修复**: 股票详情页和报告详情页切换后会自动刷新正确内容
-- **单股同步增强**: 同步结果支持展示主链路、回退链路、失败原因和 `market_quotes` 落库状态
-- **AKShare 兜底增强**: 单股实时行情支持 `stock_bid_ask_em -> stock_zh_a_spot -> stock_zh_a_spot_em -> stock_zh_a_hist` 多级降级链
-- **上游能力同步**: 同步 `llm_clients`、共享模型目录、provider 规范键、图层初始化路径和数据库迁移增强等能力
+#### 🚀 **v1.1.0 重点增强**
+- **火山方舟集成**: 新增火山方舟（VolcEngine Ark）Provider，支持编程版模型硬编码配置与密码兼容
+- **推理模型优化**: `reasoning_effort` 全链路传递，推理模型超时保护优化
+- **数据模型扩展**: 添加 `reasoning_effort` / `test_model` 字段，支持火山方舟模型过滤
+- **统一启动脚本**: 新增 `start_dev.ps1`，支持 v1.0/v2.0/v2.1/v3.0 多版本开发环境一键启动
+- **连接修复**: MongoDB 连接字符串自动构建，Tushare 写 tk.csv 权限错误修复
+- **文档体系完善**: 更新版权声明与授权说明、贡献者指南（贡献换授权机制）、项目发展战略规划
 
 #### 🎯 **企业级功能**
 - **用户权限管理**: 完整的用户认证、角色管理、操作日志系统
@@ -111,7 +149,7 @@
 
 ### 📊 技术栈升级
 
-| 组件 | v0.1.x | v1.0.1 |
+| 组件 | v0.1.x | v1.1.0 |
 |------|--------|----------------|
 | **后端框架** | Streamlit | FastAPI + Uvicorn |
 | **前端框架** | Streamlit | Vue 3 + Vite + Element Plus |
@@ -137,9 +175,9 @@
 #### 📚 使用指南
 
 在使用前，建议先阅读详细的使用指南：
-- **[v1.0.1 发布说明](./docs/releases/v1.0.1-release-notes.md)**
-- **[v1.0.1 使用手册](./docs/guides/v1.0.1-user-manual.md)**
-- **[v1.0.1 升级指南](./docs/releases/upgrade-guide.md)**
+- **[v1.1.0 发布说明](./docs/releases/v1.1.0-release-notes.md)**
+- **[v1.1.0 使用手册](./docs/guides/v1.1.0-user-manual.md)**
+- **[v1.1.0 升级指南](./docs/releases/upgrade-guide.md)**
 - **[完整更新日志](./docs/releases/CHANGELOG.md)**
 - **[0、📘 TradingAgents-CN v1.0.0-preview 快速入门视频](https://www.bilibili.com/video/BV1i2CeBwEP7/?vd_source=5d790a5b8d2f46d2c10fd4e770be1594)**
 
@@ -169,7 +207,7 @@
   - [上游同步策略](./docs/maintenance/upstream-sync.md)
   - [人工上游吸收清单](./docs/maintenance/manual-upstream-absorption-checklist.md)
 
-- `v1.0.1` 已明确同步到当前版本的上游能力包括：
+- `v1.1.0` 已明确同步到当前版本的上游能力包括：
   - `llm_clients` 抽象层主链路
   - 共享模型目录与轻量校验
   - provider canonical key 规范化
@@ -299,15 +337,21 @@
 - **持续改进**: 不断完善中文增强版本，提供更好的用户体验
 - **开放合作**: 欢迎与源项目团队和全球开发者进行技术交流与合作
 
-## [感谢AIHubmix赞助，推荐llm模型使用AIHubmix](https://aihubmix.com/?aff=2rIi)
+## 🙏 感谢赞助
 
-<a href="https://aihubmix.com/?aff=2rIi" target="_blank" rel="noopener noreferrer">
-  <img src="assets/AIHubmixlogo.png" alt="AIHubMix" width="220"/>
-</a>
+<table>
+    <tr>
+        <td width="180"><a href="https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=TradingAgents-CN"><img src="assets/huoshan.png" alt="火山引擎" width="150"></a></td>
+        <td>感谢<a href="https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=TradingAgents-CN">字节火山引擎</a>赞助本项目！<br>
+【专属活动优惠】19元Tokens包！享字节自研豆包模型+满血版开源 SOTA模型，覆盖文本、VLM、图像生成，全模态一站配齐：Seed-2.1、Seedream-5.0、GLM-5.2、DeepSeek、Qwen等。不止编程、更能解决 Agent 复杂长程任务 → 注册即领2500万Tokens，立即前往<br>
+👉 <a href="https://www.volcengine.com/activity/ai618?utm_campaign=hw&utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&utm_term=TradingAgents-CN">点击链接抢购</a></td>
+    </tr>
+</table>
 
 ## 📈 版本历史
 
-- **v1.0.1** (2026-04-14): 🔧 配置管理优化、AiHubMix 聚合厂家、单股同步增强与上游能力吸收 ✨ **当前版本**
+- **v1.1.0** (2026-07-24): 🚀 火山方舟集成、reasoning_effort 推理优化、统一启动脚本、文档体系完善 ✨ **当前版本**
+- **v1.0.1** (2026-04-14): 🔧 配置管理优化、AiHubMix 聚合厂家、单股同步增强与上游能力吸收
 - **v1.0.0-preview** (2025-10-10): 🏗️ FastAPI + Vue 3 新架构预览版
 - **v0.1.13** (2025-08-02): 🤖 原生OpenAI支持与Google AI生态系统全面集成
 - **v0.1.12** (2025-07-29): 🧠 智能新闻分析模块与项目结构优化

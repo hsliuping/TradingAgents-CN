@@ -7,6 +7,18 @@ from datetime import datetime, date, timedelta
 import pandas as pd
 import asyncio
 import logging
+import os
+from pathlib import Path
+
+# 首先设置环境变量，在导入 tushare 之前，避免权限问题
+project_root = Path(__file__).resolve().parents[4]  # 从 tradingagents/dataflows/providers/china 往上4层
+tushare_cache_dir = project_root / "data" / "tushare"
+tushare_cache_dir.mkdir(parents=True, exist_ok=True)
+os.environ["TS_CACHE_DIR"] = str(tushare_cache_dir)
+os.environ["TS_DATA_DIR"] = str(tushare_cache_dir)
+# 另外，直接把临时目录也改了，避免它写用户目录
+os.environ["TEMP"] = str(tushare_cache_dir)
+os.environ["TMP"] = str(tushare_cache_dir)
 
 from ..base_provider import BaseStockDataProvider
 from tradingagents.config.providers_config import get_provider_config
@@ -14,6 +26,35 @@ from tradingagents.config.providers_config import get_provider_config
 # 尝试导入tushare
 try:
     import tushare as ts
+
+    # Monkey patch tushare 的 set_token 函数，避免写 tk.csv 导致权限错误
+    # 直接修改 ts 模块的 upass 子模块
+    import tushare.util.upass as upass
+    original_set_token = upass.set_token
+    original_get_token = upass.get_token
+
+    def _safe_set_token(token):
+        try:
+            # 不写文件，只保存到临时变量
+            setattr(upass, '_cached_token', token)
+        except Exception:
+            pass
+
+    def _safe_get_token():
+        # 先从缓存变量取，再从环境变量取，最后尝试读文件（但忽略错误）
+        if hasattr(upass, '_cached_token'):
+            return getattr(upass, '_cached_token')
+        try:
+            return original_get_token()
+        except Exception:
+            token = os.getenv('TUSHARE_TOKEN') or os.getenv('TS_TOKEN')
+            return token
+
+    # 替换
+    upass.set_token = _safe_set_token
+    upass.get_token = _safe_get_token
+    ts.set_token = _safe_set_token
+
     TUSHARE_AVAILABLE = True
 except ImportError:
     TUSHARE_AVAILABLE = False

@@ -169,6 +169,19 @@ class ConfigManager:
 
         try:
             connection_string = os.getenv("MONGODB_CONNECTION_STRING")
+            # 自动构建：当 MONGODB_CONNECTION_STRING 未设置时，从 MONGODB_HOST/PORT/USERNAME/PASSWORD 构建
+            if not connection_string:
+                mongo_host = os.getenv("MONGODB_HOST", "127.0.0.1")
+                mongo_port = os.getenv("MONGODB_PORT", "27017")
+                mongo_user = os.getenv("MONGODB_USERNAME", "admin")
+                mongo_password = os.getenv("MONGODB_PASSWORD", "tradingagents123")
+                mongo_auth = os.getenv("MONGODB_AUTH_SOURCE", "admin")
+                if mongo_user and mongo_password:
+                    connection_string = f"mongodb://{mongo_user}:{mongo_password}@{mongo_host}:{mongo_port}/?authSource={mongo_auth}"
+                else:
+                    connection_string = f"mongodb://{mongo_host}:{mongo_port}"
+                os.environ["MONGODB_CONNECTION_STRING"] = connection_string
+                logger.info(f"🔍 [ConfigManager] 自动构建 MONGODB_CONNECTION_STRING: {mongo_host}:{mongo_port}")
             database_name = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
 
             logger.info(f"🔍 [ConfigManager] MONGODB_CONNECTION_STRING={'已设置' if connection_string else '未设置'}")

@@ -296,6 +296,7 @@ async def get_llm_providers(
                     # 返回缩略的 API Key（前6位 + "..." + 后6位）
                     api_key=api_key_display,
                     api_secret=api_secret_display,
+                    test_model=provider.test_model,
                     extra_config={
                         **provider.extra_config,
                         "has_api_key": bool(api_key_display),

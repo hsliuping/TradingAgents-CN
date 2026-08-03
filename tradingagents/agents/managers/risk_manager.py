@@ -87,7 +87,16 @@ def create_risk_manager(llm, memory):
                 # ⏱️ 记录结束时间
                 elapsed_time = time.time() - start_time
                 
-                if response and hasattr(response, 'content') and response.content:
+                # 打印完整响应对象的结构，帮助调试
+                logger.info(f"🔍 [Risk Manager] LLM响应对象: type={type(response)}")
+                if hasattr(response, '__dict__'):
+                    logger.debug(f"🔍 [Risk Manager] 响应对象内容: {response.__dict__}")
+                
+                # 检查响应是否有效
+                if response is None:
+                    logger.warning(f"⚠️ [Risk Manager] LLM响应为 None (耗时 {elapsed_time:.2f}秒)")
+                    response_content = ""
+                elif hasattr(response, 'content') and response.content:
                     response_content = response.content.strip()
 
                     # 📊 统计响应信息

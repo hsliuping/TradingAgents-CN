@@ -284,6 +284,52 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
         }
 
 
+def _load_model_config_from_db(model_name: str) -> dict:
+    """
+    从数据库读取模型配置参数（max_tokens, temperature, timeout, reasoning_effort 等）
+
+    Args:
+        model_name: 模型名称
+
+    Returns:
+        dict: 模型配置字典，如 {"max_tokens": 4000, "temperature": 0.7, "reasoning_effort": "low"}
+    """
+    try:
+        from pymongo import MongoClient
+        from app.core.config import settings
+
+        client = MongoClient(settings.MONGO_URI)
+        db = client[settings.MONGO_DB]
+        configs_collection = db.system_configs
+        doc = configs_collection.find_one({"is_active": True}, sort=[("version", -1)])
+
+        if doc and "llm_configs" in doc:
+            for config_dict in doc["llm_configs"]:
+                if config_dict.get("model_name") == model_name:
+                    result = {
+                        "max_tokens": config_dict.get("max_tokens", 4000),
+                        "temperature": config_dict.get("temperature", 0.7),
+                        "timeout": config_dict.get("timeout", 180),
+                        "retry_times": config_dict.get("retry_times", 3),
+                        "api_base": config_dict.get("api_base"),
+                    }
+                    # 🔧 火山方舟推理模型支持 reasoning_effort
+                    re = config_dict.get("reasoning_effort")
+                    if re:
+                        result["reasoning_effort"] = re
+                        logger.info(f"🔧 [模型配置] {model_name} reasoning_effort={re}")
+                    else:
+                        logger.info(f"🔧 [模型配置] {model_name} reasoning_effort 未设置 (got: {re})")
+                    client.close()
+                    return result
+
+        client.close()
+        return {}
+    except Exception as e:
+        logger.warning(f"⚠️ 读取模型配置失败: {e}")
+        return {}
+
+
 def _get_env_api_key_for_provider(provider: str) -> str:
     """
     从环境变量获取指定供应商的 API Key
@@ -304,6 +350,10 @@ def _get_env_api_key_for_provider(provider: str) -> str:
         env_key_names = ["AI302_API_KEY"]
     if not env_key_names and provider_key == "aihubmix":
         env_key_names = ["AIHUBMIX_API_KEY"]
+    if not env_key_names and provider_key == "volcengine":
+        env_key_names = ["VOLCENGINE_API_KEY"]
+    if not env_key_names and provider_key == "volcengine_coding":
+        env_key_names = ["VOLCENGINE_CODING_API_KEY"]
     for env_key_name in env_key_names:
         api_key = os.getenv(env_key_name)
         if api_key and api_key.strip() and api_key != "your-api-key":
@@ -329,6 +379,10 @@ def _get_default_backend_url(provider: str) -> str:
         url = "https://api.302.ai/v1"
     elif provider_key == "aihubmix":
         url = "https://aihubmix.com/v1"
+    elif provider_key == "volcengine":
+        url = "https://ark.cn-beijing.volces.com/api/v3"
+    elif provider_key == "volcengine_coding":
+        url = "https://ark.cn-beijing.volces.com/api/coding/v3"
     else:
         url = default_backend_url(provider_key)
 
@@ -543,14 +597,16 @@ def create_analysis_config(
         logger.info(f"🔧 [快速模型配置] max_tokens={quick_model_config.get('max_tokens')}, "
                    f"temperature={quick_model_config.get('temperature')}, "
                    f"timeout={quick_model_config.get('timeout')}, "
-                   f"retry_times={quick_model_config.get('retry_times')}")
+                   f"retry_times={quick_model_config.get('retry_times')}, "
+                   f"reasoning_effort={quick_model_config.get('reasoning_effort')}")
 
     if deep_model_config:
         config["deep_model_config"] = deep_model_config
         logger.info(f"🔧 [深度模型配置] max_tokens={deep_model_config.get('max_tokens')}, "
                    f"temperature={deep_model_config.get('temperature')}, "
                    f"timeout={deep_model_config.get('timeout')}, "
-                   f"retry_times={deep_model_config.get('retry_times')}")
+                   f"retry_times={deep_model_config.get('retry_times')}, "
+                   f"reasoning_effort={deep_model_config.get('reasoning_effort')}")
 
     logger.info(f"📋 ========== 创建分析配置完成 ==========")
     logger.info(f"   🎯 研究深度: {research_depth}")
@@ -1210,6 +1266,14 @@ class SimpleAnalysisService:
             market_type = request.parameters.market_type if request.parameters else "A股"
             logger.info(f"📊 [市场类型] 使用市场类型: {market_type}")
 
+            # 🔧 从数据库读取模型配置参数（max_tokens, temperature, timeout, reasoning_effort 等）
+            quick_model_config = _load_model_config_from_db(quick_model)
+            deep_model_config = _load_model_config_from_db(deep_model)
+            if quick_model_config:
+                logger.info(f"🔧 [快速模型配置] {quick_model_config}")
+            if deep_model_config:
+                logger.info(f"🔧 [深度模型配置] {deep_model_config}")
+
             # 创建分析配置（支持混合模式）
             config = create_analysis_config(
                 research_depth=research_depth,
@@ -1217,7 +1281,9 @@ class SimpleAnalysisService:
                 quick_model=quick_model,
                 deep_model=deep_model,
                 llm_provider=quick_provider,  # 主要使用快速模型的供应商
-                market_type=market_type  # 使用前端传递的市场类型
+                market_type=market_type,  # 使用前端传递的市场类型
+                quick_model_config=quick_model_config,
+                deep_model_config=deep_model_config,
             )
 
             # 🔧 添加混合模式配置

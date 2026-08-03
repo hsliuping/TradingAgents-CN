@@ -35,6 +35,8 @@ class ModelProvider(str, Enum):
     # 🆕 聚合渠道
     AI302 = "302ai"              # 302.AI
     AIHUBMIX = "aihubmix"        # AiHubMix
+    VOLCENGINE = "volcengine"    # 火山方舟（Agent Plan / 原生 API）
+    VOLCENGINE_CODING = "volcengine_coding"  # 火山方舟编程（Coding Plan）
     ONEAPI = "oneapi"            # One API
     NEWAPI = "newapi"            # New API
     FASTGPT = "fastgpt"          # FastGPT
@@ -55,6 +57,7 @@ class LLMProvider(BaseModel):
     default_base_url: Optional[str] = Field(None, description="默认API地址")
     api_key: Optional[str] = Field(None, description="API密钥")
     api_secret: Optional[str] = Field(None, description="API密钥（某些厂家需要）")
+    test_model: Optional[str] = Field(None, description="API连接测试时使用的模型")
     aliases: List[str] = Field(default_factory=list, description="兼容别名")
     extra_config: Dict[str, Any] = Field(default_factory=dict, description="额外配置参数")
 
@@ -113,6 +116,7 @@ class LLMProviderRequest(BaseModel):
     default_base_url: Optional[str] = Field(None, description="默认API地址")
     api_key: Optional[str] = Field(None, description="API密钥")
     api_secret: Optional[str] = Field(None, description="API密钥（某些厂家需要）")
+    test_model: Optional[str] = Field(None, description="API连接测试时使用的模型")
     aliases: List[str] = Field(default_factory=list, description="兼容别名")
     extra_config: Dict[str, Any] = Field(default_factory=dict, description="额外配置参数")
 
@@ -136,6 +140,7 @@ class LLMProviderResponse(BaseModel):
     default_base_url: Optional[str] = None
     api_key: Optional[str] = None
     api_secret: Optional[str] = None
+    test_model: Optional[str] = None
     aliases: List[str] = Field(default_factory=list)
     extra_config: Dict[str, Any] = Field(default_factory=dict)
 
@@ -199,6 +204,10 @@ class LLMConfig(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="温度参数")
     timeout: int = Field(default=180, description="请求超时时间(秒)")
     retry_times: int = Field(default=3, description="重试次数")
+    reasoning_effort: Optional[str] = Field(
+        default=None,
+        description="推理模型思考深度 (none/minimal/low/medium/high/xhigh/max)，仅火山方舟推理模型支持"
+    )
     enabled: bool = Field(default=True, description="是否启用")
     description: Optional[str] = Field(None, description="配置描述")
 
@@ -371,6 +380,7 @@ class LLMConfigRequest(BaseModel):
     temperature: float = 0.7
     timeout: int = 180  # 默认超时时间改为180秒
     retry_times: int = 3
+    reasoning_effort: Optional[str] = None  # 推理模型思考深度控制
     enabled: bool = True
     description: Optional[str] = None
 

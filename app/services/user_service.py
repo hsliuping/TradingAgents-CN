@@ -4,6 +4,7 @@
 
 import hashlib
 import time
+import bcrypt
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pymongo import MongoClient
@@ -44,14 +45,17 @@ class UserService:
     
     @staticmethod
     def hash_password(password: str) -> str:
-        """密码哈希"""
-        # 使用 bcrypt 会更安全，但为了兼容性先使用 SHA-256
-        return hashlib.sha256(password.encode()).hexdigest()
-    
+        """密码哈希（bcrypt, rounds=12）"""
+        return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
+
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """验证密码"""
-        return UserService.hash_password(plain_password) == hashed_password
+        """验证密码（兼容 bcrypt 和旧 SHA-256）"""
+        if hashed_password.startswith("$2b$") or hashed_password.startswith("$2a$"):
+            # bcrypt 格式
+            return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+        # 旧 SHA-256 格式（兼容）
+        return hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
     
     async def create_user(self, user_data: UserCreate) -> Optional[User]:
         """创建用户"""
@@ -142,6 +146,17 @@ class UserService:
             if not self.verify_password(password, user_doc["hashed_password"]):
                 logger.warning(f"❌ [authenticate_user] 密码错误: {username}")
                 return None
+
+            # 如果是旧 SHA-256 格式，自动升级为 bcrypt
+            stored_hash = user_doc["hashed_password"]
+            if not (stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$")):
+                new_hash = self.hash_password(password)
+                self.users_collection.update_one(
+                    {"_id": user_doc["_id"]},
+                    {"$set": {"hashed_password": new_hash, "password_hash_algo": "bcrypt"}}
+                )
+                user_doc["hashed_password"] = new_hash
+                logger.info(f"🔄 [authenticate_user] SHA-256 密码已自动升级为 bcrypt: {username}")
 
             # 检查用户是否激活
             if not user_doc.get("is_active", True):

@@ -294,7 +294,7 @@
               </li>
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>多LLM支持：</strong>支持国内外主流大语言模型（OpenAI、Claude、智谱AI、DeepSeek等）,推荐使用 AIHubMix 聚合平台统一接入</span>
+                <span><strong>多LLM支持：</strong>支持国内外主流大语言模型（OpenAI、Claude、智谱AI、DeepSeek等）,推荐使用火山方舟聚合平台统一接入</span>
               </li>
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>

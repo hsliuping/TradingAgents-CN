@@ -19,6 +19,9 @@ export interface LLMProvider {
   is_active: boolean
   supported_features: string[]
   default_base_url?: string
+  test_model?: string
+  api_key?: string
+  api_secret?: string
   extra_config?: {
     has_api_key?: boolean
     source?: 'environment' | 'database'
