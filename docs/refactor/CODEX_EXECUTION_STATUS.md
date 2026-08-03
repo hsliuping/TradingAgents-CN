@@ -7534,3 +7534,73 @@ git diff --check
 本检查点从`b9d55d662ea82d3c3e251cf89eae3999798718f4`开始，独立提交为
 `fix(notifications): degrade gracefully on backend failures`，标签为
 `alphaguard-td-notifications-degraded`。行业补充脚本的既有未提交修改不进入本提交。
+
+## 29. 技术债检查点：行业补充脚本 dry-run 安全门禁
+
+### 29.1 原问题
+
+`scripts/补充行业信息_akshare.py`存在`async def补充行业信息`语法错误，导致全仓Python编译长期在
+该文件失败。修复语法后，旧脚本的默认命令仍会连接MongoDB、逐只访问AKShare并更新
+`stock_basic_info`，不符合AlphaGuard脚本默认无副作用和显式授权执行的安全边界。
+
+### 29.2 修改内容
+
+函数声明已修复为合法的`async def 补充行业信息`，并新增默认`execute=False`门禁。门禁位于
+`AsyncIOMotorClient`构造、集合查询、AKShare惰性导入/调用及任何`update_one`之前；未显式授权时
+直接返回明确的`DRY_RUN`摘要，记录计划limit、批次和延迟，并确认MongoDB连接、网络请求和数据库
+写入均为0。
+
+CLI新增`--execute`，只有该参数存在时才把`execute=True`传入真实执行函数。帮助和示例明确区分
+安全预览与真实执行；`--limit`和`--batch-size`必须为正整数，`--delay`必须非负，非法参数在建立
+事件循环和进入执行函数前由argparse以退出码2拒绝。模块导入、参数解析和`--help`不导入AKShare、
+不构造MongoDB客户端。
+
+### 29.3 dry-run 与 execute 契约
+
+- 默认命令：只输出计划，不连接MongoDB、不导入或访问AKShare、不写入数据。
+- 默认函数调用：返回`mode=DRY_RUN`以及参数、连接数、请求数和写入数的零副作用摘要。
+- `--help`：退出码0，说明默认dry-run及`--execute`授权边界。
+- 参数错误：退出码2，不调用异步执行函数。
+- `--execute`：显式允许进入原有Mongo查询、AKShare读取和逐证券`update_one`路径；没有改变查询、
+  更新字段、批次、延迟或重试语义。
+- 测试环境的execute路径仅使用FakeClient、FakeCollection和AsyncMock，不访问真实网络或MongoDB。
+
+### 29.4 测试命令与结果
+
+```text
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest \
+  tests/unit/alphaguard/test_industry_enrichment_dry_run.py -q
+= 10 passed
+
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c \
+  "import ast, pathlib; p=pathlib.Path('scripts/补充行业信息_akshare.py'); \
+   ast.parse(p.read_text(encoding='utf-8'), filename=str(p))"
+= PASS
+
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  scripts/补充行业信息_akshare.py --help
+= PASS, exit 0
+
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  scripts/补充行业信息_akshare.py --limit 2 --batch-size 1 --delay 0
+= PASS, DRY-RUN, MongoDB连接=0, 网络请求=0, 数据库写入=0
+
+git diff --check
+= PASS
+```
+
+专项测试覆盖模块导入、默认CLI、默认函数摘要、默认不调用网络、默认不构造数据库客户端、
+`--execute`参数转发、mock Mongo查询/AKShare/update_one完整执行分支、`--help`以及4组非法参数。
+默认离线pytest边界会阻断任何意外socket连接；所有数据库和Provider对象均为测试内存伪对象。
+
+### 29.5 风险与回滚
+
+显式`--execute`仍是有真实外部副作用的维护命令，会访问AKShare并更新现有
+`stock_basic_info.industry/area/updated_at`；本检查点没有执行真实execute，没有修改生产数据库。
+脚本保持原有逐证券部分成功语义，不提供跨证券事务回滚；操作者执行前仍应确认环境、Provider可用性
+和处理范围。默认dry-run只展示计划参数，不查询数据库，因此不会预估实际待处理证券数量。
+
+代码回滚可恢复该脚本到通知检查点`207a4ca`中的版本，并删除
+`tests/unit/alphaguard/test_industry_enrichment_dry_run.py`及本节；没有数据库迁移、集合或索引变化。
+本检查点独立提交为`fix(data): make industry enrichment dry-run by default`，标签为
+`alphaguard-td-industry-dry-run-safe`。通知检查点已经独立提交，不进入本提交差异。

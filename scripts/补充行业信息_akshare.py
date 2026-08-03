@@ -8,9 +8,10 @@
 3. 更新数据库中的 industry 和 area 字段
 
 使用方法：
-    python scripts/补充行业信息_akshare.py
-    python scripts/补充行业信息_akshare.py --limit 100  # 只处理前100只股票
-    python scripts/补充行业信息_akshare.py --batch-size 10  # 每批处理10只股票
+    python scripts/补充行业信息_akshare.py  # 默认仅安全预览
+    python scripts/补充行业信息_akshare.py --execute
+    python scripts/补充行业信息_akshare.py --execute --limit 100
+    python scripts/补充行业信息_akshare.py --execute --batch-size 10
 """
 
 import asyncio
@@ -35,6 +36,22 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+
+def positive_int(value: str) -> int:
+    """解析必须大于 0 的整数参数。"""
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("必须是大于 0 的整数")
+    return parsed
+
+
+def non_negative_float(value: str) -> float:
+    """解析必须大于等于 0 的浮点参数。"""
+    parsed = float(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("必须是大于等于 0 的数值")
+    return parsed
 
 
 async def get_stock_industry_from_akshare(code: str) -> Dict[str, str]:
@@ -78,10 +95,11 @@ async def get_stock_industry_from_akshare(code: str) -> Dict[str, str]:
         return {"industry": "未知", "area": "未知"}
 
 
-async def补充行业信息(
+async def 补充行业信息(
     limit: int = None,
     batch_size: int = 50,
-    delay: float = 0.5
+    delay: float = 0.5,
+    execute: bool = False,
 ):
     """
     补充行业信息主函数
@@ -90,10 +108,35 @@ async def补充行业信息(
         limit: 限制处理的股票数量（None=全部）
         batch_size: 每批处理的股票数量
         delay: 每只股票之间的延迟（秒），避免API限流
+        execute: 是否显式允许连接MongoDB、访问AKShare并写入数据
     """
     logger.info("=" * 80)
     logger.info("🚀 开始补充行业信息")
     logger.info("=" * 80)
+
+    if not execute:
+        planned_limit = limit if limit is not None else "全部待补充记录"
+        logger.info("DRY-RUN：不会访问AKShare、连接MongoDB或写入数据")
+        logger.info(
+            "计划参数: limit=%s, batch_size=%s, delay=%s秒",
+            planned_limit,
+            batch_size,
+            delay,
+        )
+        logger.info(
+            "计划动作: 查询缺失行业信息的股票，逐只读取AKShare并更新industry/area"
+        )
+        logger.info("实际动作: MongoDB连接=0, 网络请求=0, 数据库写入=0")
+        logger.info("使用 --execute 显式允许上述真实动作")
+        return {
+            "mode": "DRY_RUN",
+            "planned_limit": limit,
+            "batch_size": batch_size,
+            "delay": delay,
+            "database_connections": 0,
+            "writes": 0,
+            "network_requests": 0,
+        }
     
     # 连接 MongoDB
     logger.info(f"🔌 连接 MongoDB: {settings.MONGO_URI}")
@@ -222,34 +265,42 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  # 补充所有股票的行业信息
+  # 安全预览：不联网、不连接MongoDB、不写入数据
   python scripts/补充行业信息_akshare.py
 
+  # 补充所有股票的行业信息
+  python scripts/补充行业信息_akshare.py --execute
+
   # 只处理前100只股票
-  python scripts/补充行业信息_akshare.py --limit 100
+  python scripts/补充行业信息_akshare.py --execute --limit 100
 
   # 调整批次大小和延迟
-  python scripts/补充行业信息_akshare.py --batch-size 10 --delay 1.0
+  python scripts/补充行业信息_akshare.py --execute --batch-size 10 --delay 1.0
         """
     )
     
     parser.add_argument(
         "--limit",
-        type=int,
+        type=positive_int,
         default=None,
         help="限制处理的股票数量（默认：全部）"
     )
     parser.add_argument(
         "--batch-size",
-        type=int,
+        type=positive_int,
         default=50,
         help="每批处理的股票数量（默认：50）"
     )
     parser.add_argument(
         "--delay",
-        type=float,
+        type=non_negative_float,
         default=0.5,
         help="每只股票之间的延迟（秒）（默认：0.5）"
+    )
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="显式允许访问AKShare并更新数据库；默认仅dry-run",
     )
     
     args = parser.parse_args()
@@ -258,10 +309,10 @@ def main():
     asyncio.run(补充行业信息(
         limit=args.limit,
         batch_size=args.batch_size,
-        delay=args.delay
+        delay=args.delay,
+        execute=args.execute,
     ))
 
 
 if __name__ == "__main__":
     main()
-
