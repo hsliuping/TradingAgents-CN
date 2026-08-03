@@ -7805,3 +7805,126 @@ PR-014在保留两个已完成技术债检查点的`c48333d421999ce1be633405bcae
 `feat(alphaguard): finalize mvp operational release`一次提交，并创建附注标签`alphaguard-mvp-rc1`。
 提交范围不包含`.env`、Keychain、API Key、Cookie、日志、构建缓存、正式数据库文件或本机BSON备份；
 提交和标签完成后工作区必须clean，并停止，不开始新的功能PR。
+
+## 31. AlphaGuard MVP RC1观察期启动基线（2026-08-03）
+
+### 31.1 观察期开始与发布基线
+
+MVP RC1观察期开始时间为`2026-08-03 23:00:20 CST (+0800)`。发布源基线为
+`3bd16d9213ab6125a2c42d6ab44ee6b03db4965b`，附注标签为`alphaguard-mvp-rc1`，标签指向该提交；
+启动前工作区clean。观察期继续保持`system_mode=SIM_AUTONOMOUS`、
+`live_trading_enabled=false`、`AUTO_CANDIDATE_ACCEPT=false`、`ACTIVE_CHALLENGER=false`和
+`LIVE_READY=false`。
+
+### 31.2 服务健康与安全启动门禁
+
+使用项目Compose正式启动方式顺序构建共享后端镜像和前端镜像后启动。MongoDB、Redis、FastAPI、
+Scheduler、queue-worker、analysis-worker和前端均HEALTHY；`/health/live`为HTTP 200，
+`/health/ready`为HTTP 200且明确`live_ready=false`。queue-worker和analysis-worker心跳TTL实测为
+12秒和51秒。Credential Host使用正式入口完成临时健康检查，`/health/live`为HTTP 200，受限写入口
+返回HTTP 403；检查后按其非驻留设计停止。FastAPI、queue-worker、analysis-worker在
+`live_trading_enabled=true`下分别非零退出`3/1/1`。前端只显示“实盘永久关闭/实盘禁用”等状态，
+没有启用真实交易的按钮或路径。
+
+本机Compose缺少Buildx时，直接并行构建三个共用`tradingagents-backend:v1.0.0-preview`标签的服务会发生
+经典构建器镜像标签竞争；本次按同一Compose配置顺序执行backend、frontend构建后再`--no-build`启动，
+正式服务全部健康。该项属于本机构建工具降级，不改变应用代码或运行数据。
+
+### 31.3 PR-014 create-only索引
+
+启动前正式库缺少PR-014的10个索引，已存在0、新建10、失败0：`ag_daily_job_runs` 4个、
+`ag_mvp_acceptance_reports` 3个、`ag_consistency_reports` 3个。索引由正式服务启动中的既有
+create-only初始化创建；其余415个既有索引全部保持不变，没有删除、重建或修改业务文档。随后两次执行
+统一初始化器均返回`created=0 unchanged=425`，幂等复跑PASS。索引完成后的19项统一一致性检查全部PASS，
+报告hash为`35379a14f6f61e92f05f9673233e6311a74830846744224407bca03374f76906`。
+
+### 31.4 当前数据、推荐、模型与交易状态
+
+当前数据覆盖为：交易日历2557、RAW行情342971、QFQ行情342042、财务69、新闻53、公告2735、
+MarketContext 122；全市场证券池5535、行情窗口完整5188、交易状态完整5200、推荐DataQuality通过5066、
+最终资格4874、未覆盖469，覆盖率91.5%。行业历史仅有5条当前映射，状态为PARTIAL。
+
+推荐总数45，当前待人工审核45，最新成功推荐运行ID为
+`b2cf7758-db64-5d25-8ced-ecd1b030cae4`，运行对应交易日`2026-07-30`，本地完成时间
+`2026-08-03 18:21:56`，最新一轮自然产生15条推荐；候选池保持5。正式模型调用数保持130，
+本阶段新增模型调用0。订单意图、订单、成交、持仓、Reservation、Ledger和Settlement均为0；没有自动
+接受推荐、自动创建订单、自动启用Challenger或修改Champion。
+
+### 31.5 Daily Run状态与Dry Run
+
+执行`.venv/bin/python scripts/alphaguard_daily_run.py --trade-date 2026-08-03 --status`返回
+`NOT_FOUND`，没有创建模型调用、订单或成交。显式`--dry-run`返回`DRY_RUN`，20阶段顺序和直接依赖与
+PR-014合同一致，所有阶段以`SKIPPED/DRY_RUN`展示计划；前后`ag_daily_job_runs=0`，推荐45、候选5、
+模型调用130、订单和成交0。PR-014专项同时验证任一阶段缺少前置条件时所有后续阶段为BLOCKED，相同
+交易日和输入只会REUSED，不会重复调用模型、创建推荐、订单或成交，也不会修改Champion或自动启用
+Challenger。
+
+正式日常模拟运行未执行。虽然`2026-08-03`为有效CN交易日，行情、DataQuality、资源额度和四账户正常，
+但本机CLI运行前门禁显示`MODEL_PROVIDER=NOT_CONFIGURED`，缺少`RESEARCH_AGENT`模型配置；Compose后端
+因不能访问宿主Keychain，`/health/ready`还显示Normal和Top当前运行凭证不可用。服务启动日志同时记录
+Tushare Token校验失败和AKShare实时快照连接降级。按照“全部前置条件满足才允许执行”的规则，没有使用
+`--execute`、没有补写模型配置、没有强制触发信号，因此本次没有正式运行结果和REUSED复跑结果。
+
+### 31.6 四账户资产、Champion与Challenger
+
+四个账户均为ACTIVE，资产保持不变：
+
+| 账户 | 可用现金 | 冻结现金 | 持仓市值 | 已实现盈亏 | 费用 | 总资产 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| PAPER_QUANT | 1000000.00 | 0 | 0 | 0 | 0 | 1000000.00 |
+| PAPER_NORMAL | 1000000.00 | 0 | 0 | 0 | 0 | 1000000.00 |
+| PAPER_TOP_CONFIRMED | 1000000.00 | 0 | 0 | 0 | 0 | 1000000.00 |
+| PAPER_CHALLENGER | 1000000.00 | 0 | 0 | 0 | 0 | 1000000.00 |
+
+统一一致性检查确认现金、冻结资金和持仓非负，无重复Fill、无孤立Reservation、无跨账户Position，
+Ledger可重建余额且账户资产守恒。ACTIVE Champion Assignment保持5，固定投影hash为
+`1c170fb6001d756738ad6506ebc06ec79c5f66126a956254861c044022039ed0`。Challenger Assignment/Run为
+0/0，`ACTIVE_CHALLENGER=false`，没有晋升、切换或写入Challenger交易对象。
+
+### 31.7 前端、Operations与通知
+
+总览、股票推荐、候选池、决策链、自动模拟、实验室、Operations以及`/settings/database`均返回HTTP 200；
+“模型与 API”由Operations内独立页签提供，“备份与恢复”由Operations备份状态与数据库管理页提供。
+MVP验收报告为`overall_status=MVP_PAPER_READY`，24项中22项可用、2项降级可用、0项未就绪、0项阻断；
+状态标志为推荐运行时可用、推荐数据已就绪、真实模型运行时可用、双模型可用、模拟交易可用、评价可用、
+Challenger运行时可用、`ACTIVE_CHALLENGER=false`、`LIVE_READY=false`。运行准备度单独为
+`DEGRADED_PAPER`，原因是实验样本为空和Research Agent Provider未配置，不影响MVP Paper安全边界。
+通知保持“降级可用”，连接失败不会阻断核心页面或Paper安全链。
+
+### 31.8 新运行基线备份
+
+新备份目录为`backups/alphaguard-20260803-225500-rc1-observation-start`，记录如下：
+
+```text
+backup_id=a6b3b677-b138-5205-a82c-cedfe5316a51
+created_at=2026-08-03T14:54:27.222810+00:00
+collections=138
+documents=119139
+size_bytes=2030949860
+manifest_hash=c92ee488979423bbaf69edfe13365dc3f68a743ac57f2093aa5388b376aee17c
+source_commit=3bd16d9213ab6125a2c42d6ab44ee6b03db4965b
+source_tag=alphaguard-mvp-rc1
+verification=PASS
+secret_scan=PASS
+```
+
+备份中的4条模型凭证记录全部包含`credential_ref`，禁止Secret字段为0；没有API Key、Keychain Secret、
+密码、Token、Cookie或私钥。Manifest Hash、138个集合Hash和119139个文档数量均通过二次校验。本阶段只
+校验备份，没有执行恢复或覆盖正式数据库。
+
+### 31.9 验证与已知降级项
+
+默认离线CI为`771 passed, 89 warnings`，PR-014专项为`26 passed, 85 warnings`。前端
+`npm run type-check`、正式`npm run build`、独立`npx vite build`、全仓Python `compileall`、
+`docker compose config --quiet`和`git diff --check`均PASS。敏感信息扫描覆盖2415个tracked文件，50个
+命中均位于已知示例、文档或测试fixture，正式源代码意外命中0，观察期文档diff命中0；`.env`和备份目录
+均未被Git跟踪，备份自身Secret扫描PASS。已知非阻断项为：Research Agent Provider未配置、Compose内
+Normal/Top凭证不可用、实验样本为空、行业历史仅当前映射、通知降级、无自然OrderIntent/订单/Fill、
+Tushare Token不可用、AKShare实时快照连接降级、前端Sass弃用与大Chunk警告，以及本机缺Buildx时的
+Compose并行镜像标签竞争。
+
+### 31.10 观察期约束
+
+观察期内只修复明确缺陷，不新增投资策略，不调整模型以诱导交易，不修改推荐阈值，不自动接受推荐，
+不自动晋升Challenger，不开发或启用真实交易。除正式日常运行自然产生的create-only对象外，不人工写入
+业务结果；一致性异常只报告，不自动修复正式数据。
