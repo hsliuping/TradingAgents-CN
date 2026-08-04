@@ -1109,7 +1109,7 @@ class RecommendationDataService:
             f"{self.contract['contract_version']}:"
             f"{recommendation_hash({'price': versions, 'raw': raw_versions, 'status': status_hash})[:24]}"
         )
-        identity = f"{symbol}:{trade_date}:{data_version}"
+        identity = f"{symbol}:{trade_date}:{data_version}:{input_hash}"
         payload = {
             "quality_report_id": _stable_id("recommendation-data-quality", identity),
             "symbol": symbol,

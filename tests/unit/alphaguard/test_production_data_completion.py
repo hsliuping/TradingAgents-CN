@@ -7,6 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 import app.services.alphaguard.operations_service as operations_module
+from app.services.alphaguard.akshare_market_context_provider import (
+    AKShareTencentMarketContextProvider,
+)
 from app.services.alphaguard.backfill_label_maturity_service import (
     BackfillLabelMaturityError,
     BackfillLabelMaturityService,
@@ -19,9 +22,12 @@ from app.services.alphaguard.execution_market_snapshot_service import (
     ExecutionMarketSnapshotService,
 )
 from app.services.alphaguard.historical_market_context_service import (
+    BaoStockHistoricalMarketProvider,
     HistoricalMarketFetchResult,
+    HistoricalMarketContextError,
 )
 from app.services.alphaguard.horizon_label_service import HorizonLabelService
+from app.services.alphaguard.daily_stage_executor import ProductionDailyStageExecutor
 from app.services.alphaguard.operations_service import (
     AlphaGuardOperationsService,
 )
@@ -188,6 +194,81 @@ class StubMarketProvider:
         )
 
 
+class _BaoStockResult:
+    def __init__(self, *, error_code="0", fields=None, rows=None):
+        self.error_code = error_code
+        self.fields = fields or []
+        self._rows = iter(rows or [])
+        self._current = None
+
+    def next(self):
+        try:
+            self._current = next(self._rows)
+            return True
+        except StopIteration:
+            return False
+
+    def get_row_data(self):
+        return self._current
+
+
+def _market_provider_policy(*, benchmark_required: bool) -> dict:
+    return {
+        "provider_benchmark_required": benchmark_required,
+        "market_context": {
+            "normalization_version": "test-v1",
+            "history_buffer_calendar_days": 30,
+            "rolling_high_low_sessions": 20,
+            "amount_ratio_sessions": 20,
+            "minimum_universe_coverage": "0.9",
+            "minimum_high_low_coverage": "0.8",
+            "minimum_sector_coverage": "0.8",
+            "query_retry_attempts": 1,
+            "socket_timeout_seconds": 1,
+            "query_delay_seconds": 0,
+            "sector_index_codes": ["sh.000001"],
+        },
+    }
+
+
+def test_production_provider_does_not_duplicate_caller_owned_benchmark(monkeypatch):
+    import baostock as bs
+
+    monkeypatch.setattr(
+        BaoStockHistoricalMarketProvider,
+        "capability_check",
+        staticmethod(
+            lambda: {
+                "provider": "baostock",
+                "provider_version": "test",
+                "available": True,
+            }
+        ),
+    )
+    monkeypatch.setattr(bs, "login", lambda: _BaoStockResult())
+    monkeypatch.setattr(bs, "logout", lambda: _BaoStockResult())
+    monkeypatch.setattr(bs, "query_all_stock", lambda **_: _BaoStockResult())
+
+    def history(code, *_args, **_kwargs):
+        return _BaoStockResult(error_code="1" if code == "sh.000300" else "0")
+
+    monkeypatch.setattr(bs, "query_history_k_data_plus", history)
+    fetched = BaoStockHistoricalMarketProvider.fetch(
+        selected_dates=[date(2026, 7, 30)],
+        policy=_market_provider_policy(benchmark_required=False),
+    )
+    assert fetched.context_payloads[date(2026, 7, 30)][
+        "extreme_risk_flag"
+    ] is None
+    assert any(item["scope"] == "sh.000300" for item in fetched.failures)
+
+    with pytest.raises(HistoricalMarketContextError):
+        BaoStockHistoricalMarketProvider.fetch(
+            selected_dates=[date(2026, 7, 30)],
+            policy=_market_provider_policy(benchmark_required=True),
+        )
+
+
 class StubSecurityMasterProvider:
     name = "baostock"
     version = "00.9.30"
@@ -332,7 +413,31 @@ async def test_production_market_context_is_dry_run_then_idempotent():
 
 
 @pytest.mark.asyncio
-async def test_production_market_context_locks_each_benchmark_session_version():
+async def test_daily_market_context_uses_bounded_production_fallback(monkeypatch):
+    db = FakeDB()
+    captured = {}
+
+    async def sync(_self, **kwargs):
+        captured.update(kwargs)
+        return {
+            "calculation_status": "READY",
+            "context_action": "CREATED",
+            "provider": "akshare-tencent",
+        }
+
+    monkeypatch.setattr(ProductionMarketContextService, "sync", sync)
+
+    result = await ProductionDailyStageExecutor(
+        db
+    ).stage_benchmark_industry_sync(trading_date=date(2026, 7, 30))
+
+    assert isinstance(captured["provider"], AKShareTencentMarketContextProvider)
+    assert captured["execute"] is True
+    assert result.result["market_context_provider"] == "akshare-tencent"
+
+
+@pytest.mark.asyncio
+async def test_production_market_context_requires_one_version_locked_benchmark_window():
     db = FakeDB()
     trade_date = date(2026, 7, 27)
     await db["trading_calendar"].insert_one(
@@ -343,20 +448,45 @@ async def test_production_market_context_locks_each_benchmark_session_version():
         }
     )
     await _seed_benchmark(db, trade_date)
-    target = await db["stock_daily_quotes"].find_one(
-        {"ref_id": f"index-000300-{trade_date}"}
-    )
-    target["price_data_version"] = "index-v2"
-    await db["stock_daily_quotes"].replace_one(
-        {"ref_id": f"index-000300-{trade_date}"},
-        target,
-    )
+    for row in db["stock_daily_quotes"].documents:
+        row["price_data_version"] = "index-v2"
     result = await ProductionMarketContextService(db).sync(
         trade_date=trade_date,
         provider=StubMarketProvider(),
         now=datetime(2026, 7, 28, 10),
         execute=False,
     )
+    assert result["calculation_status"] == "READY"
+
+
+@pytest.mark.asyncio
+async def test_production_market_context_ignores_other_benchmark_versions():
+    db = FakeDB()
+    trade_date = date(2026, 7, 27)
+    await db["trading_calendar"].insert_one(
+        {
+            "market": "CN",
+            "session_date": datetime(2026, 7, 27),
+            "is_open": True,
+        }
+    )
+    await _seed_benchmark(db, trade_date)
+    duplicates = []
+    for original in db["stock_daily_quotes"].documents:
+        duplicate = dict(original)
+        duplicate["ref_id"] = f"legacy-{original['ref_id']}"
+        duplicate["price_data_version"] = "legacy-index-v0"
+        duplicates.append(duplicate)
+    for duplicate in duplicates:
+        await db["stock_daily_quotes"].insert_one(duplicate)
+
+    result = await ProductionMarketContextService(db).sync(
+        trade_date=trade_date,
+        provider=StubMarketProvider(),
+        now=datetime(2026, 7, 28, 10),
+        execute=False,
+    )
+
     assert result["calculation_status"] == "READY"
 
 

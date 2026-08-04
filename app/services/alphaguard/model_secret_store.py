@@ -8,12 +8,20 @@ logs, exceptions, or API responses.
 from __future__ import annotations
 
 import ctypes
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import lru_cache
+import json
+import os
 import platform
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote
+from urllib.request import Request, urlopen
+
+from .credential_host_runtime import CREDENTIAL_HOST_TOKEN_HEADER
 
 
 KEYCHAIN_ALIAS_SERVICE = "AlphaGuard Credential Alias"
@@ -338,6 +346,117 @@ class UnavailableSecretStore:
         raise SecretStoreUnavailable("Secret Store is unavailable")
 
 
+_credential_profile_context: ContextVar[dict[str, Any] | None] = ContextVar(
+    "alphaguard_credential_profile_context",
+    default=None,
+)
+
+
+@dataclass(frozen=True)
+class CredentialHostSecretStore:
+    """Read-only Secret Store client used by Docker backend processes."""
+
+    base_url: str
+    token_path: Path
+    timeout_seconds: float = 5.0
+
+    @property
+    def available(self) -> bool:
+        return bool(self.base_url) and self.token_path.is_file()
+
+    @contextmanager
+    def profile_context(self, profile: Any):
+        context = {
+            "role": profile.role,
+            "profile_id": profile.profile_id,
+            "profile_version": profile.profile_version,
+            "config_hash": profile.config_hash,
+            "credential_ref": profile.credential_ref,
+            "endpoint_profile_id": profile.endpoint_profile_id,
+            "endpoint_profile_version": profile.endpoint_profile_version,
+            "endpoint_model_id": profile.endpoint_model_id,
+            "endpoint_model_version": profile.endpoint_model_version,
+        }
+        token = _credential_profile_context.set(context)
+        try:
+            yield
+        finally:
+            _credential_profile_context.reset(token)
+
+    def _token(self) -> str:
+        try:
+            value = self.token_path.read_text(encoding="ascii").strip()
+        except (OSError, UnicodeError) as exc:
+            raise SecretStoreUnavailable(
+                "Credential Host authorization is unavailable"
+            ) from exc
+        if not value:
+            raise SecretStoreUnavailable(
+                "Credential Host authorization is unavailable"
+            )
+        return value
+
+    def read(self, *, service: str, account: str) -> str:
+        if not self.available:
+            raise SecretStoreUnavailable("Credential Host is unavailable")
+        body = json.dumps(
+            {
+                "service": service,
+                "account": account,
+                "profile": _credential_profile_context.get(),
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        request = Request(
+            f"{self.base_url.rstrip('/')}/internal/alphaguard/credentials/read",
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                CREDENTIAL_HOST_TOKEN_HEADER: self._token(),
+            },
+        )
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            if exc.code in {401, 403, 404}:
+                raise SecretNotFound("credential is not configured") from exc
+            raise SecretStoreUnavailable("Credential Host is unavailable") from exc
+        except (URLError, OSError, UnicodeError, ValueError) as exc:
+            raise SecretStoreUnavailable("Credential Host is unavailable") from exc
+        value = payload.get("value") if isinstance(payload, dict) else None
+        if not isinstance(value, str) or not value:
+            raise SecretNotFound("credential is not configured")
+        return value
+
+    def write(self, *, service: str, account: str, secret: str) -> None:
+        raise SecretStoreUnavailable(
+            "Credential Host bridge is read-only from Docker services"
+        )
+
+    def delete(
+        self,
+        *,
+        service: str,
+        account: str,
+        missing_ok: bool = False,
+    ) -> None:
+        raise SecretStoreUnavailable(
+            "Credential Host bridge is read-only from Docker services"
+        )
+
+
 def default_secret_store() -> SecretStore:
     store = MacOSKeychainSecretStore()
-    return store if store.available else UnavailableSecretStore()
+    if store.available:
+        return store
+    host_url = os.getenv("ALPHAGUARD_CREDENTIAL_HOST_URL", "").strip()
+    token_path = Path(
+        os.getenv(
+            "ALPHAGUARD_CREDENTIAL_HOST_TOKEN_FILE",
+            "/run/alphaguard-credential-host/access.token",
+        )
+    )
+    remote = CredentialHostSecretStore(host_url, token_path)
+    return remote if remote.available else UnavailableSecretStore()

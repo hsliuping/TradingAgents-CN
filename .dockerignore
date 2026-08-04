@@ -95,6 +95,7 @@ data/
 # 临时文件
 tmp/
 temp/
+runtime/
 *.tmp
 
 # 测试相关（排除根目录的测试，但保留frontend/src下的测试文件）
@@ -134,4 +135,3 @@ scripts/full_redeploy_*.sh
 .editorconfig
 .prettierrc
 # 注意：不排除 tsconfig.json、vite.config.js 等，因为前端构建需要这些文件
-

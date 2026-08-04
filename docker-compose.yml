@@ -18,6 +18,7 @@ services:
       - ./config:/app/config
       # 数据目录映射
       - ./data:/app/data
+      - ./runtime/credential-host:/run/alphaguard-credential-host:ro
     env_file:
       - .env
     environment:
@@ -56,6 +57,8 @@ services:
       API_PORT: "8000"
       ALPHAGUARD_SYSTEM_MODE: "${ALPHAGUARD_SYSTEM_MODE:-SIM_AUTONOMOUS}"
       ALPHAGUARD_LIVE_TRADING_ENABLED: "${ALPHAGUARD_LIVE_TRADING_ENABLED:-false}"
+      ALPHAGUARD_CREDENTIAL_HOST_URL: "http://host.docker.internal:8011"
+      ALPHAGUARD_CREDENTIAL_HOST_TOKEN_FILE: "/run/alphaguard-credential-host/access.token"
       # CORS配置
       CORS_ORIGINS: "http://localhost:3000,http://localhost:8080,http://localhost:5173"
     depends_on:
@@ -65,6 +68,8 @@ services:
         condition: service_healthy
     networks:
       - tradingagents-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 30s
@@ -90,6 +95,7 @@ services:
       - ./logs:/app/logs
       - ./config:/app/config
       - ./data:/app/data
+      - ./runtime/credential-host:/run/alphaguard-credential-host:ro
     env_file:
       - .env
     environment:
@@ -117,6 +123,8 @@ services:
       DOCKER_CONTAINER: "true"
       ALPHAGUARD_SYSTEM_MODE: "${ALPHAGUARD_SYSTEM_MODE:-SIM_AUTONOMOUS}"
       ALPHAGUARD_LIVE_TRADING_ENABLED: "${ALPHAGUARD_LIVE_TRADING_ENABLED:-false}"
+      ALPHAGUARD_CREDENTIAL_HOST_URL: "http://host.docker.internal:8011"
+      ALPHAGUARD_CREDENTIAL_HOST_TOKEN_FILE: "/run/alphaguard-credential-host/access.token"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -124,6 +132,8 @@ services:
         condition: service_healthy
     networks:
       - tradingagents-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
       interval: 30s
@@ -149,6 +159,7 @@ services:
       - ./logs:/app/logs
       - ./config:/app/config
       - ./data:/app/data
+      - ./runtime/credential-host:/run/alphaguard-credential-host:ro
     env_file:
       - .env
     environment:
@@ -176,6 +187,8 @@ services:
       DOCKER_CONTAINER: "true"
       ALPHAGUARD_SYSTEM_MODE: "${ALPHAGUARD_SYSTEM_MODE:-SIM_AUTONOMOUS}"
       ALPHAGUARD_LIVE_TRADING_ENABLED: "${ALPHAGUARD_LIVE_TRADING_ENABLED:-false}"
+      ALPHAGUARD_CREDENTIAL_HOST_URL: "http://host.docker.internal:8011"
+      ALPHAGUARD_CREDENTIAL_HOST_TOKEN_FILE: "/run/alphaguard-credential-host/access.token"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -183,6 +196,8 @@ services:
         condition: service_healthy
     networks:
       - tradingagents-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c", "import os; os.kill(1, 0)"]
       interval: 30s

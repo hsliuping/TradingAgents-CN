@@ -9,6 +9,7 @@ from bson import BSON
 from app.services.alphaguard.candidate_recommendation_policy import (
     builtin_candidate_recommendation_policy,
 )
+from app.services.alphaguard.paper_storage import model_document
 from app.services.alphaguard.recommendation_data_service import (
     ProviderMaster,
     ProviderPriceBatch,
@@ -175,6 +176,39 @@ def test_quality_rejects_incomplete_future_or_discontinuous_windows(mutator, rea
     )
     assert report.status == "FAIL"
     assert reason in report.blocking_reasons
+
+
+@pytest.mark.asyncio
+async def test_quality_report_versions_create_only_identity_with_input_hash():
+    db = FakeDB()
+    service = RecommendationDataService(db)
+    prices = [_quote("600001", item, index) for index, item in enumerate(DATES)]
+    benchmark = [_quote("000300", item, index) for index, item in enumerate(DATES)]
+    kwargs = {
+        "symbol": "600001",
+        "trade_date": TRADE_DATE,
+        "rows": prices,
+        "status": _status("600001"),
+        "instrument": _instrument("600001"),
+        "required_trade_dates": DATES,
+        "now": datetime(2026, 7, 30, 16),
+    }
+    first = service._quality_for(benchmark_rows=benchmark, **kwargs)
+    changed_benchmark = [dict(row) for row in benchmark]
+    changed_benchmark[0]["content_hash"] = "f" * 64
+    second = service._quality_for(benchmark_rows=changed_benchmark, **kwargs)
+
+    assert first.input_hash != second.input_hash
+    assert first.quality_report_id != second.quality_report_id
+
+    await service._persist_create_only_documents(
+        service.QUALITY_COLLECTION,
+        [model_document(first), model_document(second)],
+        id_field="quality_report_id",
+        hash_field="immutable_hash",
+        execute=True,
+    )
+    assert len(db[service.QUALITY_COLLECTION].documents) == 2
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 from tradingagents.graph.trading_graph import create_llm_by_provider
@@ -41,13 +42,25 @@ class ModelProviderRuntime:
     def __init__(self, credential_service: ModelCredentialService | None = None):
         self.credentials = credential_service or ModelCredentialService()
 
+    def _resolve_profile(self, profile: ModelProfile) -> str:
+        resolver = getattr(self.credentials, "resolve_for_profile", None)
+        return (
+            resolver(profile)
+            if resolver is not None
+            else self.credentials.resolve(profile.credential_ref)
+        )
+
+    def _profile_context(self, profile: ModelProfile):
+        manager = getattr(self.credentials, "profile_context", None)
+        return manager(profile) if manager is not None else nullcontext()
+
     def create(self, profile: ModelProfile) -> Any:
         provider = profile.provider.strip().lower()
         if provider not in EXPLICIT_MODEL_PROVIDERS:
             raise UnsupportedModelProvider(
                 f"provider is not explicitly supported: {provider}"
             )
-        credential = self.credentials.resolve(profile.credential_ref)
+        credential = self._resolve_profile(profile)
         return create_llm_by_provider(
             provider=provider,
             model=profile.model_name,
@@ -64,16 +77,15 @@ class ModelProviderRuntime:
     async def create_registered(self, profile: ModelProfile, *, db) -> Any:
         if profile.provider_type != "OPENAI_COMPATIBLE":
             return self.create(profile)
-        registry = CompatibleProviderRegistryService(
-            db,
-            secret_store=getattr(self.credentials, "secret_store", None),
-        )
-        endpoint, model, _price, credential = (
-            await registry.resolve_profile_binding(profile)
-        )
-        secret = self.credentials.resolve(
-            f"keychain-alias:{credential['credential_id']}"
-        )
+        with self._profile_context(profile):
+            registry = CompatibleProviderRegistryService(
+                db,
+                secret_store=getattr(self.credentials, "secret_store", None),
+            )
+            endpoint, model, _price, _credential = (
+                await registry.resolve_profile_binding(profile)
+            )
+            secret = self.credentials.resolve(profile.credential_ref)
         client = build_pinned_client(
             endpoint=parse_registered_endpoint(endpoint.base_url),
             resolved_ips=endpoint.resolved_ips,

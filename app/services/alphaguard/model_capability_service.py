@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from datetime import datetime, timezone
 import time
 from typing import Literal
@@ -81,6 +82,18 @@ class ModelCapabilityService:
         self.budget = ModelBudgetService(db)
         self.audit = ModelAuditService(db)
 
+    def _profile_context(self, profile):
+        manager = getattr(self.credentials, "profile_context", None)
+        return manager(profile) if manager is not None else nullcontext()
+
+    def _resolve_profile(self, profile) -> str:
+        resolver = getattr(self.credentials, "resolve_for_profile", None)
+        return (
+            resolver(profile)
+            if resolver is not None
+            else self.credentials.resolve(profile.credential_ref)
+        )
+
     @staticmethod
     def _capability_contract(profile) -> tuple[str, type[BaseModel]]:
         if profile.role == "NORMAL_TRADER":
@@ -105,15 +118,14 @@ class ModelCapabilityService:
             )
 
             try:
-                endpoint, model, _price, credential = (
-                    await CompatibleProviderRegistryService(
-                        self.db,
-                        secret_store=self.credentials.secret_store,
-                    ).resolve_profile_binding(profile)
-                )
-                secret = self.credentials.resolve(
-                    f"keychain-alias:{credential['credential_id']}"
-                )
+                with self._profile_context(profile):
+                    endpoint, model, _price, _credential = (
+                        await CompatibleProviderRegistryService(
+                            self.db,
+                            secret_store=self.credentials.secret_store,
+                        ).resolve_profile_binding(profile)
+                    )
+                    secret = self.credentials.resolve(profile.credential_ref)
             except Exception as exc:
                 return (
                     "PROVIDER_ERROR",
@@ -191,7 +203,7 @@ class ModelCapabilityService:
             from openai import OpenAI
 
             client = OpenAI(
-                api_key=self.credentials.resolve(profile.credential_ref),
+                api_key=self._resolve_profile(profile),
                 base_url=profile.base_url,
                 timeout=profile.timeout_seconds,
                 max_retries=0,
@@ -302,9 +314,18 @@ class ModelCapabilityService:
             if not profile.enabled:
                 status = "DISABLED"
                 raise RuntimeError("profile is disabled")
+            configured_for_profile = getattr(
+                self.credentials,
+                "configured_for_profile",
+                None,
+            )
             credential_status = (
                 "CONFIGURED"
-                if self.credentials.configured(profile.credential_ref)
+                if (
+                    configured_for_profile(profile)
+                    if configured_for_profile is not None
+                    else self.credentials.configured(profile.credential_ref)
+                )
                 else "NOT_CONFIGURED"
             )
             if credential_status != "CONFIGURED":

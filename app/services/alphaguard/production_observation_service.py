@@ -156,6 +156,7 @@ class ProductionObservationService:
         trace_id: str,
         minimum_symbols: int = 3,
         maximum_symbols: int = 5,
+        run_model_chain: bool = True,
     ) -> dict[str, Any]:
         normalized = sorted(
             {normalize_instrument(symbol, "CN")[1] for symbol in symbols}
@@ -398,43 +399,12 @@ class ProductionObservationService:
                 }
             )
         decisions = []
-        if execute and triggered_proposals:
-            account_rows = await self.db["ag_paper_accounts"].find(
-                {
-                    "user_id": str(user_id),
-                    "account_type": "PAPER_TOP_CONFIRMED",
-                    "market": "CN",
-                    "status": "ACTIVE",
-                    "live_execution_allowed": False,
-                }
-            ).to_list(length=2)
-            if len(account_rows) != 1:
-                raise ProductionObservationError(
-                    "PAPER_TOP_CONFIRMED account identity is not unique and active"
-                )
-            account_id = str(account_rows[0]["account_id"])
-            pipeline = DecisionPipeline(self.db)
-            for proposal in sorted(
-                triggered_proposals,
-                key=lambda item: item.proposal_id,
-            ):
-                decision = await pipeline.evaluate_quant_proposal(
-                    proposal.proposal_id,
-                    user_id=str(user_id),
-                    account_id=account_id,
-                    trace_id=trace_id,
-                )
-                decisions.append(
-                    {
-                        "proposal_id": proposal.proposal_id,
-                        "terminal_status": decision.terminal_status,
-                        "risk_status": (
-                            decision.risk_decision.status
-                            if decision.risk_decision
-                            else None
-                        ),
-                    }
-                )
+        if execute and triggered_proposals and run_model_chain:
+            decisions = await self.evaluate_triggered_proposals(
+                user_id=str(user_id),
+                proposal_ids=[item.proposal_id for item in triggered_proposals],
+                trace_id=trace_id,
+            )
         subjects_created = subjects_reused = 0
         horizon_label_distribution: dict[str, int] = {}
         if execute:
@@ -466,9 +436,12 @@ class ProductionObservationService:
                         horizon_label_distribution.get(label.status, 0) + 1
                     )
         after_state = await self._state()
-        if not triggered_proposals and before_state != after_state:
+        if (
+            (not triggered_proposals or not run_model_chain)
+            and before_state != after_state
+        ):
             raise ProductionObservationError(
-                "non-triggered observation unexpectedly changed formal trading state"
+                "pre-model observation unexpectedly changed formal trading state"
             )
         return {
             "write": execute,
@@ -483,6 +456,9 @@ class ProductionObservationService:
             "context_window_count": context_window.actual_count,
             "results": results,
             "triggered_count": len(triggered_proposals),
+            "triggered_proposal_ids": [
+                item.proposal_id for item in triggered_proposals
+            ],
             "decisions": decisions,
             "evaluation_subjects_created": subjects_created,
             "evaluation_subjects_reused": subjects_reused,
@@ -491,3 +467,61 @@ class ProductionObservationService:
             "formal_trading_state_after": after_state,
             "live_execution_allowed": False,
         }
+
+    async def evaluate_triggered_proposals(
+        self,
+        *,
+        user_id: str,
+        proposal_ids: list[str],
+        trace_id: str,
+    ) -> list[dict[str, Any]]:
+        """Run only the governed model/risk chain for natural triggers."""
+
+        account_rows = await self.db["ag_paper_accounts"].find(
+            {
+                "user_id": str(user_id),
+                "account_type": "PAPER_TOP_CONFIRMED",
+                "market": "CN",
+                "status": "ACTIVE",
+                "live_execution_allowed": False,
+            }
+        ).to_list(length=2)
+        if len(account_rows) != 1:
+            raise ProductionObservationError(
+                "PAPER_TOP_CONFIRMED account identity is not unique and active"
+            )
+        account_id = str(account_rows[0]["account_id"])
+        pipeline = DecisionPipeline(self.db)
+        decisions = []
+        for proposal_id in sorted(set(proposal_ids)):
+            proposal = await self.db["ag_quant_proposals"].find_one(
+                {
+                    "proposal_id": proposal_id,
+                    "user_id": str(user_id),
+                    "status": "TRIGGERED",
+                },
+                {"_id": 0, "proposal_id": 1},
+            )
+            if proposal is None:
+                raise ProductionObservationError(
+                    "model stage received a non-triggered proposal"
+                )
+            decision = await pipeline.evaluate_quant_proposal(
+                proposal_id,
+                user_id=str(user_id),
+                account_id=account_id,
+                trace_id=trace_id,
+            )
+            decisions.append(
+                {
+                    "proposal_id": proposal_id,
+                    "terminal_status": decision.terminal_status,
+                    "risk_status": (
+                        decision.risk_decision.status
+                        if decision.risk_decision
+                        else None
+                    ),
+                    "reused": decision.reused,
+                }
+            )
+        return decisions

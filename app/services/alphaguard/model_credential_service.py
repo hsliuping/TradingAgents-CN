@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 from .model_secret_store import (
@@ -46,6 +47,27 @@ class ModelCredentialService:
         except CredentialNotConfigured:
             return False
         return self._valid(value)
+
+    @contextmanager
+    def profile_context(self, profile):
+        manager = getattr(self.secret_store, "profile_context", None)
+        if manager is None:
+            yield
+            return
+        with manager(profile):
+            yield
+
+    def configured_for_profile(self, profile) -> bool:
+        try:
+            with self.profile_context(profile):
+                value = self.resolve(profile.credential_ref)
+        except CredentialNotConfigured:
+            return False
+        return self._valid(value)
+
+    def resolve_for_profile(self, profile) -> str:
+        with self.profile_context(profile):
+            return self.resolve(profile.credential_ref)
 
     def resolve(self, credential_ref: str) -> str:
         if credential_ref.startswith("env:"):

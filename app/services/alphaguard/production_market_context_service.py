@@ -114,6 +114,7 @@ class ProductionMarketContextService:
                     "trade_date": {"$lte": _business_timestamp(trade_date)},
                     "available_at": {"$lte": cutoff_at},
                     "price_adjustment_mode": "INDEX_UNADJUSTED_EQUIVALENT",
+                    "price_data_version": target_version,
                 }
             )
             .sort("trade_date", -1)
@@ -151,6 +152,7 @@ class ProductionMarketContextService:
                 or not ref_id
                 or available_at is None
                 or not row_version
+                or row_version != target_version
             ):
                 continue
             normalized.append(
@@ -255,7 +257,13 @@ class ProductionMarketContextService:
                     "fallback_parallelism",
                     "sector_index_codes",
                 )
-            }
+            },
+            # Production owns the version-locked CSI300 window in
+            # stock_daily_quotes and recomputes every benchmark metric below.
+            # A duplicate provider benchmark request must not discard valid
+            # breadth and sector data. Historical research keeps the default
+            # fail-closed behavior because it has no independent benchmark.
+            "provider_benchmark_required": False,
         }
         fetched = await asyncio.wait_for(
             asyncio.to_thread(

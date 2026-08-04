@@ -7928,3 +7928,105 @@ Compose并行镜像标签竞争。
 观察期内只修复明确缺陷，不新增投资策略，不调整模型以诱导交易，不修改推荐阈值，不自动接受推荐，
 不自动晋升Challenger，不开发或启用真实交易。除正式日常运行自然产生的create-only对象外，不人工写入
 业务结果；一致性异常只报告，不自动修复正式数据。
+
+## 32. RC1运行时凭证桥接与首次正式日常运行阻断（2026-08-04）
+
+### 32.1 基线与范围
+
+本阶段从`b46f4dc6260407e4c6e7aa90b7c3ad7a248478f0`和附注标签
+`alphaguard-mvp-rc1-observation-start`继续，只修复容器模型凭证桥接、每日任务分阶段Provider门禁和直接阻断
+正式日常运行的数据链缺陷。没有修改策略、Factor、Regime、模型Prompt、推荐阈值、风控、Champion、
+Challenger、费用、撮合或真实交易能力；继续保持`system_mode=SIM_AUTONOMOUS`、
+`live_trading_enabled=false`、`AUTO_CANDIDATE_ACCEPT=false`、`ACTIVE_CHALLENGER=false`和
+`LIVE_READY=false`。
+
+### 32.2 Credential Host根因与常驻方式
+
+观察期启动验收中的Credential Host由前台临时进程提供，所以短暂HTTP 200后随验收命令退出；Compose容器
+同时不能直接访问宿主Keychain。修复后由macOS LaunchAgent受控常驻，启用`RunAtLoad`和`KeepAlive`，
+Docker重建后仍自动恢复。Host绑定宿主受控端口，三个后端容器统一经`host.docker.internal`访问；运行授权
+目录权限为0700、授权材料文件为0600并只读挂载到容器。读取请求必须精确匹配active Profile、
+`credential_ref`、Endpoint和模型绑定；未授权请求返回403，健康检查只返回无Secret状态。
+
+FastAPI、queue-worker和analysis-worker重建后的Credential Host健康访问均为HTTP 200；Host状态为
+`RUNNING`、LaunchAgent为`INSTALLED`、授权材料为`READY`。Secret不进入MongoDB、Compose普通环境变量、
+镜像、日志正文、前端响应或审计正文；Host不可用时读取fail-closed。本记录不包含API Key、Authorization
+Header、Key长度、Key片段或Key Hash。
+
+### 32.3 三Profile与分阶段模型门禁
+
+三个实际容器返回一致结果：Normal `alphaguard_normal_compatible`和Top
+`alphaguard_top_compatible`均`configured=true capability=READY`；Research
+`alphaguard_research_openai`仍为`configured=false capability=UNVERIFIED`，原因是其批准绑定引用的宿主
+Keychain别名不存在。没有擅自替换凭证或修改Research Profile。调用预算可用，剩余100次、20 USD。
+
+Candidate Snapshot、Factor/Regime和Quant Proposal阶段现在明确使用`run_model_chain=false`。只有自然
+`TRIGGERED` Proposal到达`MODEL_CHAIN`时才检查Research、Normal、Top和预算；无自然触发时返回
+`provider_check=NOT_REQUIRED`。模型不可用时只阻断模型与订单下游并显示`DEGRADED_PAPER`，前置数据、推荐和
+量化结果保留。该调整没有改变触发条件、自动接受、模型输出或订单规则。
+
+### 32.4 数据源降级与MarketContext修复
+
+Tushare Token无效和AKShare实时快照连接失败继续作为独立降级项，不作为全部前置阶段的全局阻断。
+BaoStock串行历史路径对5203个标的逐个抓取，在7197秒后以`TIMEOUTERROR`失败；超时后的
+`asyncio.to_thread`底层线程不能取消，正式阶段已经FAILED后仍持续高CPU，随后仅对该精确失败进程发送
+SIGTERM，未重启数据库、清空队列或修改业务文档。
+
+每日MarketContext阶段改用项目既有`AKShareTencentMarketContextProvider`生产fallback：BaoStock仍提供
+实际日期Universe，Tencent历史接口以受控32路并行抓取，计算版本和所有覆盖门槛保持不变。fallback dry-run
+完成Universe 5202、有效历史5196、行业指数10/10、网络失败0。首次dry-run还发现CSI300查询混入三个
+`price_data_version`并产生重复日期；正式目标版本自身覆盖65个唯一日期。修复后按目标日版本精确锁定窗口，
+只读核验返回61条、61个唯一交易日、`missing=[]`，旧版本全部保留。
+
+### 32.5 正式Daily Run结果
+
+运行ID为`84d9cd7e-8430-5e63-b665-68534574369e`，交易日`2026-07-30`，输入版本
+`rc1-runtime-bridge-v1`。修复后的dry-run返回`DRY_RUN`，20阶段均按计划SKIPPED且没有业务写入。正式
+resume中，`TRADING_CALENDAR`、`SECURITY_MASTER_SYNC`和`RAW_QFQ_PRICE_SYNC`复用；
+`BENCHMARK_INDUSTRY_SYNC`使用fallback在约12分13秒内SUCCESS，随后`TRADING_STATUS_SYNC`、
+`DATA_QUALITY`、`RECOMMENDATION_COVERAGE`均SUCCESS。
+
+首次推荐resume暴露质量报告create-only身份没有包含完整`input_hash`，合法输入版本变化会与旧报告冲突。
+修复后质量报告UUID包含`input_hash`，旧报告不覆盖、不删除，新版本create-only新增；对应回归验证不同基准
+输入可以共存。`FULL_MARKET_RECOMMENDATION`随后SUCCESS，两位active用户自然新增2个推荐运行和30条推荐，
+推荐运行总数由7变为9、推荐总数由45变为75；没有修改阈值或强制制造信号。候选池保持5。
+
+正式运行最终在`CANDIDATE_SNAPSHOT`按安全合同FAILED：7月30日没有既有Snapshot/Proposal，新创建的
+READY MarketContext审计采集时间晚于7月30日18:30决策cutoff。`ProductionObservationService`要求
+`available_at`和`collected_at`都不晚于同日cutoff，因此正确拒绝把事后采集数据伪装成当时已知数据。
+后续Factor、Proposal、模型、OrderIntent、订单、结算、评价、Challenger、Operations和通知均按依赖
+BLOCKED。没有放宽point-in-time门禁、回填伪造时间、使用Fixture或自动修复正式数据。
+
+因此首次正式20阶段运行和相同输入全阶段`REUSED`尚未完成。成功标签
+`alphaguard-mvp-rc1-runtime-unblocked`暂不创建；后续必须等一个在同日cutoff前完成正式采集的交易日，
+或另行批准非可执行catch-up/reprocess语义，不能在本修复中顺手放宽生产证据门禁。
+
+### 32.6 模型、交易、账户与实验安全
+
+正式`ag_model_runs`保持130，本阶段模型调用增量0。OrderIntent、Execution Outbox、Order、Fill、
+Position、Reservation、Ledger和Settlement全部保持0，没有自动接受推荐、创建订单或成交。四个账户均为
+ACTIVE，`cash_available=1000000.00`、冻结/预留现金0、持仓市值0、已实现盈亏0、费用0、总资产
+1000000.00。
+
+5个Champion Assignment经正式验证脚本全部通过，conflicts=0，固定投影hash保持
+`1c170fb6001d756738ad6506ebc06ec79c5f66126a956254861c044022039ed0`。Challenger
+Assignment/Object/Run均为0，`ACTIVE_CHALLENGER=false`。统一只读一致性检查19项全部PASS，warnings=0、
+failed=0、未自动修复，报告hash为
+`35379a14f6f61e92f05f9673233e6311a74830846744224407bca03374f76906`。
+
+### 32.7 服务、前端与验证状态
+
+MongoDB、Redis、FastAPI、queue-worker、analysis-worker和前端均HEALTHY，Credential Host常驻；三个
+`live=true`入口在本阶段代码调整前后的既有安全回归分别保持FastAPI/queue-worker/analysis-worker非零退出
+`3/1/1`。前端无开启真实交易按钮，既有总览、推荐、候选、决策、Paper账户、实验室、Operations和数据库/
+备份页面验收不受后端修复影响。通知连接降级不阻断核心页面。
+
+本阶段累计专项回归包含凭证生命周期、容器授权、脱敏、Profile/Endpoint绑定、分阶段Provider门禁、生产
+fallback、CSI300版本锁定和质量报告create-only版本化，最终专项结果为`38 passed, 85 warnings`；默认
+离线CI为`780 passed, 89 warnings`。前端`npm run type-check`、正式`npm run build`和独立
+`npx vite build`均PASS（2615 modules）；全仓Python compileall和Compose配置检查均PASS。提交前
+复核的`git diff --check`与生产代码敏感信息扫描均PASS；实际`.env`、运行授权目录和备份目录均未进入
+Git差异。三个后端容器再次访问Credential Host均为HTTP 200，健康响应只含无Secret状态；三项
+`live=true`入口再次以`3/1/1`非零退出。
+已知非阻断警告仍为Sass legacy API、Vite大Chunk和本机缺Buildx；明确阻断项为Research批准凭证缺失以及
+7月30日point-in-time采集窗口已错过。

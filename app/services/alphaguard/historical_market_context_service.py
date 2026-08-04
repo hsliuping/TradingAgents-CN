@@ -396,21 +396,34 @@ class BaoStockHistoricalMarketProvider:
                     }
                 )
 
-            benchmark_rows = cls._retry(
-                lambda: cls._query_rows(
-                    bs.query_history_k_data_plus(
-                        "sh.000300",
-                        "date,code,close,preclose,pctChg,tradestatus",
-                        start_date=history_start.isoformat(),
-                        end_date=history_end.isoformat(),
-                        frequency="d",
-                        adjustflag="3",
+            try:
+                benchmark_rows = cls._retry(
+                    lambda: cls._query_rows(
+                        bs.query_history_k_data_plus(
+                            "sh.000300",
+                            "date,code,close,preclose,pctChg,tradestatus",
+                            start_date=history_start.isoformat(),
+                            end_date=history_end.isoformat(),
+                            frequency="d",
+                            adjustflag="3",
+                        ),
+                        label="CSI300 history",
                     ),
                     label="CSI300 history",
-                ),
-                label="CSI300 history",
-                attempts=attempts,
-            )
+                    attempts=attempts,
+                )
+            except Exception as exc:
+                if policy.get("provider_benchmark_required", True):
+                    raise
+                benchmark_rows = []
+                failures.append(
+                    {
+                        "scope": "sh.000300",
+                        "error_type": type(exc).__name__,
+                        "error_message": "provider benchmark unavailable; "
+                        "caller-owned benchmark required",
+                    }
+                )
         finally:
             bs.logout()
             socket.setdefaulttimeout(previous_socket_timeout)
@@ -510,10 +523,10 @@ class BaoStockHistoricalMarketProvider:
                 ]
                 volatility = statistics.stdev(returns) * math.sqrt(250)
             extreme = (
-                volatility is not None
-                and breadth is not None
-                and volatility >= float(thresholds["extreme_volatility"])
+                volatility >= float(thresholds["extreme_volatility"])
                 and breadth <= float(thresholds["breadth_collapse"])
+                if volatility is not None and breadth is not None
+                else None
             )
             source_response_hashes = {
                 **response_hashes_by_date[trade_date],
@@ -567,7 +580,7 @@ class BaoStockHistoricalMarketProvider:
                 "new_high_count": new_highs if valid_high_low else None,
                 "new_low_count": new_lows if valid_high_low else None,
                 "industry_diffusion": industry_diffusion,
-                "extreme_risk_flag": bool(extreme),
+                "extreme_risk_flag": extreme,
                 "universe_coverage": coverage,
                 "high_low_coverage": high_low_coverage,
                 "sector_coverage": sector_coverage,

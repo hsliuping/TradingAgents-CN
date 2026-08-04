@@ -11,6 +11,9 @@ from app.services.alphaguard.candidate_recommendation_policy import (
 from app.services.alphaguard.candidate_recommendation_service import (
     CandidateRecommendationService,
 )
+from app.services.alphaguard.akshare_market_context_provider import (
+    AKShareTencentMarketContextProvider,
+)
 from app.services.alphaguard.daily_run_service import (
     DailyRunBlocked,
     DailyStageSpec,
@@ -18,6 +21,9 @@ from app.services.alphaguard.daily_run_service import (
 )
 from app.services.alphaguard.evaluation_pipeline import EvaluationPipeline
 from app.services.alphaguard.operations_service import AlphaGuardOperationsService
+from app.services.alphaguard.model_runtime_status_service import (
+    ModelRuntimeStatusService,
+)
 from app.services.alphaguard.paper_calendar_service import PaperTradingCalendarService
 from app.services.alphaguard.paper_task_service import PaperTaskService
 from app.services.alphaguard.production_market_context_service import (
@@ -30,6 +36,9 @@ from app.services.alphaguard.recommendation_data_service import (
     RecommendationDataService,
 )
 from app.services.alphaguard.paper_storage import clean_document
+
+
+DAILY_MARKET_CONTEXT_TIMEOUT_SECONDS = 7200
 
 
 class ProductionDailyStageExecutor:
@@ -154,6 +163,12 @@ class ProductionDailyStageExecutor:
         market = await ProductionMarketContextService(self.db).sync(
             trade_date=trading_date,
             execute=True,
+            # The existing production fallback keeps BaoStock as the exact-date
+            # universe source while fetching daily histories with bounded
+            # parallelism. The sequential BaoStock history path cannot finish a
+            # 5,000+ symbol production day within the governed stage timeout.
+            provider=AKShareTencentMarketContextProvider(),
+            timeout_seconds=DAILY_MARKET_CONTEXT_TIMEOUT_SECONDS,
         )
         industry_count = await self.db["stock_basic_info"].count_documents(
             {"industry": {"$nin": [None, ""]}}
@@ -163,6 +178,7 @@ class ProductionDailyStageExecutor:
             result={
                 "market_context_status": market.get("calculation_status"),
                 "market_context_action": market.get("context_action"),
+                "market_context_provider": market.get("provider"),
                 "industry_mapping_count": industry_count,
                 "industry_status": "READY" if industry_count else "DEGRADED_OPTIONAL",
             },
@@ -290,6 +306,7 @@ class ProductionDailyStageExecutor:
                 trace_id=daily_run_id,
                 minimum_symbols=1,
                 maximum_symbols=50,
+                run_model_chain=False,
             )
             summaries.append(summary)
         self.cache["observations"] = summaries
@@ -309,6 +326,16 @@ class ProductionDailyStageExecutor:
             for summary in summaries
             for item in summary.get("decisions", [])
         ]
+        triggered_proposals = [
+            {
+                "user_id": str(summary.get("user_id") or ""),
+                "proposal_ids": list(
+                    summary.get("triggered_proposal_ids") or []
+                ),
+            }
+            for summary in summaries
+            if summary.get("triggered_proposal_ids")
+        ]
         return StageExecutionResult(
             output_count=snapshot_count,
             result={
@@ -316,6 +343,7 @@ class ProductionDailyStageExecutor:
                 "snapshot_count": snapshot_count,
                 "proposal_count": proposal_count,
                 "triggered_count": triggered_count,
+                "triggered_proposals": triggered_proposals,
                 "decision_count": len(decisions),
                 "terminal_statuses": [
                     item.get("terminal_status") for item in decisions
@@ -359,31 +387,115 @@ class ProductionDailyStageExecutor:
             result={"proposal_count": proposals, "triggered_count": triggered},
         )
 
-    async def stage_model_chain(self, **_):
+    async def stage_model_chain(self, *, daily_run_id: str | None = None, **_):
         summaries = self.cache.get("observations", [])
-        decisions = [item for summary in summaries for item in summary.get("decisions", [])]
         candidate_result = self._stage_result("CANDIDATE_SNAPSHOT")
-        decision_count = (
-            len(decisions)
+        triggered = (
+            [
+                {
+                    "user_id": str(summary.get("user_id") or ""),
+                    "proposal_ids": list(
+                        summary.get("triggered_proposal_ids") or []
+                    ),
+                }
+                for summary in summaries
+                if summary.get("triggered_proposal_ids")
+            ]
             if summaries
-            else int(candidate_result.get("decision_count") or 0)
+            else list(candidate_result.get("triggered_proposals") or [])
         )
-        terminal_statuses = (
-            [item.get("terminal_status") for item in decisions]
-            if summaries
-            else list(candidate_result.get("terminal_statuses") or [])
-        )
+        if not triggered:
+            legacy_count = int(candidate_result.get("decision_count") or 0)
+            legacy_statuses = list(
+                candidate_result.get("terminal_statuses") or []
+            )
+            return StageExecutionResult(
+                output_count=legacy_count,
+                result={
+                    "decision_count": legacy_count,
+                    "terminal_statuses": legacy_statuses,
+                    "provider_check": "NOT_REQUIRED",
+                },
+                message=(
+                    "没有自然触发样本，按策略门禁未检查或调用模型"
+                    if not legacy_count
+                    else None
+                ),
+            )
+
+        runtime = await ModelRuntimeStatusService(self.db).status(admin=True)
+        required = {
+            item["role"]: item
+            for item in runtime.get("profiles", [])
+            if item.get("role")
+            in {"RESEARCH_AGENT", "NORMAL_TRADER", "TOP_RISK_REVIEWER"}
+        }
+        budget = dict(runtime.get("budget") or {})
+        if (
+            runtime.get("status") != "READY"
+            or len(required) != 3
+            or any(
+                not item.get("configured")
+                or item.get("capability") != "READY"
+                for item in required.values()
+            )
+            or int(budget.get("remaining_calls") or 0) <= 0
+            or float(budget.get("remaining_cost") or 0) <= 0
+        ):
+            raise DailyRunBlocked(
+                "MODEL_PROVIDER_UNAVAILABLE",
+                "Research、Normal或Top Provider未就绪；"
+                "MODEL_CHAIN安全阻断，overall_status=DEGRADED_PAPER",
+            )
+
+        decisions = []
+        for item in triggered:
+            user_id = str(item.get("user_id") or "")
+            proposal_ids = [
+                str(value) for value in item.get("proposal_ids") or []
+            ]
+            if not user_id or not proposal_ids:
+                raise DailyRunBlocked(
+                    "MODEL_STAGE_INPUT_INVALID",
+                    "自然触发样本缺少模型阶段的精确用户或Proposal绑定",
+                )
+            current = await ProductionObservationService(
+                self.db
+            ).evaluate_triggered_proposals(
+                user_id=user_id,
+                proposal_ids=proposal_ids,
+                trace_id=str(daily_run_id or "alphaguard-daily-model-stage"),
+            )
+            decisions.extend(current)
+            failed = next(
+                (
+                    value
+                    for value in current
+                    if value.get("terminal_status")
+                    in {
+                        "NORMAL_MODEL_FAILED",
+                        "TOP_MODEL_FAILED",
+                        "CONSENSUS_INVALID",
+                    }
+                ),
+                None,
+            )
+            if failed:
+                raise DailyRunBlocked(
+                    "MODEL_PROVIDER_UNAVAILABLE",
+                    "模型调用未满足受控输出合同；"
+                    "MODEL_CHAIN安全阻断，overall_status=DEGRADED_PAPER",
+                )
+        terminal_statuses = [
+            item.get("terminal_status") for item in decisions
+        ]
         return StageExecutionResult(
-            output_count=decision_count,
+            output_count=len(decisions),
             result={
-                "decision_count": decision_count,
+                "decision_count": len(decisions),
                 "terminal_statuses": terminal_statuses,
+                "provider_check": "READY",
             },
-            message=(
-                "没有自然触发样本，按策略门禁未调用模型"
-                if not decision_count
-                else None
-            ),
         )
 
     async def stage_order_intent(self, *, daily_run_id: str, **_):

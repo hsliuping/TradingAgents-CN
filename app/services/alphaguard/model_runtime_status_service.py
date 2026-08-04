@@ -218,13 +218,23 @@ class ModelRuntimeStatusService:
                 },
                 sort=[("created_at", -1)],
             )
+            configured_for_profile = getattr(
+                self.credentials,
+                "configured_for_profile",
+                None,
+            )
+            credential_configured = (
+                configured_for_profile(defined)
+                if configured_for_profile is not None
+                else self.credentials.configured(defined.credential_ref)
+            )
             configured = bool(
                 persisted
                 and persisted.get("config_hash") == defined.config_hash
                 and prompt_persisted
                 and prompt_persisted.get("template_hash")
                 == prompt.template_hash
-                and self.credentials.configured(defined.credential_ref)
+                and credential_configured
             )
             capability = (
                 str(latest_check.get("status"))
