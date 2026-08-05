@@ -4,6 +4,7 @@ export interface ModelProfileStatus {
   role: 'RESEARCH_AGENT' | 'NORMAL_TRADER' | 'TOP_RISK_REVIEWER'
   profile_id: string
   profile_version: string
+  analysis_selector: string
   provider: string
   provider_type?: 'OPENAI_OFFICIAL' | 'OPENAI_COMPATIBLE'
   endpoint_profile_id?: string | null
@@ -41,8 +42,54 @@ export interface ModelBudgetStatus {
 
 export interface ModelRuntimeStatus {
   status: 'READY' | 'NOT_CONFIGURED' | 'DEGRADED'
+  research_status: 'READY' | 'NOT_CONFIGURED' | 'DEGRADED'
+  decision_status: 'READY' | 'NOT_CONFIGURED' | 'DEGRADED'
   profiles: ModelProfileStatus[]
   budget?: ModelBudgetStatus
+}
+
+export interface AnalysisModelOption {
+  model_name: string
+  model_display_name: string
+  provider: string
+  role: ModelProfileStatus['role']
+  suitable_roles: Array<'quick_analysis' | 'deep_analysis'>
+  capability_level?: number
+}
+
+export interface AnalysisModelConfiguration {
+  quickModel: string
+  deepModel: string
+  availableModels: AnalysisModelOption[]
+  ready: boolean
+}
+
+export async function getAnalysisModelConfiguration(): Promise<AnalysisModelConfiguration> {
+  const response = await alphaguardModelsApi.status()
+  const readyProfiles = response.data.profiles.filter(
+    profile => profile.configured && profile.capability === 'READY'
+  )
+  const quickProfile = readyProfiles.find(profile => profile.role === 'RESEARCH_AGENT')
+  const deepProfile = readyProfiles.find(profile => profile.role === 'TOP_RISK_REVIEWER')
+  const selected = [quickProfile, deepProfile].filter(
+    (profile): profile is ModelProfileStatus => Boolean(profile)
+  )
+  const availableModels = selected.map(profile => ({
+    model_name: profile.analysis_selector,
+    model_display_name: profile.model_name,
+    provider: profile.provider,
+    role: profile.role,
+    suitable_roles: profile.role === 'RESEARCH_AGENT'
+      ? ['quick_analysis' as const]
+      : ['deep_analysis' as const]
+  }))
+
+  return {
+    quickModel: quickProfile?.analysis_selector || '',
+    deepModel: deepProfile?.analysis_selector || '',
+    availableModels,
+    ready: Boolean(quickProfile && deepProfile)
+  }
 }
 
 export interface ModelCredentialStatus {

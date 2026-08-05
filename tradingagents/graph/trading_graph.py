@@ -188,6 +188,22 @@ def _create_provider_pair(
     return deep_llm, quick_llm
 
 
+def _custom_openai_runtime_settings(config: Dict[str, Any]) -> tuple[str, str]:
+    api_key = (
+        config.get("quick_api_key")
+        or config.get("deep_api_key")
+        or os.getenv("CUSTOM_OPENAI_API_KEY")
+    )
+    if not api_key:
+        raise ValueError("自定义 OpenAI 端点的 API 凭据未配置")
+    backend_url = config.get("backend_url") or config.get(
+        "custom_openai_base_url"
+    )
+    if not backend_url:
+        raise ValueError("自定义 OpenAI 端点地址未配置")
+    return str(api_key), str(backend_url)
+
+
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
@@ -238,6 +254,10 @@ class TradingAgentsGraph:
         # 构建 extra_kwargs，统一传递 reasoning_effort
         _quick_extra = {}
         _deep_extra = {}
+        if "retry_times" in quick_config:
+            _quick_extra["max_retries"] = quick_config["retry_times"]
+        if "retry_times" in deep_config:
+            _deep_extra["max_retries"] = deep_config["retry_times"]
         if quick_reasoning_effort:
             _quick_extra["reasoning_effort"] = quick_reasoning_effort
         if deep_reasoning_effort:
@@ -251,10 +271,19 @@ class TradingAgentsGraph:
         quick_backend_url = self.config.get("quick_backend_url")
         deep_backend_url = self.config.get("deep_backend_url")
         normalized_provider = normalize_provider_key(self.config["llm_provider"])
+        separate_model_runtimes = bool(
+            normalized_quick_provider
+            and normalized_deep_provider
+            and (
+                normalized_quick_provider != normalized_deep_provider
+                or quick_backend_url != deep_backend_url
+                or self.config.get("quick_api_key")
+                != self.config.get("deep_api_key")
+            )
+        )
 
-        if normalized_quick_provider and normalized_deep_provider and normalized_quick_provider != normalized_deep_provider:
-            # 混合模式：快速模型和深度模型来自不同厂家
-            logger.info(f"🔀 [混合模式] 检测到不同厂家的模型组合")
+        if separate_model_runtimes:
+            logger.info(f"🔀 [混合模式] 检测到独立的快速/深度模型运行配置")
             logger.info(f"   快速模型: {self.config['quick_think_llm']} ({normalized_quick_provider})")
             logger.info(f"   深度模型: {self.config['deep_think_llm']} ({normalized_deep_provider})")
 
@@ -424,11 +453,9 @@ class TradingAgentsGraph:
             )
             logger.info("✅ [DeepSeek] 已通过 llm_clients 初始化成功并应用用户配置的模型参数")
         elif normalized_provider == "custom_openai":
-            custom_api_key = os.getenv('CUSTOM_OPENAI_API_KEY')
-            if not custom_api_key:
-                raise ValueError("使用自定义OpenAI端点需要设置CUSTOM_OPENAI_API_KEY环境变量")
-
-            custom_base_url = self.config.get("custom_openai_base_url", "https://api.openai.com/v1")
+            custom_api_key, custom_base_url = _custom_openai_runtime_settings(
+                self.config
+            )
             logger.info(f"🔧 [自定义OpenAI] 使用端点: {custom_base_url}")
             self.deep_thinking_llm, self.quick_thinking_llm = _create_provider_pair(
                 provider="custom_openai",

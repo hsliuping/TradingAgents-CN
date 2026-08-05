@@ -8,7 +8,7 @@
     @change="onChange"
   >
     <el-option
-      v-for="model in availableModels"
+      v-for="model in filteredModels"
       :key="model.model_name"
       :label="model.model_display_name || model.model_name"
       :value="model.model_name"
@@ -40,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 interface Props {
   modelValue: string
@@ -63,6 +63,12 @@ const emit = defineEmits<{
 }>()
 
 const localValue = ref(props.modelValue)
+const filteredModels = computed(() => props.availableModels.filter(model => {
+  if (!model.role) return true
+  return props.type === 'deep'
+    ? model.role === 'TOP_RISK_REVIEWER'
+    : model.role === 'RESEARCH_AGENT'
+}))
 
 watch(() => props.modelValue, (val) => { localValue.value = val })
 

@@ -170,7 +170,7 @@
                     size="large"
                     @click="submitAnalysis"
                     :loading="submitting"
-                    :disabled="!analysisForm.stockCode.trim()"
+                    :disabled="!analysisForm.stockCode.trim() || !modelsReady"
                     class="submit-btn large-analysis-btn"
                     style="width: 280px; height: 56px; font-size: 18px; font-weight: 700; border-radius: 16px;"
                   >
@@ -359,6 +359,14 @@
               <!-- AI模型配置 -->
               <div class="config-section">
                 <h4 class="config-title">🤖 AI模型配置</h4>
+                <el-alert
+                  v-if="modelConfigurationError"
+                  :title="modelConfigurationError"
+                  type="error"
+                  :closable="false"
+                  show-icon
+                  style="margin-bottom: 12px"
+                />
                 <div class="model-config">
                   <div class="model-item">
                     <div class="model-label">
@@ -369,7 +377,7 @@
                     </div>
                     <el-select v-model="modelSettings.quickAnalysisModel" size="small" style="width: 100%" filterable>
                       <el-option
-                        v-for="model in availableModels"
+                        v-for="model in quickModelOptions"
                         :key="`quick-${model.provider}/${model.model_name}`"
                         :label="model.model_display_name || model.model_name"
                         :value="model.model_name"
@@ -412,32 +420,6 @@
                     <DeepModelSelector v-model="modelSettings.deepAnalysisModel" :available-models="availableModels" type="deep" size="small" width="100%" />
                   </div>
                 </div>
-
-                <!-- 🆕 模型推荐提示 -->
-                <el-alert
-                  v-if="modelRecommendation"
-                  :title="modelRecommendation.title"
-                  :type="modelRecommendation.type"
-                  :closable="false"
-                  style="margin-top: 12px;"
-                >
-                  <template #default>
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
-                      <div style="font-size: 13px; line-height: 1.8; flex: 1; white-space: pre-line;">
-                        {{ modelRecommendation.message }}
-                      </div>
-                      <el-button
-                        v-if="modelRecommendation.quickModel && modelRecommendation.deepModel"
-                        type="primary"
-                        size="small"
-                        @click="applyRecommendedModels"
-                        style="flex-shrink: 0;"
-                      >
-                        应用推荐
-                      </el-button>
-                    </div>
-                  </template>
-                </el-alert>
               </div>
 
               <!-- 分析选项 -->
@@ -710,11 +692,13 @@ import { paperApi } from '@/api/paper'
 import { stocksApi } from '@/api/stocks'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
-import { configApi } from '@/api/config'
+import {
+  getAnalysisModelConfiguration,
+  type AnalysisModelOption
+} from '@/api/alphaguardModels'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
 import { marked } from 'marked'
-import { recommendModels } from '@/api/modelCapabilities'
 import { validateStockCode, getStockCodeFormatHelp } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
 
@@ -783,21 +767,18 @@ const generateStepsFromBackend = (backendSteps: any[]) => {
 
 // 模型设置
 const modelSettings = ref({
-  quickAnalysisModel: 'qwen-turbo',
-  deepAnalysisModel: 'qwen-max'
+  quickAnalysisModel: '',
+  deepAnalysisModel: ''
 })
 
-// 可用的模型列表（从配置中获取）
-const availableModels = ref<any[]>([])
-
-// 🆕 模型推荐提示
-const modelRecommendation = ref<{
-  title: string
-  message: string
-  type: 'success' | 'warning' | 'info' | 'error'
-  quickModel?: string
-  deepModel?: string
-} | null>(null)
+const availableModels = ref<AnalysisModelOption[]>([])
+const modelConfigurationError = ref('')
+const modelsReady = computed(() => Boolean(
+  modelSettings.value.quickAnalysisModel && modelSettings.value.deepAnalysisModel
+))
+const quickModelOptions = computed(() => availableModels.value.filter(
+  model => model.role === 'RESEARCH_AGENT'
+))
 
 // 分析表单
 const analysisForm = reactive<AnalysisForm>({
@@ -925,6 +906,11 @@ const submitAnalysis = async () => {
 
   if (analysisForm.selectedAnalysts.length === 0) {
     ElMessage.warning('请至少选择一个分析师')
+    return
+  }
+
+  if (!modelsReady.value) {
+    ElMessage.error('分析模型尚未配置完成，请前往设置中的“模型与 API”检查配置')
     return
   }
 
@@ -1878,26 +1864,13 @@ const updateAnalysisSteps = (status: any) => {
 // 初始化模型设置
 const initializeModelSettings = async () => {
   try {
-    const sortModelsByNewest = (configs: any[]) => {
-      const getTimestamp = (config: any) => {
-        const timeValue = config.created_at || config.updated_at
-        const timestamp = timeValue ? new Date(timeValue).getTime() : 0
-        return Number.isNaN(timestamp) ? 0 : timestamp
-      }
-
-      return [...configs].sort((a, b) => getTimestamp(b) - getTimestamp(a))
-    }
-
-    // 获取默认模型
-    const defaultModels = await configApi.getDefaultModels()
-    modelSettings.value.quickAnalysisModel = defaultModels.quick_analysis_model
-    modelSettings.value.deepAnalysisModel = defaultModels.deep_analysis_model
-
-    // 获取所有可用的模型列表
-    const llmConfigs = await configApi.getLLMConfigs()
-    availableModels.value = sortModelsByNewest(
-      llmConfigs.filter((config: any) => config.enabled)
-    )
+    const configuration = await getAnalysisModelConfiguration()
+    modelSettings.value.quickAnalysisModel = configuration.quickModel
+    modelSettings.value.deepAnalysisModel = configuration.deepModel
+    availableModels.value = configuration.availableModels
+    modelConfigurationError.value = configuration.ready
+      ? ''
+      : '分析模型尚未就绪，请前往设置中的“模型与 API”完成配置和能力检测'
 
     console.log('✅ 加载模型配置成功:', {
       quick: modelSettings.value.quickAnalysisModel,
@@ -1911,8 +1884,10 @@ const initializeModelSettings = async () => {
     })))
   } catch (error) {
     console.error('加载默认模型配置失败:', error)
-    modelSettings.value.quickAnalysisModel = 'qwen-turbo'
-    modelSettings.value.deepAnalysisModel = 'qwen-max'
+    modelSettings.value.quickAnalysisModel = ''
+    modelSettings.value.deepAnalysisModel = ''
+    availableModels.value = []
+    modelConfigurationError.value = '无法读取统一模型配置，请稍后重试'
   }
 }
 
@@ -2073,121 +2048,9 @@ const isQuickAnalysisRole = (roles: string[] | undefined): boolean => {
   return roles.includes('quick_analysis') || roles.includes('both')
 }
 
-/**
- * 判断是否适合深度分析
- */
-/**
- * 显示分析深度的模型推荐说明
- */
-const checkModelSuitability = async () => {
-  const depthNames: Record<number, string> = {
-    1: '快速',
-    2: '基础',
-    3: '标准',
-    4: '深度',
-    5: '全面'
-  }
-  const depthName = depthNames[analysisForm.researchDepth] || '标准'
-
-  try {
-    // 获取推荐模型
-    const recommendRes = await recommendModels(depthName)
-    const responseData = recommendRes?.data?.data
-
-    if (responseData) {
-      const quickModel = responseData.quick_model || '未知'
-      const deepModel = responseData.deep_model || '未知'
-
-      // 获取模型的显示名称
-      const quickModelInfo = availableModels.value.find(m => m.model_name === quickModel)
-      const deepModelInfo = availableModels.value.find(m => m.model_name === deepModel)
-
-      const quickDisplayName = quickModelInfo?.model_display_name || quickModel
-      const deepDisplayName = deepModelInfo?.model_display_name || deepModel
-
-      // 获取推荐理由
-      const reason = responseData.reason || ''
-
-      // 构建推荐说明
-      const depthDescriptions: Record<number, string> = {
-        1: '快速浏览，获取基本信息',
-        2: '基础分析，了解主要指标',
-        3: '标准分析，全面评估股票',
-        4: '深度研究，挖掘投资机会',
-        5: '全面分析，专业投资决策'
-      }
-
-      const message = `${depthDescriptions[analysisForm.researchDepth] || '标准分析'}\n\n推荐模型配置：\n• 快速模型：${quickDisplayName}\n• 深度模型：${deepDisplayName}\n\n${reason}`
-
-      modelRecommendation.value = {
-        title: '💡 模型推荐',
-        message,
-        type: 'info',
-        quickModel,
-        deepModel
-      }
-    } else {
-      // 如果没有推荐数据，显示通用说明
-      const generalDescriptions: Record<number, string> = {
-        1: '快速分析：使用基础模型即可，注重速度和成本',
-        2: '基础分析：快速模型用基础级，深度模型用标准级',
-        3: '标准分析：快速模型用基础级，深度模型用标准级以上',
-        4: '深度分析：快速模型用标准级，深度模型用高级以上，需要推理能力',
-        5: '全面分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
-      }
-
-      modelRecommendation.value = {
-        title: '💡 模型推荐',
-        message: generalDescriptions[analysisForm.researchDepth] || generalDescriptions[3],
-        type: 'info'
-      }
-    }
-  } catch (error) {
-    console.error('获取模型推荐失败:', error)
-    // 显示通用说明
-    const generalDescriptions: Record<number, string> = {
-      1: '快速分析：使用基础模型即可，注重速度和成本',
-      2: '基础分析：快速模型用基础级，深度模型用标准级',
-      3: '标准分析：快速模型用基础级，深度模型用标准级以上',
-      4: '深度分析：快速模型用标准级，深度模型用高级以上，需要推理能力',
-      5: '全面分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
-    }
-
-    modelRecommendation.value = {
-      title: '💡 模型推荐',
-      message: generalDescriptions[analysisForm.researchDepth] || generalDescriptions[3],
-      type: 'info'
-    }
-  }
-}
-
-// 应用推荐的模型配置
-const applyRecommendedModels = () => {
-  if (modelRecommendation.value?.quickModel && modelRecommendation.value?.deepModel) {
-    modelSettings.value.quickAnalysisModel = modelRecommendation.value.quickModel
-    modelSettings.value.deepAnalysisModel = modelRecommendation.value.deepModel
-
-    // 清除推荐提示
-    modelRecommendation.value = null
-
-    ElMessage.success('已应用推荐的模型配置')
-  }
-}
-
-// 监听分析深度变化
-import { watch } from 'vue'
-watch(() => analysisForm.researchDepth, () => {
-  checkModelSuitability()
-})
-
-// 监听模型选择变化
-watch([() => modelSettings.value.quickAnalysisModel, () => modelSettings.value.deepAnalysisModel], () => {
-  checkModelSuitability()
-})
-
 // 页面初始化
 onMounted(async () => {
-  initializeModelSettings()
+  await initializeModelSettings()
 
   // 🆕 从用户偏好加载默认设置
   const authStore = useAuthStore()
@@ -2250,8 +2113,6 @@ onMounted(async () => {
     await restoreTaskFromCache()
   }
 
-  // 🆕 初始检查模型适用性
-  await checkModelSuitability()
 })
 </script>
 

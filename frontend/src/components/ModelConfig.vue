@@ -13,7 +13,7 @@
           </div>
           <el-select v-model="localQuickModel" size="small" style="width: 100%" filterable @change="onQuickModelChange">
             <el-option
-              v-for="model in availableModels"
+              v-for="model in quickModels"
               :key="`quick-${model.provider}/${model.model_name}`"
               :label="model.model_display_name || model.model_name"
               :value="model.model_name"
@@ -55,7 +55,7 @@
           </div>
           <el-select v-model="localDeepModel" size="small" style="width: 100%" filterable @change="onDeepModelChange">
             <el-option
-              v-for="model in availableModels"
+              v-for="model in deepModels"
               :key="`deep-${model.provider}/${model.model_name}`"
               :label="model.model_display_name || model.model_name"
               :value="model.model_name"
@@ -88,41 +88,13 @@
           </el-select>
         </div>
       </div>
-
-      <!-- 🆕 模型推荐提示 -->
-      <el-alert
-        v-if="modelRecommendation"
-        :title="modelRecommendation.title"
-        :type="modelRecommendation.type"
-        :closable="false"
-        style="margin-top: 12px;"
-      >
-        <template #default>
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
-            <div style="font-size: 13px; line-height: 1.8; flex: 1; white-space: pre-line;">
-              {{ modelRecommendation.message }}
-            </div>
-            <el-button
-              v-if="modelRecommendation.quickModel && modelRecommendation.deepModel"
-              type="primary"
-              size="small"
-              @click="applyRecommendedModels"
-              style="flex-shrink: 0;"
-            >
-              应用推荐
-            </el-button>
-          </div>
-        </template>
-      </el-alert>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { InfoFilled } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
-import { recommendModels } from '@/api/modelCapabilities'
 
 // Props
 interface Props {
@@ -144,14 +116,12 @@ const emit = defineEmits<{
 const localQuickModel = ref(props.quickAnalysisModel)
 const localDeepModel = ref(props.deepAnalysisModel)
 
-// 模型推荐提示
-const modelRecommendation = ref<{
-  title: string
-  message: string
-  type: 'success' | 'warning' | 'info' | 'error'
-  quickModel?: string
-  deepModel?: string
-} | null>(null)
+const quickModels = computed(() => props.availableModels.filter(
+  model => !model.role || model.role === 'RESEARCH_AGENT'
+))
+const deepModels = computed(() => props.availableModels.filter(
+  model => !model.role || model.role === 'TOP_RISK_REVIEWER'
+))
 
 // Watch props changes
 watch(() => props.quickAnalysisModel, (newVal) => {
@@ -211,115 +181,6 @@ const isDeepAnalysisRole = (roles: string[] | undefined): boolean => {
   return roles.includes('deep_analysis') || roles.includes('both')
 }
 
-/**
- * 检查模型适配性并提供推荐
- */
-const checkModelSuitability = async () => {
-  // 将分析深度转换为标准格式
-  let depthName: string
-  if (typeof props.analysisDepth === 'number') {
-    const depthNames: Record<number, string> = {
-      1: '快速',
-      2: '基础',
-      3: '标准',
-      4: '深度',
-      5: '全面'
-    }
-    depthName = depthNames[props.analysisDepth] || '标准'
-  } else {
-    depthName = props.analysisDepth
-  }
-
-  try {
-    // 获取推荐模型
-    const recommendRes = await recommendModels(depthName)
-    const responseData = recommendRes?.data?.data
-
-    if (responseData) {
-      const quickModel = responseData.quick_model || '未知'
-      const deepModel = responseData.deep_model || '未知'
-
-      // 获取模型的显示名称
-      const quickModelInfo = props.availableModels.find(m => m.model_name === quickModel)
-      const deepModelInfo = props.availableModels.find(m => m.model_name === deepModel)
-
-      const quickDisplayName = quickModelInfo?.model_display_name || quickModel
-      const deepDisplayName = deepModelInfo?.model_display_name || deepModel
-
-      // 获取推荐理由
-      const reason = responseData.reason || ''
-
-      // 构建推荐说明
-      const depthDescriptions: Record<string, string> = {
-        '快速': '快速浏览，获取基本信息',
-        '基础': '基础分析，了解主要指标',
-        '标准': '标准分析，全面评估股票',
-        '深度': '深度研究，挖掘投资机会',
-        '全面': '全面分析，专业投资决策'
-      }
-
-      const message = `${depthDescriptions[depthName] || '标准分析'}\n\n推荐模型配置：\n• 快速模型：${quickDisplayName}\n• 深度模型：${deepDisplayName}\n\n${reason}`
-
-      modelRecommendation.value = {
-        title: '💡 模型推荐',
-        message,
-        type: 'info',
-        quickModel,
-        deepModel
-      }
-    } else {
-      // 如果没有推荐数据，显示通用说明
-      const generalDescriptions: Record<string, string> = {
-        '快速': '快速分析：使用基础模型即可，注重速度和成本',
-        '基础': '基础分析：快速模型用基础级，深度模型用标准级',
-        '标准': '标准分析：快速模型用基础级，深度模型用标准级以上',
-        '深度': '深度分析：快速模型用标准级，深度模型用高级以上，需要推理能力',
-        '全面': '全面分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
-      }
-
-      modelRecommendation.value = {
-        title: '💡 模型推荐',
-        message: generalDescriptions[depthName] || generalDescriptions['标准'],
-        type: 'info'
-      }
-    }
-  } catch (error) {
-    console.error('获取模型推荐失败:', error)
-  }
-}
-
-/**
- * 应用推荐的模型配置
- */
-const applyRecommendedModels = () => {
-  if (modelRecommendation.value?.quickModel && modelRecommendation.value?.deepModel) {
-    localQuickModel.value = modelRecommendation.value.quickModel
-    localDeepModel.value = modelRecommendation.value.deepModel
-    
-    emit('update:quickAnalysisModel', modelRecommendation.value.quickModel)
-    emit('update:deepAnalysisModel', modelRecommendation.value.deepModel)
-
-    // 清除推荐提示
-    modelRecommendation.value = null
-
-    ElMessage.success('已应用推荐的模型配置')
-  }
-}
-
-// 监听分析深度变化
-watch(() => props.analysisDepth, () => {
-  checkModelSuitability()
-})
-
-// 监听模型选择变化
-watch([localQuickModel, localDeepModel], () => {
-  checkModelSuitability()
-})
-
-// 初始化
-onMounted(() => {
-  checkModelSuitability()
-})
 </script>
 
 <style lang="scss" scoped>
@@ -367,4 +228,3 @@ onMounted(() => {
   }
 }
 </style>
-

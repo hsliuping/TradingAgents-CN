@@ -177,7 +177,7 @@
                     size="large"
                     @click="submitBatchAnalysis"
                     :loading="submitting"
-                    :disabled="stockCodes.length === 0"
+                    :disabled="stockCodes.length === 0 || !modelsReady"
                     class="submit-btn large-batch-btn"
                     style="width: 320px; height: 56px; font-size: 18px; font-weight: 700; border-radius: 16px;"
                   >
@@ -200,6 +200,14 @@
             </template>
 
             <div class="config-content">
+              <el-alert
+                v-if="modelConfigurationError"
+                :title="modelConfigurationError"
+                type="error"
+                :closable="false"
+                show-icon
+                style="margin-bottom: 12px"
+              />
               <!-- AI模型配置组件 -->
               <ModelConfig
                 v-model:quick-analysis-model="modelSettings.quickAnalysisModel"
@@ -290,11 +298,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Files, TrendCharts, Check, Close } from '@element-plus/icons-vue'
 import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
-import { configApi } from '@/api/config'
+import {
+  getAnalysisModelConfiguration,
+  type AnalysisModelOption
+} from '@/api/alphaguardModels'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ModelConfig from '@/components/ModelConfig.vue'
@@ -313,12 +324,15 @@ const invalidCodes = ref<string[]>([])
 
 // 模型设置
 const modelSettings = ref({
-  quickAnalysisModel: 'qwen-turbo',
-  deepAnalysisModel: 'qwen-max'
+  quickAnalysisModel: '',
+  deepAnalysisModel: ''
 })
 
-// 可用的模型列表（从配置中获取）
-const availableModels = ref<any[]>([])
+const availableModels = ref<AnalysisModelOption[]>([])
+const modelConfigurationError = ref('')
+const modelsReady = computed(() => Boolean(
+  modelSettings.value.quickAnalysisModel && modelSettings.value.deepAnalysisModel
+))
 
 const batchForm = reactive({
   title: '',
@@ -372,26 +386,13 @@ const clearStocks = () => {
 // 初始化模型设置
 const initializeModelSettings = async () => {
   try {
-    const sortModelsByNewest = (configs: any[]) => {
-      const getTimestamp = (config: any) => {
-        const timeValue = config.created_at || config.updated_at
-        const timestamp = timeValue ? new Date(timeValue).getTime() : 0
-        return Number.isNaN(timestamp) ? 0 : timestamp
-      }
-
-      return [...configs].sort((a, b) => getTimestamp(b) - getTimestamp(a))
-    }
-
-    // 获取默认模型
-    const defaultModels = await configApi.getDefaultModels()
-    modelSettings.value.quickAnalysisModel = defaultModels.quick_analysis_model
-    modelSettings.value.deepAnalysisModel = defaultModels.deep_analysis_model
-
-    // 获取所有可用的模型列表
-    const llmConfigs = await configApi.getLLMConfigs()
-    availableModels.value = sortModelsByNewest(
-      llmConfigs.filter((config: any) => config.enabled)
-    )
+    const configuration = await getAnalysisModelConfiguration()
+    modelSettings.value.quickAnalysisModel = configuration.quickModel
+    modelSettings.value.deepAnalysisModel = configuration.deepModel
+    availableModels.value = configuration.availableModels
+    modelConfigurationError.value = configuration.ready
+      ? ''
+      : '分析模型尚未就绪，请前往设置中的“模型与 API”完成配置和能力检测'
 
     console.log('✅ 加载模型配置成功:', {
       quick: modelSettings.value.quickAnalysisModel,
@@ -400,9 +401,10 @@ const initializeModelSettings = async () => {
     })
   } catch (error) {
     console.error('加载默认模型配置失败:', error)
-    // 使用硬编码的默认值
-    modelSettings.value.quickAnalysisModel = 'qwen-plus'
-    modelSettings.value.deepAnalysisModel = 'qwen-max'
+    modelSettings.value.quickAnalysisModel = ''
+    modelSettings.value.deepAnalysisModel = ''
+    availableModels.value = []
+    modelConfigurationError.value = '无法读取统一模型配置，请稍后重试'
   }
 }
 
@@ -489,6 +491,11 @@ const submitBatchAnalysis = async () => {
 
   if (stockCodes.value.length > 10) {
     ElMessage.warning('单次批量分析最多支持10只股票，请减少股票数量')
+    return
+  }
+
+  if (!modelsReady.value) {
+    ElMessage.error('分析模型尚未配置完成，请前往设置中的“模型与 API”检查配置')
     return
   }
 

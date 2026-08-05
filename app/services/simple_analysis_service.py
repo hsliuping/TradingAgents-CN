@@ -450,7 +450,9 @@ def create_analysis_config(
     llm_provider: str,
     market_type: str = "A股",
     quick_model_config: dict = None,  # 新增：快速模型的完整配置
-    deep_model_config: dict = None    # 新增：深度模型的完整配置
+    deep_model_config: dict = None,   # 新增：深度模型的完整配置
+    quick_provider_info: dict = None,
+    deep_provider_info: dict = None,
 ) -> dict:
     """
     创建分析配置 - 支持数字等级和中文等级
@@ -574,8 +576,12 @@ def create_analysis_config(
     # 🔧 获取 backend_url 和 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
     try:
         # 1️⃣ 优先从数据库获取（包含模型配置的 api_base、API Key 和厂家的 default_base_url、API Key）
-        quick_provider_info = get_provider_and_url_by_model_sync(quick_model)
-        deep_provider_info = get_provider_and_url_by_model_sync(deep_model)
+        quick_provider_info = quick_provider_info or get_provider_and_url_by_model_sync(
+            quick_model
+        )
+        deep_provider_info = deep_provider_info or get_provider_and_url_by_model_sync(
+            deep_model
+        )
 
         config["backend_url"] = quick_provider_info["backend_url"]
         config["quick_api_key"] = quick_provider_info.get("api_key")  # 🔥 保存快速模型的 API Key
@@ -1295,57 +1301,30 @@ class SimpleAnalysisService:
             # 配置阶段 - 对应步骤3 "⚙️ 参数设置" (6-8%)
             update_progress_sync(7, "⚙️ 配置分析参数", "configuration")
 
-            # 🆕 智能模型选择逻辑
-            from app.services.model_capability_service import get_model_capability_service
-            capability_service = get_model_capability_service()
-
             research_depth = request.parameters.research_depth if request.parameters else "标准"
 
-            # 1. 检查前端是否指定了模型
-            if (request.parameters and
-                hasattr(request.parameters, 'quick_analysis_model') and
-                hasattr(request.parameters, 'deep_analysis_model') and
-                request.parameters.quick_analysis_model and
-                request.parameters.deep_analysis_model):
+            from app.services.alphaguard.analysis_model_resolver import (
+                resolve_analysis_model_pair_sync,
+            )
 
-                # 使用前端指定的模型
-                quick_model = request.parameters.quick_analysis_model
-                deep_model = request.parameters.deep_analysis_model
-
-                logger.info(f"📝 [分析服务] 用户指定模型: quick={quick_model}, deep={deep_model}")
-
-                # 验证模型是否合适
-                validation = capability_service.validate_model_pair(
-                    quick_model, deep_model, research_depth
-                )
-
-                if not validation["valid"]:
-                    # 记录警告
-                    for warning in validation["warnings"]:
-                        logger.warning(warning)
-
-                    # 如果模型不合适，自动切换到推荐模型
-                    logger.info(f"🔄 自动切换到推荐模型...")
-                    quick_model, deep_model = capability_service.recommend_models_for_depth(
-                        research_depth
-                    )
-                    logger.info(f"✅ 已切换: quick={quick_model}, deep={deep_model}")
-                else:
-                    # 即使验证通过，也记录警告信息
-                    for warning in validation["warnings"]:
-                        logger.info(warning)
-                    logger.info(f"✅ 用户选择的模型验证通过: quick={quick_model}, deep={deep_model}")
-
-            else:
-                # 2. 自动推荐模型
-                quick_model, deep_model = capability_service.recommend_models_for_depth(
-                    research_depth
-                )
-                logger.info(f"🤖 自动推荐模型: quick={quick_model}, deep={deep_model}")
-
-            # 🔧 根据快速模型和深度模型分别查找对应的供应商和 API URL
-            quick_provider_info = get_provider_and_url_by_model_sync(quick_model)
-            deep_provider_info = get_provider_and_url_by_model_sync(deep_model)
+            quick_selector = (
+                request.parameters.quick_analysis_model
+                if request.parameters
+                else None
+            )
+            deep_selector = (
+                request.parameters.deep_analysis_model
+                if request.parameters
+                else None
+            )
+            resolved_models = resolve_analysis_model_pair_sync(
+                quick_selector=quick_selector,
+                deep_selector=deep_selector,
+            )
+            quick_model = resolved_models.quick.profile.model_name
+            deep_model = resolved_models.deep.profile.model_name
+            quick_provider_info = resolved_models.quick.provider_info
+            deep_provider_info = resolved_models.deep.provider_info
 
             quick_provider = quick_provider_info["provider"]
             deep_provider = deep_provider_info["provider"]
@@ -1367,9 +1346,8 @@ class SimpleAnalysisService:
             market_type = request.parameters.market_type if request.parameters else "A股"
             logger.info(f"📊 [市场类型] 使用市场类型: {market_type}")
 
-            # 🔧 从数据库读取模型配置参数（max_tokens, temperature, timeout, reasoning_effort 等）
-            quick_model_config = _load_model_config_from_db(quick_model)
-            deep_model_config = _load_model_config_from_db(deep_model)
+            quick_model_config = resolved_models.quick.model_config
+            deep_model_config = resolved_models.deep.model_config
             if quick_model_config:
                 logger.info(f"🔧 [快速模型配置] {quick_model_config}")
             if deep_model_config:
@@ -1385,6 +1363,8 @@ class SimpleAnalysisService:
                 market_type=market_type,  # 使用前端传递的市场类型
                 quick_model_config=quick_model_config,
                 deep_model_config=deep_model_config,
+                quick_provider_info=quick_provider_info,
+                deep_provider_info=deep_provider_info,
             )
 
             # 🔧 添加混合模式配置

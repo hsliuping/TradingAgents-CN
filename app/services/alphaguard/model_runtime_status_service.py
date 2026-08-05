@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .model_budget_service import ModelBudgetService
+from .analysis_model_resolver import model_profile_selector
 from .model_credential_service import ModelCredentialService
 from .model_profile_registry import ModelProfileRegistry
 from .model_runtime_repository import ModelRuntimeRepository
@@ -257,6 +258,7 @@ class ModelRuntimeStatusService:
                 "role": defined.role,
                 "profile_id": defined.profile_id,
                 "profile_version": defined.profile_version,
+                "analysis_selector": model_profile_selector(defined),
                 "provider": defined.provider,
                 "provider_type": defined.provider_type,
                 "endpoint_profile_id": defined.endpoint_profile_id,
@@ -311,6 +313,7 @@ class ModelRuntimeStatusService:
                         "role",
                         "profile_id",
                         "profile_version",
+                        "analysis_selector",
                         "provider",
                         "model_name",
                         "configured",
