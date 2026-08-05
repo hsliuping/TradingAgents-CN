@@ -1289,6 +1289,15 @@ class CompatibleProviderRegistryService:
         explicit_same_model_confirmation: bool,
         assigned_by: str,
     ) -> tuple[ModelProfile, ModelProfileAssignment]:
+        supported_roles = {
+            "RESEARCH_AGENT",
+            "NORMAL_TRADER",
+            "TOP_RISK_REVIEWER",
+        }
+        if role not in supported_roles:
+            raise ProviderRegistryNotReady(
+                "model profile role is not supported"
+            )
         endpoint = await self.endpoint(
             endpoint_profile_id, endpoint_profile_version
         )
@@ -1352,16 +1361,22 @@ class CompatibleProviderRegistryService:
         )
         self._verify_credential_binding(endpoint, credential)
         prompt = PromptProfileRegistry(self.db).definition(prompt_profile_id)
+        if prompt.role != role:
+            raise ProviderRegistryNotReady(
+                "prompt profile is not registered for the assigned role"
+            )
         structured_mode = _profile_structured_output_mode(endpoint, model)
-        other_role = (
-            "TOP_RISK_REVIEWER"
-            if role == "NORMAL_TRADER"
-            else "NORMAL_TRADER"
-        )
-        other_assignment = await self.db["ag_model_profile_assignments"].find_one(
-            {"role": other_role}, sort=[("assigned_at", -1)]
-        )
-        if other_assignment:
+        other_assignment_rows = await self.db[
+            "ag_model_profile_assignments"
+        ].find(
+            {"role": {"$in": sorted(supported_roles - {role})}},
+        ).sort("assigned_at", -1).to_list(length=None)
+        other_assignments: dict[str, dict[str, Any]] = {}
+        for assignment_row in other_assignment_rows:
+            other_assignments.setdefault(
+                str(assignment_row.get("role") or ""), assignment_row
+            )
+        for other_assignment in other_assignments.values():
             other_profile = await self.db["ag_model_profiles"].find_one(
                 {
                     "profile_id": other_assignment["profile_id"],
@@ -1379,7 +1394,8 @@ class CompatibleProviderRegistryService:
             )
             if same and not explicit_same_model_confirmation:
                 raise ProviderRegistryNotReady(
-                    "using one endpoint model for Normal and Top requires explicit confirmation"
+                    "using one endpoint model for multiple roles requires "
+                    "explicit confirmation"
                 )
         now = datetime.now(timezone.utc)
         production_allowed = (

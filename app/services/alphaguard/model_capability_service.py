@@ -449,9 +449,10 @@ class ModelCapabilityService:
                                 message = "provider quota is exhausted"
                         else:
                             payload = dict(invocation.payload or {})
-                            payload["model_meta"] = invocation.model_meta.model_dump(
-                                mode="json"
-                            )
+                            if "model_meta" in capability_schema.model_fields:
+                                payload["model_meta"] = (
+                                    invocation.model_meta.model_dump(mode="json")
+                                )
                             try:
                                 capability_schema.model_validate(payload)
                             except ValidationError as exc:

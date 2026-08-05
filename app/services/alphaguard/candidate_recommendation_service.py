@@ -228,6 +228,11 @@ class CandidateRecommendationService:
         records = []
         for row in rows:
             symbol = str(row.get("code") or row.get("symbol"))
+            listing_date = _as_date(
+                row.get("list_date") or row.get("listing_date")
+            )
+            if listing_date is not None and listing_date > universe_date:
+                continue
             source = str(row.get("source") or "unknown")
             source_ref = str(
                 row.get("security_master_source_ref")
@@ -237,7 +242,7 @@ class CandidateRecommendationService:
                 "symbol": symbol,
                 "name": str(row.get("name") or symbol),
                 "security_type": row["_recommendation_security_type"],
-                "listing_date": str(row.get("list_date") or row.get("listing_date") or ""),
+                "listing_date": listing_date.isoformat() if listing_date else "",
                 "listing_status": str(
                     row.get("listing_status") or row.get("status") or ""
                 ),

@@ -437,6 +437,39 @@ async def test_daily_market_context_uses_bounded_production_fallback(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_daily_market_context_reuses_unique_point_in_time_record(
+    monkeypatch,
+):
+    db = FakeDB()
+    trade_date = date(2026, 7, 29)
+    await db["ag_market_contexts"].insert_one(
+        {
+            "context_id": "context-ready",
+            "market": "CN",
+            "trade_date": datetime.combine(trade_date, datetime.min.time()),
+            "calculation_status": "READY",
+            "calculation_version": (
+                "production-market-context-calculation-v1.1"
+            ),
+            "available_at": datetime(2026, 7, 29, 18, 20),
+            "collected_at": datetime(2026, 7, 29, 18, 21),
+            "provider": "approved-provider",
+        }
+    )
+
+    async def must_not_sync(*_args, **_kwargs):
+        raise AssertionError("eligible MarketContext must be reused")
+
+    monkeypatch.setattr(ProductionMarketContextService, "sync", must_not_sync)
+    result = await ProductionDailyStageExecutor(
+        db
+    ).stage_benchmark_industry_sync(trading_date=trade_date)
+
+    assert result.result["market_context_action"] == "REUSED"
+    assert result.result["market_context_provider"] == "approved-provider"
+
+
+@pytest.mark.asyncio
 async def test_production_market_context_requires_one_version_locked_benchmark_window():
     db = FakeDB()
     trade_date = date(2026, 7, 27)

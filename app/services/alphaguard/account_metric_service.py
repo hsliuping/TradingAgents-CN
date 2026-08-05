@@ -99,15 +99,21 @@ class AccountMetricService:
         snapshots = [
             clean_document(item)
             for item in raw_snapshots
-            if period_start <= item["trade_date"] <= period_end
+            if (
+                (snapshot_date := _record_date(item, "trade_date")) is not None
+                and period_start <= snapshot_date <= period_end
+            )
         ]
-        snapshots.sort(key=lambda item: item["trade_date"])
+        snapshots.sort(key=lambda item: _record_date(item, "trade_date") or date.min)
         fills = [
             clean_document(item)
             for item in await self.db["ag_paper_fills"].find(
                 {"account_id": account_id}
             ).to_list(length=None)
-            if period_start <= item["trade_date"] <= period_end
+            if (
+                (fill_date := _record_date(item, "trade_date")) is not None
+                and period_start <= fill_date <= period_end
+            )
         ]
         orders = [
             clean_document(item)

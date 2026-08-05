@@ -468,6 +468,7 @@ class EvaluationRun(EvaluationSchema):
     attempt_count: int = Field(default=0, ge=0)
     result: dict[str, Any] | None = None
     error: str | None = None
+    error_history: list[dict[str, Any]] = Field(default_factory=list)
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime

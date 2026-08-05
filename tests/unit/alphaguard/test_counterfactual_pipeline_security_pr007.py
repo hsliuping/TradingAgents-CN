@@ -5,6 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
+from bson import BSON
 
 from app.routers import alphaguard_evaluations
 from app.services.alphaguard.counterfactual_evaluation_engine import (
@@ -389,6 +390,21 @@ async def test_historical_replay_does_not_discover_future_decisions():
 
 
 @pytest.mark.asyncio
+async def test_historical_replay_accepts_mongo_datetime_trade_dates():
+    db = FakeDB()
+    await _seed_pipeline_source(db)
+    db["ag_quant_proposals"].documents[0]["trade_date"] = datetime(2026, 7, 2)
+
+    subjects, _, _ = await EvaluationPipeline(db).subjects.discover(
+        user_id="user-1",
+        decision_trade_date_lte=date(2026, 7, 15),
+    )
+
+    assert {subject.source_object_id for subject in subjects} == {"proposal-1"}
+    assert subjects[0].decision_trade_date == date(2026, 7, 2)
+
+
+@pytest.mark.asyncio
 async def test_single_subject_evaluation_is_idempotent_and_eval_only():
     db = FakeDB()
     await _seed_pipeline_source(db)
@@ -436,6 +452,35 @@ async def test_run_schedule_is_idempotent_and_large_work_is_background():
     assert first.evaluation_job_id == second.evaluation_job_id
     assert db["ag_eval_runs"].count() == 1
     assert first.status == "PENDING"
+    BSON.encode(db["ag_eval_runs"].documents[0])
+
+
+@pytest.mark.asyncio
+async def test_run_schedule_reads_persisted_failure_history():
+    db = FakeDB()
+    pipeline = EvaluationPipeline(db)
+    first, _ = await pipeline.schedule(
+        as_of_trade_date=date(2026, 7, 31),
+        user_id="user-1",
+    )
+    failure = {
+        "attempt_number": 1,
+        "error": "evaluation failed",
+        "at": datetime(2026, 7, 31, 16, 0),
+    }
+    await db["ag_eval_runs"].update_one(
+        {"evaluation_job_id": first.evaluation_job_id},
+        {"$set": {"status": "FAILED"}, "$push": {"error_history": failure}},
+    )
+
+    resumed, created = await pipeline.schedule(
+        as_of_trade_date=date(2026, 7, 31),
+        user_id="user-1",
+    )
+
+    assert created is False
+    assert resumed.status == "FAILED"
+    assert resumed.error_history == [failure]
 
 
 def test_counterfactual_and_pipeline_do_not_import_production_write_services():

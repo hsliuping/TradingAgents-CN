@@ -155,7 +155,11 @@ class EndpointPriceCreateBody(_StrictBody):
 
 
 class CompatibleProfileAssignmentBody(_StrictBody):
-    role: Literal["NORMAL_TRADER", "TOP_RISK_REVIEWER"]
+    role: Literal[
+        "RESEARCH_AGENT",
+        "NORMAL_TRADER",
+        "TOP_RISK_REVIEWER",
+    ]
     profile_id: str = Field(min_length=1, max_length=100)
     profile_version: str = Field(min_length=1, max_length=50)
     endpoint_profile_id: str = Field(min_length=1, max_length=100)

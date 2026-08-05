@@ -269,7 +269,11 @@ class EndpointPriceVersion(_StrictFrozenModel):
 
 class ModelProfileAssignment(_StrictFrozenModel):
     assignment_id: str = Field(min_length=1, max_length=160)
-    role: Literal["NORMAL_TRADER", "TOP_RISK_REVIEWER"]
+    role: Literal[
+        "RESEARCH_AGENT",
+        "NORMAL_TRADER",
+        "TOP_RISK_REVIEWER",
+    ]
     profile_id: str = Field(min_length=1, max_length=100)
     profile_version: str = Field(min_length=1, max_length=50)
     supersedes_assignment_id: str | None = None
@@ -278,7 +282,7 @@ class ModelProfileAssignment(_StrictFrozenModel):
     assigned_by: str = Field(min_length=1, max_length=200)
     assigned_at: datetime
     assignment_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    schema_version: str = "model_profile_assignment_v1"
+    schema_version: str = "model_profile_assignment_v2"
 
 
 class EndpointValidationEvent(_StrictFrozenModel):

@@ -30,6 +30,11 @@ async def _insert(db: FakeDB, collection: str, documents: list[dict]) -> None:
         await db[collection].insert_one(document)
 
 
+def _keep_recommendations_reviewable(db: FakeDB) -> None:
+    for document in db["ag_candidate_recommendations"].documents:
+        document["expires_at"] = datetime(2099, 1, 1)
+
+
 def _quote(symbol: str, trade_date: date, offset: int) -> dict:
     close = Decimal("100") + Decimal(offset) / Decimal("10")
     return {
@@ -220,6 +225,39 @@ async def _seed_trade_day(db: FakeDB, symbol: str, trade_date: date, offset: int
             "immutable_hash": f"{offset + 300:064x}",
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_universe_manifest_requires_point_in_time_listing_date():
+    db = FakeDB()
+    for symbol, listing_date in (
+        ("600001", "2020-01-01"),
+        ("600002", None),
+        ("600003", "2026-08-02"),
+    ):
+        await db["stock_basic_info"].insert_one(
+            {
+                "code": symbol,
+                "symbol": symbol,
+                "name": symbol,
+                "category": "stock_cn",
+                "market": "CN",
+                "list_date": listing_date,
+                "source": "baostock",
+            }
+        )
+
+    manifest = await CandidateRecommendationService(
+        db
+    ).build_universe_manifest(
+        universe_date=TRADE_DATE,
+        policy=builtin_candidate_recommendation_policy(),
+        now=datetime(2026, 8, 1, 18),
+        execute=True,
+    )
+
+    assert manifest.ordered_symbols == ["600001", "600002"]
+    assert manifest.security_count == 2
 
 
 async def _seed_new_factor_evidence(
@@ -545,6 +583,7 @@ async def test_explicit_accept_creates_linked_candidate_and_is_idempotent():
     recommendation_id = db["ag_candidate_recommendations"].documents[0][
         "recommendation_id"
     ]
+    _keep_recommendations_reviewable(db)
     event, created = await service.review(
         recommendation_id=recommendation_id,
         user_id=USER_ID,
@@ -615,6 +654,7 @@ async def test_review_cooldown_blocks_same_business_evidence(action: str):
     recommendation_id = db["ag_candidate_recommendations"].documents[0][
         "recommendation_id"
     ]
+    _keep_recommendations_reviewable(db)
     await service.review(
         recommendation_id=recommendation_id,
         user_id=USER_ID,
@@ -645,6 +685,7 @@ async def test_material_regime_evidence_breaks_rejection_cooldown_with_new_versi
         now=datetime(2026, 8, 1, 18, 30),
     )
     prior_id = db["ag_candidate_recommendations"].documents[0]["recommendation_id"]
+    _keep_recommendations_reviewable(db)
     await service.review(
         recommendation_id=prior_id,
         user_id=USER_ID,
@@ -684,6 +725,7 @@ async def test_batch_review_and_candidate_pool_soft_limit_are_fail_closed():
         row["recommendation_id"]
         for row in db["ag_candidate_recommendations"].documents
     ]
+    _keep_recommendations_reviewable(db)
     batch = await service.batch_review(
         recommendation_ids=recommendation_ids,
         user_id=USER_ID,
@@ -703,6 +745,7 @@ async def test_batch_review_and_candidate_pool_soft_limit_are_fail_closed():
     recommendation_id = db["ag_candidate_recommendations"].documents[0][
         "recommendation_id"
     ]
+    _keep_recommendations_reviewable(db)
     for index in range(50):
         await db["ag_candidates"].insert_one(
             {

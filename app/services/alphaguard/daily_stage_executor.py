@@ -29,6 +29,9 @@ from app.services.alphaguard.paper_task_service import PaperTaskService
 from app.services.alphaguard.production_market_context_service import (
     ProductionMarketContextService,
 )
+from app.services.alphaguard.production_data_config import (
+    production_market_context_policy,
+)
 from app.services.alphaguard.production_observation_service import (
     ProductionObservationService,
 )
@@ -160,16 +163,42 @@ class ProductionDailyStageExecutor:
         )
 
     async def stage_benchmark_industry_sync(self, *, trading_date: date, **_):
-        market = await ProductionMarketContextService(self.db).sync(
-            trade_date=trading_date,
-            execute=True,
-            # The existing production fallback keeps BaoStock as the exact-date
-            # universe source while fetching daily histories with bounded
-            # parallelism. The sequential BaoStock history path cannot finish a
-            # 5,000+ symbol production day within the governed stage timeout.
-            provider=AKShareTencentMarketContextProvider(),
-            timeout_seconds=DAILY_MARKET_CONTEXT_TIMEOUT_SECONDS,
-        )
+        cutoff = datetime.combine(trading_date, time(18, 30))
+        policy = production_market_context_policy()
+        existing = await self.db["ag_market_contexts"].find(
+            {
+                "market": "CN",
+                "trade_date": datetime.combine(trading_date, time()),
+                "calculation_status": "READY",
+                "calculation_version": policy["calculation_version"],
+                "available_at": {"$lte": cutoff},
+                "collected_at": {"$lte": cutoff},
+            }
+        ).limit(2).to_list(length=2)
+        if len(existing) > 1:
+            raise DailyRunBlocked(
+                "MARKET_CONTEXT_AMBIGUOUS",
+                "同一交易日存在多个cutoff合格的MarketContext身份",
+            )
+        if existing:
+            market = {
+                "calculation_status": existing[0].get(
+                    "calculation_status"
+                ),
+                "context_action": "REUSED",
+                "provider": existing[0].get("provider"),
+            }
+        else:
+            market = await ProductionMarketContextService(self.db).sync(
+                trade_date=trading_date,
+                execute=True,
+                # The existing production fallback keeps BaoStock as the exact-date
+                # universe source while fetching daily histories with bounded
+                # parallelism. The sequential BaoStock history path cannot finish a
+                # 5,000+ symbol production day within the governed stage timeout.
+                provider=AKShareTencentMarketContextProvider(),
+                timeout_seconds=DAILY_MARKET_CONTEXT_TIMEOUT_SECONDS,
+            )
         industry_count = await self.db["stock_basic_info"].count_documents(
             {"industry": {"$nin": [None, ""]}}
         )

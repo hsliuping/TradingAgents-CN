@@ -491,7 +491,7 @@ export const alphaguardModelsApi = {
     )
   },
   assignCompatibleProfile(payload: {
-    role: 'NORMAL_TRADER' | 'TOP_RISK_REVIEWER'
+    role: 'RESEARCH_AGENT' | 'NORMAL_TRADER' | 'TOP_RISK_REVIEWER'
     profile_id: string
     profile_version: string
     endpoint_profile_id: string

@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.models.alphaguard.evaluation_collections import EVALUATION_COLLECTIONS
-from app.services.alphaguard.paper_storage import clean_document, model_document
+from app.services.alphaguard.paper_storage import (
+    clean_document,
+    model_document,
+    to_mongo_value,
+)
 from pydantic import BaseModel
 
 
@@ -47,7 +51,8 @@ class EvaluationRepository:
         hash_field: str = "input_hash",
     ) -> tuple[BaseModel, bool]:
         collection = self.db[self._collection(name)]
-        existing = clean_document(await collection.find_one(identity))
+        mongo_identity = to_mongo_value(identity)
+        existing = clean_document(await collection.find_one(mongo_identity))
         if existing is not None:
             expected = getattr(model, hash_field, None)
             actual = existing.get(hash_field)

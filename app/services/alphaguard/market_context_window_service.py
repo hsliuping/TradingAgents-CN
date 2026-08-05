@@ -245,7 +245,6 @@ class MarketContextWindowService:
                 "market": "CN",
                 "as_of_trade_date": _business_timestamp(as_of_trade_date),
                 "available_at": {"$lte": cutoff_at},
-                "created_at": {"$lte": cutoff_at},
             }
         ).limit(2).to_list(length=2)
         if len(rows) != 1:
@@ -264,4 +263,52 @@ class MarketContextWindowService:
             raise MarketContextWindowError(
                 "REGIME_INPUT_NOT_READY: context window version is incompatible"
             )
+        contexts = await self.db["ag_market_contexts"].find(
+            {"context_id": {"$in": list(manifest.ordered_context_ids)}}
+        ).to_list(length=None)
+        by_id: dict[str, list[dict[str, Any]]] = {}
+        for raw in contexts:
+            context = clean_document(raw)
+            by_id.setdefault(str(context.get("context_id") or ""), []).append(
+                context
+            )
+        for expected_id, expected_hash, expected_date in zip(
+            manifest.ordered_context_ids,
+            manifest.ordered_context_hashes,
+            manifest.ordered_trade_dates,
+            strict=True,
+        ):
+            matches = by_id.get(expected_id, [])
+            if len(matches) != 1:
+                raise MarketContextWindowError(
+                    "REGIME_INPUT_NOT_READY: locked MarketContext is missing "
+                    "or ambiguous"
+                )
+            context = matches[0]
+            if str(context.get("content_hash") or "") != expected_hash:
+                raise MarketContextWindowConflict(
+                    "INTEGRITY_CONFLICT: locked MarketContext hash changed"
+                )
+            if (
+                str(context.get("market") or "") != "CN"
+                or _as_date(context.get("trade_date")) != expected_date
+                or str(context.get("calculation_status") or "") != "READY"
+                or str(context.get("calculation_version") or "")
+                != expected_version
+            ):
+                raise MarketContextWindowError(
+                    "REGIME_INPUT_NOT_READY: locked MarketContext semantics changed"
+                )
+            available_at = context.get("available_at")
+            collected_at = context.get("collected_at")
+            if (
+                not isinstance(available_at, datetime)
+                or not isinstance(collected_at, datetime)
+                or available_at > cutoff_at
+                or collected_at > cutoff_at
+            ):
+                raise MarketContextWindowError(
+                    "REGIME_INPUT_NOT_READY: locked MarketContext was not "
+                    "point-in-time eligible"
+                )
         return manifest

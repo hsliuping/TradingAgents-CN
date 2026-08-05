@@ -1128,6 +1128,54 @@ async def test_capability_schema_validation_is_invalid_output_not_provider_error
     assert "validation" not in (result.sanitized_message or "").lower()
 
 
+@pytest.mark.asyncio
+async def test_research_capability_echo_is_not_rejected_for_execution_meta():
+    db = FakeDB()
+    await ModelProfileRegistry(db).seed()
+    await PromptProfileRegistry(db).seed()
+    service = ModelCapabilityService(
+        db,
+        provider_runtime=SimpleNamespace(
+            create_registered=AsyncMock(return_value=StructuredLLM())
+        ),
+    )
+    service.credentials = SimpleNamespace(configured=lambda _ref: True)
+    service._provider_access_probe = AsyncMock(
+        return_value=("READY", None, 1.0)
+    )
+    service.budget = SimpleNamespace(
+        check=AsyncMock(
+            return_value=BudgetDecision(
+                allowed=True,
+                status="READY",
+                estimated_input_tokens=10,
+                estimated_output_tokens=10,
+                estimated_cost=0,
+                remaining_daily_calls=10,
+                remaining_daily_cost=10,
+                model_context_window=32000,
+                remaining_context_capacity=31980,
+                context_usage_ratio=0.000625,
+                context_warning_level="NONE",
+                permitted_attempts=1,
+            )
+        )
+    )
+
+    result = await service.check(
+        profile_id="alphaguard_research_openai",
+        profile_version="v2",
+        checked_by="admin",
+        idempotency_key="research-capability-echo",
+        network=True,
+    )
+
+    assert result.status == "USAGE_UNAVAILABLE"
+    assert result.structured_output_supported is True
+    assert result.validation_error_count is None
+    assert result.error_code == "USAGE_UNAVAILABLE"
+
+
 def test_provider_quota_is_not_auth_failure_and_error_details_are_removed():
     error = ProviderQuotaError(
         "insufficient_user_quota balance=0.01 precharge=2.00 "

@@ -119,31 +119,32 @@ class ProductionObservationService:
                 "market": "CN",
                 "trade_date": mongo_date(trade_date),
                 "market_context_id": market_context_id,
+                "run_mode": None,
             }
-        ).to_list(length=2)
-        if len(rows) > 1:
-            raise ProductionObservationError(
-                f"{symbol} has duplicate production snapshots for one trade date"
-            )
+        ).to_list(length=None)
         if not rows:
             return None
-        snapshot = EvidenceSnapshot.model_validate(clean_document(rows[0]))
-        if not self.snapshots.verify_integrity(snapshot):
-            raise ProductionObservationError(
-                f"{symbol} existing snapshot failed immutable hash verification"
-            )
         expected_refs = {
             key: sorted(value) for key, value in sorted(raw_refs.items())
         }
-        stored_refs = {
-            key: sorted(value)
-            for key, value in sorted(snapshot.raw_refs.items())
-        }
-        if stored_refs != expected_refs:
+        matches = []
+        for row in rows:
+            snapshot = EvidenceSnapshot.model_validate(clean_document(row))
+            if not self.snapshots.verify_integrity(snapshot):
+                raise ProductionObservationError(
+                    f"{symbol} existing snapshot failed immutable hash verification"
+                )
+            stored_refs = {
+                key: sorted(value)
+                for key, value in sorted(snapshot.raw_refs.items())
+            }
+            if stored_refs == expected_refs:
+                matches.append(snapshot)
+        if len(matches) > 1:
             raise ProductionObservationError(
-                f"{symbol} existing snapshot references conflict with persisted inputs"
+                f"{symbol} has duplicate production snapshots for exact inputs"
             )
-        return snapshot
+        return matches[0] if matches else None
 
     async def run(
         self,

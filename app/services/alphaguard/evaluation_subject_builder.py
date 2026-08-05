@@ -973,7 +973,7 @@ class EvaluationSubjectBuilder:
             "market": market,
             "snapshot_id": snapshot_id,
             "analysis_id": analysis_id,
-            "decision_trade_date": decision_trade_date,
+            "decision_trade_date": _as_date(decision_trade_date),
             "decision_cutoff_at": cutoff,
             "action": action,
             "decision_stage": stage,

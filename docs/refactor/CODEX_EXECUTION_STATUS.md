@@ -8030,3 +8030,95 @@ Git差异。三个后端容器再次访问Credential Host均为HTTP 200，健康
 `live=true`入口再次以`3/1/1`非零退出。
 已知非阻断警告仍为Sass legacy API、Vite大Chunk和本机缺Buildx；明确阻断项为Research批准凭证缺失以及
 7月30日point-in-time采集窗口已错过。
+
+## 33. RC1首次正式日常运行收尾（2026-08-05）
+
+### 33.1 检查点与范围
+
+本阶段从`b3f4d68026e4f0d99366c0c6e51d474b6a156c36`继续，并为该精确提交创建附注标签
+`alphaguard-mvp-rc1-credential-bridge`。没有创建`alphaguard-mvp-rc1-runtime-unblocked`。本阶段只处理
+Research凭证显式绑定、MarketContext时间点门禁、首次完整日常模拟运行和相同输入幂等复跑；没有修改
+策略、Factor、Regime、模型Prompt、推荐阈值、风控、Champion或Challenger，也没有启用真实交易。
+
+### 33.2 Research显式凭证绑定
+
+Research使用已批准且已验证的第三方Provider凭证完成精确绑定，没有复制Secret、创建新Key或继承latest：
+
+```text
+role=RESEARCH_AGENT
+profile=alphaguard_research_compatible@v1
+credential_ref=keychain-alias:compatible-12c14ea0279716d1116a-v2-primary
+keychain_service=AlphaGuard Compatible Model API
+keychain_account=openai_compatible-ef1738fe-384a-46ab-a24b-a21434db723f
+endpoint=compatible-12c14ea0279716d1116a@v2
+endpoint_model=endpoint-model-2f3a6242c8394bd708f5@v2
+remote_model=gpt-5.6-luna
+assignment=2a844e61-1b45-562c-a010-47526772d7df
+assignment_status=ACTIVE
+capability=READY
+```
+
+Normal继续使用`alphaguard_normal_compatible@v8`和原Assignment
+`9c06d9ae-afe6-539f-a203-36f5b0c43872`；Top继续使用`alphaguard_top_compatible@v8`和原Assignment
+`7b0d5172-d6cc-560d-b338-15f231ee53d7`。两者没有被重建或替换。宿主进程、backend、queue-worker和
+analysis-worker均返回运行时总状态`READY`，三个环境内Research、Normal、Top全部为
+`configured=true capability=READY`。能力检测只记录无Secret状态；本记录不包含Key内容、长度、片段或
+Hash。
+
+Research Assignment合同扩展到`RESEARCH_AGENT`，并要求Prompt角色、Endpoint版本、模型版本、价格版本和
+Credential ID全部精确匹配。同一Endpoint模型跨任意两个角色复用时必须显式确认，检查覆盖所有其他当前
+角色，不依赖latest Assignment的偶然顺序。
+
+### 33.3 MarketContext时间点门禁
+
+Manifest允许在cutoff之后组装，但`get_ready`逐条校验锁定Context的ID、日期、content hash、计算版本、
+`available_at`和`collected_at`；任一来源晚于cutoff即fail-closed。日常阶段只复用同一交易日唯一且
+cutoff合格的READY Context，发现多个身份时阻断，不创建第二个Provider身份。Snapshot仅在完整`raw_refs`
+一致时复用，并明确排除`PRODUCTION_REPROCESS`对象。
+
+本次`2026-07-29 18:30`门禁加载唯一Manifest，锁定121条Context，`required_count=121`、
+`window_end=2026-07-29`，所有来源时间均不晚于cutoff。历史Universe仅排除明确晚于目标日上市的证券；
+上市日未知的记录继续进入既有资格判定并保留显式原因码，推荐阈值未变。
+
+### 33.4 首次完整日常模拟运行
+
+固定输入如下：
+
+```text
+trade_date=2026-07-29
+input_version=rc1-first-formal-daily-v1
+daily_run_id=fed0c559-d0d6-5b5f-9746-948e7b186613
+live_execution_allowed=false
+```
+
+Dry-run先验证20阶段计划。正式执行通过同一run ID安全resume，最终20阶段全部SUCCESS。正式结果包括
+DataQuality通过5026个证券、全市场推荐30条、候选观察Snapshot 5个、QuantProposal 10个；自然触发为0，
+因此MODEL_CHAIN按既有门禁返回0次模型调用。OrderIntent、Paper Order和Fill均为0。Evaluation完成1个
+运行，Attribution输出792，Challenger任务输出0；Operations输出20，通知输出2。
+
+正式评价阶段暴露并修复了三项存储兼容缺陷：失败审计`error_history`未被严格Run Schema接受、旧Mongo
+业务日期的`datetime/date`比较不一致、Evaluation create-only identity未转为BSON日期。修复只涉及评价
+合同和持久化边界，不改变评价规则、策略或生产集合。
+
+### 33.5 相同输入幂等复跑
+
+完整成功后使用完全相同的交易日和`input_version`、不带`--resume`再次执行。返回同一`daily_run_id`，20个
+阶段全部`REUSED`：DataQuality 5026、推荐30、Snapshot 5、Proposal 10、模型0、OrderIntent 0、订单0、
+成交0、Evaluation 1、Attribution 792、Challenger 0、Operations 20、通知2。复跑前后比较139个
+AlphaGuard范围业务集合，`changed_collection_count=0`，没有重复创建业务对象。
+
+### 33.6 安全与一致性
+
+运行期间始终保持`system_mode=SIM_AUTONOMOUS`、`live_trading_enabled=false`和`LIVE_READY=false`。
+OrderIntent、Order、Fill总数均为0。四个Paper账户继续ACTIVE，每个可用现金和总资产均为1000000.00，
+合计4000000.00，无持仓或交易资产变化。Champion Assignment保持5、Champion History保持0；Challenger
+Assignment和ACTIVE Challenger均为0，没有晋升或切换。统一只读一致性检查为PASS，failed=0、warnings=0、
+`auto_repair_performed=false`。
+
+### 33.7 验证
+
+默认离线CI为`789 passed, 89 warnings`。本轮凭证注册专项为`35 passed`，推荐专项为`23 passed`，其余
+MarketContext、Snapshot、模型运行时和正式运行专项组合为`86 passed`；Evaluation专项与账户指标专项均
+通过。前端`npm run type-check`和正式`npm run build`通过（2615 modules），全仓Python compileall、
+`docker compose config --quiet`和`git diff --check`均PASS。非阻断警告仍为既有Pydantic/FastAPI弃用、
+Sass legacy API和Vite大Chunk提示。

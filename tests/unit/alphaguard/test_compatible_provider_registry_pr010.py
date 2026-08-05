@@ -1297,7 +1297,11 @@ async def test_explicit_role_assignments_resolve_exact_dynamic_profiles():
         endpoint_profile_version=endpoint.profile_version,
         remote_model_name="compatible-model",
         display_name="Compatible Model",
-        role_capabilities=["NORMAL_TRADER", "TOP_RISK_REVIEWER"],
+        role_capabilities=[
+            "RESEARCH_AGENT",
+            "NORMAL_TRADER",
+            "TOP_RISK_REVIEWER",
+        ],
         supports_json_schema=True,
         supports_tool_call=False,
         supports_reasoning=None,
@@ -1392,6 +1396,122 @@ async def test_explicit_role_assignments_resolve_exact_dynamic_profiles():
             explicit_same_model_confirmation=False,
             assigned_by="admin",
         )
+
+    await db["ag_model_profiles"].insert_one(
+        {
+            "profile_id": "newer-top-different-model",
+            "profile_version": "v1",
+            "endpoint_profile_id": endpoint.endpoint_profile_id,
+            "endpoint_profile_version": endpoint.profile_version,
+            "endpoint_model_id": "different-model",
+            "endpoint_model_version": "v1",
+        }
+    )
+    await db["ag_model_profile_assignments"].insert_one(
+        {
+            "assignment_id": "newer-top-assignment",
+            "role": "TOP_RISK_REVIEWER",
+            "profile_id": "newer-top-different-model",
+            "profile_version": "v1",
+            "assigned_at": datetime(2099, 1, 1, tzinfo=timezone.utc),
+        }
+    )
+    with pytest.raises(
+        ProviderRegistryNotReady,
+        match="one endpoint model for multiple roles",
+    ):
+        await registry.register_profile_assignment(
+            role="RESEARCH_AGENT",
+            profile_id="alphaguard_research_compatible",
+            profile_version="v1",
+            endpoint_profile_id=endpoint.endpoint_profile_id,
+            endpoint_profile_version=endpoint.profile_version,
+            endpoint_model_id=model.endpoint_model_id,
+            endpoint_model_version=model.model_version,
+            credential_id="compatible-primary",
+            price_version_id=price.price_version_id,
+            price_version=price.price_version,
+            prompt_profile_id="alphaguard_research_snapshot",
+            explicit_same_model_confirmation=False,
+            assigned_by="admin",
+        )
+
+
+@pytest.mark.asyncio
+async def test_research_role_uses_an_explicit_compatible_profile_assignment():
+    db, store, registry, endpoint = await validated_registry()
+    model, _ = await registry.register_model(
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        endpoint_profile_version=endpoint.profile_version,
+        remote_model_name="compatible-research-model",
+        display_name="Compatible Research Model",
+        role_capabilities=["RESEARCH_AGENT"],
+        supports_json_schema=True,
+        supports_tool_call=False,
+        supports_reasoning=None,
+        max_context_tokens=64000,
+        max_output_tokens=4000,
+        created_by="admin",
+    )
+    price, _ = await registry.register_price(
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        endpoint_profile_version=endpoint.profile_version,
+        endpoint_model_id=model.endpoint_model_id,
+        endpoint_model_version=model.model_version,
+        input_price_per_million=Decimal("1.2"),
+        cached_input_price_per_million=None,
+        output_price_per_million=Decimal("4.8"),
+        currency="USD",
+        effective_at=datetime(2026, 7, 30, tzinfo=timezone.utc),
+        source_description="verified provider pricing",
+        verified=True,
+        created_by="admin",
+    )
+    direct_ref = install_fake_credential(
+        store,
+        credential_id="compatible-research-primary",
+        account="compatible-research-primary",
+    )
+    await db["ag_model_credentials"].insert_one(
+        {
+            "credential_id": "compatible-research-primary",
+            "provider": "openai_compatible",
+            "provider_type": "OPENAI_COMPATIBLE",
+            "credential_ref": direct_ref,
+            "endpoint_profile_id": endpoint.endpoint_profile_id,
+            "endpoint_profile_version": endpoint.profile_version,
+            "normalized_origin": endpoint.normalized_origin,
+            "auth_scheme": endpoint.auth_scheme,
+            "status": "CONFIGURED",
+        }
+    )
+
+    profile, assignment = await registry.register_profile_assignment(
+        role="RESEARCH_AGENT",
+        profile_id="alphaguard_research_compatible",
+        profile_version="v1",
+        endpoint_profile_id=endpoint.endpoint_profile_id,
+        endpoint_profile_version=endpoint.profile_version,
+        endpoint_model_id=model.endpoint_model_id,
+        endpoint_model_version=model.model_version,
+        credential_id="compatible-research-primary",
+        price_version_id=price.price_version_id,
+        price_version=price.price_version,
+        prompt_profile_id="alphaguard_research_snapshot",
+        explicit_same_model_confirmation=False,
+        assigned_by="admin",
+    )
+
+    assert profile.role == "RESEARCH_AGENT"
+    assert profile.credential_ref == (
+        "keychain-alias:compatible-research-primary"
+    )
+    assert assignment.role == "RESEARCH_AGENT"
+    assert assignment.schema_version == "model_profile_assignment_v2"
+    resolved = await ModelProfileRegistry(db).persisted_for_role(
+        "RESEARCH_AGENT"
+    )
+    assert resolved.config_hash == profile.config_hash
 
 
 @pytest.mark.asyncio

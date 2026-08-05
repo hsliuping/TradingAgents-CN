@@ -18,7 +18,11 @@ from app.services.alphaguard.module_metric_service import ModuleMetricService
 from app.services.alphaguard.paired_comparison_service import (
     PairedComparisonService,
 )
-from app.services.alphaguard.paper_storage import clean_document, safe_error_message
+from app.services.alphaguard.paper_storage import (
+    clean_document,
+    model_document,
+    safe_error_message,
+)
 from tradingagents.alphaguard.evaluation_schemas import (
     EvaluationSubject,
     EvaluationRun,
@@ -101,7 +105,7 @@ class EvaluationPipeline:
             created_at=now,
             updated_at=now,
         )
-        await self.db["ag_eval_runs"].insert_one(run.model_dump(mode="python"))
+        await self.db["ag_eval_runs"].insert_one(model_document(run))
         return run, True
 
     async def evaluate_trade_date(
@@ -229,7 +233,7 @@ class EvaluationPipeline:
                 {
                     "$set": {
                         "status": "COMPLETED",
-                        "result": result.model_dump(mode="python"),
+                        "result": model_document(result),
                         "finished_at": finished,
                         "error": None,
                         "updated_at": finished,

@@ -4,6 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
+from bson import BSON
 
 from app.services.alphaguard.account_metric_service import AccountMetricService
 from app.services.alphaguard.attribution_engine import AttributionEngine
@@ -38,7 +39,11 @@ async def test_account_metrics_use_decimal_drawdown_fees_turnover_and_completene
             {
                 "account_snapshot_id": f"snap-{trade_date}",
                 "account_id": "account-1",
-                "trade_date": trade_date,
+                "trade_date": (
+                    datetime.combine(trade_date, datetime.min.time())
+                    if trade_date == date(2026, 7, 2)
+                    else trade_date
+                ),
                 "total_equity": Decimal(equity),
                 "realized_pnl": Decimal("50"),
                 "unrealized_pnl": Decimal("47"),
@@ -51,7 +56,7 @@ async def test_account_metrics_use_decimal_drawdown_fees_turnover_and_completene
         {
             "fill_id": "fill-1",
             "account_id": "account-1",
-            "trade_date": date(2026, 7, 2),
+            "trade_date": datetime(2026, 7, 2),
             "notional": Decimal("300"),
         }
     )
@@ -85,6 +90,36 @@ async def test_account_metrics_use_decimal_drawdown_fees_turnover_and_completene
     assert metric.filled_order_count == 1
     assert metric.win_rate == Decimal("1")
     assert metric.total_fees == Decimal("3")
+
+
+@pytest.mark.asyncio
+async def test_account_metric_identity_is_bson_safe_and_idempotent():
+    db = FakeDB()
+    account = {
+        "account_id": "account-1",
+        "user_id": "user-1",
+        "account_type": "PAPER_QUANT",
+        "market": "CN",
+        "realized_pnl": 0,
+        "total_fees": 0,
+    }
+    await db["ag_paper_accounts"].insert_one(account)
+    service = AccountMetricService(db)
+
+    first = await service.calculate_all(
+        period_start=date(2026, 7, 1),
+        period_end=date(2026, 7, 3),
+        user_id="user-1",
+    )
+    second = await service.calculate_all(
+        period_start=date(2026, 7, 1),
+        period_end=date(2026, 7, 3),
+        user_id="user-1",
+    )
+
+    assert first == second
+    assert db["ag_eval_account_metrics"].count() == 1
+    BSON.encode(db["ag_eval_account_metrics"].documents[0])
 
 
 @pytest.mark.asyncio
