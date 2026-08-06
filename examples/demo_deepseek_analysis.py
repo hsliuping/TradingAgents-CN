@@ -48,10 +48,10 @@ def demo_simple_chat():
     logger.info(f"\n🤖 演示DeepSeek V3简单对话...")
     
     try:
-        from tradingagents.llm_adapters.deepseek_direct_adapter import create_deepseek_direct_adapter
+        from tradingagents.llm_adapters.deepseek_adapter import create_deepseek_llm
         
         # 创建DeepSeek模型
-        llm = create_deepseek_direct_adapter(
+        llm = create_deepseek_llm(
             model="deepseek-chat",
             temperature=0.1,
             max_tokens=500
@@ -81,10 +81,10 @@ def demo_reasoning_analysis():
     logger.info(f"\n🧠 演示DeepSeek V3推理分析...")
     
     try:
-        from tradingagents.llm_adapters.deepseek_direct_adapter import create_deepseek_direct_adapter
+        from tradingagents.llm_adapters.deepseek_adapter import create_deepseek_llm
         
         # 创建DeepSeek适配器
-        adapter = create_deepseek_direct_adapter(
+        adapter = create_deepseek_llm(
             model="deepseek-chat",
             temperature=0.1,
             max_tokens=1000
@@ -124,7 +124,7 @@ def demo_stock_analysis_with_tools():
     logger.info(f"\n📊 演示DeepSeek V3工具调用股票分析...")
     
     try:
-        from tradingagents.llm_adapters.deepseek_direct_adapter import create_deepseek_direct_adapter
+        from tradingagents.llm_adapters.deepseek_adapter import create_deepseek_llm
         # 移除langchain工具导入以避免兼容性问题
         
         # 定义股票分析工具（简化版本，不使用langchain装饰器）
@@ -148,7 +148,7 @@ def demo_stock_analysis_with_tools():
             return f"股票{symbol}当前市场情绪：中性偏乐观，机构持仓比例65%"
         
         # 创建DeepSeek适配器
-        adapter = create_deepseek_direct_adapter(
+        adapter = create_deepseek_llm(
             model="deepseek-chat",
             temperature=0.1,
             max_tokens=1000
@@ -204,10 +204,10 @@ def demo_trading_system():
     logger.info(f"\n🎯 演示DeepSeek V3完整交易分析系统...")
     
     try:
-        from tradingagents.llm_adapters.deepseek_direct_adapter import create_deepseek_direct_adapter
+        from tradingagents.llm_adapters.deepseek_adapter import create_deepseek_llm
         
         # 创建DeepSeek适配器
-        adapter = create_deepseek_direct_adapter()
+        adapter = create_deepseek_llm()
         
         # 模拟交易分析查询
         trading_query = "请分析苹果公司(AAPL)的投资价值，包括技术面、基本面和风险评估"
