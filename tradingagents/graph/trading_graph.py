@@ -804,26 +804,35 @@ class TradingAgentsGraph:
                 trace = []
                 final_state = None
                 for chunk in self.graph.stream(init_agent_state, **args):
-                    # 记录节点计时
-                    for node_name in chunk.keys():
-                        if not node_name.startswith('__'):
-                            # 如果有上一个节点，记录其结束时间
-                            if current_node_name and current_node_start:
-                                elapsed = time.time() - current_node_start
-                                node_timings[current_node_name] = elapsed
-                                logger.info(f"⏱️ [{current_node_name}] 耗时: {elapsed:.2f}秒")
+                    # 检查 stream_mode 来确定 chunk 格式
+                    if args.get("stream_mode") == "values":
+                        # values 模式: chunk 是完整的状态字典
+                        # chunk = {"messages": [...], "company_of_interest": "588000", ...}
+                        final_state = chunk
+                        # 无法从 values 模式获取节点级别的计时
+                        logger.debug("📊 [values模式] 收到状态更新")
+                    else:
+                        # updates 模式: chunk = {"node_name": state_update}
+                        # 记录节点计时
+                        for node_name in chunk.keys():
+                            if not node_name.startswith('__'):
+                                # 如果有上一个节点，记录其结束时间
+                                if current_node_name and current_node_start:
+                                    elapsed = time.time() - current_node_start
+                                    node_timings[current_node_name] = elapsed
+                                    logger.info(f"⏱️ [{current_node_name}] 耗时: {elapsed:.2f}秒")
 
-                            # 开始新节点计时
-                            current_node_name = node_name
-                            current_node_start = time.time()
-                            break
+                                # 开始新节点计时
+                                current_node_name = node_name
+                                current_node_start = time.time()
+                                break
 
-                    # 累积状态更新
-                    if final_state is None:
-                        final_state = init_agent_state.copy()
-                    for node_name, node_update in chunk.items():
-                        if not node_name.startswith('__'):
-                            final_state.update(node_update)
+                        # 累积状态更新
+                        if final_state is None:
+                            final_state = init_agent_state.copy()
+                        for node_name, node_update in chunk.items():
+                            if not node_name.startswith('__'):
+                                final_state.update(node_update)
 
         # 记录最后一个节点的时间
         if current_node_name and current_node_start:
