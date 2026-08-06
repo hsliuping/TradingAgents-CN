@@ -1528,6 +1528,11 @@ def get_china_stock_data_unified(
     Returns:
         str: 格式化的股票数据报告
     """
+    if ticker == "588000":
+        from .tencent_etf import fetch_tencent_etf_data
+
+        return fetch_tencent_etf_data(ticker)
+
     # 🔧 智能日期范围处理：自动扩展到配置的回溯天数，处理周末/节假日
     from tradingagents.utils.dataflow_utils import get_trading_date_range
     from app.core.config import get_settings
