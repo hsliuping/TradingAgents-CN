@@ -195,8 +195,9 @@ class VectorStoreManager:
     向量数据库管理器（单例）
 
     支持多种后端：
-    - qdrant (默认，推荐)
-    - chromadb (有线程安全问题)
+    - mongodb (默认，与业务数据统一存储，客户端 cosine 相似度)
+    - qdrant (可选回退，服务器模式适合大数据量)
+    - chromadb (有线程安全问题，不推荐)
 
     通过环境变量 VECTOR_STORE_BACKEND 切换后端
     """
@@ -211,12 +212,16 @@ class VectorStoreManager:
 
     def __init__(self):
         if not self._initialized:
-            # 读取后端配置（默认使用 qdrant）
-            backend = os.getenv("VECTOR_STORE_BACKEND", "qdrant").lower()
+            # 读取后端配置（默认使用 mongodb，减少运维组件）
+            backend = os.getenv("VECTOR_STORE_BACKEND", "mongodb").lower()
             self.backend = backend
 
             try:
-                if backend == "qdrant":
+                if backend == "mongodb":
+                    from .mongodb_vector_adapter import MongoDBVectorAdapter
+                    self._adapter = MongoDBVectorAdapter()
+                    logger.info("✅ 向量数据库后端: MongoDB (客户端 cosine，与业务数据统一存储)")
+                elif backend == "qdrant":
                     from .qdrant_adapter import QdrantAdapter
                     self._adapter = QdrantAdapter()
                     logger.info("✅ 向量数据库后端: Qdrant (线程安全)")
@@ -225,16 +230,15 @@ class VectorStoreManager:
                     self._adapter = ChromaDBAdapter()
                     logger.warning("⚠️ 向量数据库后端: ChromaDB (有线程安全问题，不推荐)")
                 else:
-                    logger.error(f"❌ 不支持的向量数据库后端: {backend}，使用默认 Qdrant")
-                    from .qdrant_adapter import QdrantAdapter
-                    self._adapter = QdrantAdapter()
-                    self.backend = "qdrant"
+                    logger.error(f"❌ 不支持的向量数据库后端: {backend}，使用默认 MongoDB")
+                    from .mongodb_vector_adapter import MongoDBVectorAdapter
+                    self._adapter = MongoDBVectorAdapter()
+                    self.backend = "mongodb"
 
                 VectorStoreManager._initialized = True
 
             except ImportError as e:
                 logger.error(f"❌ 向量数据库后端初始化失败: {e}")
-                logger.error(f"   请安装依赖: pip install qdrant-client (Qdrant) 或 pip install chromadb (ChromaDB)")
                 raise
 
     def get_or_create_collection(self, name: str, vector_size: int = 1024):

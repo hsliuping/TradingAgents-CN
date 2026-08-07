@@ -17,7 +17,7 @@
 services:
   # MongoDB 数据库
   mongodb:
-    image: mongo:4.4
+    image: mongo:8.0
     container_name: tradingagents-mongodb-pro
     restart: unless-stopped
     ports:
@@ -32,7 +32,7 @@ services:
     networks:
       - tradingagents-network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 10s
       timeout: 5s
       retries: 5
@@ -135,8 +135,7 @@ services:
       FINNHUB_API_KEY: "${FINNHUB_API_KEY}"
       FINNHUB_ENABLED: "${FINNHUB_ENABLED:-false}"
       # 向量数据库配置
-      VECTOR_STORE_BACKEND: "qdrant"
-      QDRANT_DATA_DIR: "/app/data/qdrant"
+      VECTOR_STORE_BACKEND: "mongodb"
       MEMORY_ENABLED: "${MEMORY_ENABLED:-true}"
     depends_on:
       mongodb:

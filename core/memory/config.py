@@ -189,6 +189,34 @@ def _env(key: str, default: str = "") -> str:
     return (os.environ.get(key) or "").strip() or default
 
 
+def _get_mongo_connection_info() -> Tuple[str, str]:
+    """获取 MongoDB 连接 URI 和数据库名（用于 mem0 向量存储）。
+
+    优先从 app.core.config.settings 读取，回退到环境变量。
+    """
+    try:
+        from app.core.config import settings
+        return settings.MONGO_URI, settings.MONGO_DB
+    except Exception:
+        # 回退：从环境变量构建
+        host = _env("MONGODB_HOST", "localhost")
+        port = _env("MONGODB_PORT", "27017")
+        db_name = _env("MONGODB_DATABASE", "tradingagents")
+        username = _env("MONGODB_USERNAME", "")
+        password = _env("MONGODB_PASSWORD", "")
+        auth_source = _env("MONGODB_AUTH_SOURCE", "admin")
+        # 也支持直接传入完整连接串
+        conn_str = _env("MONGODB_CONNECTION_STRING", "") or _env("MONGODB_URL", "")
+        if conn_str:
+            return conn_str, db_name
+        if username and password:
+            return (
+                f"mongodb://{username}:{password}@{host}:{port}/{db_name}?authSource={auth_source}",
+                db_name,
+            )
+        return f"mongodb://{host}:{port}/{db_name}", db_name
+
+
 def _get_sync_db():
     """获取同步 MongoDB 连接"""
     try:
@@ -492,15 +520,15 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
         }
         collection_name = _build_mem0_collection_name(embedder)
 
-        # Vector Store
-        qdrant_base = _env("QDRANT_DATA_DIR", "./data/qdrant")
-        mem0_qdrant_path = os.path.join(qdrant_base, "mem0")
+        # Vector Store: MongoDB（与业务数据统一存储，客户端 cosine 相似度）
+        mongo_uri, mongo_db_name = _get_mongo_connection_info()
         vector_store = {
-            "provider": "qdrant",
+            "provider": "mongodb",
             "config": {
-                "path": mem0_qdrant_path,
+                "mongo_uri": mongo_uri,
+                "db_name": mongo_db_name,
                 "collection_name": collection_name,
-                "on_disk": True,
+                "embedding_model_dims": JDYUN_EMBEDDING_DIMS,
             },
         }
 
@@ -535,27 +563,22 @@ def build_mem0_config(db=None) -> Dict[str, Any]:
     embedder = _resolve_embedding_from_db(db_settings)
     collection_name = _build_mem0_collection_name(embedder)
 
-    # --- Vector Store: 独立子目录，避免与现有 QdrantAdapter 文件锁冲突 ---
-    qdrant_base = _env("QDRANT_DATA_DIR", "./data/qdrant")
-    mem0_qdrant_path = os.path.join(qdrant_base, "mem0")
-    # Qdrant vector store 默认维度为 1536；必须显式传入 embedding_model_dims，
-    # 否则 collection 创建/复用时维度会与 embedder 输出不一致，导致写入/搜索失败。
+    # --- Vector Store: MongoDB（与业务数据统一存储，客户端 cosine 相似度）---
+    # 不再使用 Qdrant，向量和业务数据统一存储在 MongoDB 中。
+    # 维度不匹配时由客户端 cosine 自动处理（跳过维度不兼容的向量）。
     embedding_dims = 1024
     if embedder:
         embedding_dims = int(embedder.get("config", {}).get("embedding_dims") or embedding_dims)
 
-    vector_store_cfg = {
-        "path": mem0_qdrant_path,
-        "collection_name": collection_name,
-        "embedding_model_dims": embedding_dims,
-        "on_disk": True,
-    }
-    # 注意：维度检查（_ensure_qdrant_collection_dimension）已移到
-    # MemoryService._ensure_init 中执行。build_mem0_config 应为纯函数，
-    # 不产生副作用。健康检查等路径调用 build_mem0_config 时不会触发文件锁冲突。
+    mongo_uri, mongo_db_name = _get_mongo_connection_info()
     vector_store = {
-        "provider": "qdrant",
-        "config": vector_store_cfg,
+        "provider": "mongodb",
+        "config": {
+            "mongo_uri": mongo_uri,
+            "db_name": mongo_db_name,
+            "collection_name": collection_name,
+            "embedding_model_dims": embedding_dims,
+        },
     }
 
     # --- LLM: 复用统一的系统模型选择与凭证解析逻辑 ---
@@ -623,8 +646,8 @@ def summarize_mem0_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "vector_store": {
             "provider": vector_store.get("provider") or "",
             "collection_name": vector_store_cfg.get("collection_name") or "",
-            "path": vector_store_cfg.get("path") or "",
-            "on_disk": bool(vector_store_cfg.get("on_disk", False)),
+            "db_name": vector_store_cfg.get("db_name") or "",
+            "embedding_model_dims": vector_store_cfg.get("embedding_model_dims") or 0,
         },
         "llm": {
             "provider": llm.get("provider") or "",

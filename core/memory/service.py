@@ -94,7 +94,12 @@ class MemoryService:
 
             try:
                 from mem0 import AsyncMemory
-                from .config import build_mem0_config, _ensure_qdrant_collection_dimension
+                from .config import build_mem0_config
+                from .mem0_mongodb_store import register_mem0_mongodb_provider
+
+                # 注册自定义 MongoDB 向量存储 provider（客户端 cosine）
+                # 替换 mem0 官方 MongoDB provider（依赖 Atlas $vectorSearch）
+                register_mem0_mongodb_provider()
 
                 resolved_config = config or build_mem0_config(self._db)
                 if not resolved_config.get("llm", {}).get("config", {}).get("api_key"):
@@ -107,14 +112,6 @@ class MemoryService:
                     self._init_error = f"{embedder_error}，mem0 记忆层不可用"
                     logger.warning("[MemoryService] %s", self._init_error)
                     return False
-
-                # 在 mem0 初始化前确保 Qdrant collection 维度匹配。
-                # 此时无 QdrantClient 持有文件锁，可安全检查/重建。
-                # 若维度不匹配，会先备份 payload 再删除旧集合，mem0 随后按正确维度创建。
-                vector_store_cfg = (resolved_config.get("vector_store") or {}).get("config") or {}
-                embedder_cfg = (resolved_config.get("embedder") or {}).get("config") or {}
-                expected_dims = int(embedder_cfg.get("embedding_dims") or 1024)
-                _ensure_qdrant_collection_dimension(vector_store_cfg, expected_dims)
 
                 env_backup = {
                     "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY"),
@@ -570,8 +567,8 @@ class MemoryService:
             }
         except Exception as e:
             err_msg = str(e)
-            # mem0 2.0.11 get_all() 在 Qdrant 空结果时的已知 bug：
-            # 空查询触发 numpy "index 0 is out of bounds"，但此时 Qdrant 连通正常（仅无数据）
+            # mem0 2.0.11 get_all() 在空结果时的已知 bug：
+            # 空查询触发 numpy "index 0 is out of bounds"，但此时向量库连通正常（仅无数据）
             if "out of bounds" in err_msg:
                 return {
                     "ok": True,

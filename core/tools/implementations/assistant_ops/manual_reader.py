@@ -362,10 +362,10 @@ async def search_user_manual(
             # 优雅降级：回退到 read_user_manual_section 的关键字匹配
             logger.warning(
                 "[search_user_manual] 向量检索不可用，回退到关键字匹配。"
-                "建议检查 Embedding 配置或 Qdrant 服务状态。"
+                "建议检查 Embedding 配置或向量数据库（MongoDB）服务状态。"
             )
             return (
-                "⚠️ 向量检索当前不可用（Embedding 或 Qdrant 未就绪），已回退到关键字匹配模式。\n\n"
+                "⚠️ 向量检索当前不可用（Embedding 或向量数据库未就绪），已回退到关键字匹配模式。\n\n"
                 "请尝试用更精确的章节名调用 read_user_manual_section 工具，"
                 "如 '单股研究'、'数据源配置'、'模拟交易' 等。"
             )

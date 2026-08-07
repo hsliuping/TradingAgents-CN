@@ -12,7 +12,7 @@
 
 services:
   mongodb:
-    image: mongo:4.4
+    image: mongo:8.0
     restart: unless-stopped
     ports:
       - "${MONGODB_PORT:-27017}:27017"
@@ -24,7 +24,7 @@ services:
       MONGO_INITDB_DATABASE: tradingagents
       TZ: "Asia/Shanghai"
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 10s
       timeout: 5s
       retries: 5
