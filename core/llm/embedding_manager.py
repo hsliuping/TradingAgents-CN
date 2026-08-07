@@ -104,13 +104,75 @@ class EmbeddingManager:
                 self._init_from_database()
                 if self._providers:
                     logger.info(f"✅ 从数据库加载了 {len(self._providers)} 个 Embedding 提供商")
+                    # 🔥 确保本地 sentence-transformers 始终作为最终 fallback
+                    self._ensure_local_fallback()
                     return
             except Exception as e:
                 logger.warning(f"⚠️ 从数据库加载 Embedding 配置失败: {e}")
-        
+
         # 降级：从环境变量初始化
         self._init_from_env()
+
+    def _ensure_local_fallback(self):
+        """确保本地 sentence-transformers 始终作为最终 fallback provider。
+
+        当所有线上 API 模型都不可用时（无 API Key / 连接失败），
+        自动回退到本地 Qwen/Qwen3-Embedding-0.6B 模型，无需联网。
+        """
+        existing_names = {p["name"] for p in self._providers}
+        if "local" not in existing_names:
+            self._providers.append({
+                "name": "local",
+                "api_key": "local",
+                "base_url": None,
+                "model": "Qwen/Qwen3-Embedding-0.6B",
+                "display_name": "本地 sentence-transformers"
+            })
+            self._fallback_providers = self._providers[1:]
+            logger.info("📦 已添加本地 sentence-transformers 作为最终 fallback")
     
+    @staticmethod
+    def _check_provider_available(provider_info: Dict[str, Any]) -> bool:
+        """预检查提供商是否可用（不实际调用 embedding API）。
+
+        - 云端模型：检查 API Key 是否非空
+        - Ollama / LocalAI：检查 TCP 端口是否可达
+        - local（sentence-transformers）：总是可用
+        """
+        name = provider_info.get("name", "")
+        base_url = provider_info.get("base_url") or ""
+
+        # local sentence-transformers 始终可用
+        if name == "local":
+            return True
+
+        # 本地 HTTP 服务（Ollama / LocalAI）：检查端口可达
+        if name in ("ollama", "localai") and base_url:
+            import urllib.parse
+            try:
+                parsed = urllib.parse.urlparse(base_url)
+                host = parsed.hostname or "localhost"
+                port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1.0)
+                result = sock.connect_ex((host, port))
+                sock.close()
+                if result != 0:
+                    logger.info(f"🔌 {provider_info['display_name']} 端口不可达 ({host}:{port})，跳过")
+                    return False
+                return True
+            except Exception:
+                return False
+
+        # 云端模型：检查 API Key
+        api_key = provider_info.get("api_key", "")
+        if not api_key:
+            logger.info(f"🔑 {provider_info['display_name']} 未配置 API Key，跳过")
+            return False
+
+        return True
+
     def _init_from_jdyun_env(self) -> bool:
         """京东云模式：从环境变量初始化 Embedding 提供商
 
@@ -229,7 +291,11 @@ class EmbeddingManager:
                     "model": embedding_model,
                     "display_name": provider_doc.get("display_name", provider_name)
                 }
-                
+
+                # 🔥 预检查：API Key / 端口可达性
+                if not self._check_provider_available(provider_info):
+                    continue
+
                 # 🔥 如果这是系统配置的优先提供商，将其放在最前面
                 if preferred_provider_name == provider_name:
                     self._providers.insert(0, provider_info)
@@ -290,6 +356,13 @@ class EmbeddingManager:
                 "base_url": "http://localhost:8080/v1",
                 "display_name": "LocalAI (本地)"
             },
+            {
+                "name": "local",
+                "env_key": None,  # 本地 sentence-transformers，无需 API Key
+                "model": "Qwen/Qwen3-Embedding-0.6B",
+                "base_url": None,  # 直接本地推理，不走 HTTP
+                "display_name": "本地 sentence-transformers"
+            },
         ]
         
         for config in providers_config:
@@ -302,6 +375,9 @@ class EmbeddingManager:
                     "model": config["model"],
                     "display_name": config["display_name"]
                 }
+                # 🔥 预检查：端口可达性（local 除外）
+                if not self._check_provider_available(provider_info):
+                    continue
                 self._providers.append(provider_info)
                 logger.debug(f"📋 加载 Embedding 提供商: {config['display_name']} (本地模型)")
             else:
@@ -315,6 +391,7 @@ class EmbeddingManager:
                         "model": config["model"],
                         "display_name": config["display_name"]
                     }
+                    # 🔥 预检查已在 api_key 非空时通过
                     self._providers.append(provider_info)
                     logger.debug(f"📋 加载 Embedding 提供商: {config['display_name']}")
         
@@ -454,7 +531,7 @@ class EmbeddingManager:
             elif provider_name == "local":
                 # 🔥 本地 sentence-transformers 模型，无需联网
                 return self._call_local(provider, text)
-            elif provider_name in ["openai", "deepseek", "zhipu", "ollama", "localai", "jdyun"]:
+            elif provider_name in ["openai", "deepseek", "zhipu", "ollama", "localai", "jdyun", "volcengine", "volcengine_coding", "siliconflow", "kimi", "aihubmix", "xiaomi"]:
                 # 🔥 OpenAI 兼容的 API（包括智谱AI、DeepSeek、京东云、本地模型等）
                 # 智谱AI 使用 OpenAI 兼容的 API，base_url: https://open.bigmodel.cn/api/paas/v4
                 return self._call_openai_compatible(provider, text)
@@ -486,12 +563,19 @@ class EmbeddingManager:
 
             if model_name not in self._local_model_cache:
                 logger.info(f"📦 正在加载本地 Embedding 模型: {model_name}")
-                # 离线模式，不联网验证模型文件
-                os.environ.setdefault("HF_HUB_OFFLINE", "1")
-                os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+                # 🔥 模型缓存放项目数据目录，不放系统盘
+                from pathlib import Path
+                cache_dir = Path(__file__).parent.parent.parent / "data" / "models" / "sentence_transformers"
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", str(cache_dir))
+                # 🔥 使用国内镜像源，不调 HuggingFace 官方
+                os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
                 from sentence_transformers import SentenceTransformer
-                self._local_model_cache[model_name] = SentenceTransformer(model_name)
-                logger.info(f"✅ 本地 Embedding 模型加载成功: {model_name}")
+                self._local_model_cache[model_name] = SentenceTransformer(
+                    model_name,
+                    cache_folder=str(cache_dir),
+                )
+                logger.info(f"✅ 本地 Embedding 模型加载成功: {model_name} (缓存: {cache_dir})")
 
             model = self._local_model_cache[model_name]
             embedding = model.encode(text)
