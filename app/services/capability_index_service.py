@@ -1,4 +1,5 @@
 import hashlib
+import asyncio
 import json
 import logging
 import uuid
@@ -101,13 +102,14 @@ class CapabilityIndexService:
                 "[CapabilityIndex] 🔄 开始构建索引（%d 个工具，向量维度: %d）...",
                 len(documents), self._embedding_manager.get_embedding_dimension(),
             )
-            result = self._rebuild_index(documents, fingerprint)
+            result = await asyncio.to_thread(self._rebuild_index, documents, fingerprint)
         else:
             logger.info(
                 "[CapabilityIndex] 🔄 增量同步索引（%d 个工具，%d 个已有索引）...",
                 len(documents), collection_count,
             )
-            result = self._sync_index_incrementally(
+            result = await asyncio.to_thread(
+                self._sync_index_incrementally,
                 documents=documents,
                 fingerprint=fingerprint,
                 document_hashes=document_hashes,

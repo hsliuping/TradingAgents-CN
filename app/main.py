@@ -367,6 +367,9 @@ async def lifespan(app: FastAPI):
     async def _sync_capability_index_background():
         """后台异步同步能力索引，不阻塞启动"""
         try:
+            # 延迟 5 秒，让 uvicorn 先完全启动并监听端口
+            await asyncio.sleep(5)
+
             from app.core.database import get_mongo_db
             from app.services.capability_index_service import CapabilityIndexService
 
