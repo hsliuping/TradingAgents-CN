@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 from pydantic import BaseModel
+from pymongo import MongoClient, UpdateOne
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,6 @@ class MongoDBClientCosine:
         self.embedding_model_dims = embedding_model_dims
         self.db_name = db_name
         self.mongo_uri = mongo_uri
-
-        from pymongo import MongoClient
 
         self.client = MongoClient(mongo_uri)
         self.db = self.client[db_name]
@@ -114,8 +113,6 @@ class MongoDBClientCosine:
         ids: Optional[List[str]] = None,
     ) -> None:
         """插入向量（upsert 语义）"""
-        from pymongo import UpdateOne
-
         operations = []
         for vector, payload, _id in zip(
             vectors,

@@ -15,6 +15,7 @@ import time
 from typing import List, Dict, Any, Optional
 
 import numpy as np
+from pymongo import UpdateOne
 
 logger = logging.getLogger(__name__)
 
@@ -146,8 +147,6 @@ class MongoDBVectorCollection:
     ) -> bool:
         """添加文档（upsert 语义，幂等）"""
         try:
-            from pymongo import UpdateOne
-
             operations = []
             for doc_id, embedding, metadata, document in zip(ids, embeddings, metadatas, documents):
                 # 构建文档：embedding + document + metadata（扁平结构）
@@ -257,11 +256,10 @@ class MongoDBVectorCollection:
             # 构建 MongoDB 查询过滤器
             mongo_filter = _translate_where_to_mongo(where)
 
-            # 从 MongoDB 读取所有文档（含 embedding）
-            cursor = self._collection.find(
-                mongo_filter,
-                {"_id": 1, "embedding": 1, "document": 1},
-            )
+            # 从 MongoDB 读取所有文档，排除 embedding 节省带宽但在 Python 端仍需 embedding
+            # 注意：必须返回所有字段（包括 metadata 如 title/provider/...），
+            # 否则 search 结果中 metadata 会丢失导致过滤失效
+            cursor = self._collection.find(mongo_filter)
 
             docs = list(cursor)
             if not docs:

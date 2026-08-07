@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-_QDRANT_COLLECTION = "mem0_memories"
+_MEM0_COLLECTION_PREFIX = "mem0_memories"
 _LOCAL_PROVIDER = "local"
 _LOCAL_EMBEDDER_PORT = 11435
 
@@ -67,14 +67,13 @@ def _build_mem0_collection_name(embedder: Optional[Dict[str, Any]]) -> str:
     dims = int(embedder_cfg.get("embedding_dims") or 0)
     fingerprint_source = f"{provider}:{embedder_cfg.get('model') or ''}:{dims}"
     fingerprint = hashlib.sha1(fingerprint_source.encode("utf-8")).hexdigest()[:8]
-    return f"{_QDRANT_COLLECTION}_{provider}_{model}_{dims or '0'}_{fingerprint}"
+    return f"{_MEM0_COLLECTION_PREFIX}_{provider}_{model}_{dims or '0'}_{fingerprint}"
 
 
 def _backup_collection_payload(client, collection_name: str, base_path: str) -> Optional[str]:
-    """备份 collection 的所有 payload 到 JSON 文件，返回备份文件路径。
+    """[已废弃] MongoDB 迁移后不再需要 Qdrant 备份逻辑。
 
-    维度不匹配时旧向量无法直接迁移到新 collection，但 payload（用户记忆文本和元数据）
-    可以通过 migrate_mem0_collection.py 脚本用新 embedder 重新向量化后写入。
+    保留此函数以备未来回退到 Qdrant 时使用。
     """
     import json
     from datetime import datetime
@@ -111,17 +110,9 @@ def _backup_collection_payload(client, collection_name: str, base_path: str) -> 
 
 def _ensure_qdrant_collection_dimension(vector_store_cfg: Dict[str, Any], expected_dims: int) -> None:
     """
-    确保本地 Qdrant collection 维度与 embedder 一致。
+    [已废弃] MongoDB 迁移后不再调用此函数。
 
-    应在 mem0 初始化**之前**调用（此时无 QdrantClient 持有文件锁）。
-    若在 mem0 已初始化后调用（如 health_check 路径），会因 portalocker 文件锁失败——
-    但此时 mem0 已正常工作，说明维度必然匹配，失败可安全忽略。
-
-    行为：
-    1. 当前 collection 不存在 → mem0 自动创建，无需处理
-    2. 当前 collection 存在且维度匹配 → 无需处理
-    3. 当前 collection 存在但维度不匹配 → 先备份 payload 到 JSON，再删除重建
-    4. 扫描所有 mem0_memories* 旧 collection，提示用户手动迁移
+    保留以备未来回退到 Qdrant 时使用。
     """
     from qdrant_client import QdrantClient
 
@@ -138,7 +129,7 @@ def _ensure_qdrant_collection_dimension(vector_store_cfg: Dict[str, Any], expect
             # 问题 5：扫描遗留的旧命名 collection，提示用户迁移
             for col in collections:
                 name = col.name
-                if name == collection_name or not name.startswith(_QDRANT_COLLECTION):
+                if name == collection_name or not name.startswith(_MEM0_COLLECTION_PREFIX):
                     continue
                 logger.info(
                     "mem0 config: 检测到历史 collection '%s'（当前使用 '%s'）。"
