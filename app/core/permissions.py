@@ -51,6 +51,20 @@ async def get_license_info(
             features=[]
         )
 
+    # 🔧 开发模式：DEBUG=True 且 LICENSE_SKIP_PRO_CHECK=true 时直接返回 PRO 权限，
+    # 方便本地开发测试 PRO 功能（工作流、高级课程等）。
+    # 生产环境（DEBUG=False）即使误设该开关也不会生效，保证 License 校验不被绕过。
+    from app.core.config import settings
+    if settings.DEBUG and settings.LICENSE_SKIP_PRO_CHECK:
+        logger.debug("🔓 开发模式：跳过 License 校验，直接授予 PRO 权限 (%s)", user.get("email", ""))
+        return LicenseInfo(
+            email=user.get("email", ""),
+            plan="pro",
+            is_valid=True,
+            error_message=None,
+            features=[]
+        )
+
     license_service = get_license_service()
     user_doc = None
     auth_server = None

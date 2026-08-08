@@ -297,7 +297,7 @@ def _get_embedding_provider_candidates(sync_db) -> list:
     try:
         cursor = sync_db.llm_providers.find(
             {
-                "supported_features": {"$in": ["embedding"]},
+                "supported_features": "embedding",  # 🔥 直接匹配，避免 $in 在某些 MongoDB 版本上返回空结果
                 "is_active": True,
             }
         ).sort("created_at", 1)

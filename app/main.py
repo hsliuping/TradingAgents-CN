@@ -419,8 +419,9 @@ async def lifespan(app: FastAPI):
         """后台异步构建用户手册向量索引，不阻塞启动"""
         try:
             from core.knowledge.user_manual_manager import UserManualManager
+            from app.core.database import get_mongo_db
 
-            manager = UserManualManager()
+            manager = UserManualManager(db=get_mongo_db())
             if not manager.available:
                 logger.warning(
                     "⚠️ [用户手册索引] 向量库/Embedding 不可用，跳过构建。"

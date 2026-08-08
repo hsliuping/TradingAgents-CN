@@ -247,6 +247,12 @@ class Settings(BaseSettings):
     # - TUSHARE_TOKEN: Tushare 数据源 Token
     JDYUN_MODE: bool = Field(default=False, description="京东云合作版模式开关")
 
+    # ==================== 开发环境 License 跳过开关 ====================
+    # 仅当 DEBUG=True 且 LICENSE_SKIP_PRO_CHECK=true 时生效：
+    # 所有 PRO 功能（工作流、高级课程等）对当前登录用户直接放行，方便本地开发测试。
+    # 生产环境（DEBUG=False）即使误设为 true 也不会生效，保证 License 校验不被绕过。
+    LICENSE_SKIP_PRO_CHECK: bool = Field(default=False, description="开发模式跳过 PRO License 校验（仅 DEBUG=True 时生效）")
+
     # Tushare统一数据同步配置
     TUSHARE_UNIFIED_ENABLED: bool = Field(default=True)
     TUSHARE_BASIC_INFO_SYNC_ENABLED: bool = Field(default=True)

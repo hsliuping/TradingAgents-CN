@@ -181,7 +181,7 @@ if ($Command -eq "backend" -or $Command -eq "all") {
         $env:HOST = "127.0.0.1"
         $env:MONGODB_HOST = "localhost"
         $env:MONGODB_PORT = "$MongoDBPort"
-        $env:REDIS_HOST = "localhost"
+        $env:REDIS_HOST = "127.0.0.1"
         $env:REDIS_PORT = "$RedisPort"
     }
 

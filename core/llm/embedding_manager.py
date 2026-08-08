@@ -146,23 +146,19 @@ class EmbeddingManager:
         if name == "local":
             return True
 
-        # 本地 HTTP 服务（Ollama / LocalAI）：检查端口可达
-        if name in ("ollama", "localai") and base_url:
-            import urllib.parse
+        # 本地 HTTP 服务（Ollama）：检查 /v1/models 端点是否返回有效响应
+        if name == "ollama" and base_url:
+            import urllib.request
             try:
-                parsed = urllib.parse.urlparse(base_url)
-                host = parsed.hostname or "localhost"
-                port = parsed.port or (443 if parsed.scheme == "https" else 80)
-                import socket
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1.0)
-                result = sock.connect_ex((host, port))
-                sock.close()
-                if result != 0:
-                    logger.info(f"🔌 {provider_info['display_name']} 端口不可达 ({host}:{port})，跳过")
-                    return False
+                models_url = base_url.rstrip("/") + "/models"
+                req = urllib.request.Request(models_url, method="GET")
+                with urllib.request.urlopen(req, timeout=2) as resp:
+                    if resp.status != 200:
+                        logger.info(f"🔌 {provider_info['display_name']} /v1/models 返回 {resp.status}，跳过")
+                        return False
                 return True
-            except Exception:
+            except Exception as e:
+                logger.info(f"🔌 {provider_info['display_name']} 服务不可达 ({base_url})，跳过: {e}")
                 return False
 
         # 云端模型：检查 API Key
@@ -241,7 +237,7 @@ class EmbeddingManager:
             # 🔥 修复：使用 supported_features 数组检查是否包含 "embedding"
             # 🔥 修复：字段名是 is_active 而不是 enabled
             cursor = providers_collection.find({
-                "supported_features": {"$in": ["embedding"]},  # 检查 supported_features 数组是否包含 "embedding"
+                "supported_features": "embedding",  # 🔥 直接匹配，避免 $in 在某些 MongoDB 版本上返回空结果
                 "is_active": True
             }).sort("created_at", 1)  # 按创建时间排序（因为 priority 字段不存在）
             
@@ -349,13 +345,8 @@ class EmbeddingManager:
                 "base_url": "http://localhost:11434/v1",
                 "display_name": "Ollama (本地)"
             },
-            {
-                "name": "localai",
-                "env_key": None,  # 本地模型不需要 API Key
-                "model": "text-embedding-ada-002",  # LocalAI 默认 Embedding 模型
-                "base_url": "http://localhost:8080/v1",
-                "display_name": "LocalAI (本地)"
-            },
+            # LocalAI 已移除：默认端口 8080 容易与其他服务冲突（如 SearXNG），
+            # 且已有 Ollama + sentence-transformers 两个本地 fallback
             {
                 "name": "local",
                 "env_key": None,  # 本地 sentence-transformers，无需 API Key
@@ -565,17 +556,38 @@ class EmbeddingManager:
                 logger.info(f"📦 正在加载本地 Embedding 模型: {model_name}")
                 # 🔥 模型缓存放项目数据目录，不放系统盘
                 from pathlib import Path
-                cache_dir = Path(__file__).parent.parent.parent / "data" / "models" / "sentence_transformers"
-                cache_dir.mkdir(parents=True, exist_ok=True)
-                os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", str(cache_dir))
+                models_root = Path(__file__).parent.parent.parent / "data" / "models"
+                hf_home = models_root / "huggingface"
+                hf_home.mkdir(parents=True, exist_ok=True)
+                # 🔥 HF_HOME 指向 HuggingFace Hub 缓存目录（模型下载位置）
+                os.environ["HF_HOME"] = str(hf_home)
                 # 🔥 使用国内镜像源，不调 HuggingFace 官方
-                os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+                os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+                # 🔥 禁用遥测，避免额外网络请求
+                os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
+                # 🔥 修复：HuggingFace hub 缓存格式为 hub/models--<org>--<model>/snapshots/<hash>/
+                # SentenceTransformer(cache_folder=...) 不会查找此格式，导致误判模型未缓存
+                # 进而尝试联网下载。改为直接定位 snapshot 目录加载，避免任何网络请求。
+                model_org_model = model_name.replace("/", "--")
+                hub_cache = hf_home / "hub" / f"models--{model_org_model}"
+                local_model_path = None
+                if hub_cache.exists():
+                    snapshots_dir = hub_cache / "snapshots"
+                    if snapshots_dir.is_dir():
+                        for snapshot in snapshots_dir.iterdir():
+                            if snapshot.is_dir() and (snapshot / "modules.json").exists():
+                                local_model_path = snapshot
+                                break
+
                 from sentence_transformers import SentenceTransformer
-                self._local_model_cache[model_name] = SentenceTransformer(
-                    model_name,
-                    cache_folder=str(cache_dir),
-                )
-                logger.info(f"✅ 本地 Embedding 模型加载成功: {model_name} (缓存: {cache_dir})")
+                if local_model_path:
+                    logger.info(f"📂 从本地缓存加载模型: {local_model_path}")
+                    self._local_model_cache[model_name] = SentenceTransformer(str(local_model_path))
+                else:
+                    # 模型未缓存，尝试在线下载（依赖 HF_ENDPOINT 镜像）
+                    self._local_model_cache[model_name] = SentenceTransformer(model_name)
+                logger.info(f"✅ 本地 Embedding 模型加载成功: {model_name} (路径: {local_model_path or '在线下载'})")
 
             model = self._local_model_cache[model_name]
             embedding = model.encode(text)

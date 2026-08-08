@@ -3629,7 +3629,7 @@ class ConfigService:
             
             # 查询支持 embedding 的厂商
             providers_data = await providers_collection.find({
-                "supported_features": {"$in": ["embedding"]},
+                "supported_features": "embedding",  # 🔥 直接匹配，避免 $in 在某些 MongoDB 版本上返回空结果
                 "is_active": True
             }).sort("priority", 1).to_list(length=None)
             
@@ -4041,10 +4041,14 @@ class ConfigService:
                         break
 
             # 创建 embedder
+            # 🔥 修复：EmbedderFactory.create() 的第二个参数是 embedder 的内部 config dict，
+            # 不含 "provider" 键；传入完整 embedder dict 会导致 BaseEmbedderConfig 收到
+            # 未知参数 "provider" 而报错
             embedder_factory = EmbedderFactory()
+            embedder_cfg_inner = (config.get("embedder") or {}).get("config") or {}
             embedder = embedder_factory.create(
                 (config.get("embedder") or {}).get("provider") or "",
-                config.get("embedder") or {},
+                embedder_cfg_inner,
                 (config.get("vector_store") or {}).get("config") or {},
             )
 
