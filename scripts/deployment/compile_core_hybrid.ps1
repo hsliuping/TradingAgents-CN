@@ -370,6 +370,11 @@ if ($KeepSource) {
         $fileName = $_.Name
         $relativePath = $pyFile.Substring($OutputDir.Length + 1)
 
+        # Always keep __init__.py files (required for package imports)
+        if ($fileName -eq "__init__.py") {
+            return
+        }
+
         # 检查是否有对应的.pyc或.pyd文件
         $pycFile = $pyFile -replace "\.py$", ".pyc"
         $pydFile = $pyFile -replace "\.py$", ".pyd"
