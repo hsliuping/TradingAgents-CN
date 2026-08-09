@@ -66,7 +66,9 @@ $criticalPackages = @(
     @{Import="qdrant_client"; Pip="qdrant-client"; Description="Qdrant 向量数据库（推荐，线程安全）"},
     @{Import="chromadb"; Pip="chromadb"; Description="ChromaDB 向量数据库（保留兼容）"},
     @{Import="pystray"; Pip="pystray"; Description="托盘监控（系统托盘图标）"},
-    @{Import="PIL"; Pip="Pillow"; Description="托盘监控图标绘制"}
+    @{Import="PIL"; Pip="Pillow"; Description="托盘监控图标绘制"},
+    @{Import="sentence_transformers"; Pip="sentence-transformers"; Description="本地 Embedding 模型推理"},
+    @{Import="langchain_experimental"; Pip="langchain-experimental"; Description="LangChain 实验功能"}
 )
 
 # ============================================================================

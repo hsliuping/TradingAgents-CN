@@ -196,10 +196,11 @@ if (-not (Test-Path $requirementsFile)) {
     Write-Host ""
 
     # Try multiple pip mirrors
+    # --only-binary :all: forces pre-built wheels (embedded Python has no compiler toolchain)
     $pipMirrors = @(
-        @{Name="Default"; Args=@("-r", $requirementsFile, "--no-warn-script-location")},
-        @{Name="Aliyun"; Args=@("-r", $requirementsFile, "--no-warn-script-location", "-i", "https://mirrors.aliyun.com/pypi/simple/", "--trusted-host", "mirrors.aliyun.com")},
-        @{Name="Tsinghua"; Args=@("-r", $requirementsFile, "--no-warn-script-location", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "--trusted-host", "pypi.tuna.tsinghua.edu.cn")}
+        @{Name="Default"; Args=@("-r", $requirementsFile, "--no-warn-script-location", "--only-binary", ":all:")},
+        @{Name="Aliyun"; Args=@("-r", $requirementsFile, "--no-warn-script-location", "--only-binary", ":all:", "-i", "https://mirrors.aliyun.com/pypi/simple/", "--trusted-host", "mirrors.aliyun.com")},
+        @{Name="Tsinghua"; Args=@("-r", $requirementsFile, "--no-warn-script-location", "--only-binary", ":all:", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "--trusted-host", "pypi.tuna.tsinghua.edu.cn")}
     )
 
     $installed = $false
@@ -326,7 +327,9 @@ $testImports = @(
     "weasyprint",  # 🔥 PDF 生成工具（WeasyPrint，推荐）
     "qdrant_client",  # 🔥 向量数据库：Qdrant（推荐，线程安全）
     "chromadb",  # 🔥 向量数据库：ChromaDB（保留兼容）
-    "searx"  # 🔥 SearXNG 元搜索引擎（Web 搜索功能）
+    "searx",  # 🔥 SearXNG 元搜索引擎（Web 搜索功能）
+    "sentence_transformers",  # 🔥 本地 Embedding 模型推理
+    "langchain_experimental"  # 🔥 LangChain 实验功能
 )
 $importSuccess = 0
 $importFailed = 0
