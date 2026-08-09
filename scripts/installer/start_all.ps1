@@ -248,6 +248,24 @@ if (-not (Test-Path $envPath)) {
 Write-Host "Loading configuration from .env file..." -ForegroundColor Cyan
 $envMap = Load-Env $envPath
 
+# Ensure JWT_SECRET is set to a random value (not the default)
+$defaultJwtSecrets = @("your-super-secret-jwt-key-change-in-production", "change-me-in-production", "your-secret-key")
+$currentJwt = if ($envMap.ContainsKey('JWT_SECRET')) { $envMap['JWT_SECRET'] } else { "" }
+if ($currentJwt -in $defaultJwtSecrets -or [string]::IsNullOrWhiteSpace($currentJwt)) {
+    # Generate a random 64-char hex secret
+    $bytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($bytes)
+    $newJwt = [BitConverter]::ToString($bytes).Replace("-", "").ToLower()
+    $envMap['JWT_SECRET'] = $newJwt
+
+    # Update .env file (replace existing JWT_SECRET lines, avoid duplicates)
+    $envLines = Get-Content $envPath | Where-Object { $_ -notmatch "^JWT_SECRET=" }
+    $envLines += "JWT_SECRET=$newJwt"
+    $envLines | Set-Content $envPath -Encoding UTF8
+    Write-Host "  Generated random JWT_SECRET in .env" -ForegroundColor Green
+}
+
 # Read port configuration from .env
 $backendPort = if ($envMap.ContainsKey('PORT')) { [int]$envMap['PORT'] } else { 8000 }
 $mongoPort = if ($envMap.ContainsKey('MONGODB_PORT')) { [int]$envMap['MONGODB_PORT'] } else { 27017 }
