@@ -248,22 +248,49 @@ if (-not (Test-Path $envPath)) {
 Write-Host "Loading configuration from .env file..." -ForegroundColor Cyan
 $envMap = Load-Env $envPath
 
-# Ensure JWT_SECRET is set to a random value (not the default)
-$defaultJwtSecrets = @("your-super-secret-jwt-key-change-in-production", "change-me-in-production", "your-secret-key")
-$currentJwt = if ($envMap.ContainsKey('JWT_SECRET')) { $envMap['JWT_SECRET'] } else { "" }
-if ($currentJwt -in $defaultJwtSecrets -or [string]::IsNullOrWhiteSpace($currentJwt)) {
-    # Generate a random 64-char hex secret
+# Ensure JWT_SECRET and CSRF_SECRET are set to random values (not defaults)
+$defaultSecrets = @(
+    "your-super-secret-jwt-key-change-in-production",
+    "change-me-in-production",
+    "your-secret-key",
+    "PLEASE_CHANGE_JWT_SECRET_USE_openssl_rand_base64_48",
+    "PLEASE_CHANGE_CSRF_SECRET_USE_openssl_rand_base64_48",
+    "change-me-csrf-secret"
+)
+$envNeedsUpdate = $false
+
+function New-RandomSecret {
     $bytes = New-Object byte[] 32
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     $rng.GetBytes($bytes)
-    $newJwt = [BitConverter]::ToString($bytes).Replace("-", "").ToLower()
-    $envMap['JWT_SECRET'] = $newJwt
+    return [BitConverter]::ToString($bytes).Replace("-", "").ToLower()
+}
 
-    # Update .env file (replace existing JWT_SECRET lines, avoid duplicates)
-    $envLines = Get-Content $envPath | Where-Object { $_ -notmatch "^JWT_SECRET=" }
-    $envLines += "JWT_SECRET=$newJwt"
+# Check JWT_SECRET
+$currentJwt = if ($envMap.ContainsKey('JWT_SECRET')) { $envMap['JWT_SECRET'] } else { "" }
+if ($currentJwt -in $defaultSecrets -or [string]::IsNullOrWhiteSpace($currentJwt)) {
+    $newJwt = New-RandomSecret
+    $envMap['JWT_SECRET'] = $newJwt
+    $envNeedsUpdate = $true
+    Write-Host "  JWT_SECRET needs update" -ForegroundColor Yellow
+}
+
+# Check CSRF_SECRET
+$currentCsrf = if ($envMap.ContainsKey('CSRF_SECRET')) { $envMap['CSRF_SECRET'] } else { "" }
+if ($currentCsrf -in $defaultSecrets -or [string]::IsNullOrWhiteSpace($currentCsrf)) {
+    $newCsrf = New-RandomSecret
+    $envMap['CSRF_SECRET'] = $newCsrf
+    $envNeedsUpdate = $true
+    Write-Host "  CSRF_SECRET needs update" -ForegroundColor Yellow
+}
+
+# Update .env file if any secret was changed
+if ($envNeedsUpdate) {
+    $envLines = Get-Content $envPath | Where-Object { $_ -notmatch "^(JWT_SECRET|CSRF_SECRET)=" }
+    $envLines += "JWT_SECRET=$($envMap['JWT_SECRET'])"
+    $envLines += "CSRF_SECRET=$($envMap['CSRF_SECRET'])"
     $envLines | Set-Content $envPath -Encoding UTF8
-    Write-Host "  Generated random JWT_SECRET in .env" -ForegroundColor Green
+    Write-Host "  Generated random JWT_SECRET and CSRF_SECRET in .env" -ForegroundColor Green
 }
 
 # Read port configuration from .env
