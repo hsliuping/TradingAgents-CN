@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="stock-detail-redesign">
 
     <!-- ════════ 1. 顶部：股票概览 + 操作入口 ════════ -->
@@ -828,8 +828,14 @@ async function fetchFinancials() {
         label: financialRawLabels[key] || key,
         count: items.length,
       }))
-  } catch (e) {
-    console.error('获取财务明细失败', e)
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail
+    const msg = typeof detail === 'object' ? detail?.message : detail
+    if (msg) {
+      ElMessage.warning(`${msg}，请点击「同步数据」获取`)
+    } else {
+      console.error('获取财务明细失败', e)
+    }
   }
 }
 

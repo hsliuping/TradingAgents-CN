@@ -3979,136 +3979,116 @@ class ConfigService:
             raise
 
     async def migrate_mem0_collection(self, source_collection: str, dry_run: bool = False) -> Dict[str, Any]:
-        """将旧 mem0 collection 的数据迁移到当前 collection"""
+        """将旧 Qdrant mem0 collection 的数据迁移到 MongoDB（向量存储已从 Qdrant 迁移到 MongoDB）
+
+        从 Qdrant 本地存储读取所有点（含 payload + vector），直接写入 MongoDB 同名 collection，
+        文档格式与 mongodb_vector_adapter.add() 一致。
+        """
         if not source_collection or not source_collection.startswith("mem0_memories"):
             raise ValueError("源 collection 名称必须以 mem0_memories 开头")
 
         try:
+            import sys
+            # Qdrant pickle 反序列化需要 core 模块在 path 中
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            if project_root not in sys.path:
+                sys.path.insert(0, project_root)
+
             from qdrant_client import QdrantClient
-            from qdrant_client.models import Distance, PointStruct, VectorParams
-            from mem0.utils.factory import EmbedderFactory
-            from core.memory.config import build_mem0_config
+            from pymongo import UpdateOne
             from app.core.database import get_mongo_db_sync
-
-            config = build_mem0_config(get_mongo_db_sync())
-            target_collection = (config.get("vector_store", {}).get("config", {}).get("collection_name") or "")
-            embedder_cfg = (config.get("embedder") or {}).get("config") or {}
-            vector_size = int(embedder_cfg.get("embedding_dims") or 0)
-
-            if not target_collection:
-                raise RuntimeError("当前 mem0 配置未解析出目标 collection")
-            if source_collection == target_collection:
-                raise RuntimeError("源 collection 和目标 collection 相同，拒绝执行")
 
             qdrant_base = os.environ.get("QDRANT_DATA_DIR", "./data/qdrant")
             mem0_path = os.path.join(qdrant_base, "mem0")
             client = QdrantClient(path=mem0_path)
 
-            # 检查源是否存在
-            collections = {col.name for col in client.get_collections().collections}
-            if source_collection not in collections:
+            # 检查 Qdrant 源是否存在
+            qdrant_collections = {col.name for col in client.get_collections().collections}
+            if source_collection not in qdrant_collections:
                 client.close()
-                raise RuntimeError(f"源 collection 不存在: {source_collection}")
+                raise RuntimeError(f"Qdrant 中不存在源 collection: {source_collection}")
 
-            logger.info(
-                f"🔄 迁移开始: source={source_collection} target={target_collection} dry_run={dry_run}"
-            )
+            source_count = client.count(source_collection).count
+            logger.info(f"🔄 Qdrant->MongoDB 迁移开始: {source_collection} ({source_count} points), dry_run={dry_run}")
 
-            if not dry_run:
-                # 确保目标存在
-                if target_collection not in collections:
-                    client.create_collection(
-                        collection_name=target_collection,
-                        vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE, on_disk=True),
-                    )
+            mongo_db = get_mongo_db_sync()
+            mongo_col = mongo_db[source_collection]
 
-                # 获取目标已有 ID
-                existing_ids: set = set()
-                offset = None
-                while True:
-                    points, offset = client.scroll(
-                        collection_name=target_collection,
-                        limit=256,
-                        offset=offset,
-                        with_payload=False,
-                        with_vectors=False,
-                    )
-                    if not points:
-                        break
-                    for p in points:
-                        existing_ids.add(str(p.id))
-                    if offset is None:
-                        break
-
-            # 创建 embedder
-            # 🔥 修复：EmbedderFactory.create() 的第二个参数是 embedder 的内部 config dict，
-            # 不含 "provider" 键；传入完整 embedder dict 会导致 BaseEmbedderConfig 收到
-            # 未知参数 "provider" 而报错
-            embedder_factory = EmbedderFactory()
-            embedder_cfg_inner = (config.get("embedder") or {}).get("config") or {}
-            embedder = embedder_factory.create(
-                (config.get("embedder") or {}).get("provider") or "",
-                embedder_cfg_inner,
-                (config.get("vector_store") or {}).get("config") or {},
-            )
-
-            batch_size = 20
-            total_seen = 0
+            batch_size = 100
             total_migrated = 0
             total_skipped = 0
-
             offset = None
+
             while True:
                 points, offset = client.scroll(
                     collection_name=source_collection,
                     limit=batch_size,
                     offset=offset,
                     with_payload=True,
-                    with_vectors=False,
+                    with_vectors=True,
                 )
                 if not points:
                     break
 
-                to_upsert = []
+                operations = []
                 for point in points:
-                    payload = dict(point.payload or {})
-                    memory_text = str(payload.get("data") or "").strip()
-                    if not memory_text:
-                        total_skipped += 1
-                        continue
+                    doc_id = str(point.id)
+                    vector = point.vector
+                    # 处理 named vector 的情况
+                    if isinstance(vector, dict):
+                        vector = list(vector.values())[0] if vector else []
+                    elif not isinstance(vector, list):
+                        vector = list(vector) if vector else []
 
-                    pid = str(point.id)
-                    if not dry_run and pid in existing_ids:
-                        total_skipped += 1
-                        continue
+                    payload = point.payload or {}
+                    doc = {
+                        "embedding": vector,
+                        "document": payload.get("document", payload.get("page_content", payload.get("data", ""))),
+                    }
+                    # 将 payload 字段平铺到文档顶层
+                    for k, v in payload.items():
+                        if k not in ("document", "page_content"):
+                            doc[k] = v
+                    if not doc.get("document") and payload.get("page_content"):
+                        doc["document"] = payload["page_content"]
 
-                    vector = embedder.embed(memory_text, "add")
-                    to_upsert.append(PointStruct(id=point.id, vector=vector, payload=payload))
+                    operations.append(
+                        UpdateOne(
+                            {"_id": doc_id},
+                            {"$set": doc},
+                            upsert=True,
+                        )
+                    )
 
-                if not dry_run and to_upsert:
-                    client.upsert(collection_name=target_collection, points=to_upsert)
-
-                total_seen += len(points)
-                total_migrated += len(to_upsert)
-                logger.info(
-                    f"  批次: 已处理={total_seen}, 已迁移={total_migrated}, 已跳过={total_skipped}"
-                )
+                if not dry_run and operations:
+                    result = mongo_col.bulk_write(operations, ordered=False)
+                    total_migrated += len(points)
+                    logger.info(
+                        f"  批次: 已处理={total_migrated}/{source_count}, "
+                        f"upserted={result.upserted_count}, modified={result.modified_count}"
+                    )
+                else:
+                    total_migrated += len(points)
 
                 if offset is None:
                     break
 
             client.close()
 
+            # 验证
+            mongo_count = mongo_col.count_documents({}) if not dry_run else 0
+
             result = {
                 "success": True,
                 "source_collection": source_collection,
-                "target_collection": target_collection,
-                "total_seen": total_seen,
+                "target": "mongodb",
+                "source_count": source_count,
                 "migrated": total_migrated,
                 "skipped": total_skipped,
+                "mongo_count": mongo_count,
                 "dry_run": dry_run,
             }
-            logger.info(f"✅ 迁移完成: {result}")
+            logger.info(f"✅ Qdrant->MongoDB 迁移完成: {result}")
             return result
         except Exception as e:
             logger.error(f"❌ 迁移失败: {e}", exc_info=True)

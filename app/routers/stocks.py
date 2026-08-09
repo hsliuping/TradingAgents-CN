@@ -890,7 +890,14 @@ async def get_financials(
                 sort=[("report_period", -1), ("updated_at", -1)]
             )
     if not financial_data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的财务数据")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "message": "暂无财务数据",
+                "suggestion": "请先在「数据同步」页面同步该股票的财务数据",
+                "sync_url": "/sync",
+            }
+        )
 
     summary = _build_financial_summary(financial_data)
     p0_snapshot = _get_p0_fundamental_snapshot(normalized_code)

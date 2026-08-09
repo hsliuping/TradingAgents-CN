@@ -32,8 +32,8 @@
     </div>
 
 
-    <!-- ════════ 京东云版专属内容（仅在京东云版下显示） ════════ -->
-    <template v-if="isJdyunMode">
+    <!-- ════════ 增强版仪表盘内容（v3.0 统一布局） ════════ -->
+    <div class="dashboard-enhanced-content">
       <!-- KPI 数据卡片行 -->
       <KpiCards
         :recent-tasks="recentAnalyses"
@@ -197,8 +197,8 @@
           <p>暂无市场快讯</p>
         </div>
       </el-card>
-    </template>
-    <!-- ════════ 京东云版专属内容结束 ════════ -->
+    </div>
+    <!-- ════════ 增强版仪表盘内容结束 ════════ -->
 
 
     <!-- 🔥 系统就绪度引导卡片（未就绪时显示，京东云版隐藏） -->
@@ -242,419 +242,6 @@
       </div>
     </el-card>
 
-    <!-- v3.0 智能助手推荐卡片（标准版显示） -->
-    <template v-if="!isJdyunMode">
-    <el-card class="assistant-highlight-card">
-      <div class="learning-highlight">
-        <div class="learning-icon assistant-icon">
-          <el-icon size="48"><ChatDotRound /></el-icon>
-        </div>
-        <div class="learning-content">
-          <h2>🤖 智能助手 <span class="new-badge">v3.0 NEW</span></h2>
-          <p class="learning-description">
-            <strong>🎯 AI 对话式股票分析助手</strong> — 通过自然语言对话，智能调用多种分析工具，为您提供个性化的投资研究支持。支持 QQ 频道接入、MCP 工具扩展、自动 Skill 生成等 v3.0 全新能力。
-          </p>
-          <div class="learning-features">
-            <span class="feature-tag highlight">💬 对话式分析</span>
-            <span class="feature-tag">🔧 MCP 工具扩展</span>
-            <span class="feature-tag">🏭 Agent 工坊</span>
-            <span class="feature-tag">📱 QQ 频道接入</span>
-            <span class="feature-tag">⚡ Skill 自动生成</span>
-            <span class="feature-tag">🔍 选股助手</span>
-          </div>
-        </div>
-        <div class="learning-action">
-          <el-button type="primary" size="large" @click="goToAssistant">
-            <el-icon><ChatDotRound /></el-icon>
-            开始对话
-          </el-button>
-        </div>
-      </div>
-    </el-card>
-
-    <!-- 学习中心推荐卡片 -->
-    <el-card class="learning-highlight-card">
-      <div class="learning-highlight">
-        <div class="learning-icon">
-          <el-icon size="48"><Reading /></el-icon>
-        </div>
-        <div class="learning-content">
-          <h2>📚 AI股票分析学习中心</h2>
-          <p class="learning-description">
-            <strong>🎯 24小时全流程AI辅助学习课程</strong> - 通过计划→执行→复盘→提升的完整循环，帮助您形成全流程使用AI辅助的炒股方法提升思路。从入门到提高，系统学习AI辅助股票分析技术。
-          </p>
-          <div class="learning-features">
-            <span class="feature-tag highlight">⏰ 24小时全流程课程</span>
-            <span class="feature-tag">📋 计划制定</span>
-            <span class="feature-tag">⚡ 执行跟踪</span>
-            <span class="feature-tag">📊 复盘分析</span>
-            <span class="feature-tag">📈 持续提升</span>
-            <span class="feature-tag">🎓 方法构建</span>
-          </div>
-        </div>
-        <div class="learning-action">
-          <el-button type="primary" size="large" @click="goToLearning">
-            <el-icon><Reading /></el-icon>
-            开始学习
-          </el-button>
-        </div>
-      </div>
-    </el-card>
-    </template>
-
-    <!-- 主要功能区域（标准版显示，京东云版隐藏） -->
-    <el-row v-if="!isJdyunMode" :gutter="24" class="main-content">
-      <!-- 左侧：快速操作 -->
-      <el-col :span="16">
-        <el-card class="quick-actions-card" header="快速操作">
-          <div class="quick-actions">
-            <div class="action-item" @click="goToSingleAnalysis">
-              <div class="action-icon">
-                <el-icon><Document /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>单股研究</h3>
-                <p>深度整理单只股票的研究线索、证据与风险</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToBatchAnalysis">
-              <div class="action-icon">
-                <el-icon><Files /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>批量分析 <span class="advanced-chip">高级</span></h3>
-                <p>同时分析多只股票，提高效率</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToScreening">
-              <div class="action-icon">
-                <el-icon><Search /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>股票筛选</h3>
-                <p>通过多维度条件筛选优质股票</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToQueue">
-              <div class="action-icon">
-                <el-icon><List /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>任务中心</h3>
-                <p>查看和管理分析任务列表</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToPortfolio">
-              <div class="action-icon">
-                <el-icon><PieChart /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>持仓研究</h3>
-                <p>分析当前持仓的研究状态与风险变化</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToReview">
-              <div class="action-icon">
-                <el-icon><DocumentChecked /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>复盘分析</h3>
-                <p>回顾和总结交易操作</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToTradingSystem">
-              <div class="action-icon">
-                <el-icon><Tickets /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>交易计划</h3>
-                <p>制定和管理个人交易规则</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- v3.0 核心功能 -->
-        <el-card class="v2-features-card v3-features-card" style="margin-top: 24px;">
-          <template #header>
-            <span>v3.0 核心功能 <el-tag size="small" type="success" effect="dark" style="margin-left: 8px;">NEW</el-tag></span>
-          </template>
-          <div class="quick-actions">
-            <div class="action-item" @click="goToAssistant">
-              <div class="action-icon v3-icon">
-                <el-icon><ChatDotRound /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>智能助手 <el-tag size="small" type="success">v3.0</el-tag></h3>
-                <p>AI 对话式分析助手，自然语言驱动的投资研究</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToScreening">
-              <div class="action-icon v3-icon">
-                <el-icon><Filter /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>选股助手 <el-tag size="small" type="success">v3.0</el-tag></h3>
-                <p>根据您描述的条件，快速筛选符合条件的股票</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToAgentWorkshop">
-              <div class="action-icon v3-icon">
-                <el-icon><MagicStick /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>Agent 工坊 <el-tag size="small" type="success">v3.0</el-tag></h3>
-                <p>可视化创建和管理自定义 AI 智能体</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToMcpServers">
-              <div class="action-icon v3-icon">
-                <el-icon><Connection /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>MCP 服务器 <el-tag size="small" type="success">v3.0</el-tag></h3>
-                <p>管理外部工具服务器，扩展 AI 能力边界</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 流程配置 -->
-        <el-card class="v2-features-card" header="流程配置" style="margin-top: 24px;">
-          <div class="quick-actions">
-            <div class="action-item" @click="goToWorkflow">
-              <div class="action-icon">
-                <el-icon><SetUp /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>流程管理 <span class="advanced-chip">高级</span></h3>
-                <p>可视化工作流编辑器，配置分析流程</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToAgents">
-              <div class="action-icon">
-                <el-icon><UserFilled /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>Agent配置 <span class="advanced-chip">高级</span></h3>
-                <p>管理和配置AI分析智能体</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToTools">
-              <div class="action-icon">
-                <el-icon><Tools /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>工具管理 <span class="advanced-chip">高级</span></h3>
-                <p>配置和管理分析工具</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-
-            <div class="action-item" @click="goToPrompts">
-              <div class="action-icon">
-                <el-icon><EditPen /></el-icon>
-              </div>
-              <div class="action-content">
-                <h3>提示词管理 <span class="advanced-chip">高级</span></h3>
-                <p>管理和优化AI提示词模板</p>
-              </div>
-              <el-icon class="action-arrow"><ArrowRight /></el-icon>
-            </div>
-          </div>
-        </el-card>
-
-        <!-- 最近分析 -->
-        <el-card class="recent-analyses-card" header="最近分析" style="margin-top: 24px;">
-          <el-table :data="recentAnalyses" style="width: 100%">
-            <el-table-column prop="stock_code" label="股票代码" width="120" />
-            <el-table-column prop="stock_name" label="股票名称" width="150" />
-            <el-table-column prop="status" label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="getStatusType(row.status)">
-                  {{ getStatusText(row.status) }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="start_time" label="创建时间" width="180">
-              <template #default="{ row }">
-                {{ formatTime(row.start_time) }}
-              </template>
-            </el-table-column>
-            <el-table-column label="操作">
-              <template #default="{ row }">
-                <el-button type="text" size="small" @click="viewAnalysis(row)">
-                  查看
-                </el-button>
-                <el-button
-                  v-if="row.status === 'completed'"
-                  type="text"
-                  size="small"
-                  @click="downloadReport(row)"
-                >
-                  下载
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <div class="table-footer">
-            <el-button type="text" @click="goToHistory">
-              查看全部历史 <el-icon><ArrowRight /></el-icon>
-            </el-button>
-          </div>
-        </el-card>
-
-        <!-- 市场快讯 -->
-        <el-card class="market-news-card" style="margin-top: 24px;">
-          <template #header>
-            <span>市场快讯</span>
-          </template>
-          <div v-if="marketNews.length > 0" class="news-list">
-            <div
-              v-for="news in marketNews"
-              :key="news.id"
-              class="news-item"
-            >
-              <a
-                v-if="news.url"
-                :href="news.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="news-title news-title-link"
-              >{{ news.title }}</a>
-              <div v-else class="news-title">{{ news.title }}</div>
-              <div class="news-time">{{ formatTime(news.time) }}</div>
-            </div>
-          </div>
-          <div v-else class="empty-state">
-            <el-icon class="empty-icon"><InfoFilled /></el-icon>
-            <p>暂无市场快讯</p>
-          </div>
-        </el-card>
-      </el-col>
-
-      <!-- 右侧：股票关注列表和快讯 -->
-      <el-col :span="8">
-        <!-- 股票关注列表 -->
-        <el-card class="favorites-card">
-          <template #header>
-            <div class="card-header">
-              <span>股票关注列表</span>
-              <el-button type="text" size="small" @click="goToFavorites">
-                查看全部 <el-icon><ArrowRight /></el-icon>
-              </el-button>
-            </div>
-          </template>
-
-          <div v-if="favoriteStocks.length === 0" class="empty-favorites">
-            <el-empty description="暂无股票关注列表" :image-size="60">
-              <el-button type="primary" size="small" @click="goToFavorites">
-                添加到研究列表
-              </el-button>
-            </el-empty>
-          </div>
-
-          <div v-else class="favorites-list">
-            <div
-              v-for="stock in favoriteStocks.slice(0, 5)"
-              :key="stock.stock_code"
-              class="favorite-item"
-              @click="viewStockDetail(stock)"
-            >
-              <div class="stock-info">
-                <div class="stock-code">{{ stock.stock_code }}</div>
-                <div class="stock-name">{{ stock.stock_name }}</div>
-              </div>
-              <div class="stock-price">
-                <div class="current-price">¥{{ stock.current_price }}</div>
-                <div
-                  class="change-percent"
-                  :class="getPriceChangeClass(stock.change_percent)"
-                >
-                  {{ stock.change_percent > 0 ? '+' : '' }}{{ Number(stock.change_percent).toFixed(2) }}%
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="favoriteStocks.length > 5" class="favorites-footer">
-            <el-button type="text" size="small" @click="goToFavorites">
-              查看全部 {{ favoriteStocks.length }} 只股票关注列表
-            </el-button>
-          </div>
-        </el-card>
-
-        <!-- 模拟交易账户 -->
-        <el-card class="paper-trading-card" style="margin-top: 24px;">
-          <template #header>
-            <div class="card-header">
-              <span>模拟交易账户</span>
-              <el-button type="text" size="small" @click="goToPaperTrading">
-                查看详情 <el-icon><ArrowRight /></el-icon>
-              </el-button>
-            </div>
-          </template>
-
-          <div v-if="paperAccount" class="paper-account-info">
-            <!-- A股账户 -->
-            <div class="account-section">
-              <div class="account-section-title">🇨🇳 A股账户</div>
-              <div class="account-item">
-                <div class="account-label">现金</div>
-                <div class="account-value">¥{{ formatMoney(getCurrencyAmount(paperAccount.cash, 'CNY')) }}</div>
-              </div>
-              <div class="account-item">
-                <div class="account-label">持仓市值</div>
-                <div class="account-value">¥{{ formatMoney(getCurrencyAmount(paperAccount.positions_value, 'CNY')) }}</div>
-              </div>
-              <div class="account-item">
-                <div class="account-label">总资产</div>
-                <div class="account-value primary">¥{{ formatMoney(getCurrencyAmount(paperAccount.equity, 'CNY')) }}</div>
-              </div>
-            </div>
-
-
-          </div>
-
-          <div v-else class="empty-state">
-            <el-icon class="empty-icon"><InfoFilled /></el-icon>
-            <p>暂无账户信息</p>
-            <el-button type="primary" size="small" @click="goToPaperTrading">
-              查看模拟交易
-            </el-button>
-          </div>
-        </el-card>
-
-        <!-- 多数据源同步 -->
-        <MultiSourceSyncCard style="margin-top: 24px;" />
-      </el-col>
-    </el-row>
-
     <!-- 首次登录引导弹窗 -->
     <GuideDialog
       v-model="showGuideDialog"
@@ -674,28 +261,20 @@ import {
   TrendCharts,
   Search,
   Document,
-  Files,
-  List,
   ArrowRight,
   InfoFilled,
   Reading,
   PieChart,
   DocumentChecked,
-  Tickets,
   SetUp,
-  UserFilled,
   Tools,
   EditPen,
   ChatDotRound,
-  Filter,
-  MagicStick,
-  Connection,
   Refresh,
   DataAnalysis
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { AnalysisTask, AnalysisStatus } from '@/types/analysis'
-import MultiSourceSyncCard from '@/components/Dashboard/MultiSourceSyncCard.vue'
 import KpiCards from '@/components/Dashboard/KpiCards.vue'
 import RunningTasksCard from '@/components/Dashboard/RunningTasksCard.vue'
 import DismissableBanner from '@/components/Dashboard/DismissableBanner.vue'
@@ -781,20 +360,8 @@ const quickAnalysis = () => {
   router.push('/analysis/single')
 }
 
-const goToSingleAnalysis = () => {
-  router.push('/analysis/single')
-}
-
-const goToBatchAnalysis = () => {
-  router.push('/analysis/batch')
-}
-
 const goToScreening = () => {
   router.push('/screening')
-}
-
-const goToQueue = () => {
-  router.push('/queue')
 }
 
 const goToHistory = () => {
@@ -827,44 +394,8 @@ const goToGuide = () => {
   router.push('/guide')
 }
 
-const goToPortfolio = () => {
-  router.push('/portfolio')
-}
-
-const goToReview = () => {
-  router.push('/review')
-}
-
-const goToTradingSystem = () => {
-  router.push('/trading-system')
-}
-
-const goToWorkflow = () => {
-  router.push('/workflow')
-}
-
-const goToAgents = () => {
-  router.push('/workflow/agents')
-}
-
-const goToTools = () => {
-  router.push('/workflow/tools')
-}
-
-const goToPrompts = () => {
-  router.push('/settings/templates')
-}
-
 const goToAssistant = () => {
   router.push('/assistant')
-}
-
-const goToAgentWorkshop = () => {
-  router.push('/workflow/agent-workshop')
-}
-
-const goToMcpServers = () => {
-  router.push('/workflow/mcp-servers')
 }
 
 const viewAnalysis = (analysis: AnalysisTask) => {
@@ -957,22 +488,6 @@ const stripHtmlTags = (text: string): string => {
     .trim()
 }
 
-// 股票关注列表相关方法
-const goToFavorites = () => {
-  router.push('/favorites')
-}
-
-const viewStockDetail = (stock: any) => {
-  // 可以跳转到股票详情页或分析页
-  router.push(`/analysis/single?stock_code=${stock.stock_code}`)
-}
-
-const getPriceChangeClass = (changePercent: number) => {
-  if (changePercent > 0) return 'price-up'
-  if (changePercent < 0) return 'price-down'
-  return 'price-neutral'
-}
-
 const loadFavoriteStocks = async () => {
   try {
     const response = await favoritesApi.list()
@@ -1063,25 +578,6 @@ const loadPaperAccount = async () => {
 // 跳转到模拟交易页面
 const goToPaperTrading = () => {
   router.push('/paper')
-}
-
-// 格式化金额
-const formatMoney = (value: number | null | undefined) => {
-  // 🔥 修复：处理 NaN 和非数字值
-  if (value == null || Number.isNaN(value as any) || typeof value !== 'number') {
-    return '0.00'
-  }
-  return value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-}
-
-const getCurrencyAmount = (
-  value: number | { CNY: number } | undefined,
-  currency: 'CNY'
-) => {
-  if (typeof value === 'number') {
-    return currency === 'CNY' ? value : 0
-  }
-  return value?.CNY ?? 0
 }
 
 // 处理引导弹窗确认

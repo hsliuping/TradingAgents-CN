@@ -179,7 +179,7 @@
               <p>系统支持多种主流大语言模型，推荐优先使用国内模型，您需要选择其中一个并获取API密钥：</p>
               <ul class="step-list">
                 <li>
-                  <strong>火山方舟：</strong>豆包系列模型（推荐国内用户）<br>
+                  <strong>火山方舟：</strong>豆包大模型 Seed 系列（推荐国内用户）<br>
                   <span style="font-size: 13px; color: var(--el-text-color-secondary);">感谢字节火山引擎赞助本项目！注册即领2500万Tokens</span>
                   <div class="register-link-wrapper">
                     <el-link href="https://www.volcengine.com/product/ark?utm_campaign=hw&utm_content=TradingAgents-CN&utm_medium=devrel-1&utm_source=OWO&utm_term=TradingAgents-CN" target="_blank" type="primary" :underline="false" class="register-link">
@@ -189,7 +189,7 @@
                   </div>
                 </li>
                 <li>
-                  <strong>DeepSeek：</strong>DeepSeek Chat 等模型（推荐国内用户）
+                  <strong>DeepSeek：</strong>DeepSeek-V4-Pro、V4-Flash模型（推荐国内用户）
                   <div class="register-link-wrapper">
                     <el-link href="https://platform.deepseek.com/" target="_blank" type="primary" :underline="false" class="register-link">
                       <el-icon><Link /></el-icon>
@@ -197,12 +197,13 @@
                     </el-link>
                   </div>
                 </li>
-                <li><strong>智谱AI：</strong>GLM-4 等国产大模型</li>
-                <li><strong>OpenAI：</strong>GPT-3.5、GPT-4 等模型</li>
-                <li><strong>Claude：</strong>Anthropic 的 Claude 系列模型</li>
-                <li>其他支持的大语言模型提供商</li>
+                <li><strong>智谱AI：</strong>GLM-5、GLM-5.2 等模型</li>
+                <li><strong>OpenAI：</strong>GPT-5、GPT-5.4 等模型</li>
+                <li><strong>Claude：</strong>Claude Opus 5、Opus 4.8 等模型</li>
+                <li><strong>其他：</strong>Kimi、小米 MiMo、AIHubMix、硅基流动等</li>
+                <li><strong>本地模型：</strong>Ollama（无需 API Key，本地部署）</li>
               </ul>
-              <p class="step-tip">💡 提示：国内用户推荐优先使用火山方舟或DeepSeek，访问速度更快，使用更稳定</p>
+              <p class="step-tip">💡 提示：国内用户推荐优先使用火山方舟或 DeepSeek，访问速度更快，使用更稳定</p>
               </template>
             </div>
           </template>

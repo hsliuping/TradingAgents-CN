@@ -234,13 +234,26 @@
         </el-form-item>
 
         <el-form-item label="股票代码" prop="stock_code">
-          <el-input
+          <el-autocomplete
             v-model="addForm.stock_code"
-            :placeholder="getStockCodePlaceholder()"
+            :fetch-suggestions="searchStocks"
+            placeholder="输入股票代码或名称搜索，如：000001 或 平安银行"
+            clearable
+            class="w-full"
+            value-key="code"
+            :debounce="300"
+            @select="handleStockSelect"
             @blur="fetchStockInfo"
-          />
+          >
+            <template #default="{ item }">
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0;">
+                <span style="font-weight: 600; color: #303133;">{{ item.code }}</span>
+                <span style="color: #606266; font-size: 13px;">{{ item.name }}</span>
+              </div>
+            </template>
+          </el-autocomplete>
           <div style="font-size: 12px; color: #909399; margin-top: 4px;">
-            {{ getStockCodeHint() }}
+            支持股票代码或名称搜索，选择后自动填充
           </div>
         </el-form-item>
 
@@ -503,6 +516,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { isJdyunMode } from '@/utils/config'
+import request from '@/api/request'
 import {
   Star,
   Search,
@@ -612,18 +626,6 @@ const validateStockCode = (_rule: any, value: any, callback: any) => {
     callback(new Error('请输入股票代码'))
     return
   }
-
-  const code = value.trim()
-  const market = addForm.value.market
-
-  if (market === 'A股') {
-    // A股：6位数字
-    if (!/^\d{6}$/.test(code)) {
-      callback(new Error('A股代码必须是6位数字，如：000001'))
-      return
-    }
-  }
-
   callback()
 }
 
@@ -632,8 +634,7 @@ const addRules = {
     { required: true, message: '请选择市场类型', trigger: 'change' }
   ],
   stock_code: [
-    { required: true, message: '请输入股票代码', trigger: 'blur' },
-    { validator: validateStockCode, trigger: 'blur' }
+    { required: true, message: '请选择或输入股票代码', trigger: 'blur' }
   ],
   stock_name: [
     { required: true, message: '请输入股票名称', trigger: 'blur' }
@@ -927,20 +928,44 @@ const handleMarketChange = () => {
 
 // 获取股票代码输入提示
 const getStockCodePlaceholder = () => {
-  const market = addForm.value.market
-  if (market === 'A股') {
-    return '请输入6位数字代码，如：000001 或 ETF 代码如 510300'
-  }
-  return '请输入股票代码'
+  return '输入股票代码或名称搜索，如：000001 或 平安银行'
 }
 
 // 获取股票代码输入提示文字
 const getStockCodeHint = () => {
-  const market = addForm.value.market
-  if (market === 'A股') {
-    return '支持股票和 ETF 代码，输入后失焦将自动填充名称'
+  return '支持股票代码或名称搜索，选择后自动填充'
+}
+
+// 搜索股票（支持代码和名称）
+const searchStocks = async (queryString: string, cb: (results: any[]) => void) => {
+  const q = queryString?.trim()
+  if (!q || q.length < 1) {
+    cb([])
+    return
   }
-  return ''
+  try {
+    console.log('搜索:', q)
+    // 正确路径是 /api/markets/CN/stocks/search
+    const res = await request.get(`/api/markets/CN/stocks/search`, { params: { q, limit: 20 } })
+    const stocks = res?.data?.stocks || []
+    console.log('搜索结果:', stocks)
+    cb(stocks.map((s: any) => ({
+      value: s.code || s.symbol || '',
+      code: s.code || s.symbol || '',
+      name: s.name || '',
+    })))
+  } catch (err) {
+    console.error('搜索失败:', err)
+    cb([])
+  }
+}
+
+// 选择搜索结果后自动填充
+const handleStockSelect = (item: any) => {
+  console.log('选中项:', item)
+  // el-autocomplete 会自动把 item.value 填到 v-model，只需填 name
+  addForm.value.stock_name = item.name
+  addFormRef.value?.clearValidate()
 }
 
 const fetchStockInfo = async () => {

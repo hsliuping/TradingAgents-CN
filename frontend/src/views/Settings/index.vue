@@ -759,21 +759,6 @@ const updateSectionFromRoute = () => {
   } else if (path === '/settings/jdyun-config') {
     currentSection.value = 'config'
     activeTab.value = 'jdyun-config'
-  } else if (path === '/settings/usage') {
-    currentSection.value = 'config'
-    activeTab.value = 'usage'
-  } else if (path === '/settings/cache') {
-    currentSection.value = 'config'
-    activeTab.value = 'cache'
-  } else if (path === '/settings/database') {
-    currentSection.value = 'admin'
-    activeTab.value = 'database'
-  } else if (path === '/settings/logs') {
-    currentSection.value = 'admin'
-    activeTab.value = 'logs'
-  } else if (path === '/settings/sync') {
-    currentSection.value = 'admin'
-    activeTab.value = 'sync'
   } else if (path === '/settings/capability-index') {
     currentSection.value = 'admin'
     activeTab.value = 'capability-index'
@@ -869,6 +854,31 @@ const handleMenuSelect = (index: string) => {
   // 京东云模式：点击"数据源配置"菜单项时跳转到配置管理页（数据源标签页）
   if (index === 'datasource-config') {
     router.push('/settings/config?tab=datasource')
+    return
+  }
+  // 直接跳转到独立页面，避免显示中间页
+  if (index === 'database') {
+    router.push('/settings/database')
+    return
+  }
+  if (index === 'logs') {
+    router.push('/settings/logs')
+    return
+  }
+  if (index === 'sync') {
+    router.push('/settings/sync')
+    return
+  }
+  if (index === 'usage') {
+    router.push('/settings/usage')
+    return
+  }
+  if (index === 'cache') {
+    router.push('/settings/cache')
+    return
+  }
+  if (index === 'config') {
+    router.push('/settings/config')
     return
   }
   activeTab.value = index

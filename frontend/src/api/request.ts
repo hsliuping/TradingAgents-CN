@@ -338,7 +338,9 @@ const createAxiosInstance = (): AxiosInstance => {
             break
 
           case 404:
-            showErrorMessage('请求的资源不存在')
+            if (!config?.skipErrorHandler) {
+              showErrorMessage('请求的资源不存在')
+            }
             break
 
           case 429:

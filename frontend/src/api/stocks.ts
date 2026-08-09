@@ -243,10 +243,14 @@ export const stocksApi = {
    * @param options includeRaw: 是否返回 raw_data 分组明细
    */
   async getFinancials(symbol: string, options?: { source?: string; includeRaw?: boolean }) {
-    return ApiClient.get<StockFinancialsResponse>(`/api/stocks/${symbol}/financials`, {
-      ...(options?.source ? { source: options.source } : {}),
-      ...(options?.includeRaw !== undefined ? { include_raw: String(options.includeRaw) } : {}),
-    })
+    return ApiClient.get<StockFinancialsResponse>(
+      `/api/stocks/${symbol}/financials`,
+      {
+        ...(options?.source ? { source: options.source } : {}),
+        ...(options?.includeRaw !== undefined ? { include_raw: String(options.includeRaw) } : {}),
+      },
+      { skipErrorHandler: true }
+    )
   },
 
   /**

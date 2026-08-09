@@ -1,11 +1,7 @@
 <template>
   <div class="advanced-lesson-wrapper">
     <!-- 页面头部 -->
-    <el-page-header @back="goBack" :content="lessonTitle">
-      <template #extra>
-        <el-button v-if="canAccess" type="primary" :icon="Download" @click="downloadLesson">下载</el-button>
-      </template>
-    </el-page-header>
+    <el-page-header @back="goBack" :content="lessonTitle" />
 
     <!-- 主容器：课程内容 + 侧边栏 -->
     <div v-if="canAccess" class="advanced-lesson">
@@ -56,7 +52,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Download, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { renderMarkdown } from '@/utils/markdown'
 import { useLicenseStore } from '@/stores/license'
@@ -182,32 +178,6 @@ const scrollToHeading = (id: string) => {
   const element = document.getElementById(id)
   if (element) {
     element.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-}
-
-// 下载课程
-const downloadLesson = async () => {
-  if (!lesson.value) return
-
-  try {
-    const { getCourseContent } = await import('@/config/advancedCourseContent')
-    const markdown = await getCourseContent(lesson.value.file)
-    
-    if (!markdown) {
-      ElMessage.error('课程内容未找到')
-      return
-    }
-
-    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = lesson.value.file.split('/').pop() || 'lesson.md'
-    a.click()
-    URL.revokeObjectURL(url)
-  } catch (error: any) {
-    console.error('下载失败:', error)
-    ElMessage.error('下载失败：' + (error.message || '未知错误'))
   }
 }
 

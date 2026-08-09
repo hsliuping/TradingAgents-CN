@@ -827,6 +827,8 @@
               </el-select>
               <div class="setting-description">
                 用于文本向量化和记忆功能，从所有支持 embedding 的厂商中选择（格式：厂商:模型名，如：dashscope:text-embedding-v3）
+                <!-- 向量迁移功能已废弃：向量存储已从 Qdrant 迁移到 MongoDB，不再需要 Qdrant 迁移 -->
+                <!--
                 <el-button
                   type="warning"
                   size="small"
@@ -835,6 +837,7 @@
                 >
                   迁移向量数据
                 </el-button>
+                -->
               </div>
             </el-form-item>
 
@@ -1460,7 +1463,8 @@
       </template>
     </el-dialog>
 
-    <!-- 🔧 向量迁移对话框（京东云模式下隐藏） -->
+    <!-- 向量迁移对话框已废弃：向量存储已从 Qdrant 迁移到 MongoDB -->
+    <!--
     <el-dialog
       v-if="!isJdyunMode()"
       v-model="migrationDialogVisible"
@@ -1572,6 +1576,7 @@
         <el-button @click="migrationDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+    -->
   </div>
 </template>
 
@@ -2290,6 +2295,25 @@ const loadSystemSettings = async () => {
       no_proxy: 'localhost,127.0.0.1,eastmoney.com,push2.eastmoney.com,82.push2.eastmoney.com,82.push2delay.eastmoney.com,gtimg.cn,sinaimg.cn,api.tushare.pro,baostock.com',
 
       ...settings
+    }
+    // 🔥 修复：后端返回的数值字段可能是字符串，el-input-number 要求 Number 类型
+    const numericKeys = [
+      'cost_alert_threshold', 'default_analysis_timeout', 'cache_ttl',
+      'worker_heartbeat_interval_seconds', 'queue_poll_interval_seconds',
+      'queue_cleanup_interval_seconds', 'sse_poll_timeout_seconds',
+      'sse_heartbeat_interval_seconds', 'sse_task_max_idle_seconds',
+      'sse_batch_poll_interval_seconds', 'sse_batch_max_idle_seconds',
+      'ta_hk_min_request_interval_seconds', 'ta_hk_timeout_seconds',
+      'ta_hk_max_retries', 'ta_hk_rate_limit_wait_seconds', 'ta_hk_cache_ttl_seconds',
+      'ta_china_min_api_interval_seconds', 'ta_us_min_api_interval_seconds',
+      'ta_google_news_sleep_min_seconds', 'ta_google_news_sleep_max_seconds',
+      'max_usage_records',
+    ]
+    for (const k of numericKeys) {
+      const v = systemSettings.value[k]
+      if (v != null && typeof v !== 'number') {
+        systemSettings.value[k] = Number(v)
+      }
     }
     syncModelSelectionSettings()
     // 🔥 保存原始 Embedding 模型值（用于切换提醒）
