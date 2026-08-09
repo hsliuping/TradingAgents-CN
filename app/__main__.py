@@ -13,9 +13,14 @@ if project_root not in sys.path:
 logs_dir = os.path.join(project_root, "logs")
 os.makedirs(logs_dir, exist_ok=True)
 crash_log_path = os.path.join(logs_dir, "crash.log")
-crash_log_file = open(crash_log_path, "w")
-faulthandler.enable(file=crash_log_file)
-print(f"🔧 Faulthandler enabled, crash log: {crash_log_path}")
+try:
+    crash_log_file = open(crash_log_path, "w")
+    faulthandler.enable(file=crash_log_file)
+    print(f"🔧 Faulthandler enabled, crash log: {crash_log_path}")
+except (PermissionError, OSError) as e:
+    # crash.log 打开失败不阻塞启动（可能是权限问题或路径限制）
+    faulthandler.enable()
+    print(f"⚠️  Faulthandler enabled (stderr only), crash.log open failed: {e}")
 
 import uvicorn
 
