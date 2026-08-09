@@ -30,11 +30,12 @@ if (-not (Test-Path $envFile) -and (Test-Path $envExample)) {
 
 if (Test-Path $envFile) {
     $content = Get-Content $envFile -Raw -Encoding UTF8
-    $content = $content -replace "PORT=\d+", "PORT=$BackendPort"
-    $content = $content -replace "API_PORT=\d+", "API_PORT=$BackendPort"
-    $content = $content -replace "MONGODB_PORT=\d+", "MONGODB_PORT=$MongoPort"
-    $content = $content -replace "REDIS_PORT=\d+", "REDIS_PORT=$RedisPort"
-    $content = $content -replace "NGINX_PORT=\d+", "NGINX_PORT=$NginxPort"
+    # Use (?m)^ to match start of line only, avoiding partial matches like PORT= inside MONGODB_PORT=
+    $content = $content -replace "(?m)^PORT=\d+", "PORT=$BackendPort"
+    $content = $content -replace "(?m)^API_PORT=\d+", "API_PORT=$BackendPort"
+    $content = $content -replace "(?m)^MONGODB_PORT=\d+", "MONGODB_PORT=$MongoPort"
+    $content = $content -replace "(?m)^REDIS_PORT=\d+", "REDIS_PORT=$RedisPort"
+    $content = $content -replace "(?m)^NGINX_PORT=\d+", "NGINX_PORT=$NginxPort"
     [System.IO.File]::WriteAllText($envFile, $content, $utf8NoBom)
     Write-Host "  Updated .env ports: Backend=$BackendPort, Mongo=$MongoPort, Redis=$RedisPort, Nginx=$NginxPort"
 } else {
