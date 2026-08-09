@@ -565,9 +565,9 @@ Write-Host "  Cleaning runtime directory (keeping config files)..." -ForegroundC
 
 $runtimeDir = Join-Path $tempDir "runtime"
 if (Test-Path $runtimeDir) {
-    # Keep only config files (.conf, .types)
+    # Keep only config files (.conf, .types, .yml)
     Get-ChildItem -Path $runtimeDir -File | Where-Object {
-        $_.Extension -notin @('.conf', '.types')
+        $_.Extension -notin @('.conf', '.types', '.yml')
     } | Remove-Item -Force -ErrorAction SilentlyContinue
 
     Write-Host "  Runtime directory cleaned" -ForegroundColor Green

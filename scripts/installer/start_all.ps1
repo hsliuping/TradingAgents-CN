@@ -786,7 +786,7 @@ if ($backendReady) {
 Write-Host ""
 Write-Host "[3.5/5] Starting SearXNG (Web Search)..." -ForegroundColor Yellow
 
-$searxngSettingsPath = Join-Path $root 'runtime\searxng-settings.yml'
+$searxngSettingsPath = Join-Path $root 'config\searxng\settings.yml'
 $searxngPort = 8888
 $searxngStarted = $false
 
