@@ -275,7 +275,7 @@ Write-Host ""
 
 $appDir = Join-Path $PortableDir "app"
 if (Test-Path $appDir) {
-    $appCompiled = Invoke-CompileAndStrip -TargetDir $appDir -KeepFileNames @("__main__.py")
+    $appCompiled = Invoke-CompileAndStrip -TargetDir $appDir -KeepFileNames @("__main__.py", "__init__.py")
     if ($appCompiled) {
         Write-Host "  ✅ App compilation completed" -ForegroundColor Green
     }
@@ -294,7 +294,7 @@ Write-Host ""
 
 $tradingagentsDir = Join-Path $PortableDir "tradingagents"
 if (Test-Path $tradingagentsDir) {
-    $tradingagentsCompiled = Invoke-CompileAndStrip -TargetDir $tradingagentsDir
+    $tradingagentsCompiled = Invoke-CompileAndStrip -TargetDir $tradingagentsDir -KeepFileNames @("__init__.py")
     if ($tradingagentsCompiled) {
         Write-Host "  ✅ tradingagents/ compilation completed" -ForegroundColor Green
     }
@@ -313,7 +313,7 @@ Write-Host ""
 
 $scriptsDir = Join-Path $PortableDir "scripts"
 if (Test-Path $scriptsDir) {
-    $scriptsCompiled = Invoke-CompileAndStrip -TargetDir $scriptsDir -KeepRelativePaths $preservedScriptSources
+    $scriptsCompiled = Invoke-CompileAndStrip -TargetDir $scriptsDir -KeepRelativePaths $preservedScriptSources -KeepFileNames @("__init__.py")
     if ($scriptsCompiled) {
         Write-Host "  ✅ scripts/ compilation completed" -ForegroundColor Green
     }
@@ -332,7 +332,7 @@ Write-Host ""
 
 $migrationsDir = Join-Path $PortableDir "migrations"
 if (Test-Path $migrationsDir) {
-    $migrationsCompiled = Invoke-CompileAndStrip -TargetDir $migrationsDir -KeepRelativePaths $preservedMigrationSources -KeepFileNames @()
+    $migrationsCompiled = Invoke-CompileAndStrip -TargetDir $migrationsDir -KeepRelativePaths $preservedMigrationSources -KeepFileNames @("__init__.py")
     if ($migrationsCompiled) {
         Write-Host "  ✅ migrations/ compilation completed" -ForegroundColor Green
     }
@@ -349,11 +349,11 @@ Write-Host ""
 Write-Host "[6/7] Enforcing compiled-only package layout..." -ForegroundColor Yellow
 Write-Host ""
 
-Invoke-EnforceCompiledLayout -TargetDir $coreDir | Out-Null
-Invoke-EnforceCompiledLayout -TargetDir $appDir -KeepFileNames @("__main__.py") | Out-Null
-Invoke-EnforceCompiledLayout -TargetDir $tradingagentsDir | Out-Null
-Invoke-EnforceCompiledLayout -TargetDir $scriptsDir -KeepRelativePaths $preservedScriptSources | Out-Null
-Invoke-EnforceCompiledLayout -TargetDir $migrationsDir -KeepRelativePaths $preservedMigrationSources | Out-Null
+Invoke-EnforceCompiledLayout -TargetDir $coreDir -KeepFileNames @("__init__.py") | Out-Null
+Invoke-EnforceCompiledLayout -TargetDir $appDir -KeepFileNames @("__main__.py", "__init__.py") | Out-Null
+Invoke-EnforceCompiledLayout -TargetDir $tradingagentsDir -KeepFileNames @("__init__.py") | Out-Null
+Invoke-EnforceCompiledLayout -TargetDir $scriptsDir -KeepRelativePaths $preservedScriptSources -KeepFileNames @("__init__.py") | Out-Null
+Invoke-EnforceCompiledLayout -TargetDir $migrationsDir -KeepRelativePaths $preservedMigrationSources -KeepFileNames @("__init__.py") | Out-Null
 
 Write-Host ""
 
