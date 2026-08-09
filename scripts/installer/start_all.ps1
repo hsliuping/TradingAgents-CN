@@ -782,6 +782,79 @@ if ($backendReady) {
 
 # Worker is integrated in Backend process (thread pool), no separate Worker needed
 
+# Step 3.5: Start SearXNG (Web search service, optional)
+Write-Host ""
+Write-Host "[3.5/5] Starting SearXNG (Web Search)..." -ForegroundColor Yellow
+
+$searxngSettingsPath = Join-Path $root 'runtime\searxng-settings.yml'
+$searxngPort = 8888
+$searxngStarted = $false
+
+# Check if SearXNG is installed (import searx)
+$searxngCheck = & $pythonExe -c "import searx; print('ok')" 2>&1
+if ($searxngCheck -ne "ok") {
+    Write-Host "  SearXNG not installed, skipping (web search will use Baidu fallback)" -ForegroundColor Gray
+} elseif (-not (Test-Path $searxngSettingsPath)) {
+    Write-Host "  SearXNG config not found: $searxngSettingsPath, skipping" -ForegroundColor Gray
+} else {
+    # Check if port 8888 is already in use
+    $searxngPortInUse = Get-NetTCPConnection -LocalPort $searxngPort -State Listen -ErrorAction SilentlyContinue
+    if ($searxngPortInUse) {
+        Write-Host "  Port $searxngPort already in use, SearXNG may already be running" -ForegroundColor Gray
+        $searxngStarted = $true
+    } else {
+        $searxngLog = Join-Path $logsDir 'searxng.log'
+        $searxngErrorLog = Join-Path $logsDir 'searxng_error.log'
+
+        Write-Host "  Config: $searxngSettingsPath" -ForegroundColor Gray
+        Write-Host "  Starting SearXNG on port $searxngPort..." -ForegroundColor Gray
+
+        try {
+            # Set environment variables for SearXNG (PowerShell 5.1 compatible)
+            $env:SEARXNG_SETTINGS_PATH = $searxngSettingsPath
+            $env:PYTHONIOENCODING = "utf-8"
+            $env:PYTHONUTF8 = "1"
+
+            $searxngProcess = Start-Process -FilePath $pythonExe `
+                -ArgumentList "-m", "searx.webapp" `
+                -WorkingDirectory $root `
+                -WindowStyle Hidden `
+                -PassThru `
+                -RedirectStandardOutput $searxngLog `
+                -RedirectStandardError $searxngErrorLog
+
+            Start-Sleep -Seconds 5
+
+            # Check if process is still running
+            if (-not $searxngProcess.HasExited) {
+                Write-Host "  SearXNG started (PID: $($searxngProcess.Id))" -ForegroundColor Green
+                $searxngStarted = $true
+            } else {
+                Write-Host "  WARNING: SearXNG process exited (code: $($searxngProcess.ExitCode))" -ForegroundColor Yellow
+                Write-Host "  Check logs/searxng_error.log for details" -ForegroundColor Gray
+            }
+        } catch {
+            Write-Host "  WARNING: Failed to start SearXNG: $_" -ForegroundColor Yellow
+            Write-Host "  Web search will use Baidu fallback" -ForegroundColor Gray
+        }
+    }
+}
+
+# Set SEARXNG_INSTANCES in .env if SearXNG is running
+if ($searxngStarted) {
+    $envFile = Join-Path $root '.env'
+    if (Test-Path $envFile) {
+        $envContent = Get-Content $envFile -Raw
+        if ($envContent -match 'SEARXNG_INSTANCES=') {
+            $envContent = $envContent -replace 'SEARXNG_INSTANCES=.*', "SEARXNG_INSTANCES=http://127.0.0.1:$searxngPort"
+        } else {
+            $envContent += "`nSEARXNG_INSTANCES=http://127.0.0.1:$searxngPort`n"
+        }
+        Set-Content -Path $envFile -Value $envContent -Encoding UTF8
+        Write-Host "  Updated SEARXNG_INSTANCES in .env" -ForegroundColor Gray
+    }
+}
+
 # Step 4: Start Nginx
 Write-Host ""
 Write-Host "[4/4] Starting Nginx..." -ForegroundColor Yellow
@@ -930,6 +1003,7 @@ try {
         mongodb = $mongoPid
         redis = $redisPid
         backend = $backendProcess.Id
+        searxng = if ($searxngStarted -and $searxngProcess) { $searxngProcess.Id } else { $null }
         nginx = $nginxPid
     }
 
@@ -947,6 +1021,9 @@ try {
     Write-Host "    MongoDB: $mongoPid" -ForegroundColor Gray
     Write-Host "    Redis: $redisPid" -ForegroundColor Gray
     Write-Host "    Backend: $($backendProcess.Id) (includes Thread Pool Worker)" -ForegroundColor Gray
+    if ($searxngStarted -and $searxngProcess) {
+        Write-Host "    SearXNG: $($searxngProcess.Id)" -ForegroundColor Gray
+    }
     Write-Host "    Nginx: $nginxPid" -ForegroundColor Gray
 } catch {
     Write-Host "  WARNING: Failed to save PIDs: $_" -ForegroundColor Yellow
@@ -963,6 +1040,11 @@ Write-Host "Service Status:" -ForegroundColor White
 Write-Host "  MongoDB:  127.0.0.1:$mongoPort" -ForegroundColor Green
 Write-Host "  Redis:    127.0.0.1:$redisPort" -ForegroundColor Green
 Write-Host "  Backend:  http://127.0.0.1:$backendPort (includes Thread Pool Worker)" -ForegroundColor Green
+if ($searxngStarted) {
+    Write-Host "  SearXNG:  http://127.0.0.1:$searxngPort (Web Search)" -ForegroundColor Green
+} else {
+    Write-Host "  SearXNG:  not running (web search uses Baidu fallback)" -ForegroundColor Gray
+}
 Write-Host "  Frontend: http://127.0.0.1:$nginxPort" -ForegroundColor Green
 Write-Host ""
 

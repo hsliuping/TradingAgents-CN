@@ -1,0 +1,69 @@
+# SearXNG 配置文件 - TradingAgents-CN 专用
+# 基于 use_default_settings，只覆盖需要自定义的部分
+# 部署位置：runtime/searxng-settings.yml
+# 启动时通过 SEARXNG_SETTINGS_PATH 环境变量指定此文件路径
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "TradingAgents-CN Search"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "zh"
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 120
+
+server:
+  port: 8888
+  bind_address: "127.0.0.1"
+  base_url: false
+  # 禁用 limiter（不需要 Redis/Valkey）
+  limiter: false
+  public_instance: false
+  secret_key: "ta_searxng_local_secret_key_2026"
+  image_proxy: false
+  method: "POST"
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Download-Options: noopen
+    X-Robots-Tag: noindex, nofollow
+    Referrer-Policy: no-referrer
+
+# 不连接 Valkey/Redis（limiter 已禁用）
+valkey:
+  url: false
+
+outgoing:
+  # 单引擎请求超时2秒，总超时5秒
+  request_timeout: 2.0
+  max_request_timeout: 5.0
+  useragent_suffix: ""
+  pool_connections: 100
+
+# 只启用国内可访问的搜索引擎
+engines:
+  - name: baidu
+    engine: baidu
+    baidu_category: general
+    categories: [general]
+    shortcut: bd
+    disabled: false
+
+  - name: 360search
+    engine: 360search
+    shortcut: 360so
+    disabled: false
+
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+    base_url: https://cn.bing.com
+
+  - name: sogou
+    engine: sogou
+    shortcut: sogou
+    disabled: false

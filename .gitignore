@@ -169,6 +169,6 @@ scripts/deployment/stage_local_vendors.ps1
 nanobot_sessions/
 
 # SearXNG 第三方源码（通过 pip install -e searxng/ 安装，不需要提交）
-searxng/
+/searxng/
 
 nul

@@ -234,6 +234,60 @@ if (-not (Test-Path $requirementsFile)) {
 Write-Host ""
 
 # ============================================================================
+# Step 5.5: Install SearXNG (from wheel, for Web search functionality)
+# ============================================================================
+
+Write-Host "[5.5/6] Installing SearXNG..." -ForegroundColor Yellow
+Write-Host ""
+
+$searxngWheelDir = Join-Path $PortableDir "vendors\wheels"
+$searxngWheel = Get-ChildItem -Path $searxngWheelDir -Filter "searxng-*.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+if ($searxngWheel) {
+    Write-Host "  Found SearXNG wheel: $($searxngWheel.Name)" -ForegroundColor Gray
+    Write-Host "  Installing (this may take a minute)..." -ForegroundColor Gray
+    try {
+        $searxngOutput = & $pythonExe -m pip install $searxngWheel.FullName --no-warn-script-location 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  ✅ SearXNG installed successfully" -ForegroundColor Green
+        } else {
+            Write-Host "  ⚠️ SearXNG installation may have issues" -ForegroundColor Yellow
+            Write-Host "  Output: $searxngOutput" -ForegroundColor Gray
+        }
+    } catch {
+        Write-Host "  ⚠️ SearXNG installation error: $_" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "  ⚠️ SearXNG wheel not found in $searxngWheelDir" -ForegroundColor Yellow
+    Write-Host "  Web search functionality will fall back to Baidu scraper" -ForegroundColor Gray
+}
+
+Write-Host ""
+
+# ============================================================================
+# Step 5.6: Copy SearXNG config file
+# ============================================================================
+
+Write-Host "[5.6/6] Copying SearXNG config..." -ForegroundColor Yellow
+Write-Host ""
+
+$searxngConfigSrc = Join-Path $PortableDir "config\searxng\settings.yml"
+$searxngConfigDest = Join-Path $PortableDir "runtime\searxng-settings.yml"
+
+if (Test-Path $searxngConfigSrc) {
+    $runtimeDir = Join-Path $PortableDir "runtime"
+    if (-not (Test-Path $runtimeDir)) {
+        New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+    }
+    Copy-Item -Path $searxngConfigSrc -Destination $searxngConfigDest -Force
+    Write-Host "  ✅ SearXNG config copied to runtime\searxng-settings.yml" -ForegroundColor Green
+} else {
+    Write-Host "  ⚠️ SearXNG config not found: $searxngConfigSrc" -ForegroundColor Yellow
+}
+
+Write-Host ""
+
+# ============================================================================
 # Step 6: Verify Installation
 # ============================================================================
 
@@ -271,7 +325,8 @@ $testImports = @(
     "pdfkit",  # 🔥 PDF 生成工具（pdfkit）
     "weasyprint",  # 🔥 PDF 生成工具（WeasyPrint，推荐）
     "qdrant_client",  # 🔥 向量数据库：Qdrant（推荐，线程安全）
-    "chromadb"  # 🔥 向量数据库：ChromaDB（保留兼容）
+    "chromadb",  # 🔥 向量数据库：ChromaDB（保留兼容）
+    "searx"  # 🔥 SearXNG 元搜索引擎（Web 搜索功能）
 )
 $importSuccess = 0
 $importFailed = 0

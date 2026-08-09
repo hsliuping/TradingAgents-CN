@@ -89,6 +89,55 @@ if (-not $SkipSync) {
 }
 
 # ============================================================================
+# Step 1.2: Build SearXNG wheel (for Web search functionality)
+# ============================================================================
+
+Write-Host "[1.2/4] Building SearXNG wheel..." -ForegroundColor Yellow
+Write-Host ""
+
+$searxngSrcDir = Join-Path $root "searxng"
+$wheelsDestDir = Join-Path $portableDir "vendors\wheels"
+
+if (Test-Path $searxngSrcDir) {
+    # Create wheels directory in portable
+    if (-not (Test-Path $wheelsDestDir)) {
+        New-Item -ItemType Directory -Path $wheelsDestDir -Force | Out-Null
+    }
+
+    # Check if wheel already exists
+    $existingWheel = Get-ChildItem -Path $wheelsDestDir -Filter "searxng-*.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($existingWheel) {
+        Write-Host "  SearXNG wheel already exists: $($existingWheel.Name)" -ForegroundColor Gray
+    } else {
+        Write-Host "  Building SearXNG wheel from source..." -ForegroundColor Gray
+        $buildPython = Join-Path $root "env\Scripts\python.exe"
+        if (-not (Test-Path $buildPython)) {
+            $buildPython = "python"
+        }
+
+        try {
+            & $buildPython -m pip wheel $searxngSrcDir -w $wheelsDestDir --no-build-isolation --no-warn-script-location 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                $wheel = Get-ChildItem -Path $wheelsDestDir -Filter "searxng-*.whl" | Select-Object -First 1
+                if ($wheel) {
+                    Write-Host "  SearXNG wheel built: $($wheel.Name) ($([math]::Round($wheel.Length/1MB, 2)) MB)" -ForegroundColor Green
+                }
+            } else {
+                Write-Host "  WARNING: SearXNG wheel build failed (exit $LASTEXITCODE)" -ForegroundColor Yellow
+                Write-Host "  Web search will fall back to Baidu scraper in portable version" -ForegroundColor Gray
+            }
+        } catch {
+            Write-Host "  WARNING: SearXNG wheel build error: $_" -ForegroundColor Yellow
+        }
+    }
+} else {
+    Write-Host "  SearXNG source not found ($searxngSrcDir), skipping wheel build" -ForegroundColor Gray
+    Write-Host "  Web search will use Baidu fallback in portable version" -ForegroundColor Gray
+}
+
+Write-Host ""
+
+# ============================================================================
 # Step 1.5: Setup Embedded Python (if not present)
 # ============================================================================
 

@@ -70,6 +70,7 @@ if (Test-Path -LiteralPath $pidFile) {
         if ($pids.mongodb) { Stop-ByPid -ProcessId ([int]$pids.mongodb) -Name 'MongoDB' }
         if ($pids.redis) { Stop-ByPid -ProcessId ([int]$pids.redis) -Name 'Redis' }
         if ($pids.backend) { Stop-ByPid -ProcessId ([int]$pids.backend) -Name 'Backend' }
+        if ($pids.searxng) { Stop-ByPid -ProcessId ([int]$pids.searxng) -Name 'SearXNG' }
         if ($pids.worker) { Stop-ByPid -ProcessId ([int]$pids.worker) -Name 'Worker' }
         if ($pids.nginx) { Stop-ByPid -ProcessId ([int]$pids.nginx) -Name 'Nginx' }
     }
