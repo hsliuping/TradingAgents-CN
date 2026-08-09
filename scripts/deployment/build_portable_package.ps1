@@ -519,6 +519,10 @@ foreach ($pythonRoot in $projectPythonRoots) {
 
     Get-ChildItem -Path $pythonRoot -Recurse -Filter "*.py" -File -ErrorAction SilentlyContinue | ForEach-Object {
         $relativePath = $_.FullName.Substring($tempDir.Length + 1)
+        # Always keep __init__.py files (required for package imports)
+        if ($_.Name -eq "__init__.py") {
+            return
+        }
         if ($projectPythonWhitelist -contains $relativePath) {
             return
         }
