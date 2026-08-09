@@ -714,7 +714,20 @@ try {
         Write-Host "    2. Database connection: Check MongoDB and Redis are running" -ForegroundColor Gray
         Write-Host "    3. Configuration errors: Check .env file and database configs" -ForegroundColor Gray
         Write-Host "    4. Port conflicts: Check if port $backendPort is already in use" -ForegroundColor Gray
-        
+
+        # Re-run backend in foreground to capture the actual error
+        Write-Host ""
+        Write-Host "  Re-running backend to capture error..." -ForegroundColor Yellow
+        $captureScript = "`$env:PYTHONIOENCODING='utf-8'; `$env:PYTHONUTF8='1'; & `"$pythonExe`" `"$appMain`" 2>&1 | Select-Object -First 30"
+        $errorOutput = & powershell -Command $captureScript -WorkingDirectory $root 2>&1
+        if ($errorOutput) {
+            Write-Host ""
+            Write-Host "  Captured error output:" -ForegroundColor Red
+            $errorOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+            # Save to crash log
+            $errorOutput | Out-File (Join-Path $logsDir "backend_crash_capture.log") -Encoding UTF8
+        }
+
         Exit-WithError
     }
 } catch {
