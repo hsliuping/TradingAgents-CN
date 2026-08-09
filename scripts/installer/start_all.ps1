@@ -736,8 +736,11 @@ try {
         # Re-run backend in foreground to capture the actual error
         Write-Host ""
         Write-Host "  Re-running backend to capture error..." -ForegroundColor Yellow
-        $captureScript = "`$env:PYTHONIOENCODING='utf-8'; `$env:PYTHONUTF8='1'; & `"$pythonExe`" `"$appMain`" 2>&1 | Select-Object -First 30"
-        $errorOutput = & powershell -Command $captureScript -WorkingDirectory $root 2>&1
+        Push-Location $root
+        $env:PYTHONIOENCODING = 'utf-8'
+        $env:PYTHONUTF8 = '1'
+        $errorOutput = & $pythonExe $appMain 2>&1 | Select-Object -First 30
+        Pop-Location
         if ($errorOutput) {
             Write-Host ""
             Write-Host "  Captured error output:" -ForegroundColor Red
