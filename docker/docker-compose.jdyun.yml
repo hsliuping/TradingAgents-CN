@@ -126,10 +126,11 @@ services:
       AKSHARE_ENABLED: "false"
       BAOSTOCK_ENABLED: "false"
       FINNHUB_ENABLED: "false"
-      # 向量数据库配置
-      VECTOR_STORE_BACKEND: "qdrant"
-      QDRANT_DATA_DIR: "/app/data/qdrant"
+      # 向量数据库配置（v3.0 已迁移到 MongoDB 向量存储，无需独立 Qdrant 容器）
+      VECTOR_STORE_BACKEND: "mongodb"
       MEMORY_ENABLED: "${MEMORY_ENABLED:-true}"
+      # 🔍 SearXNG Web 搜索（智能助手实时资讯；留空则回退百度爬虫）
+      SEARXNG_INSTANCES: "${SEARXNG_INSTANCES:-}"
       # 🔧 LLM 限速配置（应对京东云 API 限速，默认值已优化，通常无需修改）
       JDYUN_LLM_MAX_RETRIES: "${JDYUN_LLM_MAX_RETRIES:-8}"
       JDYUN_LLM_MAX_RPM: "${JDYUN_LLM_MAX_RPM:-30}"
