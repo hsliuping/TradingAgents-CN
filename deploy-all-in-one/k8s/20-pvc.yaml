@@ -1,0 +1,33 @@
+# TradingAgents-CN Pro 持久化存储
+# 包含 MongoDB 数据、Redis 数据、运行时标记文件、应用日志
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tradingagents-data
+  namespace: tradingagents
+  labels:
+    app: tradingagents-cn-pro
+spec:
+  accessModes:
+    - ReadWriteOnce   # 单 Pod 读写
+  # 推荐使用 storageClassName 指定高性能存储（如京东云的 ssd-sata）
+  # storageClassName: ssd-sata
+  resources:
+    requests:
+      storage: 50Gi
+---
+# 如果需要日志单独持久化（可选）
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tradingagents-logs
+  namespace: tradingagents
+  labels:
+    app: tradingagents-cn-pro
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

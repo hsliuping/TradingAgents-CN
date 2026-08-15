@@ -1,0 +1,199 @@
+#!/command/with-contenv bash
+# init 服务 - 容器启动时的初始化工作
+# 只运行一次，处理好所有目录权限和环境
+
+set -eu
+
+log() {
+    local msg="$1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [init] $msg"
+}
+
+log "=========================================="
+log "🚀 TradingAgents-CN Pro 容器初始化"
+log "=========================================="
+
+# ------------------------------------------------------------------------------
+# 1. 确保挂载卷目录存在
+# ------------------------------------------------------------------------------
+log "📁 创建必要的目录..."
+
+# 持久化数据目录
+mkdir -p /data/db           # MongoDB 数据
+mkdir -p /var/lib/redis     # Redis 数据
+mkdir -p /app/runtime       # 标记文件、临时文件
+mkdir -p /app/logs          # 应用日志
+mkdir -p /app/data          # Qdrant 向量数据（挂载到持久化卷）
+
+# 日志目录
+mkdir -p /var/log/mongodb /var/log/redis /var/log/nginx
+
+# 进程文件目录
+mkdir -p /var/run
+
+# 运行时 PID 目录
+mkdir -p /var/run/s6
+
+# Nginx 需要的临时目录
+mkdir -p /var/cache/nginx/client_temp /var/cache/nginx/proxy_temp /var/cache/nginx/fastcgi_temp /var/cache/nginx/uwsgi_temp /var/cache/nginx/scgi_temp
+chown -R appuser:appuser /var/cache/nginx 2>/dev/null || true
+
+# 运行时 PID 目录
+mkdir -p /var/run/s6
+
+# ------------------------------------------------------------------------------
+# 2. 设置目录权限
+# ------------------------------------------------------------------------------
+log "🔐 设置目录权限..."
+
+# MongoDB 数据和日志
+chown -R mongodb:mongodb /data/db /var/log/mongodb
+chmod 750 /data/db
+
+# Redis 数据和日志
+chown -R redis:redis /var/lib/redis /var/log/redis
+chmod 750 /var/lib/redis
+
+# 应用数据和日志
+chown -R appuser:appuser /app/runtime /app/logs /app/data
+chmod 750 /app/runtime /app/logs /app/data
+
+# Nginx 日志
+chown -R appuser:appuser /var/log/nginx
+
+# MongoDB/Redis 进程文件
+touch /var/run/mongodb.pid /var/run/redis.pid 2>/dev/null || true
+chown mongodb:mongodb /var/run/mongodb.pid 2>/dev/null || true
+chown redis:redis /var/run/redis.pid 2>/dev/null || true
+
+# ------------------------------------------------------------------------------
+# 2.5 导入预生成的向量索引种子数据（首次启动时）
+# ------------------------------------------------------------------------------
+# /app/data 是持久化卷挂载点，全新部署时为空。
+# /app/qdrant-seed 是镜像内预生成的索引数据（随镜像分发）。
+# 首次启动时从种子复制到持久化卷，后续重启卷已有数据则跳过。
+# 这样全新部署不需要发送几百次 embedding 请求，秒级可用。
+QDRANT_DATA="/app/data/qdrant"
+QDRANT_SEED="/app/qdrant-seed"
+
+if [ -d "$QDRANT_SEED" ]; then
+    # 判断 Qdrant 数据是否已存在（卷非空）
+    if [ -f "$QDRANT_DATA/meta.json" ] && [ -d "$QDRANT_DATA/collection" ]; then
+        log "ℹ️  Qdrant 数据已存在，跳过种子导入"
+    else
+        log "📦 首次启动，导入预生成的向量索引种子数据..."
+        mkdir -p "$QDRANT_DATA"
+        cp -r "$QDRANT_SEED"/* "$QDRANT_DATA/"
+        # 不复制 .lock 文件（Qdrant 本地模式的文件锁）
+        rm -f "$QDRANT_DATA/.lock" 2>/dev/null || true
+        chown -R appuser:appuser "$QDRANT_DATA"
+        log "   ✅ 种子数据已导入（Qdrant 向量索引，$(du -sh "$QDRANT_DATA" | cut -f1)）"
+    fi
+else
+    log "⚠️  未找到 Qdrant 种子数据 ($QDRANT_SEED)，首次启动将全量构建索引"
+fi
+
+# ------------------------------------------------------------------------------
+# 3. 验证环境变量
+# ------------------------------------------------------------------------------
+log "🔍 验证关键环境变量..."
+
+required_vars=(
+    "MONGODB_PASSWORD"
+)
+
+missing_vars=()
+for var in "${required_vars[@]}"; do
+    if [ -z "${!var:-}" ]; then
+        missing_vars+=("$var")
+    fi
+done
+
+if [ ${#missing_vars[@]} -gt 0 ]; then
+    log "❌ 缺少必要的环境变量：${missing_vars[*]}"
+    log "   请通过 docker run -e 或 docker-compose 设置"
+    exit 1
+fi
+
+log "✅ MONGODB_PASSWORD 已设置"
+
+# ------------------------------------------------------------------------------
+# 4. 准备 Redis 密码配置
+# ------------------------------------------------------------------------------
+if [ -n "${REDIS_PASSWORD:-}" ]; then
+    # 动态生成包含密码的 redis 配置
+    log "🔑 配置 Redis 密码..."
+    if ! grep -q "^requirepass" /etc/redis/redis.conf; then
+        echo "requirepass ${REDIS_PASSWORD}" >> /etc/redis/redis.conf
+    fi
+fi
+
+# ------------------------------------------------------------------------------
+# 5. 自动生成 JWT/CSRF 密钥（单容器场景）
+# ------------------------------------------------------------------------------
+# 如果是单容器部署且没有设置 JWT/CSRF 密钥，自动生成并持久化
+SECRET_FILE="/app/runtime/.secrets"
+if [ ! -f "$SECRET_FILE" ]; then
+    log "🔐 首次启动，自动生成 JWT/CSRF 密钥..."
+    JWT_SECRET=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
+    CSRF_SECRET=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
+    cat > "$SECRET_FILE" <<EOF
+JWT_SECRET=${JWT_SECRET}
+CSRF_SECRET=${CSRF_SECRET}
+EOF
+    chmod 600 "$SECRET_FILE"
+    chown appuser:appuser "$SECRET_FILE" 2>/dev/null || true
+    log "   密钥已保存到 $SECRET_FILE"
+fi
+
+# 加载密钥到环境变量（如果未设置）
+if [ -z "${JWT_SECRET:-}" ]; then
+    export JWT_SECRET=$(grep '^JWT_SECRET=' "$SECRET_FILE" | cut -d= -f2-)
+    log "   从持久化文件加载 JWT_SECRET"
+fi
+if [ -z "${CSRF_SECRET:-}" ]; then
+    export CSRF_SECRET=$(grep '^CSRF_SECRET=' "$SECRET_FILE" | cut -d= -f2-)
+    log "   从持久化文件加载 CSRF_SECRET"
+fi
+
+# 让子进程（backend）能访问这些变量
+echo "export JWT_SECRET='${JWT_SECRET}'" > /app/runtime/env.sh
+echo "export CSRF_SECRET='${CSRF_SECRET}'" >> /app/runtime/env.sh
+chmod 644 /app/runtime/env.sh
+
+# ------------------------------------------------------------------------------
+# 6. 自动生成 MongoDB 集群密钥文件（用于启用 RBAC 认证）
+# ------------------------------------------------------------------------------
+# 密钥文件是 MongoDB 启用 --auth 模式的必要条件
+# 单容器场景下我们仍然需要它（保持与多容器一致的认证模式）
+# 密钥文件持久化到数据卷，保证容器重启后密钥不变
+KEYFILE="/data/db/.mongodb-keyfile"
+if [ ! -f "$KEYFILE" ]; then
+    log "🔐 首次启动，自动生成 MongoDB 集群密钥文件..."
+    # MongoDB 密钥文件要求：base64 编码的 6-1024 字节字符串（推荐 32 字节以上）
+    head -c 32 /dev/urandom | base64 > "$KEYFILE"
+    chmod 600 "$KEYFILE"
+    chown mongodb:mongodb "$KEYFILE" 2>/dev/null || true
+    log "   密钥文件已保存到 $KEYFILE"
+else
+    log "🔐 使用已存在的 MongoDB 密钥文件: $KEYFILE"
+fi
+
+# 创建符号链接（mongod.conf 中配置的路径）
+ln -sf "$KEYFILE" /etc/mongodb-keyfile
+chown -h mongodb:mongodb /etc/mongodb-keyfile 2>/dev/null || true
+
+# ------------------------------------------------------------------------------
+# 7. 显示启动信息
+# ------------------------------------------------------------------------------
+log ""
+log "📋 启动配置："
+log "   MongoDB: ${MONGODB_HOST}:${MONGODB_PORT}"
+log "   Redis:   ${REDIS_HOST}:${REDIS_PORT}"
+log "   Backend: 127.0.0.1:${BACKEND_PORT}"
+log "   Nginx:   0.0.0.0:${NGINX_PORT:-8082}"
+log "   TZ:      ${TZ}"
+log "   JDYUN:   ${JDYUN_MODE:-false}"
+log ""
+log "✅ 容器初始化完成"
+log "=========================================="

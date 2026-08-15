@@ -1,0 +1,183 @@
+# TradingAgents-CN Pro Deployment
+# 单 Pod 单容器，通过 s6-overlay 统一管理 MongoDB/Redis/Backend/Nginx
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradingagents
+  namespace: tradingagents
+  labels:
+    app: tradingagents-cn-pro
+    version: 3.0.0
+spec:
+  replicas: 1   # 单用户部署，单副本即可
+  strategy:
+    type: Recreate  # 单 Pod 必须用 Recreate，PVC 是 RWO
+  selector:
+    matchLabels:
+      app: tradingagents-cn-pro
+  template:
+    metadata:
+      labels:
+        app: tradingagents-cn-pro
+        version: 3.0.0
+      annotations:
+        # 京东云 Prometheus 监控
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Pod 优雅停止时间
+      terminationGracePeriodSeconds: 60
+
+      # 京东云节点选择（可选）
+      # nodeSelector:
+      #   node.kubernetes.io/instance-type: s6.xlarge.2
+
+      # 京东云可用区
+      # topologySpreadConstraints:
+      #   - maxSkew: 1
+      #     topologyKey: topology.kubernetes.io/zone
+      #     whenUnsatisfiable: DoNotSchedule
+
+      containers:
+      - name: tradingagents
+        image: tradingagents-cn-pro:3.0.0
+        imagePullPolicy: IfNotPresent
+
+        # 京东云镜像仓库（如使用京东云 CCR）
+        # image: registry.cn-north-1.jdcloud.com/your-namespace/tradingagents-cn-pro:3.0.0
+
+        ports:
+        - name: http
+          containerPort: 8082
+          protocol: TCP
+
+        env:
+        # MongoDB
+        - name: MONGODB_HOST
+          value: "127.0.0.1"
+        - name: MONGODB_PORT
+          value: "27017"
+        - name: MONGODB_USERNAME
+          value: "admin"
+        - name: MONGODB_DATABASE
+          value: "tradingagents"
+        - name: MONGODB_AUTH_SOURCE
+          value: "admin"
+        - name: MONGODB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: tradingagents-secrets
+              key: MONGODB_PASSWORD
+
+        # Redis
+        - name: REDIS_HOST
+          value: "127.0.0.1"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: tradingagents-secrets
+              key: REDIS_PASSWORD
+              optional: true
+
+        # 业务参数
+        - name: TUSHARE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: tradingagents-secrets
+              key: TUSHARE_TOKEN
+              optional: true
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: tradingagents-secrets
+              key: OPENAI_API_KEY
+              optional: true
+        - name: OPENAI_API_BASE
+          value: "https://api.openai.com/v1"
+        - name: OPENAI_MODEL
+          value: "gpt-4"
+
+        # 京东云合作版模式
+        - name: JDYUN_MODE
+          value: "false"   # 京东云部署时改为 "true"
+
+        # 时区
+        - name: TZ
+          value: "Asia/Shanghai"
+
+        # 资源限制（根据实际情况调整）
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "4000m"
+            memory: "4Gi"
+
+        # 健康检查
+        livenessProbe:
+          httpGet:
+            path: /nginx-health
+            port: 8082
+          initialDelaySeconds: 60    # 首次启动时间（含数据初始化）
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8082
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # 卷挂载
+        volumeMounts:
+        - name: data
+          mountPath: /data/db          # MongoDB 数据
+        - name: data
+          mountPath: /var/lib/redis    # Redis 数据
+        - name: data
+          mountPath: /app/runtime      # 标记文件、临时文件
+        - name: logs
+          mountPath: /app/logs         # 应用日志
+        - name: logs
+          mountPath: /var/log/mongodb  # MongoDB 日志
+        - name: logs
+          mountPath: /var/log/redis    # Redis 日志
+        - name: logs
+          mountPath: /var/log/nginx    # Nginx 日志
+
+        # 安全上下文
+        securityContext:
+          runAsNonRoot: false   # s6 需要 root 启动
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # /data/db 等需要写
+          capabilities:
+            drop:
+              - ALL
+            add:
+              - CHOWN
+              - SETUID
+              - SETGID
+              - DAC_OVERRIDE
+
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: tradingagents-data
+      - name: logs
+        persistentVolumeClaim:
+          claimName: tradingagents-logs
+
+      # 安全：京东云 K8s 安全基线
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault

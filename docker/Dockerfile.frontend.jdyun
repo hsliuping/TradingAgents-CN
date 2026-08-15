@@ -1,0 +1,39 @@
+# Frontend Dockerfile for Vue 3 + Vite app (TradingAgents-CN 京东云合作版)
+#
+# 多阶段构建：在容器内构建前端，自动注入 VITE_JDYUN_MODE=true
+#
+# 构建方式:
+#   docker build -f docker/Dockerfile.frontend.jdyun -t hsliup/tradingagents-jdyun-frontend:3-latest .
+
+# ===== 阶段1：构建前端 =====
+FROM node:20-alpine AS builder
+
+WORKDIR /build
+
+# 复制 package 文件并安装依赖
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm config set registry https://registry.npmmirror.com && npm ci || npm install
+
+# 复制源代码
+COPY frontend/ .
+
+# 复制京东云版环境变量文件
+COPY frontend/.env.jdyun .env.jdyun
+
+# 构建京东云版前端（使用 jdyun 模式）
+RUN npm run build -- --mode jdyun
+
+# ===== 阶段2：运行 Nginx =====
+FROM nginx:alpine
+
+WORKDIR /usr/share/nginx/html
+
+# 从构建阶段复制产物
+COPY --from=builder /build/dist .
+
+# 复制 Nginx 配置（支持 SPA 路由）
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
