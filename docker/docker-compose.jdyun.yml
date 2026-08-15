@@ -129,8 +129,8 @@ services:
       # 向量数据库配置（v3.0 已迁移到 MongoDB 向量存储，无需独立 Qdrant 容器）
       VECTOR_STORE_BACKEND: "mongodb"
       MEMORY_ENABLED: "${MEMORY_ENABLED:-true}"
-      # 🔍 SearXNG Web 搜索（智能助手实时资讯；留空则回退百度爬虫）
-      SEARXNG_INSTANCES: "${SEARXNG_INSTANCES:-}"
+      # 🔍 SearXNG Web 搜索（内置 searxng 服务容器；也可指向外部实例，逗号分隔）
+      SEARXNG_INSTANCES: "${SEARXNG_INSTANCES:-http://searxng:8080}"
       # 🔧 LLM 限速配置（应对京东云 API 限速，默认值已优化，通常无需修改）
       JDYUN_LLM_MAX_RETRIES: "${JDYUN_LLM_MAX_RETRIES:-8}"
       JDYUN_LLM_MAX_RPM: "${JDYUN_LLM_MAX_RPM:-30}"
@@ -150,6 +150,34 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # SearXNG Web 搜索引擎（智能助手实时资讯）
+  # 🔐 安全：使用 expose 仅暴露给容器内部网络，不映射到宿主机
+  # 挂载项目内精简配置：仅国内引擎（百度/360/Bing/搜狗）、无 Redis、5秒超时
+  searxng:
+    image: searxng/searxng:latest
+    container_name: tradingagents-jdyun-searxng
+    restart: unless-stopped
+    expose:
+      - "8080"
+    volumes:
+      - ../config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      TZ: "Asia/Shanghai"
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    networks:
+      - tradingagents-jdyun-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # Vue 3 前端服务（京东云版，多阶段构建自动注入 VITE_JDYUN_MODE=true）
   frontend:

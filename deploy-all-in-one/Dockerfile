@@ -145,6 +145,16 @@ RUN cd /app && chmod +x /tmp/compile-and-cleanup.sh && \
 COPY docs/02-user-guide/user-manual-v3.0.md /app/docs/02-user-guide/
 COPY docs/02-user-guide/jdyun-user-manual-v3.0.md /app/docs/02-user-guide/
 
+# ------------------------------------------------------------------------------
+# SearXNG Web 搜索引擎（智能助手实时资讯）
+# wheel 由 build.sh 从 searxng/ 源码生成（pip wheel --no-deps，依赖已在基础镜像）
+# 配置文件已随 COPY config /app/config 包含（config/searxng/settings.yml）
+# ------------------------------------------------------------------------------
+COPY deploy-all-in-one/wheels/searxng-*.whl /tmp/
+RUN pip install --no-cache-dir /tmp/searxng-*.whl && \
+    rm -f /tmp/searxng-*.whl && \
+    python -c "import searx; print('searxng OK:', searx.__file__)"
+
 # 预生成的向量索引种子数据（首次启动时从 /app/qdrant-seed 导入到持久化卷，避免全量 embedding 请求）
 # 注意：种子数据中的签名在 build.sh 中通过 update_seed_signature_local.py 更新（确保跨环境一致）
 COPY deploy-all-in-one/qdrant-seed /app/qdrant-seed
@@ -187,7 +197,7 @@ RUN mkdir -p /data/db /var/lib/redis /app/runtime /app/logs /app/data \
 #   - up:      标记就绪的信号文件（通常为空）
 # ------------------------------------------------------------------------------
 RUN mkdir -p /etc/s6-overlay/user-bundles.d/user/contents.d && \
-    for svc in init init-data mongodb redis backend nginx; do \
+    for svc in init init-data mongodb redis backend searxng nginx; do \
         ln -sf /etc/s6-overlay/s6-rc.d/$svc /etc/s6-overlay/user-bundles.d/user/contents.d/$svc; \
     done && \
     ls -la /etc/s6-overlay/user-bundles.d/user/contents.d/ && \
@@ -196,7 +206,7 @@ RUN mkdir -p /etc/s6-overlay/user-bundles.d/user/contents.d && \
         printf '/command/with-contenv\nbash /etc/s6-overlay/s6-rc.d/%s/run\n' "$svc" > /etc/s6-overlay/s6-rc.d/$svc/up; \
     done && \
     # longrun 服务：up 是空文件（标记就绪）\
-    for svc in mongodb redis backend nginx; do \
+    for svc in mongodb redis backend searxng nginx; do \
         : > /etc/s6-overlay/s6-rc.d/$svc/up; \
     done && \
     echo "s6-overlay contents.d 符号链接和 up 文件创建完成" && \

@@ -85,6 +85,27 @@ fi
 cd "$PROJECT_ROOT"
 
 # ------------------------------------------------------------------------------
+# 生成 SearXNG wheel（在 docker build 之前执行）
+# 从 searxng/ 源码目录打包，Dockerfile 会 COPY 到镜像内安装
+# --no-deps：依赖已在基础镜像，避免拉取额外包
+# ------------------------------------------------------------------------------
+if [ -f "searxng/setup.py" ] || [ -f "searxng/pyproject.toml" ]; then
+    echo "📦 生成 SearXNG wheel..."
+    mkdir -p deploy-all-in-one/wheels
+    rm -f deploy-all-in-one/wheels/searxng-*.whl
+    python -m pip wheel ./searxng --no-deps -w deploy-all-in-one/wheels || \
+    python3 -m pip wheel ./searxng --no-deps -w deploy-all-in-one/wheels
+    if ! ls deploy-all-in-one/wheels/searxng-*.whl &> /dev/null; then
+        echo "❌ SearXNG wheel 生成失败"
+        exit 1
+    fi
+    echo "   $(ls deploy-all-in-one/wheels/searxng-*.whl | head -1)"
+else
+    echo "❌ searxng/ 源码目录不存在（git clone https://github.com/searxng/searxng 后重试）"
+    exit 1
+fi
+
+# ------------------------------------------------------------------------------
 # 更新种子数据中的用户手册签名（确保跨环境签名一致）
 # 签名基于文件内容 hash，不依赖路径和 mtime
 # ------------------------------------------------------------------------------

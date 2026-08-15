@@ -255,7 +255,7 @@ action_start() {
             -e EMBEDDING_API_BASE="${EMBEDDING_API_BASE:-https://modelservice.jdcloud.com/v1}"
             -e EMBEDDING_API_KEY="${EMBEDDING_API_KEY:-}"
             -e TUSHARE_TOKEN="${TUSHARE_TOKEN:-}"
-            -e SEARXNG_INSTANCES="${SEARXNG_INSTANCES:-}"
+            -e SEARXNG_INSTANCES="${SEARXNG_INSTANCES:-http://127.0.0.1:8888}"
             -e JDYUN_BASIC_AUTH_USERS="${JDYUN_BASIC_AUTH_USERS:-}"
             -e JDYUN_GATEWAY_IPS="${JDYUN_GATEWAY_IPS:-}"
             -e JDYUN_LLM_MAX_RETRIES="${JDYUN_LLM_MAX_RETRIES:-8}"

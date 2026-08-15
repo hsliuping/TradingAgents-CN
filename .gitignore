@@ -171,4 +171,7 @@ nanobot_sessions/
 # SearXNG 第三方源码（通过 pip install -e searxng/ 安装，不需要提交）
 /searxng/
 
+# SearXNG wheel 构建产物（deploy-all-in-one/build.sh 生成）
+deploy-all-in-one/wheels/
+
 nul
