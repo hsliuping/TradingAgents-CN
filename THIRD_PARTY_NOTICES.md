@@ -2,6 +2,36 @@
 
 本产品随包分发以下第三方开源组件。各组件的完整许可证文本随包提供或可从上游地址获取。
 
+## 需特别声明的组件
+
+### pystray（LGPLv3）
+
+- **许可证**: GNU Lesser General Public License v3.0
+- **上游源码**: https://github.com/moses-palmer/pystray
+- **用途**: Windows 便携版系统托盘监控（`scripts/monitor/tray_monitor.py`）
+
+按 LGPLv3 条款使用（作为独立库调用，闭源宿主程序允许）：
+- 本声明即 LGPL 第 4 条要求的显著声明
+- 库源码可从上述上游地址获取
+- LGPLv3 全文随包分发（site-packages `pystray-*.dist-info/COPYING.LGPL`）
+
+### pyphen（GPL 2.0+ / LGPL 2.1+ / MPL 1.1 三重许可）
+
+- **许可证**: 三重许可，本产品选择按 **MPL 1.1** 条款使用（文件级弱 copyleft，不传染宿主程序）
+- **上游源码**: https://github.com/henrik-lehtinen/pyphen（字典数据来自 LibreOffice）
+- **用途**: WeasyPrint PDF 导出的断词（hyphenation）依赖
+- **许可证文本**: site-packages `pyphen-*.dist-info/`（含 COPYING.GPL / COPYING.LGPL / COPYING.MPL）
+
+### WeasyPrint（BSD-3-Clause）
+
+- **上游源码**: https://github.com/Kozea/WeasyPrint
+- **用途**: 研究报告 PDF 导出（`app/utils/report_exporter.py`）
+
+### mini-racer（ISC）
+
+- **上游源码**: https://github.com/bpcreech/PyMiniRacer
+- **用途**: JavaScript 执行引擎
+
 ## SearXNG
 
 - **许可证**: GNU Affero General Public License v3.0 或更新版本（AGPL-3.0-or-later）
@@ -45,3 +75,10 @@ git apply ../config/searxng/searxng-local-modifications.patch
 
 SearXNG 聚合的搜索结果来自第三方引擎（百度、360、Bing、搜狗等）。本产品仅限
 私有部署、内部使用；各引擎服务条款对程序化访问的限制由部署方自行评估。
+
+## 其余依赖
+
+其他全部 Python 依赖（约 250 个）均为宽松许可证（MIT / BSD / Apache-2.0 / PSFL / ISC），
+无 copyleft 传染义务，许可证文本随各包 `dist-info` 分发。完整清单见
+`requirements.txt` 及安装后 `pip list --format=freeze`。
+
