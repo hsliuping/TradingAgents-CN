@@ -125,6 +125,8 @@ COPY config /app/config
 COPY scripts /app/scripts
 COPY install /app/install
 COPY migrations /app/migrations
+# 第三方开源组件声明（SearXNG AGPL-3.0 合规，对应源码补丁随 config/searxng/ 分发）
+COPY THIRD_PARTY_NOTICES.md /app/THIRD_PARTY_NOTICES.md
 
 # ------------------------------------------------------------------------------
 # 源码保护：编译 Python 代码为 .pyc 字节码，删除 .py 源码
