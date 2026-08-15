@@ -69,6 +69,9 @@ load_env_file() {
     if [ -n "$env_file" ]; then
         echo "📄 加载配置: $env_file"
         while IFS='=' read -r key value; do
+            # 去除 Windows CRLF 行尾的 \r（跨平台编辑兼容）
+            key="${key%$'\r'}"
+            value="${value%$'\r'}"
             [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
             key=$(echo "$key" | xargs)
             value=$(echo "$value" | xargs)

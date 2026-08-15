@@ -91,14 +91,23 @@ cd "$PROJECT_ROOT"
 # ------------------------------------------------------------------------------
 if [ -f "searxng/setup.py" ] || [ -f "searxng/pyproject.toml" ]; then
     echo "📦 生成 SearXNG wheel..."
+    # 冻结版本号（容器内无 git，version.py 运行时 fallback 需要 git，必须打包前冻结）
+    (cd searxng && python -m searx.version freeze) || \
+    (cd searxng && python3 -m searx.version freeze) || true
+    if [ ! -f "searxng/searx/version_frozen.py" ]; then
+        echo "❌ version_frozen.py 冻结失败（需要 git 和已安装的 searx 包）"
+        exit 1
+    fi
     mkdir -p deploy-all-in-one/wheels
     rm -f deploy-all-in-one/wheels/searxng-*.whl
-    python -m pip wheel ./searxng --no-deps -w deploy-all-in-one/wheels || \
-    python3 -m pip wheel ./searxng --no-deps -w deploy-all-in-one/wheels
+    python -m pip wheel ./searxng --no-deps --no-build-isolation -w deploy-all-in-one/wheels || \
+    python3 -m pip wheel ./searxng --no-deps --no-build-isolation -w deploy-all-in-one/wheels
     if ! ls deploy-all-in-one/wheels/searxng-*.whl &> /dev/null; then
         echo "❌ SearXNG wheel 生成失败"
         exit 1
     fi
+    # 验证 wheel 内含 version_frozen（缺失会导致容器内启动崩溃）
+    python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('deploy-all-in-one/wheels/searxng-*.whl')[0]); assert 'searx/version_frozen.py' in z.namelist(), 'version_frozen.py missing in wheel'; print('   wheel 内含 version_frozen.py OK')"
     echo "   $(ls deploy-all-in-one/wheels/searxng-*.whl | head -1)"
 else
     echo "❌ searxng/ 源码目录不存在（git clone https://github.com/searxng/searxng 后重试）"
