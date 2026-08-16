@@ -40,22 +40,23 @@
 
       <div class="pricing-section">
         <div class="price-card">
-          <div class="price-label">年费会员</div>
+          <div class="price-label">新人专享价</div>
           <div class="price-amount">
             <span class="currency">¥</span>
-            <span class="number">200</span>
+            <span class="number">100</span>
             <span class="period">/年</span>
           </div>
-          <div class="price-note">每天不到 6 毛钱</div>
+          <div class="price-original">原价 ¥200/年</div>
+          <div class="price-note">仅限前 100 个名额 · 每天不到 3 毛钱</div>
         </div>
       </div>
 
-      <!-- 二维码占位：替换为真实知识星球二维码 -->
+      <!-- 知识星球新人券二维码 -->
       <div class="qrcode-section">
-        <div class="qrcode-placeholder">
-          <el-icon size="48"><PictureFilled /></el-icon>
+        <div class="qrcode-card">
+          <img src="/assets/xqyhq.png" alt="知识星球新人券二维码" class="qrcode-img" />
           <p>扫码加入知识星球</p>
-          <p class="qrcode-hint">（请替换为真实二维码图片）</p>
+          <p class="qrcode-hint">新人专享优惠券</p>
         </div>
       </div>
 
@@ -68,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { PictureFilled, InfoFilled } from '@element-plus/icons-vue'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { FREE_LESSON_COUNT } from '@/config/advancedCourses'
 
 const freeCount = FREE_LESSON_COUNT
@@ -183,6 +184,13 @@ const freeCount = FREE_LESSON_COUNT
           }
         }
 
+        .price-original {
+          font-size: 13px;
+          opacity: 0.75;
+          text-decoration: line-through;
+          margin-top: 2px;
+        }
+
         .price-note {
           font-size: 13px;
           opacity: 0.75;
@@ -195,25 +203,32 @@ const freeCount = FREE_LESSON_COUNT
       text-align: center;
       margin-bottom: 24px;
 
-      .qrcode-placeholder {
+      .qrcode-card {
         display: inline-flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
-        width: 200px;
-        height: 200px;
-        border: 2px dashed var(--el-border-color);
+        padding: 16px;
+        background: #fff;
+        border: 1px solid var(--el-border-color-lighter);
         border-radius: 12px;
-        color: var(--el-text-color-placeholder);
+
+        .qrcode-img {
+          width: 200px;
+          height: 200px;
+          object-fit: contain;
+          border-radius: 8px;
+        }
 
         p {
-          margin: 4px 0 0 0;
+          margin: 8px 0 0 0;
           font-size: 14px;
+          color: var(--el-text-color-primary);
         }
 
         .qrcode-hint {
           font-size: 12px;
-          opacity: 0.6;
+          color: var(--el-color-warning);
+          margin-top: 2px;
         }
       }
     }
@@ -239,7 +254,7 @@ const freeCount = FREE_LESSON_COUNT
       background: var(--el-fill-color);
     }
 
-    .qrcode-placeholder {
+    .qrcode-card {
       border-color: var(--el-border-color);
     }
   }
