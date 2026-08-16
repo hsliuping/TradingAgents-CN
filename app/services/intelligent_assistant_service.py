@@ -247,6 +247,36 @@ _UNSOURCED_RETRY_PROMPT = (
     "3. 若工具确实未返回相关数据，请明确说明数据缺失，禁止使用任何具体数字。"
 )
 
+# "调过工具但高风险数字无法溯源"拦截后的自动纠错重试指令（最多重试1次）
+_UNTRACED_RETRY_PROMPT_TEMPLATE = (
+    "【系统校验反馈】你刚才的回复中引用了以下具体数字：{numbers}，"
+    "但这些数字既不在本轮工具返回结果中，也不在历史工具结果或事实记忆中，无法溯源，"
+    "疑似来自训练记忆，已被系统拦截。\n"
+    "请重新回答用户的问题，要求：\n"
+    "1. 只引用工具返回中出现过的数字；若是基于工具数字的计算结果（如区间涨跌幅、"
+    "同比变化），必须在回复中列出算式与依据数字（例如：从X涨到Y，涨幅=(Y-X)/X），"
+    "且计算必须正确；\n"
+    "2. 需要新数据时先调用工具（行业/板块问题用 get_sector_daily 或 "
+    "analyze_sector_by_name，个股问题用 get_stock_market_data_unified，"
+    "最新行业动态用 get_web_search）；\n"
+    "3. 工具未覆盖的数据一律改为定性描述或明确说明数据缺失，禁止编造具体数字。"
+)
+
+
+def _build_untraced_interception(untraced_detail: str) -> str:
+    """构造"高风险数字无法溯源"的拦截文案（重试失败后兜底）。"""
+    return (
+        "抱歉，我在刚才的回复中引用了一些工具和搜索结果里都没有的具体数字"
+        f"（如 {untraced_detail}），这类数字可能来自过时的记忆而非实时数据，"
+        "继续呈现会误导您的判断，因此已整段拦截。\n\n"
+        "常见原因：搜索结果只有标题/链接/摘要，未包含具体数值"
+        "（如行业成本数据多在付费研报正文中，搜索引擎摘要抓不到）。\n"
+        "您可以：\n"
+        "• 换更具体的关键词让我再搜索（如\"牧原股份 7月成本 公告\"）\n"
+        "• 让我引用搜索到的来源链接，由您人工查看原文\n"
+        "• 只让我分析工具已返回的真实数据\n"
+    )
+
 
 def _has_fabricated_tool_json(reply: str) -> bool:
     """检测回复中是否把工具结果编造为 JSON 对象。
@@ -520,7 +550,15 @@ def _recent_user_context(messages: List[Any], max_messages: int = 6) -> str:
 #    检索时只返回未过期记忆；过期数据不注入、由新一轮工具结果覆盖。
 # 3. 注入 prompt 的记忆加入溯源候选集：助手引用记忆数字不会被第4道防线误拦。
 _MEMORY_FACTS_COLLECTION = "assistant_memory_facts"
-_MEMORY_FACT_TOOLS = {"web_search", "fetch_url"}
+# 可保存为事实记忆的在线工具（结果含外部世界数据，跨会话有复用价值）
+# 注意：tool_id 必须与 core/tools 注册名一致（此前误写 web_search/fetch_url
+# 导致从未命中，现修正为真实 ID；旧名保留做兼容）
+_MEMORY_FACT_TOOLS = {
+    "search_recent_information",  # 联网搜索（真实工具ID）
+    "get_stock_news_unified",     # 个股新闻聚合
+    "web_search",                 # 兼容保留
+    "fetch_url",                  # 兼容保留
+}
 # 类别规则：(类别名, 关键词列表, 有效天数)，顺序即优先级
 _FACT_CATEGORY_RULES = [
     ("realtime_quote", ["价格", "行情", "均价", "现价", "股价", "涨跌", "实时", "点位"], 3),
@@ -569,8 +607,11 @@ def _extract_match_tokens(text: str) -> set:
 
 
 def _memory_topic_key(args: Dict[str, Any], fallback: str) -> str:
-    """记忆主题键：优先用工具参数里的 query/url，兜底用户消息。"""
-    q = (args or {}).get("query") or (args or {}).get("url") or ""
+    """记忆主题键：优先用工具参数里的 query/url/ticker，兜底用户消息。"""
+    args = args or {}
+    q = args.get("query") or args.get("url") or ""
+    if not q and args.get("ticker"):
+        q = f"{args.get('ticker')} 新闻"
     topic = str(q).strip()
     if not topic:
         topic = str(fallback or "").strip()
@@ -2461,6 +2502,17 @@ class IntelligentAssistantService:
                 trusted_texts,
             ):
                 logger.warning("[智能助手] 检测到无法溯源的高风险数字（疑似训练记忆填充/单位换算错误），拦截回复")
+                # 自动纠错重试一次：告知具体无法溯源的数字，要求基于工具数字重答
+                if _retry_attempt < 1:
+                    untraced_numbers = _get_untraced_risky_numbers(
+                        reply_content, tool_results, resolved_user_message,
+                        trusted_texts)[:6]
+                    retry_prompt = _UNTRACED_RETRY_PROMPT_TEMPLATE.format(
+                        numbers="、".join(untraced_numbers))
+                    messages.append({"role": "assistant", "content": reply_content})
+                    messages.append({"role": "user", "content": retry_prompt})
+                    logger.info("[智能助手] 已拦截无法溯源数字回复，自动纠错重试（第1次）")
+                    return await _do_chat(_retry_attempt + 1)
                 untraced_detail = "、".join(_get_untraced_risky_numbers(
                     reply_content, tool_results, resolved_user_message,
                     trusted_texts)[:6])
@@ -2887,20 +2939,55 @@ class IntelligentAssistantService:
                 _extract_history_tool_contents(messages) + memory_trusted_contents_s,
             ):
                 logger.warning("[智能助手·流式] 检测到无法溯源的高风险数字（疑似训练记忆填充/单位换算错误），拦截回复")
-                untraced_detail = "、".join(_get_untraced_risky_numbers(
-                    reply, tool_results, resolved_user_message,
-                    _extract_history_tool_contents(messages) + memory_trusted_contents_s)[:6])
-                reply = (
-                    "抱歉，我在刚才的回复中引用了一些工具和搜索结果里都没有的具体数字"
-                    f"（如 {untraced_detail}），这类数字可能来自过时的记忆而非实时数据，"
-                    "继续呈现会误导您的判断，因此已整段拦截。\n\n"
-                    "常见原因：搜索结果只有标题/链接/摘要，未包含具体数值"
-                    "（如行业成本数据多在付费研报正文中，搜索引擎摘要抓不到）。\n"
-                    "您可以：\n"
-                    "• 换更具体的关键词让我再搜索（如\"牧原股份 7月成本 公告\"）\n"
-                    "• 让我引用搜索到的来源链接，由您人工查看原文\n"
-                    "• 只让我分析工具已返回的真实数据\n"
-                )
+                untraced_texts_s = (
+                    _extract_history_tool_contents(messages) + memory_trusted_contents_s)
+                # 自动纠错重试一次：告知具体无法溯源的数字，要求基于工具数字重答
+                try:
+                    yield _sse("progress", {
+                        "stage": "retry",
+                        "message": "检测到无法溯源的数据，正在调用工具重新获取…",
+                    })
+                    untraced_numbers_s = _get_untraced_risky_numbers(
+                        reply, tool_results, resolved_user_message,
+                        untraced_texts_s)[:6]
+                    retry_prompt_s = _UNTRACED_RETRY_PROMPT_TEMPLATE.format(
+                        numbers="、".join(untraced_numbers_s))
+                    messages.append({"role": "assistant", "content": reply})
+                    messages.append({"role": "user", "content": retry_prompt_s})
+                    retry_resp = await asyncio.wait_for(
+                        self._llm_client.achat(
+                            messages,
+                            tools=self._openai_tools,
+                            auto_execute_tools=True,
+                            max_tool_rounds=8,
+                            tools_used=tools_used,
+                            tool_results_collector=tool_results,
+                            dry_run=False,
+                            tool_interceptor=self._build_tool_interceptor(
+                                conversation_id or "default"),
+                        ),
+                        timeout=_stream_effective_timeout(),
+                    )
+                    await _record_assistant_token_usage(
+                        retry_resp, conversation_id or "assistant_chat")
+                    retry_reply_s = (retry_resp.content or "").strip()
+                    if retry_reply_s \
+                            and not _has_fabricated_tool_json(retry_reply_s) \
+                            and not _has_untraced_risky_numbers(
+                                retry_reply_s, tool_results, tools_used,
+                                resolved_user_message, untraced_texts_s):
+                        logger.info("[智能助手·流式] 无法溯源数字纠错重试成功，采用重试回复")
+                        reply = retry_reply_s
+                    else:
+                        logger.warning("[智能助手·流式] 无法溯源数字纠错重试后仍不达标，返回拦截文案")
+                        untraced_detail = "、".join(untraced_numbers_s)
+                        reply = _build_untraced_interception(untraced_detail)
+                except Exception as retry_err:
+                    logger.warning("[智能助手·流式] 无法溯源数字纠错重试失败: %s", retry_err)
+                    untraced_detail = "、".join(_get_untraced_risky_numbers(
+                        reply, tool_results, resolved_user_message,
+                        untraced_texts_s)[:6])
+                    reply = _build_untraced_interception(untraced_detail)
 
             CHUNK_SIZE = 40
             for i in range(0, len(reply), CHUNK_SIZE):
