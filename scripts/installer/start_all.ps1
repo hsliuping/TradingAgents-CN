@@ -249,13 +249,19 @@ Write-Host "Loading configuration from .env file..." -ForegroundColor Cyan
 $envMap = Load-Env $envPath
 
 # Ensure JWT_SECRET and CSRF_SECRET are set to random values (not defaults)
+# 与 app/core/config.py 的 _DEFAULT_SECRETS 保持对齐：缺一个值就会导致
+# 后端生产校验 FATAL（如 your-csrf-secret-key-change-in-production）
 $defaultSecrets = @(
-    "your-super-secret-jwt-key-change-in-production",
     "change-me-in-production",
-    "your-secret-key",
+    "change-me-csrf-secret",
+    "your-super-secret-jwt-key-change-in-production",
+    "your-csrf-secret-key-change-in-production",
+    "docker-jwt-secret-key-change-in-production-2024",
+    "docker-csrf-secret-key-change-in-production-2024",
+    "jdyun-jwt-secret-key-change-in-production-2024",
+    "jdyun-csrf-secret-key-change-in-production-2024",
     "PLEASE_CHANGE_JWT_SECRET_USE_openssl_rand_base64_48",
-    "PLEASE_CHANGE_CSRF_SECRET_USE_openssl_rand_base64_48",
-    "change-me-csrf-secret"
+    "PLEASE_CHANGE_CSRF_SECRET_USE_openssl_rand_base64_48"
 )
 $envNeedsUpdate = $false
 
