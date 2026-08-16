@@ -742,6 +742,8 @@ class UnifiedLLMClient:
                         "tool": result.name or tool_call.name,
                         "content": result.content or "",
                         "is_error": bool(result.is_error),
+                        # 工具调用参数（事实记忆层用 query/url 作主题键）
+                        "args": dict(tool_call.arguments) if tool_call.arguments else {},
                     })
                 logger.info(
                     "[UnifiedLLM·异步] tool_result_appended | round=%s | tool=%s | chars=%s | is_error=%s",
