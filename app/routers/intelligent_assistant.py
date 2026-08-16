@@ -52,6 +52,45 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 logger = logging.getLogger(__name__)
 
 
+@router.post("/user-manual-index/rebuild")
+async def rebuild_user_manual_index(
+    current_user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """重新初始化并重建用户手册向量索引。
+
+    场景：系统启动时 Embedding API Key 未配置/错误导致用户手册索引构建失败
+    （使用问答助手的语义检索不可用），用户在配置好 Key 后可调用此接口手动
+    重建，无需重启后端。
+    """
+    from core.knowledge.user_manual_manager import UserManualManager
+
+    manager = UserManualManager(db=db)
+
+    # 1. 若向量后端不可用（启动时初始化失败），先重新初始化
+    if not manager.available:
+        ok = manager.reinit()
+        if not ok:
+            raise HTTPException(
+                status_code=400,
+                detail="向量检索后端重新初始化失败，请检查 Embedding API Key 配置（系统设置 -> LLM/Embedding），配置好后重试",
+            )
+
+    # 2. 强制重建索引（忽略签名比对，全量重建）
+    result = await asyncio.to_thread(manager.ensure_indexed, True)
+
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=f"用户手册索引重建失败: {result['error']}")
+
+    return {
+        "success": True,
+        "rebuilt": result.get("rebuilt", False),
+        "sections_count": result.get("sections_count", 0),
+        "manuals_count": result.get("manuals_count", 0),
+        "signature": result.get("signature", ""),
+    }
+
+
 def _resolve_requested_model(request: ChatRequest) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     unified_model = (request.model or "").strip() or None
     unified_model_config_id = (request.model_config_id or "").strip() or None
