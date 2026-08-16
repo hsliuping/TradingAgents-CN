@@ -41,6 +41,10 @@ def is_retryable_llm_error(error_msg: str) -> bool:
 # 默认配置
 DEFAULT_MAX_TOOL_ITERATIONS = 3  # 最大工具调用迭代次数
 
+# 外部事实记忆注入白名单：仅辩论环节（乐观/审慎情景研究员）与风险评估环节
+# （风险经理）消费分析引擎注入的 memory_facts_summary，其他环节不受影响
+_MEMORY_AWARE_AGENTS = {"bull_researcher_v2", "bear_researcher_v2", "risk_manager_v2"}
+
 
 class BaseAgent(ABC):
     """
@@ -1615,6 +1619,19 @@ class BaseAgent(ABC):
                         logger.info(f"📚 [知识注入] {agent_name}: 已追加知识型 Skill 内容")
                 except Exception as e:
                     logger.warning(f"⚠️ [知识注入] 失败: {e}")
+
+                # 🧠 外部事实记忆注入：分析引擎把智能助手联网提取的事实
+                # （memory_facts_summary，带采集日期与来源）放入 state，这里仅对
+                # 辩论环节与风险评估环节追加为分析材料，供其完善研究论证。
+                if (
+                    prompt_type == "user"
+                    and agent_name in _MEMORY_AWARE_AGENTS
+                    and state
+                ):
+                    memory_block = state.get("memory_facts_summary")
+                    if isinstance(memory_block, str) and memory_block.strip():
+                        prompt = prompt + "\n\n" + memory_block
+                        logger.info(f"🧠 [事实记忆注入] {agent_name}: 已追加外部事实记忆参考")
 
                 return prompt
             else:
