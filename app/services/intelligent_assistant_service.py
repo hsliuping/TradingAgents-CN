@@ -1426,6 +1426,14 @@ def _build_stock_scope_block(user_context: Optional[dict]) -> str:
         pct_str = f"{pct:+.2f}%" if pct is not None else ""
         lines.append(f"- 当前行情快照：现价 {quote['price']:.2f}（{pct_str}）")
 
+    # ── 行情数据工具指引（走势/反弹/回调类问题的首选工具） ──
+    lines.append("")
+    lines.append("【本股行情数据工具指引】")
+    lines.append(f"- 用户问当前股票的价格走势、是否反弹/回调/突破、涨跌幅度、技术面信号等问题时，**必须优先调用行情数据工具获取真实K线数据**，不要用 web_search 搜索代替：")
+    lines.append(f"  • get_stock_market_data_unified(ticker=\"{code}\", start_date=最近交易日, end_date=最近交易日) 获取历史K线（近1年，含涨跌幅）")
+    lines.append(f"  • get_technical_indicators(ticker=\"{code}\", indicators=\"macd,rsi_14,kdj\") 获取 MACD/RSI/KDJ 技术指标")
+    lines.append("- 只有询问近期新闻/公告/行业动态等非行情信息时，才使用 search_recent_information/web_search。")
+
     # ── 按需取用指引（核心：引导 LLM 调工具取完整内容） ──
     if report_index_lines:
         lines.append("")
@@ -1691,6 +1699,7 @@ def _get_system_prompt(
 【工具使用原则】
 - **严禁**根据训练数据回答行情、大盘、市场等需要实时数据的问题，**必须**通过调用工具获取
 - 对“大盘现在多少点”“今年高点/低点”“MACD/RSI 是否超买”“技术面怎么看”“市场是否放量”“最近是否突破/回调”这类问题，必须先调用工具，再回答
+- **股价走势/反弹/回调类问题必须用行情数据工具，禁止用 web_search 代替**：当用户问“最近股价是否有反弹/下跌迹象”“近期走势如何”“涨了还是跌了”“技术面怎么样”等需要判断价格趋势的问题时，**必须优先调用行情数据工具**（get_stock_market_data_unified 获取历史K线、get_technical_indicators 获取技术指标、实时行情接口获取最新价），基于真实K线数据分析后回答。**严禁直接调用 search_recent_information/web_search 搜索网页代替**——网页搜索结果不包含个股股价走势数据，返回的只是新闻链接，无法回答价格趋势问题
 - 根据每个工具的描述，**自主选择**最合适的工具；若一次调用不足，可继续调用其他工具
 - 所有需要 curr_date 或 trade_date 的工具，**必须**传入上述日期
 - 对“截至目前”“最新”“近期是否有变化”“请确认最新口径”“最新公告/持股比例/减持进展”这类问题，优先调用“近期信息搜索”或相关新闻工具，先检索近期公开信息，再回答
