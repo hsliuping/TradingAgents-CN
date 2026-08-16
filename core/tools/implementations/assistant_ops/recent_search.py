@@ -124,12 +124,35 @@ def _search_with_qwen(query: str, curr_date: str) -> str:
 
 
 def run_recent_information_search(query: str) -> str:
-    """搜索近期公开信息，优先用于事实确认类问题。"""
+    """搜索近期公开信息，优先用于事实确认类问题。
+
+    搜索源优先级：
+    1. SearXNG 本地实例（快，约1-2秒；SEARXNG_INSTANCES 配置时启用）
+    2. DashScope 联网搜索（qwen + web_search_preview，较慢，可能超时）
+    3. Google News（兜底）
+    """
     query_clean = (query or "").strip()
     if not query_clean:
         return "请提供要搜索的关键词，例如：比亚迪 伯克希尔 减持 持股比例。"
 
     curr_date = datetime.now().strftime("%Y-%m-%d")
+
+    # 1) SearXNG 本地搜索（优先，秒级返回）
+    try:
+        from core.tools.implementations.assistant_ops.web_search import run_web_search
+
+        searx_result = run_web_search(query_clean, max_results=10)
+        if searx_result and not searx_result.startswith("Web 搜索失败"):
+            return (
+                f"以下是“{query_clean}”的近期联网搜索结果（搜索引擎聚合，按相关性排序）。"
+                "请优先依据发布时间最新、来源更权威的条目回答，并注意核对发布日期。\n\n"
+                f"{searx_result}"
+            )
+        logger.warning("SearXNG 搜索无结果，回退 DashScope: %s", query_clean)
+    except Exception as exc:
+        logger.warning("SearXNG 搜索失败，回退 DashScope: %s", exc)
+
+    # 2) DashScope 联网搜索（备选）
     try:
         result = _search_with_qwen(query_clean, curr_date)
         return (
@@ -139,6 +162,7 @@ def run_recent_information_search(query: str) -> str:
     except Exception as exc:
         logger.warning("百炼近期搜索失败，回退 Google News: %s", exc)
 
+    # 3) Google News（兜底）
     result = _invoke_legacy_tool(Toolkit.get_google_news, query=query_clean, curr_date=curr_date)
     if not result or str(result).startswith("近期信息搜索失败"):
         return f"近期信息搜索失败：{result}"
