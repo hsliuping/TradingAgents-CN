@@ -52,6 +52,35 @@ export interface MemoryRecallData {
   items: MemoryItem[]
 }
 
+/** 智能助手事实记忆（assistant_memory_facts） */
+export interface AssistantFactItem {
+  id: string
+  topic: string
+  content: string
+  symbol?: string
+  related_terms?: string[]
+  tool_id?: string
+  fetched_at?: string
+  category?: string
+  valid_until?: string
+  thread_id?: string
+}
+
+export interface AssistantFactListData {
+  items: AssistantFactItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export const FACT_CATEGORY_LABELS: Record<string, string> = {
+  realtime_quote: '实时行情',
+  industry_metric: '行业指标',
+  company_financial: '公司财务',
+  company_static: '公司资料',
+  default: '通用',
+}
+
 export const SCOPE_LABELS: Record<string, string> = {
   conversation: '对话记忆',
   user_preference: '用户偏好',
@@ -118,5 +147,23 @@ export const memoryApi = {
   async deleteAll(): Promise<{ deleted: number }> {
     const res: any = await request.delete('/api/memory/clear-all')
     return res?.data ?? { deleted: 0 }
+  },
+
+  // ── 智能助手事实记忆（assistant_memory_facts）───────────────────────────
+  async getAssistantFacts(
+    params: { q?: string; symbol?: string; category?: string; page?: number; page_size?: number } = {},
+  ): Promise<AssistantFactListData> {
+    const res: any = await request.get('/api/memory/assistant-facts', { params })
+    return res?.data ?? res
+  },
+
+  async deleteAssistantFact(factId: string): Promise<boolean> {
+    const res: any = await request.delete(`/api/memory/assistant-facts/${encodeURIComponent(factId)}`)
+    return res?.success ?? false
+  },
+
+  async batchDeleteAssistantFacts(factIds: string[]): Promise<{ deleted: number; requested: number }> {
+    const res: any = await request.post('/api/memory/assistant-facts/batch-delete', { fact_ids: factIds })
+    return res?.data ?? { deleted: 0, requested: factIds.length }
   },
 }
