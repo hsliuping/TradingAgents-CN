@@ -235,6 +235,17 @@ _FABRICATED_TOOL_JSON_RE = re.compile(
     r"(get_|fetch_|trigger_|set_)[a-z0-9_]+\s*\([^)\n]{0,80}\)[^{\n]{0,60}\{[^{}\n]{5,500}\}",
     re.IGNORECASE,
 )
+# "未调工具但回复含大量数字"拦截后的自动纠错重试指令（最多重试1次）
+_UNSOURCED_RETRY_PROMPT = (
+    "【系统校验反馈】你刚才的回复包含了大量具体数字，但本轮对话你没有调用任何工具，"
+    "这些数字无法溯源，属于训练记忆填充，已被系统拦截。\n"
+    "请重新回答用户的问题，要求：\n"
+    "1. 必须先调用相关工具获取真实数据（行业/板块问题用 get_sector_daily 或 search_sector，"
+    "个股问题用 get_stock_market_data_unified / get_technical_indicators，"
+    "最新行业动态用 get_web_search）；\n"
+    "2. 只基于工具返回的真实数据作答，引用数字时标注来源和日期；\n"
+    "3. 若工具确实未返回相关数据，请明确说明数据缺失，禁止使用任何具体数字。"
+)
 
 
 def _has_fabricated_tool_json(reply: str) -> bool:
@@ -305,6 +316,11 @@ _TOOL_NUMBER_RE = re.compile(
 )
 # 金额类单位 → 归一化到"亿元"的换算因子
 _AMOUNT_UNIT_FACTOR = {"亿元": 1.0, "万元": 1e-4}
+# 重量价格单位 → 归一化到"元/公斤"的换算因子（乘以该因子=换算成元/公斤价格）。
+# 每公斤价 = 每斤价 × 2（1公斤=2斤）；每公斤价 = 每吨价 ÷ 1000（1吨=1000公斤）。
+# LLM 常将工具返回的 元/kg 换算为 元/斤 表述（如 10.87元/kg → 5.44元/斤），
+# 属合法换算，不算编造
+_WEIGHT_UNIT_FACTOR = {"元/公斤": 1.0, "元/斤": 2.0, "元/吨": 0.001}
 # 匹配容差（工具值与回复值的相对误差上限；1% 覆盖常规四舍五入，
 # 同时避免跨语义误匹配——如编造"15.8元/公斤"撞上质押 holding_ratio 15.54）
 _TRACE_TOLERANCE = 0.01
@@ -344,6 +360,8 @@ def _number_matches(value: float, unit: str, candidates: list) -> bool:
     匹配规则：
     - 金额类（亿元/万元）：必须同属金额类，按归一化到亿元后匹配
       （如 15764.6万 ↔ 1.58亿；15764.6万 ≠ 157.6亿，防100倍换算错误）
+    - 重量价格类（元/公斤、元/斤、元/吨）：归一化到元/公斤后匹配
+      （如 5.44元/斤 ↔ 10.87元/kg，合法单位换算不算编造）
     - 非金额类（%/元/公斤/kg/倍/分位/裸数字）：单位写法差异（元/kg vs 元/公斤、
       "15.77元一公斤"截断为"元" vs 回复"15.77元/公斤"）按数值直接匹配（1%容差）
     - 不做 ×100 的百分比换算：工具返回 0.37 就是 0.37%，回复写 37% 视为不可溯源
@@ -362,6 +380,12 @@ def _number_matches(value: float, unit: str, candidates: list) -> bool:
                 if abs(v1 - v2) <= tol * max(abs(v2), 1e-9):
                     return True
             continue
+        # 重量价格单位：归一化到元/公斤后比较（斤↔公斤 ×2、吨↔公斤 ×1000）
+        if unit in _WEIGHT_UNIT_FACTOR and cand_unit in _WEIGHT_UNIT_FACTOR:
+            v1 = value * _WEIGHT_UNIT_FACTOR[unit]
+            v2 = cand_val * _WEIGHT_UNIT_FACTOR[cand_unit]
+            if abs(v1 - v2) <= tol * max(abs(v2), 1e-9):
+                return True
         # 非金额类：数值相等即匹配（容忍单位写法差异）
         if abs(value - cand_val) <= tol * max(abs(cand_val), 1e-9):
             return True
@@ -451,10 +475,13 @@ def _has_untraced_risky_numbers(
 
 
 def _extract_history_tool_contents(messages: List[Any]) -> List[str]:
-    """从对话历史中提取 role=tool 的消息内容（多轮溯源用）。
+    """从对话历史中提取可溯源的可信文本（多轮溯源用）。
 
-    上一轮工具返回过的真实数字（如财务数据），本轮回复引用时
-    同样应视为可溯源，避免误拦截。
+    覆盖两类内容：
+    1. 历史 tool 消息（工具返回原文）；
+    2. 历史 assistant 回复——这些回复均通过四道防线验证才落库，
+       属已验证可信文本。LLM 引用自己上一轮回复中的数字（如推导值、
+       上轮搜索结论）不应被判为编造。
     """
     contents = []
     for m in (messages or []):
@@ -462,9 +489,286 @@ def _extract_history_tool_contents(messages: List[Any]) -> List[str]:
         content = getattr(m, "content", None)
         if content is None and isinstance(m, dict):
             content = m.get("content")
-        if role == "tool" and content:
+        if role in ("tool", "assistant") and content:
             contents.append(str(content))
     return contents
+
+
+def _recent_user_context(messages: List[Any], max_messages: int = 6) -> str:
+    """提取会话近期用户消息拼接文本（用于记忆保存时提取关联股票）。
+
+    行业类记忆（如"生猪养殖成本"）的主题不含股票名，但保存该记忆的
+    会话上下文里通常有（如"牧原股份值得入手吗"）——据此建立
+    股票↔行业记忆的关联。
+    """
+    texts = []
+    for m in (messages or []):
+        role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else None)
+        content = getattr(m, "content", None)
+        if content is None and isinstance(m, dict):
+            content = m.get("content")
+        if role == "user" and content:
+            texts.append(str(content))
+    return " ".join(texts[-max_messages:])[-2000:]
+
+
+# ── 事实记忆层（带时间标签，跨会话复用工具获取的真实数据）──────────────────────
+# 设计要点：
+# 1. 仅对 web_search/fetch_url 等在线工具的成功结果建立记忆（含来源、跨会话有价值）；
+#    本地数据类工具（财务/行情）不建记忆——数据库每次查询都是最新值，缓存无意义。
+# 2. 每条记忆带 fetched_at（采集时间）+ category（数据类别）+ valid_until（失效时间），
+#    检索时只返回未过期记忆；过期数据不注入、由新一轮工具结果覆盖。
+# 3. 注入 prompt 的记忆加入溯源候选集：助手引用记忆数字不会被第4道防线误拦。
+_MEMORY_FACTS_COLLECTION = "assistant_memory_facts"
+_MEMORY_FACT_TOOLS = {"web_search", "fetch_url"}
+# 类别规则：(类别名, 关键词列表, 有效天数)，顺序即优先级
+_FACT_CATEGORY_RULES = [
+    ("realtime_quote", ["价格", "行情", "均价", "现价", "股价", "涨跌", "实时", "点位"], 3),
+    ("industry_metric", ["成本", "存栏", "产能", "出栏", "销量", "市场份额", "行业"], 30),
+    ("company_financial", ["财报", "营收", "净利", "季报", "年报", "毛利", "现金流", "业绩"], 90),
+    ("company_static", ["上市日期", "主营业务", "公司简介", "注册地", "成立时间", "发展历程"], 365),
+]
+_FACT_DEFAULT_VALID_DAYS = 7
+# 检索返回条数上限 / 单条注入长度上限
+_MEMORY_RECALL_TOP_K = 3
+_MEMORY_INJECT_MAX_CHARS = 1500
+# 主题匹配：bigram 交集达到该数量视为命中
+_MEMORY_MATCH_THRESHOLD = 2
+
+
+def _classify_fact_category(text: str) -> str:
+    """根据文本关键词判定数据类别（决定记忆有效期）。"""
+    t = text or ""
+    for category, keywords, _days in _FACT_CATEGORY_RULES:
+        if any(k in t for k in keywords):
+            return category
+    return "default"
+
+
+def _fact_valid_days(category: str) -> int:
+    for cat, _kw, days in _FACT_CATEGORY_RULES:
+        if cat == category:
+            return days
+    return _FACT_DEFAULT_VALID_DAYS
+
+
+def _extract_match_tokens(text: str) -> set:
+    """提取文本匹配词元：中文 bigram + 英文单词 + 数字串。"""
+    if not text:
+        return set()
+    tokens = set()
+    # 中文 bigram（"生猪养殖" → {生猪, 猪养, 养殖}）
+    chinese_runs = re.findall(r"[\u4e00-\u9fa5]+", text)
+    for run in chinese_runs:
+        for i in range(len(run) - 1):
+            tokens.add(run[i : i + 2])
+    # 英文单词 / 数字串
+    for w in re.findall(r"[A-Za-z]{2,}|\d{4,}", text):
+        tokens.add(w.lower())
+    return tokens
+
+
+def _memory_topic_key(args: Dict[str, Any], fallback: str) -> str:
+    """记忆主题键：优先用工具参数里的 query/url，兜底用户消息。"""
+    q = (args or {}).get("query") or (args or {}).get("url") or ""
+    topic = str(q).strip()
+    if not topic:
+        topic = str(fallback or "").strip()
+    return topic[:80]
+
+
+def _extract_symbol_hint(text: str) -> Optional[str]:
+    """从文本中提取 6 位 A 股代码（记忆关联股票，可空）。"""
+    m = re.search(r"\b(\d{6})\b", text or "")
+    return m.group(1) if m else None
+
+
+# 关联主体提取：股票名（XX股份/XX集团等常见后缀）与 6 位代码。
+# 用途：行业类记忆（如"生猪养殖成本"）保存时记录当时会话涉及的股票
+# （如"牧原股份"），后续问该股任何问题（如"牧原反弹了吗"）都能带出行业背景
+_RELATED_NAME_RE = re.compile(
+    r"[\u4e00-\u9fa5]{2,4}(?:股份|集团|科技|生物|能源|牧业|农业|银行|证券|药业|重工|电工|汽车|医药)"
+)
+
+
+def _extract_related_terms(*texts: str) -> List[str]:
+    """从多段文本中提取关联主体（股票名+代码），最多8个。"""
+    terms = set()
+    _connectives = "与和及对比跟或者、，。？?；;：: "
+    for t in texts:
+        if not t:
+            continue
+        for m in _RELATED_NAME_RE.finditer(t):
+            name = m.group(0).lstrip(_connectives)
+            if len(name) >= 4:  # 至少2字公司名+2字后缀
+                terms.add(name)
+        for code in re.findall(r"\b\d{6}\b", t):
+            terms.add(code)
+    return sorted(terms)[:8]
+
+
+# 股票名称→代码 映射缓存（懒加载）。用于从会话文本提取股票关联：
+# 行业类记忆（如"生猪养殖完全成本"）虽不含股票名，但保存时的会话上下文
+# （用户在聊牧原）可建立关联，检索时问该股票即命中——解决"问个股时
+# 想要行业背景记忆"的语义桥梁问题
+_STOCK_NAME_MAP_CACHE: Optional[Dict[str, str]] = None
+
+
+async def _get_stock_name_map(db) -> Dict[str, str]:
+    global _STOCK_NAME_MAP_CACHE
+    if _STOCK_NAME_MAP_CACHE is None:
+        try:
+            mapping: Dict[str, str] = {}
+            async for doc in db["stock_basic_info"].find({}, {"symbol": 1, "name": 1}):
+                name = (doc.get("name") or "").strip()
+                sym = (doc.get("symbol") or "").strip()
+                if name and sym and 2 <= len(name) <= 6:
+                    mapping[name] = sym
+            _STOCK_NAME_MAP_CACHE = mapping
+            logger.info("[智能助手·记忆] 股票名称缓存已加载: %d 条", len(mapping))
+        except Exception as e:
+            logger.warning("[智能助手·记忆] 加载股票名称缓存失败: %s", e)
+            _STOCK_NAME_MAP_CACHE = {}
+    return _STOCK_NAME_MAP_CACHE
+
+
+def _match_stock_refs(texts) -> set:
+    """从多段文本提取股票线索集合：6位代码 + 股票名称子串匹配。"""
+    joined = " ".join(str(t) for t in texts if t)
+    if not joined:
+        return set()
+    refs = set(re.findall(r"\b\d{6}\b", joined))
+    for name, sym in (_STOCK_NAME_MAP_CACHE or {}).items():
+        if name in joined:
+            refs.add(sym)
+    return refs
+
+
+async def _persist_memory_facts(
+    db,
+    tool_results: List[Dict[str, Any]],
+    user_message: str,
+    thread_id: str,
+    related_context: str = "",
+) -> int:
+    """将本轮在线工具的成功结果保存为事实记忆（按主题 upsert 覆盖）。
+
+    Args:
+        related_context: 会话近期上下文（如最近几条用户消息拼接），
+            用于提取关联股票（如"牧原股份"）存入 related_terms——
+            行业类记忆借此在该股的后续问题中被召回。
+
+    Returns:
+        保存条数（0 表示无可保存结果）。
+    """
+    saved = 0
+    try:
+        related_terms = _extract_related_terms(user_message, related_context)
+        for item in (tool_results or []):
+            tool = item.get("tool") or ""
+            content = item.get("content") or ""
+            if tool not in _MEMORY_FACT_TOOLS or item.get("is_error"):
+                continue
+            if len(content) < 100:
+                continue  # 内容太短无记忆价值
+            topic = _memory_topic_key(item.get("args"), user_message)
+            if not topic:
+                continue
+            category = _classify_fact_category(topic + content[:300])
+            now = datetime.now()
+            valid_until = now + timedelta(days=_fact_valid_days(category))
+            doc = {
+                "topic": topic,
+                "symbol": _extract_symbol_hint(topic),
+                "related_terms": related_terms,
+                "tool_id": tool,
+                "content": content[:8000],  # 防止单条记忆过大
+                "fetched_at": now.isoformat(timespec="seconds"),
+                "category": category,
+                "valid_until": valid_until.isoformat(timespec="seconds"),
+                "thread_id": thread_id,
+            }
+            await db[_MEMORY_FACTS_COLLECTION].update_one(
+                {"topic": topic}, {"$set": doc}, upsert=True
+            )
+            saved += 1
+            logger.info(
+                "[智能助手·记忆] 已保存事实记忆: topic=%.40s category=%s 有效期至 %s",
+                topic, category, doc["valid_until"],
+            )
+    except Exception as e:
+        logger.warning("[智能助手·记忆] 保存事实记忆失败（不影响回复）: %s", e)
+    return saved
+
+
+async def _recall_memory_facts(
+    db,
+    user_message: str,
+    current_thread_id: str,
+) -> List[Dict[str, Any]]:
+    """检索与当前问题匹配且未过期的事实记忆（排除本会话自己保存的）。
+
+    匹配策略（双通道）：
+    1. 主题匹配：用户消息与记忆主题的词元交集（bigram 为主）；
+    2. 关联主体匹配：用户消息提及的股票（如"牧原股份"/"002714"）与记忆保存时
+       记录的 related_terms 交集——行业类记忆（如"生猪养殖成本"）借此在
+       个股问题（如"牧原反弹了吗"）中被召回，提供行业背景。
+    """
+    try:
+        now_iso = datetime.now().isoformat(timespec="seconds")
+        user_tokens = _extract_match_tokens(user_message or "")
+        user_terms = set(_extract_related_terms(user_message))
+        if not user_tokens and not user_terms:
+            return []
+        cursor = (
+            db[_MEMORY_FACTS_COLLECTION]
+            .find({"valid_until": {"$gte": now_iso}})
+            .sort("fetched_at", -1)
+            .limit(100)
+        )
+        scored = []
+        async for doc in cursor:
+            if current_thread_id and doc.get("thread_id") == current_thread_id:
+                continue  # 本会话已有该数据在上下文里，无需重复注入
+            topic_tokens = _extract_match_tokens(doc.get("topic") or "")
+            overlap = user_tokens & topic_tokens
+            related_hit = bool(
+                user_terms & set(doc.get("related_terms") or [])
+            )
+            if len(overlap) >= _MEMORY_MATCH_THRESHOLD or related_hit:
+                # 主题直接命中权重高于关联主体命中
+                scored.append((len(overlap) * 10 + (1 if related_hit else 0), doc))
+        scored.sort(key=lambda x: -x[0])
+        recalled = [doc for _score, doc in scored[:_MEMORY_RECALL_TOP_K]]
+        if recalled:
+            logger.info(
+                "[智能助手·记忆] 命中 %d 条事实记忆: %s",
+                len(recalled),
+                [d.get("topic", "")[:30] for d in recalled],
+            )
+        return recalled
+    except Exception as e:
+        logger.warning("[智能助手·记忆] 检索事实记忆失败（降级为无记忆）: %s", e)
+        return []
+
+
+def _build_memory_injection(recalled: List[Dict[str, Any]]) -> str:
+    """将命中的记忆构建为注入 prompt 的文本区块。"""
+    if not recalled:
+        return ""
+    blocks = [
+        "【历史事实记忆】以下是之前会话中通过工具获取的真实数据（已通过时效校验），"
+        "可直接引用，但引用时必须标注数据采集日期；若用户在追问最新情况，"
+        "应主动说明数据采集时间并建议重新核实。"
+    ]
+    for i, doc in enumerate(recalled, 1):
+        fetched = str(doc.get("fetched_at", ""))[:16].replace("T", " ")
+        topic = doc.get("topic", "")
+        content = str(doc.get("content", ""))[:_MEMORY_INJECT_MAX_CHARS]
+        blocks.append(
+            f"--- 记忆 {i} | 采集于 {fetched} | 来源 {doc.get('tool_id', '')} | 主题：{topic} ---\n{content}"
+        )
+    return "\n\n".join(blocks)
 
 
 def _should_force_tool_retry(user_message: str) -> bool:
@@ -1185,7 +1489,7 @@ def _get_system_prompt(
 - **严禁伪造工具调用痕迹**：不得在回答中标注"数据来源：get_xxx_tool()""📌 数据来源：XXX工具"等字样，除非你**确实调用了该工具**并获得了真实返回值。如果你在回答中写了一个工具名作为数据来源，但实际并没有调用该工具，这就是伪造——严格禁止。
 - **股票价格、估值指标（PE/PB/PS）、财务数据（营收/净利润/毛利率）、销量数据等必须通过工具实时获取**。严禁用训练记忆中的价格回答（训练数据可能过时，如股票可能已发生送转/拆股导致价格大幅变化）。如果未调用工具获取行情数据，不得在回答中出现任何具体价格数字。
 - **严禁编造文件名、报告名称、政策文件名、统计数据来源**（如"《XX年全国畜牧业统计年报》""《XX产业高质量发展三年行动》"等）。如果你要引用某个文件或报告，该文件必须由 web_search 或 fetch_url 工具返回的搜索结果中明确提及，且你必须在回答中标注来源链接。未通过工具验证的文件/报告一律不得引用。
-- **严禁编造精确数字**（如"占比34.7%""合作农户4.2万户""平均成本14.3元/公斤"等）。所有精确数字必须来自工具返回的真实数据。如果你只有训练记忆中的大致印象，只能用"大致""约"等模糊表述，且必须说明"以下为基于历史信息的概览，具体最新数据请通过 web_search 查询"。
+- **严禁编造精确数字**（如"占比34.7%""合作农户4.2万户""平均成本14.3元/公斤"等）。所有精确数字必须来自工具返回的真实数据。**严禁用"约/大约/估计/接近"等字眼包装未经工具验证的数值**（如"约35.20元""约3800万股"）——"约"字数字同样是编造，且更隐蔽。如果工具未返回某项数据，必须如实写"该数据本次未获取"，或者先算清楚：只有当工具返回了原始序列（如K线）且你能逐项核对时，才允许基于这些原始数据做显式推导（写明推导式），否则一个数字都不能给。
 - **行业实时背景数据同样严禁凭记忆给出**：行业成本线（如养殖完全成本）、现货价格（如生猪价）、市场均价、产能数据、库存水平、估值历史分位数等，都属于随时间快速变化的实时数据，你的训练记忆严重过时（例如成本线实际已从15元级别降到11-12元级别，凭记忆说"15.8元/公斤"是完全错误的）。这类数字**只能**来自工具返回或 web_search 结果；工具未返回时只能定性描述（如"当前猪价低于行业成本线"），并明确告知"具体数值建议通过 web_search 查询最新数据"，**不得填入任何记忆中的具体数字**。
 - **估值分位数必须有数据支撑**：只有当工具返回中明确包含分位数字段时才能说"处于X%分位"；工具只返回 PE/PB 绝对值时，只能说"PE为X倍"，严禁自行编造"近5年X%分位"。
 - **web_search 摘要里没有的数字同样不能编**：搜索引擎摘要通常只有标题/链接/片段（行业成本、专业数据多在付费研报正文中，摘要抓不到）。若搜索结果未包含用户要的具体数值，必须如实回答"搜索结果未包含该数值"，并附上最相关的来源链接供用户人工查看；**严禁凭对该来源的印象（如涌益咨询周报口径）编造精确数字**。这是最常见的编造形态，系统会逐数字比对工具返回原文，编造必被拦截。
@@ -1993,6 +2297,17 @@ class IntelligentAssistantService:
         except Exception as e:
             logger.warning(f"[智能助手] ⚠️ 知识检索失败（降级为静态知识）: {e}")
 
+        # 事实记忆检索：跨会话复用之前工具获取的真实数据（带时间标签，未过期才注入）
+        recalled_memory_docs: List[Dict[str, Any]] = []
+        memory_injection = ""
+        try:
+            recalled_memory_docs = await _recall_memory_facts(
+                self._db, resolved_user_message, conversation_id or ""
+            )
+            memory_injection = _build_memory_injection(recalled_memory_docs)
+        except Exception as e:
+            logger.warning("[智能助手] 事实记忆检索异常（忽略）: %s", e)
+
         # 构建消息列表：系统提示 + 历史记录 + 当前用户消息
         messages = [
             Message(
@@ -2009,10 +2324,15 @@ class IntelligentAssistantService:
                 ),
             ),
         ]
+        if memory_injection:
+            messages.append(Message(role=MessageRole.SYSTEM, content=memory_injection))
         if history_messages:
             messages.extend(history_messages)
             logger.info(f"[智能助手] 已注入 {len(history_messages)} 条历史消息")
         messages.append(Message(role=MessageRole.USER, content=resolved_user_message.strip()))
+
+        # 溯源可信文本：会话历史工具返回 + 注入的事实记忆（引用记忆数字不算编造）
+        memory_trusted_contents = [str(d.get("content", "")) for d in recalled_memory_docs if d.get("content")]
 
         tools_used: List[str] = []
         tool_results: List[Dict[str, Any]] = []
@@ -2034,7 +2354,7 @@ class IntelligentAssistantService:
                 pass
             return base
 
-        async def _do_chat():
+        async def _do_chat(_retry_attempt: int = 0):
             nonlocal tools_used
 
             tool_interceptor = self._build_tool_interceptor(conversation_id or "default")
@@ -2093,8 +2413,19 @@ class IntelligentAssistantService:
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
 
+            # 事实记忆保存：在线工具成功结果落库（带时间标签，跨会话复用）
+            if tool_results:
+                await _persist_memory_facts(
+                    self._db,
+                    tool_results,
+                    resolved_user_message,
+                    conversation_id or "",
+                    related_context=_recent_user_context(messages),
+                )
+
             # 回复后验证：检测 LLM 是否在文本中伪造了工具调用痕迹
             reply_content = resp.content or ""
+            trusted_texts = _extract_history_tool_contents(messages) + memory_trusted_contents
             if _has_fabricated_tool_json(reply_content):
                 logger.warning("[智能助手] 检测到编造的工具JSON结果，硬拦截回复")
                 return (
@@ -2113,23 +2444,26 @@ class IntelligentAssistantService:
             if _has_unsourced_numbers(reply_content, tools_used):
                 logger.warning("[智能助手] 检测到未调工具但回复含大量数字，拦截回复（数字数=%d）",
                                len(_SPECIFIC_NUMBER_RE.findall(reply_content)))
+                # 自动纠错重试一次：追加校验反馈让 LLM 先调工具再回答
+                if _retry_attempt < 1:
+                    messages.append({"role": "assistant", "content": reply_content})
+                    messages.append({"role": "user", "content": _UNSOURCED_RETRY_PROMPT})
+                    logger.info("[智能助手] 已拦截未溯源数字回复，自动纠错重试（第1次）")
+                    return await _do_chat(_retry_attempt + 1)
                 return (
-                    "抱歉，我目前未能通过工具获取到与您问题相关的实时数据，无法提供有数据支撑的分析。\n\n"
-                    "可能的原因：数据库中的股票数据尚未同步完整。\n"
-                    "建议您：\n"
-                    "• 在\"数据管理\"页面同步该股票的基础数据和历史行情\n"
-                    "• 同步完成后再次提问，我会调用工具获取真实数据为您分析\n"
-                    "• 或尝试通过 web_search 搜索互联网公开信息"
+                    "抱歉，我刚才两次都未能先调用工具获取真实数据，为避免误导已停止回答。\n\n"
+                    "请换一个更具体的问法（例如指明行业或股票，如\"养殖行业最近走势如何\"），"
+                    "我会先调用工具获取真实数据再为您分析。"
                 )
             if _has_untraced_risky_numbers(
                 reply_content, tool_results, tools_used,
                 resolved_user_message,
-                _extract_history_tool_contents(messages),
+                trusted_texts,
             ):
                 logger.warning("[智能助手] 检测到无法溯源的高风险数字（疑似训练记忆填充/单位换算错误），拦截回复")
                 untraced_detail = "、".join(_get_untraced_risky_numbers(
                     reply_content, tool_results, resolved_user_message,
-                    _extract_history_tool_contents(messages))[:6])
+                    trusted_texts)[:6])
                 return (
                     "抱歉，我在刚才的回复中引用了一些工具和搜索结果里都没有的具体数字"
                     f"（如 {untraced_detail}），这类数字可能来自过时的记忆而非实时数据，"
@@ -2343,6 +2677,17 @@ class IntelligentAssistantService:
         except Exception:
             pass
 
+        # 事实记忆检索：跨会话复用之前工具获取的真实数据（带时间标签，未过期才注入）
+        recalled_memory_docs_s: List[Dict[str, Any]] = []
+        memory_injection_s = ""
+        try:
+            recalled_memory_docs_s = await _recall_memory_facts(
+                self._db, resolved_user_message, conversation_id or ""
+            )
+            memory_injection_s = _build_memory_injection(recalled_memory_docs_s)
+        except Exception as e:
+            logger.warning("[智能助手·流式] 事实记忆检索异常（忽略）: %s", e)
+
         messages = [
             Message(
                 role=MessageRole.SYSTEM,
@@ -2356,9 +2701,14 @@ class IntelligentAssistantService:
                 ),
             ),
         ]
+        if memory_injection_s:
+            messages.append(Message(role=MessageRole.SYSTEM, content=memory_injection_s))
         if history_messages:
             messages.extend(history_messages)
         messages.append(Message(role=MessageRole.USER, content=resolved_user_message.strip()))
+
+        # 溯源可信文本：会话历史工具返回 + 注入的事实记忆
+        memory_trusted_contents_s = [str(d.get("content", "")) for d in recalled_memory_docs_s if d.get("content")]
 
         tools_used: List[str] = []
         tool_results: List[Dict[str, Any]] = []
@@ -2421,6 +2771,16 @@ class IntelligentAssistantService:
                         tool_interceptor=tool_interceptor,
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
+
+            # 事实记忆保存：在线工具成功结果落库（带时间标签，跨会话复用）
+            if tool_results:
+                await _persist_memory_facts(
+                    self._db,
+                    tool_results,
+                    resolved_user_message,
+                    conversation_id or "",
+                    related_context=_recent_user_context(messages),
+                )
             return resp.content
 
         def _stream_effective_timeout() -> int:
@@ -2477,23 +2837,59 @@ class IntelligentAssistantService:
                 )
             elif _has_unsourced_numbers(reply, tools_used):
                 logger.warning("[智能助手·流式] 检测到未调工具但回复含大量数字，拦截回复")
-                reply = (
-                    "抱歉，我目前未能通过工具获取到与您问题相关的实时数据，无法提供有数据支撑的分析。\n\n"
-                    "可能的原因：数据库中的股票数据尚未同步完整。\n"
-                    "建议您：\n"
-                    "• 在\"数据管理\"页面同步该股票的基础数据和历史行情\n"
-                    "• 同步完成后再次提问，我会调用工具获取真实数据为您分析\n"
-                    "• 或尝试通过 web_search 搜索互联网公开信息"
-                )
+                # 自动纠错重试一次：追加校验反馈让 LLM 先调工具再回答
+                try:
+                    yield _sse("progress", {
+                        "stage": "retry",
+                        "message": "检测到未经验证的数据，正在调用工具重新获取…",
+                    })
+                    messages.append({"role": "assistant", "content": reply})
+                    messages.append({"role": "user", "content": _UNSOURCED_RETRY_PROMPT})
+                    retry_resp = await asyncio.wait_for(
+                        self._llm_client.achat(
+                            messages,
+                            tools=self._openai_tools,
+                            auto_execute_tools=True,
+                            max_tool_rounds=8,
+                            tools_used=tools_used,
+                            tool_results_collector=tool_results,
+                            dry_run=False,
+                            tool_interceptor=self._build_tool_interceptor(
+                                conversation_id or "default"),
+                        ),
+                        timeout=_stream_effective_timeout(),
+                    )
+                    await _record_assistant_token_usage(
+                        retry_resp, conversation_id or "assistant_chat")
+                    retry_reply = (retry_resp.content or "").strip()
+                    if retry_reply and not _has_unsourced_numbers(retry_reply, tools_used) \
+                            and not _has_fabricated_tool_json(retry_reply):
+                        logger.info("[智能助手·流式] 纠错重试成功，采用重试回复")
+                        reply = retry_reply
+                    else:
+                        logger.warning("[智能助手·流式] 纠错重试后仍含未溯源数字，返回拦截文案")
+                        reply = (
+                            "抱歉，我刚才两次都未能先调用工具获取真实数据，为避免误导已停止回答。\n\n"
+                            "请换一个更具体的问法（例如指明行业或股票，"
+                            "如\"养殖行业最近走势如何\"），"
+                            "我会先调用工具获取真实数据再为您分析。"
+                        )
+                except Exception as retry_err:
+                    logger.warning("[智能助手·流式] 纠错重试失败: %s", retry_err)
+                    reply = (
+                        "抱歉，我刚才的回复未能基于工具真实数据，已被拦截。\n\n"
+                        "请换一个更具体的问法（例如指明行业或股票），"
+                        "我会先调用工具获取真实数据再为您分析。"
+                    )
             elif _has_untraced_risky_numbers(
                 reply, tool_results, tools_used,
                 resolved_user_message,
-                _extract_history_tool_contents(messages),
+                _extract_history_tool_contents(messages) + memory_trusted_contents_s,
             ):
                 logger.warning("[智能助手·流式] 检测到无法溯源的高风险数字（疑似训练记忆填充/单位换算错误），拦截回复")
                 untraced_detail = "、".join(_get_untraced_risky_numbers(
                     reply, tool_results, resolved_user_message,
-                    _extract_history_tool_contents(messages))[:6])
+                    _extract_history_tool_contents(messages) + memory_trusted_contents_s)[:6])
                 reply = (
                     "抱歉，我在刚才的回复中引用了一些工具和搜索结果里都没有的具体数字"
                     f"（如 {untraced_detail}），这类数字可能来自过时的记忆而非实时数据，"
