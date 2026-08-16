@@ -60,12 +60,17 @@ class ToolLoader:
             return 0
         
         count = 0
-        
-        # 遍历所有 Python 文件
-        for py_file in self.tools_dir.rglob("*.py"):
+
+        # 遍历所有 Python 文件（含 .pyc：京东云源码保护后 .py 被删，只剩 .pyc）
+        py_files = list(self.tools_dir.rglob("*.py"))
+        py_files += list(self.tools_dir.rglob("*.pyc"))
+        for py_file in py_files:
             if py_file.name.startswith("_"):
                 continue
-            
+            # __pycache__ 里的 .pyc 跳过（由同名 .py 或 .pyc 顶层文件覆盖）
+            if "__pycache__" in py_file.parts:
+                continue
+
             try:
                 self._load_module_from_file(py_file)
                 count += 1
