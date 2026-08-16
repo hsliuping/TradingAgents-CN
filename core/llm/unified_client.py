@@ -472,6 +472,7 @@ class UnifiedLLMClient:
         auto_execute_tools: bool = False,
         max_tool_rounds: int = 5,
         tools_used: Optional[List[str]] = None,
+        tool_results_collector: Optional[List[Dict[str, Any]]] = None,
         dry_run: bool = False,
         progress_callback: Optional[Callable] = None,
         log_payloads: bool = False,
@@ -484,6 +485,8 @@ class UnifiedLLMClient:
 
         Args:
             tools_used: 可选，用于收集各轮工具调用名称（智能助手展示执行步骤用）
+            tool_results_collector: 可选，用于收集各轮工具返回原文（数字溯源校验用），
+                每项为 {"tool": 工具名, "content": 返回文本, "is_error": 是否出错}
             dry_run: 若为 True，工具调用只记日志并返回模拟结果，不真正执行函数（用于意图路由测试）
             tool_interceptor: 可选，在真正执行工具前调用；返回 ToolResult 则跳过默认执行
         """
@@ -515,6 +518,7 @@ class UnifiedLLMClient:
             return await self._aexecute_tool_loop(
                 messages, tools, response, max_tool_rounds,
                 tools_used=tools_used,
+                tool_results_collector=tool_results_collector,
                 dry_run=dry_run,
                 progress_callback=progress_callback,
                 log_payloads=log_payloads,
@@ -621,6 +625,7 @@ class UnifiedLLMClient:
         response: LLMResponse,
         max_rounds: int,
         tools_used: Optional[List[str]] = None,
+        tool_results_collector: Optional[List[Dict[str, Any]]] = None,
         dry_run: bool = False,
         progress_callback: Optional[Callable] = None,
         log_payloads: bool = False,
@@ -732,6 +737,12 @@ class UnifiedLLMClient:
                     tool_call_id=result.tool_call_id,
                     name=result.name
                 ))
+                if tool_results_collector is not None:
+                    tool_results_collector.append({
+                        "tool": result.name or tool_call.name,
+                        "content": result.content or "",
+                        "is_error": bool(result.is_error),
+                    })
                 logger.info(
                     "[UnifiedLLM·异步] tool_result_appended | round=%s | tool=%s | chars=%s | is_error=%s",
                     rounds + 1,

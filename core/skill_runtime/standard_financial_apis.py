@@ -2913,6 +2913,12 @@ def get_pledge_risk_profile(symbol: str, source: Optional[str] = None) -> Dict[s
                 if e["ann_date"] and _days_between(e["ann_date"], _today()) <= 30
             ),
         },
+        "_readme": {
+            "total_pledge_ratio": f"总质押比例 = {round(total_pledge_ratio, 2)}%（该字段值为百分数本身：0.37 含义是 0.37%，不是 37%）",
+            "outstanding_pledge_amount_wan": f"未解押质押股数 = {round(outstanding_amount, 2)} 万股（单位是万股，不是万元；折算市值 = 万股 × 股价 ÷ 10000 得亿元）",
+            "total_share_wan": "总股本，单位万股",
+            "holding_ratio": "持股占总股本比例，值为百分数本身（38.19 = 38.19%）",
+        },
         "top_pledgers": top_pledgers,
         "recent_pledges": recent_pledges,
         "risk_level": risk_level,
