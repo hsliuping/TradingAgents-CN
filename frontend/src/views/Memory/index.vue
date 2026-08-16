@@ -331,6 +331,106 @@
         </div>
       </div>
     </el-card>
+
+    <!-- 智能助手事实记忆（assistant_memory_facts）-->
+    <el-card shadow="never" class="fact-card">
+      <template #header>
+        <div class="fact-header">
+          <div class="fact-title">
+            <el-icon><Memo /></el-icon>
+            <span>智能助手事实记忆</span>
+            <el-tag size="small" effect="plain">assistant_memory_facts</el-tag>
+          </div>
+          <div class="fact-actions">
+            <el-input
+              v-model="factSearch"
+              placeholder="搜索事实内容或主题..."
+              clearable
+              style="width: 280px"
+              @keyup.enter="fetchFacts(1)"
+              @clear="fetchFacts(1)"
+            >
+              <template #append>
+                <el-button @click="fetchFacts(1)">
+                  <el-icon><Search /></el-icon>
+                </el-button>
+              </template>
+            </el-input>
+            <el-button :loading="factLoading" @click="fetchFacts(currentFactPage)">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+            <el-button
+              type="danger"
+              plain
+              :disabled="selectedFactIds.length === 0"
+              @click="handleBatchDeleteFacts"
+            >
+              <el-icon><Delete /></el-icon>
+              删除选中 ({{ selectedFactIds.length }})
+            </el-button>
+          </div>
+        </div>
+        <p class="fact-hint">
+          这里展示智能助手通过联网工具提取并保存的事实（含数据采集时间与有效期），跨会话自动引用；引用时会标注数据采集日期。
+          无需手动录入，助手在对话中获取到关键数据后会自动生成。
+        </p>
+      </template>
+
+      <div v-loading="factLoading">
+        <el-empty v-if="!factList.length" :image-size="100">
+          <template #description>
+            <p>暂无事实记忆。在助手对话中提问具体数据（如"赛力斯7月销量多少"）后，提取出的事实会自动保存在这里。</p>
+          </template>
+        </el-empty>
+
+        <div v-else class="fact-list">
+          <div v-for="item in factList" :key="item.id" class="fact-item">
+            <div class="fact-item-header">
+              <el-checkbox
+                :model-value="selectedFactIds.includes(item.id)"
+                @change="toggleFactSelected(item.id, $event)"
+              />
+              <el-tag size="small" effect="plain">{{ item.topic }}</el-tag>
+              <el-tag
+                :type="getFactCategoryType(item.category)"
+                size="small"
+                effect="plain"
+              >
+                {{ FACT_CATEGORY_LABELS[item.category || 'default'] }}
+              </el-tag>
+              <span v-if="item.symbol" class="fact-symbol">{{ item.symbol }}</span>
+              <span class="fact-item-time">采集于 {{ formatTime(item.fetched_at) }}</span>
+              <el-popconfirm
+                title="确定删除这条事实记忆？"
+                @confirm="handleDeleteFact(item.id)"
+              >
+                <template #reference>
+                  <el-button type="danger" text size="small">
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </template>
+              </el-popconfirm>
+            </div>
+            <p class="fact-item-content">{{ item.content }}</p>
+            <div class="fact-item-meta">
+              <span>有效期至 {{ formatTime(item.valid_until) }}</span>
+              <span v-if="item.tool_id">来源工具：{{ item.tool_id }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="fact-pagination" v-if="factTotal > FACT_PAGE_SIZE">
+          <el-pagination
+            v-model:current-page="currentFactPage"
+            :page-size="FACT_PAGE_SIZE"
+            :total="factTotal"
+            layout="total, prev, pager, next"
+            @current-change="fetchFacts"
+          />
+        </div>
+      </div>
+    </el-card>
   </div>
 </template>
 
@@ -338,8 +438,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Coin, Delete, Refresh, Search, Memo } from '@element-plus/icons-vue'
-import { memoryApi, SCOPE_COLORS, SCOPE_LABELS } from '@/api/memory'
-import type { MemoryItem, MemoryQueryParams } from '@/api/memory'
+import { memoryApi, SCOPE_COLORS, SCOPE_LABELS, FACT_CATEGORY_LABELS } from '@/api/memory'
+import type { MemoryItem, MemoryQueryParams, AssistantFactItem } from '@/api/memory'
 
 interface MemoryCardItem {
   id: string
@@ -756,9 +856,91 @@ function normalizeMetadataTags(metadata: Record<string, any>): Record<string, st
   return result
 }
 
+// ============================================================================
+// 智能助手事实记忆（assistant_memory_facts）
+// 参考：app/services/intelligent_assistant_service.py 事实记忆层
+// ============================================================================
+
+const FACT_PAGE_SIZE = 10
+const factList = ref<AssistantFactItem[]>([])
+const factTotal = ref(0)
+const factLoading = ref(false)
+const factSearch = ref('')
+const currentFactPage = ref(1)
+const selectedFactIds = ref<string[]>([])
+
+function getFactCategoryType(category?: string): ElTagType {
+  const map: Record<string, ElTagType> = {
+    realtime_quote: 'danger',
+    industry_metric: 'warning',
+    company_financial: 'success',
+    company_static: 'primary',
+    default: 'info',
+  }
+  return map[category || 'default'] || 'info'
+}
+
+async function fetchFacts(page = 1) {
+  factLoading.value = true
+  try {
+    const q = factSearch.value.trim()
+    const data = await memoryApi.getAssistantFacts({
+      q: q || undefined,
+      page,
+      page_size: FACT_PAGE_SIZE,
+    })
+    factList.value = data.items
+    factTotal.value = data.total
+    currentFactPage.value = data.page
+    selectedFactIds.value = []
+  } catch (e: any) {
+    ElMessage.error(e?.message || '加载事实记忆失败')
+  } finally {
+    factLoading.value = false
+  }
+}
+
+function toggleFactSelected(id: string, checked: unknown) {
+  const shouldSelect = Boolean(checked)
+  if (shouldSelect) {
+    if (!selectedFactIds.value.includes(id)) {
+      selectedFactIds.value.push(id)
+    }
+    return
+  }
+  selectedFactIds.value = selectedFactIds.value.filter(fid => fid !== id)
+}
+
+async function handleDeleteFact(id: string) {
+  const ok = await memoryApi.deleteAssistantFact(id)
+  if (ok) {
+    ElMessage.success('事实记忆已删除')
+    await fetchFacts(currentFactPage.value)
+  } else {
+    ElMessage.error('删除失败')
+  }
+}
+
+async function handleBatchDeleteFacts() {
+  if (selectedFactIds.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${selectedFactIds.value.length} 条事实记忆？`,
+      '批量删除',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  const result = await memoryApi.batchDeleteAssistantFacts(selectedFactIds.value)
+  ElMessage.success(`已删除 ${result.deleted} 条事实记忆`)
+  await fetchFacts(currentFactPage.value)
+}
+
 onMounted(() => {
   fetchAll()
   fetchPreferenceList()
+  fetchFacts()
 })
 </script>
 
@@ -1100,6 +1282,94 @@ onMounted(() => {
         font-size: 11px;
       }
     }
+  }
+}
+
+.fact-card {
+  margin-top: 16px;
+
+  .fact-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .fact-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 15px;
+  }
+
+  .fact-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .fact-hint {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.5;
+  }
+
+  .fact-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .fact-item {
+    padding: 12px 14px;
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 6px;
+    background: var(--el-fill-color-blank);
+
+    .fact-item-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+
+    .fact-symbol {
+      font-weight: 600;
+      color: var(--el-color-primary);
+    }
+
+    .fact-item-time {
+      flex: 1;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+    }
+
+    .fact-item-content {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: var(--el-text-color-primary);
+      line-height: 1.6;
+      word-break: break-word;
+    }
+
+    .fact-item-meta {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+    }
+  }
+
+  .fact-pagination {
+    display: flex;
+    justify-content: center;
+    padding-top: 12px;
   }
 }
 </style>

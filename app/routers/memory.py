@@ -5,6 +5,7 @@ mem0 统一记忆层 API
 """
 
 import logging
+import re
 from typing import List, Optional
 
 from fastapi import APIRouter, Body, Depends, Query
@@ -245,4 +246,91 @@ async def memory_delete(
     ok = await svc.delete_memory(memory_id)
     if ok:
         return {"success": True, "message": "记忆已删除"}
+    return {"success": False, "message": "删除失败，请稍后重试"}
+
+
+# =============================================================================
+# 智能助手事实记忆（assistant_memory_facts）
+# 与 mem0 对象记忆不同：事实记忆由智能助手从联网工具结果中提取（含数字的
+# 短句，≤150字符），存于 assistant_memory_facts 集合，跨会话召回供助手引用。
+# 这里提供只读浏览、搜索与删除能力。
+# =============================================================================
+_FACTS_COLLECTION = "assistant_memory_facts"
+
+
+def _serialize_fact(doc: dict) -> dict:
+    """把事实文档序列化为前端可用 dict（_id -> id）。"""
+    out = {"id": str(doc["_id"])}
+    out.update({k: v for k, v in doc.items() if k != "_id"})
+    return out
+
+
+@router.get("/assistant-facts")
+async def assistant_facts_list(
+    q: Optional[str] = Query(None, description="按主题/内容关键词搜索"),
+    symbol: Optional[str] = Query(None, description="按股票代码过滤"),
+    category: Optional[str] = Query(None, description="按数据类别过滤"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """分页查询智能助手提取的事实记忆（按采集时间倒序）。"""
+    query: dict = {}
+    if q:
+        q = q.strip()
+        if q:
+            query["$or"] = [
+                {"topic": {"$regex": re.escape(q), "$options": "i"}},
+                {"content": {"$regex": re.escape(q), "$options": "i"}},
+            ]
+    if symbol:
+        query["symbol"] = symbol.strip()
+    if category:
+        query["category"] = category.strip()
+    total = await db[_FACTS_COLLECTION].count_documents(query)
+    cursor = (
+        db[_FACTS_COLLECTION]
+        .find(query)
+        .sort("fetched_at", -1)
+        .skip((page - 1) * page_size)
+        .limit(page_size)
+    )
+    items = [_serialize_fact(doc) async for doc in cursor]
+    logger.info("[memory-api] assistant-facts list — page=%d page_size=%d total=%d", page, page_size, total)
+    return {
+        "success": True,
+        "data": {"items": items, "total": total, "page": page, "page_size": page_size},
+    }
+
+
+@router.post("/assistant-facts/batch-delete")
+async def assistant_facts_batch_delete(
+    fact_ids: List[str] = Body(..., embed=True),
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """批量删除事实记忆。"""
+    from bson import ObjectId
+    ids = [ObjectId(fid) for fid in fact_ids[:100] if ObjectId.is_valid(fid)]
+    result = await db[_FACTS_COLLECTION].delete_many({"_id": {"$in": ids}})
+    return {
+        "success": True,
+        "data": {"deleted": result.deleted_count, "requested": len(fact_ids)},
+    }
+
+
+@router.delete("/assistant-facts/{fact_id}")
+async def assistant_facts_delete(
+    fact_id: str,
+    user: dict = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """删除单条事实记忆。"""
+    from bson import ObjectId
+    if not ObjectId.is_valid(fact_id):
+        return {"success": False, "message": "无效的事实 ID"}
+    result = await db[_FACTS_COLLECTION].delete_one({"_id": ObjectId(fact_id)})
+    if result.deleted_count:
+        return {"success": True, "message": "事实记忆已删除"}
     return {"success": False, "message": "删除失败，请稍后重试"}
