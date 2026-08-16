@@ -576,6 +576,18 @@ _FACT_CATEGORY_RULES = [
     ("company_static", ["上市日期", "主营业务", "公司简介", "注册地", "成立时间", "发展历程"], 365),
 ]
 _FACT_DEFAULT_VALID_DAYS = 7
+# 事实句提取：回复/工具原文中"含数字 + 命中这些关键词"的短句才作为记忆落库
+_FACT_SENTENCE_KEYWORDS = [
+    "销量", "交付", "产量", "出栏", "存栏", "产能",
+    "成本", "价格", "均价", "毛利", "利润", "营收", "收入", "净利", "亏损", "盈利",
+    "同比", "环比", "增长", "下滑", "下降", "上升", "上涨", "下跌", "回落", "涨幅", "跌幅",
+    "占比", "份额", "市占率", "分红", "股息", "估值", "市盈率",
+    "调研", "评级", "公告",
+    "亿元", "万元", "元/", "公斤", "千克", "kg", "吨", "斤", "万辆", "万头",
+]
+# 每轮最多落库的事实条数 / 单条事实最大长度
+_MEMORY_FACT_MAX_PER_TURN = 6
+_MEMORY_FACT_MAX_CHARS = 150
 # 检索返回条数上限 / 单条注入长度上限
 _MEMORY_RECALL_TOP_K = 3
 _MEMORY_INJECT_MAX_CHARS = 1500
@@ -615,18 +627,6 @@ def _extract_match_tokens(text: str) -> set:
     return tokens
 
 
-def _memory_topic_key(args: Dict[str, Any], fallback: str) -> str:
-    """记忆主题键：优先用工具参数里的 query/url/ticker，兜底用户消息。"""
-    args = args or {}
-    q = args.get("query") or args.get("url") or ""
-    if not q and args.get("ticker"):
-        q = f"{args.get('ticker')} 新闻"
-    topic = str(q).strip()
-    if not topic:
-        topic = str(fallback or "").strip()
-    return topic[:80]
-
-
 def _extract_symbol_hint(text: str) -> Optional[str]:
     """从文本中提取 6 位 A 股代码（记忆关联股票，可空）。"""
     m = re.search(r"\b(\d{6})\b", text or "")
@@ -641,10 +641,18 @@ _RELATED_NAME_RE = re.compile(
 )
 
 
-def _extract_related_terms(*texts: str) -> List[str]:
-    """从多段文本中提取关联主体（股票名+代码），最多8个。"""
+def _extract_related_terms(
+    *texts: str, name_map: Optional[Dict[str, str]] = None
+) -> List[str]:
+    """从多段文本中提取关联主体（股票名+代码），最多8个。
+
+    name_map: 股票名→代码 映射（None 时仅正则提取名称）。
+    传入映射后，"赛力斯"这类不带后缀的公司名也能得到关联代码（如 601127），
+    保证行业/个股类记忆保存与检索两侧提取结果一致。
+    """
     terms = set()
     _connectives = "与和及对比跟或者、，。？?；;：: "
+    joined = " ".join(t for t in texts if t)
     for t in texts:
         if not t:
             continue
@@ -654,6 +662,9 @@ def _extract_related_terms(*texts: str) -> List[str]:
                 terms.add(name)
         for code in re.findall(r"\b\d{6}\b", t):
             terms.add(code)
+    for name, sym in (name_map or {}).items():
+        if name in joined:
+            terms.add(sym)
     return sorted(terms)[:8]
 
 
@@ -694,57 +705,160 @@ def _match_stock_refs(texts) -> set:
     return refs
 
 
+def _clean_fact_line(text: str) -> str:
+    """清洗候选事实句：仅去除列表符号/星号/反引号，保留数字开头的原样。
+
+    注意：不复用 _clean_memory_line——它会剥离行首数字（把"1-7月累计销量"
+    误清理成"月累计销量"），破坏销量/产量等以数字开头的事实。
+    """
+    cleaned = (text or "").strip()
+    cleaned = re.sub(r"^[>\-\*\s✅⚠️📌🔍💡]+", "", cleaned)
+    cleaned = re.sub(r"\*+", "", cleaned)
+    cleaned = re.sub(r"`+", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _extract_fact_sentences(text: str, max_facts: int = _MEMORY_FACT_MAX_PER_TURN) -> List[str]:
+    """从文本中提取"含数字 + 命中事实关键词"的短句（记忆落库用，不额外调 LLM）。
+
+    适用场景（按优先级）：
+    1. 助手最终回复——已通过四道数字溯源防线，句中数字可回溯到本轮工具结果，
+       作为事实直接落库（如"赛力斯2026年7月新能源销量24,229辆"）；
+    2. 工具返回原文兜底——搜索结果摘要本身往往就是一条事实。
+
+    规则：按句号/分号/换行切句，保留含数字且命中事实关键词的句子，清洗去重。
+    """
+    if not text:
+        return []
+    facts: List[str] = []
+    seen = set()
+    for raw in re.split(r"[。！？；;\n]+", text):
+        sent = _clean_fact_line(raw)
+        if len(sent) < 8:
+            continue
+        if sent.startswith("|"):  # 表格行
+            continue
+        if any(t in sent for t in ("数据来源", "免责声明", "不构成投资建议", "以上内容")):
+            continue
+        if not re.search(r"\d", sent):
+            continue  # 无数字不成事实
+        if not any(k in sent for k in _FACT_SENTENCE_KEYWORDS):
+            continue
+        sent = sent[:_MEMORY_FACT_MAX_CHARS]
+        if sent in seen:
+            continue
+        seen.add(sent)
+        facts.append(sent)
+        if len(facts) >= max_facts:
+            break
+    return facts
+
+
+def _fact_topic(
+    fact: str, user_message: str, name_map: Optional[Dict[str, str]] = None
+) -> str:
+    """为单条事实生成记忆主题（主体+概念），如"赛力斯 销量"。
+
+    主体来源（按优先级）：
+    1. 用户消息中的明确主体（正则匹配"股票/走势/业绩…"等后缀）；
+    2. 股票名称映射中最长命中名（如"赛力斯"不带后缀也能识别，取最长
+       避免"力斯"之类子串误配）；
+    3. 事实文本中的"XX股份/XX汽车"类名称。
+    概念为事实命中的第一个核心词（销量/成本/价格…）。
+    检索时以"主体+概念"的 bigram 命中即可召回。
+    """
+    subject = _extract_memory_subject(user_message, fact)
+    if not subject and name_map:
+        text = f"{user_message or ''} {fact or ''}"
+        name_hits = [name for name in name_map if len(name) >= 2 and name in text]
+        if name_hits:
+            subject = max(name_hits, key=len)
+    if not subject:
+        m = _RELATED_NAME_RE.search(fact or "")
+        if m:
+            subject = m.group(0)
+    concept = next((k for k in _FACT_SENTENCE_KEYWORDS if k in (fact or "")), "")
+    parts = [p for p in (subject, concept) if p]
+    if not parts:
+        return ""
+    return " ".join(parts)[:60]
+
+
 async def _persist_memory_facts(
     db,
     tool_results: List[Dict[str, Any]],
     user_message: str,
     thread_id: str,
+    assistant_reply: str = "",
     related_context: str = "",
 ) -> int:
-    """将本轮在线工具的成功结果保存为事实记忆（按主题 upsert 覆盖）。
+    """将本轮在线工具背后的"提取事实"保存为记忆（不再存工具返回全文）。
+
+    事实来源（按优先级）：
+    1. 助手最终回复——已通过数字溯源防线，其中"含数字+事实关键词"的短句
+       即可信事实（如"赛力斯2026年7月新能源销量24,229辆"）；
+    2. 兜底：从工具返回原文中抽取同样格式的短句（搜索结果摘要往往本身就是
+       一条事实，如"牧原获11家机构调研：2025年完全成本12元/公斤"）。
+
+    相比旧实现（把工具返回全文存 content[:8000]）：
+    - 每条记忆≤150字符，体积小、检索注入无压力；
+    - 数字直接存在于 content，换会话召回后可进入溯源候选集（memory_trusted_contents）；
+    - 主题按"主体+概念"生成（如"赛力斯 销量"），bigram 命中即可召回。
 
     Args:
+        assistant_reply: 本轮助手最终回复（已通过数字溯源防线）。
         related_context: 会话近期上下文（如最近几条用户消息拼接），
-            用于提取关联股票（如"牧原股份"）存入 related_terms——
-            行业类记忆借此在该股的后续问题中被召回。
+            用于提取关联股票存入 related_terms——行业类事实借此在该股
+            的后续问题中被召回。
 
     Returns:
-        保存条数（0 表示无可保存结果）。
+        保存条数（0 表示无可保存事实）。
     """
     saved = 0
     try:
-        related_terms = _extract_related_terms(user_message, related_context)
-        for item in (tool_results or []):
-            tool = item.get("tool") or ""
-            content = item.get("content") or ""
-            if tool not in _MEMORY_FACT_TOOLS or item.get("is_error"):
-                continue
-            if len(content) < 100:
-                continue  # 内容太短无记忆价值
-            topic = _memory_topic_key(item.get("args"), user_message)
+        name_map = await _get_stock_name_map(db)
+        related_terms = _extract_related_terms(user_message, related_context, name_map=name_map)
+        facts = _extract_fact_sentences(assistant_reply or "")
+        if not facts:
+            # 回复里无可提取事实（如纯会话回复），退回从工具原文抽取
+            for item in (tool_results or []):
+                if item.get("tool") not in _MEMORY_FACT_TOOLS or item.get("is_error"):
+                    continue
+                facts.extend(_extract_fact_sentences(item.get("content") or ""))
+                if len(facts) >= _MEMORY_FACT_MAX_PER_TURN:
+                    break
+        if not facts:
+            return 0
+        tools_used_str = ",".join(
+            sorted({str(i.get("tool", "")) for i in (tool_results or []) if i.get("tool")})
+        )
+        now = datetime.now()
+        for fact in facts[:_MEMORY_FACT_MAX_PER_TURN]:
+            topic = _fact_topic(fact, user_message, name_map)
             if not topic:
                 continue
-            category = _classify_fact_category(topic + content[:300])
-            now = datetime.now()
+            category = _classify_fact_category(fact)
             valid_until = now + timedelta(days=_fact_valid_days(category))
             doc = {
                 "topic": topic,
-                "symbol": _extract_symbol_hint(topic),
+                "symbol": _extract_symbol_hint(fact),
                 "related_terms": related_terms,
-                "tool_id": tool,
-                "content": content[:8000],  # 防止单条记忆过大
+                "tool_id": tools_used_str,
+                "content": fact,
                 "fetched_at": now.isoformat(timespec="seconds"),
                 "category": category,
                 "valid_until": valid_until.isoformat(timespec="seconds"),
                 "thread_id": thread_id,
             }
+            # 相同事实句（topic+content）upsert 刷新，不同事实各自成条
             await db[_MEMORY_FACTS_COLLECTION].update_one(
-                {"topic": topic}, {"$set": doc}, upsert=True
+                {"topic": topic, "content": fact}, {"$set": doc}, upsert=True
             )
             saved += 1
             logger.info(
-                "[智能助手·记忆] 已保存事实记忆: topic=%.40s category=%s 有效期至 %s",
-                topic, category, doc["valid_until"],
+                "[智能助手·记忆] 已保存事实: topic=%.40s category=%s fact=%.50s",
+                topic, category, fact,
             )
     except Exception as e:
         logger.warning("[智能助手·记忆] 保存事实记忆失败（不影响回复）: %s", e)
@@ -759,15 +873,18 @@ async def _recall_memory_facts(
     """检索与当前问题匹配且未过期的事实记忆（排除本会话自己保存的）。
 
     匹配策略（双通道）：
-    1. 主题匹配：用户消息与记忆主题的词元交集（bigram 为主）；
-    2. 关联主体匹配：用户消息提及的股票（如"牧原股份"/"002714"）与记忆保存时
-       记录的 related_terms 交集——行业类记忆（如"生猪养殖成本"）借此在
-       个股问题（如"牧原反弹了吗"）中被召回，提供行业背景。
+    1. 主题/内容匹配：用户消息与记忆的"主题+事实内容"词元交集（bigram 为主）
+       ——事实句（≤150字）整体参与匹配，问"赛力斯7月销量"可直接命中
+       "赛力斯2026年7月新能源销量24,229辆"这类落库事实；
+    2. 关联主体匹配：用户消息提及的股票（如"牧原股份"/"002714"，含名称→代码
+       映射）与记忆保存时记录的 related_terms 交集——行业类记忆（如
+       "生猪养殖成本"）借此在个股问题（如"牧原反弹了吗"）中被召回。
     """
     try:
         now_iso = datetime.now().isoformat(timespec="seconds")
         user_tokens = _extract_match_tokens(user_message or "")
-        user_terms = set(_extract_related_terms(user_message))
+        name_map = await _get_stock_name_map(db)
+        user_terms = set(_extract_related_terms(user_message, name_map=name_map))
         if not user_tokens and not user_terms:
             return []
         cursor = (
@@ -780,7 +897,8 @@ async def _recall_memory_facts(
         async for doc in cursor:
             if current_thread_id and doc.get("thread_id") == current_thread_id:
                 continue  # 本会话已有该数据在上下文里，无需重复注入
-            topic_tokens = _extract_match_tokens(doc.get("topic") or "")
+            match_text = f"{doc.get('topic') or ''} {doc.get('content') or ''}"
+            topic_tokens = _extract_match_tokens(match_text)
             overlap = user_tokens & topic_tokens
             related_hit = bool(
                 user_terms & set(doc.get("related_terms") or [])
@@ -2463,13 +2581,14 @@ class IntelligentAssistantService:
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
 
-            # 事实记忆保存：在线工具成功结果落库（带时间标签，跨会话复用）
+            # 事实记忆保存：将本轮提取出的"事实"落库（带时间标签，跨会话复用）
             if tool_results:
                 await _persist_memory_facts(
                     self._db,
                     tool_results,
                     resolved_user_message,
                     conversation_id or "",
+                    assistant_reply=resp.content or "",
                     related_context=_recent_user_context(messages),
                 )
 
@@ -2833,13 +2952,14 @@ class IntelligentAssistantService:
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat_stream")
 
-            # 事实记忆保存：在线工具成功结果落库（带时间标签，跨会话复用）
+            # 事实记忆保存：将本轮提取出的"事实"落库（带时间标签，跨会话复用）
             if tool_results:
                 await _persist_memory_facts(
                     self._db,
                     tool_results,
                     resolved_user_message,
                     conversation_id or "",
+                    assistant_reply=resp.content or "",
                     related_context=_recent_user_context(messages),
                 )
             return resp.content
