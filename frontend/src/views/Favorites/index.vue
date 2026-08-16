@@ -918,15 +918,18 @@ const handleMarketChange = () => {
 }
 
 // 搜索股票（支持代码和名称）
-const searchStocks = (queryString: string, cb: any): void => {
+// 注意：不能声明为 async——el-autocomplete 的 fetch-suggestions 要求同步返回
+// void 的函数签名，async 函数返回 Promise<void> 会触发 vue-tsc 类型错误
+const searchStocks = (queryString: string, cb: (results: any[]) => void) => {
   const q = queryString?.trim()
   if (!q || q.length < 1) {
     cb([])
     return
   }
   // 正确路径是 /api/markets/CN/stocks/search
-  request.get(`/api/markets/CN/stocks/search`, { params: { q, limit: 20 } })
-    .then(res => {
+  request
+    .get(`/api/markets/CN/stocks/search`, { params: { q, limit: 20 } })
+    .then((res: any) => {
       const stocks = res?.data?.stocks || []
       cb(stocks.map((s: any) => ({
         value: s.code || s.symbol || '',
@@ -934,7 +937,7 @@ const searchStocks = (queryString: string, cb: any): void => {
         name: s.name || '',
       })))
     })
-    .catch(err => {
+    .catch((err: any) => {
       console.error('搜索失败:', err)
       cb([])
     })
