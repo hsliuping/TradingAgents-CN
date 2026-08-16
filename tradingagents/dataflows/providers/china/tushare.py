@@ -115,31 +115,49 @@ class TushareProvider(BaseStockDataProvider):
         return None
 
     def _ensure_api_client(self, validate: bool = False) -> bool:
-        """确保 Tushare API Client 已初始化。Tushare 是 HTTP API，不维护长连接。"""
+        """确保 Tushare API Client 已初始化。Tushare 是 HTTP API，不维护长连接。
+
+        🔥 每次调用都会从数据库读取最新 Token（优先级：数据库 > 环境变量）；
+        若与当前 API Client 使用的 Token 不一致，则自动重新初始化，
+        保证用户在 Web 后台修改 Token 后立即生效，无需重启后端。
+        """
         if not TUSHARE_AVAILABLE:
             self.logger.error("❌ Tushare库不可用")
             self.api = None
             self.connected = False
             return False
 
-        if self.api is not None and not validate:
-            self.connected = True
-            return True
-
         try:
+            # 🔥 每次调用重新读取 Token，避免缓存旧 Token
             db_token = self._get_token_from_database()
-            env_token = self.config.get('token')
+            env_token = self.config.get('token') or os.getenv("TUSHARE_TOKEN", "")
             token_candidates = []
             if db_token:
-                token_candidates.append(("database", db_token))
+                token_candidates.append(("database", db_token.strip()))
             if env_token:
-                token_candidates.append(("env", env_token))
+                token_candidates.append(("env", env_token.strip()))
 
             if not token_candidates:
                 self.logger.error("❌ Tushare token未配置，请在 Web 后台或 .env 文件中配置 TUSHARE_TOKEN")
                 self.api = None
                 self.connected = False
                 return False
+
+            # 当前应使用的 Token（数据库优先）
+            effective_token = token_candidates[0][1]
+
+            # 🔥 Token 未变化且 API Client 已就绪：直接复用，避免不必要的重建
+            if (
+                self.api is not None
+                and not validate
+                and getattr(self, "_current_token", None) == effective_token
+            ):
+                self.connected = True
+                return True
+
+            # 🔥 Token 已变化：废弃旧 API Client，重新初始化
+            if self.api is not None:
+                self.logger.info("🔄 Tushare Token 已变更，重新初始化 API Client")
 
             for source, token in token_candidates:
                 try:
@@ -155,6 +173,7 @@ class TushareProvider(BaseStockDataProvider):
                             continue
 
                     self.api = api
+                    self._current_token = token
                     self.connected = True
                     self.token_source = source
                     self.logger.info(f"✅ Tushare API Client 已就绪 (Token来源: {source})")
