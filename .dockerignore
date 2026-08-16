@@ -118,6 +118,7 @@ coverage/
 # 默认忽略所有 Markdown，但为前端构建需要的目录开白名单
 *.md
 !README.md
+!THIRD_PARTY_NOTICES.md
 !docs/docker_deployment_guide.md
 !docs/auth_system_improvement.md
 !docs/release_v2.0/**
@@ -127,6 +128,8 @@ coverage/
 !docs/paper/**
 !docs/courses/advanced/*.md
 !docs/courses/advanced/expanded/**
+# v3.0 高级课程（前端 ?raw 导入，构建期必需）
+!docs/07-courses/v3.0/**
 # 用户手册（向量索引用，打包到镜像）
 !docs/02-user-guide/user-manual-v3.0.md
 !docs/02-user-guide/jdyun-user-manual-v3.0.md

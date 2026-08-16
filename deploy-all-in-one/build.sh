@@ -85,34 +85,14 @@ fi
 cd "$PROJECT_ROOT"
 
 # ------------------------------------------------------------------------------
-# 生成 SearXNG wheel（在 docker build 之前执行）
-# 从 searxng/ 源码目录打包，Dockerfile 会 COPY 到镜像内安装
-# --no-deps：依赖已在基础镜像，避免拉取额外包
+# 检查 searxng/ 源码目录（wheel 生成现已移入 Dockerfile 阶段 0，复用后端基础镜像）
+# 不再依赖本地 Python 环境，避免 docker run 新 Python 镜像造成 apt/pip 网络问题
 # ------------------------------------------------------------------------------
-if [ -f "searxng/setup.py" ] || [ -f "searxng/pyproject.toml" ]; then
-    echo "📦 生成 SearXNG wheel..."
-    # 冻结版本号（容器内无 git，version.py 运行时 fallback 需要 git，必须打包前冻结）
-    (cd searxng && python -m searx.version freeze) || \
-    (cd searxng && python3 -m searx.version freeze) || true
-    if [ ! -f "searxng/searx/version_frozen.py" ]; then
-        echo "❌ version_frozen.py 冻结失败（需要 git 和已安装的 searx 包）"
-        exit 1
-    fi
-    mkdir -p deploy-all-in-one/wheels
-    rm -f deploy-all-in-one/wheels/searxng-*.whl
-    python -m pip wheel ./searxng --no-deps --no-build-isolation -w deploy-all-in-one/wheels || \
-    python3 -m pip wheel ./searxng --no-deps --no-build-isolation -w deploy-all-in-one/wheels
-    if ! ls deploy-all-in-one/wheels/searxng-*.whl &> /dev/null; then
-        echo "❌ SearXNG wheel 生成失败"
-        exit 1
-    fi
-    # 验证 wheel 内含 version_frozen（缺失会导致容器内启动崩溃）
-    python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('deploy-all-in-one/wheels/searxng-*.whl')[0]); assert 'searx/version_frozen.py' in z.namelist(), 'version_frozen.py missing in wheel'; print('   wheel 内含 version_frozen.py OK')"
-    echo "   $(ls deploy-all-in-one/wheels/searxng-*.whl | head -1)"
-else
+if [ ! -f "searxng/setup.py" ] && [ ! -f "searxng/pyproject.toml" ]; then
     echo "❌ searxng/ 源码目录不存在（git clone https://github.com/searxng/searxng 后重试）"
     exit 1
 fi
+echo "🔍 searxng 源码就绪，wheel 生成将在 docker build 阶段执行（复用后端基础镜像）"
 
 # ------------------------------------------------------------------------------
 # 更新种子数据中的用户手册签名（确保跨环境签名一致）
@@ -135,12 +115,51 @@ else
     echo "📦 编译前端..."
     cd frontend
 
+    # v3.0 前端用 ?raw 静态导入 30 个课程 + 用户手册，Vite 打包时 bundle 很大
+    # 需放大 Node.js V8 堆上限，否则 JS heap OOM（默认约 2GB，容易顶满）
+    export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=8192"
+    export NODE_ENV=production
+
+    # 在 Windows/WSL 混合环境下，优先用 Windows 本地 npm 编译前端
+    # （node_modules 通常在 Windows 侧安装，WSL Linux npm 会缺平台二进制导致
+    #  rollup/vue-tsc 等一系列跨平台问题；npm.exe 互操作可直接复用 Windows 环境）
+    USE_WINDOWS_NPM=false
+    if command -v npm.exe >/dev/null 2>&1; then
+        USE_WINDOWS_NPM=true
+        echo "   检测到 Windows 本地 npm，使用 Windows 环境编译前端（复用 Windows 侧 node_modules）"
+    fi
+
+    # 检查 rollup 可选依赖是否匹配当前平台（仅在使用 WSL/Linux npm 时需要；
+    # Windows npm.exe 天然匹配 Windows 安装的 node_modules）
+    ROLLUP_PLATFORM_PKG=""
+    if [ "$USE_WINDOWS_NPM" = false ]; then
+        case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64)  ROLLUP_PLATFORM_PKG="@rollup/rollup-linux-x64-gnu" ;;
+            Linux-aarch64) ROLLUP_PLATFORM_PKG="@rollup/rollup-linux-arm64-gnu" ;;
+            Darwin-x86_64) ROLLUP_PLATFORM_PKG="@rollup/rollup-darwin-x64" ;;
+            Darwin-arm64)  ROLLUP_PLATFORM_PKG="@rollup/rollup-darwin-arm64" ;;
+        esac
+    fi
+    if [ -n "$ROLLUP_PLATFORM_PKG" ] && [ ! -d "node_modules/$ROLLUP_PLATFORM_PKG" ]; then
+        echo "   ⚠️  缺少 $ROLLUP_PLATFORM_PKG（node_modules/ 非本机平台安装），正在补齐..."
+        npm install --silent --no-save --include=optional "$ROLLUP_PLATFORM_PKG" || \
+            npm install --silent --no-save "$ROLLUP_PLATFORM_PKG" || \
+            echo "   （补齐失败，尝试直接构建；若仍报错请删除 frontend/node_modules 后重新 npm install）"
+    fi
+
+    NPM_CMD="npm"
+    if [ "$USE_WINDOWS_NPM" = true ]; then
+        NPM_CMD="npm.exe"
+        # NODE_OPTIONS 需通过 WSLENV 才能传递给 Windows 进程
+        export WSLENV="${WSLENV:+$WSLENV:}NODE_OPTIONS"
+    fi
+
     if [ "$JDYUN" = true ]; then
-        echo "   京东云版：npm run build -- --mode jdyun"
-        npm run build -- --mode jdyun
+        echo "   京东云版：$NPM_CMD run build -- --mode jdyun（NODE_OPTIONS=--max-old-space-size=8192）"
+        "$NPM_CMD" run build -- --mode jdyun
     else
-        echo "   普通版：npm run build"
-        npm run build
+        echo "   普通版：$NPM_CMD run build（NODE_OPTIONS=--max-old-space-size=8192）"
+        "$NPM_CMD" run build
     fi
 
     cd "$PROJECT_ROOT"
@@ -151,12 +170,16 @@ else
         exit 1
     fi
 
-    # 京东云版验证标识
+    # 京东云版验证：检查 index.html 标题是否包含“京东云版”
+    # （VITE_APP_TITLE 由 .env.jdyun 在 jdyun 模式下注入；通用模式编译的产物不含此标识）
     if [ "$JDYUN" = true ]; then
-        if ! grep -q "京东云" frontend/dist/index.html 2>/dev/null; then
-            echo "⚠️  警告：京东云版编译未检测到标识，请确认 .env.jdyun 配置正确"
+        if ! grep -q "京东云版" frontend/dist/index.html 2>/dev/null; then
+            echo "❌ 京东云版编译失败：index.html 标题未包含“京东云版”"
+            echo "   原因：vite 未加载 frontend/.env.jdyun（检查 --mode jdyun 是否生效），"
+            echo "   或复用了通用模式的旧 dist（不要 --skip-frontend）"
+            exit 1
         else
-            echo "✅ 京东云版标识验证通过"
+            echo "✅ 京东云版标识验证通过（index.html 标题含“京东云版”）"
         fi
     fi
 

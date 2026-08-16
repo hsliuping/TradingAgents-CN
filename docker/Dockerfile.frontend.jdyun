@@ -20,6 +20,14 @@ COPY frontend/ .
 # 复制京东云版环境变量文件
 COPY frontend/.env.jdyun .env.jdyun
 
+# v3.0 课程内容与用户手册（前端 ?raw 导入，构建期必需）
+# 说明：src/config/ 下的 ../../../docs 相对路径解析到容器根 /docs
+COPY docs/07-courses/v3.0 /docs/07-courses/v3.0
+COPY docs/02-user-guide/user-manual-v3.0.md /docs/02-user-guide/user-manual-v3.0.md
+
+# v3.0 ?raw 导入 30 个课程 + 用户手册会撑大打包内存，放大 Node V8 堆上限
+ENV NODE_OPTIONS="--max-old-space-size=8192" NODE_ENV=production
+
 # 构建京东云版前端（使用 jdyun 模式）
 RUN npm run build -- --mode jdyun
 

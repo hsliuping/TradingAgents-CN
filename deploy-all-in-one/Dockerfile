@@ -9,13 +9,34 @@
 # 运行：docker run -d -p 8082:8082 -v ta-data:/data/db tradingagents-cn-pro:3.0.0
 
 # ==============================================================================
-# 阶段 1：构建运行时镜像（复用基础镜像 + 添加 MongoDB/Redis/Nginx/s6）
+# 全局 ARG（必须在第一个 FROM 之前声明，所有 stage 可见）
 # ==============================================================================
 ARG BASE_BACKEND=hsliup/tradingagents-pro-backend:3-latest
 ARG MONGO_IMAGE=mongo:7.0
 ARG REDIS_IMAGE=redis:7-alpine
 ARG NGINX_IMAGE=nginx:alpine
 
+# ==============================================================================
+# 阶段 0：用后端基础镜像生成 SearXNG wheel（不引入额外 Python 镜像）
+# 基础镜像内已含 Python + searxng 运行依赖（msgspec/lxml 等），无需额外安装
+# version_frozen.py：searx/version.py 的 freeze 用 git 获取版本号（若无 git 则写默认值兜底）
+# ==============================================================================
+FROM ${BASE_BACKEND} AS searxng-wheel-builder
+COPY searxng /build/searxng
+# 后端基础镜像不含 searxng 运行依赖（msgspec/lxml 等），
+# setup.py 生成 metadata 时会 import searx → 触发 msgspec 导入，必须先装
+RUN pip install --no-cache-dir -r /build/searxng/requirements.txt
+RUN cd /build/searxng && \
+    # 冻结版本号：有 git 就用 searx 自带的 freeze；没 git 就用 python 直接写兜底文件
+    (command -v git >/dev/null 2>&1 && python -m searx.version freeze) || \
+    python -c "open('searx/version_frozen.py','w').write('VERSION_STRING=\"2026.8.16+local\"\nVERSION_TAG=\"2026.8.16+local\"\nDOCKER_TAG=\"2026.8.16-local\"\nGIT_URL=\"https://github.com/searxng/searxng\"\nGIT_BRANCH=\"local\"\n')" && \
+    mkdir -p /build/wheels && \
+    python -m pip wheel . --no-deps --no-build-isolation -w /build/wheels && \
+    python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('/build/wheels/searxng-*.whl')[0]); assert 'searx/version_frozen.py' in z.namelist(), 'version_frozen missing'"
+
+# ==============================================================================
+# 阶段 1：构建运行时镜像（复用基础镜像 + 添加 MongoDB/Redis/Nginx/s6）
+# ==============================================================================
 FROM ${MONGO_IMAGE} AS mongo-source
 FROM ${REDIS_IMAGE} AS redis-source
 FROM ${NGINX_IMAGE} AS nginx-source
@@ -149,10 +170,10 @@ COPY docs/02-user-guide/jdyun-user-manual-v3.0.md /app/docs/02-user-guide/
 
 # ------------------------------------------------------------------------------
 # SearXNG Web 搜索引擎（智能助手实时资讯）
-# wheel 由 build.sh 从 searxng/ 源码生成（pip wheel --no-deps，依赖已在基础镜像）
+# wheel 由阶段 0（searxng-wheel-builder）生成，使用同一基础镜像的 Python 环境
 # 配置文件已随 COPY config /app/config 包含（config/searxng/settings.yml）
 # ------------------------------------------------------------------------------
-COPY deploy-all-in-one/wheels/searxng-*.whl /tmp/
+COPY --from=searxng-wheel-builder /build/wheels/searxng-*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/searxng-*.whl && \
     rm -f /tmp/searxng-*.whl && \
     python -c "import searx; print('searxng OK:', searx.__file__)"

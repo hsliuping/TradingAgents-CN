@@ -22,6 +22,9 @@ from core.tools.implementations.assistant_ops import topic_manager  # noqa: F401
 from core.tools.implementations.assistant_ops import recent_search  # noqa: F401
 from core.tools.implementations.assistant_ops import agent_executor  # noqa: F401
 from core.tools.implementations.assistant_ops import stock_sync_ops  # noqa: F401
+# v3.0 在线搜索工具：必须显式导入，否则京东云编译后 .py 被删、ToolLoader 动态发现失效
+from core.tools.implementations.assistant_ops import web_search  # noqa: F401
+from core.tools.implementations.assistant_ops import fetch_url  # noqa: F401
 from .gain_alerts import set_stop_gain_alert, list_stop_gain_alerts, clear_stop_gain_alert
 # 使用问答机器人专用工具（v3.0 新增）：仅在 assistant_role="usage_helper" 时加载
 from core.tools.implementations.assistant_ops import user_state  # noqa: F401
