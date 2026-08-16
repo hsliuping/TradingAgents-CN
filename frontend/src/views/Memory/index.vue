@@ -549,7 +549,7 @@ function formatScore(score: number) {
   return `${Math.round((score || 0) * 100)}%`
 }
 
-function formatTime(t: string) {
+function formatTime(t?: string | null) {
   if (!t) return '-'
   try {
     const d = new Date(t)
