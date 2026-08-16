@@ -274,6 +274,14 @@ async def get_sector_performance(
         
         # 4. 分析板块表现
         if sectors_df is not None and not sectors_df.empty:
+            # ths_member 反查仅含板块代码，构建代码→名称映射（N行业板块 + I行业指数）
+            name_map = {}
+            for idx_type in ["N", "I"]:
+                ldf = await _get_ths_index_list_cached(provider, idx_type)
+                if ldf is not None and not ldf.empty:
+                    for _, r in ldf.iterrows():
+                        name_map[r['ts_code']] = r['name']
+
             sector_count = len(sectors_df)
             report_lines.append(f"📌 所属板块数: {sector_count} 个")
             report_lines.append("")
@@ -305,7 +313,7 @@ async def get_sector_performance(
                         
                         sector_performance.append({
                             'code': sector_code,
-                            'name': row.get('name', sector_code),
+                            'name': name_map.get(sector_code) or row.get('name', sector_code),
                             'period_pct': round(pct_change, 2),
                             'today_pct': round(today_pct, 2) if today_pct else 0
                         })
@@ -879,6 +887,111 @@ async def analyze_sector(ticker: str, trade_date: str) -> str:
 # 板块级别工具函数（以板块名称/代码为入口）
 # ============================================================
 
+# 常见行业/概念别名 → 同花顺板块关键词
+# 同花顺板块命名与常识叫法不一致时兜底（如"生猪养殖行业"在THS体系中叫"猪肉"）
+# 注意：映射目标必须是THS体系中真实存在的板块名关键词
+_SECTOR_SYNONYMS = {
+    # 畜禽养殖：THS无"养殖/畜牧/生猪"板块，A股对应"猪肉"
+    "养殖": "猪",
+    "生猪": "猪",
+    "养猪": "猪",
+    "畜牧": "猪",
+    "猪周期": "猪",
+    "肉鸡": "鸡",
+    # 金融：THS无"证券"板块，对应"参股券商/中资券商股"
+    "证券": "券商",
+    # 新能源
+    "新能源车": "新能源汽车",
+    "电动车": "新能源汽车",
+    "锂电": "锂电池",
+    "锂矿": "锂",
+    # 军工航天：THS对应"军工"
+    "国防": "军工",
+    "船舶": "船",
+    # 石化
+    "石化": "石油",
+    # 电子
+    "封测": "集成电路",
+    "面板": "OLED",
+    # 汽车
+    "汽车零部件": "汽车",
+    "智能驾驶": "无人驾驶",
+    # 农业
+    "种业": "转基因",
+    "渔业": "水产",
+    # 消费
+    "乳制品": "乳业",
+    "奶牛": "乳",
+    "零食": "休闲食品",
+    "调味品": "调味",
+    "家电": "家用电器",
+    "中药": "中医药",
+    "服装": "服饰",
+    "造纸": "纸",
+    # 基建物流
+    "基建": "基础建设",
+    "快递": "物流",
+    "运营商": "电信运营",
+    "水务": "污水",
+    "机场": "航空",
+}
+
+
+def _synonym_keywords(keyword: str) -> List[str]:
+    """扩展关键词：原词 + 命中的同义词映射目标（去重保序）。"""
+    candidates = [keyword]
+    for k, v in _SECTOR_SYNONYMS.items():
+        if k in keyword and v not in candidates:
+            candidates.append(v)
+    return candidates
+
+
+def _suggest_similar_sectors(df, keyword: str, top_n: int = 5) -> List[tuple]:
+    """字符重叠模糊推荐：板块名与关键词至少重叠2个字符时按重叠数降序推荐。"""
+    if df is None or df.empty:
+        return []
+    chars = set(keyword)
+    scored = []
+    for _, row in df.iterrows():
+        name = str(row['name'])
+        overlap = len(chars & set(name))
+        if overlap >= 2:
+            scored.append((overlap, str(row['ts_code']), name, row.get('count', 'N/A')))
+    scored.sort(key=lambda x: -x[0])
+    return scored[:top_n]
+
+
+async def _sector_not_found_hint(provider, keyword: str) -> str:
+    """板块未命中时生成候选建议文本，帮助调用方（LLM）自我纠正板块名。"""
+    # 1. 同义词重试提示
+    synonym_names = []
+    for idx_type in ["N", "I", "S"]:
+        df = await _get_ths_index_list_cached(provider, idx_type)
+        if df is None or df.empty:
+            continue
+        for kw in _synonym_keywords(keyword)[1:]:
+            matched = df[df['name'].str.contains(kw, case=False, na=False)]
+            for _, row in matched.head(3).iterrows():
+                synonym_names.append(f"{row['name']} ({row['ts_code']})")
+        if synonym_names:
+            break
+    # 2. 字符重叠候选
+    if not synonym_names:
+        for idx_type in ["N", "I", "S"]:
+            df = await _get_ths_index_list_cached(provider, idx_type)
+            if df is not None and not df.empty:
+                synonym_names = [
+                    f"{name} ({code})" for _o, code, name, _c in _suggest_similar_sectors(df, keyword)
+                ]
+                if synonym_names:
+                    break
+    hint = f"⚠️ 未找到包含 \"{keyword}\" 的板块。"
+    if synonym_names:
+        hint += f"相近板块：{'、'.join(synonym_names[:5])}。"
+    hint += "建议：① 用上述板块名重试；② 调用 search_sector 搜索正确板块名；③ 若已知个股代码，改用 get_sector_performance(ticker) 按个股反查所属板块。"
+    return hint
+
+
 async def search_sector(
     keyword: str,
     sector_type: str = "N",
@@ -888,7 +1001,7 @@ async def search_sector(
 
     Args:
         keyword: 板块名称关键词（如 "光伏"、"半导体"、"白酒"）
-        sector_type: 板块类型 N=行业 S=概念 R=地域，默认 N
+        sector_type: 板块类型 N=行业板块 I=行业指数 S=概念 R=地域，默认 N
 
     Returns:
         匹配的板块列表（含代码、名称、成分股数量）
@@ -904,8 +1017,8 @@ async def search_sector(
         matched = df[df['name'].str.contains(keyword, case=False, na=False)]
 
         if matched.empty:
-            # 尝试其他类型
-            for alt_type in ["S", "N", "R"]:
+            # 尝试其他类型（含I类行业指数：完整行业体系，"养殖/调味品"等仅存在于I类）
+            for alt_type in ["I", "N", "S", "R"]:
                 if alt_type == sector_type:
                     continue
                 alt_df = await _get_ths_index_list_cached(provider, alt_type)
@@ -915,12 +1028,31 @@ async def search_sector(
                         sector_type = alt_type
                         break
 
+        matched_kw = keyword
         if matched.empty:
-            return f"⚠️ 未找到包含 \"{keyword}\" 的板块"
+            # 同义词兜底：如"养殖"→"猪"（THS板块命名与常识叫法不一致）
+            all_types = ["N", "I", "S", "R"]
+            for kw in _synonym_keywords(keyword)[1:]:
+                for t in all_types:
+                    df_t = df if t == sector_type else await _get_ths_index_list_cached(provider, t)
+                    if df_t is None or df_t.empty:
+                        continue
+                    hit = df_t[df_t['name'].str.contains(kw, case=False, na=False)]
+                    if not hit.empty:
+                        matched = hit
+                        sector_type = t
+                        matched_kw = kw
+                        break
+                if not matched.empty:
+                    break
+
+        if matched.empty:
+            return await _sector_not_found_hint(provider, keyword)
 
         type_map = {"N": "行业", "S": "概念", "R": "地域", "I": "行业指数"}
+        title_kw = f"\"{keyword}\"" if matched_kw == keyword else f"\"{keyword}\"（按同义词\"{matched_kw}\"匹配）"
         lines = [
-            f"🔍 板块搜索结果：\"{keyword}\"",
+            f"🔍 板块搜索结果：{title_kw}",
             f"类型: {type_map.get(sector_type, sector_type)}",
             f"匹配数量: {len(matched)} 个",
             "",
@@ -958,7 +1090,7 @@ async def get_sector_daily(
         # 1. 搜索板块代码
         sector_code = await _resolve_sector_code(provider, sector_name)
         if not sector_code:
-            return f"⚠️ 未找到包含 \"{sector_name}\" 的板块，无法获取行情"
+            return await _sector_not_found_hint(provider, sector_name)
 
         sector_ts_code, sector_display_name = sector_code
 
@@ -1040,7 +1172,7 @@ async def get_sector_constituents(
         # 1. 搜索板块代码
         sector_code = await _resolve_sector_code(provider, sector_name)
         if not sector_code:
-            return f"⚠️ 未找到包含 \"{sector_name}\" 的板块"
+            return await _sector_not_found_hint(provider, sector_name)
 
         sector_ts_code, sector_display_name = sector_code
 
@@ -1198,19 +1330,24 @@ async def _resolve_sector_code(
 ) -> Optional[tuple]:
     """
     根据关键词搜索板块，返回 (ts_code, name) 或 None。
-    优先匹配行业板块(N)，其次概念板块(S)。
+    原词优先在 N(行业板块)/I(行业指数)/S(概念)/R(地域) 四类中查找，
+    全部未命中再用同义词表重试（如"锂电"→"锂电池"）。
+    注意：I类（881/884开头）是同花顺完整行业指数体系（约1100个），
+    "养殖/生猪/调味品/港口"等行业仅在I类中存在，不可遗漏。
     """
-    for idx_type in ["N", "S", "R"]:
-        df = await _get_ths_index_list_cached(provider, idx_type)
-        if df is None or df.empty:
-            continue
-        matched = df[df['name'].str.contains(keyword, case=False, na=False)]
-        if not matched.empty:
-            # 取成分股最多的那个（通常是最主要的板块）
-            if 'count' in matched.columns:
-                matched = matched.sort_values('count', ascending=False)
-            top = matched.iloc[0]
-            return (top['ts_code'], top['name'])
+    candidates = _synonym_keywords(keyword)
+    for kw in candidates:  # 原词优先，同义词兜底
+        for idx_type in ["N", "I", "S", "R"]:
+            df = await _get_ths_index_list_cached(provider, idx_type)
+            if df is None or df.empty:
+                continue
+            matched = df[df['name'].str.contains(kw, case=False, na=False)]
+            if not matched.empty:
+                # 取成分股最多的那个（通常是最主要的板块）
+                if 'count' in matched.columns:
+                    matched = matched.sort_values('count', ascending=False)
+                top = matched.iloc[0]
+                return (top['ts_code'], top['name'])
     return None
 
 

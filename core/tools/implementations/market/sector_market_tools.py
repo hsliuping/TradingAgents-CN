@@ -367,7 +367,7 @@ def get_sector_analysis(
 )
 def search_sector_tool(
     keyword: Annotated[str, "板块名称关键词（如 光伏、半导体、白酒、新能源）"],
-    sector_type: Annotated[str, "板块类型: N=行业 S=概念 R=地域，默认N"] = "N",
+    sector_type: Annotated[str, "板块类型: N=行业板块 I=行业指数 S=概念 R=地域，默认N"] = "N",
 ) -> str:
     """
     按名称关键词搜索同花顺板块
