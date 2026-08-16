@@ -96,6 +96,377 @@ def _build_fallback_memory_facts(user_msg: str, assistant_msg: str, limit: int =
     return facts
 
 
+# 股票代码正则（6位数字，A股主板/创业板/科创板）
+_STOCK_CODE_RE = re.compile(r"\b(00|30|60|68)\d{4}\b")
+# 数据相关关键词——用于判断用户问题是否涉及股票数据查询
+_STOCK_DATA_KEYWORDS = [
+    "财报", "利润", "营收", "收入", "净利润", "毛利率", "现金流", "资产", "负债",
+    "估值", "市盈率", "市净率", "pe", "pb", "ps",
+    "销量", "产量", "出栏", "交付",
+    "价格", "股价", "行情", "涨跌", "涨幅", "跌幅",
+    "入手", "买入", "卖出", "加仓", "减仓", "持有", "清仓", "值得", "能不能买", "该不该",
+    "分析", "研究", "怎么样", "如何", "技术面", "基本面", "基本面",
+]
+
+
+def _extract_stock_code(user_message: str) -> Optional[str]:
+    """从用户消息中提取 6 位 A 股股票代码。"""
+    if not user_message:
+        return None
+    match = _STOCK_CODE_RE.search(user_message)
+    if match:
+        return match.group(0)
+    return None
+
+
+async def _resolve_stock_name_to_code(user_message: str, db=None) -> Optional[str]:
+    """尝试从用户消息中匹配股票名称并返回股票代码。
+
+    查询 stock_basic_info 集合，用消息中的文本匹配 stock_name 字段。
+    db 参数优先；未传时尝试 get_mongo_db()（某些上下文会失败）。
+    """
+    if not user_message:
+        return None
+    try:
+        if db is None:
+            from app.core.database import get_mongo_db
+            db = get_mongo_db()
+        # 取消息中可能的股票名称关键词（含"股份""集团"等后缀的词）
+        # 简单策略：用消息中的连续中文字符段去匹配 stock_name
+        import re as _re
+        chinese_segments = _re.findall(r"[\u4e00-\u9fa5]{2,8}(?:股份|集团|科技|新能|汽车|银行|证券|保险|能源)", user_message)
+        if not chinese_segments:
+            # 也尝试匹配一些常见简称
+            common_names = ["牧原", "赛力斯", "比亚迪", "宁德", "温氏", "新希望", "万科", "茅台", "五粮液"]
+            for name in common_names:
+                if name in user_message:
+                    chinese_segments = [name]
+                    break
+
+        if not chinese_segments:
+            return None
+
+        # 查询数据库匹配股票名称（字段为 name/symbol）
+        for segment in chinese_segments:
+            doc = await db["stock_basic_info"].find_one(
+                {"name": {"$regex": segment, "$options": "i"}},
+                {"symbol": 1, "name": 1, "code": 1}
+            )
+            if not doc:
+                doc = await db["stock_basic_info"].find_one(
+                    {"name": {"$regex": segment[:2], "$options": "i"}},
+                    {"symbol": 1, "name": 1, "code": 1}
+                )
+            if doc and doc.get("symbol"):
+                return doc["symbol"]
+
+        return None
+    except Exception as e:
+        logger.warning("[智能助手] 股票名称解析失败: %s", e)
+        return None
+
+
+async def _check_stock_data_sync(symbol: str, db=None) -> dict:
+    """检查单只股票的数据同步状态，返回 {has_historical, has_financial, has_basic, ...}。
+
+    直接查询实际数据集合（与前端数据检验接口一致）：
+    - 基础数据: stock_basic_info（按 symbol）
+    - 历史行情: stock_daily_quotes（按 symbol/code）
+    - 财务数据: stock_financial_data（按 symbol）
+    """
+    try:
+        if db is None:
+            from app.core.database import get_mongo_db
+            db = get_mongo_db()
+
+        normalized = str(symbol).strip().upper()
+        if "." in normalized:
+            normalized = normalized.split(".", 1)[0]
+
+        # 基础数据
+        basic_doc = await db["stock_basic_info"].find_one(
+            {"symbol": normalized}, {"symbol": 1, "name": 1}
+        )
+
+        # 历史行情（stock_daily_quotes，兼容 symbol/code 两种字段）
+        hist_count = await db["stock_daily_quotes"].count_documents({"symbol": normalized})
+        if hist_count == 0:
+            hist_count = await db["stock_daily_quotes"].count_documents({"code": normalized})
+        hist_latest = await db["stock_daily_quotes"].find_one(
+            {"symbol": normalized}, sort=[("trade_date", -1)]
+        ) or await db["stock_daily_quotes"].find_one(
+            {"code": normalized}, sort=[("trade_date", -1)]
+        )
+        hist_last_date = None
+        if hist_latest:
+            d = hist_latest.get("trade_date") or hist_latest.get("date")
+            hist_last_date = str(d)[:10] if d else None
+
+        # 财务数据
+        fin_count = await db["stock_financial_data"].count_documents({"symbol": normalized})
+
+        return {
+            "has_historical": hist_count > 0,
+            "has_financial": fin_count > 0,
+            "has_basic": basic_doc is not None,
+            "hist_records": hist_count,
+            "fin_records": fin_count,
+            "hist_last_date": hist_last_date,
+            "stock_name": basic_doc.get("name") if basic_doc else None,
+            "symbol": normalized,
+        }
+    except Exception as e:
+        logger.warning("[智能助手] 检查股票数据同步状态失败(%s): %s", symbol, e)
+        return {"error": str(e)}
+
+
+# 匹配回复中伪造的工具调用痕迹（如"数据来源：get_xxx_tool"或"📌 数据来源：XXX工具"）
+_FABRICATED_TOOL_REF_RE = re.compile(
+    r"(数据来源[:：]\s*(get_|fetch_)[a-z_]+|📌\s*数据来源[:：].*工具)",
+    re.IGNORECASE,
+)
+# 匹配回复中出现的具体数字（亿元/万元/元/%/元/公斤等），用于检测未调工具却给数据的情况
+_SPECIFIC_NUMBER_RE = re.compile(
+    r"[\d,]+\.?\d*\s*(亿元|万元|元|公斤|辆|头|%|pct|分位|x|倍)"
+)
+# 匹配"工具名(参数) → { JSON结果 }"模式：所有真实工具的返回都是 Markdown 文本，
+# 回复中把工具结果包装成 JSON 对象必然是 LLM 编造的结构化字段（如 post_count: 127）
+_FABRICATED_TOOL_JSON_RE = re.compile(
+    r"(get_|fetch_|trigger_|set_)[a-z0-9_]+\s*\([^)\n]{0,80}\)[^{\n]{0,60}\{[^{}\n]{5,500}\}",
+    re.IGNORECASE,
+)
+
+
+def _has_fabricated_tool_json(reply: str) -> bool:
+    """检测回复中是否把工具结果编造为 JSON 对象。
+
+    系统所有工具的真实返回均为 Markdown 文本（output_shape=markdown），
+    绝不会返回 {"sentiment_score": 0.32, "post_count": 127} 这类 JSON。
+    若回复中出现"工具名(参数) ... { json }"模式，说明 LLM 自行构造了
+    工具返回的结构化假数据 —— 硬拦截。
+    """
+    if not reply:
+        return False
+    m = _FABRICATED_TOOL_JSON_RE.search(reply)
+    if m:
+        logger.warning("[智能助手] 检测到编造的工具JSON结果: %.120s", m.group(0))
+        return True
+    return False
+
+
+def _has_fabricated_tool_refs(reply: str, tools_used: list) -> bool:
+    """检测回复中是否伪造了工具调用痕迹。
+
+    判定标准：回复中出现了"数据来源：get_xxx_tool"等字样，
+    但 tools_used 为空或不包含对应工具名。
+    """
+    if not reply:
+        return False
+    matches = _FABRICATED_TOOL_REF_RE.findall(reply)
+    if not matches:
+        return False
+    # 有工具引用痕迹但没有实际调用任何工具 → 伪造
+    if not tools_used:
+        return True
+    # 有工具引用痕迹，检查引用的工具名是否在 tools_used 中
+    # 从回复中提取工具名
+    tool_names_in_reply = set()
+    for m in re.finditer(r"(get_|fetch_)[a-z_]+", reply, re.IGNORECASE):
+        tool_names_in_reply.add(m.group(0).lower())
+    tools_used_lower = {t.lower() for t in tools_used}
+    # 如果引用的工具名都不在实际调用列表中 → 伪造
+    if tool_names_in_reply and not tool_names_in_reply.intersection(tools_used_lower):
+        return True
+    return False
+
+
+def _has_unsourced_numbers(reply: str, tools_used: list) -> bool:
+    """检测回复中是否包含大量具体数字但未调用任何数据工具。
+
+    用于拦截 LLM 未调工具却在回复中编造精确财务/销量数据的情况。
+    """
+    if not reply or tools_used:
+        return False
+    # 统计回复中的具体数字数量
+    numbers = _SPECIFIC_NUMBER_RE.findall(reply)
+    # 超过 5 个具体数字且未调任何工具 → 大概率编造
+    return len(numbers) > 5
+
+
+# ── 第4道防线：高风险数字溯源校验 ─────────────────────────────────────────────
+# 提取回复中带金融单位的高风险数字（长单位优先，避免"元/公斤"被"元"截断；
+# 同时覆盖中英文单位写法：元/kg 与 元/公斤 是同一单位）
+_RISKY_NUMBER_RE = re.compile(
+    r"(\d[\d,]*\.?\d*)\s*(元/[kK][gG]|元/公斤|元/吨|元/斤|亿元|万元|分位|pct|%|倍|元)"
+)
+# 提取工具返回文本中的所有数字（带金融单位或裸数字，如 JSON 字段值 0.37 / 15764.6）
+_TOOL_NUMBER_RE = re.compile(
+    r"(\d[\d,]*\.?\d*)\s*(元/[kK][gG]|元/公斤|元/吨|元/斤|亿元|万元|分位|pct|%|倍|元)?"
+)
+# 金额类单位 → 归一化到"亿元"的换算因子
+_AMOUNT_UNIT_FACTOR = {"亿元": 1.0, "万元": 1e-4}
+# 匹配容差（工具值与回复值的相对误差上限；1% 覆盖常规四舍五入，
+# 同时避免跨语义误匹配——如编造"15.8元/公斤"撞上质押 holding_ratio 15.54）
+_TRACE_TOLERANCE = 0.01
+# 不可溯源高风险数字达到该数量 → 拦截回复
+_UNTRACED_NUMBER_LIMIT = 3
+
+
+def _normalize_unit(unit: str) -> str:
+    """单位别名归一：元/kg 与 元/公斤 视为同一单位。"""
+    u = (unit or "").lower()
+    return u.replace("/kg", "/公斤").replace("kg", "公斤")
+
+
+def _parse_number(text: str) -> Optional[float]:
+    """'1,771.97' → 1771.97；失败返回 None。"""
+    try:
+        return float(str(text).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_risky_numbers(text: str, pattern: re.Pattern) -> list:
+    """从文本中提取 (数值, 单位) 列表，单位统一小写。"""
+    out = []
+    for m in pattern.finditer(text or ""):
+        val = _parse_number(m.group(1))
+        if val is None:
+            continue
+        unit = (m.group(2) or "").lower() if pattern.groups >= 2 else ""
+        out.append((val, unit))
+    return out
+
+
+def _number_matches(value: float, unit: str, candidates: list) -> bool:
+    """判断 (数值, 单位) 是否能在候选集（工具返回数字）中溯源。
+
+    匹配规则：
+    - 金额类（亿元/万元）：必须同属金额类，按归一化到亿元后匹配
+      （如 15764.6万 ↔ 1.58亿；15764.6万 ≠ 157.6亿，防100倍换算错误）
+    - 非金额类（%/元/公斤/kg/倍/分位/裸数字）：单位写法差异（元/kg vs 元/公斤、
+      "15.77元一公斤"截断为"元" vs 回复"15.77元/公斤"）按数值直接匹配（1%容差）
+    - 不做 ×100 的百分比换算：工具返回 0.37 就是 0.37%，回复写 37% 视为不可溯源
+    """
+    tol = _TRACE_TOLERANCE
+    unit = _normalize_unit(unit)
+    value_is_amount = unit in _AMOUNT_UNIT_FACTOR
+    for cand_val, cand_unit_raw in candidates:
+        cand_unit = _normalize_unit(cand_unit_raw)
+        cand_is_amount = cand_unit in _AMOUNT_UNIT_FACTOR
+        if value_is_amount or cand_is_amount:
+            # 金额类只与金额类匹配（归一化到亿元），不与价格/百分比/裸数字混配
+            if value_is_amount and cand_is_amount:
+                v1 = value * _AMOUNT_UNIT_FACTOR[unit]
+                v2 = cand_val * _AMOUNT_UNIT_FACTOR[cand_unit]
+                if abs(v1 - v2) <= tol * max(abs(v2), 1e-9):
+                    return True
+            continue
+        # 非金额类：数值相等即匹配（容忍单位写法差异）
+        if abs(value - cand_val) <= tol * max(abs(cand_val), 1e-9):
+            return True
+    return False
+
+
+def _get_untraced_risky_numbers(
+    reply: str,
+    tool_results: Optional[list],
+    user_message: str = "",
+    history_tool_contents: Optional[list] = None,
+    return_candidates: bool = False,
+):
+    """提取回复中无法在工具返回原文（或用户消息）中溯源的高风险数字。
+
+    Args:
+        tool_results: 本轮工具返回（collector 收集）
+        user_message: 用户消息（引用用户给的数字不算编造）
+        history_tool_contents: 会话历史中 role=tool 的消息内容（多轮对话时，
+            引用上一轮工具的真实数据同样可溯源，不应误判）
+        return_candidates: True 时返回 (untraced, candidates) 供日志排查
+
+    Returns:
+        不可溯源的 "数值+单位" 字符串列表（用于日志与阈值判断）。
+    """
+    if not reply:
+        return ([], []) if return_candidates else []
+    # 工具返回原文中的所有数字（含裸数字）作为可信候选集
+    candidates: list = []
+    for item in (tool_results or []):
+        content = item.get("content") or ""
+        if not content or item.get("is_error"):
+            continue
+        candidates.extend(_extract_risky_numbers(content, _TOOL_NUMBER_RE))
+    # 会话历史中工具返回过的数字同样可信（多轮引用）
+    for content in (history_tool_contents or []):
+        if content:
+            candidates.extend(_extract_risky_numbers(content, _TOOL_NUMBER_RE))
+    # 用户消息中出现的数字也视为可信（助手引用用户给的数字不算编造）
+    user_numbers = _extract_risky_numbers(user_message or "", _TOOL_NUMBER_RE)
+    candidates.extend(user_numbers)
+
+    untraced = []
+    for m in _RISKY_NUMBER_RE.finditer(reply):
+        val = _parse_number(m.group(1))
+        unit = (m.group(2) or "").lower()
+        if val is None:
+            continue
+        # 排除：年份（1900-2099）、百分比里的小整数序号等噪音由阈值兜底
+        if 1900 <= val <= 2099 and val == int(val):
+            continue
+        if _number_matches(val, unit, candidates):
+            continue
+        untraced.append(f"{m.group(1)}{m.group(2)}")
+    if return_candidates:
+        return untraced, candidates
+    return untraced
+
+
+def _has_untraced_risky_numbers(
+    reply: str,
+    tool_results: Optional[list],
+    tools_used: list,
+    user_message: str = "",
+    history_tool_contents: Optional[list] = None,
+) -> bool:
+    """第4道防线：调用了工具，但回复中混入大量无法溯源的高风险数字。
+
+    场景：LLM 确实调用了工具（前三道防线通过），却用训练记忆补齐
+    工具未返回的数字（如"行业成本线15.8元/公斤""PE近5年75%分位"），
+    或对工具数字做错误换算（0.37 说成 37%、15764.6万 说成 157.6亿）。
+    """
+    if not reply or not tools_used:
+        return False
+    untraced, candidates = _get_untraced_risky_numbers(
+        reply, tool_results, user_message, history_tool_contents, return_candidates=True
+    )
+    if len(untraced) >= _UNTRACED_NUMBER_LIMIT:
+        # 附带候选集摘要，便于排查"数字在工具返回里但没匹配上"的误判（如单位别名差异）
+        cand_preview = [f"{v}{u}" for v, u in candidates[:30]]
+        logger.warning(
+            "[智能助手] 检测到 %d 个无法溯源的高风险数字: %s | 工具候选集(%d个, 前30): %s",
+            len(untraced), untraced[:10], len(candidates), cand_preview,
+        )
+        return True
+    return False
+
+
+def _extract_history_tool_contents(messages: List[Any]) -> List[str]:
+    """从对话历史中提取 role=tool 的消息内容（多轮溯源用）。
+
+    上一轮工具返回过的真实数字（如财务数据），本轮回复引用时
+    同样应视为可溯源，避免误拦截。
+    """
+    contents = []
+    for m in (messages or []):
+        role = getattr(m, "role", None) or (m.get("role") if isinstance(m, dict) else None)
+        content = getattr(m, "content", None)
+        if content is None and isinstance(m, dict):
+            content = m.get("content")
+        if role == "tool" and content:
+            contents.append(str(content))
+    return contents
+
+
 def _should_force_tool_retry(user_message: str) -> bool:
     """判断是否属于“应优先调用工具”的个人数据查询请求。"""
     text = (user_message or "").strip().lower()
@@ -125,8 +496,23 @@ def _should_force_tool_retry(user_message: str) -> bool:
     has_market = any(k in text for k in market_markers)
     has_recency = any(k in text for k in recency_markers)
 
-    # 至少满足：个人+领域，或 领域+查询
-    return (has_personal and has_domain) or (has_domain and has_query) or (has_market and has_recency)
+    # 至少满足：个人+领域，或 领域+查询，或 市场+近期，或 股票+数据
+    # 股票数据类问题：股票代码/名称 + 数据相关词汇（如"牧原股份值得入手吗"）
+    import re
+    has_stock_code = bool(re.search(r"(00|30|60|68)\d{4}", text))
+    has_stock_name = any(k in text for k in ["股份", "集团", "科技", "新能", "汽车", "银行", "证券", "保险", "能源", "牧原", "赛力斯", "比亚迪", "宁德"])
+    stock_data_markers = [
+        "财报", "利润", "营收", "收入", "净利润", "毛利率", "现金流", "资产", "负债",
+        "估值", "市盈率", "市净率", "pe", "pb", "ps",
+        "销量", "产量", "出栏", "交付",
+        "价格", "股价", "行情", "涨跌", "涨幅", "跌幅",
+        "入手", "买入", "卖出", "加仓", "减仓", "持有", "清仓", "值得", "能不能买", "该不该",
+        "分析", "研究", "怎么样", "如何",
+    ]
+    has_stock_data = any(k in text for k in stock_data_markers)
+    stock_data_query = (has_stock_code or has_stock_name) and has_stock_data
+
+    return (has_personal and has_domain) or (has_domain and has_query) or (has_market and has_recency) or stock_data_query
 
 
 async def _record_assistant_token_usage(
@@ -722,6 +1108,10 @@ def _get_system_prompt(
 - 只承诺你确实能通过工具完成的事情，不要编造不存在的功能
 - 如果用户的需求超出上述能力范围，直接坦诚告知「目前不支持该功能」，不要虚构解决方案
 - 回答问题时只使用工具返回的真实数据，不要凭空捏造数字或结论
+- **回复末尾的"我可以帮您"/"下一步行动建议"列表中的每一条，都必须对应一个实际可用的工具或功能**。严禁在建议列表中承诺系统不具备的能力（如"设置猪价提醒""监控宏观经济指标""自动跟踪行业数据"等）。
+- **价格提醒功能仅支持股票价格**（通过 risk_alerts 工具设置个股价格下限提醒），**不支持**猪价/商品价格/宏观指标/行业数据等非股票标的的提醒或监控。不要对用户说"猪价突破XX时自动通知你"之类的话。
+- **严禁在建议中给出具体的止损价/止盈价/提醒价位**（如"set_stop_loss_alert('601127', stop_loss_price=228.5)"）。如果用户想设置价格提醒，可以告诉用户"您可以设置价格提醒功能"，但**必须由用户自己决定具体价位**，你不得建议任何具体数字。
+- 如果你不确定某个功能是否可用，先查看已加载的工具列表，确认对应工具存在后再承诺；不确定时不要承诺。
 
 【长期记忆管理】
 - 当用户**明确表达**「请记住」「请帮我记下」「我希望你以后也按这个偏好」等意图时，调用 `remember_this` 工具将其偏好写入长期记忆
@@ -780,20 +1170,35 @@ def _get_system_prompt(
 - 解释为什么：教用户理解数据背后的含义
 - 诚实表达不确定性
 
+【空数据处理规则（关键）】
+- 当工具返回空数据、空列表、None、"无数据"等结果时，**必须如实告知用户"当前未获取到相关数据"**，不得用训练记忆中的数据填充。
+- 可能的原因包括：数据库中该股票的数据尚未同步、数据日期范围不匹配、或该数据项不支持当前股票。
+- 此时应该建议用户：①在"数据管理"页面同步该股票的数据；②或尝试通过 web_search 搜索互联网公开信息。
+- **严禁在工具返回空数据后，自行编造数据并在回复中标注"数据来源：XXX工具"**——这会误导用户认为数据来自真实查询。
+
 【当前日期】{today}（用于判断年份、财报披露周期等时间逻辑）
 【当前/最近交易日】{trade_date}（用于调用工具获取行情数据）
 - 调用所有需要 curr_date 或 trade_date 参数的工具时，**必须传入交易日**
 - 回答涉及年份、季度等问题时，**必须基于当前日期推理**
 - 严禁使用训练数据中的历史日期回答
 - 严禁直接引用模型训练记忆中的指数点位、涨跌幅、MACD、RSI、均线、成交额、财报数字等；这类数字**只能**来自本次工具返回
-- 如果工具返回的数据日期不是当前问题要求的时间范围，必须明确说明“数据日期”，不能冒充成当前/今年/最新口径
-- 如果没有拿到真实数据，必须直接说明“无法基于实时数据确认”，不能用历史记忆补答案
+- **严禁伪造工具调用痕迹**：不得在回答中标注"数据来源：get_xxx_tool()""📌 数据来源：XXX工具"等字样，除非你**确实调用了该工具**并获得了真实返回值。如果你在回答中写了一个工具名作为数据来源，但实际并没有调用该工具，这就是伪造——严格禁止。
+- **股票价格、估值指标（PE/PB/PS）、财务数据（营收/净利润/毛利率）、销量数据等必须通过工具实时获取**。严禁用训练记忆中的价格回答（训练数据可能过时，如股票可能已发生送转/拆股导致价格大幅变化）。如果未调用工具获取行情数据，不得在回答中出现任何具体价格数字。
+- **严禁编造文件名、报告名称、政策文件名、统计数据来源**（如"《XX年全国畜牧业统计年报》""《XX产业高质量发展三年行动》"等）。如果你要引用某个文件或报告，该文件必须由 web_search 或 fetch_url 工具返回的搜索结果中明确提及，且你必须在回答中标注来源链接。未通过工具验证的文件/报告一律不得引用。
+- **严禁编造精确数字**（如"占比34.7%""合作农户4.2万户""平均成本14.3元/公斤"等）。所有精确数字必须来自工具返回的真实数据。如果你只有训练记忆中的大致印象，只能用"大致""约"等模糊表述，且必须说明"以下为基于历史信息的概览，具体最新数据请通过 web_search 查询"。
+- **行业实时背景数据同样严禁凭记忆给出**：行业成本线（如养殖完全成本）、现货价格（如生猪价）、市场均价、产能数据、库存水平、估值历史分位数等，都属于随时间快速变化的实时数据，你的训练记忆严重过时（例如成本线实际已从15元级别降到11-12元级别，凭记忆说"15.8元/公斤"是完全错误的）。这类数字**只能**来自工具返回或 web_search 结果；工具未返回时只能定性描述（如"当前猪价低于行业成本线"），并明确告知"具体数值建议通过 web_search 查询最新数据"，**不得填入任何记忆中的具体数字**。
+- **估值分位数必须有数据支撑**：只有当工具返回中明确包含分位数字段时才能说"处于X%分位"；工具只返回 PE/PB 绝对值时，只能说"PE为X倍"，严禁自行编造"近5年X%分位"。
+- **web_search 摘要里没有的数字同样不能编**：搜索引擎摘要通常只有标题/链接/片段（行业成本、专业数据多在付费研报正文中，摘要抓不到）。若搜索结果未包含用户要的具体数值，必须如实回答"搜索结果未包含该数值"，并附上最相关的来源链接供用户人工查看；**严禁凭对该来源的印象（如涌益咨询周报口径）编造精确数字**。这是最常见的编造形态，系统会逐数字比对工具返回原文，编造必被拦截。
+- **单位与换算必须逐字核对**（极易出错）：①工具 JSON 字段名带 wan 后缀的（如 outstanding_pledge_amount_wan）单位是"万"（万股/万元），换算成"亿"必须除以10000（15764.6万 = 1.58亿，绝不能写成157.6亿）；②ratio/百分比字段（如 total_pledge_ratio: 0.37）通常表示 0.37% 而不是 37%，必须结合字段含义和常识核验（总质押比例37%意味着极端风险，多数公司实际在1%-10%区间）；③大数换算后要用常识校验（市值千亿的公司高管质押金额不可能高达百亿级）。对任何换算后的数字拿不准时，直接引用工具原始字段和原始数值，不做换算。
+- 如果工具返回的数据日期不是当前问题要求的时间范围，必须明确说明"数据日期"，不能冒充成当前/今年/最新口径
+- 如果没有拿到真实数据，必须直接说明"无法基于实时数据确认"，不能用历史记忆补答案
+- **对于产业知识、行业格局、政策动态等非结构化问题**（如"中国还有散户养猪吗""某行业集中度如何"等），优先调用 web_search 获取最新权威信息，不要仅凭训练记忆回答——训练数据可能过时，且容易产生编造精确数字和文件名的幻觉
+- **工具结果必须忠实原样呈现，禁止改写为JSON**：所有工具的真实返回都是Markdown文本。在回答中引用工具结果时：①保持原始格式和原始文字，不得把Markdown结果改写成JSON对象（即"字段名: 数值"的花括号块形式）；②禁止添加工具返回中不存在的字段和数字（如sentiment_score、post_count、hot_score）；③保持原始来源描述（如工具写的是"基于新闻标题分析"，不得说成"雪球/股吧讨论量"）。如果你想让结果更结构化，只能用Markdown表格罗列**工具原文中出现过的**数字和文字。
 
-【A股交易执行规则】
-- 讨论A股买卖数量时，默认遵守整手交易：普通买入/卖出应为100股整数倍。
-- 只有配股、送转等历史原因形成的零股，才可能出现不足100股仍可卖出的情况；不要把这类情况当成常规规则。
-- 如果根据仓位比例计算出的结果不是100股整数倍，不要直接给出诸如30股、60股、80股之类的执行建议；应改为“按100股整数倍取整执行”，并明确说明剩余零头如何处理。
-- 当工具返回的是比例规则而不是实际下单数量时，要主动提醒用户：实际执行需结合当前持仓股数按整手约束换算。
+【A股交易规则知识（仅用于客观解释，不可用于提供建仓建议）】
+- 仅当用户主动询问"A股交易规则""整手是多少股"等知识性问题时，才客观说明：普通买入/卖出应为100股整数倍。
+- **严禁**主动给出建仓步骤、仓位比例建议、确认价位、止损止盈价位、买卖时点等交易指令——这属于【合规原则】禁止的投顾行为。
+- 如果用户询问"该买多少股""该用什么仓位"，不要给出具体数字，改为引导用户参考其个人投资计划（如有）或咨询持牌投顾。
 
 【A股财报披露时间规则】
 - 年报：1月1日～4月30日 | 一季报：4月30日前 | 半年报：8月31日前 | 三季报：10月31日前
@@ -805,6 +1210,11 @@ def _get_system_prompt(
 - 所有观点必须有工具返回的数据支撑，不做主观臆断
 - 不提供目标价、仓位建议、具体买卖时点
 - 每次回答结尾自然提醒：以上分析仅供学习参考，不构成投资建议
+- **对"是否值得入手/该不该买/现在能不能买/要不要加仓"等直接索要投资建议的问题**，按以下方式处理：
+  1. 第一句话明确告知："我无法提供'是否值得入手'这类投资建议，这需要您根据自身风险承受能力和投资策略独立判断。"
+  2. 简要列出你可以从哪些维度研究这只股票（如：基本面盈利质量、技术面趋势位置、行业竞争格局、估值水平横向对比、资金面动向），每个维度一句话说明看什么，**不要展开给数据**
+  3. 询问用户想从哪个维度开始研究，由用户选择后调用对应工具获取真实数据
+  4. **严禁**在此类问题的回答中直接给出长篇分析报告、具体数据表格、止损价位、仓位建议——那等于变相替用户做了投资决策
 
 【工具使用原则】
 - **严禁**根据训练数据回答行情、大盘、市场等需要实时数据的问题，**必须**通过调用工具获取
@@ -1483,6 +1893,93 @@ class IntelligentAssistantService:
             except Exception as e:
                 logger.warning(f"[智能助手] 近期搜索快路径失败，回退常规对话: {e}")
 
+        # 数据同步预检查：当用户问到某只股票的数据相关问题时，
+        # 先检查该股票的数据是否已同步。数据不充分直接提示用户同步，不调 LLM。
+        stock_code = _extract_stock_code(resolved_user_message)
+        if not stock_code:
+            # 没有直接匹配到股票代码，尝试从股票名称解析
+            text_lower = resolved_user_message.lower()
+            has_data_keyword = any(k in text_lower for k in _STOCK_DATA_KEYWORDS)
+            if has_data_keyword:
+                stock_code = await _resolve_stock_name_to_code(resolved_user_message, db=self._db)
+                logger.info("[智能助手] 预检查·名称解析结果: %s", stock_code)
+        if stock_code:
+            text_lower = resolved_user_message.lower()
+            has_data_keyword = any(k in text_lower for k in _STOCK_DATA_KEYWORDS)
+            if has_data_keyword:
+                sync_status = await _check_stock_data_sync(stock_code, db=self._db)
+                logger.info("[智能助手] 预检查·股票 %s 数据状态: %s", stock_code, sync_status)
+                if sync_status and not sync_status.get("error"):
+                    has_hist = sync_status.get("has_historical", False)
+                    has_fin = sync_status.get("has_financial", False)
+                    has_basic = sync_status.get("has_basic", False)
+                    hist_records = sync_status.get("hist_records", 0)
+                    fin_records = sync_status.get("fin_records", 0)
+
+                    # 判断用户问题需要哪些数据
+                    financial_keywords = [
+                        "财报", "利润", "营收", "收入", "净利润", "毛利率", "现金流",
+                        "资产", "负债", "估值", "市盈率", "市净率", "pe", "pb", "ps",
+                        "盈利", "财务", "roe", "roa", "资产负债率",
+                    ]
+                    technical_keywords = [
+                        "技术面", "技术指标", "macd", "rsi", "kdj", "boll", "布林",
+                        "均线", "ma", "ema", "超买", "超卖", "背离", "支撑", "阻力",
+                        "压力位", "趋势", "k线",
+                    ]
+                    investment_decision_keywords = [
+                        "入手", "买入", "卖出", "加仓", "减仓", "持有", "清仓",
+                        "值得", "能不能买", "该不该", "怎么样", "如何", "分析",
+                    ]
+                    asks_financial = any(k in text_lower for k in financial_keywords)
+                    asks_technical = any(k in text_lower for k in technical_keywords)
+                    asks_investment_decision = any(k in text_lower for k in investment_decision_keywords)
+                    # 投资决策类问题需要财务+技术面综合判断
+                    if asks_investment_decision:
+                        asks_financial = True
+                        asks_technical = True
+
+                    # 构建缺失数据提示
+                    missing_parts = []
+                    if asks_financial and not has_fin:
+                        missing_parts.append(f"财务数据（利润表/资产负债表/现金流量表，当前 0 条）")
+                    if asks_technical and (not has_hist or hist_records < 30):
+                        missing_parts.append(f"历史行情数据（当前 {hist_records} 条，技术分析需要至少 30 条）")
+
+                    if missing_parts:
+                        missing_text = "\n".join(f"• ❌ {p}" for p in missing_parts)
+                        available_text = (
+                            f"• ✅ 历史行情: {hist_records} 条"
+                            if has_hist else "• ❌ 历史行情: 未同步"
+                        )
+                        available_text += "\n"
+                        available_text += (
+                            f"• ✅ 财务数据: {fin_records} 条"
+                            if has_fin else "• ❌ 财务数据: 未同步"
+                        )
+                        available_text += "\n"
+                        available_text += "✅ 基础数据: 已同步" if has_basic else "❌ 基础数据: 未同步"
+
+                        logger.info(
+                            "[智能助手] 股票 %s 数据不充分，拦截（缺失: %s）",
+                            stock_code, ", ".join(missing_parts)
+                        )
+                        return {
+                            "reply": (
+                                f"📊 股票 {stock_code} 的数据不充分，无法进行分析\n\n"
+                                f"当前数据同步状态：\n{available_text}\n\n"
+                                f"缺失的数据：\n{missing_text}\n\n"
+                                f"请先同步数据后再提问：\n"
+                                f"• 前往「数据管理」页面，搜索 {stock_code} 并触发数据同步\n"
+                                f"• 建议同步完整的历史行情（至少 250 个交易日）和财务数据\n"
+                                f"• 同步完成后再次提问，我会调用工具获取真实数据为您分析\n\n"
+                                f"或者，如果您只是想了解互联网公开信息，我也可以通过 web_search 搜索。"
+                                f"是否需要我搜索？"
+                            ),
+                            "tools_used": ["get_data_sync_status"],
+                            "data_refs": None,
+                        }
+
         # RAG 动态知识检索（优雅降级：不可用时返回空字符串）
         knowledge_snippets = ""
         try:
@@ -1518,6 +2015,7 @@ class IntelligentAssistantService:
         messages.append(Message(role=MessageRole.USER, content=resolved_user_message.strip()))
 
         tools_used: List[str] = []
+        tool_results: List[Dict[str, Any]] = []
 
         def _effective_timeout() -> int:
             """根据已调用工具的 tier 动态计算总超时"""
@@ -1547,6 +2045,7 @@ class IntelligentAssistantService:
                 auto_execute_tools=True,
                 max_tool_rounds=8,
                 tools_used=tools_used,
+                tool_results_collector=tool_results,
                 dry_run=False,
                 tool_interceptor=tool_interceptor,
             )
@@ -1574,6 +2073,7 @@ class IntelligentAssistantService:
                         auto_execute_tools=True,
                         max_tool_rounds=8,
                         tools_used=tools_used,
+                        tool_results_collector=tool_results,
                         dry_run=False,
                         tool_choice="required",
                         tool_interceptor=tool_interceptor,
@@ -1587,12 +2087,62 @@ class IntelligentAssistantService:
                         auto_execute_tools=True,
                         max_tool_rounds=8,
                         tools_used=tools_used,
+                        tool_results_collector=tool_results,
                         dry_run=False,
                         tool_interceptor=tool_interceptor,
                     )
                     await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
 
-            return resp.content
+            # 回复后验证：检测 LLM 是否在文本中伪造了工具调用痕迹
+            reply_content = resp.content or ""
+            if _has_fabricated_tool_json(reply_content):
+                logger.warning("[智能助手] 检测到编造的工具JSON结果，硬拦截回复")
+                return (
+                    "抱歉，我在呈现工具返回结果时出现了格式错误（把工具返回改写成了结构化数据），"
+                    "这可能导致数据失真。\n\n"
+                    "请重新提问，我会严格按工具返回的原始内容为您呈现分析结果。"
+                )
+            if _has_fabricated_tool_refs(reply_content, tools_used):
+                logger.warning("[智能助手] 检测到伪造工具调用痕迹，拦截回复（tools_used=%s）", tools_used)
+                return (
+                    "抱歉，我在生成回复时出现了数据来源标注错误。\n\n"
+                    "为确保您获取的信息真实可靠，请尝试将问题拆分得更具体一些，"
+                    "例如直接指定想查看的数据维度（如\"查一下牧原股份最新财报\"\"看技术指标\"等），"
+                    "我会调用对应工具获取真实数据后为您分析。"
+                )
+            if _has_unsourced_numbers(reply_content, tools_used):
+                logger.warning("[智能助手] 检测到未调工具但回复含大量数字，拦截回复（数字数=%d）",
+                               len(_SPECIFIC_NUMBER_RE.findall(reply_content)))
+                return (
+                    "抱歉，我目前未能通过工具获取到与您问题相关的实时数据，无法提供有数据支撑的分析。\n\n"
+                    "可能的原因：数据库中的股票数据尚未同步完整。\n"
+                    "建议您：\n"
+                    "• 在\"数据管理\"页面同步该股票的基础数据和历史行情\n"
+                    "• 同步完成后再次提问，我会调用工具获取真实数据为您分析\n"
+                    "• 或尝试通过 web_search 搜索互联网公开信息"
+                )
+            if _has_untraced_risky_numbers(
+                reply_content, tool_results, tools_used,
+                resolved_user_message,
+                _extract_history_tool_contents(messages),
+            ):
+                logger.warning("[智能助手] 检测到无法溯源的高风险数字（疑似训练记忆填充/单位换算错误），拦截回复")
+                untraced_detail = "、".join(_get_untraced_risky_numbers(
+                    reply_content, tool_results, resolved_user_message,
+                    _extract_history_tool_contents(messages))[:6])
+                return (
+                    "抱歉，我在刚才的回复中引用了一些工具和搜索结果里都没有的具体数字"
+                    f"（如 {untraced_detail}），这类数字可能来自过时的记忆而非实时数据，"
+                    "继续呈现会误导您的判断，因此已整段拦截。\n\n"
+                    "常见原因：搜索结果只有标题/链接/摘要，未包含具体数值"
+                    "（如行业成本数据多在付费研报正文中，搜索引擎摘要抓不到）。\n"
+                    "您可以：\n"
+                    "• 换更具体的关键词让我再搜索（如\"牧原股份 7月成本 公告\"）\n"
+                    "• 让我引用搜索到的来源链接，由您人工查看原文\n"
+                    "• 只让我分析工具已返回的真实数据\n"
+                )
+
+            return reply_content
 
         try:
             content = await asyncio.wait_for(
@@ -1703,6 +2253,88 @@ class IntelligentAssistantService:
             except Exception as e:
                 logger.warning(f"[智能助手·流式] 近期搜索快路径失败，回退常规对话: {e}")
 
+        # 数据同步预检查：当用户问到某只股票的数据相关问题时，
+        # 先检查该股票的数据是否已同步。数据不充分直接提示用户同步，不调 LLM。
+        stock_code_stream = _extract_stock_code(resolved_user_message)
+        if not stock_code_stream:
+            text_lower_s = resolved_user_message.lower()
+            has_data_keyword_s = any(k in text_lower_s for k in _STOCK_DATA_KEYWORDS)
+            if has_data_keyword_s:
+                stock_code_stream = await _resolve_stock_name_to_code(resolved_user_message, db=self._db)
+                logger.info("[智能助手·流式] 预检查·名称解析结果: %s", stock_code_stream)
+        if stock_code_stream:
+            text_lower_s = resolved_user_message.lower()
+            has_data_keyword_s = any(k in text_lower_s for k in _STOCK_DATA_KEYWORDS)
+            if has_data_keyword_s:
+                sync_status_s = await _check_stock_data_sync(stock_code_stream, db=self._db)
+                logger.info("[智能助手·流式] 预检查·股票 %s 数据状态: %s", stock_code_stream, sync_status_s)
+                if sync_status_s and not sync_status_s.get("error"):
+                    has_hist_s = sync_status_s.get("has_historical", False)
+                    has_fin_s = sync_status_s.get("has_financial", False)
+                    has_basic_s = sync_status_s.get("has_basic", False)
+                    hist_records_s = sync_status_s.get("hist_records", 0)
+                    fin_records_s = sync_status_s.get("fin_records", 0)
+
+                    financial_keywords_s = [
+                        "财报", "利润", "营收", "收入", "净利润", "毛利率", "现金流",
+                        "资产", "负债", "估值", "市盈率", "市净率", "pe", "pb", "ps",
+                        "盈利", "财务", "roe", "roa", "资产负债率",
+                    ]
+                    technical_keywords_s = [
+                        "技术面", "技术指标", "macd", "rsi", "kdj", "boll", "布林",
+                        "均线", "ma", "ema", "超买", "超卖", "背离", "支撑", "阻力",
+                        "压力位", "趋势", "k线",
+                    ]
+                    investment_decision_keywords_s = [
+                        "入手", "买入", "卖出", "加仓", "减仓", "持有", "清仓",
+                        "值得", "能不能买", "该不该", "怎么样", "如何", "分析",
+                    ]
+                    asks_fin_s = any(k in text_lower_s for k in financial_keywords_s)
+                    asks_tech_s = any(k in text_lower_s for k in technical_keywords_s)
+                    asks_inv_s = any(k in text_lower_s for k in investment_decision_keywords_s)
+                    if asks_inv_s:
+                        asks_fin_s = True
+                        asks_tech_s = True
+
+                    missing_parts_s = []
+                    if asks_fin_s and not has_fin_s:
+                        missing_parts_s.append(f"财务数据（利润表/资产负债表/现金流量表，当前 0 条）")
+                    if asks_tech_s and (not has_hist_s or hist_records_s < 30):
+                        missing_parts_s.append(f"历史行情数据（当前 {hist_records_s} 条，技术分析需要至少 30 条）")
+
+                    if missing_parts_s:
+                        missing_text_s = "\n".join(f"• ❌ {p}" for p in missing_parts_s)
+                        available_text_s = (
+                            f"• ✅ 历史行情: {hist_records_s} 条"
+                            if has_hist_s else "• ❌ 历史行情: 未同步"
+                        )
+                        available_text_s += "\n"
+                        available_text_s += (
+                            f"• ✅ 财务数据: {fin_records_s} 条"
+                            if has_fin_s else "• ❌ 财务数据: 未同步"
+                        )
+                        available_text_s += "\n"
+                        available_text_s += "✅ 基础数据: 已同步" if has_basic_s else "❌ 基础数据: 未同步"
+
+                        logger.info(
+                            "[智能助手·流式] 股票 %s 数据不充分，拦截（缺失: %s）",
+                            stock_code_stream, ", ".join(missing_parts_s)
+                        )
+                        reply_text = (
+                            f"📊 股票 {stock_code_stream} 的数据不充分，无法进行分析\n\n"
+                            f"当前数据同步状态：\n{available_text_s}\n\n"
+                            f"缺失的数据：\n{missing_text_s}\n\n"
+                            f"请先同步数据后再提问：\n"
+                            f"• 前往「数据管理」页面，搜索 {stock_code_stream} 并触发数据同步\n"
+                            f"• 建议同步完整的历史行情（至少 250 个交易日）和财务数据\n"
+                            f"• 同步完成后再次提问，我会调用工具获取真实数据为您分析\n\n"
+                            f"或者，如果您只是想了解互联网公开信息，我也可以通过 web_search 搜索。"
+                            f"是否需要我搜索？"
+                        )
+                        yield _sse("token", {"content": reply_text})
+                        yield _sse("done", {"tools_used": ["get_data_sync_status"]})
+                        return
+
         knowledge_snippets = ""
         try:
             from core.knowledge import FinancialKnowledgeManager
@@ -1729,6 +2361,7 @@ class IntelligentAssistantService:
         messages.append(Message(role=MessageRole.USER, content=resolved_user_message.strip()))
 
         tools_used: List[str] = []
+        tool_results: List[Dict[str, Any]] = []
         event_queue: asyncio.Queue = asyncio.Queue()
 
         async def _progress(payload):
@@ -1743,6 +2376,7 @@ class IntelligentAssistantService:
                 auto_execute_tools=True,
                 max_tool_rounds=8,
                 tools_used=tools_used,
+                tool_results_collector=tool_results,
                 dry_run=False,
                 progress_callback=_progress,
                 tool_interceptor=tool_interceptor,
@@ -1767,6 +2401,7 @@ class IntelligentAssistantService:
                         auto_execute_tools=True,
                         max_tool_rounds=8,
                         tools_used=tools_used,
+                        tool_results_collector=tool_results,
                         dry_run=False,
                         progress_callback=_progress,
                         tool_choice="required",
@@ -1780,6 +2415,7 @@ class IntelligentAssistantService:
                         auto_execute_tools=True,
                         max_tool_rounds=8,
                         tools_used=tools_used,
+                        tool_results_collector=tool_results,
                         dry_run=False,
                         progress_callback=_progress,
                         tool_interceptor=tool_interceptor,
@@ -1822,6 +2458,53 @@ class IntelligentAssistantService:
 
             content = task.result()
             reply = content or "抱歉，暂时无法生成回答，请稍后再试。"
+
+            # 回复后验证（与非流式一致）：编造工具JSON / 伪造工具痕迹 / 未调工具大量数字
+            if _has_fabricated_tool_json(reply):
+                logger.warning("[智能助手·流式] 检测到编造的工具JSON结果，硬拦截回复")
+                reply = (
+                    "抱歉，我在呈现工具返回结果时出现了格式错误（把工具返回改写成了结构化数据），"
+                    "这可能导致数据失真。\n\n"
+                    "请重新提问，我会严格按工具返回的原始内容为您呈现分析结果。"
+                )
+            elif _has_fabricated_tool_refs(reply, tools_used):
+                logger.warning("[智能助手·流式] 检测到伪造工具调用痕迹，拦截回复（tools_used=%s）", tools_used)
+                reply = (
+                    "抱歉，我在生成回复时出现了数据来源标注错误。\n\n"
+                    "为确保您获取的信息真实可靠，请尝试将问题拆分得更具体一些，"
+                    "例如直接指定想查看的数据维度（如\"查一下牧原股份最新财报\"\"看技术指标\"等），"
+                    "我会调用对应工具获取真实数据后为您分析。"
+                )
+            elif _has_unsourced_numbers(reply, tools_used):
+                logger.warning("[智能助手·流式] 检测到未调工具但回复含大量数字，拦截回复")
+                reply = (
+                    "抱歉，我目前未能通过工具获取到与您问题相关的实时数据，无法提供有数据支撑的分析。\n\n"
+                    "可能的原因：数据库中的股票数据尚未同步完整。\n"
+                    "建议您：\n"
+                    "• 在\"数据管理\"页面同步该股票的基础数据和历史行情\n"
+                    "• 同步完成后再次提问，我会调用工具获取真实数据为您分析\n"
+                    "• 或尝试通过 web_search 搜索互联网公开信息"
+                )
+            elif _has_untraced_risky_numbers(
+                reply, tool_results, tools_used,
+                resolved_user_message,
+                _extract_history_tool_contents(messages),
+            ):
+                logger.warning("[智能助手·流式] 检测到无法溯源的高风险数字（疑似训练记忆填充/单位换算错误），拦截回复")
+                untraced_detail = "、".join(_get_untraced_risky_numbers(
+                    reply, tool_results, resolved_user_message,
+                    _extract_history_tool_contents(messages))[:6])
+                reply = (
+                    "抱歉，我在刚才的回复中引用了一些工具和搜索结果里都没有的具体数字"
+                    f"（如 {untraced_detail}），这类数字可能来自过时的记忆而非实时数据，"
+                    "继续呈现会误导您的判断，因此已整段拦截。\n\n"
+                    "常见原因：搜索结果只有标题/链接/摘要，未包含具体数值"
+                    "（如行业成本数据多在付费研报正文中，搜索引擎摘要抓不到）。\n"
+                    "您可以：\n"
+                    "• 换更具体的关键词让我再搜索（如\"牧原股份 7月成本 公告\"）\n"
+                    "• 让我引用搜索到的来源链接，由您人工查看原文\n"
+                    "• 只让我分析工具已返回的真实数据\n"
+                )
 
             CHUNK_SIZE = 40
             for i in range(0, len(reply), CHUNK_SIZE):
