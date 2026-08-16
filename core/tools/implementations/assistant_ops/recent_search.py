@@ -187,6 +187,7 @@ def run_recent_information_search(query: str) -> str:
     output_shape="report",
     preferred_for=["搜索近期公开新闻", "确认最新事实信息", "查询近期公告或事件", "核实最新持股或市场动态"],
     when_to_use="当用户问及‘截至目前’‘最新’‘近期是否有变化’或需要确认最新持股比例、公告、市场消息等时使用。",
+    when_not_to_use="不适用于查询个股股价走势、行情涨跌、是否反弹/回调/突破等价格趋势判断——这类问题必须调用行情数据工具（get_stock_market_data_unified / get_technical_indicators / 实时行情）获取真实K线数据，网页搜索结果无法提供股价走势；也不适用于查询历史价格数据。",
     returns="返回文本格式的搜索结果，包含最新结论、确证依据、参考报道和不确定点。",
 )
 def search_recent_information(
