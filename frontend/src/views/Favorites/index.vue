@@ -620,15 +620,6 @@ const addForm = ref({
   notes: ''
 })
 
-// 股票代码验证器
-const validateStockCode = (_rule: any, value: any, callback: any) => {
-  if (!value) {
-    callback(new Error('请输入股票代码'))
-    return
-  }
-  callback()
-}
-
 const addRules = {
   market: [
     { required: true, message: '请选择市场类型', trigger: 'change' }
@@ -926,38 +917,27 @@ const handleMarketChange = () => {
   }
 }
 
-// 获取股票代码输入提示
-const getStockCodePlaceholder = () => {
-  return '输入股票代码或名称搜索，如：000001 或 平安银行'
-}
-
-// 获取股票代码输入提示文字
-const getStockCodeHint = () => {
-  return '支持股票代码或名称搜索，选择后自动填充'
-}
-
 // 搜索股票（支持代码和名称）
-const searchStocks = async (queryString: string, cb: (results: any[]) => void) => {
+const searchStocks = (queryString: string, cb: any): void => {
   const q = queryString?.trim()
   if (!q || q.length < 1) {
     cb([])
     return
   }
-  try {
-    console.log('搜索:', q)
-    // 正确路径是 /api/markets/CN/stocks/search
-    const res = await request.get(`/api/markets/CN/stocks/search`, { params: { q, limit: 20 } })
-    const stocks = res?.data?.stocks || []
-    console.log('搜索结果:', stocks)
-    cb(stocks.map((s: any) => ({
-      value: s.code || s.symbol || '',
-      code: s.code || s.symbol || '',
-      name: s.name || '',
-    })))
-  } catch (err) {
-    console.error('搜索失败:', err)
-    cb([])
-  }
+  // 正确路径是 /api/markets/CN/stocks/search
+  request.get(`/api/markets/CN/stocks/search`, { params: { q, limit: 20 } })
+    .then(res => {
+      const stocks = res?.data?.stocks || []
+      cb(stocks.map((s: any) => ({
+        value: s.code || s.symbol || '',
+        code: s.code || s.symbol || '',
+        name: s.name || '',
+      })))
+    })
+    .catch(err => {
+      console.error('搜索失败:', err)
+      cb([])
+    })
 }
 
 // 选择搜索结果后自动填充
