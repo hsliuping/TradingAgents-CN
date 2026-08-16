@@ -3,8 +3,10 @@
 import logging
 import os
 import random
+import re
+import time
 from typing import Annotated, Optional
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, unquote, urlencode, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -23,6 +25,20 @@ USER_AGENTS = [
 
 # SearXNG 只使用国内可访问的引擎
 SEARXNG_ENGINES = "baidu,360so,sogou,bing"
+
+# 引擎轮换顺序（质量优先：百度中文质量最好，Bing中国版对长中文查询会
+# 降级成单字匹配返回字典页，放最后兜底）
+SEARXNG_ENGINE_ORDER = ["baidu", "sogou", "360so", "bing"]
+
+# 引擎熔断状态：引擎名 -> 冷却截止时间戳。
+# 引擎连续被查询会触发反爬 CAPTCHA 被 SearXNG 挂起（实测 LLM 一轮对话
+# 搜 8 次即触发），挂起后该引擎返回 0 结果。这里在客户端配合熔断：
+# 某引擎无有效结果后 5 分钟内不再首选它，自动轮换到下一引擎。
+_engine_cooldown: dict = {}
+
+# 两次 SearXNG 请求的最小间隔（秒），降低触发反爬的概率
+_SEARXNG_MIN_INTERVAL = 1.2
+_last_searxng_ts = 0.0
 
 # 财经网站域名优先级（分数越高越优先）
 FINANCE_DOMAINS = {
@@ -70,46 +86,127 @@ def _sort_by_finance_priority(results: list[dict]) -> list[dict]:
     return sorted(results, key=lambda r: _get_domain_score(r.get("url", "")), reverse=True)
 
 
+def _query_key_terms(query: str) -> list:
+    """提取查询中的核心词（去掉年份/数字/量词/单字，用于关联性过滤）。
+
+    例："赛力斯 2026年6月 产销快报 销量 辆" -> ["赛力斯", "产销快报", "销量"]
+    """
+    tokens = re.split(r"[\s,，、/·\"']+", query.strip())
+    terms = []
+    for tok in tokens:
+        # 去掉纯数字、年份月份、百分数、常见量词
+        cleaned = re.sub(r"^\d{4}年?\d{0,2}月?\d{0,2}日?$|^\d+%?$|^\d+$", "", tok)
+        if len(cleaned) >= 2:
+            terms.append(cleaned)
+    return terms
+
+
+def _filter_irrelevant_results(query: str, results: list) -> list:
+    """过滤与查询零关联的垃圾结果。
+
+    背景：Bing 中国版对长中文查询会降级成单字匹配，返回"赛"字字典、
+    汉典等无关页面，污染 LLM 上下文。过滤规则：结果标题（含解码后 URL）
+    至少包含一个核心词，否则丢弃。
+    """
+    terms = _query_key_terms(query)
+    if not terms:
+        return results  # 无法提取核心词（如纯代码查询），不过滤
+
+    kept = []
+    for r in results:
+        text = (r.get("title", "") or "") + " " + unquote(r.get("url", "") or "")
+        if any(t in text for t in terms):
+            kept.append(r)
+    dropped = len(results) - len(kept)
+    if dropped:
+        logger.info("垃圾结果过滤: 丢弃 %d 条与查询零关联的结果", dropped)
+    return kept
+
+
 def _search_searxng(
     instance_url: str, query: str, language: str, max_results: int
-) -> list[dict]:
-    """通过 SearXNG 实例搜索（只使用国内引擎）。"""
-    params = {
-        "q": query,
-        "format": "json",
-        "language": language,
-        "safesearch": 0,
-        "categories": "general",
-        "engines": SEARXNG_ENGINES,
-        "timeout": 5,
-    }
-    full_url = f"{instance_url.rstrip('/')}/search?{urlencode(params)}"
-    resp = requests.get(
-        full_url,
-        headers={
-            "User-Agent": random.choice(USER_AGENTS),
-            "Accept": "application/json",
-        },
-        timeout=10,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+) -> list:
+    """通过 SearXNG 实例搜索（引擎轮换 + 熔断 + 关联性过滤）。
 
-    results = []
-    for item in (data.get("results") or [])[:max_results * 2]:  # 多取一些用于排序
-        results.append(
+    不再一次并发打满所有引擎（会同时触发多个引擎的反爬 CAPTCHA），
+    而是按质量顺序逐个尝试：某引擎返回有效结果即停止；
+    无有效结果的引擎进入 5 分钟冷却，后续搜索自动轮换。
+    """
+    global _last_searxng_ts
+
+    # 全局限速：两次 SearXNG 请求至少间隔 _SEARXNG_MIN_INTERVAL 秒
+    wait = _SEARXNG_MIN_INTERVAL - (time.time() - _last_searxng_ts)
+    if wait > 0:
+        time.sleep(wait)
+    _last_searxng_ts = time.time()
+
+    now = time.time()
+    # 可用引擎在前（冷却中的排后），同优先级保持质量顺序
+    engines = sorted(
+        SEARXNG_ENGINE_ORDER,
+        key=lambda e: (_engine_cooldown.get(e, 0) > now, SEARXNG_ENGINE_ORDER.index(e)),
+    )
+    logger.info("SearXNG 引擎顺序: %s（冷却: %s）", engines, {
+        e: f"{_engine_cooldown[e] - now:.0f}s" for e in _engine_cooldown if _engine_cooldown[e] > now
+    } or "无")
+
+    for engine in engines:
+        params = {
+            "q": query,
+            "format": "json",
+            "language": language,
+            "safesearch": 0,
+            "categories": "general",
+            "engines": engine,
+            "timeout": 6,
+        }
+        full_url = f"{instance_url.rstrip('/')}/search?{urlencode(params)}"
+        try:
+            resp = requests.get(
+                full_url,
+                headers={
+                    "User-Agent": random.choice(USER_AGENTS),
+                    "Accept": "application/json",
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            logger.warning("SearXNG 引擎 %s 查询失败: %s", engine, exc)
+            _engine_cooldown[engine] = time.time() + 300
+            continue
+
+        raw = data.get("results") or []
+        unresponsive = [u[0] for u in (data.get("unresponsive_engines") or [])]
+        if engine in unresponsive:
+            logger.warning("SearXNG 引擎 %s 已被挂起（反爬/超时），冷却 5 分钟", engine)
+            _engine_cooldown[engine] = time.time() + 300
+            continue
+
+        results = [
             {
                 "title": item.get("title", ""),
                 "url": item.get("url", ""),
                 "content": item.get("content", ""),
-                "engine": item.get("engine", "searxng"),
+                "engine": item.get("engine", engine),
                 "published_date": item.get("publishedDate", ""),
             }
-        )
+            for item in raw[: max_results * 2]
+        ]
+        results = _filter_irrelevant_results(query, results)
+        if not results:
+            logger.warning(
+                "SearXNG 引擎 %s 无有效结果（原始 %d 条），冷却 5 分钟", engine, len(raw)
+            )
+            _engine_cooldown[engine] = time.time() + 300
+            continue
 
-    # 按财经网站优先级排序
-    results = _sort_by_finance_priority(results)
-    return results[:max_results]
+        results = _sort_by_finance_priority(results)
+        logger.info("SearXNG 命中引擎 %s：%d 条有效结果", engine, len(results))
+        return results[:max_results]
+
+    return []
 
 
 def _get_baidu_session() -> requests.Session:
