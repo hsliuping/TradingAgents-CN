@@ -634,6 +634,7 @@ class UnifiedLLMClient:
         **kwargs
     ) -> LLMResponse:
         """异步执行工具调用循环，可选收集每轮调用的工具名称"""
+        from .models import LLMResponse  # 🔥 函数开头统一导入：避免 dry_run 分支内局部导入导致 intercepted 分支 UnboundLocalError
         current_messages = messages.copy()
         current_response = response
         rounds = 0
@@ -757,7 +758,6 @@ class UnifiedLLMClient:
             if dry_run:
                 logger.info("[DRY_RUN] ✅ 第 1 轮工具选择已记录，跳过后续轮次")
                 # 不再调 LLM，直接构造一个纯文本回复返回
-                from .models import LLMResponse
                 return LLMResponse(
                     content=f"[dry_run 测试模式] LLM 选择的工具: {', '.join(tools_used or [])}",
                     model=current_response.model,
