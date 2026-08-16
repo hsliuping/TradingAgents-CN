@@ -442,7 +442,60 @@ class UnifiedAnalysisEngine:
                 return "workflow"
             return default_engine
         return requested_engine
-    
+
+    async def _inject_memory_facts(self, workflow_inputs: Dict[str, Any]) -> None:
+        """查询该股票的未过期事实记忆并注入工作流输入（失败不影响分析）。
+
+        事实记忆来源：智能助手联网工具提取（assistant_memory_facts 集合），
+        按 symbol / related_terms 匹配股票代码，只取 valid_until 未过期的记录。
+        注入文本含采集日期与来源，供辩论环节（bull/bear）与风险评估环节
+        （risk_manager）作为可溯源材料参考（消费方见 core/agents/base.py
+        的事实记忆注入白名单）。
+        """
+        try:
+            ticker_val = str(workflow_inputs.get("ticker") or "").strip()
+            if not ticker_val:
+                return
+            from datetime import datetime as _dt
+            from app.core.database import get_mongo_db
+            db = get_mongo_db()
+            now_iso = _dt.now().isoformat(timespec="seconds")
+            cursor = (
+                db["assistant_memory_facts"]
+                .find(
+                    {
+                        "valid_until": {"$gte": now_iso},
+                        "$or": [
+                            {"symbol": ticker_val},
+                            {"related_terms": ticker_val},
+                        ],
+                    }
+                )
+                .sort("fetched_at", -1)
+                .limit(8)
+            )
+            docs = [doc async for doc in cursor]
+            if not docs:
+                return
+            blocks = [
+                "【外部事实记忆】以下事实来自智能助手此前通过联网工具获取并验证的真实数据"
+                "（含采集日期与来源，已通过时效校验）。可将其作为本次分析材料的一部分参考，"
+                "引用时需标注采集日期；若与本次分析获取的最新数据不一致，以本次数据为准。"
+            ]
+            for i, doc in enumerate(docs, 1):
+                fetched = str(doc.get("fetched_at", ""))[:16].replace("T", " ")
+                blocks.append(
+                    f"--- 事实 {i} | 采集于 {fetched} | 来源 {doc.get('tool_id', '')} | "
+                    f"主题：{doc.get('topic', '')} ---\n{str(doc.get('content', ''))[:1000]}"
+                )
+            workflow_inputs["memory_facts_summary"] = "\n\n".join(blocks)
+            self.logger.info(
+                "🧠 [事实记忆注入] ticker=%s 已注入 %d 条外部事实记忆",
+                ticker_val, len(docs),
+            )
+        except Exception as e:
+            self.logger.warning(f"⚠️ [事实记忆注入] 失败（不影响分析）: {e}")
+
     async def _execute_via_workflow(
         self,
         task: UnifiedAnalysisTask,
@@ -546,6 +599,11 @@ class UnifiedAnalysisEngine:
                     workflow_inputs["ticker"] = val
                     self.logger.debug(f"📋 参数映射: {key} → ticker = {val}")
                     break
+
+        # 🧠 外部事实记忆注入：查询该股票相关的未过期事实记忆（智能助手联网提取），
+        # 写入 memory_facts_summary 供辩论环节（bull/bear）与风险评估环节（risk_manager）
+        # 作为分析材料参考（消费方见 core/agents/base.py 的事实记忆注入白名单）。
+        await self._inject_memory_facts(workflow_inputs)
 
         # 🆕 读取工作流的 input_config，根据字段定义补充缺失参数
         try:

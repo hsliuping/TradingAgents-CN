@@ -1512,6 +1512,11 @@ class WorkflowBuilder:
             skip_cache: Annotated[bool, keep_non_empty]  # 是否跳过缓存
             prompt_overrides: Annotated[dict, merge_dict]  # 提示词覆盖
 
+            # 🆕 外部事实记忆注入（智能助手联网提取的事实，带采集日期与来源）
+            # 由 UnifiedAnalysisEngine 在启动时按 ticker 查询写入，仅辩论环节
+            # （bull/bear）与风险评估环节（risk_manager）消费，其他环节不受影响
+            memory_facts_summary: Annotated[str, keep_non_empty]
+
         # 🔥 动态注入工坊 Agent 的 output_field 到 State schema
         # LangGraph 的 StateGraph 只会保留 schema 中声明的字段，未声明的字段会被丢弃
         # 工坊创建的 Agent（如 valuation_analyst_v1）使用自定义 output_field（如 valuation_report）

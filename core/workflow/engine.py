@@ -358,6 +358,8 @@ class WorkflowEngine:
             "_condition_result": FieldType.BOOLEAN,
             "_condition_error": FieldType.STRING,
             "_analysis_data_source": FieldType.STRING,
+            # 外部事实记忆注入（智能助手联网提取的事实，供辩论/风险评估环节参考）
+            "memory_facts_summary": FieldType.STRING,
         }
 
         for node in definition.nodes:
