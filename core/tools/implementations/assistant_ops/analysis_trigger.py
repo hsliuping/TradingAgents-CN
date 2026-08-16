@@ -25,6 +25,23 @@ def _depth_label(depth: int) -> str:
     return _DEPTH_MAP.get(depth, "标准")
 
 
+def _analysis_models() -> tuple[str, str]:
+    """获取当前配置的快速/深度分析模型，写入 task_params 供报告页展示模型名。
+
+    与前端/正常分析入口保持一致（analysis_service 亦从 unified_config 读取），
+    避免智能助手发起的分析报告显示 Unknown/Unknown。
+    """
+    try:
+        from app.core.unified_config import unified_config
+        return (
+            unified_config.get_quick_analysis_model(),
+            unified_config.get_deep_analysis_model(),
+        )
+    except Exception as e:
+        logger.warning(f"[analysis_trigger] 读取分析模型配置失败: {e}")
+        return "qwen-turbo", "qwen-max"
+
+
 @tool
 @register_tool(
     tool_id="trigger_stock_analysis",
@@ -59,7 +76,14 @@ async def trigger_stock_analysis(
         service = get_task_analysis_service()
 
         # 构造任务参数，若在 IM 渠道触发则附加回调渠道信息（用于任务完成后推送通知）
-        task_params: dict = {"symbol": symbol, "market_type": "cn", "research_depth": _depth_label(depth)}
+        quick_model, deep_model = _analysis_models()
+        task_params: dict = {
+            "symbol": symbol,
+            "market_type": "cn",
+            "research_depth": _depth_label(depth),
+            "quick_analysis_model": quick_model,
+            "deep_analysis_model": deep_model,
+        }
         im_channel = get_current_im_channel()
         if im_channel:
             task_params["_im_channel"] = im_channel
@@ -135,7 +159,14 @@ async def trigger_batch_analysis(
 
     task_ids = []
     for sym in symbol_list:
-        task_params = {"symbol": sym, "market_type": "cn", "research_depth": _depth_label(depth)}
+        quick_model, deep_model = _analysis_models()
+        task_params = {
+            "symbol": sym,
+            "market_type": "cn",
+            "research_depth": _depth_label(depth),
+            "quick_analysis_model": quick_model,
+            "deep_analysis_model": deep_model,
+        }
         current_thread_id = (get_current_assistant_thread_id() or "").strip()
         if current_thread_id:
             task_params["_assistant_thread_id"] = current_thread_id
