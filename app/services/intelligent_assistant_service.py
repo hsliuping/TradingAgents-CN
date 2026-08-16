@@ -278,6 +278,15 @@ def _build_untraced_interception(untraced_detail: str) -> str:
     )
 
 
+def _retry_message(role: str, content: str) -> Message:
+    """构造重试反馈消息。
+
+    注意：achat 要求 messages 为 core.llm.models.Message 对象（pydantic），
+    直接 append dict 会触发 'dict' object has no attribute 'role'。
+    """
+    return Message(role=MessageRole(role), content=content)
+
+
 def _has_fabricated_tool_json(reply: str) -> bool:
     """检测回复中是否把工具结果编造为 JSON 对象。
 
@@ -2487,8 +2496,8 @@ class IntelligentAssistantService:
                                len(_SPECIFIC_NUMBER_RE.findall(reply_content)))
                 # 自动纠错重试一次：追加校验反馈让 LLM 先调工具再回答
                 if _retry_attempt < 1:
-                    messages.append({"role": "assistant", "content": reply_content})
-                    messages.append({"role": "user", "content": _UNSOURCED_RETRY_PROMPT})
+                    messages.append(_retry_message("assistant", reply_content))
+                    messages.append(_retry_message("user", _UNSOURCED_RETRY_PROMPT))
                     logger.info("[智能助手] 已拦截未溯源数字回复，自动纠错重试（第1次）")
                     return await _do_chat(_retry_attempt + 1)
                 return (
@@ -2509,8 +2518,8 @@ class IntelligentAssistantService:
                         trusted_texts)[:6]
                     retry_prompt = _UNTRACED_RETRY_PROMPT_TEMPLATE.format(
                         numbers="、".join(untraced_numbers))
-                    messages.append({"role": "assistant", "content": reply_content})
-                    messages.append({"role": "user", "content": retry_prompt})
+                    messages.append(_retry_message("assistant", reply_content))
+                    messages.append(_retry_message("user", retry_prompt))
                     logger.info("[智能助手] 已拦截无法溯源数字回复，自动纠错重试（第1次）")
                     return await _do_chat(_retry_attempt + 1)
                 untraced_detail = "、".join(_get_untraced_risky_numbers(
@@ -2895,8 +2904,8 @@ class IntelligentAssistantService:
                         "stage": "retry",
                         "message": "检测到未经验证的数据，正在调用工具重新获取…",
                     })
-                    messages.append({"role": "assistant", "content": reply})
-                    messages.append({"role": "user", "content": _UNSOURCED_RETRY_PROMPT})
+                    messages.append(_retry_message("assistant", reply))
+                    messages.append(_retry_message("user", _UNSOURCED_RETRY_PROMPT))
                     retry_resp = await asyncio.wait_for(
                         self._llm_client.achat(
                             messages,
@@ -2952,8 +2961,8 @@ class IntelligentAssistantService:
                         untraced_texts_s)[:6]
                     retry_prompt_s = _UNTRACED_RETRY_PROMPT_TEMPLATE.format(
                         numbers="、".join(untraced_numbers_s))
-                    messages.append({"role": "assistant", "content": reply})
-                    messages.append({"role": "user", "content": retry_prompt_s})
+                    messages.append(_retry_message("assistant", reply))
+                    messages.append(_retry_message("user", retry_prompt_s))
                     retry_resp = await asyncio.wait_for(
                         self._llm_client.achat(
                             messages,
