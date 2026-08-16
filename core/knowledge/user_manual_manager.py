@@ -127,10 +127,17 @@ def _resolve_manual_files() -> List[Tuple[str, str]]:
     # 3. 当前工作目录相对路径
     candidate_dirs.append(os.path.join(os.getcwd(), "docs", "02-user-guide"))
 
-    # 找到第一个存在且包含手册文件的目录
+    # 🔥 兼容旧版平铺 docs 结构（历史便携包/安装包：user-manual-v3.0.md 直接位于 docs/ 根下）
+    candidate_dirs.append(os.path.join(project_root, "docs"))
+    candidate_dirs.append("/app/docs")
+
+    # 找到第一个存在且包含手册文件的目录（避免选中空目录）
     user_guide_dir = None
     for d in candidate_dirs:
-        if os.path.isdir(d):
+        if os.path.isdir(d) and (
+            os.path.exists(os.path.join(d, "user-manual-v3.0.md"))
+            or os.path.exists(os.path.join(d, "jdyun-user-manual-v3.0.md"))
+        ):
             user_guide_dir = d
             break
 
@@ -272,6 +279,28 @@ class UserManualManager:
     @property
     def available(self) -> bool:
         return self._available
+
+    def reinit(self) -> bool:
+        """重新初始化向量后端（embedding + 向量集合）。
+
+        适用场景：启动时 Embedding API Key 未配置/错误导致初始化失败
+        （available=False），用户在管理界面配置好 Key 后调用此方法即可
+        恢复向量检索，无需重启后端。EmbeddingManager 每次重建都会重新
+        从数据库/环境变量读取最新配置。
+        """
+        try:
+            self._embedding_manager = None
+            self._collection = None
+            self._init_backend()
+            if self._available:
+                logger.info("✅ [UserManualManager] 重新初始化成功，向量检索已恢复")
+                return True
+            logger.warning("⚠️ [UserManualManager] 重新初始化后仍不可用")
+            return False
+        except Exception as e:
+            logger.error(f"❌ [UserManualManager] 重新初始化失败: {e}", exc_info=True)
+            self._available = False
+            return False
 
     # ----------------------------------------------------------
     # 索引构建

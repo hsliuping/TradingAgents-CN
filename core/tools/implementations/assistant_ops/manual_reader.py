@@ -357,18 +357,26 @@ async def search_user_manual(
 
         manager = UserManualManager()
 
-        # 检查向量库是否可用
+        # 检查向量库是否可用；不可用时尝试重新初始化
+        # （用户可能已配置好 Embedding Key，reinit 会重新读取配置，无需重启后端）
         if not manager.available:
-            # 优雅降级：回退到 read_user_manual_section 的关键字匹配
-            logger.warning(
-                "[search_user_manual] 向量检索不可用，回退到关键字匹配。"
-                "建议检查 Embedding 配置或向量数据库（MongoDB）服务状态。"
-            )
-            return (
-                "⚠️ 向量检索当前不可用（Embedding 或向量数据库未就绪），已回退到关键字匹配模式。\n\n"
-                "请尝试用更精确的章节名调用 read_user_manual_section 工具，"
-                "如 '单股研究'、'数据源配置'、'模拟交易' 等。"
-            )
+            try:
+                if manager.reinit() and manager.available:
+                    logger.info("[search_user_manual] 向量检索重新初始化成功，继续语义检索")
+                else:
+                    raise RuntimeError("reinit 失败")
+            except Exception as e:
+                # 优雅降级：回退到 read_user_manual_section 的关键字匹配
+                logger.warning(
+                    "[search_user_manual] 向量检索不可用（%s），回退到关键字匹配。"
+                    "建议检查 Embedding 配置（系统设置 -> LLM/Embedding）或重启后端。",
+                    e,
+                )
+                return (
+                    "⚠️ 向量检索当前不可用（Embedding 或向量数据库未就绪），已回退到关键字匹配模式。\n\n"
+                    "请尝试用更精确的章节名调用 read_user_manual_section 工具，"
+                    "如 '单股研究'、'数据源配置'、'模拟交易' 等。"
+                )
 
         # 检查索引是否已构建
         count = manager.get_count()

@@ -25,8 +25,22 @@
       <div class="chat-body">
         <!-- 顶部说明 -->
         <div class="chat-intro">
-          <el-icon color="var(--el-color-primary)"><InfoFilled /></el-icon>
-          <span>问我任何关于系统使用的问题，我能查到你的真实状态再回答</span>
+          <div class="chat-intro-text">
+            <el-icon color="var(--el-color-primary)"><InfoFilled /></el-icon>
+            <span>问我任何关于系统使用的问题，我能查到你的真实状态再回答</span>
+          </div>
+          <el-tooltip content="重建用户手册向量索引（语义检索不可用时手动补救，无需重启后端）" placement="top">
+            <el-button
+              text
+              size="small"
+              type="primary"
+              :loading="rebuildingIndex"
+              @click="rebuildManualIndex"
+            >
+              <el-icon><RefreshRight /></el-icon>
+              重建手册索引
+            </el-button>
+          </el-tooltip>
         </div>
 
         <!-- 消息列表 -->
@@ -133,6 +147,7 @@ import {
   InfoFilled,
   Tools,
   Delete,
+  RefreshRight,
 } from '@element-plus/icons-vue'
 import { assistantApi } from '@/api/assistant'
 import { renderMarkdown } from '@/utils/markdown'
@@ -148,12 +163,31 @@ const visible = ref(false)
 const inputText = ref('')
 const messages = ref<ChatMessage[]>([])
 const loading = ref(false)
+const rebuildingIndex = ref(false)
 const streamingMessage = ref('')
 const toolInProgress = ref('')
 const messagesRef = ref<HTMLElement>()
 const route = useRoute()
 const conversationId = ref<string | undefined>(undefined)
 let abortController: AbortController | null = null
+
+/** 重建用户手册向量索引：启动时未配置 Embedding Key 导致语义检索不可用时的手动补救 */
+const rebuildManualIndex = async () => {
+  if (rebuildingIndex.value) return
+  rebuildingIndex.value = true
+  try {
+    const res = await assistantApi.rebuildUserManualIndex()
+    ElMessage.success(
+      `用户手册索引已重建：${res.sections_count ?? 0} 个切片（${res.manuals_count ?? 0} 份手册）`
+    )
+  } catch (e: any) {
+    ElMessage.error(
+      e?.response?.data?.detail || e?.message || '用户手册索引重建失败，请检查 Embedding 配置'
+    )
+  } finally {
+    rebuildingIndex.value = false
+  }
+}
 
 // 最近浏览器报错收集
 const recentErrors: string[] = []
@@ -387,6 +421,7 @@ watch(visible, (v) => {
 .chat-intro {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   padding: 10px 12px;
   background: var(--el-color-primary-light-9);
@@ -395,6 +430,14 @@ watch(visible, (v) => {
   font-size: 12px;
   color: var(--el-text-color-regular);
   line-height: 1.5;
+}
+
+.chat-intro-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 
 .messages {
