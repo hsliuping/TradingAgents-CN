@@ -246,17 +246,42 @@ async def _execute_critical_tool(
     user_id: str = "",
 ) -> str:
     """执行真正的关键工具（用户确认后调用）"""
+    import inspect
     from core.tools import get_tool_registry
     registry = get_tool_registry()
     func = registry.get_function(tool_id)
     if func is None:
         raise ValueError(f"工具 {tool_id} 未注册")
 
-    # 注入 user_id 到参数（部分工具需要）
-    if user_id and "user_id" not in arguments:
-        arguments = {**arguments, "user_id": user_id}
+    call_args = dict(arguments or {})
 
-    result = func(**arguments)
+    # 检查工具签名：是否接受 user_id / 是否接受 **kwargs
+    try:
+        sig = inspect.signature(func)
+        param_names = set(sig.parameters.keys())
+        accepts_var_kwargs = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
+    except (TypeError, ValueError):
+        param_names = set()
+        accepts_var_kwargs = False
+
+    # 仅当工具签名接受 user_id 时才注入（如 remember_this 闭包）；
+    # 不接受 user_id 的工具（如 trigger_stock_analysis 内部自行取当前用户）不注入，
+    # 否则 func(**arguments) 会抛 TypeError
+    if (
+        user_id
+        and "user_id" not in call_args
+        and ("user_id" in param_names or accepts_var_kwargs)
+    ):
+        call_args["user_id"] = user_id
+
+    # 过滤工具不接受的参数（LLM 可能编造多余参数导致 TypeError），**kwargs 除外
+    if not accepts_var_kwargs and param_names:
+        call_args = {k: v for k, v in call_args.items() if k in param_names}
+
+    result = func(**call_args)
     if hasattr(result, "__await__"):
         result = await result
 
