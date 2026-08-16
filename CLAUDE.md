@@ -87,10 +87,33 @@
 
 ## 分支模型
 
-- `main`：v3.0 开发主线，所有新功能只往这里合
-- `release/2.0.x`：v2.0.1 维护分支，只接受 Bug 修复
-- `release/2.1.x`：v2.1.0 维护分支，只接受 Bug 修复
-- `hotfix/<version>/<issue>`：紧急修复，用完即删
+### 核心分支表（⚠️ 开发前必须确认在正确分支上）
+
+| 分支 | 作用 | 跟踪远程 | 使用场景 |
+|------|------|---------|---------|
+| `v3.0` | **v3.0 开发主线（日常开发用这个）** | `pro/v3.0` | 所有 v3.0 新功能开发、Bug 修复都在此分支进行 |
+| `pro-main` | Pro 版主干（发布节点快照） | `pro/main` | 版本集成/发布时同步，**不在其上做日常开发** |
+| `main` | 开源版主线 | `origin/main` | 同步开源社区，与 Pro 版功能不同步 |
+| `release/jdyun-v3.0` | 京东云合作版发布分支 | `pro` | 京东云专用界面/部署，v3.0 功能视需要 cherry-pick 同步 |
+| `pro-release-main` | Pro 历史发布分支 | `pro` | 已闲置（behind 2000+），勿用 |
+| `release/2.0.x` / `release/2.1.x` | v2.0.1 / v2.1.0 维护分支 | - | 只接受 Bug 修复 |
+| `hotfix/<version>/<issue>` | 紧急修复分支 | - | 用完即删 |
+| `backup/*`、`dev-branch`、`develop`、`feature/*`、`integration/*` | 历史归档分支 | - | 禁止在其上开发 |
+
+### AI 助手注意事项（🔴 严格执行）
+
+1. **v3.0 功能开发一律在 `v3.0` 分支**（不是 `pro-main`、更不是 `main`）
+2. 开发完成的功能按需同步：`release/jdyun-v3.0`（京东云版）通过 cherry-pick
+3. 切换分支前先确认工作区干净（`git status`），未提交修改先 stash 或提交
+
+### 远程仓库说明
+
+| 远程 | 仓库 | 用途 |
+|------|------|------|
+| `pro` | hsliuping/TradingAgents-CN-Pro | **Pro 版私有仓库（主要推送目标）** |
+| `origin` | hsliuping/TradingAgents-CN | 开源版 |
+| `upstream` | TauricResearch/TradingAgents | 原版上游（只读参考） |
+| `hub` / `charliecai` / `contributor` / `yifanhere` | 协作者仓库 | 历史协作，勿推送 |
 
 ## Commit 规范
 

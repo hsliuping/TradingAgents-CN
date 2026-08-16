@@ -12,6 +12,8 @@
 
 services:
   mongodb:
+    # 8.0：与数据卷格式（WiredTiger format 14）及京东云生产环境对齐；
+    # 降级到 7.0 以下会因索引格式版本过新 fatal 退出
     image: mongo:8.0
     restart: unless-stopped
     ports:
