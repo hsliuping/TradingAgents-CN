@@ -23,12 +23,10 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
 ]
 
-# SearXNG 只使用国内可访问的引擎
-SEARXNG_ENGINES = "baidu,360so,sogou,bing"
-
-# 引擎轮换顺序（质量优先：百度中文质量最好，Bing中国版对长中文查询会
-# 降级成单字匹配返回字典页，放最后兜底）
-SEARXNG_ENGINE_ORDER = ["baidu", "sogou", "360so", "bing"]
+# SearXNG 引擎轮换顺序（质量优先）。
+# 注意：不放 bing——Bing 中国版对长中文查询会降级成单字匹配，
+# 返回"赛"字字典页等无关结果，过滤它们反而浪费上下文 token。
+SEARXNG_ENGINE_ORDER = ["baidu", "sogou", "360so"]
 
 # 引擎熔断状态：引擎名 -> 冷却截止时间戳。
 # 引擎连续被查询会触发反爬 CAPTCHA 被 SearXNG 挂起（实测 LLM 一轮对话
