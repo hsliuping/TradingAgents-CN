@@ -155,5 +155,5 @@ A: 看你的胜率:
 ## 📚 延伸阅读
 
 - [第 22 课:短线实战案例(下)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-22-short-case-2.md)
-- [第 20 课:短线交易系统设计](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md)
+- [第 20 课:短线交易计划设计](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md)
 - [第 16 课:操作复盘](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-04-review/lesson-16-trade-review.md)

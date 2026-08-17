@@ -5,14 +5,14 @@
 ## 🎯 阶段目标
 
 本阶段为**短线风格**用户定制。学完后,你能:
-- 设计**短线交易系统**
+- 设计**短线交易计划**
 - 用 v3.0 平台做**短线实战**
 
 ## 📚 课程列表
 
 | 课 | 主题 | 时长 |
 |----|------|------|
-| [第 20 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md) | 短线交易系统设计 | 20 分钟 |
+| [第 20 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md) | 短线交易计划设计 | 20 分钟 |
 | [第 21 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-21-short-case-1.md) | 短线实战案例(上) | 20 分钟 |
 | [第 22 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-22-short-case-2.md) | 短线实战案例(下) | 20 分钟 |
 
