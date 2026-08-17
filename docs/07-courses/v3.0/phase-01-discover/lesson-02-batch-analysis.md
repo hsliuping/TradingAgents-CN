@@ -217,4 +217,4 @@ A: 可以,在"市场"下拉选 ETF,然后输入 ETF 代码(如 510050)。
 
 - [第 1 课:股票筛选](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-01-stock-screening.md)
 - [第 3 课:单股研究入门](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-03-single-analysis-basic.md)
-- [第 7 课:定时分析与渠道推送](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-07-scheduled-push.md) - 解决"每天手动重复提交"的问题
+- [第 9 课:定时分析 + 跟踪节奏](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-09-scheduled-track-rhythm.md) - 解决"每天手动重复提交"的问题

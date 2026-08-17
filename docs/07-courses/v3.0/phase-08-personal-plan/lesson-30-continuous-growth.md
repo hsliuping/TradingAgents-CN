@@ -211,10 +211,10 @@
 
 ### 阶段 2:跟踪(4 课)
 
-- [第 6 课:通用研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-06-general-research.md)
-- [第 7 课:定时分析 + 渠道推送](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-07-scheduled-push.md)
-- [第 8 课:AI 对话助手与 AI 记忆](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-08-ai-assistant-memory.md)
-- [第 9 课:跟踪节奏控制](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-09-track-rhythm.md)
+- [第 6 课:AI 助手功能全景](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-06-ai-assistant-overview.md)
+- [第 7 课:用 AI 助手做行业研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-07-ai-assistant-industry-research.md)
+- [第 8 课:AI 助手驱动日常研究闭环](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-08-ai-assistant-daily-research.md)
+- [第 9 课:定时分析 + 跟踪节奏](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-09-scheduled-track-rhythm.md)
 
 ### 阶段 3:持仓(6 课)
 
@@ -234,9 +234,9 @@
 
 ### 阶段 5:短线(3 课)
 
-- [第 20 课:短线交易计划设计](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md)
-- [第 21 课:短线实战案例(上)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-21-short-case-1.md)
-- [第 22 课:短线实战案例(下)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-22-short-case-2.md)
+- [第 20 课:短线研究的平台工具链](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md)
+- [第 21 课:短线研究实战(上)·发现与跟踪](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-21-short-case-1.md)
+- [第 22 课:短线研究实战(下)·跟踪与复盘](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-22-short-case-2.md)
 
 ### 阶段 6:中长线(3 课)
 

@@ -862,7 +862,7 @@ A: 单股研究是"通用 7 Agent"输出;巴菲特工作流是"专业 5 Agent"�
 
 - [第 26 课:AI 工作流架构师](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-26-ai-workflow-architect.md)
 - [第 27 课:Agent 工坊 + Skill 中心](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-27-agent-skill-workshop.md)
-- [第 6 课:通用研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-06-general-research.md)
+- [第 7 课:用 AI 助手做行业研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-07-ai-assistant-industry-research.md)
 - [阶段 7 完成!进入阶段 8](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-08-personal-plan/README.md)
 
 

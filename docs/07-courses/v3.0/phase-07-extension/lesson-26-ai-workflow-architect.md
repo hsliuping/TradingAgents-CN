@@ -73,7 +73,43 @@ AI 生成后,可以:
 - 满意后点"保存"
 - 工作流入库,可以在「通用研究」菜单或「单股研究」菜单选择使用
 
-## 📊 工作流的"5 个核心组件"
+## 🧭 通用研究菜单:工作流的应用
+
+建好"通用分析类工作流"后,就能在「通用研究」菜单用自然语言研究行业/主题(无需明确股票)。
+
+### 入口
+
+- 侧边栏「通用研究」菜单
+
+### 操作要点
+
+1. **选分析流程**: 在"分析流程"下拉里选一个通用分析类工作流(如"行业研究流程")
+2. **填动态参数**: 系统根据工作流的输入参数配置,自动生成表单
+
+#### 支持的 7 种字段类型
+
+| 类型 | UI | 适用场景 |
+|------|-----|---------|
+| `string` | 单行文本 | 股票代码、行业名 |
+| `textarea` | 多行文本 | 研究问题、主题描述 |
+| `number` | 数字输入 | 估值范围、PE 阈值 |
+| `boolean` | 开关 | 是否包含风险/情绪 |
+| `date` | 日期选择 | 起止日期 |
+| `select` | 下拉单选 | 行业、市场 |
+| `multiselect` | 下拉多选 | 多选股票/行业 |
+
+3. **提交分析**: 点"开始分析",完成后在"分析记录" Tab 看历史
+
+### 典型用例
+
+| 用例 | 流程 | 参数示例 |
+|------|------|---------|
+| 行业研究 | 行业研究流程 | 行业=`新能源`、时间=2025-2026、子行业多选 |
+| 主题研究 | 主题研究流程 | 主题=`固态电池产业化`、公司范围 5-10 家 |
+
+> 💡 **对比**:通用研究(工作流版)适合固化成固定模板反复用;想快速摸底一个行业,直接用 AI 助手问(第 7 课)更快。
+
+## 🧩 工作流的"5 个核心组件"
 
 ### 组件 1:节点(Agents)
 
@@ -169,5 +205,5 @@ A: 默认**不共享**,每个用户独立。需要的话**手动复制配置**�
 
 - [第 27 课:Agent 工坊 + Skill 中心](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-27-agent-skill-workshop.md)
 - [第 28 课:巴菲特工作流实战](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-28-buffett-workflow-case.md)
-- [第 6 课:通用研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-06-general-research.md)
+- [第 7 课:用 AI 助手做行业研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-07-ai-assistant-industry-research.md)
 - [附录 A:v3.0 平台能力速查表](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/appendices/A-platform-capabilities.md)

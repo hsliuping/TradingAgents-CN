@@ -190,6 +190,6 @@ A: 简单原则:
 ## 📚 延伸阅读
 
 - [第 12 课:加减仓决策](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-12-add-reduce-decision.md)
-- [第 7 课:定时分析 + 渠道推送](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-07-scheduled-push.md)
+- [第 9 课:定时分析 + 跟踪节奏](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-09-scheduled-track-rhythm.md)
 - [第 16 课:操作复盘](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-04-review/lesson-16-trade-review.md) - 复盘止盈止损效果
 - [第 14 课:持仓阶段常见错误](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-14-position-pitfalls.md)

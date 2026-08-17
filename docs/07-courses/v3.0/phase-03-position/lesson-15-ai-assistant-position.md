@@ -1,6 +1,6 @@
 # 第 15 课:AI 智能助手在持仓阶段——用自然语言管理持仓
 
-> **课时**: 15 分钟 | **难度**: ⭐⭐ 入门 | **前置**: 第 8 课(AI 助手基础) + 第 10-13 课
+> **课时**: 15 分钟 | **难度**: ⭐⭐ 入门 | **前置**: 第 6 课(AI 助手功能全景) + 第 10-13 课
 
 > ⚠️ **风险提示**:本课程内容仅为平台功能教学,AI 输出的研究报告不构成投资建议,最终决策由你自己负责。
 
@@ -75,8 +75,8 @@ AI 会:
 > "我的持仓集中在新能源,这个行业最近怎么样?"
 
 AI 会:
-- 调通用研究 API
-- 跑行业分析工作流
+- 调板块数据工具 + 联网搜索
+- 汇总行业景气、龙头、情绪倾向
 - 显示**行业洞察** + 对持仓的影响
 
 ## 📊 实战工作流
@@ -108,7 +108,7 @@ AI 会:
 
 ## ⚠️ v3.0 重要变化
 
-- ✅ **AI 助手有 20+ 工具**,自动选择(第 8 课)
+- ✅ **AI 助手有 20+ 工具**,自动选择(第 6 课)
 - ✅ **多轮对话**:可追问"刚才那只股票现在怎么样?"
 - ✅ **多会话**:不同主题分开对话,持仓和复盘互不干扰
 - ⚠️ **京东云版单并发**:大持仓(>10 只)的研究会排队
@@ -144,7 +144,7 @@ A: Dashboard 显示**预设**指标(涨跌幅、成交量),AI 助手可以**自�
 
 ## 📚 延伸阅读
 
-- [第 8 课:AI 对话助手](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-08-ai-assistant-memory.md)
+- [第 6 课:AI 助手功能全景](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-06-ai-assistant-overview.md)
 - [第 11 课:持仓研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-11-position-research.md)
 - [第 13 课:风险跟踪](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-13-risk-tracking.md)
 - 阶段 3 完成!进入 [阶段 4:复盘](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-04-review/README.md)

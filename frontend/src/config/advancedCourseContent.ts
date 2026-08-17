@@ -14,10 +14,10 @@ const courseContentMap: Record<string, () => Promise<{ default: string }>> = {
   'phase-01-discover/lesson-05-discover-pitfalls.md': () => import('../../../docs/07-courses/v3.0/phase-01-discover/lesson-05-discover-pitfalls.md?raw'),
 
   // 阶段2：跟踪
-  'phase-02-track/lesson-06-general-research.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-06-general-research.md?raw'),
-  'phase-02-track/lesson-07-scheduled-push.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-07-scheduled-push.md?raw'),
-  'phase-02-track/lesson-08-ai-assistant-memory.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-08-ai-assistant-memory.md?raw'),
-  'phase-02-track/lesson-09-track-rhythm.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-09-track-rhythm.md?raw'),
+  'phase-02-track/lesson-06-ai-assistant-overview.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-06-ai-assistant-overview.md?raw'),
+  'phase-02-track/lesson-07-ai-assistant-industry-research.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-07-ai-assistant-industry-research.md?raw'),
+  'phase-02-track/lesson-08-ai-assistant-daily-research.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-08-ai-assistant-daily-research.md?raw'),
+  'phase-02-track/lesson-09-scheduled-track-rhythm.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-09-scheduled-track-rhythm.md?raw'),
 
   // 阶段3：持仓
   'phase-03-position/lesson-10-paper-trading.md': () => import('../../../docs/07-courses/v3.0/phase-03-position/lesson-10-paper-trading.md?raw'),

@@ -48,11 +48,11 @@
 - 第 4 课: 单股研究进阶·多情景辩论
 - 第 5 课: 发现阶段的常见错误
 
-### [阶段 2:跟踪(4 课)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/README.md) — 选出来后怎么持续跟进?
-- 第 6 课: 通用研究(无明确股票,讲行业讲主题)
-- 第 7 课: 定时分析与渠道推送
-- 第 8 课: AI 对话助手与 AI 记忆
-- 第 9 课: 跟踪阶段的节奏控制
+### [阶段 2:跟踪(4 课)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/README.md) — 用 AI 助手持续跟进
+- 第 6 课: AI 助手功能全景
+- 第 7 课: 用 AI 助手做行业研究
+- 第 8 课: AI 助手驱动日常研究闭环
+- 第 9 课: 定时分析与跟踪节奏
 
 ### [阶段 3:持仓(6 课)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/README.md) — 买了之后怎么管?
 - 第 10 课: 模拟交易:先练手再真金白银
@@ -69,9 +69,9 @@
 - 第 19 课: 持续优化:基于复盘迭代交易计划
 
 ### [阶段 5:短线风格应用(3 课)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/README.md) — 短线用户专章
-- 第 20 课: 短线交易计划设计
-- 第 21 课: 短线实战案例(上)
-- 第 22 课: 短线实战案例(下)
+- 第 20 课: 短线研究的平台工具链
+- 第 21 课: 短线研究实战(上)·发现与跟踪
+- 第 22 课: 短线研究实战(下)·跟踪与复盘
 
 ### [阶段 6:中长线风格应用(3 课)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/README.md) — 中长线用户专章
 - 第 23 课: 中长线投资系统设计
