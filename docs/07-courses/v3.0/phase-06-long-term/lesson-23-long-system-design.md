@@ -217,4 +217,4 @@ A: 大盘是中长线的**背景**:
 
 - [第 24 课:中长线实战案例(上)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-24-long-case-1.md)
 - [第 25 课:中长线实战案例(下)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-25-long-case-2.md)
-- [第 20 课:短线交易计划设计](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md)
+- [第 20 课:短线研究的平台工具链](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md)
