@@ -13,9 +13,9 @@
 
 ## 📍 入口
 
-- **定时分析**: `/settings/scheduled-analysis`(设置 → 定时分析)
-- **渠道推送**: `/settings/channel-configs`(设置 → 渠道推送)
-- **关注分组**: `/settings/watchlist-groups`(设置 → 关注分组)
+- **定时分析**: 侧边栏「设置」→「个人设置」→「定时分析配置」
+- **渠道推送**: 侧边栏「设置」→「个人设置」→「渠道推送」
+- **关注分组**: 侧边栏「设置」→「个人设置」→「定时分析分组」
 
 ## 🖱️ 操作步骤(分两部分)
 
@@ -164,10 +164,10 @@
 
 ## 🛠️ 实操作业
 
-1. 先去 `/settings/watchlist-groups` 创建 1 个关注分组(如"我的持仓"),加 3-5 只股票
-2. 去 `/settings/channel-configs` 配 1 个邮件渠道(收件人填自己的邮箱)
+1. 先去「设置」→「个人设置」→「定时分析分组」创建 1 个关注分组(如"我的持仓"),加 3-5 只股票
+2. 去「设置」→「个人设置」→「渠道推送」配 1 个邮件渠道(收件人填自己的邮箱)
 3. 测通邮件渠道(收到测试邮件)
-4. 去 `/settings/scheduled-analysis` 创建定时任务:
+4. 去「设置」→「个人设置」→「定时分析配置」创建定时任务:
    - 名称: `每日盘后跟踪`
    - 时段 1: 简单模式,周一到周五 15:30,2级-基础分析,选"我的持仓"分组
 5. 点"测试执行",验证配置
@@ -208,4 +208,4 @@ A: 告警是另一套机制(止盈/止损),第 13 课讲。定时分析完成后
 
 - [第 1 课:股票筛选](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-01-discover/lesson-01-stock-screening.md) - 创建关注分组
 - [第 8 课:AI 对话助手](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-08-ai-assistant-memory.md)
-- [第 13 课:风险跟踪](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-13-risk-tracking.md) - 止盈止损告警
+- [第 13 课:风险跟踪](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-13-risk-tracking.md) - 止盈止损规则

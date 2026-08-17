@@ -15,9 +15,9 @@
 
 | 入口 | 路径 | 适合问什么 |
 |------|------|----------|
-| **AI 智能助手** | `/assistant` | "新能源行业 2026 怎么看?"、"帮我查最近政策" |
+| **AI 智能助手** | 侧边栏「智能助手」菜单 | "新能源行业 2026 怎么看?"、"帮我查最近政策" |
 | **使用问答助手** | 右下角浮窗 | "模拟交易在哪?"、"怎么看 Token 用量?" |
-| **智能筛选** | `/screening` 默认 Tab | "低估值高股息的银行股" |
+| **智能筛选** | 「股票筛选」菜单默认 Tab | "低估值高股息的银行股" |
 
 ## 📍 入口
 
@@ -91,7 +91,7 @@
 
 #### 步骤 3:会话分类(可选)
 
-- 部分版本支持给会话打**标签**(`/tags`)
+- 部分版本支持给会话打**标签**
 - 标签可分类:"研究" / "复盘" / "系统使用"等
 
 ### 使用问答助手(右下角浮窗)
@@ -149,7 +149,7 @@ AI 助手背后的 [工具注册表](file:///c:/TradingAgentsCN/core/tools/regis
 
 ## 🛠️ 实操作业
 
-1. 进入 `/assistant`
+1. 点侧边栏「智能助手」菜单
 2. 新建会话,起名"我的研究"
 3. 依次问 AI:
    - "我关注列表里有什么股票?"
@@ -166,9 +166,7 @@ AI 助手背后的 [工具注册表](file:///c:/TradingAgentsCN/core/tools/regis
 ## ❓ FAQ
 
 **Q:AI 助手说"暂不支持港股分析",怎么办?**
-A: 正常。AI 助手**对话式提问**会拒绝港美股,但你可以:
-- 切换到 `/analysis/single` 直接输入代码(底层数据可用)
-- 在关注列表加港美股,看行情(行情数据是支持的)
+A: 正常。本平台**仅支持 A 股和 ETF 分析**,港美股的前端入口已全部下线(单股研究、批量分析、筛选、关注列表、模拟交易均不可用)。请改用 A 股或 ETF 代码进行分析。
 
 **Q:AI 助手说"我需要新工具",会自动生成吗?**
 A: v3.0 有 **Skill 自动生成**功能。AI 助手会**建议**生成新 Skill,但**需要你确认**(防止意外)。
@@ -186,4 +184,4 @@ A: 在同一会话里**直接说"你错了,应该是 X"**,AI 会基于上下文�
 
 - [第 9 课:跟踪节奏控制](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-09-track-rhythm.md)
 - [第 26 课:AI 工作流架构师](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-26-ai-workflow-architect.md) - 自然语言生成工作流
-- [第 28 课:Skill 自动生成](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-28-buffett-workflow-case.md)
+- [第 28 课:实战·以巴菲特工作流为例](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-07-extension/lesson-28-buffett-workflow-case.md)

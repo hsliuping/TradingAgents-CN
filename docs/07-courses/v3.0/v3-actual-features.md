@@ -228,17 +228,23 @@
 | `neutral_analyst` | 中性风险分析 |
 | `risk_management_decision` | 风险管理决策 |
 
-## §8 decision 字段(决策结构)
+## §8 decision 字段(决策结构,已合规化)
 
-| Key | 类型 | 示例 |
+> ⚠️ 本表为合规化后的结构(2026-08 更新)。旧的 `target_price` / `stop_loss` / "买入/卖出/持有" 等字段已移除。
+> 来源: [core/agents/adapters/risk_manager_v2.py](file:///c:/TradingAgentsCN/core/agents/adapters/risk_manager_v2.py) 的 `FinalTradeDecision` / `RiskAssessmentOutput` schema。
+
+| Key | 类型 | 说明 |
 |-----|------|------|
-| `action` | str | `持有` / `买入` / `卖出` / `观望` |
-| `target_price` | float | 375.0 |
-| `stop_loss` | float | 338.0 |
-| `position_ratio` | str | `40%-60%` |
-| `confidence` | float | 0.76 |
-| `risk_score` | float | 0.5 |
-| `reasoning` | str(长文本) | 推理过程 |
+| `action` | str | 决策标签,**只能是 `乐观` / `审慎` / `中性`**(非交易指令) |
+| `confidence` | float | 信心度(0-1) |
+| `price_analysis_range` | str(可选) | 价格分析区间(替代旧 `target_price`,**非目标价**) |
+| `risk_reference_price` | str(可选) | 风险控制参考价位(替代旧 `stop_loss`,**非止损价**) |
+| `risk_exposure_ratio` | str(可选) | 风险敞口分析 |
+| `reasoning` | str | 推理过程 |
+| `summary` | str | 分析摘要 |
+| `risk_warning` | str | 风险提示 |
+
+风险审阅(`risk_assessment`)另有:`risk_level`(低/中/高)、`risk_score`(0-1)、`key_risks`(数组)、`risk_control`、`investment_adjustment`(乐观/审慎/中性)。
 
 ## §9 ⚠️ 港美股功能状态:前端已下线,后端保留
 
@@ -272,7 +278,7 @@
 ### 课程改写影响
 
 - ❌ **lesson-10 模拟交易**:不写港美股账户(原课程中我误判要保留港美股)
-- ❌ **lesson-04 多情景**:删除"5 种情景",改为讲解"3 角色辩论"(看涨/看跌/中性)
+- ❌ **lesson-04 多情景**:删除"5 种情景",改为讲解"2 角色辩论(乐观/审慎)+ 1 整合员"
 - ❌ **lesson-03 单股研究**:示例股票用 A 股代码(如 600519/601919)
 - ✅ **课程应明确告诉用户**:"平台仅支持 A 股和 ETF 基金分析"
 
@@ -430,11 +436,11 @@
 
 ## §14 课程改写时需要核对的"易错点"
 
-1. **多情景分析**: ❌ 没有"乐观/基准/审慎/高弹性/防御"5 情景。实际是 3 角色(看涨/看跌/中性)辩论 + 单一决策(action/target_price/stop_loss)
+1. **多情景分析**: ❌ 没有"乐观/基准/审慎/高弹性/防御"5 情景。实际是 **2 角色辩论(乐观/审慎)+ 1 整合员** + **3 风险视角(高弹性/防御/基准)**,最终由风险评估师综合输出 decision(`action` ∈ {乐观/审慎/中性})
 2. **置信度**: ✅ 正确存在 `confidence_score` 字段(0-1)
 3. **AI 评分**: ❌ 没有"AI 综合评分 0-100"。实际是 `confidence_score` (0-1) 和 `risk_score` (0-1)
 4. **风险等级**: ✅ 有 `risk_level` 字段(字符串:"低"/"中"/"高"/"中等")
-5. **目标价/止损**: ✅ 正确在 `decision.target_price` 和 `decision.stop_loss`
+5. **目标价/止损**: ❌ 已合规化移除。decision 不再有 `target_price`/`stop_loss`,改为可选的 `price_analysis_range`(价格分析区间) 和 `risk_reference_price`(风险参考价),且明确"禁止给出具体目标价或止损价"
 6. **持仓分析**: ✅ 有专门的 4 个 Agent(持仓技术面/基本面/风险评估/操作建议)
 7. **复盘**: ✅ 有 `/review` 路由,后端 `trade_review_service.py` 3618 行
 8. **回测**: ✅ 有 `/backtest` 路由和 `/api/backtest` API
