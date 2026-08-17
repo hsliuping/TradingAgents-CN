@@ -240,9 +240,9 @@
 
 ### 阶段 6:中长线(3 课)
 
-- [第 23 课:中长线投资系统设计](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-23-long-system-design.md)
-- [第 24 课:中长线实战案例(上)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-24-long-case-1.md)
-- [第 25 课:中长线实战案例(下)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-25-long-case-2.md)
+- [第 23 课:中长线研究的平台工具链](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-23-long-system-design.md)
+- [第 24 课:中长线实战(上)·价值股估值修复](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-24-long-case-1.md)
+- [第 25 课:中长线实战(下)·成长股业绩跟踪](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-25-long-case-2.md)
 
 ### 阶段 7:平台扩展(3 课)
 

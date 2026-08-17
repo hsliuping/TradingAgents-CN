@@ -231,5 +231,5 @@ A: 看谁更有依据。
 
 - [第 11 课:持仓研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-11-position-research.md)
 - [第 13 课:风险跟踪](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-13-risk-tracking.md)
-- [第 23 课:中长线投资系统设计](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-23-long-system-design.md) - 系统的设计
-- [第 24 课:中长线实战案例](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-24-long-case-1.md)
+- [第 23 课:中长线研究的平台工具链](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-23-long-system-design.md)
+- [第 24 课:中长线实战(上)·价值股估值修复](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-24-long-case-1.md)

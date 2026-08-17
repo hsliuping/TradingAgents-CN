@@ -106,9 +106,9 @@ export const advancedCourseCategories: CourseCategory[] = [
     description: '中长线投资者的专属实战课',
     lessonCount: 3,
     lessons: [
-      { id: 'lesson-23', title: '第23课：中长线投资系统设计', file: 'phase-06-long-term/lesson-23-long-system-design.md', order: 23 },
-      { id: 'lesson-24', title: '第24课：中长线实战案例（上）', file: 'phase-06-long-term/lesson-24-long-case-1.md', order: 24 },
-      { id: 'lesson-25', title: '第25课：中长线实战案例（下）', file: 'phase-06-long-term/lesson-25-long-case-2.md', order: 25 },
+      { id: 'lesson-23', title: '第23课：中长线研究的平台工具链', file: 'phase-06-long-term/lesson-23-long-system-design.md', order: 23 },
+      { id: 'lesson-24', title: '第24课：中长线实战（上）·价值股估值修复', file: 'phase-06-long-term/lesson-24-long-case-1.md', order: 24 },
+      { id: 'lesson-25', title: '第25课：中长线实战（下）·成长股业绩跟踪', file: 'phase-06-long-term/lesson-25-long-case-2.md', order: 25 },
     ]
   },
   {
