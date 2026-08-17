@@ -36,7 +36,7 @@
 | 16 | `/review` | Review | 复盘(实际叫 trade_review) |
 | 17 | `/trading-system` | TradingSystem | 交易系统(策略) |
 | 18 | `/stocks/:code` | StockDetail | 股票详情页 |
-| 19 | `/backtest` | Backtest | 回测 |
+| 19 | `/backtest` | Backtest | 回测(前端入口已下线) |
 | 20 | `/settings` | Settings | 设置(6 个子菜单,见 §3) |
 | 21 | `/debug/embedded-nanobot` | EmbeddedNanobotDebug | 调试页面(开发者向) |
 | 22 | `/about` | About | 关于 |
@@ -428,7 +428,7 @@
 | 18 | **Token 统计** | `/reports/token` | ✅ |
 | 19 | **渠道推送(飞书/钉钉/邮件/Webhook)** | `/api/channel-configs` | ✅ |
 | 20 | **止盈告警** | `/api/stop-gain-alerts`(待确认) | ✅ |
-| 21 | **回测** | `/backtest` | ✅ |
+| 21 | **回测** | `/backtest` | ❌ 前端入口已下线 |
 | 22 | **嵌入式纳米机器人** | `/api/embedded-nanobot` | ✅ |
 | 23 | **工具能力索引** | `/api/capability-index` | ✅ |
 | 24 | **系统更新** | `/api/system/update` | ✅ |
@@ -443,7 +443,7 @@
 5. **目标价/止损**: ❌ 已合规化移除。decision 不再有 `target_price`/`stop_loss`,改为可选的 `price_analysis_range`(价格分析区间) 和 `risk_reference_price`(风险参考价),且明确"禁止给出具体目标价或止损价"
 6. **持仓分析**: ✅ 有专门的 4 个 Agent(持仓技术面/基本面/风险评估/操作建议)
 7. **复盘**: ✅ 有 `/review` 路由,后端 `trade_review_service.py` 3618 行
-8. **回测**: ✅ 有 `/backtest` 路由和 `/api/backtest` API
+8. **回测**: ⚠️ 后端有 `/backtest` 路由和 `/api/backtest` API 残留,但前端入口已下线,产品不提供
 9. **关注列表分组**: ✅ 有 `watchlist_groups` 集合,可在 `/settings/watchlist-groups` 管理
 10. **定时分析**: ✅ 有 `scheduled_analysis_configs` 集合
 11. **自然语言筛选**: ✅ 有 `/api/screening/intelligent/chat` API,在 Dashboard 有入口
@@ -459,7 +459,7 @@
 | **阶段 5:短线** | 交易系统 `/trading-system` 的 `short_term` 风格 |
 | **阶段 6:中长线** | 交易系统 `/trading-system` 的 `medium_term` / `long_term` 风格 |
 | **阶段 7:平台扩展** | AI 工作流架构师(`/api/workflow-generation`) + Agent 工坊(`/workflow/agent-workshop`) + Skill 中心(`/workflow/skills`) + Skill 自动生成(`/api/skill-generation`) |
-| **阶段 8:个人计划** | 交易系统(`/trading-system`) + AI 助手(`/assistant`) + AI 记忆(`/memory`) + 回测(`/backtest`) |
+| **阶段 8:个人计划** | 交易系统(`/trading-system`) + AI 助手(`/assistant`) + AI 记忆(`/memory`) |
 
 ---
 
