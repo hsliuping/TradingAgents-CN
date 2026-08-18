@@ -8,7 +8,7 @@
 - 在 `模拟交易` 纸上谈兵练手
 - 在 `持仓` 页面管理真仓
 - 用 **持仓研究** 跑持仓监控(系统调用持仓专属 Agent)
-- 跟踪**止盈止损告警**
+- 在交易计划里配置**止盈止损规则**
 - 沉淀"操作经验"
 
 ## 📍 阶段路线图
@@ -28,9 +28,9 @@
    ↓
 "该不该加仓 / 减仓?"
    │
-   │  第 13 课: 风险跟踪(止盈止损)
+   │  第 13 课: 风险跟踪(止盈止损规则)
    ↓
-止盈止损告警
+止盈止损规则
    │
    │  第 14 课: 持仓阶段常见错误
    ↓
@@ -50,17 +50,17 @@
 | [第 10 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-10-paper-trading.md) | 模拟交易(纸上练手) | 25 分钟 | 模拟账户 + 模拟交易经验 |
 | [第 11 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-11-position-research.md) | 持仓研究(决策标签 + 风险评估) | 25 分钟 | 持仓监控体系 |
 | [第 12 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-12-add-reduce-decision.md) | 加减仓决策 | 25 分钟 | 个人加仓/减仓规则 |
-| [第 13 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-13-risk-tracking.md) | 风险跟踪(止盈止损) | 25 分钟 | 止盈止损配置 |
+| [第 13 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-13-risk-tracking.md) | 风险跟踪(止盈止损规则) | 25 分钟 | 止盈止损规则配置 |
 | [第 14 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-14-position-pitfalls.md) | 持仓阶段常见错误 | 20 分钟 | 避雷清单 |
 | [第 15 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-15-ai-assistant-position.md) | AI 智能助手在持仓阶段 | 15 分钟 | 持仓 AI 工作流 |
 
 ## 🔑 阶段关键概念
 
-- **模拟交易** `/paper`:纸上谈兵,无风险练手,**A 股账户**
-- **真实持仓** `/portfolio`:管理真仓,**用户持仓 Tab**
-- **模拟持仓** `/portfolio` "模拟持仓" Tab:从模拟交易同步过来
+- **模拟交易**(侧边栏「模拟交易」菜单):纸上谈兵,无风险练手,**A 股账户**
+- **真实持仓**(侧边栏「持仓研究」菜单):管理真仓,**用户持仓 Tab**
+- **模拟持仓**(侧边栏「持仓研究」菜单里的"模拟持仓" Tab):从模拟交易同步过来
 - **持仓研究**: 系统调用的持仓专属 Agent,输出"决策标签 + 风险评估"
-- **止盈止损告警** `/settings` 里配置
+- **止盈止损规则**(侧边栏「交易计划」菜单)里配置
 
 ## ⚠️ 阶段限制
 
@@ -72,7 +72,7 @@
 
 - 用模拟交易无风险练手
 - 让 AI 帮你监控持仓
-- 配置止盈止损告警
+- 在交易计划里配置止盈止损规则
 - 用 AI 助手汇总持仓异动
 
 ## ⏭️ 下一步

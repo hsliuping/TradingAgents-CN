@@ -926,13 +926,11 @@ const searchStocks = (queryString: string, cb: (results: any[]) => void) => {
     cb([])
     return
   }
-  console.log('搜索:', q)
   // 正确路径是 /api/markets/CN/stocks/search
   request
     .get(`/api/markets/CN/stocks/search`, { params: { q, limit: 20 } })
     .then((res: any) => {
       const stocks = res?.data?.stocks || []
-      console.log('搜索结果:', stocks)
       cb(stocks.map((s: any) => ({
         value: s.code || s.symbol || '',
         code: s.code || s.symbol || '',

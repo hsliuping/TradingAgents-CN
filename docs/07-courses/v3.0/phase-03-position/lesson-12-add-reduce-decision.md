@@ -55,7 +55,7 @@ AI 输出"决策标签"是哪一个?
 
 ### 维度 3:个人持仓规则
 
-你的**个人交易系统**(`/trading-system`)里有没有相关规则?
+你的**个人交易计划**里有没有相关规则?
 
 比如:
 - "单只持仓超过 20% 必须减仓"
@@ -139,7 +139,7 @@ AI 输出"决策标签"是哪一个?
 
 ## 📋 个人加仓/减仓规则模板
 
-把这份模板填好,保存到 `/trading-system` 或 `/memory`:
+把这份模板填好,保存到「交易计划」:
 
 ```markdown
 # 我的加减仓规则
@@ -189,18 +189,16 @@ AI 输出"决策标签"是哪一个?
 ## ⚠️ v3.0 重要变化
 
 - ✅ **持仓研究** 提供"决策标签 + 风险评估"(第 11 课)
-- ✅ **个人交易系统** `/trading-system` 可以写规则
-- ✅ **AI 记忆** `/memory` 可以沉淀决策经验
+- ✅ **个人交易计划**可以写规则并沉淀决策规则
 - ⚠️ **AI 建议是参考,不是命令**——你做最终决策
 
 ## 🛠️ 实操作业
 
-1. 打开 `/memory` AI 记忆
-2. 新建会话"我的加减仓规则"
-3. 把上面的"个人加仓/减仓规则模板"填好
-4. 进入 `/trading-system` 交易系统,把这些规则录入
-5. 下次持仓研究 AI 结论乐观时,**按决策树走一遍**
-6. 记录: 实际决策 vs AI 建议,差异原因是什么
+1. 点侧边栏「交易计划」菜单
+2. 把上面的"个人加仓/减仓规则模板"填入持仓规则 / 纪律规则模块
+3. 保存交易计划
+4. 下次持仓研究 AI 结论乐观时,**按决策树走一遍**
+5. 记录: 实际决策 vs AI 建议,差异原因是什么
 
 **做完这次作业**,你就有了一套**自己的**加减仓框架,不是"听 AI 指挥"。
 
@@ -233,5 +231,5 @@ A: 看谁更有依据。
 
 - [第 11 课:持仓研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-11-position-research.md)
 - [第 13 课:风险跟踪](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-03-position/lesson-13-risk-tracking.md)
-- [第 17 课:中长线投资系统设计](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-23-long-system-design.md) - 系统的设计
-- [第 18 课:中长线实战案例](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-24-long-case-1.md)
+- [第 23 课:中长线研究的平台工具链](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-23-long-system-design.md)
+- [第 24 课:中长线实战(上)·价值股估值修复](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-24-long-case-1.md)

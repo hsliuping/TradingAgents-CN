@@ -1,0 +1,1 @@
+import{A as s}from"./index-CrA_uZYV.js";const c={syncSingle(t){return s.post("/api/stock-sync/single",t,{timeout:15e3})},syncBatch(t){return s.post("/api/stock-sync/batch",t,{timeout:15e3})},getTaskStatus(t){return s.get(`/api/stock-sync/tasks/${t}`)},getStatus(t){return s.get(`/api/stock-sync/status/${t}`)}};export{c as s};

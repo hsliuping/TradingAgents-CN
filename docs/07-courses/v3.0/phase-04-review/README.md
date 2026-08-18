@@ -8,7 +8,7 @@
 - **系统化**复盘每笔交易
 - 把**经验**沉淀到案例库
 - 把**复盘结果** 转化为下次的行动指南
-- 持续优化**交易系统**
+- 持续优化**交易计划**
 
 ## 📍 阶段路线图
 
@@ -27,7 +27,7 @@
    ↓
 "复盘 → 规则"转化
    │
-   │  第 19 课: 持续优化(基于复盘迭代交易系统)
+   │  第 19 课: 持续优化(基于复盘迭代交易计划)
    ↓
 [阶段 5/6:短线/中长线]
    或
@@ -41,14 +41,14 @@
 | [第 16 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-04-review/lesson-16-trade-review.md) | 操作复盘 | 25 分钟 | 复盘报告 |
 | [第 17 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-04-review/lesson-17-case-library.md) | 案例库沉淀 | 20 分钟 | 案例库 |
 | [第 18 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-04-review/lesson-18-review-to-action.md) | 复盘到行动 | 20 分钟 | 下次规则 |
-| [第 19 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-04-review/lesson-19-continuous-improvement.md) | 持续优化 | 25 分钟 | 交易系统迭代 |
+| [第 19 课](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-04-review/lesson-19-continuous-improvement.md) | 持续优化 | 25 分钟 | 交易计划迭代 |
 
 ## 🔑 阶段关键概念
 
-- **复盘** `/review`:操作复盘 + 模拟交易复盘(2 大数据源)
+- **复盘**（「操作复盘」菜单）:操作复盘 + 模拟交易复盘(2 大数据源)
 - **4 个 Tab**:可复盘持仓 / 历史持仓 / 复盘历史 / 案例库
 - **案例库**:沉淀经验,变成可复用资产
-- **交易系统迭代**:基于复盘优化 `/trading-system`
+- **交易计划迭代**:基于复盘优化「交易计划」菜单
 
 ## ⚠️ 阶段限制
 
@@ -60,7 +60,7 @@
 
 - 系统化复盘每笔交易
 - 把经验沉淀为案例库
-- 持续优化个人交易系统
+- 持续优化个人交易计划
 
 ## ⏭️ 下一步
 

@@ -1,0 +1,17 @@
+#!/command/with-contenv bash
+# searxng 服务 - Web 搜索引擎（智能助手实时资讯）
+# 使用容器内置的精简配置：仅国内引擎、无 Redis 依赖、5秒超时
+
+cd /app
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [searxng] $1" | tee -a /app/logs/searxng.log
+}
+
+log "🚀 启动 SearXNG..."
+
+# 指定配置文件路径（COPY config /app/config 时已包含）
+export SEARXNG_SETTINGS_PATH=/app/config/searxng/settings.yml
+
+# searx.webapp 直接以前台运行（监听 127.0.0.1:8888）
+exec gosu appuser python -m searx.webapp

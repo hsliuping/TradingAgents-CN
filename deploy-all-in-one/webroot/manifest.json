@@ -1,0 +1,16 @@
+{
+  "name": "TradingAgents-CN Pro",
+  "short_name": "TradingAgents Pro",
+  "description": "TradingAgents-CN Pro - 多智能体股票分析专业平台",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#409EFF",
+  "icons": [
+    {
+      "src": "/favicon.ico?v=2.0",
+      "sizes": "192x192",
+      "type": "image/x-icon"
+    }
+  ]
+}

@@ -57,6 +57,8 @@ $syncFiles = @(
     "requirements.txt",
     "pyproject.toml",  # 🔥 添加 pyproject.toml（包含 weasyprint 依赖）
     "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",  # 第三方开源组件声明（SearXNG AGPL 合规）
     ".env.example",
     "start_api.py",
     "debug_services.ps1"  # MongoDB和Redis诊断脚本

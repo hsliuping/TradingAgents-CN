@@ -53,10 +53,10 @@ export const advancedCourseCategories: CourseCategory[] = [
     description: '选出来后怎么持续跟进？',
     lessonCount: 4,
     lessons: [
-      { id: 'lesson-06', title: '第6课：通用研究（行业/主题分析）', file: 'phase-02-track/lesson-06-general-research.md', order: 6 },
-      { id: 'lesson-07', title: '第7课：定时分析与渠道推送', file: 'phase-02-track/lesson-07-scheduled-push.md', order: 7 },
-      { id: 'lesson-08', title: '第8课：AI对话助手与AI记忆', file: 'phase-02-track/lesson-08-ai-assistant-memory.md', order: 8 },
-      { id: 'lesson-09', title: '第9课：跟踪阶段的节奏控制', file: 'phase-02-track/lesson-09-track-rhythm.md', order: 9 },
+      { id: 'lesson-06', title: '第6课：AI助手功能全景', file: 'phase-02-track/lesson-06-ai-assistant-overview.md', order: 6 },
+      { id: 'lesson-07', title: '第7课：用AI助手做行业研究', file: 'phase-02-track/lesson-07-ai-assistant-industry-research.md', order: 7 },
+      { id: 'lesson-08', title: '第8课：AI助手驱动日常研究闭环', file: 'phase-02-track/lesson-08-ai-assistant-daily-research.md', order: 8 },
+      { id: 'lesson-09', title: '第9课：定时分析与跟踪节奏', file: 'phase-02-track/lesson-09-scheduled-track-rhythm.md', order: 9 },
     ]
   },
   {
@@ -94,9 +94,9 @@ export const advancedCourseCategories: CourseCategory[] = [
     description: '短线交易者的专属实战课',
     lessonCount: 3,
     lessons: [
-      { id: 'lesson-20', title: '第20课：短线交易系统设计', file: 'phase-05-short-term/lesson-20-short-system-design.md', order: 20 },
-      { id: 'lesson-21', title: '第21课：短线实战案例（上）', file: 'phase-05-short-term/lesson-21-short-case-1.md', order: 21 },
-      { id: 'lesson-22', title: '第22课：短线实战案例（下）', file: 'phase-05-short-term/lesson-22-short-case-2.md', order: 22 },
+      { id: 'lesson-20', title: '第20课：短线研究的平台工具链', file: 'phase-05-short-term/lesson-20-short-system-design.md', order: 20 },
+      { id: 'lesson-21', title: '第21课：短线研究实战（上）·发现与跟踪', file: 'phase-05-short-term/lesson-21-short-case-1.md', order: 21 },
+      { id: 'lesson-22', title: '第22课：短线研究实战（下）·跟踪与复盘', file: 'phase-05-short-term/lesson-22-short-case-2.md', order: 22 },
     ]
   },
   {
@@ -106,9 +106,9 @@ export const advancedCourseCategories: CourseCategory[] = [
     description: '中长线投资者的专属实战课',
     lessonCount: 3,
     lessons: [
-      { id: 'lesson-23', title: '第23课：中长线投资系统设计', file: 'phase-06-long-term/lesson-23-long-system-design.md', order: 23 },
-      { id: 'lesson-24', title: '第24课：中长线实战案例（上）', file: 'phase-06-long-term/lesson-24-long-case-1.md', order: 24 },
-      { id: 'lesson-25', title: '第25课：中长线实战案例（下）', file: 'phase-06-long-term/lesson-25-long-case-2.md', order: 25 },
+      { id: 'lesson-23', title: '第23课：中长线研究的平台工具链', file: 'phase-06-long-term/lesson-23-long-system-design.md', order: 23 },
+      { id: 'lesson-24', title: '第24课：中长线实战（上）·价值股估值修复', file: 'phase-06-long-term/lesson-24-long-case-1.md', order: 24 },
+      { id: 'lesson-25', title: '第25课：中长线实战（下）·成长股业绩跟踪', file: 'phase-06-long-term/lesson-25-long-case-2.md', order: 25 },
     ]
   },
   {

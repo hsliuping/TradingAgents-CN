@@ -524,13 +524,26 @@ export const assistantApi = {
   },
 
   /** 重新初始化并重建用户手册向量索引（使用问答助手语义检索不可用时手动补救） */
-  rebuildUserManualIndex() {
-    return request.post<{
+  async rebuildUserManualIndex(): Promise<{
+    success: boolean
+    rebuilt?: boolean
+    sections_count?: number
+    manuals_count?: number
+    signature?: string
+  }> {
+    const res = await request.post<{
       success: boolean
       rebuilt?: boolean
       sections_count?: number
       manuals_count?: number
       signature?: string
     }>('/api/assistant/user-manual-index/rebuild')
+    return res as unknown as {
+      success: boolean
+      rebuilt?: boolean
+      sections_count?: number
+      manuals_count?: number
+      signature?: string
+    }
   },
 }

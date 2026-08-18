@@ -1,0 +1,104 @@
+diff --git a/searx/settings.yml b/searx/settings.yml
+index e8c540d..891e3d7 100644
+--- a/searx/settings.yml
++++ b/searx/settings.yml
+@@ -84,6 +84,8 @@ search:
+   # formats: [html, csv, json, rss]
+   formats:
+     - html
++    - json
++  default_lang: "zh"
+ 
+ server:
+   # Is overwritten by ${SEARXNG_PORT} and ${SEARXNG_BIND_ADDRESS}
+@@ -102,7 +104,7 @@ server:
+   # If your instance owns a /etc/searxng/settings.yml file, then set the following
+   # values there.
+ 
+-  secret_key: "ultrasecretkey"  # Is overwritten by ${SEARXNG_SECRET}
++  secret_key: "ta_searxng_local_2026_secret_key"  # Is overwritten by ${SEARXNG_SECRET}
+   # Proxy image results through SearXNG. Is overwritten by ${SEARXNG_IMAGE_PROXY}
+   image_proxy: false
+   # 1.0 and 1.1 are supported
+@@ -176,9 +178,9 @@ preferences:
+ #
+ outgoing:
+   # default timeout in seconds, can be override by engine
+-  request_timeout: 3.0
++  request_timeout: 2.0
+   # the maximum timeout in seconds
+-  # max_request_timeout: 10.0
++  max_request_timeout: 5.0
+   # suffix of searxng_useragent, could contain information like an email address
+   # to the administrator
+   useragent_suffix: ""
+@@ -302,7 +304,7 @@ engines:
+     engine: 360search
+     shortcut: 360so
+     timeout: 20.0
+-    disabled: true
++    disabled: false
+ 
+   - name: 360search videos
+     engine: 360search_videos
+@@ -536,7 +538,7 @@ engines:
+     categories: [general]
+     engine: baidu
+     shortcut: bd
+-    disabled: true
++    disabled: false
+ 
+   - name: baidu images
+     baidu_category: images
+@@ -567,8 +569,8 @@ engines:
+   - name: bing
+     engine: bing
+     shortcut: bi
+-    disabled: true
+-    # base_url: https://cn.bing.com  # for instances hosted in China
++    disabled: false
++    base_url: https://cn.bing.com  # for instances hosted in China
+ 
+   - name: bing images
+     engine: bing_images
+@@ -2206,7 +2208,7 @@ engines:
+   - name: sogou
+     engine: sogou
+     shortcut: sogou
+-    disabled: true
++    disabled: false
+ 
+   - name: sogou images
+     engine: sogou_images
+diff --git a/searx/valkeydb.py b/searx/valkeydb.py
+index 1cdc8d2..d4e12e9 100644
+--- a/searx/valkeydb.py
++++ b/searx/valkeydb.py
+@@ -19,10 +19,14 @@ A valkey DB connect can be tested by::
+ """
+ 
+ import os
+-import pwd
+ import logging
+ import warnings
+ 
++try:
++    import pwd
++except ImportError:
++    pwd = None
++
+ import valkey
+ from searx import get_setting
+ 
+@@ -60,6 +64,9 @@ def initialize():
+         return True
+     except valkey.exceptions.ValkeyError:
+         _CLIENT = None
+-        _pw = pwd.getpwuid(os.getuid())
+-        logger.exception("[%s (%s)] can't connect valkey DB ...", _pw.pw_name, _pw.pw_uid)
++        if pwd:
++            _pw = pwd.getpwuid(os.getuid())
++            logger.exception("[%s (%s)] can't connect valkey DB ...", _pw.pw_name, _pw.pw_uid)
++        else:
++            logger.exception("can't connect valkey DB ...")
+     return False

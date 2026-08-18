@@ -51,7 +51,7 @@
 
 ### 思想 3:持续迭代
 
-- 交易系统**不是一次定好的**
+- 交易计划**不是一次定好的**
 - 是**持续迭代**的
 - 每月微调、季度中调、年度大调
 - 复盘是核心
@@ -80,7 +80,7 @@
 | **渠道推送** | 把研究结果通过邮箱、飞书、钉钉自动送到你手上 |
 | **AI 记忆** | 助手长期记住你们的对话与结论，跨会话延续上下文 |
 | **复盘系统** | 记录每笔交易的操作与结果，结构化复盘沉淀经验 |
-| **交易系统** | 把你的交易规则固化成系统，帮助纪律化执行 |
+| **交易计划** | 把你的交易规则固化成系统，帮助纪律化执行 |
 | **工作流架构** | 用自然语言描述生成自定义分析工作流，编排多个 AI 步骤 |
 | **Agent 工坊** | 自定义 Agent 角色与 Skill 技能，打造专属分析师 |
 
@@ -119,13 +119,13 @@
 
 - 学完阶段 1-4
 - 重点用好 8 大核心能力
-- 用模拟交易功能练手,形成初步的交易系统
+- 用模拟交易功能练手,形成初步的交易计划
 
 ### 第 2 步:找到风格(3-6 个月)
 
 - 学完阶段 5/6
 - 明确自己短线还是中长线
-- 优化交易系统
+- 优化交易计划
 - 在模拟账户跑出**正收益**
 
 ### 第 3 步:打造专属(6-12 个月)
@@ -193,7 +193,7 @@
 
 > **30 课不是结束,而是开始**。
 
-学完这 30 课,你有了**一套方法论**。但**真正属于你的交易系统**,需要你在**实战中沉淀**。
+学完这 30 课,你有了**一套方法论**。但**真正属于你的交易计划**,需要你在**实战中沉淀**。
 
 **祝你在投资的路上,稳健前行** 🚀
 
@@ -211,10 +211,10 @@
 
 ### 阶段 2:跟踪(4 课)
 
-- [第 6 课:通用研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-06-general-research.md)
-- [第 7 课:定时分析 + 渠道推送](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-07-scheduled-push.md)
-- [第 8 课:AI 对话助手与 AI 记忆](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-08-ai-assistant-memory.md)
-- [第 9 课:跟踪节奏控制](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-09-track-rhythm.md)
+- [第 6 课:AI 助手功能全景](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-06-ai-assistant-overview.md)
+- [第 7 课:用 AI 助手做行业研究](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-07-ai-assistant-industry-research.md)
+- [第 8 课:AI 助手驱动日常研究闭环](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-08-ai-assistant-daily-research.md)
+- [第 9 课:定时分析 + 跟踪节奏](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-02-track/lesson-09-scheduled-track-rhythm.md)
 
 ### 阶段 3:持仓(6 课)
 
@@ -234,15 +234,15 @@
 
 ### 阶段 5:短线(3 课)
 
-- [第 20 课:短线交易系统设计](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md)
-- [第 21 课:短线实战案例(上)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-21-short-case-1.md)
-- [第 22 课:短线实战案例(下)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-22-short-case-2.md)
+- [第 20 课:短线研究的平台工具链](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md)
+- [第 21 课:短线研究实战(上)·发现与跟踪](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-21-short-case-1.md)
+- [第 22 课:短线研究实战(下)·跟踪与复盘](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-05-short-term/lesson-22-short-case-2.md)
 
 ### 阶段 6:中长线(3 课)
 
-- [第 23 课:中长线投资系统设计](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-23-long-system-design.md)
-- [第 24 课:中长线实战案例(上)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-24-long-case-1.md)
-- [第 25 课:中长线实战案例(下)](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-25-long-case-2.md)
+- [第 23 课:中长线研究的平台工具链](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-23-long-system-design.md)
+- [第 24 课:中长线实战(上)·价值股估值修复](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-24-long-case-1.md)
+- [第 25 课:中长线实战(下)·成长股业绩跟踪](file:///c:/TradingAgentsCN/docs/07-courses/v3.0/phase-06-long-term/lesson-25-long-case-2.md)
 
 ### 阶段 7:平台扩展(3 课)
 
