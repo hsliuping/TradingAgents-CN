@@ -887,7 +887,6 @@ interface AnalysisForm {
 }
 
 // 使用store
-const authStore = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 

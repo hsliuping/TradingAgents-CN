@@ -255,7 +255,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import {
   TrendCharts,
@@ -290,7 +289,6 @@ import { isJdyunMode as checkJdyunMode } from '@/utils/config'
 import { Star, Plus } from '@element-plus/icons-vue'
 
 const router = useRouter()
-const authStore = useAuthStore()
 const appStore = useAppStore()
 const displayVersion = computed(() => `v${appStore.version}`)
 const isJdyunMode = checkJdyunMode()

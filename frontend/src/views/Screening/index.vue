@@ -775,7 +775,7 @@ import type { StockInfo } from '@/types/analysis'
 import { screeningApi, type FieldConfigResponse, type FieldInfo, type ScreeningConditionItem, type ScreeningConversationSummary, type ScreeningMessageItem, type ScreeningPreset, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
-import { isJdyunMode } from '@/utils/config'
+import { createWebSocket, type ManagedWebSocket } from '@/utils/createWebSocket'
 import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
 import { loadCurrentDataSourceInfo } from '@/utils/dataSource'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
@@ -813,7 +813,7 @@ const aiInput = ref('')
 const aiLoading = ref(false)
 const aiHistoryLoading = ref(false)
 const aiMessagesContainer = ref<HTMLElement | null>(null)
-const aiSocket = ref<WebSocket | null>(null)
+const aiSocket = ref<ManagedWebSocket | null>(null)
 const aiSocketConnected = ref(false)
 const aiPendingAssistantIndex = ref<number | null>(null)
 const aiConversationList = ref<ScreeningConversationSummary[]>([])
@@ -1070,12 +1070,12 @@ const handleAiWebSocketMessage = (envelope: ScreeningWsEnvelope<any>) => {
   }
 }
 
-const ensureAiSocket = async (): Promise<WebSocket> => {
-  if (aiSocket.value && aiSocketConnected.value && aiSocket.value.readyState === WebSocket.OPEN) {
+const ensureAiSocket = async (): Promise<ManagedWebSocket> => {
+  if (aiSocket.value && aiSocket.value.isConnected()) {
     return aiSocket.value
   }
 
-  return await new Promise<WebSocket>((resolve, reject) => {
+  return await new Promise<ManagedWebSocket>((resolve, reject) => {
     try {
       if (aiSocket.value) {
         try {
@@ -1086,46 +1086,42 @@ const ensureAiSocket = async (): Promise<WebSocket> => {
       }
 
       const token = authStore.token || localStorage.getItem('auth-token') || ''
-      const jdyun = isJdyunMode()
 
-      // 京东云模式：无 JWT token 也可连接，由网关注入 Basic Auth 认证
-      // 非京东云模式：必须有 JWT token
-      if (!token && !jdyun) {
-        reject(new Error('未登录或登录已过期'))
-        return
+      // 非京东云模式：必须有 JWT token（京东云模式由 createWebSocket 内部处理）
+      if (!token) {
+        // 交给 createWebSocket 内部判断京东云模式，这里不提前 reject
+        // 但如果既无 token 又非京东云模式，WS 连接会失败，onError 会 reject
       }
 
-      // 京东云模式下无 token 时不传 token 参数，由网关认证
-      const socket = new WebSocket(screeningApi.getIntelligentChatWsUrl(token || undefined))
-      aiSocket.value = socket
+      const ws = createWebSocket('/api/screening/intelligent/ws', {
+        autoReconnect: true,
+        maxReconnectAttempts: 5,
+        heartbeatInterval: 0, // 筛选 WS 有自己的 ping/pong 机制
+        onOpen: () => {
+          aiSocketConnected.value = true
+          resolve(ws)
+        },
+        onMessage: (data) => {
+          handleAiWebSocketMessage(data as ScreeningWsEnvelope<any>)
+        },
+        onError: () => {
+          aiSocketConnected.value = false
+          // 首次连接失败时 reject
+          if (!aiSocket.value) {
+            reject(new Error('智能筛选 WebSocket 连接失败'))
+          }
+        },
+        onClose: () => {
+          aiSocketConnected.value = false
+          if (aiLoading.value && aiPendingAssistantIndex.value != null) {
+            updatePendingAssistantMessage({ content: '抱歉，智能筛选流式连接已断开，请重试。' })
+            aiPendingAssistantIndex.value = null
+            aiLoading.value = false
+          }
+        },
+      })
 
-      socket.onopen = () => {
-        aiSocketConnected.value = true
-        resolve(socket)
-      }
-
-      socket.onmessage = (event) => {
-        try {
-          handleAiWebSocketMessage(JSON.parse(event.data) as ScreeningWsEnvelope<any>)
-        } catch (error) {
-          console.error('智能筛选 WS 消息解析失败', error)
-        }
-      }
-
-      socket.onerror = () => {
-        aiSocketConnected.value = false
-        reject(new Error('智能筛选 WebSocket 连接失败'))
-      }
-
-      socket.onclose = () => {
-        aiSocketConnected.value = false
-        aiSocket.value = null
-        if (aiLoading.value && aiPendingAssistantIndex.value != null) {
-          updatePendingAssistantMessage({ content: '抱歉，智能筛选流式连接已断开，请重试。' })
-          aiPendingAssistantIndex.value = null
-          aiLoading.value = false
-        }
-      }
+      aiSocket.value = ws
     } catch (error) {
       reject(error instanceof Error ? error : new Error('智能筛选连接失败'))
     }

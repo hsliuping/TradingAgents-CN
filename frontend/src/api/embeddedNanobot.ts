@@ -1,4 +1,5 @@
 import { request } from './request'
+import { fetchSSE } from '@/utils/fetchSSE'
 
 export interface EmbeddedNanobotStatusResponse {
   enabled: boolean
@@ -85,87 +86,38 @@ function createEmbeddedNanobotStream(
   payload: EmbeddedNanobotChatRequest,
   callbacks?: EmbeddedNanobotStreamCallbacks,
 ): AbortController {
-  const controller = new AbortController()
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
-  const token = localStorage.getItem('auth-token') || ''
-  const appToken = localStorage.getItem('app-token') || ''
-
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  if (appToken) headers['X-App-Token'] = appToken
-
-  fetch(`${baseUrl}${path}`, {
+  return fetchSSE(path, {
     method: 'POST',
-    headers,
-    credentials: 'include',
-    body: JSON.stringify(payload),
-    signal: controller.signal,
+    body: payload,
+    onEvent: (eventType, data) => {
+      switch (eventType) {
+        case 'started':
+          callbacks?.onStarted?.(data)
+          break
+        case 'progress':
+          callbacks?.onProgress?.(data)
+          break
+        case 'token':
+          callbacks?.onToken?.(data.content || '')
+          break
+        case 'tool_event':
+          callbacks?.onToolEvent?.(data)
+          break
+        case 'step_event':
+          callbacks?.onStepEvent?.(data)
+          break
+      }
+    },
+    onDone: (data) => {
+      callbacks?.onDone?.(data as EmbeddedNanobotChatResponse)
+    },
+    onError: (message) => {
+      callbacks?.onError?.(message)
+    },
+    onAbort: () => {
+      callbacks?.onAbort?.()
+    },
   })
-    .then(async (response) => {
-      if (!response.ok) {
-        callbacks?.onError?.(`HTTP ${response.status}: ${response.statusText}`)
-        return
-      }
-
-      const reader = response.body!.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const parts = buffer.split('\n\n')
-        buffer = parts.pop() || ''
-
-        for (const part of parts) {
-          if (!part.trim() || part.startsWith(': ')) continue
-
-          let eventType = ''
-          let eventData = ''
-          for (const line of part.split('\n')) {
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7)
-            } else if (line.startsWith('data: ')) {
-              eventData = line.slice(6)
-            }
-          }
-
-          if (!eventData) continue
-
-          try {
-            const data = JSON.parse(eventData)
-            if (eventType === 'started') {
-              callbacks?.onStarted?.(data)
-            } else if (eventType === 'progress') {
-              callbacks?.onProgress?.(data)
-            } else if (eventType === 'token') {
-              callbacks?.onToken?.(data.content || '')
-            } else if (eventType === 'tool_event') {
-              callbacks?.onToolEvent?.(data)
-            } else if (eventType === 'step_event') {
-              callbacks?.onStepEvent?.(data)
-            } else if (eventType === 'done') {
-              callbacks?.onDone?.(data)
-            } else if (eventType === 'error') {
-              callbacks?.onError?.(data.message || '未知错误')
-            }
-          } catch {
-            // Ignore malformed JSON chunks.
-          }
-        }
-      }
-    })
-    .catch((err) => {
-      if (err.name === 'AbortError') {
-        callbacks?.onAbort?.()
-      } else {
-        callbacks?.onError?.(err.message || '网络请求失败，请检查网络连接后重试')
-      }
-    })
-
-  return controller
 }
 
 export const embeddedNanobotApi = {

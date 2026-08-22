@@ -148,6 +148,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { List, Refresh, Download } from '@element-plus/icons-vue'
 import { analysisApi } from '@/api/analysis'
 import { fetchTaskResultWithRetry } from '@/utils/taskResult'
+import { createWebSocket, type ManagedWebSocket } from '@/utils/createWebSocket'
 import TaskResultDialog from '@/components/Global/TaskResultDialog.vue'
 import TaskReportDialog from '@/components/Global/TaskReportDialog.vue'
 
@@ -170,7 +171,7 @@ const stats = ref({ total: 0, completed: 0, failed: 0, uniqueStocks: 0 })
 
 
 // WebSocket 连接管理
-let wsConnections: Map<string, WebSocket> = new Map()
+let wsConnections: Map<string, ManagedWebSocket> = new Map()
 let timer: any = null
 
 const setupPolling = () => {
@@ -188,19 +189,14 @@ const connectTaskWebSocket = (taskId: string) => {
   }
 
   try {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
-    const wsUrl = `${wsProtocol}//${host}/api/ws/task/${taskId}`
-
-    const ws = new WebSocket(wsUrl)
-
-    ws.onopen = () => {
-      console.log(`✅ WebSocket 连接成功: ${taskId}`)
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data)
+    const ws = createWebSocket(`/api/ws/task/${taskId}`, {
+      autoReconnect: true,
+      maxReconnectAttempts: 5,
+      heartbeatInterval: 0,
+      onOpen: () => {
+        console.log(`✅ WebSocket 连接成功: ${taskId}`)
+      },
+      onMessage: (message) => {
         if (message.type === 'progress_update') {
           // 更新列表中的任务进度
           const taskIndex = list.value.findIndex(t => t.task_id === taskId)
@@ -211,19 +207,15 @@ const connectTaskWebSocket = (taskId: string) => {
             console.log(`📊 更新任务进度: ${taskId} -> ${message.progress}%`)
           }
         }
-      } catch (e) {
-        console.error('WebSocket 消息解析失败:', e)
-      }
-    }
-
-    ws.onerror = (error) => {
-      console.error(`❌ WebSocket 错误: ${taskId}`, error)
-    }
-
-    ws.onclose = () => {
-      console.log(`🔌 WebSocket 断开: ${taskId}`)
-      wsConnections.delete(taskId)
-    }
+      },
+      onError: (error) => {
+        console.error(`❌ WebSocket 错误: ${taskId}`, error)
+      },
+      onClose: () => {
+        console.log(`🔌 WebSocket 断开: ${taskId}`)
+        wsConnections.delete(taskId)
+      },
+    })
 
     wsConnections.set(taskId, ws)
   } catch (e) {

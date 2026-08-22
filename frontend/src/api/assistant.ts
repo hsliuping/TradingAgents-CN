@@ -3,6 +3,7 @@
  */
 
 import { ApiClient, request } from './request'
+import { fetchSSE } from '@/utils/fetchSSE'
 
 export interface StockScopeReport {
   task_id?: string
@@ -225,128 +226,23 @@ function createAssistantStream(
   payload: ChatRequest,
   callbacks?: StreamCallbacks,
 ): AbortController {
-  const controller = new AbortController()
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
-  const token = localStorage.getItem('auth-token') || ''
-  const appToken = localStorage.getItem('app-token') || ''
-
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  if (appToken) headers['X-App-Token'] = appToken
-
-  const IDLE_TIMEOUT_MS = 90_000
-
-  fetch(`${baseUrl}${path}`, {
+  return fetchSSE(path, {
     method: 'POST',
-    headers,
-    credentials: 'include',
-    body: JSON.stringify(payload),
-    signal: controller.signal,
+    body: payload,
+    onEvent: (eventType, data) => {
+      if (eventType === 'token') {
+        callbacks?.onToken?.(data.content || '')
+      } else {
+        callbacks?.onToolEvent?.({ ...data, event: eventType || data.event })
+      }
+    },
+    onDone: (data) => {
+      callbacks?.onDone?.(data || { tools_used: [] })
+    },
+    onError: (message) => {
+      callbacks?.onError?.(message)
+    },
   })
-    .then(async (response) => {
-      if (!response.ok) {
-        if (response.status === 401) {
-          callbacks?.onError?.('登录已过期，请重新登录')
-        } else {
-          callbacks?.onError?.(`HTTP ${response.status}: ${response.statusText}`)
-        }
-        return
-      }
-
-      const reader = response.body!.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let idleTimer: ReturnType<typeof setTimeout> | null = null
-      let receivedTerminalEvent = false
-
-      const resetIdle = () => {
-        if (idleTimer) clearTimeout(idleTimer)
-        idleTimer = setTimeout(() => {
-          callbacks?.onError?.('连接超时：服务器长时间未响应，请重试')
-          controller.abort()
-        }, IDLE_TIMEOUT_MS)
-      }
-
-      const processEventBlock = (part: string) => {
-        if (!part.trim() || part.startsWith(': ')) return
-
-        let eventType = ''
-        const dataLines: string[] = []
-
-        for (const rawLine of part.split('\n')) {
-          const line = rawLine.replace(/\r$/, '')
-          if (line.startsWith('event: ')) {
-            eventType = line.slice(7)
-          } else if (line.startsWith('data: ')) {
-            dataLines.push(line.slice(6))
-          }
-        }
-
-        const eventData = dataLines.join('\n')
-        if (!eventData) return
-
-        try {
-          const data = JSON.parse(eventData)
-          switch (eventType) {
-            case 'token':
-              callbacks?.onToken?.(data.content || '')
-              break
-            case 'done':
-              receivedTerminalEvent = true
-              callbacks?.onDone?.(data)
-              break
-            case 'error':
-              receivedTerminalEvent = true
-              callbacks?.onError?.(data.message || '未知错误')
-              break
-            default:
-              callbacks?.onToolEvent?.({ ...data, event: eventType || data.event })
-          }
-        } catch {
-          // Ignore malformed JSON
-        }
-      }
-
-      resetIdle()
-
-      try {
-        let reading = true
-        while (reading) {
-          const { done, value } = await reader.read()
-          if (done) {
-            buffer += decoder.decode()
-            reading = false
-            continue
-          }
-
-          resetIdle()
-          buffer += decoder.decode(value, { stream: true })
-          const parts = buffer.split('\n\n')
-          buffer = parts.pop() || ''
-
-          for (const part of parts) {
-            processEventBlock(part)
-          }
-        }
-
-        if (buffer.trim()) {
-          processEventBlock(buffer)
-        }
-
-        if (!receivedTerminalEvent && !controller.signal.aborted) {
-          callbacks?.onDone?.({ tools_used: [] })
-        }
-      } finally {
-        if (idleTimer) clearTimeout(idleTimer)
-      }
-    })
-    .catch((err) => {
-      if (err.name !== 'AbortError') {
-        callbacks?.onError?.(err.message || '网络请求失败，请检查网络连接后重试')
-      }
-    })
-
-  return controller
 }
 
 export const assistantApi = {
