@@ -285,7 +285,7 @@ import { getTaskList as getUnifiedTaskList } from '@/api/unifiedTasks'
 import { newsApi } from '@/api/news'
 import { paperApi, type PaperAccountSummary } from '@/api/paper'
 import { ensureReportExportAccess } from '@/utils/featureAccess'
-import { request } from '@/api/request'
+import { request, ApiClient } from '@/api/request'
 import { isJdyunMode as checkJdyunMode } from '@/utils/config'
 import { Star, Plus } from '@element-plus/icons-vue'
 
@@ -415,18 +415,11 @@ const downloadReport = async (analysis: AnalysisTask) => {
 
   try {
     const reportId = analysis.task_id
-    const res = await fetch(`/api/reports/${reportId}/download?format=markdown`, {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      }
-    })
-    if (!res.ok) {
-      const msg = `下载失败：HTTP ${res.status}`
-      console.error(msg)
-      ElMessage.error('下载失败，报告可能尚未生成')
-      return
-    }
-    const blob = await res.blob()
+    const blobData = await ApiClient.get(`/api/reports/${reportId}/download?format=markdown`, {
+      responseType: 'blob',
+      showLoading: false
+    }) as unknown as BlobPart
+    const blob = new Blob([blobData])
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

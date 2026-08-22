@@ -775,6 +775,7 @@ import type { StockInfo } from '@/types/analysis'
 import { screeningApi, type FieldConfigResponse, type FieldInfo, type ScreeningConditionItem, type ScreeningConversationSummary, type ScreeningMessageItem, type ScreeningPreset, type ScreeningWsEnvelope, type ScreeningWsProgressData, type StockRecommendation } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
+import { isJdyunMode } from '@/utils/config'
 import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
 import { loadCurrentDataSourceInfo } from '@/utils/dataSource'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
@@ -1085,12 +1086,17 @@ const ensureAiSocket = async (): Promise<WebSocket> => {
       }
 
       const token = authStore.token || localStorage.getItem('auth-token') || ''
-      if (!token) {
+      const jdyun = isJdyunMode()
+
+      // 京东云模式：无 JWT token 也可连接，由网关注入 Basic Auth 认证
+      // 非京东云模式：必须有 JWT token
+      if (!token && !jdyun) {
         reject(new Error('未登录或登录已过期'))
         return
       }
 
-      const socket = new WebSocket(screeningApi.getIntelligentChatWsUrl(token))
+      // 京东云模式下无 token 时不传 token 参数，由网关认证
+      const socket = new WebSocket(screeningApi.getIntelligentChatWsUrl(token || undefined))
       aiSocket.value = socket
 
       socket.onopen = () => {

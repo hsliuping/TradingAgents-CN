@@ -220,7 +220,7 @@ import {
   Refresh,
   ArrowDown
 } from '@element-plus/icons-vue'
-import { useAuthStore } from '@/stores/auth'
+import { ApiClient } from '@/api/request'
 
 type ElTagType = 'primary' | 'success' | 'info' | 'warning' | 'danger'
 
@@ -238,9 +238,8 @@ interface ReportListItem {
   created_at: string
 }
 
-// 使用路由和认证store
+// 使用路由
 const router = useRouter()
-const authStore = useAuthStore()
 
 // 响应式数据
 const loading = ref(false)
@@ -280,18 +279,7 @@ const fetchReports = async () => {
       params.append('end_date', dateRange.value[1])
     }
 
-    const response = await fetch(`/api/reports/list?${params}`, {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-
-    const result = await response.json()
+    const result = await ApiClient.get<any>(`/api/reports/list?${params}`)
 
     if (result.success) {
       reports.value = Array.isArray(result.data?.reports) ? result.data.reports as ReportListItem[] : []
@@ -367,20 +355,14 @@ const downloadReport = async (report: ReportListItem, format: string = 'markdown
       duration: 0
     })
 
-    const response = await fetch(`/api/reports/${report.id}/download?format=${format}`, {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      }
-    })
+    const blobData = await ApiClient.get(`/api/reports/${report.id}/download?format=${format}`, {
+      responseType: 'blob',
+      showLoading: false
+    }) as unknown as BlobPart
 
     loadingMsg.close()
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
-    }
-
-    const blob = await response.blob()
+    const blob = new Blob([blobData])
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -459,19 +441,7 @@ const deleteReport = async (report: ReportListItem) => {
     )
 
     // 调用删除API
-    const response = await fetch(`/api/reports/${report.id}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-
-    const result = await response.json()
+    const result = await ApiClient.delete(`/api/reports/${report.id}`)
 
     if (result.success) {
       ElMessage.success('报告已删除')
@@ -503,11 +473,11 @@ const exportSelected = async (format: string = 'markdown') => {
     for (let i = 0; i < toExport.length; i++) {
       const report = toExport[i]
       try {
-        const response = await fetch(`/api/reports/${report.id}/download?format=${format}`, {
-          headers: { 'Authorization': `Bearer ${authStore.token}` }
-        })
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        const blob = await response.blob()
+        const blobData = await ApiClient.get(`/api/reports/${report.id}/download?format=${format}`, {
+          responseType: 'blob',
+          showLoading: false
+        }) as unknown as BlobPart
+        const blob = new Blob([blobData])
         const url = window.URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url

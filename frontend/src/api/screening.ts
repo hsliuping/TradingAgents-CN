@@ -509,10 +509,11 @@ export const screeningApi = {
   // 智能筛选
   intelligentChat: (message: string, conversation_id?: string) =>
     ApiClient.post<ScreeningChatResponse>('/api/screening/intelligent/chat', { message, conversation_id }, { timeout: 180000 }),
-  getIntelligentChatWsUrl: (token: string) => {
+  getIntelligentChatWsUrl: (token?: string) => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
-    return `${wsProtocol}//${host}/api/screening/intelligent/ws?token=${encodeURIComponent(token)}`
+    const base = `${wsProtocol}//${host}/api/screening/intelligent/ws`
+    return token ? `${base}?token=${encodeURIComponent(token)}` : base
   },
   listIntelligentConversations: () =>
     ApiClient.get<ScreeningConversationListResponse>('/api/screening/intelligent/conversations'),

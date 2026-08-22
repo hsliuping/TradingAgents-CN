@@ -181,7 +181,7 @@ import {
   Cpu,
   ArrowDown
 } from '@element-plus/icons-vue'
-import { useAuthStore } from '@/stores/auth'
+import { ApiClient } from '@/api/request'
 import { marked } from 'marked'
 
 interface ReportDecision {
@@ -220,7 +220,6 @@ interface ReportDetailData {
 // 路由和认证
 const route = useRoute()
 const router = useRouter()
-const authStore = useAuthStore()
 
 // 配置 marked 以获得更完整的 Markdown 支持
 marked.setOptions({ breaks: true, gfm: true })
@@ -365,18 +364,7 @@ const fetchReportDetail = async () => {
   try {
     const reportId = route.params.id as string
 
-    const response = await fetch(`/api/reports/${reportId}/detail`, {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-
-    const result = await response.json()
+    const result = await ApiClient.get<any>(`/api/reports/${reportId}/detail`)
 
     if (result.success) {
       report.value = result.data
@@ -438,20 +426,14 @@ const downloadReport = async (format: string = 'markdown') => {
       duration: 0
     })
 
-    const response = await fetch(`/api/reports/${currentReport.id}/download?format=${format}`, {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      }
-    })
+    const blobData = await ApiClient.get(`/api/reports/${currentReport.id}/download?format=${format}`, {
+      responseType: 'blob',
+      showLoading: false
+    }) as unknown as BlobPart
 
     loadingMsg.close()
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(errorText || `HTTP ${response.status}`)
-    }
-
-    const blob = await response.blob()
+    const blob = new Blob([blobData])
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

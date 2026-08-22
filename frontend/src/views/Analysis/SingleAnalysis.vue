@@ -847,6 +847,7 @@ import { stocksApi, type FundamentalsResponse } from '@/api/stocks'
 import { stockSyncApi, type StockSyncTaskStatus, type SingleStockSyncResponse } from '@/api/stockSync'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { ApiClient } from '@/api/request'
 import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
@@ -2358,20 +2359,14 @@ const downloadReport = async (format: string = 'markdown') => {
     })
 
     const reportId = (analysisResults.value?.id as any) || currentTaskId.value
-    const res = await fetch(`/api/reports/${reportId}/download?format=${format}`, {
-      headers: {
-        'Authorization': `Bearer ${authStore.token}`
-      }
-    })
+    const blobData = await ApiClient.get(`/api/reports/${reportId}/download?format=${format}`, {
+      responseType: 'blob',
+      showLoading: false
+    }) as unknown as BlobPart
 
     loadingMsg.close()
 
-    if (!res.ok) {
-      const errorText = await res.text()
-      throw new Error(errorText || `HTTP ${res.status}`)
-    }
-
-    const blob = await res.blob()
+    const blob = new Blob([blobData])
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
