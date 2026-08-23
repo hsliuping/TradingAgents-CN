@@ -497,6 +497,7 @@ class TushareProvider(BaseStockDataProvider):
             # 🔧 使用 pro_bar 接口获取前复权数据（与同花顺一致）
             # 注意：Tushare 的 daily/weekly/monthly 接口不支持复权
             # 必须使用 ts.pro_bar() 函数并指定 adj='qfq' 参数
+            # ⚠️ ETF/基金（50/51/52/56/58/15/16 开头）pro_bar 不支持，需走 fund_daily 接口
 
             # 周期映射
             freq_map = {
@@ -506,8 +507,7 @@ class TushareProvider(BaseStockDataProvider):
             }
             freq = freq_map.get(period, "D")
 
-            # 使用 ts.pro_bar() 函数获取前复权数据
-            # 注意：pro_bar 是 tushare 模块的函数，不是 api 对象的方法
+            is_etf = self._is_etf(ts_code)
 
             # ⏱️ 记录实际 API 调用时间（使用高精度计时）
             import time
@@ -516,20 +516,33 @@ class TushareProvider(BaseStockDataProvider):
             try:
                 # 🔍 验证 API 对象是否有效
                 if self.api is None:
-                    self.logger.error("❌ [Tushare API调用] API 对象为 None，无法调用 ts.pro_bar()")
+                    self.logger.error("❌ [Tushare API调用] API 对象为 None，无法调用 Tushare 接口")
                     return None
 
                 # 实际调用 Tushare API
                 try:
-                    df = await asyncio.to_thread(
-                        ts.pro_bar,
-                        ts_code=ts_code,
-                        api=self.api,  # 传入 api 对象
-                        start_date=start_str,
-                        end_date=end_str,
-                        freq=freq,
-                        adj='qfq'  # 前复权（与同花顺一致）
-                    )
+                    if is_etf:
+                        # ETF/基金走 fund_daily 接口（pro_bar 不支持 ETF）
+                        self.logger.info(
+                            f"📊 [Tushare API调用] 检测到ETF标的，使用 fund_daily 接口: {ts_code}"
+                        )
+                        df = await asyncio.to_thread(
+                            self.api.fund_daily,
+                            ts_code=ts_code,
+                            start_date=start_str,
+                            end_date=end_str,
+                        )
+                    else:
+                        # 股票走 pro_bar 接口（支持复权）
+                        df = await asyncio.to_thread(
+                            ts.pro_bar,
+                            ts_code=ts_code,
+                            api=self.api,  # 传入 api 对象
+                            start_date=start_str,
+                            end_date=end_str,
+                            freq=freq,
+                            adj='qfq'  # 前复权（与同花顺一致）
+                        )
                 except RuntimeError as runtime_error:
                     # 🔥 捕获 "cannot schedule new futures after shutdown" 错误
                     if "shutdown" in str(runtime_error).lower():
@@ -1343,6 +1356,18 @@ class TushareProvider(BaseStockDataProvider):
                 return f"{symbol}.SZ"  # 默认深交所
 
         return symbol
+
+    @staticmethod
+    def _is_etf(ts_code: str) -> bool:
+        """判断是否为ETF/基金类标的（pro_bar 不支持，需走 fund_daily）。
+
+        上交所ETF: 50/51/52/56/58 开头
+        深交所ETF: 15/16 开头
+        """
+        code = ts_code.split('.')[0] if '.' in ts_code else ts_code
+        if not code.isdigit() or len(code) != 6:
+            return False
+        return code.startswith(('50', '51', '52', '56', '58', '15', '16'))
 
     def _determine_market_info_from_ts_code(self, ts_code: str) -> Dict[str, Any]:
         """根据ts_code确定市场信息"""

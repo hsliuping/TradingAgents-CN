@@ -17,6 +17,8 @@ T = TypeVar("T")
 RETRYABLE_KEYWORDS = (
     "choices", "null value", "connection", "timeout", "rate limit",
     "too many requests", "server error", "500", "502", "503", "529",
+    # 京东云等国内网关的限流提示
+    "429", "rate_limit", "tokens limit", "rate_limited", "访问限制", "RATE_LIMIT",
 )
 
 

@@ -278,6 +278,149 @@ def _build_untraced_interception(untraced_detail: str) -> str:
     )
 
 
+def _find_closest_candidate(value: float, unit: str, candidates: list) -> Optional[tuple]:
+    """为一个不可溯源数字找到工具候选集中最接近的值（及推导关系说明）。
+
+    返回 (cand_val, cand_unit, relation_desc) 或 None。
+    relation_desc 描述推导关系，如"四舍五入"、"累计/差值估算"、"单位换算"等。
+    """
+    unit = _normalize_unit(unit)
+    tol = _TRACE_TOLERANCE
+    pct_tol = _TRACE_PCT_TOLERANCE
+    value_is_amount = unit in _AMOUNT_UNIT_FACTOR
+    value_is_volume = unit in ("万手", "手")
+    value_is_pct = unit in _PCT_UNITS
+
+    best = None  # (relative_diff, cand_val, cand_unit, relation)
+
+    for cand_val, cand_unit_raw in candidates:
+        cand_unit = _normalize_unit(cand_unit_raw)
+        cand_is_amount = cand_unit in _AMOUNT_UNIT_FACTOR
+        cand_is_bare = cand_unit == ""
+        cand_is_pct = cand_unit in _PCT_UNITS
+
+        v1 = value
+        v2 = cand_val
+        relation = None
+
+        # 金额类（两边都是金额单位）
+        if value_is_amount and cand_is_amount:
+            v1 = value * _AMOUNT_UNIT_FACTOR[unit]
+            v2 = cand_val * _AMOUNT_UNIT_FACTOR[cand_unit]
+            relation = f"{cand_val}{cand_unit}（单位换算）"
+        # 百分比类
+        elif value_is_pct and cand_is_pct:
+            relation = f"{cand_val}{cand_unit}（四舍五入/近似）"
+        elif value_is_pct and cand_is_bare:
+            relation = f"{cand_val}（四舍五入/近似）"
+        # 金额 + 裸数字（反推）
+        elif value_is_amount and cand_is_bare:
+            best_guess = None
+            for guess_unit, factor in _BARE_AMOUNT_GUESS_FACTORS:
+                v2_guess = cand_val * factor
+                if v2_guess <= 0:
+                    continue
+                rel_diff = abs(value * _AMOUNT_UNIT_FACTOR[unit] - v2_guess) \
+                    / max(abs(v2_guess), 1e-9)
+                if rel_diff < 0.5:  # 放宽到50%内都算有参考关系
+                    if best_guess is None or rel_diff < best_guess[0]:
+                        best_guess = (rel_diff, cand_val, guess_unit,
+                                      f"{cand_val}元 ≈ {cand_val * factor:.2f}亿元（金额估算）")
+            if best_guess:
+                rel_diff, cv, cu, desc = best_guess
+                if best is None or rel_diff < best[0]:
+                    best = (rel_diff, cv, cu, desc)
+            continue
+        # 成交量 + 裸数字
+        elif value_is_volume and cand_is_bare:
+            best_guess = None
+            for guess_unit, factor in _BARE_VOLUME_GUESS_FACTORS:
+                v1_hand = value * (10000 if unit == "万手" else 1)
+                v2_hand = cand_val * factor
+                if v2_hand <= 0:
+                    continue
+                rel_diff = abs(v1_hand - v2_hand) / max(abs(v2_hand), 1e-9)
+                if rel_diff < 0.5:
+                    desc = f"{cand_val}手 ≈ {cand_val * factor / 10000:.2f}万手（成交量估算）" \
+                        if guess_unit == "万手" \
+                        else f"{cand_val}手（原始数据）"
+                    if best_guess is None or rel_diff < best_guess[0]:
+                        best_guess = (rel_diff, cand_val, guess_unit, desc)
+            if best_guess:
+                rel_diff, cv, cu, desc = best_guess
+                if best is None or rel_diff < best[0]:
+                    best = (rel_diff, cv, cu, desc)
+            continue
+        # 同单位（价格/倍数等）
+        elif unit == cand_unit or (cand_is_bare and not value_is_amount):
+            relation = f"{cand_val}{cand_unit}（近似）"
+        else:
+            continue
+
+        if v2 == 0 and v1 == 0:
+            rel_diff = 0.0
+        else:
+            ref = max(abs(v2), abs(v1), 1e-9)
+            rel_diff = abs(v1 - v2) / ref
+
+        # 跳过差异太大的（>100% 基本没关系）
+        if rel_diff > 1.0:
+            continue
+        if rel_diff < (pct_tol if value_is_pct else tol):
+            relation = relation or f"{cand_val}{cand_unit}"
+        if best is None or rel_diff < best[0]:
+            best = (rel_diff, cand_val, cand_unit, relation or f"{cand_val}{cand_unit}")
+
+    if best is None:
+        return None
+    return (best[1], best[2], best[3])
+
+
+def _build_data_transparency_note(
+    reply: str,
+    tool_results: list,
+    user_message: str,
+    history_tool_contents: list,
+) -> Optional[str]:
+    """生成「数据说明」附言：把推导/估算的数字透明标注出来，供用户自行判断。
+
+    不再硬拦截，而是把 LLM 表述值、工具原始值、可能的推导关系都列出来。
+    """
+    untraced, candidates = _get_untraced_risky_numbers(
+        reply, tool_results, user_message, history_tool_contents, return_candidates=True)
+    if not untraced:
+        return None
+
+    lines = []
+    for num_str in untraced[:8]:
+        # 解析数值和单位
+        m = _RISKY_NUMBER_RE.match(num_str)
+        if not m:
+            continue
+        try:
+            val = float(m.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        unit = m.group(2) or ""
+        closest = _find_closest_candidate(val, unit, candidates)
+        if closest:
+            _, _, relation = closest
+            lines.append(f"- **{num_str}**：工具参考数据 {relation}，以上为估算/推导值，请谨慎参考")
+        else:
+            lines.append(f"- **{num_str}**：未在工具返回中找到对应数据，请注意核实")
+
+    if not lines:
+        return None
+
+    return (
+        "\n\n---\n"
+        "📌 **数据说明**\n"
+        "下面这些数值是基于工具原始数据推导或估算的（可能经过四舍五入、累计计算、单位换算等），"
+        "原始工具数据也一并列出，请您自行判断：\n"
+        + "\n".join(lines)
+    )
+
+
 def _retry_message(role: str, content: str) -> Message:
     """构造重试反馈消息。
 
@@ -347,14 +490,28 @@ def _has_unsourced_numbers(reply: str, tools_used: list) -> bool:
 # 提取回复中带金融单位的高风险数字（长单位优先，避免"元/公斤"被"元"截断；
 # 同时覆盖中英文单位写法：元/kg 与 元/公斤 是同一单位）
 _RISKY_NUMBER_RE = re.compile(
-    r"(\d[\d,]*\.?\d*)\s*(元/[kK][gG]|元/公斤|元/吨|元/斤|亿元|万元|分位|pct|%|倍|元)"
+    r"(\d[\d,]*\.?\d*)\s*(元/[kK][gG]|元/公斤|元/吨|元/斤|亿元|万元|万手|分位|pct|%|倍|元|手)"
 )
 # 提取工具返回文本中的所有数字（带金融单位或裸数字，如 JSON 字段值 0.37 / 15764.6）
 _TOOL_NUMBER_RE = re.compile(
-    r"(\d[\d,]*\.?\d*)\s*(元/[kK][gG]|元/公斤|元/吨|元/斤|亿元|万元|分位|pct|%|倍|元)?"
+    r"(\d[\d,]*\.?\d*)\s*(元/[kK][gG]|元/公斤|元/吨|元/斤|亿元|万元|万手|分位|pct|%|倍|元|手)?"
 )
 # 金额类单位 → 归一化到"亿元"的换算因子
 _AMOUNT_UNIT_FACTOR = {"亿元": 1.0, "万元": 1e-4}
+# 工具侧裸数字的金额反推：当工具返回的是无单位裸数字（如成交额、规模），
+# 而 LLM 回复时带上了「亿元/万元」等金额单位时，按以下常见单位反推
+# （归一化到亿元），能匹配上就算溯源成功。
+# 顺序优先用大单位（亿元、万元），避免小单位下大数误撞上价格类裸数字。
+_BARE_AMOUNT_GUESS_FACTORS = [
+    ("亿元", 1.0),
+    ("万元", 1e-4),
+    ("元", 1e-8),
+]
+# 成交量类裸数字反推（手 ↔ 万手）
+_BARE_VOLUME_GUESS_FACTORS = [
+    ("万手", 1e-4),  # 1手 = 0.0001万手
+    ("手", 1.0),
+]
 # 重量价格单位 → 归一化到"元/公斤"的换算因子（乘以该因子=换算成元/公斤价格）。
 # 每公斤价 = 每斤价 × 2（1公斤=2斤）；每公斤价 = 每吨价 ÷ 1000（1吨=1000公斤）。
 # LLM 常将工具返回的 元/kg 换算为 元/斤 表述（如 10.87元/kg → 5.44元/斤），
@@ -363,8 +520,15 @@ _WEIGHT_UNIT_FACTOR = {"元/公斤": 1.0, "元/斤": 2.0, "元/吨": 0.001}
 # 匹配容差（工具值与回复值的相对误差上限；1% 覆盖常规四舍五入，
 # 同时避免跨语义误匹配——如编造"15.8元/公斤"撞上质押 holding_ratio 15.54）
 _TRACE_TOLERANCE = 0.01
-# 不可溯源高风险数字达到该数量 → 拦截回复
-_UNTRACED_NUMBER_LIMIT = 3
+# 百分比类数字的专项容差（涨跌幅、费率等容易因四舍五入或累计计算产生误差）
+# 例如工具返回 0.17%，LLM 说"约0.2%"是合理的，不算编造
+_TRACE_PCT_TOLERANCE = 0.05
+# 百分比单位列表
+_PCT_UNITS = {"%", "pct", "分位"}
+# 不可溯源高风险数字达到该数量 → 触发拦截（不再调LLM重试，改为本地模糊化处理）
+# 阈值不宜过低：LLM 对工具返回做简单加法/平均/四舍五入是合理的，
+# 如"管理费0.15%+托管费0.05%=0.20%"、"近5日累计涨跌1.93%"等
+_UNTRACED_NUMBER_LIMIT = 6
 
 
 def _normalize_unit(unit: str) -> str:
@@ -401,33 +565,74 @@ def _number_matches(value: float, unit: str, candidates: list) -> bool:
       （如 15764.6万 ↔ 1.58亿；15764.6万 ≠ 157.6亿，防100倍换算错误）
     - 重量价格类（元/公斤、元/斤、元/吨）：归一化到元/公斤后匹配
       （如 5.44元/斤 ↔ 10.87元/kg，合法单位换算不算编造）
-    - 非金额类（%/元/公斤/kg/倍/分位/裸数字）：单位写法差异（元/kg vs 元/公斤、
-      "15.77元一公斤"截断为"元" vs 回复"15.77元/公斤"）按数值直接匹配（1%容差）
+    - 非金额类（%/元/公斤/kg/倍/分位/裸数字）：单位写法差异按数值直接匹配（1%容差）
     - 不做 ×100 的百分比换算：工具返回 0.37 就是 0.37%，回复写 37% 视为不可溯源
+    - 兜底：工具侧裸数字（无单位）但回复带金额/成交量单位时，按常见单位反推匹配
+      （如工具返回 543533 万元 → LLM 说 54.35 亿元，属合理换算）
     """
     tol = _TRACE_TOLERANCE
     unit = _normalize_unit(unit)
     value_is_amount = unit in _AMOUNT_UNIT_FACTOR
+    value_is_volume = unit in ("万手", "手")
+    value_is_pct = unit in _PCT_UNITS
     for cand_val, cand_unit_raw in candidates:
         cand_unit = _normalize_unit(cand_unit_raw)
         cand_is_amount = cand_unit in _AMOUNT_UNIT_FACTOR
-        if value_is_amount or cand_is_amount:
-            # 金额类只与金额类匹配（归一化到亿元），不与价格/百分比/裸数字混配
-            if value_is_amount and cand_is_amount:
-                v1 = value * _AMOUNT_UNIT_FACTOR[unit]
-                v2 = cand_val * _AMOUNT_UNIT_FACTOR[cand_unit]
-                if abs(v1 - v2) <= tol * max(abs(v2), 1e-9):
-                    return True
+        cand_is_bare = cand_unit == ""
+        cand_is_pct = cand_unit in _PCT_UNITS
+        # 百分比类：用专项容差（四舍五入/累计计算误差较大属合理）
+        if value_is_pct and cand_is_pct:
+            if cand_val == 0 and value == 0:
+                return True
+            ref = max(abs(cand_val), abs(value), 1e-9)
+            if abs(value - cand_val) <= _TRACE_PCT_TOLERANCE * ref:
+                return True
             continue
-        # 重量价格单位：归一化到元/公斤后比较（斤↔公斤 ×2、吨↔公斤 ×1000）
+        # 一边百分比一边裸数字 → 也用百分比容差（工具裸数字常就是百分比值）
+        if value_is_pct and cand_is_bare:
+            ref = max(abs(cand_val), abs(value), 1e-9)
+            if abs(value - cand_val) <= _TRACE_PCT_TOLERANCE * ref:
+                return True
+        # 1) 两边都是金额单位 → 归一化到亿元后直接比较
+        if value_is_amount and cand_is_amount:
+            v1 = value * _AMOUNT_UNIT_FACTOR[unit]
+            v2 = cand_val * _AMOUNT_UNIT_FACTOR[cand_unit]
+            if abs(v1 - v2) <= tol * max(abs(v2), 1e-9):
+                return True
+            continue
+        # 候选是金额但回复不是 → 跳过，避免把价格/百分比等误匹配成金额
+        if cand_is_amount and not value_is_amount:
+            continue
+        # 2) 重量价格单位：归一化到元/公斤后比较（斤↔公斤 ×2、吨↔公斤 ×1000）
         if unit in _WEIGHT_UNIT_FACTOR and cand_unit in _WEIGHT_UNIT_FACTOR:
             v1 = value * _WEIGHT_UNIT_FACTOR[unit]
             v2 = cand_val * _WEIGHT_UNIT_FACTOR[cand_unit]
             if abs(v1 - v2) <= tol * max(abs(v2), 1e-9):
                 return True
-        # 非金额类：数值相等即匹配（容忍单位写法差异）
+        # 3) 非金额类：数值相等即匹配（容忍单位写法差异）
         if abs(value - cand_val) <= tol * max(abs(cand_val), 1e-9):
             return True
+        # 4) 兜底：工具侧是裸数字，回复带金额/成交量单位 → 按常见单位反推
+        if cand_is_bare and cand_val > 0:
+            if value_is_amount:
+                v1 = value * _AMOUNT_UNIT_FACTOR[unit]
+                for _, factor in _BARE_AMOUNT_GUESS_FACTORS:
+                    v2 = cand_val * factor
+                    if v2 <= 0:
+                        continue
+                    if abs(v1 - v2) <= tol * max(abs(v2), 1e-9):
+                        return True
+            elif value_is_volume:
+                # 归一化到"手"再比较
+                v1 = value * (10000 if unit == "万手" else 1)
+                for _, factor in _BARE_VOLUME_GUESS_FACTORS:
+                    # factor 是 候选值(以factor_unit计) → 手 的换算因子
+                    # 归一化到手：cand_val * factor
+                    v2 = cand_val * factor
+                    if v2 <= 0:
+                        continue
+                    if abs(v1 - v2) <= tol * max(abs(v2), 1e-9):
+                        return True
     return False
 
 
@@ -3071,61 +3276,15 @@ class IntelligentAssistantService:
                         "请换一个更具体的问法（例如指明行业或股票），"
                         "我会先调用工具获取真实数据再为您分析。"
                     )
-            elif _has_untraced_risky_numbers(
-                reply, tool_results, tools_used,
-                resolved_user_message,
-                _extract_history_tool_contents(messages) + memory_trusted_contents_s,
-            ):
-                logger.warning("[智能助手·流式] 检测到无法溯源的高风险数字（疑似训练记忆填充/单位换算错误），拦截回复")
-                untraced_texts_s = (
-                    _extract_history_tool_contents(messages) + memory_trusted_contents_s)
-                # 自动纠错重试一次：告知具体无法溯源的数字，要求基于工具数字重答
-                try:
-                    yield _sse("progress", {
-                        "stage": "retry",
-                        "message": "检测到无法溯源的数据，正在调用工具重新获取…",
-                    })
-                    untraced_numbers_s = _get_untraced_risky_numbers(
-                        reply, tool_results, resolved_user_message,
-                        untraced_texts_s)[:6]
-                    retry_prompt_s = _UNTRACED_RETRY_PROMPT_TEMPLATE.format(
-                        numbers="、".join(untraced_numbers_s))
-                    messages.append(_retry_message("assistant", reply))
-                    messages.append(_retry_message("user", retry_prompt_s))
-                    retry_resp = await asyncio.wait_for(
-                        self._llm_client.achat(
-                            messages,
-                            tools=self._openai_tools,
-                            auto_execute_tools=True,
-                            max_tool_rounds=8,
-                            tools_used=tools_used,
-                            tool_results_collector=tool_results,
-                            dry_run=False,
-                            tool_interceptor=self._build_tool_interceptor(
-                                conversation_id or "default"),
-                        ),
-                        timeout=_stream_effective_timeout(),
-                    )
-                    await _record_assistant_token_usage(
-                        retry_resp, conversation_id or "assistant_chat")
-                    retry_reply_s = (retry_resp.content or "").strip()
-                    if retry_reply_s \
-                            and not _has_fabricated_tool_json(retry_reply_s) \
-                            and not _has_untraced_risky_numbers(
-                                retry_reply_s, tool_results, tools_used,
-                                resolved_user_message, untraced_texts_s):
-                        logger.info("[智能助手·流式] 无法溯源数字纠错重试成功，采用重试回复")
-                        reply = retry_reply_s
-                    else:
-                        logger.warning("[智能助手·流式] 无法溯源数字纠错重试后仍不达标，返回拦截文案")
-                        untraced_detail = "、".join(untraced_numbers_s)
-                        reply = _build_untraced_interception(untraced_detail)
-                except Exception as retry_err:
-                    logger.warning("[智能助手·流式] 无法溯源数字纠错重试失败: %s", retry_err)
-                    untraced_detail = "、".join(_get_untraced_risky_numbers(
-                        reply, tool_results, resolved_user_message,
-                        untraced_texts_s)[:6])
-                    reply = _build_untraced_interception(untraced_detail)
+            # 数据透明化：回复末尾追加「数据说明」附言，列出推导/估算值与工具原始值的对应关系，
+            # 让用户自行判断可信度，不再硬拦截（避免误杀 + 避免LLM重试撞限流）
+            if tools_used:
+                note = _build_data_transparency_note(
+                    reply, tool_results, resolved_user_message,
+                    _extract_history_tool_contents(messages) + memory_trusted_contents_s,
+                )
+                if note:
+                    reply += note
 
             CHUNK_SIZE = 40
             for i in range(0, len(reply), CHUNK_SIZE):
