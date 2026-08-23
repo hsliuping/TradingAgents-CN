@@ -442,13 +442,35 @@ class UnifiedNewsAnalyzer:
         except Exception as e:
             logger.warning(f"[统一新闻工具] Google美股新闻获取失败: {e}")
         
-        # 优先级3: FinnHub新闻（如果可用）
+        # 优先级3: 实时新闻聚合器（FinnHub / Alpha Vantage / NewsAPI 的真实 API 调用）
+        # 🔧 补丁：港股分支（_get_hk_share_news）早就把 get_realtime_stock_news 作为兜底，
+        # 唯独美股分支漏了，导致前两条链一断就直接返回失败。这里补齐，位置放在下面那个
+        # FinnHub 分支之前——因为 toolkit.get_finnhub_news 最终走 interface.get_finnhub_news，
+        # 读的是本地离线目录 news_data 而不是 API，配了 Key 也取不到数据。
+        try:
+            if hasattr(self.toolkit, 'get_realtime_stock_news'):
+                logger.info(f"[统一新闻工具] 尝试实时美股新闻...")
+                result = self.toolkit.get_realtime_stock_news.invoke({"ticker": stock_code, "curr_date": curr_date})
+                # ⚠️ 必须排除失败占位文本：聚合器取不到新闻时会返回一段 160+ 字符的
+                # 「实时新闻获取失败 - XXX / ❌ 错误信息: ...」，长度轻松越过阈值，
+                # 只判长度会把失败提示当成新闻正文写进报告。
+                if (result and len(result.strip()) > 100
+                        and "❌" not in result and "实时新闻获取失败" not in result):
+                    logger.info(f"[统一新闻工具] ✅ 实时美股新闻获取成功: {len(result)} 字符")
+                    return self._format_news_result(result, "实时美股新闻", model_info)
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] 实时美股新闻获取失败: {e}")
+
+        # 优先级4: FinnHub新闻（如果可用）
+        # ⚠️ 故意不修它传错的参数名（{symbol,max_results} vs 签名 {ticker,start_date,end_date}）：
+        # 修好之后它会去读不存在的本地目录并返回一段 >50 字符的中文错误提示，
+        # 而上面的 len>50 判断会把这段错误当成新闻正文采纳，比现在直接抛异常更糟。
         try:
             if hasattr(self.toolkit, 'get_finnhub_news'):
                 logger.info(f"[统一新闻工具] 尝试FinnHub美股新闻...")
                 # 使用LangChain工具的正确调用方式：.invoke()方法和字典参数
                 result = self.toolkit.get_finnhub_news.invoke({"symbol": stock_code, "max_results": min(max_news, 50)})
-                if result and len(result.strip()) > 50:
+                if result and len(result.strip()) > 50 and "❌" not in result and "⚠️" not in result:
                     logger.info(f"[统一新闻工具] ✅ FinnHub美股新闻获取成功: {len(result)} 字符")
                     return self._format_news_result(result, "FinnHub美股新闻", model_info)
         except Exception as e:

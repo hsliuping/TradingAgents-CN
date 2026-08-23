@@ -1540,7 +1540,11 @@ class SimpleAnalysisService:
 
             # 执行实际分析，传递进度回调和task_id
             state, decision = trading_graph.propagate(
-                request.stock_code,
+                # 🔧 修复：request.stock_code 是 schema 标注「已废弃，请用 symbol」的字段。
+                # 只传 symbol 的客户端会让 ticker 变成 None，整轮分析跑在「股票None」上
+                # 且最终仍标记成功。本文件 771/847 行用的都是兼容取值 get_symbol()。
+                # 上游 pro/main 分支已用同样方式修复（注释：使用 stock_code 变量而不是 request.stock_code）。
+                request.get_symbol(),
                 analysis_date,
                 progress_callback=graph_progress_callback,
                 task_id=task_id
@@ -1823,8 +1827,11 @@ class SimpleAnalysisService:
             # 构建结果
             result = {
                 "analysis_id": str(uuid.uuid4()),
-                "stock_code": request.stock_code,
-                "stock_symbol": request.stock_code,  # 添加stock_symbol字段以保持兼容性
+                # 🔧 修复：同 propagate 处，request.stock_code 是已废弃字段。只传 symbol 的
+                # 客户端会让结果里的 stock_code/stock_symbol 变成 None，最终在
+                # app/routers/analysis.py:647-648 被 safe_string 兜底成 "UNKNOWN"。
+                "stock_code": request.get_symbol(),
+                "stock_symbol": request.get_symbol(),  # 添加stock_symbol字段以保持兼容性
                 "analysis_date": analysis_date,
                 "summary": summary,
                 "recommendation": recommendation,

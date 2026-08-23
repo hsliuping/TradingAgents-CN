@@ -336,8 +336,15 @@ def create_news_analyst(llm, toolkit):
             logger.info(f"[新闻分析师] LLM调用了 {current_tool_calls} 个工具")
             logger.debug(f"📊 [DEBUG] 累计工具调用次数: {tool_call_count}/{max_tool_calls}")
 
-            if current_tool_calls == 0:
-                logger.warning(f"[新闻分析师] ⚠️ {llm.__class__.__name__} 没有调用任何工具，启动补救机制...")
+            # 🔧 修复：模型「正常发起工具调用」时，result.content 只是「我将立即获取…」这类开场白。
+            # 本节点最终返回的是不含 tool_calls 的 clean_message，工具调用不会被任何地方执行，
+            # 上游却把这段开场白直接当成最终报告（实测 news_report 恒为 30 字符）并标记成功。
+            # 因此把判据从「有没有调用工具」改成「有没有拿到可用报告」，两种情况统一走下面
+            # 已有且已验证的强制补救路径：主动调统一新闻工具 + 二次 LLM 生成正式报告。
+            _preliminary = result.content if hasattr(result, 'content') else ""
+            _preliminary_len = len(str(_preliminary).strip())
+            if current_tool_calls == 0 or _preliminary_len < 200:
+                logger.warning(f"[新闻分析师] ⚠️ 未获得可用报告（工具调用数={current_tool_calls}, 正文={_preliminary_len}字符），启动补救机制...")
                 logger.warning(f"[新闻分析师] 📄 LLM原始响应内容 (前500字符): {result.content[:500] if hasattr(result, 'content') else 'No content'}")
 
                 try:
@@ -390,7 +397,7 @@ def create_news_analyst(llm, toolkit):
                     logger.error(f"[新闻分析师] 📋 异常堆栈: {traceback.format_exc()}")
                     report = result.content if hasattr(result, 'content') else ""
             else:
-                # 有工具调用，直接使用结果
+                # 有工具调用且正文足够长（模型已自行给出完整报告），直接使用
                 report = result.content
         
         total_time_taken = (datetime.now() - start_time).total_seconds()

@@ -186,7 +186,11 @@ class UnifiedStockService:
         }
 
         # 查询所有匹配的记录
-        cursor = collection.find(filter_query)
+        # 🔧 修复：漏了 {"_id": 0} 投影，返回的 doc 带 ObjectId，FastAPI 序列化直接抛
+        # "Unable to serialize unknown type: <class 'bson.objectid.ObjectId'>"，
+        # 导致 GET /api/markets/{market}/stocks/search 只要命中结果就 500（空结果反而正常）。
+        # 本文件其余 6 处 find/find_one 都带了该投影，只有这里漏掉。
+        cursor = collection.find(filter_query, {"_id": 0})
         all_results = await cursor.to_list(length=None)
         
         if not all_results:
