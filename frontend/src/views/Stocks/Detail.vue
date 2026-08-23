@@ -21,6 +21,7 @@
       @toggle-favorite="onToggleFavorite"
       @clear-cache="clearCache"
       @go-position-analysis="goToPositionAnalysis"
+      @add-position="showAddPositionDialog"
       @go-trade-review="goToTradeReview"
       @go-trade-review-history="goToReviewHistory"
       @go-api-guide="goToApiGuide"
@@ -129,6 +130,13 @@
     <!-- 回到顶部 -->
     <BackToTop :show-after="600" />
 
+    <!-- 添加持仓对话框 -->
+    <AddPositionDialog
+      v-model:visible="addPositionDialogVisible"
+      :initial-data="addPositionInitialData"
+      @success="onAddPositionSuccess"
+    />
+
     <!-- ════════ 对话框（保留原有逻辑） ════════ -->
 
     <!-- 详细报告对话框 -->
@@ -185,7 +193,7 @@
           <el-radio-group v-model="syncForm.dataSource">
             <el-radio label="tushare" :disabled="!availableSyncSources.tushare">Tushare</el-radio>
             <el-radio label="akshare" :disabled="!availableSyncSources.akshare">AKShare</el-radio>
-            <el-radio label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
+            <el-radio v-if="!isJdyunMode()" label="qmt" :disabled="!availableSyncSources.qmt">QMT</el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="历史数据天数" v-if="syncForm.syncTypes.includes('historical')">
@@ -315,6 +323,7 @@ import { useAuthStore } from '@/stores/auth'
 import type { StockInfo } from '@/types/analysis'
 import { getFactorDiagnosticEntries, getFactorWarningEntries } from '@/utils/factorPresentation'
 import { loadManualSyncSourceState, type ManualSyncDataSource } from '@/utils/dataSource'
+import { isJdyunMode } from '@/utils/config'
 import { getReportName } from '@/utils/reportPresentation'
 import { getTaskList, getTaskDetail, TaskType, TaskStatus } from '@/api/unifiedTasks'
 import { reviewApi } from '@/api/review'
@@ -331,6 +340,7 @@ import PositionReviewTabs from './components/PositionReviewTabs.vue'
 import AssistantChat from './components/AssistantChat.vue'
 import BottomSection from './components/BottomSection.vue'
 import BackToTop from './components/BackToTop.vue'
+import AddPositionDialog from '@/views/Portfolio/components/AddPositionDialog.vue'
 
 
 echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
@@ -460,6 +470,15 @@ const syncStatus = ref<any>(null)
 // 数据同步对话框
 const syncDialogVisible = ref(false)
 const syncLoading = ref(false)
+
+// 添加持仓对话框
+const addPositionDialogVisible = ref(false)
+const addPositionInitialData = computed(() => ({
+  code: code.value,
+  name: stockName.value,
+  market: isEtf.value ? 'ETF' : 'CN',
+  cost_price: Number(quote.price) || undefined
+}))
 const availableSyncSources = reactive<Record<ManualSyncDataSource, boolean>>({
   tushare: true,
   akshare: true,
@@ -485,16 +504,33 @@ function showSyncDialog() {
   syncDialogVisible.value = true
 }
 
+// 显示添加持仓对话框
+function showAddPositionDialog() {
+  addPositionDialogVisible.value = true
+}
+
+function onAddPositionSuccess() {
+  addPositionDialogVisible.value = false
+  // 刷新持仓相关数据
+  fetchPositionAnalysisSummary()
+  fetchPositionData()
+}
+
 async function loadPreferredSyncDataSource() {
   try {
     const sourceState = await loadManualSyncSourceState()
     availableSyncSources.tushare = sourceState.availableSources.tushare
     availableSyncSources.akshare = sourceState.availableSources.akshare
-    availableSyncSources.qmt = sourceState.availableSources.qmt
+    availableSyncSources.qmt = isJdyunMode() ? false : sourceState.availableSources.qmt
 
     if (sourceState.preferredSource) {
-      syncForm.dataSource = sourceState.preferredSource
-      return
+      // 京东云模式下，若首选是 qmt 则回退
+      if (isJdyunMode() && sourceState.preferredSource === 'qmt') {
+        // fall through to default selection
+      } else {
+        syncForm.dataSource = sourceState.preferredSource
+        return
+      }
     }
 
     if (availableSyncSources.qmt) {

@@ -95,6 +95,11 @@
         <span class="title">持仓分析</span>
         <span class="desc">查看持仓研究详情</span>
       </button>
+      <button class="action-btn" @click="$emit('addPosition')">
+        <span class="icon">➕</span>
+        <span class="title">添加持仓</span>
+        <span class="desc">记录你的持仓信息</span>
+      </button>
       <button class="action-btn" @click="$emit('goTradeReview')">
         <span class="icon">📈</span>
         <span class="title">操作复盘</span>
@@ -179,6 +184,7 @@ defineEmits<{
   (e: 'toggleFavorite'): void
   (e: 'clearCache'): void
   (e: 'goPositionAnalysis'): void
+  (e: 'addPosition'): void
   (e: 'goTradeReview'): void
   (e: 'goTradeReviewHistory'): void
   (e: 'goApiGuide'): void

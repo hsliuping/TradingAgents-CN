@@ -20,18 +20,24 @@
           <div class="metric-values">
             <div class="metric-value-item">
               <div class="metric-value-label">PE(TTM)</div>
-              <div class="metric-value-number">
-                {{ fmtNum(basics.pe) }}
-                <el-tag v-if="basics.peIsRealtime" type="success" size="small" style="margin-left:4px">实时</el-tag>
-              </div>
+              <el-tooltip :content="fmtNum(basics.pe)" placement="top" :show-after="300">
+                <div class="metric-value-number">
+                  {{ fmtNum(basics.pe) }}
+                  <el-tag v-if="basics.peIsRealtime" type="success" size="small" style="margin-left:4px">实时</el-tag>
+                </div>
+              </el-tooltip>
             </div>
             <div class="metric-value-item">
               <div class="metric-value-label">PB</div>
-              <div class="metric-value-number">{{ fmtNum(basics.pb) }}</div>
+              <el-tooltip :content="fmtNum(basics.pb)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtNum(basics.pb) }}</div>
+              </el-tooltip>
             </div>
             <div class="metric-value-item">
               <div class="metric-value-label">PS</div>
-              <div class="metric-value-number">{{ fmtNum(basics.ps) }}</div>
+              <el-tooltip :content="fmtNum(basics.ps)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtNum(basics.ps) }}</div>
+              </el-tooltip>
             </div>
           </div>
           <div class="metric-bar">
@@ -48,15 +54,21 @@
           <div class="metric-values">
             <div class="metric-value-item">
               <div class="metric-value-label">ROE</div>
-              <div class="metric-value-number">{{ fmtPercent(basics.roe) }}</div>
+              <el-tooltip :content="fmtPercent(basics.roe)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtPercent(basics.roe) }}</div>
+              </el-tooltip>
             </div>
             <div class="metric-value-item">
               <div class="metric-value-label">毛利率</div>
-              <div class="metric-value-number">{{ fmtPercent(financialSnapshot.grossMargin) }}</div>
+              <el-tooltip :content="fmtPercent(financialSnapshot.grossMargin)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtPercent(financialSnapshot.grossMargin) }}</div>
+              </el-tooltip>
             </div>
             <div class="metric-value-item">
               <div class="metric-value-label">净利率</div>
-              <div class="metric-value-number">{{ fmtPercent(financialSnapshot.netprofitMargin) }}</div>
+              <el-tooltip :content="fmtPercent(financialSnapshot.netprofitMargin)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtPercent(financialSnapshot.netprofitMargin) }}</div>
+              </el-tooltip>
             </div>
           </div>
           <div class="metric-bar">
@@ -73,15 +85,21 @@
           <div class="metric-values">
             <div class="metric-value-item">
               <div class="metric-value-label">负债率</div>
-              <div class="metric-value-number">{{ fmtPercent(basics.debtRatio) }}</div>
+              <el-tooltip :content="fmtPercent(basics.debtRatio)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtPercent(basics.debtRatio) }}</div>
+              </el-tooltip>
             </div>
             <div class="metric-value-item">
               <div class="metric-value-label">流动比率</div>
-              <div class="metric-value-number">{{ fmtRatio(basics.currentRatio) }}</div>
+              <el-tooltip :content="fmtRatio(basics.currentRatio)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtRatio(basics.currentRatio) }}</div>
+              </el-tooltip>
             </div>
             <div class="metric-value-item">
               <div class="metric-value-label">股息率</div>
-              <div class="metric-value-number">{{ fmtPercent(basics.dividendYield) }}</div>
+              <el-tooltip :content="fmtPercent(basics.dividendYield)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtPercent(basics.dividendYield) }}</div>
+              </el-tooltip>
             </div>
           </div>
           <div class="metric-bar">
@@ -97,15 +115,21 @@
           <div class="metric-values">
             <div class="metric-value-item">
               <div class="metric-value-label">总市值</div>
-              <div class="metric-value-number">{{ fmtAmount(basics.marketCap) }}</div>
+              <el-tooltip :content="fmtAmount(basics.marketCap)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtAmount(basics.marketCap) }}</div>
+              </el-tooltip>
             </div>
             <div class="metric-value-item">
               <div class="metric-value-label">营收</div>
-              <div class="metric-value-number">{{ fmtAmount(financialSnapshot.revenue) }}</div>
+              <el-tooltip :content="fmtAmount(financialSnapshot.revenue)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtAmount(financialSnapshot.revenue) }}</div>
+              </el-tooltip>
             </div>
             <div class="metric-value-item">
               <div class="metric-value-label">净利润</div>
-              <div class="metric-value-number">{{ fmtAmount(financialSnapshot.netProfit) }}</div>
+              <el-tooltip :content="fmtAmount(financialSnapshot.netProfit)" placement="top" :show-after="300">
+                <div class="metric-value-number">{{ fmtAmount(financialSnapshot.netProfit) }}</div>
+              </el-tooltip>
             </div>
           </div>
           <div class="metric-bar">
@@ -327,7 +351,7 @@ const healthBarColor = computed(() => {
 }
 
 .metric-card {
-  padding: 12px;
+  padding: 12px 10px;
   border-radius: 8px;
   background: #f8fafc;
   border: 1px solid #f1f5f9;
@@ -370,11 +394,12 @@ const healthBarColor = computed(() => {
 
 .metric-values {
   display: flex;
-  gap: 12px;
+  gap: 8px;
 }
 
 .metric-value-item {
   flex: 1;
+  min-width: 0;
 }
 
 .metric-value-label {
@@ -383,10 +408,13 @@ const healthBarColor = computed(() => {
 }
 
 .metric-value-number {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   margin-top: 2px;
   color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .metric-bar {

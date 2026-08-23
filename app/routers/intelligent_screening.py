@@ -11,9 +11,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from typing import Optional
 
 from app.core.database import get_mongo_db
 from app.routers.auth_db import get_current_user
+from app.routers.websocket_notifications import _authenticate_websocket
 from app.services.auth_service import AuthService
 from app.schemas.intelligent_assistant import ChatRequest
 from app.schemas.intelligent_screening import (
@@ -70,21 +72,20 @@ async def chat(
 @router.websocket("/ws")
 async def websocket_chat(
     websocket: WebSocket,
-    token: str = Query(...),
+    token: Optional[str] = Query(None),
 ):
-    """智能筛选 WebSocket 端点，按阶段与工具调用实时推送进度。"""
-    token_data = AuthService.verify_token(token)
-    if not token_data:
-        await websocket.close(code=1008, reason="Unauthorized")
-        return
+    """智能筛选 WebSocket 端点，按阶段与工具调用实时推送进度。
 
-    user = await user_service.get_user_by_username(token_data.sub)
-    if not user or not user.is_active:
+    认证方式：
+    - JWT 模式: ws://.../ws?token=<jwt_token>
+    - 京东云模式: ws://.../ws （无需 token，由网关注入 Basic Auth）
+    """
+    user_id = await _authenticate_websocket(websocket, token)
+    if not user_id:
         await websocket.close(code=1008, reason="Unauthorized")
         return
 
     await websocket.accept()
-    user_id = str(user.id)
     db = get_mongo_db()
 
     await websocket.send_json({

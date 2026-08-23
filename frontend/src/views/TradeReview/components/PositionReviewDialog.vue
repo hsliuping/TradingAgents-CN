@@ -136,7 +136,7 @@ import { reviewApi, type TradeRecord } from '@/api/review'
 import * as tradingSystemApi from '@/api/tradingSystem'
 import type { TradingSystem } from '@/api/tradingSystem'
 import { useLicenseStore } from '@/stores/license'
-import { workflowApi, type WorkflowSummary } from '@/api/workflow'
+import { workflowApi, isSelectableAnalysisWorkflow, type WorkflowSummary } from '@/api/workflow'
 
 interface PositionData {
   code: string
@@ -190,7 +190,7 @@ const parseVersion = (v: string): number[] => {
 
 const workflowsSorted = computed(() => {
   const arr = workflows.value.filter(
-    (w: WorkflowSummary) => w.workflow_type === 'trade_review'
+    (w: WorkflowSummary) => isSelectableAnalysisWorkflow(w, 'trade_review')
   )
   arr.sort((a, b) => {
     const vA = a.version || ''
@@ -212,7 +212,7 @@ const loadWorkflows = async () => {
   try {
     const data = await workflowApi.listAll()
     workflows.value = data
-    const targetWorkflows = data.filter((w: WorkflowSummary) => w.workflow_type === 'trade_review')
+    const targetWorkflows = workflowsSorted.value
     if (targetWorkflows.length > 0) {
       const defaultWf = targetWorkflows.find((w: WorkflowSummary) => w.is_default)
       selectedWorkflowId.value = defaultWf ? defaultWf.id : targetWorkflows[0].id

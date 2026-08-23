@@ -842,7 +842,7 @@ import {
   View,
 } from '@element-plus/icons-vue'
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
-import { workflowApi, type WorkflowSummary } from '@/api/workflow'
+import { workflowApi, isSelectableAnalysisWorkflow, type WorkflowSummary } from '@/api/workflow'
 import { stocksApi, type FundamentalsResponse } from '@/api/stocks'
 import { stockSyncApi, type StockSyncTaskStatus, type SingleStockSyncResponse } from '@/api/stockSync'
 import { useAppStore } from '@/stores/app'
@@ -972,7 +972,7 @@ const workflowsSorted = computed(() => {
   // 根据市场类型做级联过滤
   const expectedType = analysisForm.market === 'ETF' ? 'etf_analysis' : 'stock_analysis'
   const arr = workflows.value.filter(
-    (w: WorkflowSummary) => w.workflow_type === expectedType
+    (w: WorkflowSummary) => isSelectableAnalysisWorkflow(w, expectedType)
   )
   
   // 按版本号倒序排序
@@ -1029,9 +1029,9 @@ const analysisForm = reactive<AnalysisForm>({
 // 监听市场类型变化，自动切换到对应类型的默认流程
 watch(
   () => analysisForm.market,
-  (newMarket) => {
-    const expectedType = newMarket === 'ETF' ? 'etf_analysis' : 'stock_analysis'
-    const targetWorkflows = workflows.value.filter(w => w.workflow_type === expectedType)
+  () => {
+    // 使用已过滤（排除 v1.0/快速/空白流程）并按版本排序的列表
+    const targetWorkflows = workflowsSorted.value
     
     if (targetWorkflows.length > 0) {
       // 优先找 is_default 的
@@ -2358,14 +2358,12 @@ const downloadReport = async (format: string = 'markdown') => {
     })
 
     const reportId = (analysisResults.value?.id as any) || currentTaskId.value
-    const blobData = await ApiClient.get(`/api/reports/${reportId}/download?format=${format}`, {
-      responseType: 'blob',
-      showLoading: false
-    }) as unknown as BlobPart
+    const res: any = await ApiClient.get(`/api/reports/${reportId}/download`, { format }, { responseType: 'blob' })
 
     loadingMsg.close()
 
-    const blob = new Blob([blobData])
+    // 响应拦截器直接返回 Blob（response.data）；兼容返回 { data: Blob } 的旧实现
+    const blob = res instanceof Blob ? res : (res?.data instanceof Blob ? res.data : new Blob([res]))
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

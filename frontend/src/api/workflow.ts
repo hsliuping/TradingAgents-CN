@@ -93,6 +93,25 @@ export interface WorkflowSummary {
   updated_at?: string
 }
 
+/**
+ * 判断工作流是否适合在分析页面（单股/批量分析）的"分析流程"下拉框中选择。
+ *
+ * 排除以下流程：
+ * 1. v1.0 及更早的已弃用流程（主版本 < 2）
+ * 2. 快速分析流（非完整分析流）
+ * 3. 空白流程
+ */
+export function isSelectableAnalysisWorkflow(w: WorkflowSummary, expectedType: string): boolean {
+  if (w.workflow_type !== expectedType) return false
+  // v1.0 及更早流程已弃用，仅保留主版本 >= 2 的流程
+  const major = parseInt((w.version || '0').split('.')[0], 10) || 0
+  if (major < 2) return false
+  // 排除快速分析流、空白流程等非完整分析流
+  const name = w.name || ''
+  if (name.includes('快速') || name.includes('空白')) return false
+  return true
+}
+
 export interface ValidationResult {
   is_valid: boolean
   errors: string[]

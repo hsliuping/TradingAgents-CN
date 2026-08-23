@@ -166,7 +166,7 @@ class IntentClassifier:
 意图定义：
 - new_request: 用户提出了全新的选股需求
 - adjust: 用户希望调整之前的筛选条件（放宽、收紧、修改等）
-- approve: 用户明确批准某个方案（"执行"、"按此方案"、"好的"、"可以"等）
+- approve: 用户明确批准某个方案（"执行"、"按此方案"、"好的"、"可以"、"确认"、"是的"、"没问题"等）
 - follow_up: 用户基于当前结果追问（"这几只怎么样"、"加入自选"、"分析一下"等）
 - single_stock: 用户询问单只股票的情况
 
@@ -178,8 +178,9 @@ class IntentClassifier:
 - action: 用户想执行的操作
 
 澄清机制：
-- 如果意图非常模糊，请设置clarification_needed=true，并给出clarification_question
-- 如果意图明确但缺少关键参数，请设置clarification_needed=true
+- 仅当意图非常模糊、完全无法判断用户想做什么时，才设置clarification_needed=true
+- **用户回复"确认""是的""好的""可以"等批准性词语时，intent=approve，clarification_needed=false**
+- 不要因为"缺少关键参数"而触发澄清，参数缺失可在后续阶段补充
 
 示例：
 - 用户说"帮我选低估值银行股" → intent=new_request
@@ -362,10 +363,9 @@ class IntelligentScreeningServiceV2:
 
         self._tool_functions = {}
         for tool in screening_metadata:
-            if tool.parameters:
-                func = registry.get_function(tool.id)
-                if func:
-                    self._tool_functions[tool.id] = func
+            func = registry.get_function(tool.id)
+            if func:
+                self._tool_functions[tool.id] = func
 
         # 结果执行阶段仅保留批量筛选相关工具
         self._result_openai_tools = self._filter_result_tools(self._openai_tools)
@@ -416,8 +416,12 @@ class IntelligentScreeningServiceV2:
         intent = await self._intent_classifier.classify(message, history)
         logger.info(f"[智能筛选V2] 用户={user_id} 意图={intent.intent.value} 置信度={intent.confidence:.2f}")
 
-        # 4. 是否需要澄清
-        if intent.clarification_needed and intent.clarification_question:
+        # 4. 状态机判断（先判断状态，再决定是否需要澄清）
+        state = self._state_machine.determine_state(history, intent)
+        logger.info(f"[智能筛选V2] 当前状态={state.value}")
+
+        # 5. 仅在确认阶段才允许澄清；用户正在回复确认问题时，不应再追问
+        if state == DialogState.CONFIRMING and intent.clarification_needed and intent.clarification_question:
             response = {
                 "reply": intent.clarification_question,
                 "tools_used": [],
@@ -428,10 +432,6 @@ class IntelligentScreeningServiceV2:
             }
             await self._save_message(user_id, resolved_conversation_id, message, response["reply"], [], [], "confirming")
             return response
-
-        # 5. 状态机判断
-        state = self._state_machine.determine_state(history, intent)
-        logger.info(f"[智能筛选V2] 当前状态={state.value}")
 
         # 6. 路由到对应处理器
         response: Optional[Dict[str, Any]] = None
@@ -654,7 +654,7 @@ class IntelligentScreeningServiceV2:
     def _get_confirmation_prompt(self) -> str:
         """获取确认阶段提示词"""
         curr_date = _get_latest_trade_date()
-        return f"""你是一位专业的 A 股选股专家。用户提出了选股需求。
+        return f"""你是一位专业的 A 股选股专家。用户提出了选股或行业研究需求。
 
 ## 你的任务：需求分析与确认
 
@@ -665,7 +665,10 @@ class IntelligentScreeningServiceV2:
 3. **改进建议**：基于专业判断，提出 2-3 条可选的改进建议
 4. **等待确认**：明确询问用户是"按原需求筛选"还是"采纳建议后再筛选"
 
-补充规则：
+## 重要规则
+
+- **行业/板块类问题**：如"养猪行业龙头有哪些"，应理解为"筛选该行业内按市值/营收排序的头部公司"，转化为筛选条件（行业=xxx + 按市值降序 + 取前N只），**不要追问具体股票名称**
+- **用户回复"确认""好的""是的""可以"等**：表示批准当前方案，不要再追问
 - 如果用户使用"低估值"这类模糊描述，但没有明确口径，请指出歧义并建议默认值
 - PE 相关口径区分 PE / PE(TTM)
 - PB 相关口径区分 PB / PB(MRQ)
@@ -735,12 +738,33 @@ class IntelligentScreeningServiceV2:
 
 用户已**批准执行计划**，请按之前规划的参数立即执行筛选。
 """
+        elif intent.intent == IntentType.FOLLOW_UP:
+            action = intent.slots.get("action", "")
+            if action == "add_favorite":
+                intent_hint = """
+## 当前用户意图分析（重要）
+
+用户希望**将筛选结果加入关注列表**。请：
+1. 调用 `add_stocks_to_favorites` 工具，将之前筛选出的股票批量添加到用户的关注列表
+2. 参数 `stocks_json` 是一个 JSON 数组，格式如 `[{"code":"002714","name":"牧原股份","market":"A股"}]`
+3. 可通过 `tags` 参数给这批股票打标签（如用户指定了分组名，可作为标签）
+4. 告诉用户操作结果
+
+**不要说"无法获取分组信息"或让用户手动操作，必须调用工具完成。**
+"""
+            else:
+                intent_hint = """
+## 当前用户意图分析（重要）
+
+用户在**追问当前结果**。请根据用户的问题，调用合适的工具回答。
+"""
 
         return f"""你是一位专业的 A 股选股专家。
 {intent_hint}
 
-## 你的任务：执行筛选
+## 你的任务
 
+### 筛选任务
 1. **调用工具**：按计划调用 `screen_stocks_by_criteria` 等工具获取数据
 2. **精选推荐**：每次严格推荐 **5 只** 最符合条件的股票（如果筛选结果不足5只，就推荐实际找到的数量）
 3. **结构化输出**：在回答最后包含以下 JSON 代码块
@@ -765,6 +789,12 @@ class IntelligentScreeningServiceV2:
     ]
 }}
 ```
+
+### 关注列表操作
+- 用户说"加入自选""加入关注"时，调用 `add_stocks_to_favorites` 批量添加到关注列表
+- 参数 `stocks_json` 格式：`[{{"code":"002714","name":"牧原股份","market":"A股"}}]`
+- 可通过 `tags` 参数给这批股票打标签
+- **不要让用户手动操作，必须通过工具完成**
 
 当前日期：{curr_date}
 - 最多执行 {SCREENING_MAX_TOOL_ROUNDS} 轮工具调用
