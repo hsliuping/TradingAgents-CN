@@ -95,22 +95,30 @@ def _format_risk_rules(risk_mgmt: dict) -> str:
     take_profit = risk_mgmt.get("take_profit") or {}
     
     sl_type = stop_loss.get("type", "")
+    sl_desc = stop_loss.get("description", "")
     if sl_type == "percentage":
         pct = stop_loss.get("percentage")
-        if pct:
+        if sl_desc:
+            parts.append(f"  - 止损: {sl_desc}")
+        elif pct:
             parts.append(f"  - 止损: {pct * 100}%")
     elif sl_type:
         parts.append(f"  - 止损: {stop_loss}")
     
     tp_type = take_profit.get("type", "")
+    tp_desc = take_profit.get("description", "")
     if tp_type == "percentage":
         pct = take_profit.get("percentage")
-        if pct:
+        if tp_desc:
+            parts.append(f"  - 止盈: {tp_desc}")
+        elif pct:
             parts.append(f"  - 止盈: {pct * 100}%")
     elif tp_type == "trailing":
         pullback = take_profit.get("trailing_pullback_pct")
         activation = take_profit.get("activation_profit_pct")
-        if pullback and activation:
+        if tp_desc:
+            parts.append(f"  - 止盈: {tp_desc}")
+        elif pullback and activation:
             parts.append(f"  - 止盈: 移动止盈，浮盈{activation * 100}%后激活，回撤{pullback * 100}%触发")
     elif tp_type:
         parts.append(f"  - 止盈: {take_profit}")

@@ -444,6 +444,9 @@ function isLikelyDetailedCondition(text: string): boolean {
   const value = String(text || '').trim()
   if (!value) return false
   if (value.length >= 14) return true
+  // 短文本（如“技术突破”“MACD金叉”）是信号类别名，不应判定为详细条件，
+  // 否则会与 isLikelyCategoryLabel 互相命中，导致“前后列填反”交换逻辑死循环。
+  if (value.length < 6) return false
   return /[，,。；;：:]|且|并|突破|回踩|放量|金叉|均线|收盘/.test(value)
 }
 
@@ -624,42 +627,50 @@ watchEffect(() => {
 function sanitizeStopLoss(stopLoss: Record<string, any> | undefined) {
   const source = stopLoss || {}
   const type = source.type || 'percentage'
+  const description = source.description || ''
 
   if (type === 'technical') {
     return {
       type,
-      description: source.description || ''
+      description
     }
   }
 
   if (type === 'atr') {
-    return {
+    const result: Record<string, any> = {
       type,
       atr_multiplier: source.atr_multiplier ?? 2.0
     }
+    if (description) result.description = description
+    return result
   }
 
-  return {
+  const result: Record<string, any> = {
     type: 'percentage',
     percentage: source.percentage ?? 0.08
   }
+  if (description) result.description = description
+  return result
 }
 
 function sanitizeTakeProfit(takeProfit: Record<string, any> | undefined) {
   const source = takeProfit || {}
   const type = source.type || 'percentage'
+  const description = source.description || ''
 
   if (type === 'trailing') {
-    return {
+    const result: Record<string, any> = {
       type,
       trailing_pullback_pct: source.trailing_pullback_pct ?? 0.08,
       activation_profit_pct: source.activation_profit_pct ?? 0.1,
       reference: source.reference || 'highest_price'
     }
+    if (description) result.description = description
+    return result
   }
 
   if (type === 'scaled') {
-    return {
+    const result: Record<string, any> = {
       type,
       levels: (Array.isArray(source.levels) && source.levels.length > 0)
         ? source.levels
@@ -669,12 +680,16 @@ function sanitizeTakeProfit(takeProfit: Record<string, any> | undefined) {
             { target_profit_pct: 0.5, sell_ratio: 0.4 }
           ]
     }
+    if (description) result.description = description
+    return result
   }
 
-  return {
+  const result: Record<string, any> = {
     type: 'percentage',
     percentage: source.percentage ?? 0.2
   }
+  if (description) result.description = description
+  return result
 }
 
 // 止损止盈百分比

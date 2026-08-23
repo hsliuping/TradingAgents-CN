@@ -75,36 +75,47 @@ class RiskManagementRule(BaseModel):
     def _sanitize_stop_loss(stop_loss: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         source = stop_loss or {}
         stop_type = source.get("type", "percentage")
+        description = source.get("description", "")
 
         if stop_type == "technical":
             return {
                 "type": "technical",
-                "description": source.get("description", "")
+                "description": description
             }
 
         if stop_type == "atr":
-            return {
+            result = {
                 "type": "atr",
                 "atr_multiplier": float(source.get("atr_multiplier", 2.0))
             }
+            if description:
+                result["description"] = description
+            return result
 
-        return {
+        result = {
             "type": "percentage",
             "percentage": float(source.get("percentage", 0.08))
         }
+        if description:
+            result["description"] = description
+        return result
 
     @staticmethod
     def _sanitize_take_profit(take_profit: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         source = take_profit or {}
         take_type = source.get("type", "percentage")
+        description = source.get("description", "")
 
         if take_type == "trailing":
-            return {
+            result = {
                 "type": "trailing",
                 "trailing_pullback_pct": float(source.get("trailing_pullback_pct", 0.08)),
                 "activation_profit_pct": float(source.get("activation_profit_pct", 0.1)),
                 "reference": source.get("reference", "highest_price")
             }
+            if description:
+                result["description"] = description
+            return result
 
         if take_type == "scaled":
             levels = source.get("levels") if isinstance(source.get("levels"), list) else []
@@ -114,15 +125,21 @@ class RiskManagementRule(BaseModel):
                     {"target_profit_pct": 0.35, "sell_ratio": 0.3},
                     {"target_profit_pct": 0.5, "sell_ratio": 0.4},
                 ]
-            return {
+            result = {
                 "type": "scaled",
                 "levels": levels
             }
+            if description:
+                result["description"] = description
+            return result
 
-        return {
+        result = {
             "type": "percentage",
             "percentage": float(source.get("percentage", 0.2))
         }
+        if description:
+            result["description"] = description
+        return result
 
     @model_validator(mode="after")
     def normalize_exclusive_fields(self):

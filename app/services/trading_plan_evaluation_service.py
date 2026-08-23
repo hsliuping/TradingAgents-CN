@@ -95,8 +95,11 @@ class TradingPlanEvaluationService:
             评估结果
         """
         try:
+            # 过滤值为 None 的规则字段（前端草稿未填写时可能缺失/null），
+            # 让 TradingSystem 的 default_factory 填充默认空结构，避免 Pydantic 校验失败
+            clean_data = {k: v for k, v in trading_plan_data.items() if v is not None}
             # 将字典转换为TradingSystem对象
-            trading_system = TradingSystem(**trading_plan_data)
+            trading_system = TradingSystem(**clean_data)
             return await self._evaluate_trading_plan_data(trading_system, user_id)
         except Exception as e:
             logger.error(f"评估交易计划数据失败: {e}", exc_info=True)

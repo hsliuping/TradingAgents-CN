@@ -35,7 +35,7 @@
     <!-- 步骤内容 -->
     <div class="step-content">
       <!-- Step 0: 基本信息 -->
-      <el-card v-show="currentStep === 0">
+      <el-card v-if="currentStep === 0">
         <template #header>
           <span>基本信息</span>
         </template>
@@ -121,7 +121,7 @@
       </el-card>
 
       <!-- Step 1: 选股规则 -->
-      <el-card v-show="currentStep === 1">
+      <el-card v-if="currentStep === 1">
         <template #header>
           <span>选股规则</span>
         </template>
@@ -136,7 +136,7 @@
       </el-card>
 
       <!-- Step 2: 择时规则 -->
-      <el-card v-show="currentStep === 2">
+      <el-card v-if="currentStep === 2">
         <template #header>
           <span>择时规则</span>
         </template>
@@ -151,7 +151,7 @@
       </el-card>
 
       <!-- Step 3: 仓位规则 -->
-      <el-card v-show="currentStep === 3">
+      <el-card v-if="currentStep === 3">
         <template #header>
           <span>仓位规则</span>
         </template>
@@ -199,7 +199,7 @@
       </el-card>
 
       <!-- Step 4: 风险管理 -->
-      <el-card v-show="currentStep === 4">
+      <el-card v-if="currentStep === 4">
         <template #header>
           <span>风险管理规则</span>
         </template>
@@ -219,7 +219,7 @@
       </el-card>
 
       <!-- Step 5: 纪律规则 -->
-      <el-card v-show="currentStep === 5">
+      <el-card v-if="currentStep === 5">
         <template #header>
           <span>纪律规则</span>
         </template>
@@ -227,7 +227,7 @@
       </el-card>
 
       <!-- Step 6: 完成确认 -->
-      <el-card v-show="currentStep === 6">
+      <el-card v-if="currentStep === 6">
         <template #header>
           <span>确认信息</span>
         </template>
@@ -521,25 +521,42 @@ function createDefaultPositionConfig() {
   return { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 }
 }
 
+function createDefaultTimingRules() {
+  return {
+    market_condition: { rule: '市场环境', description: '' },
+    sector_condition: {},
+    entry_signals: [],
+    confirmation: []
+  }
+}
+
+function createDefaultFormData(): TradingSystemCreatePayload {
+  return {
+    name: '',
+    description: '',
+    style: 'medium_term',
+    risk_profile: 'balanced',
+    stock_selection: { must_have: [], exclude: [], bonus: [] },
+    timing: createDefaultTimingRules(),
+    position: createDefaultPositionConfig(),
+    holding: { add_conditions: [], reduce_conditions: [] },
+    risk_management: {
+      stop_loss: { type: 'percentage', percentage: 0.08 },
+      take_profit: { type: 'percentage', percentage: 0.2 },
+      time_stop: { enabled: false, max_holding_days: 30 },
+      logical_stop: { conditions: [] }
+    },
+    review: { checklist: [] },
+    discipline: { must_do: [], must_not: [] }
+  }
+}
+
+function normalizeFormData(source: Partial<TradingSystemCreatePayload>): TradingSystemCreatePayload {
+  return mergeDeep(createDefaultFormData(), source)
+}
+
 // 表单数据
-const formData = ref<TradingSystemCreatePayload>({
-  name: '',
-  description: '',
-  style: 'medium_term',
-  risk_profile: 'balanced',
-  stock_selection: { must_have: [], exclude: [], bonus: [] },
-  timing: { entry_signals: [] },
-  position: createDefaultPositionConfig(),
-  holding: { add_conditions: [], reduce_conditions: [] },
-  risk_management: {
-    stop_loss: { type: 'percentage', percentage: 0.08 },
-    take_profit: { type: 'percentage', percentage: 0.2 },
-    time_stop: { enabled: false, max_holding_days: 30 },
-    logical_stop: { conditions: [] }
-  },
-  review: { checklist: [] },
-  discipline: { must_do: [], must_not: [] }
-})
+const formData = ref<TradingSystemCreatePayload>(createDefaultFormData())
 
 // AI评估相关
 const evaluating = ref(false)
@@ -635,29 +652,23 @@ onMounted(async () => {
       const sourceData = (system.status === 'published' && system.draft_data)
         ? mergeDeep(system, system.draft_data)
         : system
-      
-      const positionData = sourceData.position || createDefaultPositionConfig()
-      
-      formData.value = {
+
+      formData.value = normalizeFormData({
         name: sourceData.name,
         description: sourceData.description || '',
         style: sourceData.style,
         risk_profile: sourceData.risk_profile,
-        stock_selection: sourceData.stock_selection || { must_have: [], exclude: [], bonus: [] },
-        timing: sourceData.timing || { entry_signals: [] },
-        position: positionData,
-        holding: sourceData.holding || { add_conditions: [], reduce_conditions: [] },
-        risk_management: sourceData.risk_management || {
-          stop_loss: { type: 'percentage', percentage: 0.08 },
-          take_profit: { type: 'percentage', percentage: 0.2 },
-          time_stop: { enabled: false, max_holding_days: 30 },
-          logical_stop: { conditions: [] }
-        },
-        review: sourceData.review || { checklist: [] },
-        discipline: sourceData.discipline || { must_do: [], must_not: [] }
-      }
-      
+        stock_selection: sourceData.stock_selection,
+        timing: sourceData.timing,
+        position: sourceData.position,
+        holding: sourceData.holding,
+        risk_management: sourceData.risk_management,
+        review: sourceData.review,
+        discipline: sourceData.discipline
+      })
+
       // 同步仓位配置到绑定的 ref
+      const positionData = formData.value.position || createDefaultPositionConfig()
       maxHoldings.value = positionData.max_holdings ?? 10
       minHoldings.value = positionData.min_holdings ?? 3
     }
@@ -772,18 +783,14 @@ async function handlePublish() {
 function selectTemplate(template: TradingSystemTemplate) {
   selectedTemplate.value = template.id
 
-  // 应用模板数据
-  formData.value.name = template.name
-  formData.value.description = template.description
-  formData.value.style = template.style
-  formData.value.risk_profile = template.risk_profile
-  formData.value.stock_selection = JSON.parse(JSON.stringify(template.data.stock_selection))
-  formData.value.timing = JSON.parse(JSON.stringify(template.data.timing))
-  formData.value.position = JSON.parse(JSON.stringify(template.data.position))
-  formData.value.holding = JSON.parse(JSON.stringify(template.data.holding))
-  formData.value.risk_management = JSON.parse(JSON.stringify(template.data.risk_management))
-  formData.value.review = JSON.parse(JSON.stringify(template.data.review))
-  formData.value.discipline = JSON.parse(JSON.stringify(template.data.discipline))
+  // 一次性替换表单，避免隐藏步骤中的编辑器在模板应用过程中反复响应每个字段变更。
+  formData.value = normalizeFormData({
+    name: template.name,
+    description: template.description,
+    style: template.style,
+    risk_profile: template.risk_profile,
+    ...cloneValue(template.data)
+  })
 }
 
 // 工具函数

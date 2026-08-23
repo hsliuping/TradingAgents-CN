@@ -219,13 +219,17 @@ function getStopLossSummary(stopLoss: any): string {
     return stopLoss.description || '-'
   }
   if (stopLoss.type === 'atr') {
-    return `跌破 ${stopLoss.atr_multiplier ?? 2.0} 倍 ATR 止损`
+    return stopLoss.description || `跌破 ${stopLoss.atr_multiplier ?? 2.0} 倍 ATR 止损`
   }
-  return `亏损达到 ${toPercentText(stopLoss.percentage)} 时止损`
+  return stopLoss.description || `亏损达到 ${toPercentText(stopLoss.percentage)} 时止损`
 }
 
 function getTakeProfitSummary(takeProfit: any): string {
   if (!takeProfit) return ''
+  // 模板/用户填写的描述优先展示，避免结构化默认值覆盖原始语义
+  if (takeProfit.description) {
+    return takeProfit.description
+  }
   if (takeProfit.type === 'trailing') {
     return `盈利达到 ${toPercentText(takeProfit.activation_profit_pct)} 后启动，较高点回撤 ${toPercentText(takeProfit.trailing_pullback_pct)} 止盈，参考 ${takeProfit.reference || 'highest_price'}`
   }
