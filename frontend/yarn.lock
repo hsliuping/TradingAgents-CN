@@ -52,16 +52,6 @@
   resolved "https://registry.npmmirror.com/@element-plus/icons-vue/-/icons-vue-2.3.2.tgz"
   integrity sha512-OzIuTaIfC8QXEPmJvB4Y4kw34rSXdCJzxcD1kFStBvr8bK6X1zQAYDo0CNMjojnfTqRQCJ0I7prlErcoRiET2A==
 
-"@esbuild/linux-x64@0.21.5":
-  version "0.21.5"
-  resolved "https://registry.npmmirror.com/@esbuild/linux-x64/-/linux-x64-0.21.5.tgz"
-  integrity sha512-1rYdTpyv03iycF1+BhzrzQJCdOuAOtaqHTWJZCWvijKD2N5Xu0TtVC8/+1faWqcP9iBCWOmjmhoH94dH82BxPQ==
-
-"@esbuild/linux-x64@0.28.2":
-  version "0.28.2"
-  resolved "https://registry.npmmirror.com/@esbuild/linux-x64/-/linux-x64-0.28.2.tgz"
-  integrity sha512-4xTZr1FUmSoQW4XIWmit3tzQrUTZM+N3P0XV8xROKYF50XfI7xeO90+1bZvNwxIufQ9hDQVRJH5YhgPVF8A/HQ==
-
 "@esbuild/win32-x64@0.21.5":
   version "0.21.5"
   resolved "https://registry.npmmirror.com/@esbuild/win32-x64/-/win32-x64-0.21.5.tgz"
@@ -177,11 +167,6 @@
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
 
-"@napi-rs/lzma-linux-x64-gnu@1.5.1":
-  version "1.5.1"
-  resolved "https://registry.npmmirror.com/@napi-rs/lzma-linux-x64-gnu/-/lzma-linux-x64-gnu-1.5.1.tgz"
-  integrity sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ==
-
 "@nodelib/fs.scandir@2.1.5":
   version "2.1.5"
   resolved "https://registry.npmmirror.com/@nodelib/fs.scandir/-/fs.scandir-2.1.5.tgz"
@@ -207,16 +192,6 @@
   version "0.144.0"
   resolved "https://registry.npmmirror.com/@oxc-project/types/-/types-0.144.0.tgz"
   integrity sha512-nuhZIOLuI6TFQ32I/WnUx+SCPY7SdSKwgnFHydAuoS1+Z4BRcaP+RRJmGzl9lw+0OFF7UmaESf7KQRXaNLHypg==
-
-"@parcel/watcher-linux-x64-glibc@2.6.0":
-  version "2.6.0"
-  resolved "https://registry.npmmirror.com/@parcel/watcher-linux-x64-glibc/-/watcher-linux-x64-glibc-2.6.0.tgz"
-  integrity sha512-ulGE6x6Oz6iAwg75T8YQSoguBWasniIbX+QWpaYPcCnDOpdWX3k+4xbEYPZVLxOuoJI+svJJPD3sEj8G7lrQ3A==
-
-"@parcel/watcher-linux-x64-musl@2.6.0":
-  version "2.6.0"
-  resolved "https://registry.npmmirror.com/@parcel/watcher-linux-x64-musl/-/watcher-linux-x64-musl-2.6.0.tgz"
-  integrity sha512-tkBYKt7YQrjIJWYDnto2YgO8MRkjlMTSNoRHzsXinBqbLdeOM3L32wPZJvIZxqaLMfSlS/4sUjH/6STVP/XDLw==
 
 "@parcel/watcher-win32-x64@2.6.0":
   version "2.6.0"
@@ -256,16 +231,6 @@
   resolved "https://registry.npmmirror.com/@sxzz/popperjs-es/-/popperjs-es-2.11.7.tgz"
   integrity sha512-Ccy0NlLkzr0Ex2FKvh2X+OyERHXJ88XJ1MXtsI9y9fGexlaXaVTPzBCRBwIxFkORuOb+uBqeu+RqnpgYTEZRUQ==
 
-"@rolldown/binding-linux-x64-gnu@1.2.4":
-  version "1.2.4"
-  resolved "https://registry.npmmirror.com/@rolldown/binding-linux-x64-gnu/-/binding-linux-x64-gnu-1.2.4.tgz"
-  integrity sha512-4/GyVjmhR+Tc6HLJvwc1sOhPqAZtySiSMesOZyX6JQ5XBxoTDEMKQzvo07NIK6nTon/SivlZqvhzvuVBNQhObQ==
-
-"@rolldown/binding-linux-x64-musl@1.2.4":
-  version "1.2.4"
-  resolved "https://registry.npmmirror.com/@rolldown/binding-linux-x64-musl/-/binding-linux-x64-musl-1.2.4.tgz"
-  integrity sha512-l9eeLsCNvPpmSXUej0etw/J1eqV0Jj1D5G/xG6YTijmE6dkv6E2QezgWbTfQk63v952DPqrjOCoiqxq7Bw0YUQ==
-
 "@rolldown/binding-win32-x64-msvc@1.2.4":
   version "1.2.4"
   resolved "https://registry.npmmirror.com/@rolldown/binding-win32-x64-msvc/-/binding-win32-x64-msvc-1.2.4.tgz"
@@ -285,22 +250,12 @@
     estree-walker "^2.0.2"
     picomatch "^4.0.2"
 
-"@rollup/rollup-linux-x64-gnu@4.62.4":
-  version "4.62.4"
-  resolved "https://registry.npmmirror.com/@rollup/rollup-linux-x64-gnu/-/rollup-linux-x64-gnu-4.62.4.tgz"
-  integrity sha512-W69hukhZ3KKNRCaMIEzKvcFye42hh0FE1+YoYaf5+Ikacuftoco6yO/xouz0hc5d5W/s3yBro5jRiuEE/Q5vUw==
-
-"@rollup/rollup-linux-x64-musl@4.62.4":
-  version "4.62.4"
-  resolved "https://registry.npmmirror.com/@rollup/rollup-linux-x64-musl/-/rollup-linux-x64-musl-4.62.4.tgz"
-  integrity sha512-qiXbGG2jkjXhzXpsFZSR2Xpb8DN/UaxYsbb/STbuR/6fpaDgRmmaq1B/LmtF2wQFOFOSsK2jdE0RZ3a0zHn4QA==
-
 "@rollup/rollup-win32-x64-gnu@4.62.4":
   version "4.62.4"
   resolved "https://registry.npmmirror.com/@rollup/rollup-win32-x64-gnu/-/rollup-win32-x64-gnu-4.62.4.tgz"
   integrity sha512-qPzHqdj9rfUD+w79dtE07zi/kFwKyCJqplp5K5ygeLTp7jLpAoc16OAH39HSmRC9UpozaecsleI8uAdEj6v2yw==
 
-"@rollup/rollup-win32-x64-msvc@*", "@rollup/rollup-win32-x64-msvc@4.62.4":
+"@rollup/rollup-win32-x64-msvc@4.62.4":
   version "4.62.4"
   resolved "https://registry.npmmirror.com/@rollup/rollup-win32-x64-msvc/-/rollup-win32-x64-msvc-4.62.4.tgz"
   integrity sha512-zD6NdeWEByGE9QF9vCrlJ5YQB4oq9q91kPZS37Jwj5hOkvR1lTBSpsKhKDw4IJtbQ35LsTS1HD9DZYGKIshU1Q==
@@ -2142,16 +2097,6 @@ levn@^0.4.1:
     prelude-ls "^1.2.1"
     type-check "~0.4.0"
 
-lightningcss-linux-x64-gnu@1.33.0:
-  version "1.33.0"
-  resolved "https://registry.npmmirror.com/lightningcss-linux-x64-gnu/-/lightningcss-linux-x64-gnu-1.33.0.tgz"
-  integrity sha512-ar+Ju7LmcN0Jo4FpL4hpFybwNG9/3A/Br5KW2n2jyODg3MEZXaDYADdemoNS+BDNfMgKvylJLj4S5tyRActuAg==
-
-lightningcss-linux-x64-musl@1.33.0:
-  version "1.33.0"
-  resolved "https://registry.npmmirror.com/lightningcss-linux-x64-musl/-/lightningcss-linux-x64-musl-1.33.0.tgz"
-  integrity sha512-RYiYbkokw0trfKqqzfF55lginwEPrD3OJDfTuJzFs1MK6iFnDenaz1fqLLtX4ITG3OktJQXOeTaw1awrBAlZPw==
-
 lightningcss-win32-x64-msvc@1.33.0:
   version "1.33.0"
   resolved "https://registry.npmmirror.com/lightningcss-win32-x64-msvc/-/lightningcss-win32-x64-msvc-1.33.0.tgz"
@@ -3021,16 +2966,6 @@ sade@^1.7.3:
   version "2.1.2"
   resolved "https://registry.npmmirror.com/safer-buffer/-/safer-buffer-2.1.2.tgz"
   integrity sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==
-
-sass-embedded-linux-musl-x64@1.102.0:
-  version "1.102.0"
-  resolved "https://registry.npmmirror.com/sass-embedded-linux-musl-x64/-/sass-embedded-linux-musl-x64-1.102.0.tgz"
-  integrity sha512-HHzU5/g/MT1edbHfDzZleKcX19l6LMGk0KhZFLy66cxQl1iRLUaL22jfGstmHOdRUmVzWF3VevjSflSGvAjr4Q==
-
-sass-embedded-linux-x64@1.102.0:
-  version "1.102.0"
-  resolved "https://registry.npmmirror.com/sass-embedded-linux-x64/-/sass-embedded-linux-x64-1.102.0.tgz"
-  integrity sha512-CxfhMwwbQFBCTjGysByvOw4PIOCYZ/jtz9uBU0UR5sfHtQvqqnsNyb1fVCIUsZ7piimxQAwcLV5H3Skj96QiVg==
 
 sass-embedded-win32-x64@1.102.0:
   version "1.102.0"
