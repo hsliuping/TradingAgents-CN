@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <el-dialog
     v-model="visible"
     width="1000px"
@@ -154,7 +154,7 @@
       <el-alert type="error" :closable="false">
         <template #title>分析失败</template>
         <template #default>
-          <p>{{ analysisResult.error_message || '分析过程中出现错误' }}</p>
+          <p>{{ formatErrorMessage(analysisResult.error_message, '分析过程中出现错误，请稍后重试') }}</p>
           <el-button type="primary" size="small" @click="resetAnalysis" style="margin-top: 10px">
             重新分析
           </el-button>
@@ -209,60 +209,20 @@
 
       <el-divider content-position="left">分析结果</el-divider>
 
-      <!-- 分析观点 -->
-      <div class="action-section">
-        <div class="action-badge" :class="actionClass">
-          {{ actionText }}
+      <!-- 当前结论 -->
+      <div class="overview-panel">
+        <div class="overview-header">
+          <h3>当前结论</h3>
+          <div class="conclusion-content markdown-content" v-html="renderMarkdown(userView.conclusion || '暂无结论')"></div>
         </div>
-        <div class="confidence">
-          置信度: <el-progress :percentage="analysisResult.confidence" :stroke-width="8" style="width: 120px; display: inline-flex;" />
+        <div class="context-chip" v-if="userView.position_context">
+          {{ userView.position_context }}
         </div>
       </div>
 
-      <!-- 分析理由 -->
-      <div class="reason-section">
-        <h4>分析理由</h4>
-        <div class="markdown-content" v-html="renderMarkdown(analysisResult.action_reason || '暂无')"></div>
-      </div>
-
-      <!-- 价格参考区间 -->
-      <div class="price-targets" v-if="analysisResult.price_targets">
-        <h4>价格参考区间</h4>
-        <el-row :gutter="20">
-          <el-col :span="8">
-            <div class="target-card loss-bg">
-              <div class="label">风险控制参考价</div>
-              <div class="value">¥{{ analysisResult.price_targets.stop_loss_price?.toFixed(2) || '-' }}</div>
-              <div class="pct">{{ analysisResult.price_targets.stop_loss_pct?.toFixed(1) || '-' }}%</div>
-            </div>
-          </el-col>
-          <el-col :span="8">
-            <div class="target-card neutral-bg">
-              <div class="label">成本价</div>
-              <div class="value">¥{{ analysisResult.price_targets.breakeven_price?.toFixed(2) || '-' }}</div>
-              <div class="pct">0%</div>
-            </div>
-          </el-col>
-          <el-col :span="8">
-            <div class="target-card profit-bg">
-              <div class="label">收益预期参考价</div>
-              <div class="value">¥{{ analysisResult.price_targets.take_profit_price?.toFixed(2) || '-' }}</div>
-              <div class="pct">+{{ analysisResult.price_targets.take_profit_pct?.toFixed(1) || '-' }}%</div>
-            </div>
-          </el-col>
-        </el-row>
-      </div>
-
-      <!-- 风险与机会评估 -->
-      <div class="assessment-section">
-        <div class="assessment-card">
-          <h4><el-icon><WarningFilled /></el-icon> 风险评估</h4>
-          <div class="markdown-content" v-html="renderMarkdown(analysisResult.risk_assessment || '暂无')"></div>
-        </div>
-        <div class="assessment-card" style="margin-top: 20px;">
-          <h4><el-icon><StarFilled /></el-icon> 机会评估</h4>
-          <div class="markdown-content" v-html="renderMarkdown(analysisResult.opportunity_assessment || '暂无')"></div>
-        </div>
+      <div class="uncertainty-card" v-if="userView.uncertainty_note">
+        <h4>不确定性说明</h4>
+        <p>{{ userView.uncertainty_note }}</p>
       </div>
 
       <!-- 资金风险指标（如果启用） -->
@@ -295,10 +255,24 @@
         <p class="risk-summary">{{ analysisResult.risk_metrics.risk_summary }}</p>
       </div>
 
-      <!-- 详细分析 -->
+      <!-- 研究附录 -->
       <el-collapse>
-        <el-collapse-item title="查看详细分析" name="detail">
-          <div class="detailed-analysis markdown-content" v-html="renderMarkdown(analysisResult.detailed_analysis || '暂无详细分析')"></div>
+        <el-collapse-item title="查看研究附录" name="detail">
+          <template v-if="appendixSections.length > 0">
+            <div
+              v-for="section in appendixSections"
+              :key="section.key"
+              class="appendix-section"
+            >
+              <h4>{{ section.title }}</h4>
+              <div class="detailed-analysis markdown-content" v-html="renderMarkdown(section.content)"></div>
+            </div>
+          </template>
+          <div
+            v-else
+            class="detailed-analysis markdown-content"
+            v-html="renderMarkdown(analysisResult.detailed_analysis || '暂无详细分析')"
+          ></div>
         </el-collapse-item>
       </el-collapse>
     </div>
@@ -334,13 +308,13 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { WarningFilled, StarFilled, WalletFilled, Loading, Refresh, Clock, InfoFilled } from '@element-plus/icons-vue'
+import { WarningFilled, WalletFilled, Loading, Refresh, Clock, InfoFilled } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PositionAnalysisResult, type PositionAnalysisParams, type AccountSummary } from '@/api/portfolio'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { renderMarkdown as safeMarkdown } from '@/utils/markdown'
 import { getMarketByStockCode } from '@/utils/market'
-import { workflowApi, type WorkflowSummary } from '@/api/workflow'
+import { workflowApi, isSelectableAnalysisWorkflow, type WorkflowSummary } from '@/api/workflow'
 import PositionAnalysisHistoryDialog from './PositionAnalysisHistoryDialog.vue'
 
 // 配置marked选项
@@ -354,6 +328,72 @@ const renderMarkdown = (content: string) => {
   } catch (e) {
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
   }
+}
+
+/**
+ * 将后端/网络错误消息转换为用户可理解的友好中文提示。
+ * 针对常见的限流、网络、超时等情况做了专门处理。
+ */
+const formatErrorMessage = (err: any, defaultMsg = '操作失败，请稍后重试'): string => {
+  if (!err) return defaultMsg
+  const msg = String(err?.message || err?.data?.message || err?.error_message || err || '').toLowerCase()
+
+  // 限流类
+  if (
+    msg.includes('429') ||
+    msg.includes('rate_limit') ||
+    msg.includes('rate limit') ||
+    msg.includes('tokens limit') ||
+    msg.includes('rate_limited') ||
+    msg.includes('访问限制') ||
+    msg.includes('限流')
+  ) {
+    return '当前使用AI分析的人数较多，服务繁忙，请稍后再试。（提示：避免短时间内连续发起多次分析）'
+  }
+
+  // 网络/连接类
+  if (
+    msg.includes('network error') ||
+    msg.includes('connection error') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('连接失败') ||
+    msg.includes('网络错误')
+  ) {
+    return '网络连接失败，请检查您的网络状态后重试。'
+  }
+
+  // 超时类
+  if (msg.includes('timeout') || msg.includes('超时')) {
+    return '请求超时，请稍后重试。若频繁出现，请联系管理员。'
+  }
+
+  // 余额/额度不足
+  if (
+    msg.includes('insufficient balance') ||
+    msg.includes('quota') ||
+    msg.includes('余额不足') ||
+    msg.includes('额度不足')
+  ) {
+    return 'AI分析额度不足，请联系管理员补充额度后再试。'
+  }
+
+  // 认证/权限类
+  if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized') || msg.includes('无权限')) {
+    return '登录已过期，请刷新页面重新登录后再试。'
+  }
+
+  // 服务端错误
+  if (msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('server error')) {
+    return '服务器暂时不可用，请稍后重试。'
+  }
+
+  // 返回原始消息（如果是中文且可读，直接返回）
+  const original = String(err?.message || err?.data?.message || err?.error_message || defaultMsg)
+  if (/[\u4e00-\u9fa5]/.test(original) && original.length < 100) {
+    return original
+  }
+
+  return defaultMsg
 }
 
 const props = defineProps<{
@@ -389,7 +429,7 @@ const parseVersion = (v: string): number[] => {
 
 const workflowsSorted = computed(() => {
   const arr = workflows.value.filter(
-    (w: WorkflowSummary) => w.workflow_type === 'position_analysis'
+    (w: WorkflowSummary) => isSelectableAnalysisWorkflow(w, 'position_analysis')
   )
   arr.sort((a, b) => {
     const vA = a.version || ''
@@ -461,7 +501,7 @@ const loadWorkflows = async () => {
   try {
     const data = await workflowApi.listAll()
     workflows.value = data
-    const targetWorkflows = data.filter((w: WorkflowSummary) => w.workflow_type === 'position_analysis')
+    const targetWorkflows = workflowsSorted.value
     if (targetWorkflows.length > 0) {
       const defaultWf = targetWorkflows.find((w: WorkflowSummary) => w.is_default)
       selectedWorkflowId.value = defaultWf ? defaultWf.id : targetWorkflows[0].id
@@ -508,28 +548,20 @@ const isAIConnectionError = computed(() => {
          (analysisResult.value.confidence === 0 && reason.includes('error'))
 })
 
-// 分析观点样式
-const actionClass = computed(() => {
-  if (!analysisResult.value) return ''
-  const map: Record<string, string> = {
-    add: 'action-add',
-    reduce: 'action-reduce',
-    hold: 'action-hold',
-    clear: 'action-clear'
-  }
-  return map[analysisResult.value.action] || 'action-hold'
+// 用户版展示内容（合规化后统一展示 user_view 字段）
+const userView = computed(() => analysisResult.value?.user_view || {
+  conclusion: analysisResult.value?.action_reason || '暂无结论',
+  position_context: '',
+  key_points: [] as string[],
+  risk_focus: [] as string[],
+  watch_items: [] as string[],
+  uncertainty_note: ''
 })
 
-const actionText = computed(() => {
-  if (!analysisResult.value) return ''
-  const map: Record<string, string> = {
-    add: '增持观点',
-    reduce: '减持观点',
-    hold: '中性观点',
-    clear: '观望观点'
-  }
-  return map[analysisResult.value.action] || '中性观点'
-})
+// 研究附录（仅展示有内容的分节）
+const appendixSections = computed(() =>
+  (analysisResult.value?.appendix_sections || []).filter(section => section?.content)
+)
 
 // 执行分析（异步模式）
 const handleAnalyze = async () => {
@@ -623,13 +655,13 @@ const handleAnalyze = async () => {
         ElMessage.success(res.data.message || '分析任务已提交，预计需要2-5分钟，请稍后点击"手动刷新状态"查看结果')
       }
     } else {
-      ElMessage.error(res.message || '提交分析任务失败')
+      ElMessage.error(formatErrorMessage(res.message, '提交分析任务失败'))
       analysisStatus.value = 'failed'
     }
   } catch (error: any) {
     // 如果是MessageBox的取消操作，不显示错误
     if (error !== 'cancel' && error !== 'close') {
-      ElMessage.error(error.message || '提交分析任务失败')
+      ElMessage.error(formatErrorMessage(error, '提交分析任务失败'))
       analysisStatus.value = 'failed'
     }
   } finally {
@@ -672,17 +704,17 @@ const manualRefreshStatus = async () => {
         analysisResult.value = res.data
         ElMessage.success('分析完成！')
       } else if (res.data.status === 'failed') {
-        ElMessage.error(res.data.error_message || '分析失败')
+        ElMessage.error(formatErrorMessage(res.data.error_message, '分析失败，请稍后重试'))
       } else {
         ElMessage.info(`当前状态: ${res.data.status}`)
       }
     } else {
       console.error('[手动刷新状态] 响应失败:', res)
-      ElMessage.error(res.message || '获取分析状态失败')
+      ElMessage.error(formatErrorMessage(res.message, '获取分析状态失败'))
     }
   } catch (error: any) {
     console.error('[手动刷新状态] 请求失败:', error)
-    ElMessage.error(error.message || '刷新状态失败')
+    ElMessage.error(formatErrorMessage(error, '刷新状态失败，请稍后重试'))
   } finally {
     refreshing.value = false
   }
@@ -876,75 +908,106 @@ const getRiskLevelText = (level?: string) => {
   color: #909399;
 }
 
-.action-section {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  margin: 16px 0;
+.overview-panel {
+  background: linear-gradient(135deg, #f8fafc 0%, #eef4ff 100%);
+  border: 1px solid #dbe7ff;
+  border-radius: 16px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
 }
 
-.action-badge {
-  padding: 8px 24px;
-  border-radius: 20px;
-  font-size: 16px;
-  font-weight: bold;
+.overview-header h3 {
+  margin: 0 0 10px 0;
+  font-size: 20px;
+  color: #1f2937;
 }
 
-.action-add { background: #e1f3d8; color: #67c23a; }
-.action-reduce { background: #fde2e2; color: #f56c6c; }
-.action-hold { background: #faecd8; color: #e6a23c; }
-.action-clear { background: #fde2e2; color: #f56c6c; }
-
-.reason-section, .price-targets {
-  margin: 16px 0;
+.overview-header p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.9;
+  color: #334155;
 }
 
-.reason-section h4, .price-targets h4, .assessment-card h4 {
-  margin-bottom: 8px;
-  font-size: 14px;
-  color: #303133;
+.context-chip {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #475569;
+  line-height: 1.8;
 }
 
-.target-card {
-  text-align: center;
-  padding: 12px;
-  border-radius: 8px;
-}
-
-.loss-bg { background: #fef0f0; }
-.neutral-bg { background: #f5f7fa; }
-.profit-bg { background: #f0f9eb; }
-
-.target-card .label {
-  font-size: 12px;
-  color: #909399;
-}
-
-.target-card .value {
-  font-size: 18px;
-  font-weight: bold;
-  margin: 4px 0;
-}
-
-.target-card .pct {
-  font-size: 12px;
-  color: #606266;
-}
-
-.assessment-row {
-  margin: 16px 0;
+.assessment-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
 }
 
 .assessment-card {
-  background: #f5f7fa;
-  padding: 12px;
-  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e5edf6;
+  border-radius: 14px;
+  padding: 18px;
 }
 
-.assessment-card h4 {
+.assessment-card h4,
+.uncertainty-card h4 {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  color: #1f2937;
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.bullet-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #475569;
+  line-height: 1.8;
+}
+
+.bullet-list li + li {
+  margin-top: 8px;
+}
+
+.uncertainty-card {
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+
+.uncertainty-card p {
+  margin: 0;
+  color: #7c2d12;
+  line-height: 1.8;
+}
+
+.appendix-section {
+  padding: 12px 0;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.appendix-section:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.appendix-section h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+@media (max-width: 900px) {
+  .assessment-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .detailed-analysis {

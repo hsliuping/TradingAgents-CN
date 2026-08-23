@@ -5,6 +5,7 @@
 
 import asyncio
 import os
+import re
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone as tz
@@ -13,6 +14,60 @@ from bson import ObjectId
 from app.utils.api_key_utils import truncate_api_key
 
 from app.core.database import get_mongo_db
+
+
+# ==================== 工具函数 ====================
+def _format_user_friendly_error(error_msg: str) -> str:
+    """将技术性/英文错误消息转换为用户可理解的友好中文提示。
+
+    针对常见的限流、网络、超时、余额不足等情况做专门处理，
+    避免把英文报错直接展示给用户。
+    """
+    if not error_msg:
+        return "分析过程中出现错误，请稍后重试"
+
+    msg = error_msg.lower()
+
+    # 限流类（429 / RATE_LIMIT）
+    if any(key in msg for key in (
+        "429", "rate_limit", "rate limit", "tokens limit",
+        "rate_limited", "访问限制", "限流", "quota exceeded"
+    )):
+        return "当前使用AI分析的人数较多，服务繁忙，请稍后再试。（提示：避免短时间内连续发起多次分析）"
+
+    # 网络/连接类
+    if any(key in msg for key in (
+        "network error", "connection error", "connection refused",
+        "failed to fetch", "连接失败", "网络错误",
+    )):
+        return "网络连接失败，请检查网络状态后重试。"
+
+    # 超时类
+    if any(key in msg for key in ("timeout", "timed out", "超时")):
+        return "请求超时，请稍后重试。若频繁出现，请联系管理员。"
+
+    # 认证/权限类
+    if any(key in msg for key in ("401", "403", "unauthorized", "forbidden", "无权限", "未授权")):
+        return "登录已过期，请刷新页面重新登录后再试。"
+
+    # 余额/额度不足
+    if any(key in msg for key in (
+        "insufficient balance", "余额不足", "额度不足", "out of quota",
+    )):
+        return "AI分析额度不足，请联系管理员补充额度后再试。"
+
+    # 服务端错误
+    if any(key in msg for key in ("server error", "500", "502", "503", "internal error")):
+        return "服务器暂时不可用，请稍后重试。"
+
+    # 如果是中文且相对简短，直接返回
+    import re as _re
+    if _re.search(r"[\u4e00-\u9fa5]", error_msg) and len(error_msg) <= 80:
+        return error_msg
+
+    # 默认兜底
+    return "分析过程中出现错误，请稍后重试"
+
 
 # ==================== 特性开关 ====================
 # 是否使用模板系统生成提示词（默认关闭，保持向后兼容）
@@ -38,12 +93,14 @@ from app.models.portfolio import (
     PositionCreate, PositionUpdate, PositionResponse, PortfolioStatsResponse,
     PositionAnalysisRequest, PositionAnalysisReport, PositionAnalysisResult,
     PriceTarget, PositionAnalysisResponse, PositionRiskMetrics,
+    PositionUserView,
     RealAccount, CapitalTransaction, CapitalTransactionType,
     AccountInitRequest, AccountTransactionRequest, AccountSettingsRequest, AccountSummary,
     PositionChangeType, PositionChange, PositionChangeResponse,
     PositionOperationType, PositionOperationRequest
 )
 from app.utils.timezone import now_tz
+from app.utils.compliance import sanitize_position_analysis_payload
 
 logger = logging.getLogger("app.services.portfolio_service")
 
@@ -5363,6 +5420,12 @@ class PortfolioService:
                     "total_capital": snapshot.total_capital
                 },
 
+                # 分析目标股票：顶层 ticker 字段（工作流 agents 依赖 ticker 定位股票，缺失会报
+                # "Missing required parameters: ticker"）；同时补齐 symbol/company_of_interest 兼容别名
+                "ticker": snapshot.code,
+                "symbol": snapshot.code,
+                "company_of_interest": snapshot.code,
+
                 # 分析参数
                 "analysis_params": {
                     "research_depth": params.research_depth,
@@ -5614,6 +5677,87 @@ class PortfolioService:
             
             logger.info(f"📊 [工作流持仓分析] recommendation字段: 使用转换后的Markdown，长度: {len(recommendation_markdown)}")
 
+            # 构建用户版展示内容（user_view）：从 LLM 返回的 JSON 中提取，供前端主界面直接展示
+            user_view = PositionUserView()
+            raw_user_view = advice_json.get("user_view") if advice_json else None
+            if isinstance(raw_user_view, dict):
+                user_view.conclusion = str(raw_user_view.get("conclusion") or "").strip()
+                user_view.position_context = str(raw_user_view.get("position_context") or "").strip()
+                user_view.uncertainty_note = str(raw_user_view.get("uncertainty_note") or "").strip()
+                for field, key in (
+                    ("key_points", "key_points"),
+                    ("risk_focus", "risk_focus"),
+                    ("watch_items", "watch_items"),
+                ):
+                    raw_items = raw_user_view.get(key) or []
+                    if isinstance(raw_items, str):
+                        raw_items = [raw_items]
+                    cleaned_items: List[str] = []
+                    if isinstance(raw_items, list):
+                        for item in raw_items:
+                            text = str(item or "").strip()
+                            if text and text not in cleaned_items:
+                                cleaned_items.append(text)
+                    setattr(user_view, field, cleaned_items[:3])
+
+            # ===== 兜底：若 LLM 未生成合规的 user_view 列表字段，从 neutral_operation_advice / specific_plan 等字段降级提取 =====
+            # 确保「核心依据 / 风险提示 / 后续观察点」三个卡片至少有内容可展示
+            def _to_clean_list(value, limit=3):
+                if not value:
+                    return []
+                if isinstance(value, str):
+                    value = [s.strip() for s in re.split(r'[；;。\n]', value) if s.strip()]
+                if isinstance(value, list):
+                    result = []
+                    for item in value:
+                        text = str(item or "").strip()
+                        if text and text not in result:
+                            result.append(text)
+                    return result[:limit]
+                return []
+
+            neutral_advice = advice_json.get("neutral_operation_advice") if advice_json else None
+            specific_plan = advice_json.get("specific_plan") if advice_json else None
+            if isinstance(neutral_advice, dict):
+                # 核心依据：优先用 reasoning，其次 core_judgment
+                if not user_view.key_points:
+                    reasoning = neutral_advice.get("reasoning") or []
+                    core_judgment = neutral_advice.get("core_judgment") or ""
+                    merged = _to_clean_list(reasoning, 3)
+                    if not merged and core_judgment:
+                        merged = [core_judgment]
+                    user_view.key_points = merged
+
+                # 风险提示：优先用 risk_reminder（字符串），拆分展示
+                if not user_view.risk_focus:
+                    risk_reminder = neutral_advice.get("risk_reminder") or ""
+                    if risk_reminder:
+                        user_view.risk_focus = _to_clean_list(risk_reminder, 3)
+
+                # 后续观察点：优先用 analysis_points，其次 specific_plan.observation_factors / immediate_step
+                if not user_view.watch_items:
+                    analysis_points = neutral_advice.get("analysis_points") or []
+                    obs_factors = (specific_plan.get("observation_factors") or []) if isinstance(specific_plan, dict) else []
+                    immediate_step = (specific_plan.get("immediate_step") or "") if isinstance(specific_plan, dict) else ""
+                    merged = _to_clean_list(analysis_points, 3)
+                    if not merged:
+                        merged = _to_clean_list(obs_factors, 3)
+                    if not merged and immediate_step:
+                        merged = [immediate_step]
+                    user_view.watch_items = merged
+
+            # 结论兜底：若 conclusion 为空，用 recommendation_markdown / action_reason 替代
+            if not user_view.conclusion:
+                if recommendation_markdown:
+                    user_view.conclusion = recommendation_markdown
+                elif action_reason:
+                    user_view.conclusion = action_reason
+
+            logger.info(
+                f"📊 [工作流持仓分析] 构建user_view: conclusion={user_view.conclusion[:40]}, "
+                f"key_points={len(user_view.key_points)}条, risk_focus={len(user_view.risk_focus)}条, watch_items={len(user_view.watch_items)}条"
+            )
+
             return PositionAnalysisResult(
                 action=action,
                 action_reason=action_reason,
@@ -5624,14 +5768,18 @@ class PortfolioService:
                 detailed_analysis=detailed_analysis,
                 summary=analysis_summary,
                 recommendation=recommendation_markdown,
+                user_view=user_view,
                 source="workflow_engine_v2"
             )
 
         except Exception as e:
             logger.error(f"❌ [工作流持仓分析] 执行异常: {e}", exc_info=True)
+            # 将技术性/英文错误消息转换为用户友好的中文提示
+            error_msg = _format_user_friendly_error(str(e))
             return PositionAnalysisResult(
                 action=PositionAction.HOLD,
-                action_reason=f"工作流分析异常: {str(e)}"
+                action_reason=error_msg,
+                error_message=error_msg
             )
 
     def _get_user_analysis_preference(self, user_id: Optional[str], risk_tolerance: str) -> str:
@@ -6121,6 +6269,14 @@ class PortfolioService:
         action_reason = action_advice[:200] + "..." if len(action_advice) > 200 else action_advice
 
         return action, action_reason
+
+    def _sanitize_position_analysis_dict(
+        self,
+        data: Dict[str, Any],
+        position_snapshot: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """统一清洗持仓研究详情和历史记录中的结果字段（合规化：移除执行性交易指令）。"""
+        return sanitize_position_analysis_payload(data, position_snapshot=position_snapshot)
 
 
 # 服务实例

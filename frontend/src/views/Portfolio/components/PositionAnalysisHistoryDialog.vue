@@ -54,10 +54,9 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="置信度" width="100" align="center">
+      <el-table-column label="一句话结论" min-width="260">
         <template #default="{ row }">
-          <span v-if="row.confidence">{{ row.confidence }}%</span>
-          <span v-else>-</span>
+          <span class="conclusion-preview">{{ row.user_view?.conclusion || row.action_reason || '-' }}</span>
         </template>
       </el-table-column>
 
@@ -259,35 +258,33 @@ const pnlClass = (pnl: number) => {
   return ''
 }
 
-// 分析观点类型
+// 分析观点类型（收敛为 乐观/审慎/中性 三种合规标签）
 const getActionType = (action: string) => {
-  if (action === 'buy' || action === 'add') return 'success'
-  if (action === 'sell' || action === 'reduce') return 'danger'
+  if (action === 'buy' || action === 'add' || action === '乐观') return 'success'
+  if (action === 'sell' || action === 'reduce' || action === 'clear' || action === '审慎') return 'danger'
   return 'info'
 }
 
-// 分析观点文本（兼容新旧术语，统一显示为研究结论倾向）
+// 分析观点文本（统一收敛为 乐观/审慎/中性 三种合规标签）
 const getActionText = (action: string) => {
   const map: Record<string, string> = {
-    // 旧交易指令/市场观点术语
+    // 旧交易指令/市场观点术语 → 三种合规标签
     buy: '乐观',
-    add: '偏多',
+    add: '乐观',
     hold: '中性',
-    reduce: '偏空',
+    reduce: '审慎',
     sell: '审慎',
+    clear: '审慎',
     // 旧市场观点术语
     '看涨': '乐观',
     '看跌': '审慎',
-    '增持观点': '偏多',
-    '减持观点': '偏空',
-    '观望观点': '待验证',
+    '增持观点': '乐观',
+    '减持观点': '审慎',
+    '观望观点': '中性',
     // 新合规术语
     '乐观': '乐观',
     '审慎': '审慎',
-    '中性': '中性',
-    '偏多': '偏多',
-    '偏空': '偏空',
-    '待验证': '待验证'
+    '中性': '中性'
   }
   return map[action] || action
 }
@@ -319,6 +316,14 @@ const getStatusText = (status: string) => {
 
 .text-danger {
   color: #f56c6c;
+}
+
+.conclusion-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.6;
 }
 </style>
 

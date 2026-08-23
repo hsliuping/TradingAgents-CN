@@ -243,6 +243,18 @@ class ActionAdvisorV2(ManagerAgent):
 }
 ```
 
+**重要提示**：
+1. **user_view 是给前端主界面直接展示的用户版内容，必须严格按结构输出，不得把内容堆进 conclusion 一个字段里。** key_points、risk_focus、watch_items 必须各自独立输出为字符串数组，conclusion 只写 1-2 句核心判断。
+2. user_view.conclusion 和 user_view.position_context 必须使用白话中文，不得出现“技术面”“基本面”“PB”“ROE”“均线”“MACD”“RSI”“KDJ”“站稳”“突破”“支撑位”“阻力位”“右侧介入”“放量”等术语或触发语
+3. user_view.key_points、risk_focus、watch_items 每组最多3条，每条必须是完整短句；宁可少写也不要输出半句、截断句或长段落
+4. key_points 不得写“当前判断主要基于已披露信息”“请持续关注”“后续重点观察”等空话，必须写具体依据
+5. **confidence** 字段是必需的，必须是0-100的整数，表示研究判断稳定度，不代表交易把握
+6. 严禁输出加仓、减仓、清仓、买卖、目标价、价格区间、止损止盈、仓位比例等执行性内容
+7. 请根据综合分析给出真实的 confidence 值，不要使用默认值
+8. specific_suggestions 和 observation_factors 必须是可继续验证的公开信号、研究动作或信息核查事项，不得写成交易动作
+9. 严禁输出“评分”“站稳”“突破”“放量”“右侧介入”等会被用户理解为交易触发条件的表达
+10. **user_view 的六个字段（conclusion、position_context、key_points、risk_focus、watch_items、uncertainty_note）缺一不可，必须全部输出。** 即使内容简短也要输出，禁止省略或合并到其他字段。
+
 **免责声明**：
 本分析仅用于研究辅助与风险提示，不构成任何交易建议或执行指令。"""
 
@@ -632,7 +644,7 @@ class ActionAdvisorV2(ManagerAgent):
 ```
 
 **重要提示**：
-1. user_view 是给前端主界面直接展示的用户版内容，必须优先生成，且不得与后面的详细研究字段重复堆砌
+1. **user_view 是给前端主界面直接展示的用户版内容，必须严格按结构输出，不得把内容堆进 conclusion 一个字段里。** key_points、risk_focus、watch_items 必须各自独立输出为字符串数组，conclusion 只写 1-2 句核心判断。
 2. user_view.conclusion 和 user_view.position_context 必须使用白话中文，不得出现“技术面”“基本面”“PB”“ROE”“均线”“MACD”“RSI”“KDJ”“站稳”“突破”“支撑位”“阻力位”“右侧介入”“放量”等术语或触发语
 3. user_view.key_points、risk_focus、watch_items 每组最多3条，每条必须是完整短句；宁可少写也不要输出半句、截断句或长段落
 4. 如果某条内容会以“将”“让”“获”“并”“但”“与”“或”“则”“需”等字结尾，说明句子不完整，必须重写，不得直接输出
@@ -641,7 +653,8 @@ class ActionAdvisorV2(ManagerAgent):
 7. 严禁输出加仓、减仓、清仓、买卖、目标价、价格区间、止损止盈、仓位比例等执行性内容
 8. 请根据综合分析给出真实的 confidence 值，不要使用默认值
 9. specific_suggestions 和 observation_factors 必须是可继续验证的公开信号、研究动作或信息核查事项，不得写成交易动作
-10. 严禁输出“评分”“站稳”“突破”“放量”“右侧介入”等会被用户理解为交易触发条件的表达"""
+10. 严禁输出“评分”“站稳”“突破”“放量”“右侧介入”等会被用户理解为交易触发条件的表达
+11. **user_view 的六个字段（conclusion、position_context、key_points、risk_focus、watch_items、uncertainty_note）缺一不可，必须全部输出。** 即使内容简短也要输出，禁止省略或合并到其他字段。"""
 
     def _get_required_inputs(self) -> List[str]:
         """

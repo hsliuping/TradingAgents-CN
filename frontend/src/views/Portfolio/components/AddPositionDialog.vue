@@ -67,6 +67,12 @@ import { formatLocalDate } from '@/utils/datetime'
 const props = defineProps<{
   visible: boolean
   editData?: PositionItem | null
+  initialData?: {
+    code?: string
+    name?: string
+    market?: string
+    cost_price?: number
+  } | null
 }>()
 
 const emit = defineEmits<{
@@ -222,21 +228,27 @@ watch(() => props.visible, (val) => {
     // 编辑模式下，重置自动获取记录
     lastFetchedCode.value = ''
   } else if (val) {
+    const init = props.initialData
     form.value = {
-      code: '',
-      name: '',
-      market: 'CN',
+      code: init?.code || '',
+      name: init?.name || '',
+      market: init?.market || 'CN',
       quantity: 100,
-      cost_price: 10,
+      cost_price: init?.cost_price ?? 10,
       buy_date: undefined,
       notes: ''
+    }
+    // 如果有预填代码，记录为已自动获取，避免被 watch 清空
+    if (init?.code) {
+      lastFetchedCode.value = init.code
+    } else {
+      lastFetchedCode.value = ''
     }
     // 清除定时器和记录
     if (fetchStockNameTimer) {
       clearTimeout(fetchStockNameTimer)
       fetchStockNameTimer = null
     }
-    lastFetchedCode.value = ''
     loadingStockName.value = false
   }
 })

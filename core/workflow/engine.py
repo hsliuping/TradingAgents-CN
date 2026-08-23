@@ -360,6 +360,18 @@ class WorkflowEngine:
             "_analysis_data_source": FieldType.STRING,
             # 外部事实记忆注入（智能助手联网提取的事实，供辩论/风险评估环节参考）
             "memory_facts_summary": FieldType.STRING,
+            # 持仓分析工作流输入：position_info/portfolio_data 若不声明，LangGraph 动态
+            # State 会丢弃未声明键，导致 agents 拿不到持仓数据并报 "Missing required parameters: ticker"
+            "position_info": FieldType.OBJECT,
+            "portfolio_data": FieldType.OBJECT,
+            "position_type": FieldType.STRING,
+            "analysis_params": FieldType.OBJECT,
+            "stock_analysis_report": FieldType.OBJECT,
+            "user_preference": FieldType.STRING,
+            "trade_info": FieldType.OBJECT,
+            "ticker": FieldType.STRING,
+            "symbol": FieldType.STRING,
+            "company_of_interest": FieldType.STRING,
         }
 
         for node in definition.nodes:

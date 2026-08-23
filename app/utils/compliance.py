@@ -942,6 +942,7 @@ def sanitize_display_report_text(text: Any, fallback: str = "") -> str:
         return fallback
 
     cleaned_lines: List[str] = []
+    in_disclaimer_block = False
 
     for raw_line in raw_text.splitlines():
         line = _normalize_display_line(raw_line.rstrip())
@@ -954,7 +955,16 @@ def sanitize_display_report_text(text: Any, fallback: str = "") -> str:
 
         if "免责声明" in normalized or normalized == RESEARCH_ONLY_DISCLAIMER:
             cleaned_lines.append(line)
+            # 免责声明正文整块保留：跳过可操作内容过滤，直到下一个 markdown 标题
+            in_disclaimer_block = True
             continue
+
+        if in_disclaimer_block:
+            if line.strip().startswith("#"):
+                in_disclaimer_block = False
+            else:
+                cleaned_lines.append(line)
+                continue
 
         if contains_actionable_content(normalized):
             continue
