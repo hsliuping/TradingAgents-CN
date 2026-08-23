@@ -77,6 +77,10 @@
                     解析股票代码
                   </el-button>
                   <el-button @click="clearStocks" size="small">清空</el-button>
+                  <el-button type="success" size="small" @click="openFavoritesDialog">
+                    <el-icon><Star /></el-icon>
+                    从关注列表选择
+                  </el-button>
                 </div>
               </div>
 
@@ -113,6 +117,106 @@
                   </div>
                 </el-alert>
               </div>
+
+              <!-- 从关注列表选择对话框 -->
+              <el-dialog
+                v-model="favoritesDialogVisible"
+                title="从关注列表选择股票"
+                width="720px"
+                :close-on-click-modal="false"
+                class="favorites-select-dialog"
+              >
+                <div class="favorites-dialog-toolbar">
+                  <el-input
+                    v-model="favoritesSearchKeyword"
+                    placeholder="搜索代码/名称"
+                    clearable
+                    size="default"
+                    style="width: 240px;"
+                  >
+                    <template #prefix>
+                      <el-icon><Search /></el-icon>
+                    </template>
+                  </el-input>
+                  <div class="favorites-dialog-actions">
+                    <el-button size="small" @click="toggleSelectAllFavorites">
+                      {{ isAllFavoritesSelected ? '取消全选' : '全选' }}
+                    </el-button>
+                    <span style="color: #909399; font-size: 13px;">
+                      已选 {{ selectedFavorites.length }} / {{ filteredFavorites.length }}
+                    </span>
+                  </div>
+                </div>
+
+                <!-- 按标签批量选择 -->
+                <div v-if="favoriteTags.length > 0" class="favorites-tags-bar">
+                  <span class="tags-label">按标签选：</span>
+                  <div class="tags-list">
+                    <el-tag
+                      v-for="tag in favoriteTags"
+                      :key="tag"
+                      :type="isTagFullySelected(tag) ? 'success' : 'info'"
+                      :effect="isTagFullySelected(tag) ? 'dark' : 'plain'"
+                      size="small"
+                      class="tag-chip"
+                      @click="toggleSelectByTag(tag)"
+                    >
+                      {{ tag }}
+                      <span class="tag-count">({{ getTagCount(tag) }})</span>
+                    </el-tag>
+                  </div>
+                </div>
+
+                <div v-if="favoritesLoading" class="favorites-loading">
+                  <el-icon class="is-loading" style="font-size: 32px; color: #409eff;"><Loading /></el-icon>
+                  <p style="margin-top: 12px; color: #909399;">加载关注列表中...</p>
+                </div>
+
+                <div v-else-if="filteredFavorites.length === 0" class="favorites-empty">
+                  <el-empty description="暂无匹配的关注股票" />
+                </div>
+
+                <div v-else class="favorites-grid">
+                  <div
+                    v-for="item in filteredFavorites"
+                    :key="item.symbol"
+                    class="favorite-item"
+                    :class="{ selected: selectedFavorites.includes(item.symbol!) }"
+                    @click="toggleFavorite(item.symbol!)"
+                  >
+                    <div class="favorite-checkbox">
+                      <el-checkbox :model-value="selectedFavorites.includes(item.symbol!)" />
+                    </div>
+                    <div class="favorite-info">
+                      <div class="favorite-code">{{ item.symbol }}</div>
+                      <div class="favorite-name">{{ item.stock_name }}</div>
+                    </div>
+                    <div v-if="item.current_price != null" class="favorite-price">
+                      <div class="price-value">{{ item.current_price.toFixed(2) }}</div>
+                      <div
+                        class="price-change"
+                        :class="(item.change_percent ?? 0) >= 0 ? 'up' : 'down'"
+                      >
+                        {{ item.change_percent != null ? (item.change_percent >= 0 ? '+' : '') + item.change_percent.toFixed(2) + '%' : '--' }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <template #footer>
+                  <div class="dialog-footer">
+                    <span style="color: #606266; font-size: 13px;">
+                      已选择 <strong style="color: #409eff;">{{ selectedFavorites.length }}</strong> 只股票
+                    </span>
+                    <div>
+                      <el-button @click="favoritesDialogVisible = false">取消</el-button>
+                      <el-button type="primary" @click="confirmFavoritesSelection" :disabled="selectedFavorites.length === 0">
+                        确认导入
+                      </el-button>
+                    </div>
+                  </div>
+                </template>
+              </el-dialog>
             </div>
           </el-card>
         </el-col>
@@ -330,10 +434,11 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Files, TrendCharts, Check, Close, InfoFilled } from '@element-plus/icons-vue'
+import { Files, TrendCharts, Check, Close, InfoFilled, Star, Search, Loading } from '@element-plus/icons-vue'
 import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
 import { configApi } from '@/api/config'
-import { workflowApi, type WorkflowSummary } from '@/api/workflow'
+import { workflowApi, isSelectableAnalysisWorkflow, type WorkflowSummary } from '@/api/workflow'
+import { favoritesApi, type FavoriteItem } from '@/api/favorites'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ModelConfig from '@/components/ModelConfig.vue'
@@ -396,7 +501,7 @@ const parseVersion = (v: string): number[] => {
 const workflowsSorted = computed(() => {
   const expectedType = batchForm.market === 'ETF' ? 'etf_analysis' : 'stock_analysis'
   const arr = workflows.value.filter(
-    (w: WorkflowSummary) => w.workflow_type === expectedType
+    (w: WorkflowSummary) => isSelectableAnalysisWorkflow(w, expectedType)
   )
   arr.sort((a, b) => {
     const vA = a.version || ''
@@ -432,8 +537,8 @@ const batchForm = reactive({
 watch(
   () => batchForm.market,
   (newMarket) => {
-    const expectedType = newMarket === 'ETF' ? 'etf_analysis' : 'stock_analysis'
-    const targetWorkflows = workflows.value.filter(w => w.workflow_type === expectedType)
+    // 使用已过滤（排除 v1.0/快速/空白流程）并按版本排序的列表
+    const targetWorkflows = workflowsSorted.value
     
     if (targetWorkflows.length > 0) {
       const defaultWf = targetWorkflows.find(w => w.is_default)
@@ -455,6 +560,166 @@ const normalizeCodeSmart = (raw: string): { symbol?: string; error?: string } =>
   if (v.valid && v.normalizedCode) return { symbol: v.normalizedCode }
 
   return { error: v.message || '代码格式无效' }
+}
+
+// 关注列表选择相关
+const favoritesDialogVisible = ref(false)
+const favoritesLoading = ref(false)
+const favoritesSearchKeyword = ref('')
+const favoritesList = ref<FavoriteItem[]>([])
+const selectedFavorites = ref<string[]>([])
+
+// 当前市场下的关注列表（用于计算标签和显示）
+const marketFavorites = computed(() => {
+  const market = batchForm.market === 'ETF' ? 'ETF' : 'A股'
+  return favoritesList.value.filter(item => !item.market || item.market === market)
+})
+
+// 所有标签（按当前市场过滤后的关注列表里的标签）
+const favoriteTags = computed(() => {
+  const tagSet = new Set<string>()
+  for (const item of marketFavorites.value) {
+    for (const t of (item.tags || [])) {
+      if (t) tagSet.add(t)
+    }
+  }
+  return Array.from(tagSet).sort()
+})
+
+const getTagCount = (tag: string) => {
+  let count = 0
+  for (const item of marketFavorites.value) {
+    if ((item.tags || []).includes(tag)) count++
+  }
+  return count
+}
+
+// 判断某标签下的股票是否已全部选中
+const isTagFullySelected = (tag: string) => {
+  const tagItems = marketFavorites.value.filter(item => (item.tags || []).includes(tag))
+  if (tagItems.length === 0) return false
+  const selectedSet = new Set(selectedFavorites.value)
+  return tagItems.every(item => selectedSet.has(item.symbol!))
+}
+
+// 点击标签：切换该标签下所有股票的选中状态（全选/取消全选）
+const toggleSelectByTag = (tag: string) => {
+  const tagItems = marketFavorites.value.filter(item => (item.tags || []).includes(tag))
+  const selectedSet = new Set(selectedFavorites.value)
+  const allSelected = tagItems.every(item => selectedSet.has(item.symbol!))
+
+  if (allSelected) {
+    // 全部已选中 → 取消该标签下所有股票的选中
+    const tagSet = new Set(tagItems.map(i => i.symbol!))
+    selectedFavorites.value = selectedFavorites.value.filter(s => !tagSet.has(s))
+    ElMessage.info(`已取消「${tag}」标签下 ${tagItems.length} 只股票的选中`)
+  } else {
+    // 未全部选中 → 全部选中
+    for (const item of tagItems) {
+      if (!selectedSet.has(item.symbol!)) {
+        selectedFavorites.value.push(item.symbol!)
+      }
+    }
+    ElMessage.success(`已选中「${tag}」标签下 ${tagItems.length} 只股票`)
+  }
+}
+
+// 搜索过滤（仅搜索，标签不做筛选而是直接选）
+const filteredFavorites = computed(() => {
+  const keyword = favoritesSearchKeyword.value.trim().toLowerCase()
+  if (!keyword) return marketFavorites.value
+  return marketFavorites.value.filter(item =>
+    item.symbol?.toLowerCase().includes(keyword) ||
+    item.stock_name?.toLowerCase().includes(keyword)
+  )
+})
+
+const isAllFavoritesSelected = computed(() => {
+  if (filteredFavorites.value.length === 0) return false
+  return filteredFavorites.value.every(item => selectedFavorites.value.includes(item.symbol!))
+})
+
+const openFavoritesDialog = async () => {
+  favoritesDialogVisible.value = true
+  favoritesSearchKeyword.value = ''
+  if (favoritesList.value.length === 0) {
+    await loadFavorites()
+  }
+  // 已在列表里的股票默认选中（需与关注列表 symbol 格式对齐：提取 6 位代码）
+  const codeSet = new Set(stockCodes.value.map(c => c.replace(/\.(SZ|SH|BJ)$/i, '')))
+  selectedFavorites.value = marketFavorites.value
+    .filter(item => codeSet.has(item.symbol!))
+    .map(item => item.symbol!)
+}
+
+const loadFavorites = async () => {
+  favoritesLoading.value = true
+  try {
+    const res = await favoritesApi.list()
+    const rawList = ((res as any)?.data || []) as FavoriteItem[]
+    // 后端返回 stock_code 字段，前端统一用 symbol 字段（此处做归一化）
+    favoritesList.value = rawList.map(item => ({
+      ...item,
+      symbol: item.symbol || item.stock_code || ''
+    }))
+  } catch (e: any) {
+    console.error('加载关注列表失败:', e)
+    ElMessage.error(e.message || '加载关注列表失败')
+  } finally {
+    favoritesLoading.value = false
+  }
+}
+
+const toggleFavorite = (symbol: string) => {
+  const idx = selectedFavorites.value.indexOf(symbol)
+  if (idx > -1) {
+    selectedFavorites.value.splice(idx, 1)
+  } else {
+    selectedFavorites.value.push(symbol)
+  }
+}
+
+const toggleSelectAllFavorites = () => {
+  if (isAllFavoritesSelected.value) {
+    // 取消全选（只对当前过滤结果）
+    const currentSet = new Set(filteredFavorites.value.map(i => i.symbol!))
+    selectedFavorites.value = selectedFavorites.value.filter(s => !currentSet.has(s))
+  } else {
+    // 全选（合并当前过滤结果）
+    const currentSet = new Set(selectedFavorites.value)
+    for (const item of filteredFavorites.value) {
+      if (!currentSet.has(item.symbol!)) {
+        selectedFavorites.value.push(item.symbol!)
+      }
+    }
+  }
+}
+
+const confirmFavoritesSelection = () => {
+  const newCodes = selectedFavorites.value
+  if (newCodes.length === 0) {
+    ElMessage.warning('请至少选择一只股票')
+    return
+  }
+
+  // 合并到股票列表（去重）
+  const existing = new Set(stockCodes.value)
+  const added: string[] = []
+  for (const code of newCodes) {
+    if (!existing.has(code)) {
+      existing.add(code)
+      added.push(code)
+    }
+  }
+
+  stockCodes.value = Array.from(existing)
+  symbols.value = [...stockCodes.value]
+  stockInput.value = stockCodes.value.join('\n')
+  // 重新解析以更新 invalidCodes
+  parseStockCodes()
+
+  ElMessage.success(`成功导入 ${added.length} 只股票`)
+  favoritesDialogVisible.value = false
 }
 
 const parseStockCodes = () => {
@@ -624,7 +889,7 @@ onMounted(async () => {
   try {
     const data = await workflowApi.listAll()
     workflows.value = data
-    const targetWorkflows = data.filter(w => w.workflow_type === 'stock_analysis')
+    const targetWorkflows = workflowsSorted.value
     if (targetWorkflows.length > 0) {
       const defaultWf = targetWorkflows.find(w => w.is_default)
       selectedWorkflowId.value = defaultWf ? defaultWf.id : targetWorkflows[0].id
@@ -984,6 +1249,148 @@ const convertDepthToNumber = (depth: string): string => {
           flex-wrap: wrap;
           gap: 6px;
         }
+      }
+
+      // 关注列表选择对话框
+      .favorites-dialog-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+
+        .favorites-dialog-actions {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+      }
+
+      .favorites-tags-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        background: #f5f7fa;
+        border-radius: 8px;
+        margin-bottom: 16px;
+
+        .tags-label {
+          font-size: 13px;
+          color: #606266;
+          flex-shrink: 0;
+        }
+
+        .tags-list {
+          flex: 1;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+
+          .tag-chip {
+            cursor: pointer;
+            transition: all 0.2s;
+
+            &:hover {
+              transform: translateY(-1px);
+            }
+
+            .tag-count {
+              margin-left: 4px;
+              opacity: 0.7;
+              font-size: 11px;
+            }
+
+            &.tag-clear {
+              margin-left: 4px;
+            }
+          }
+        }
+      }
+
+      .favorites-loading,
+      .favorites-empty {
+        padding: 40px 0;
+        text-align: center;
+      }
+
+      .favorites-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        max-height: 400px;
+        overflow-y: auto;
+        padding: 4px;
+
+        .favorite-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 12px;
+          border: 2px solid #e4e7ed;
+          border-radius: 10px;
+          cursor: pointer;
+          transition: all 0.2s;
+
+          &:hover {
+            border-color: #409eff;
+            background: #ecf5ff;
+          }
+
+          &.selected {
+            border-color: #409eff;
+            background: #ecf5ff;
+          }
+
+          .favorite-checkbox {
+            flex-shrink: 0;
+          }
+
+          .favorite-info {
+            flex: 1;
+            min-width: 0;
+
+            .favorite-code {
+              font-family: 'Monaco', 'Menlo', monospace;
+              font-size: 15px;
+              font-weight: 600;
+              color: #1f2937;
+            }
+
+            .favorite-name {
+              font-size: 12px;
+              color: #6b7280;
+              margin-top: 2px;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            }
+          }
+
+          .favorite-price {
+            text-align: right;
+            flex-shrink: 0;
+
+            .price-value {
+              font-size: 15px;
+              font-weight: 600;
+              color: #1f2937;
+            }
+
+            .price-change {
+              font-size: 12px;
+              margin-top: 2px;
+
+              &.up { color: #f56c6c; }
+              &.down { color: #67c23a; }
+            }
+          }
+        }
+      }
+
+      .dialog-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
       }
     }
 
