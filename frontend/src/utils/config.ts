@@ -35,16 +35,13 @@ let _jdyunModelsLoaded = false
 export const loadJdyunChatModels = async (): Promise<string[]> => {
   if (!isJdyunMode() || _jdyunModelsLoaded) return JDYUN_CHAT_MODELS
   try {
-    // 使用原生 fetch，避免引入 API 模块造成循环依赖
-    const resp = await fetch('/api/config/jdyun/status', {
-      headers: { Accept: 'application/json' },
-    })
-    if (resp.ok) {
-      const data = await resp.json()
-      const models = data?.available_models
-      if (Array.isArray(models) && models.length > 0) {
-        JDYUN_CHAT_MODELS = models
-      }
+    // 动态 import 打破循环依赖：config -> request -> auth -> config
+    const { ApiClient } = await import('@/api/request')
+    const resp: any = await ApiClient.get('/api/config/jdyun/status', undefined, { skipErrorHandler: true })
+    const data = resp?.data || resp
+    const models = data?.available_models
+    if (Array.isArray(models) && models.length > 0) {
+      JDYUN_CHAT_MODELS = models
     }
   } catch (e) {
     console.warn('加载京东云模型列表失败，使用默认列表:', e)

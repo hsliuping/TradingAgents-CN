@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="api-guide-container">
     <el-card>
       <template #header>
@@ -41,6 +41,7 @@ import { ref, onMounted, computed } from 'vue'
 import { Download, Lock } from '@element-plus/icons-vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { useLicenseStore } from '@/stores/license'
+import { ApiClient } from '@/api/request'
 
 // 配置 marked 选项
 // marked 配置已由 @/utils/markdown 统一管理
@@ -58,19 +59,9 @@ const loadContent = async () => {
   try {
     const apiUrl = '/api/stock-data/api-guide-content'
     
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'text/plain'
-      }
-    })
-    
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '')
-      throw new Error(`加载失败: ${response.status} ${response.statusText}${errorText ? ' - ' + errorText : ''}`)
-    }
-    
-    markdownContent.value = await response.text()
+    const res: any = await ApiClient.get(apiUrl, undefined, { headers: { Accept: 'text/plain' }, responseType: 'text', skipErrorHandler: true })
+
+    markdownContent.value = typeof res === 'string' ? res : (res?.data || '')
     renderedContent.value = renderMarkdown(markdownContent.value)
   } catch (error: any) {
     console.error('加载 API 指南失败:', error)

@@ -24,6 +24,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { Download } from '@element-plus/icons-vue'
+import { ApiClient } from '@/api/request'
 
 const route = useRoute()
 const loading = ref(false)
@@ -99,19 +100,9 @@ const loadContent = async () => {
       }
     }
     
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      headers: {
-        'Accept': 'text/plain'
-      }
-    })
-    
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '')
-      throw new Error(`加载失败: ${response.status} ${response.statusText}${errorText ? ' - ' + errorText : ''}`)
-    }
-    
-    content.value = await response.text()
+    const res: any = await ApiClient.get(apiUrl, undefined, { headers: { Accept: 'text/plain' }, responseType: 'text', skipErrorHandler: true })
+
+    content.value = typeof res === 'string' ? res : (res?.data || '')
   } catch (error: any) {
     console.error('加载文件失败:', error)
     content.value = `加载失败: ${error?.message || '未知错误'}`

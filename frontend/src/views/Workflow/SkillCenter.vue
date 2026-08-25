@@ -637,6 +637,7 @@ import {
 import SkillGenerate from './SkillCenter/SkillGenerate.vue'
 import { skillCenterApi } from '@/api/skillCenter'
 import { skillsApi } from '@/api/skills'
+import { ApiClient } from '@/api/request'
 
 interface SkillSummary {
   skill_id: string
@@ -808,8 +809,8 @@ async function loadStats() {
 
 async function loadAgents() {
   try {
-    const agentsResponse = await fetch('/api/agents')
-    const agents = await agentsResponse.json()
+    const res: any = await ApiClient.get('/api/agents')
+    const agents = Array.isArray(res) ? res : (res?.data || [])
     availableAgents.value = agents.map((a: any) => ({ id: a.id, name: a.name }))
   } catch (error) {
     console.error('Failed to load agents:', error)
