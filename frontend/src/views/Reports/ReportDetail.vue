@@ -426,14 +426,12 @@ const downloadReport = async (format: string = 'markdown') => {
       duration: 0
     })
 
-    const blobData = await ApiClient.get(`/api/reports/${currentReport.id}/download?format=${format}`, {
-      responseType: 'blob',
-      showLoading: false
-    }) as unknown as BlobPart
+    const res: any = await ApiClient.get(`/api/reports/${currentReport.id}/download`, { format }, { responseType: 'blob', showLoading: false })
 
     loadingMsg.close()
 
-    const blob = new Blob([blobData])
+    // 兼容：响应拦截器直接返回 Blob；兼容返回 { data: Blob } 的旧实现
+    const blob = res instanceof Blob ? res : (res?.data instanceof Blob ? res.data : new Blob([res]))
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
