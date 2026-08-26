@@ -1243,10 +1243,10 @@ class TushareProvider(BaseStockDataProvider):
             "pct_chg": self._convert_to_float(raw_data.get('pct_chg')),
 
             # 成交数据
-            # 🔥 成交量单位转换：Tushare 返回的是手，需要转换为股
-            "volume": self._convert_to_float(raw_data.get('vol')) * 100 if raw_data.get('vol') else None,
+            # 🔥 成交量单位转换：Tushare 返回的是手，需要转换为股（停牌时 vol/amount 为 0，应保留 0 而非 None）
+            "volume": self._convert_to_float(raw_data.get('vol')) * 100 if raw_data.get('vol') is not None else None,
             # 🔥 成交额单位转换：Tushare daily 接口返回的是千元，需要转换为元
-            "amount": self._convert_to_float(raw_data.get('amount')) * 1000 if raw_data.get('amount') else None,
+            "amount": self._convert_to_float(raw_data.get('amount')) * 1000 if raw_data.get('amount') is not None else None,
 
             # 财务指标
             "total_mv": self._convert_to_float(raw_data.get('total_mv')),
@@ -1276,6 +1276,8 @@ class TushareProvider(BaseStockDataProvider):
         if symbol.isdigit() and len(symbol) == 6:
             if symbol.startswith(('60', '68', '90')):
                 return f"{symbol}.SH"  # 上交所
+            elif symbol.startswith(('43', '83', '87', '92', '88')):
+                return f"{symbol}.BJ"  # 北交所
             else:
                 return f"{symbol}.SZ"  # 深交所
 

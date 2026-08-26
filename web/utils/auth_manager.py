@@ -28,7 +28,8 @@ class AuthManager:
     
     def __init__(self):
         self.users_file = Path(__file__).parent.parent / "config" / "users.json"
-        self.session_timeout = 600000  
+        # 会话超时（秒），与 time.time() 的秒级时间戳比较；10分钟无操作自动失效
+        self.session_timeout = 600
         self._ensure_users_file()
     
     def _ensure_users_file(self):
@@ -275,7 +276,7 @@ class AuthManager:
             <script>
             console.log('🔐 保存认证数据到localStorage');
             try {{
-                const authData = {json.dumps(auth_data)};
+                const authData = {json.dumps(auth_data).replace('</', '<\\/')};
                 localStorage.setItem('tradingagents_auth', JSON.stringify(authData));
                 console.log('✅ 认证数据已保存到localStorage:', authData);
             }} catch (e) {{
@@ -343,14 +344,23 @@ class AuthManager:
             if username not in users:
                 logger.warning(f"⚠️ 尝试恢复不存在的用户: {username}")
                 return False
-            
+
+            # 安全修复：role/permissions 一律以服务端 users.json 为准，
+            # 不采信客户端（URL 参数/localStorage）传入的值，防止伪造管理员身份
+            stored_user = users[username]
+            safe_user_info = {
+                "username": username,
+                "role": stored_user.get("role", "user"),
+                "permissions": stored_user.get("permissions", [])
+            }
+
             # 恢复登录状态，使用原始登录时间或当前时间
             restore_time = login_time if login_time is not None else time.time()
-            
+
             st.session_state.authenticated = True
-            st.session_state.user_info = user_info
+            st.session_state.user_info = safe_user_info
             st.session_state.login_time = restore_time
-            
+
             logger.info(f"✅ 从前端缓存恢复用户 {username} 的登录状态")
             logger.debug(f"🔍 [恢复状态] login_time: {restore_time}, current_time: {time.time()}")
             return True

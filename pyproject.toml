@@ -85,13 +85,14 @@ dependencies = [
     "toml>=0.10.2",
     "tqdm>=4.67.1",
     "typing-extensions>=4.14.0",
+    "typer>=0.12.0",  # cli/ 命令行入口依赖
 ]
 
 [project.optional-dependencies]
 qianfan = ["qianfan>=0.4.20"]
 
 [project.scripts]
-tradingagents = "main:main"
+tradingagents = "tradingagents.demo:main"
 
 [tool.setuptools.packages.find]
 include = ["tradingagents*"]

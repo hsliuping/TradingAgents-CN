@@ -630,6 +630,10 @@ app.add_middleware(
 # 操作日志中间件
 app.add_middleware(OperationLogMiddleware)
 
+# 速率限制中间件（登录防爆破等；Redis 不可用时自动放行）
+from app.middleware.rate_limit import RateLimitMiddleware
+app.add_middleware(RateLimitMiddleware)
+
 
 # 请求日志中间件
 @app.middleware("http")

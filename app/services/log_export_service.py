@@ -125,6 +125,21 @@ class LogExportService:
         else:
             return "other"
 
+    def _resolve_safe_path(self, filename: str) -> Path:
+        """
+        将文件名解析为日志目录内的安全路径，防止路径穿越（如 ../../etc/passwd）
+
+        Returns:
+            解析后的路径
+
+        Raises:
+            ValueError: 文件名试图逃逸日志目录
+        """
+        file_path = (self.log_dir / filename).resolve()
+        if not file_path.is_relative_to(self.log_dir.resolve()):
+            raise ValueError(f"非法的日志文件名: {filename}")
+        return file_path
+
     def read_log_file(
         self,
         filename: str,
@@ -148,8 +163,8 @@ class LogExportService:
         Returns:
             日志内容和统计信息
         """
-        file_path = self.log_dir / filename
-        
+        file_path = self._resolve_safe_path(filename)
+
         if not file_path.exists():
             raise FileNotFoundError(f"日志文件不存在: {filename}")
         
@@ -238,7 +253,8 @@ class LogExportService:
         try:
             # 确定要导出的文件
             if filenames:
-                files_to_export = [self.log_dir / f for f in filenames if (self.log_dir / f).exists()]
+                files_to_export = [self._resolve_safe_path(f) for f in filenames]
+                files_to_export = [f for f in files_to_export if f.exists()]
             else:
                 files_to_export = list(self.log_dir.glob("*.log*"))
             

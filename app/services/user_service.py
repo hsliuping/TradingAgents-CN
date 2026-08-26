@@ -135,14 +135,7 @@ class UserService:
 
             logger.info(f"🔍 [authenticate_user] 用户信息: username={user_doc.get('username')}, email={user_doc.get('email')}, is_active={user_doc.get('is_active')}")
 
-            # 验证密码
-            input_password_hash = self.hash_password(password)
-            stored_password_hash = user_doc["hashed_password"]
-            logger.info(f"🔍 [authenticate_user] 密码哈希对比:")
-            logger.info(f"   输入密码哈希: {input_password_hash[:20]}...")
-            logger.info(f"   存储密码哈希: {stored_password_hash[:20]}...")
-            logger.info(f"   哈希匹配: {input_password_hash == stored_password_hash}")
-
+            # 验证密码（不在日志中输出任何密码哈希片段）
             if not self.verify_password(password, user_doc["hashed_password"]):
                 logger.warning(f"❌ [authenticate_user] 密码错误: {username}")
                 return None
@@ -340,7 +333,6 @@ class UserService:
             admin_doc["_id"] = result.inserted_id
             
             logger.info(f"✅ 管理员用户创建成功: {username}")
-            logger.info(f"   密码: {password}")
             logger.info("   ⚠️  请立即修改默认密码！")
             
             return User(**admin_doc)

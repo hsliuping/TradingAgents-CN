@@ -86,12 +86,20 @@ def search_stocks_by_name(name: str) -> List[Dict[str, Any]]:
         >>> for stock in results:
         logger.info(f"{stock['code']}: {stock['name']}")
     """
-    # 这个功能需要MongoDB支持，暂时通过原有方式实现
+    # 从股票基础信息列表中按名称模糊匹配
     try:
-        from ..examples.stock_query_examples import EnhancedStockQueryService
+        from tradingagents.dataflows.data_source_manager import get_data_source_manager
 
-        service = EnhancedStockQueryService()
-        return service.query_stocks_by_name(name)
+        manager = get_data_source_manager()
+        all_stocks = manager.get_stock_basic_info()
+        if isinstance(all_stocks, list) and all_stocks:
+            name_lower = name.lower()
+            matches = [
+                stock for stock in all_stocks
+                if name_lower in str(stock.get('name', '')).lower()
+            ]
+            return matches[:20]
+        return [{'error': '股票基础信息不可用，无法按名称搜索'}]
     except Exception as e:
         return [{'error': f'名称搜索功能不可用: {str(e)}'}]
 
@@ -109,13 +117,15 @@ def check_data_sources() -> Dict[str, Any]:
     """
     service = get_stock_data_service()
     
+    mongodb_ok = service.db_manager is not None and service.db_manager.is_mongodb_available()
+
     return {
-        'mongodb_available': service.db_manager is not None and service.db_manager.mongodb_db is not None,
+        'mongodb_available': mongodb_ok,
         'unified_api_available': True,  # 统一接口总是可用
         'enhanced_fetcher_available': True,  # 这个通常都可用
-        'fallback_mode': service.db_manager is None or service.db_manager.mongodb_db is None,
+        'fallback_mode': not mongodb_ok,
         'recommendation': (
-            "所有数据源正常" if service.db_manager and service.db_manager.mongodb_db 
+            "所有数据源正常" if mongodb_ok
             else "建议配置MongoDB以获得最佳性能，当前使用统一数据接口降级模式"
         )
     }
