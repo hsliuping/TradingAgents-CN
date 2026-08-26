@@ -78,7 +78,7 @@ async def get_stock_industry_from_akshare(code: str) -> Dict[str, str]:
         return {"industry": "未知", "area": "未知"}
 
 
-async def补充行业信息(
+async def 补充行业信息(
     limit: int = None,
     batch_size: int = 50,
     delay: float = 0.5

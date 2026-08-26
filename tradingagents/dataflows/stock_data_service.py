@@ -183,11 +183,11 @@ class StockDataService:
     
     def _cache_to_mongodb(self, data: Any) -> bool:
         """将数据缓存到MongoDB"""
-        if not self.db_manager or not self.db_manager.mongodb_db:
+        if not self.db_manager or not self.db_manager.is_mongodb_available():
             return False
-        
+
         try:
-            collection = self.db_manager.mongodb_db['stock_basic_info']
+            collection = self.db_manager.get_mongodb_db()['stock_basic_info']
             
             if isinstance(data, list):
                 # 批量插入

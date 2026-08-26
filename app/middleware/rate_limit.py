@@ -7,7 +7,7 @@ from fastapi import Request, Response, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 from typing import Callable, Dict, Optional
-from core.redis_client import get_redis_service, RedisKeys
+from app.core.redis_client import get_redis_service, RedisKeys
 
 logger = logging.getLogger(__name__)
 

@@ -282,7 +282,7 @@ class DataSourceManager:
             duration = time.time() - start_time
             result_length = len(result) if result else 0
 
-            if result and "❌" not in result:
+            if result and "❌" not in result and "⚠️" not in result:
                 logger.info(f"✅ [数据来源: {self.current_source.value}] 成功获取基本面数据: {symbol} ({result_length}字符, 耗时{duration:.2f}秒)",
                            extra={
                                'symbol': symbol,
@@ -661,22 +661,23 @@ class DataSourceManager:
 
     def _get_volume_safely(self, data: pd.DataFrame) -> float:
         """
-        安全获取成交量数据
+        安全获取区间平均成交量数据
 
         Args:
             data: 股票数据DataFrame
 
         Returns:
-            float: 成交量，如果获取失败返回0
+            float: 区间平均成交量，如果获取失败返回0
         """
         try:
-            if 'volume' in data.columns:
-                return data['volume'].iloc[-1]
-            elif 'vol' in data.columns:
-                return data['vol'].iloc[-1]
-            else:
-                return 0
-        except Exception:
+            volume_columns = ['volume', 'vol', 'turnover', 'trade_volume']
+            for col in volume_columns:
+                if col in data.columns:
+                    return data[col].mean()
+            logger.warning(f"⚠️ 未找到成交量列，可用列: {list(data.columns)}")
+            return 0
+        except Exception as e:
+            logger.error(f"❌ 获取成交量失败: {e}")
             return 0
 
     def _format_stock_data_response(self, data: pd.DataFrame, symbol: str, stock_name: str,
@@ -1118,9 +1119,10 @@ class DataSourceManager:
                               })
 
                 # 数据质量异常时也尝试降级到其他数据源
-                fallback_result = self._try_fallback_sources(symbol, start_date, end_date)
+                # _try_fallback_sources 返回 (结果字符串, 数据源名称) 元组，需先解包再判断
+                fallback_result, fallback_source = self._try_fallback_sources(symbol, start_date, end_date)
                 if fallback_result and "❌" not in fallback_result and "错误" not in fallback_result:
-                    logger.info(f"✅ [数据来源: 备用数据源] 降级成功获取数据: {symbol}")
+                    logger.info(f"✅ [数据来源: 备用数据源({fallback_source})] 降级成功获取数据: {symbol}")
                     return fallback_result
                 else:
                     logger.error(f"❌ [数据来源: 所有数据源失败] 所有数据源都无法获取有效数据: {symbol}")
@@ -1138,7 +1140,8 @@ class DataSourceManager:
                             'error': str(e),
                             'event_type': 'data_fetch_exception'
                         }, exc_info=True)
-            return self._try_fallback_sources(symbol, start_date, end_date)
+            fallback_result, _ = self._try_fallback_sources(symbol, start_date, end_date)
+            return fallback_result
 
     def _get_mongodb_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> tuple[str, str | None]:
         """
@@ -1360,25 +1363,6 @@ class DataSourceManager:
     #     logger.error(f"❌ TDX数据源已不再支持")
     #     return f"❌ TDX数据源已不再支持"
 
-    def _get_volume_safely(self, data) -> float:
-        """安全地获取成交量数据，支持多种列名"""
-        try:
-            # 支持多种可能的成交量列名
-            volume_columns = ['volume', 'vol', 'turnover', 'trade_volume']
-
-            for col in volume_columns:
-                if col in data.columns:
-                    logger.info(f"✅ 找到成交量列: {col}")
-                    return data[col].sum()
-
-            # 如果都没找到，记录警告并返回0
-            logger.warning(f"⚠️ 未找到成交量列，可用列: {list(data.columns)}")
-            return 0
-
-        except Exception as e:
-            logger.error(f"❌ 获取成交量失败: {e}")
-            return 0
-
     def _try_fallback_sources(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> tuple[str, str | None]:
         """
         尝试备用数据源 - 避免递归调用
@@ -1550,7 +1534,7 @@ class DataSourceManager:
                 from tradingagents.config.database_manager import get_database_manager
                 db_manager = get_database_manager()
                 if db_manager and db_manager.is_mongodb_available():
-                    collection = db_manager.mongodb_db['stock_basic_info']
+                    collection = db_manager.get_mongodb_db()['stock_basic_info']
                     stocks = list(collection.find({}, {'_id': 0}))
                     if stocks:
                         logger.info(f"✅ 从MongoDB获取所有股票: {len(stocks)}条")
@@ -1854,15 +1838,12 @@ class DataSourceManager:
     def _get_valuation_indicators(self, symbol: str) -> Dict:
         """从stock_basic_info集合获取估值指标"""
         try:
+            from tradingagents.config.database_manager import get_database_manager
             db_manager = get_database_manager()
             if not db_manager.is_mongodb_available():
                 return {}
-                
-            client = db_manager.get_mongodb_client()
-            db = client[db_manager.config.mongodb_config.database_name]
-            
-            # 从stock_basic_info集合获取估值指标
-            collection = db['stock_basic_info']
+
+            collection = db_manager.get_mongodb_db()['stock_basic_info']
             result = collection.find_one({'ts_code': symbol})
             
             if result:
@@ -2036,7 +2017,7 @@ class DataSourceManager:
                     else:
                         continue
 
-                    if result and "❌" not in result:
+                    if result and "❌" not in result and "⚠️" not in result:
                         logger.info(f"✅ [数据来源: 备用数据源] 降级成功获取基本面: {source.value}")
                         return result
                     else:
