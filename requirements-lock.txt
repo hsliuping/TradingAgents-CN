@@ -42,7 +42,7 @@ cachetools==5.5.2
 celery==5.5.3
 certifi==2025.8.3
 cffi==2.0.0
-chainlit==2.8.0
+chainlit==2.12.0
 charset-normalizer==3.4.3
 chevron==0.14.0
 chromadb==1.1.0
