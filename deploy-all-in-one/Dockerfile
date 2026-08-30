@@ -25,7 +25,7 @@ FROM ${BASE_BACKEND} AS searxng-wheel-builder
 COPY searxng /build/searxng
 # 后端基础镜像不含 searxng 运行依赖（msgspec/lxml 等），
 # setup.py 生成 metadata 时会 import searx → 触发 msgspec 导入，必须先装
-RUN pip install --no-cache-dir -r /build/searxng/requirements.txt
+RUN pip install --no-cache-dir -r /build/searxng/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 RUN cd /build/searxng && \
     # 冻结版本号：有 git 就用 searx 自带的 freeze；没 git 就用 python 直接写兜底文件
     (command -v git >/dev/null 2>&1 && python -m searx.version freeze) || \
@@ -91,21 +91,28 @@ COPY --from=nginx-source /usr/lib /usr/lib
 # ------------------------------------------------------------------------------
 # 安装 s6-overlay v3.2.3.2（轻量级 init 系统，本地文件）
 # ------------------------------------------------------------------------------
-# s6-overlay v3 需要 4 个包：noarch + x86_64 + symlinks-noarch + symlinks-arch
+# s6-overlay v3 需要 4 个包：noarch + 架构二进制 + symlinks-noarch + symlinks-arch
 # 顺序很重要：noarch 先（包含 /init），然后是 arch 二进制，最后是符号链接
+# 架构二进制按 TARGETARCH 选择 x86_64（amd64）或 aarch64（arm64）
+ARG TARGETARCH
 COPY deploy-all-in-one/s6-overlay-noarch.tar.xz /tmp/s6-noarch.tar.xz
 COPY deploy-all-in-one/s6-overlay-x86_64.tar.xz /tmp/s6-x86_64.tar.xz
+COPY deploy-all-in-one/s6-overlay-aarch64.tar.xz /tmp/s6-aarch64.tar.xz
 COPY deploy-all-in-one/s6-overlay-symlinks-noarch.tar.xz /tmp/s6-symlinks-noarch.tar.xz
 COPY deploy-all-in-one/s6-overlay-symlinks-arch.tar.xz /tmp/s6-symlinks-arch.tar.xz
 
-RUN echo "安装 s6-overlay v3.2.3.2 (4 个包)..." && \
+RUN echo "安装 s6-overlay v3.2.3.2 (TARGETARCH=${TARGETARCH})..." && \
     apt-get update && \
     apt-get install -y --no-install-recommends xz-utils && \
     rm -rf /var/lib/apt/lists/* && \
     # 1. noarch（包含 /init 和 /etc/s6-overlay）
     tar -C / -xJf /tmp/s6-noarch.tar.xz && \
-    # 2. x86_64 平台二进制
-    tar -C / -xJf /tmp/s6-x86_64.tar.xz && \
+    # 2. 平台二进制（amd64 → x86_64，arm64 → aarch64）
+    if [ "${TARGETARCH}" = "arm64" ]; then \
+        tar -C / -xJf /tmp/s6-aarch64.tar.xz; \
+    else \
+        tar -C / -xJf /tmp/s6-x86_64.tar.xz; \
+    fi && \
     # 3. 跨平台符号链接
     tar -C / -xJf /tmp/s6-symlinks-noarch.tar.xz && \
     # 4. 架构特定符号链接
@@ -114,7 +121,7 @@ RUN echo "安装 s6-overlay v3.2.3.2 (4 个包)..." && \
     rm /tmp/s6-*.tar.xz && \
     # 验证 /init 存在
     ls -la /init && \
-    echo "s6-overlay 安装完成"
+    echo "s6-overlay 安装完成 (${TARGETARCH})"
 
 # 安装 gosu（用于权限降级）和 curl（用于健康检查）
 # 注意：基础镜像可能已经有这些，但显式安装保证可用
@@ -174,7 +181,7 @@ COPY docs/02-user-guide/jdyun-user-manual-v3.0.md /app/docs/02-user-guide/
 # 配置文件已随 COPY config /app/config 包含（config/searxng/settings.yml）
 # ------------------------------------------------------------------------------
 COPY --from=searxng-wheel-builder /build/wheels/searxng-*.whl /tmp/
-RUN pip install --no-cache-dir /tmp/searxng-*.whl && \
+RUN pip install --no-cache-dir --retries 5 --timeout 300 /tmp/searxng-*.whl -i https://pypi.tuna.tsinghua.edu.cn/simple && \
     rm -f /tmp/searxng-*.whl && \
     python -c "import searx; print('searxng OK:', searx.__file__)"
 
