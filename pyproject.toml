@@ -60,7 +60,6 @@ dependencies = [
     "langgraph>=0.4.8",
     "openai>=1.0.0,<2.0.0",
     "qdrant-client>=1.7.0",  # 向量数据库客户端
-    "sentence-transformers>=3.0.0",  # 本地 Embedding 模型推理
 
     # 数据处理和分析
     "pandas>=2.3.0",

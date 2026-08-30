@@ -328,7 +328,6 @@ $testImports = @(
     "qdrant_client",  # 🔥 向量数据库：Qdrant（推荐，线程安全）
     "chromadb",  # 🔥 向量数据库：ChromaDB（保留兼容）
     "searx",  # 🔥 SearXNG 元搜索引擎（Web 搜索功能）
-    "sentence_transformers",  # 🔥 本地 Embedding 模型推理
     "langchain_experimental"  # 🔥 LangChain 实验功能
 )
 $importSuccess = 0

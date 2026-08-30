@@ -104,8 +104,6 @@ class EmbeddingManager:
                 self._init_from_database()
                 if self._providers:
                     logger.info(f"✅ 从数据库加载了 {len(self._providers)} 个 Embedding 提供商")
-                    # 🔥 确保本地 sentence-transformers 始终作为最终 fallback
-                    self._ensure_local_fallback()
                     return
             except Exception as e:
                 logger.warning(f"⚠️ 从数据库加载 Embedding 配置失败: {e}")
@@ -113,38 +111,19 @@ class EmbeddingManager:
         # 降级：从环境变量初始化
         self._init_from_env()
 
-    def _ensure_local_fallback(self):
-        """确保本地 sentence-transformers 始终作为最终 fallback provider。
-
-        当所有线上 API 模型都不可用时（无 API Key / 连接失败），
-        自动回退到本地 Qwen/Qwen3-Embedding-0.6B 模型，无需联网。
-        """
-        existing_names = {p["name"] for p in self._providers}
-        if "local" not in existing_names:
-            self._providers.append({
-                "name": "local",
-                "api_key": "local",
-                "base_url": None,
-                "model": "Qwen/Qwen3-Embedding-0.6B",
-                "display_name": "本地 sentence-transformers"
-            })
-            self._fallback_providers = self._providers[1:]
-            logger.info("📦 已添加本地 sentence-transformers 作为最终 fallback")
-    
     @staticmethod
     def _check_provider_available(provider_info: Dict[str, Any]) -> bool:
         """预检查提供商是否可用（不实际调用 embedding API）。
 
         - 云端模型：检查 API Key 是否非空
         - Ollama / LocalAI：检查 TCP 端口是否可达
-        - local（sentence-transformers）：总是可用
         """
         name = provider_info.get("name", "")
         base_url = provider_info.get("base_url") or ""
 
-        # local sentence-transformers 始终可用
+        # sentence-transformers 本地 embedding 已移除，local provider 不再支持
         if name == "local":
-            return True
+            return False
 
         # 本地 HTTP 服务（Ollama）：检查 /v1/models 端点是否返回有效响应
         if name == "ollama" and base_url:
@@ -258,8 +237,8 @@ class EmbeddingManager:
                 base_url = provider_doc.get("default_base_url") or provider_doc.get("base_url", "")
                 embedding_model = provider_doc.get("embedding_model", "")
 
-                # 🔥 本地模型（local/ollama/localai）不需要 API Key
-                is_local_provider = provider_name in ["local", "ollama", "localai"]
+                # 🔥 本地 HTTP 服务（ollama/localai）不需要 API Key
+                is_local_provider = provider_name in ["ollama", "localai"]
                 if not api_key and not is_local_provider:
                     logger.debug(f"⚠️ {provider_name} 未配置 API Key，跳过")
                     continue
@@ -344,15 +323,6 @@ class EmbeddingManager:
                 "model": "nomic-embed-text",  # Ollama 默认 Embedding 模型
                 "base_url": "http://localhost:11434/v1",
                 "display_name": "Ollama (本地)"
-            },
-            # LocalAI 已移除：默认端口 8080 容易与其他服务冲突（如 SearXNG），
-            # 且已有 Ollama + sentence-transformers 两个本地 fallback
-            {
-                "name": "local",
-                "env_key": None,  # 本地 sentence-transformers，无需 API Key
-                "model": "Qwen/Qwen3-Embedding-0.6B",
-                "base_url": None,  # 直接本地推理，不走 HTTP
-                "display_name": "本地 sentence-transformers"
             },
         ]
         
@@ -519,9 +489,6 @@ class EmbeddingManager:
         try:
             if provider_name == "dashscope":
                 return self._call_dashscope(provider, text)
-            elif provider_name == "local":
-                # 🔥 本地 sentence-transformers 模型，无需联网
-                return self._call_local(provider, text)
             elif provider_name in ["openai", "deepseek", "zhipu", "ollama", "localai", "jdyun", "volcengine", "volcengine_coding", "siliconflow", "kimi", "aihubmix", "xiaomi"]:
                 # 🔥 OpenAI 兼容的 API（包括智谱AI、DeepSeek、京东云、本地模型等）
                 # 智谱AI 使用 OpenAI 兼容的 API，base_url: https://open.bigmodel.cn/api/paas/v4
@@ -536,70 +503,6 @@ class EmbeddingManager:
                 return self._call_openai_compatible(provider, text)
         except Exception as e:
             logger.error(f"❌ {provider['display_name']} Embedding 调用失败: {e}")
-            return None
-
-    def _call_local(self, provider: Dict[str, Any], text: str) -> Optional[List[float]]:
-        """
-        调用本地 sentence-transformers 模型（无需联网）
-
-        使用 HuggingFace sentence-transformers 库直接在本地加载模型，
-        支持 Qwen/Qwen3-Embedding-0.6B 等模型。
-        """
-        model_name = provider.get('model', 'Qwen/Qwen3-Embedding-0.6B')
-
-        try:
-            # 缓存已加载的模型，避免重复加载
-            if not hasattr(self, '_local_model_cache'):
-                self._local_model_cache = {}
-
-            if model_name not in self._local_model_cache:
-                logger.info(f"📦 正在加载本地 Embedding 模型: {model_name}")
-                # 🔥 模型缓存放项目数据目录，不放系统盘
-                from pathlib import Path
-                models_root = Path(__file__).parent.parent.parent / "data" / "models"
-                hf_home = models_root / "huggingface"
-                hf_home.mkdir(parents=True, exist_ok=True)
-                # 🔥 HF_HOME 指向 HuggingFace Hub 缓存目录（模型下载位置）
-                os.environ["HF_HOME"] = str(hf_home)
-                # 🔥 使用国内镜像源，不调 HuggingFace 官方
-                os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-                # 🔥 禁用遥测，避免额外网络请求
-                os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
-
-                # 🔥 修复：HuggingFace hub 缓存格式为 hub/models--<org>--<model>/snapshots/<hash>/
-                # SentenceTransformer(cache_folder=...) 不会查找此格式，导致误判模型未缓存
-                # 进而尝试联网下载。改为直接定位 snapshot 目录加载，避免任何网络请求。
-                model_org_model = model_name.replace("/", "--")
-                hub_cache = hf_home / "hub" / f"models--{model_org_model}"
-                local_model_path = None
-                if hub_cache.exists():
-                    snapshots_dir = hub_cache / "snapshots"
-                    if snapshots_dir.is_dir():
-                        for snapshot in snapshots_dir.iterdir():
-                            if snapshot.is_dir() and (snapshot / "modules.json").exists():
-                                local_model_path = snapshot
-                                break
-
-                from sentence_transformers import SentenceTransformer
-                if local_model_path:
-                    logger.info(f"📂 从本地缓存加载模型: {local_model_path}")
-                    self._local_model_cache[model_name] = SentenceTransformer(str(local_model_path))
-                else:
-                    # 模型未缓存，尝试在线下载（依赖 HF_ENDPOINT 镜像）
-                    self._local_model_cache[model_name] = SentenceTransformer(model_name)
-                logger.info(f"✅ 本地 Embedding 模型加载成功: {model_name} (路径: {local_model_path or '在线下载'})")
-
-            model = self._local_model_cache[model_name]
-            embedding = model.encode(text)
-            embedding = embedding.tolist() if hasattr(embedding, 'tolist') else list(embedding)
-            logger.debug(f"✅ 本地 Embedding 成功，维度: {len(embedding)}")
-            return embedding
-
-        except ImportError:
-            logger.error(f"❌ sentence-transformers 未安装，请运行: pip install sentence-transformers")
-            return None
-        except Exception as e:
-            logger.error(f"❌ 本地 Embedding 调用失败: {e}")
             return None
 
     def _call_dashscope(self, provider: Dict[str, Any], text: str) -> Optional[List[float]]:

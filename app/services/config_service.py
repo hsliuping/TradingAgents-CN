@@ -3660,15 +3660,8 @@ class ConfigService:
                         "display_name": display_name,
                         "models": models
                     })
-            
-            # 🔧 添加本地 Embedding 选项（无需 API Key，使用 sentence-transformers）
-            result.append({
-                "name": "local",
-                "display_name": "本地 Embedding（无需联网）",
-                "models": ["Qwen/Qwen3-Embedding-0.6B"],
-            })
-            
-            logger.info(f"✅ [get_embedding_providers] 返回 {len(result)} 个支持 embedding 的厂家（含本地）")
+
+            logger.info(f"✅ [get_embedding_providers] 返回 {len(result)} 个支持 embedding 的厂家")
             return result
         except Exception as e:
             logger.error(f"❌ [get_embedding_providers] 获取 Embedding 厂家列表失败: {e}", exc_info=True)
