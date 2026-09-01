@@ -6,8 +6,15 @@ param(
     [switch]$ForceImport  # Force import configuration even if already imported
 )
 
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Stop"
+
+# Support both the package-root copies and the canonical source-tree layout.
 $root = $PSScriptRoot
+$parent = Split-Path -Parent $PSScriptRoot
+if ((Split-Path -Leaf $PSScriptRoot) -eq 'installer' -and
+    (Split-Path -Leaf $parent) -eq 'scripts') {
+    $root = Split-Path -Parent $parent
+}
 
 function Load-Env($path) {
     $map = @{}
@@ -19,6 +26,11 @@ function Load-Env($path) {
             if ($idx -gt 0) {
                 $key = $line.Substring(0, $idx).Trim()
                 $val = $line.Substring($idx + 1).Trim()
+                if ($val.Length -ge 2 -and
+                    (($val.StartsWith('"') -and $val.EndsWith('"')) -or
+                     ($val.StartsWith("'") -and $val.EndsWith("'")))) {
+                    $val = $val.Substring(1, $val.Length - 2)
+                }
                 $map[$key] = $val
             }
         }
@@ -26,11 +38,79 @@ function Load-Env($path) {
     return $map
 }
 
+function Sync-MongoUriEndpoints {
+    param(
+        [string]$File,
+        [string]$HostName,
+        [int]$PortNumber
+    )
+
+    if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { return }
+
+    $content = Get-Content -LiteralPath $File -Raw -Encoding UTF8
+    $formattedHost = $HostName
+    if ($formattedHost -match ':' -and -not ($formattedHost.StartsWith('['))) {
+        $formattedHost = "[$formattedHost]"
+    }
+
+    # Replace only the local MongoDB endpoint. Credentials, database names,
+    # and query parameters in every supported URI alias remain unchanged.
+    $uriPattern = '(?m)^((?:MONGODB_CONNECTION_STRING|MONGODB_URL|MONGO_URI|MONGODB_URI)=mongodb://)([^@\r\n/?]+@)?(\[[^\]]+\]|[^:/\r\n/?]+)(?::\d+)?'
+    $replacement = '$1$2' + $formattedHost + ':' + $PortNumber
+    $updated = [regex]::Replace($content, $uriPattern, $replacement)
+    if ($updated -ne $content) {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($File, $updated, $utf8NoBom)
+    }
+}
+
+function Test-TcpPort {
+    param(
+        [string]$HostName,
+        [int]$Port,
+        [int]$TimeoutMilliseconds = 1000
+    )
+
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $connectTask = $client.ConnectAsync($HostName, $Port)
+        return ($connectTask.Wait($TimeoutMilliseconds) -and $client.Connected)
+    } catch {
+        return $false
+    } finally {
+        $client.Dispose()
+    }
+}
+
+function Wait-ForTcpPort {
+    param(
+        [string]$HostName,
+        [int]$Port,
+        [int]$TimeoutSeconds = 60
+    )
+
+    for ($attempt = 0; $attempt -lt $TimeoutSeconds; $attempt++) {
+        if (Test-TcpPort -HostName $HostName -Port $Port) {
+            return $true
+        }
+        Start-Sleep -Seconds 1
+    }
+    return (Test-TcpPort -HostName $HostName -Port $Port)
+}
+
 $envMap = Load-Env (Join-Path $root '.env')
 $backendPort = if ($envMap.ContainsKey('PORT')) { [int]$envMap['PORT'] } else { 8000 }
 $nginxPort = if ($envMap.ContainsKey('NGINX_PORT')) { [int]$envMap['NGINX_PORT'] } else { 80 }
 $mongoPort = if ($envMap.ContainsKey('MONGODB_PORT')) { [int]$envMap['MONGODB_PORT'] } else { 27017 }
+$mongoHost = if ($envMap.ContainsKey('MONGODB_HOST') -and -not [string]::IsNullOrWhiteSpace($envMap['MONGODB_HOST'])) { [string]$envMap['MONGODB_HOST'] } else { 'localhost' }
 $redisPort = if ($envMap.ContainsKey('REDIS_PORT')) { [int]$envMap['REDIS_PORT'] } else { 6379 }
+$mongoProbeHost = $mongoHost
+if ([string]::IsNullOrWhiteSpace($mongoProbeHost) -or
+    $mongoProbeHost -eq '0.0.0.0' -or $mongoProbeHost -eq '::' -or $mongoProbeHost -eq '*') {
+    $mongoProbeHost = '127.0.0.1'
+}
+
+Sync-MongoUriEndpoints -File (Join-Path $root '.env') -HostName $mongoHost -PortNumber $mongoPort
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "TradingAgents-CN Portable - Start All" -ForegroundColor Cyan
@@ -52,12 +132,16 @@ if (Test-Path $pyvenvCfg) {
 
 # Step 1: Start MongoDB and Redis
 Write-Host "[1/4] Starting MongoDB and Redis..." -ForegroundColor Yellow
-$servicesScript = Join-Path $root "start_services_clean.ps1"
+$servicesScript = Join-Path $PSScriptRoot "start_services_clean.ps1"
+if (-not (Test-Path -LiteralPath $servicesScript)) {
+    $servicesScript = Join-Path $root "start_services_clean.ps1"
+}
 if (Test-Path $servicesScript) {
     & powershell -ExecutionPolicy Bypass -File $servicesScript
-    if ($LASTEXITCODE -ne 0) {
+    $servicesExitCode = $LASTEXITCODE
+    if ($servicesExitCode -ne 0) {
         Write-Host "ERROR: Failed to start services" -ForegroundColor Red
-        exit 1
+        exit $servicesExitCode
     }
 } else {
     Write-Host "ERROR: Services script not found: $servicesScript" -ForegroundColor Red
@@ -66,7 +150,12 @@ if (Test-Path $servicesScript) {
 
 Write-Host ""
 Write-Host "[2/4] Waiting for services to be ready..." -ForegroundColor Yellow
-Start-Sleep -Seconds 3
+if (-not (Wait-ForTcpPort -HostName $mongoProbeHost -Port $mongoPort -TimeoutSeconds 60)) {
+    Write-Host "ERROR: MongoDB is not reachable at ${mongoProbeHost}:$mongoPort" -ForegroundColor Red
+    Write-Host "Check the MongoDB startup logs before retrying." -ForegroundColor Yellow
+    exit 1
+}
+Write-Host "  MongoDB is reachable at ${mongoProbeHost}:$mongoPort" -ForegroundColor Green
 
 # Step 2: Import configuration and create user (first time only)
 $importMarkerFile = Join-Path $root 'runtime\.config_imported'
@@ -81,28 +170,44 @@ if ($needsImport) {
     }
 
     $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
+    if (-not (Test-Path -LiteralPath $pythonExe)) {
+        $pythonExe = Join-Path $root 'vendors\python\python.exe'
+    }
     if (-not (Test-Path $pythonExe)) {
         Write-Host "  ERROR: Python not found at: $pythonExe" -ForegroundColor Red
-        Write-Host "  Skipping configuration import..." -ForegroundColor Yellow
+        Write-Host "  Configuration import cannot continue." -ForegroundColor Red
+        exit 1
     } else {
         # Test Python first
         Write-Host "  Testing Python: $pythonExe" -ForegroundColor Gray
         try {
             $pythonTest = & $pythonExe --version 2>&1
+            $pythonTestExitCode = $LASTEXITCODE
+            if ($pythonTestExitCode -ne 0) {
+                throw "Python exited with code $pythonTestExitCode"
+            }
             Write-Host "  Python version: $pythonTest" -ForegroundColor Gray
         } catch {
             Write-Host "  ERROR: Python failed to run: $_" -ForegroundColor Red
             Write-Host "  Exception details: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "  Skipping configuration import..." -ForegroundColor Yellow
+            exit 1
         }
 
         $importScript = Join-Path $root 'scripts\import_config_and_create_user.py'
-        $configFile = Join-Path $root 'install\database_export_config_2025-10-31.json'
+        $installDir = Join-Path $root 'install'
+        $configCandidates = @()
+        if (Test-Path -LiteralPath $installDir) {
+            $configCandidates = @(Get-ChildItem -LiteralPath $installDir -Filter 'database_export_config_*.json' -File | Sort-Object Name -Descending)
+            if ($configCandidates.Count -eq 0) {
+                $configCandidates = @(Get-ChildItem -LiteralPath $installDir -Filter 'database_export_config.json' -File)
+            }
+        }
+        $configFile = if ($configCandidates.Count -gt 0) { $configCandidates[0].FullName } else { $null }
 
-        if ((Test-Path $importScript) -and (Test-Path $configFile)) {
+        if ((Test-Path -LiteralPath $importScript) -and $configFile -and (Test-Path -LiteralPath $configFile)) {
             try {
                 Write-Host "  Running import script..." -ForegroundColor Gray
-                Write-Host "  Command: $pythonExe $importScript $configFile --host --mongodb-port $mongoPort" -ForegroundColor Gray
+                Write-Host "  Command: $pythonExe $importScript $configFile --host --mongodb-host $mongoHost --mongodb-port $mongoPort" -ForegroundColor Gray
 
                 # Set console output encoding to UTF-8 to handle Chinese characters
                 $originalOutputEncoding = [Console]::OutputEncoding
@@ -112,10 +217,12 @@ if ($needsImport) {
                 $env:PYTHONIOENCODING = "utf-8"
 
                 # Capture output for debugging
-                $importOutput = & $pythonExe $importScript $configFile --host --mongodb-port $mongoPort 2>&1
-
-                # Restore original encoding
-                [Console]::OutputEncoding = $originalOutputEncoding
+                try {
+                    $importOutput = & $pythonExe $importScript $configFile --host --mongodb-host $mongoHost --mongodb-port $mongoPort 2>&1
+                    $importExitCode = $LASTEXITCODE
+                } finally {
+                    [Console]::OutputEncoding = $originalOutputEncoding
+                }
 
                 # Print all output
                 if ($importOutput) {
@@ -124,7 +231,7 @@ if ($needsImport) {
                 }
 
                 # Check if import was successful
-                if ($LASTEXITCODE -eq 0) {
+                if ($importExitCode -eq 0) {
                     Write-Host "  Configuration imported successfully" -ForegroundColor Green
 
                     # Create marker file to indicate import is done
@@ -132,24 +239,27 @@ if ($needsImport) {
                     if (-not (Test-Path $runtimeDir)) {
                         New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
                     }
-                    Set-Content -Path $importMarkerFile -Value (Get-Date).ToString() -Encoding ASCII
+                    Set-Content -LiteralPath $importMarkerFile -Value (Get-Date).ToString('o') -Encoding ASCII -ErrorAction Stop
                     Write-Host "  Import marker created: $importMarkerFile" -ForegroundColor Gray
                 } else {
-                    Write-Host "  ERROR: Import script failed with exit code $LASTEXITCODE" -ForegroundColor Red
+                    Write-Host "  ERROR: Import script failed with exit code $importExitCode" -ForegroundColor Red
+                    exit 1
                 }
             } catch {
                 Write-Host "  ERROR: Failed to import configuration: $_" -ForegroundColor Red
                 Write-Host "  Exception details: $($_.Exception.Message)" -ForegroundColor Red
-                Write-Host "  Continuing with startup..." -ForegroundColor Yellow
+                Write-Host "  Import marker was not created." -ForegroundColor Yellow
+                exit 1
             }
         } else {
             if (-not (Test-Path $importScript)) {
                 Write-Host "  WARNING: Import script not found: $importScript" -ForegroundColor Yellow
             }
-            if (-not (Test-Path $configFile)) {
-                Write-Host "  WARNING: Config file not found: $configFile" -ForegroundColor Yellow
+            if (-not $configFile -or -not (Test-Path -LiteralPath $configFile)) {
+                Write-Host "  WARNING: Config file not found under: $installDir" -ForegroundColor Yellow
             }
-            Write-Host "  Skipping configuration import" -ForegroundColor Gray
+            Write-Host "  Configuration import cannot continue." -ForegroundColor Red
+            exit 1
         }
     }
 } else {
@@ -194,7 +304,10 @@ if ($portInUse) {
 }
 
 $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
-if (-not (Test-Path $pythonExe)) {
+if (-not (Test-Path -LiteralPath $pythonExe)) {
+    $pythonExe = Join-Path $root 'vendors\python\python.exe'
+}
+if (-not (Test-Path -LiteralPath $pythonExe)) {
     Write-Host "  ERROR: Python not found at: $pythonExe" -ForegroundColor Red
     exit 1
 }
@@ -203,6 +316,10 @@ if (-not (Test-Path $pythonExe)) {
 Write-Host "  Testing Python..." -ForegroundColor Gray
 try {
     $pythonTest = & $pythonExe --version 2>&1
+    $pythonTestExitCode = $LASTEXITCODE
+    if ($pythonTestExitCode -ne 0) {
+        throw "Python exited with code $pythonTestExitCode"
+    }
     Write-Host "  Python version: $pythonTest" -ForegroundColor Gray
 } catch {
     Write-Host "  ERROR: Python failed to run: $_" -ForegroundColor Red
@@ -493,7 +610,7 @@ Write-Host "All Services Started Successfully!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Service Status:" -ForegroundColor White
-Write-Host "  MongoDB:  127.0.0.1:$mongoPort" -ForegroundColor Green
+Write-Host "  MongoDB:  ${mongoProbeHost}:$mongoPort" -ForegroundColor Green
 Write-Host "  Redis:    127.0.0.1:$redisPort" -ForegroundColor Green
 Write-Host "  Backend:  http://127.0.0.1:$backendPort" -ForegroundColor Green
 Write-Host "  Frontend: http://127.0.0.1:$nginxPort" -ForegroundColor Green

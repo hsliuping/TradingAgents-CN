@@ -217,6 +217,62 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
+def rewrite_mongodb_uri_endpoint(
+    uri: str,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+) -> str:
+    """Replace only the endpoint in a MongoDB URI.
+
+    Credentials, database names, and query parameters are deliberately kept
+    byte-for-byte intact.  The portable package uses a local ``mongodb://``
+    URI, so an explicit endpoint override must not discard settings that are
+    only present in the full connection string.
+    """
+    if host is None and port is None:
+        return uri
+
+    pattern = re.compile(
+        r"^(mongodb://)"
+        r"([^@\r\n/?]+@)?"
+        r"(\[[^\]]+\]|[^:/\r\n/?]+)"
+        r"(?P<port>:\d+)?"
+        r"(?P<suffix>[/?.#].*)?$",
+        re.IGNORECASE,
+    )
+    match = pattern.match(uri)
+    if not match:
+        raise ValueError("Unsupported MongoDB URI format; cannot override its endpoint safely")
+
+    current_host = match.group(3)
+    new_host = current_host if host is None else host
+    if ':' in new_host and not new_host.startswith('['):
+        new_host = f'[{new_host}]'
+    # The endpoint port is optional.  Preserve it when only the host changes.
+    current_port = match.group('port')
+    new_port = port if port is not None else (current_port[1:] if current_port else None)
+    endpoint = f":{new_port}" if new_port is not None else ''
+    suffix = match.group('suffix') or ''
+    return f"{match.group(1)}{match.group(2) or ''}{new_host}{endpoint}{suffix}"
+
+
+def apply_cli_overrides(config: dict, host: Optional[str] = None, port: Optional[int] = None) -> dict:
+    """Apply explicit MongoDB command-line overrides without dropping URI settings."""
+    if port is not None:
+        config['mongodb_port'] = port
+    if host is not None:
+        config['mongodb_host'] = host
+    if port is not None or host is not None:
+        mongo_uri = config.get('mongodb_connection_string')
+        if mongo_uri:
+            config['mongodb_connection_string'] = rewrite_mongodb_uri_endpoint(
+                mongo_uri,
+                host=host,
+                port=port,
+            )
+    return config
+
+
 def convert_to_bson(data: Any) -> Any:
     """将 JSON 数据转换为 BSON 兼容格式"""
     if isinstance(data, dict):
@@ -281,6 +337,17 @@ def load_export_file(file_path: str) -> Dict[str, Any]:
         sys.exit(1)
 
 
+def build_mongodb_uri(use_docker: bool, config: dict) -> str:
+    """Build a MongoDB URI from the endpoint settings in ``config``."""
+    database = config['mongodb_database']
+    auth_source = config.get('mongodb_auth_source') or 'admin'
+    host = 'mongodb' if use_docker else config['mongodb_host']
+    port = config['mongodb_port']
+    username = config['mongodb_username']
+    password = config['mongodb_password']
+    return f"mongodb://{username}:{password}@{host}:{port}/{database}?authSource={auth_source}"
+
+
 def connect_mongodb(use_docker: bool = True, config: dict = None) -> MongoClient:
     """连接到 MongoDB
 
@@ -301,18 +368,13 @@ def connect_mongodb(use_docker: bool = True, config: dict = None) -> MongoClient
         }
 
     database = config['mongodb_database']
-    auth_source = config.get('mongodb_auth_source') or 'admin'
+    port = config['mongodb_port']
     mongo_uri = config.get('mongodb_connection_string')
     env_name = "Docker 容器内" if use_docker else "宿主机"
 
     if not mongo_uri:
-        # 构建 MongoDB URI
-        host = 'mongodb' if use_docker else config['mongodb_host']
-        port = config['mongodb_port']
-        username = config['mongodb_username']
-        password = config['mongodb_password']
-        mongo_uri = f"mongodb://{username}:{password}@{host}:{port}/{database}?authSource={auth_source}"
-        masked_uri = f"mongodb://{username}:***@{host}:{port}/{database}?authSource={auth_source}"
+        mongo_uri = build_mongodb_uri(use_docker, config)
+        masked_uri = re.sub(r"://([^:/]+):([^@]+)@", r"://\1:***@", mongo_uri)
     else:
         # 如果是 Docker 模式，并且 .env 写的是 localhost，则替换成容器内服务名
         if use_docker:
@@ -555,18 +617,26 @@ def main():
     script_dir = Path(__file__).parent
     env_config = load_env_config(script_dir)
 
-    # 命令行参数覆盖 .env 配置
-    if args.mongodb_port:
-        env_config['mongodb_port'] = args.mongodb_port
+    # 命令行参数覆盖 .env 配置。显式指定任一端点参数时，只更新完整
+    # 连接字符串的 endpoint，不能丢失其中的凭据、数据库或查询参数。
+    if args.mongodb_port is not None:
         print(f"💡 使用命令行指定的 MongoDB 端口: {args.mongodb_port}")
-    if args.mongodb_host:
-        env_config['mongodb_host'] = args.mongodb_host
+    if args.mongodb_host is not None:
         print(f"💡 使用命令行指定的 MongoDB 主机: {args.mongodb_host}")
-        # 主机被显式覆盖时，不再复用 .env 里的完整连接串
-        env_config['mongodb_connection_string'] = None
+    endpoint_host = args.mongodb_host
+    endpoint_port = args.mongodb_port
+    if args.host:
+        # --host selects the configured local endpoint, including the port.
+        if endpoint_host is None:
+            endpoint_host = env_config['mongodb_host']
+        if endpoint_port is None:
+            endpoint_port = env_config['mongodb_port']
+    apply_cli_overrides(env_config, host=endpoint_host, port=endpoint_port)
 
     # 连接数据库
-    use_docker = not args.host  # 默认在 Docker 内运行，除非指定 --host
+    # An explicit host is an endpoint selection too, so do not replace it with
+    # Docker's service name unless the caller left the endpoint untouched.
+    use_docker = not args.host and args.mongodb_host is None
     client = connect_mongodb(use_docker=use_docker, config=env_config)
     db_name = env_config['mongodb_database']
     db = client[db_name]
@@ -598,6 +668,7 @@ def main():
             "inserted": 0,
             "skipped": 0
         }
+        import_errors = []
         
         for collection_name in collections_to_import:
             if collection_name not in data:
@@ -620,6 +691,12 @@ def main():
             
             except Exception as e:
                 print(f"      ❌ 失败: {e}")
+                import_errors.append(collection_name)
+
+        if import_errors:
+            print(f"\n❌ 配置导入失败，失败集合: {', '.join(import_errors)}")
+            client.close()
+            return 1
         
         print(f"\n📊 导入统计:")
         if args.overwrite:
@@ -648,8 +725,8 @@ def main():
     print(f"   1. 重启后端服务: docker restart tradingagents-backend")
     print(f"   2. 访问前端并使用默认账号登录")
     print(f"   3. 检查系统配置是否正确加载")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
-
+    sys.exit(main())

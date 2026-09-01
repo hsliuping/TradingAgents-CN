@@ -58,6 +58,46 @@ if (-not $SkipSync) {
     Write-Host ""
 }
 
+# Always refresh the startup payload, including when -SkipSync is used. The
+# portable release intentionally preserves data and other local files, but it
+# must never preserve an old generated startup script.
+Write-Host "Staging portable startup and initialization files..." -ForegroundColor Cyan
+$portableStartupFiles = @(
+    @{ Source = "scripts\installer\setup.ps1"; Destination = "scripts\installer\setup.ps1" },
+    @{ Source = "scripts\installer\start_all.ps1"; Destination = "scripts\installer\start_all.ps1" },
+    @{ Source = "scripts\installer\start_services_clean.ps1"; Destination = "scripts\installer\start_services_clean.ps1" },
+    @{ Source = "scripts\installer\stop_all.ps1"; Destination = "scripts\installer\stop_all.ps1" },
+    @{ Source = "scripts\installer\start_all.ps1"; Destination = "start_all.ps1" },
+    @{ Source = "scripts\installer\start_services_clean.ps1"; Destination = "start_services_clean.ps1" },
+    @{ Source = "scripts\installer\stop_all.ps1"; Destination = "stop_all.ps1" },
+    @{ Source = "scripts\import_config_and_create_user.py"; Destination = "scripts\import_config_and_create_user.py" },
+    @{ Source = "scripts\init_mongodb_user.py"; Destination = "scripts\init_mongodb_user.py" }
+)
+foreach ($file in $portableStartupFiles) {
+    $source = Join-Path $root $file.Source
+    $destination = Join-Path $portableDir $file.Destination
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        Write-Host "ERROR: Required portable file not found: $source" -ForegroundColor Red
+        exit 1
+    }
+    $destinationDir = Split-Path -Parent $destination
+    if (-not (Test-Path -LiteralPath $destinationDir)) {
+        New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+    }
+    Copy-Item -LiteralPath $source -Destination $destination -Force
+    Write-Host "  OK: $($file.Destination)" -ForegroundColor Green
+}
+
+$installSource = Join-Path $root 'install'
+if (Test-Path -LiteralPath $installSource) {
+    $installDestination = Join-Path $portableDir 'install'
+    if (-not (Test-Path -LiteralPath $installDestination)) {
+        New-Item -ItemType Directory -Path $installDestination -Force | Out-Null
+    }
+    Get-ChildItem -LiteralPath $installSource -Filter 'database_export_config*.json' -File | Copy-Item -Destination $installDestination -Force
+}
+Write-Host ""
+
 # ============================================================================
 # Step 1.5: Setup Embedded Python (if not present)
 # ============================================================================
