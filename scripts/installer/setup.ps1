@@ -47,6 +47,32 @@ function Set-EnvLine {
     Add-Content -Path $File -Value "$Key=$Value" -Encoding ASCII
 }
 
+function Sync-MongoUriEndpoints {
+    param(
+        [string]$File,
+        [string]$HostName,
+        [int]$PortNumber
+    )
+
+    if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { return }
+
+    $content = Get-Content -LiteralPath $File -Raw -Encoding UTF8
+    $formattedHost = $HostName
+    if ($formattedHost -match ':' -and -not ($formattedHost.StartsWith('['))) {
+        $formattedHost = "[$formattedHost]"
+    }
+
+    # Replace only the local MongoDB endpoint. Credentials, database names,
+    # and query parameters in every supported URI alias remain unchanged.
+    $uriPattern = '(?m)^((?:MONGODB_CONNECTION_STRING|MONGODB_URL|MONGO_URI|MONGODB_URI)=mongodb://)([^@\r\n/?]+@)?(\[[^\]]+\]|[^:/\r\n/?]+)(?::\d+)?'
+    $replacement = '$1$2' + $formattedHost + ':' + $PortNumber
+    $updated = [regex]::Replace($content, $uriPattern, $replacement)
+    if ($updated -ne $content) {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($File, $updated, $utf8NoBom)
+    }
+}
+
 Write-Host "TradingAgents-CN Windows Setup"
 Write-Host "Initializing environment and configuration..."
 
@@ -111,6 +137,7 @@ if ($AutoOpenBrowser -or -not $NonInteractive) {
 Set-EnvLine -File $envFile -Key 'MONGODB_HOST' -Value $MongoHost
 Set-EnvLine -File $envFile -Key 'MONGODB_PORT' -Value $MongoPort
 Set-EnvLine -File $envFile -Key 'MONGODB_DATABASE' -Value $MongoDb
+Sync-MongoUriEndpoints -File $envFile -HostName $MongoHost -PortNumber $MongoPort
 Set-EnvLine -File $envFile -Key 'REDIS_HOST' -Value $RedisHost
 Set-EnvLine -File $envFile -Key 'REDIS_PORT' -Value $RedisPort
 if ($EnableNginx) { Set-EnvLine -File $envFile -Key 'NGINX_PORT' -Value $NginxPort }

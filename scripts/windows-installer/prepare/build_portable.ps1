@@ -41,6 +41,37 @@ Write-Log "app directory copied"
 Copy-Item -Recurse -Force (Join-Path $root "scripts\installer") (Join-Path $out "scripts\installer")
 Write-Log "scripts\installer directory copied"
 
+# Keep the NSIS payload and the green package on the same tracked startup
+# scripts. The NSIS launcher starts from the package root, while the documented
+# portable layout also exposes scripts\installer.
+$startupFiles = @(
+  @{ Source = "scripts\installer\start_all.ps1"; Destination = "start_all.ps1" },
+  @{ Source = "scripts\installer\start_services_clean.ps1"; Destination = "start_services_clean.ps1" },
+  @{ Source = "scripts\installer\stop_all.ps1"; Destination = "stop_all.ps1" },
+  @{ Source = "scripts\import_config_and_create_user.py"; Destination = "scripts\import_config_and_create_user.py" },
+  @{ Source = "scripts\init_mongodb_user.py"; Destination = "scripts\init_mongodb_user.py" }
+)
+foreach ($file in $startupFiles) {
+  $source = Join-Path $root $file.Source
+  $destination = Join-Path $out $file.Destination
+  if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+    Write-Log "Required startup file not found: $source" "ERROR"
+    exit 1
+  }
+  $destinationDir = Split-Path -Parent $destination
+  New-Item -ItemType Directory -Force -Path $destinationDir | Out-Null
+  Copy-Item -LiteralPath $source -Destination $destination -Force
+  Write-Log "$($file.Destination) copied"
+}
+
+$installSource = Join-Path $root "install"
+if (Test-Path -LiteralPath $installSource) {
+  $installDestination = Join-Path $out "install"
+  New-Item -ItemType Directory -Force -Path $installDestination | Out-Null
+  Get-ChildItem -LiteralPath $installSource -Filter "database_export_config*.json" -File | Copy-Item -Destination $installDestination -Force
+  Write-Log "database configuration files copied"
+}
+
 if (Test-Path (Join-Path $root "vendors")) {
   Copy-Item -Recurse -Force (Join-Path $root "vendors") (Join-Path $out "vendors")
   Write-Log "vendors directory copied"
@@ -102,7 +133,7 @@ Write-Log "=========================================="
 Write-Log "Location: $out"
 Write-Log "Next steps:"
 Write-Log "1. Review .env.example and create .env"
-Write-Log "2. Start services: .\scripts\installer\start.ps1"
+Write-Log "2. Start services: .\start_all.ps1"
 Write-Log "3. Access Web UI at http://localhost"
 
 return $out

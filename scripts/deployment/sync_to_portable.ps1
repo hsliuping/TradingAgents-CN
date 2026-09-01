@@ -44,7 +44,8 @@ $syncDirs = @(
     "tests",
     "examples",
     "prompts",
-    "config"
+    "config",
+    "install"
 )
 
 $syncFiles = @(
@@ -209,6 +210,68 @@ foreach ($file in $syncFiles) {
 
     Copy-WithProgress -Source $sourceFile -Destination $destFile -Description $file
     $syncCount++
+}
+
+Write-Host ""
+
+# ============================================================================
+# Stage startup and initialization files
+# ============================================================================
+# These files are intentionally excluded from the normal source sync because
+# the portable release has its own startup layout. Always copy the tracked
+# versions so an old generated script cannot remain in the distributable.
+
+function Copy-RequiredFile {
+    param(
+        [string]$SourceRelativePath,
+        [string]$DestinationRelativePath
+    )
+
+    if ($DryRun) {
+        Write-Host "  [DRY RUN] Will copy: $DestinationRelativePath" -ForegroundColor Yellow
+        return
+    }
+
+    $source = Join-Path $root $SourceRelativePath
+    $destination = Join-Path $portableDir $DestinationRelativePath
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "Required portable file not found: $source"
+    }
+
+    $destinationDir = Split-Path -Parent $destination
+    if (-not (Test-Path -LiteralPath $destinationDir)) {
+        New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+    }
+    Copy-Item -LiteralPath $source -Destination $destination -Force
+    Write-Host "  OK: $DestinationRelativePath" -ForegroundColor Green
+}
+
+$portableStartupFiles = @(
+    @{ Source = "scripts\installer\setup.ps1"; Destination = "scripts\installer\setup.ps1" },
+    @{ Source = "scripts\installer\start_all.ps1"; Destination = "scripts\installer\start_all.ps1" },
+    @{ Source = "scripts\installer\start_services_clean.ps1"; Destination = "scripts\installer\start_services_clean.ps1" },
+    @{ Source = "scripts\installer\stop_all.ps1"; Destination = "scripts\installer\stop_all.ps1" },
+    @{ Source = "scripts\installer\start_all.ps1"; Destination = "start_all.ps1" },
+    @{ Source = "scripts\installer\start_services_clean.ps1"; Destination = "start_services_clean.ps1" },
+    @{ Source = "scripts\installer\stop_all.ps1"; Destination = "stop_all.ps1" },
+    @{ Source = "scripts\import_config_and_create_user.py"; Destination = "scripts\import_config_and_create_user.py" },
+    @{ Source = "scripts\init_mongodb_user.py"; Destination = "scripts\init_mongodb_user.py" }
+)
+
+Write-Host "Staging portable startup files..." -ForegroundColor Cyan
+foreach ($file in $portableStartupFiles) {
+    try {
+        Copy-RequiredFile -SourceRelativePath $file.Source -DestinationRelativePath $file.Destination
+        $syncCount++
+    } catch {
+        Write-Host "  FAILED: $($file.Destination) - $_" -ForegroundColor Red
+        $errorCount++
+    }
+}
+
+if ($errorCount -gt 0) {
+    Write-Host "ERROR: Required portable files could not be staged." -ForegroundColor Red
+    exit 1
 }
 
 Write-Host ""
