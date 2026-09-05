@@ -1,0 +1,426 @@
+"""
+基本面指标提取器（反幻觉核心）
+================================
+
+本模块的职责：从 Tushare/MongoDB 提取股票估值与盈利能力指标，
+返回结构化 dict，并渲染成「硬数据块」字符串供 prompt 注入。
+
+设计原则：
+1. **纯 Python 提取** —— LLM 完全不参与数字本身，避免估值幻觉
+2. **缺失 = None** —— 找不到的字段返回 None，绝不返回估算值或 0
+3. **MongoDB 缓存优先** —— 避免重复打 Tushare API（配额紧张）
+4. **降级链** —— MongoDB → Tushare → 返回残缺 dict（不抛异常）
+
+调用方：
+    metrics = extract_fundamentals_metrics(symbol="603699", trade_date="2026-09-04")
+    hard_block = format_metrics_block(metrics, currency_name="人民币")
+
+作者：WorkBuddy @ 2026-09-05
+问题背景：fundamentals_analyst LLM 自行编造 PE 值（实际 21.42 报 12~14 倍）
+"""
+
+from __future__ import annotations
+
+from typing import Optional, Dict, Any
+from datetime import datetime
+import logging
+
+try:
+    import pandas as pd
+except ImportError:  # 兜底
+    pd = None  # type: ignore
+
+logger = logging.getLogger(__name__)
+
+
+# ==================== 常量 ====================
+
+# Tushare daily_basic 标准字段（按需取，不取全量省流量）
+DAILY_BASIC_FIELDS = (
+    "ts_code,trade_date,close,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,"
+    "total_mv,circ_mv"
+)
+
+# Tushare fina_indicator 标准字段
+FINA_INDICATOR_FIELDS = (
+    "ts_code,end_date,eps,roe,grossprofit_margin,netprofit_margin,"
+    "debt_to_assets,net_profit_yoy,sales_yoy"
+)
+
+# 输出字典的标准 key（用于标记缺失）
+METRIC_KEYS = [
+    # 估值类
+    "close", "pe_ttm", "pe_static", "pb", "ps_ttm", "ps_static",
+    "dv_ratio_ttm", "total_mv", "circ_mv",
+    # 盈利能力类
+    "eps", "roe_ttm", "gross_margin", "net_margin", "debt_to_assets",
+    # 增长率
+    "net_profit_yoy", "sales_yoy",
+]
+
+# MongoDB 缓存集合名（避免与 stock_daily_basic 冲突，独立命名）
+SNAPSHOT_COLLECTION = "stock_metrics_snapshot"
+
+
+# ==================== 工具函数 ====================
+
+def _safe_float(x) -> Optional[float]:
+    """安全转 float，None/NaN 都返回 None（绝不返回 0）"""
+    if x is None:
+        return None
+    try:
+        v = float(x)
+        if pd is not None and pd.isna(v):
+            return None
+        if v != v:  # NaN 二次保险
+            return None
+        return round(v, 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_tushare_api():
+    """获取已初始化的 Tushare pro_api（带 token）"""
+    try:
+        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+        provider = get_tushare_provider()
+        if not getattr(provider, "connected", False):
+            return None
+        api = getattr(provider, "api", None)
+        return api
+    except Exception as e:
+        logger.debug(f"[metrics_extractor] get_tushare_api 失败: {e}")
+        return None
+
+
+def _resolve_ts_code(symbol: str) -> Optional[str]:
+    """6 位代码 → ts_code（如 603699 → 603699.SH），失败返回 None"""
+    if not symbol:
+        return None
+    s = str(symbol).strip().upper()
+    if s.endswith((".SH", ".SZ", ".BJ")):
+        return s
+    # 上海：60/68/90 开头
+    if s.startswith(("60", "68", "90")):
+        return f"{s}.SH"
+    # 深圳：00/30/20 开头
+    if s.startswith(("00", "30", "20")):
+        return f"{s}.SZ"
+    # 北京：43/87/92 等
+    if s.startswith(("43", "83", "87", "92")):
+        return f"{s}.BJ"
+    return None
+
+
+# ==================== 估值类提取 ====================
+
+def _fetch_valuation_metrics(symbol: str, trade_date: str) -> Dict[str, Any]:
+    """从 Tushare daily_basic 提取估值类指标"""
+    metrics: Dict[str, Any] = {}
+    api = _get_tushare_api()
+    if api is None:
+        logger.debug("[metrics_extractor] Tushare API 不可用，跳过估值提取")
+        return metrics
+
+    try:
+        ts_code = _resolve_ts_code(symbol)
+        if not ts_code:
+            logger.warning(f"[metrics_extractor] 无法解析 ts_code: {symbol}")
+            return metrics
+
+        # 优先按交易日查
+        df = api.daily_basic(ts_code=ts_code, trade_date=trade_date,
+                             fields=DAILY_BASIC_FIELDS)
+
+        # 当日非交易日则往前找最近 5 个交易日
+        if df is None or df.empty:
+            df = api.daily_basic(ts_code=ts_code, fields=DAILY_BASIC_FIELDS,
+                                 limit=5)
+            if df is not None and not df.empty:
+                df = df.sort_values("trade_date", ascending=False).head(1)
+
+        if df is not None and not df.empty:
+            row = df.iloc[0]
+            metrics.update({
+                "as_of_date": str(row.get("trade_date")),
+                "close":         _safe_float(row.get("close")),
+                "pe_ttm":        _safe_float(row.get("pe_ttm")),
+                "pe_static":     _safe_float(row.get("pe")),
+                "pb":            _safe_float(row.get("pb")),
+                "ps_ttm":        _safe_float(row.get("ps_ttm")),
+                "ps_static":     _safe_float(row.get("ps")),
+                "dv_ratio_ttm":  _safe_float(row.get("dv_ttm")),
+                "total_mv":      _safe_float(row.get("total_mv")),  # 单位：万元
+                "circ_mv":       _safe_float(row.get("circ_mv")),
+            })
+            logger.info(
+                f"[metrics_extractor] daily_basic 命中: {ts_code} "
+                f"as_of={metrics.get('as_of_date')}, "
+                f"pe_ttm={metrics.get('pe_ttm')}, pb={metrics.get('pb')}"
+            )
+    except Exception as e:
+        logger.warning(f"[metrics_extractor] daily_basic 提取失败 [{symbol}]: {e}")
+
+    return metrics
+
+
+# ==================== 盈利能力类提取 ====================
+
+def _fetch_profitability_metrics(symbol: str) -> Dict[str, Any]:
+    """从 Tushare fina_indicator 提取盈利能力指标（最新一期）"""
+    metrics: Dict[str, Any] = {}
+    api = _get_tushare_api()
+    if api is None:
+        return metrics
+
+    try:
+        ts_code = _resolve_ts_code(symbol)
+        if not ts_code:
+            return metrics
+
+        df = api.fina_indicator(ts_code=ts_code,
+                                fields=FINA_INDICATOR_FIELDS)
+        if df is not None and not df.empty:
+            df = df.sort_values("end_date", ascending=False)
+            row = df.iloc[0]
+            metrics.update({
+                "fina_period":    str(row.get("end_date")),
+                "eps":            _safe_float(row.get("eps")),
+                "roe_ttm":        _safe_float(row.get("roe")),
+                "gross_margin":   _safe_float(row.get("grossprofit_margin")),
+                "net_margin":     _safe_float(row.get("netprofit_margin")),
+                "debt_to_assets": _safe_float(row.get("debt_to_assets")),
+                "net_profit_yoy": _safe_float(row.get("net_profit_yoy")),
+                "sales_yoy":      _safe_float(row.get("sales_yoy")),
+            })
+            logger.info(
+                f"[metrics_extractor] fina_indicator 命中: {ts_code} "
+                f"period={metrics.get('fina_period')}, "
+                f"roe={metrics.get('roe_ttm')}"
+            )
+    except Exception as e:
+        logger.warning(f"[metrics_extractor] fina_indicator 提取失败 [{symbol}]: {e}")
+
+    return metrics
+
+
+# ==================== MongoDB 缓存层 ====================
+
+def _read_cache(symbol: str, trade_date: str,
+                max_age_days: int = 7) -> Optional[Dict[str, Any]]:
+    """
+    从 MongoDB 缓存读 metrics（7 天内有效）。
+    命中且数据非空 → 直接返回 dict；否则返回 None。
+    """
+    try:
+        from app.core.database import get_mongo_db_sync
+        db = get_mongo_db_sync()
+        doc = db[SNAPSHOT_COLLECTION].find_one({
+            "symbol": symbol,
+            "trade_date": trade_date,
+        })
+        if not doc:
+            return None
+        # 过期检查（仅基于 trade_date）
+        cached_date = doc.get("trade_date")
+        if cached_date:
+            try:
+                d = datetime.strptime(str(cached_date), "%Y-%m-%d")
+                if (datetime.now() - d).days > max_age_days:
+                    logger.debug(
+                        f"[metrics_extractor] 缓存过期: {symbol}@{cached_date}"
+                    )
+                    return None
+            except ValueError:
+                pass
+        # 转回纯 dict（去掉 _id）
+        return {k: v for k, v in doc.items() if k != "_id"}
+    except Exception as e:
+        logger.debug(f"[metrics_extractor] MongoDB 读缓存失败: {e}")
+        return None
+
+
+def _write_cache(metrics: Dict[str, Any]) -> None:
+    """把 metrics 写回 MongoDB（best-effort，失败不抛异常）"""
+    try:
+        from app.core.database import get_mongo_db_sync
+        db = get_mongo_db_sync()
+        db[SNAPSHOT_COLLECTION].update_one(
+            {
+                "symbol": metrics.get("_symbol"),
+                "trade_date": metrics.get("_trade_date"),
+            },
+            {
+                "$set": {
+                    **metrics,
+                    "_updated_at": datetime.now().isoformat(),
+                }
+            },
+            upsert=True,
+        )
+    except Exception as e:
+        logger.debug(f"[metrics_extractor] MongoDB 写缓存失败: {e}")
+
+
+# ==================== 主入口 ====================
+
+def extract_fundamentals_metrics(symbol: str,
+                                 trade_date: str) -> Dict[str, Any]:
+    """
+    提取股票基本面核心指标（纯代码，不让 LLM 参与数字本身）。
+
+    Args:
+        symbol: 股票代码（6 位，如 603699）
+        trade_date: 交易日 YYYY-MM-DD
+
+    Returns:
+        dict: 包含估值 + 盈利能力指标的 dict
+              缺失字段为 None，绝不返回估算值
+              含 _symbol/_trade_date/_source/_missing 等元字段
+    """
+    # 初始化标准结构（全部 None）
+    metrics: Dict[str, Any] = {k: None for k in METRIC_KEYS}
+    metrics["_symbol"] = symbol
+    metrics["_trade_date"] = trade_date
+    metrics["_source"] = "tushare"
+    metrics["_missing"] = []
+
+    # 1. 先查 MongoDB 缓存（命中且未过期 → 直接返回，省 Tushare 配额）
+    cached = _read_cache(symbol, trade_date)
+    if cached and any(cached.get(k) is not None for k in METRIC_KEYS):
+        metrics["_source"] = "mongodb_cache"
+        # 把缓存值合并进来
+        for k in METRIC_KEYS:
+            if cached.get(k) is not None:
+                metrics[k] = cached[k]
+        for meta_key in ("as_of_date", "fina_period"):
+            if cached.get(meta_key):
+                metrics[meta_key] = cached[meta_key]
+        metrics["_missing"] = [
+            k for k in METRIC_KEYS if metrics.get(k) is None
+        ]
+        logger.info(
+            f"[metrics_extractor] 缓存命中: {symbol}@{trade_date} "
+            f"missing={len(metrics['_missing'])}"
+        )
+        return metrics
+
+    # 2. 缓存未命中 → 调 Tushare
+    valuation = _fetch_valuation_metrics(symbol, trade_date)
+    profitability = _fetch_profitability_metrics(symbol)
+
+    # 合并（只覆盖 None 字段）
+    for source_dict in (valuation, profitability):
+        for k, v in source_dict.items():
+            if v is not None:
+                metrics[k] = v
+
+    # 3. 标记缺失字段
+    metrics["_missing"] = [
+        k for k in METRIC_KEYS if metrics.get(k) is None
+    ]
+
+    # 4. 写回缓存（best-effort）
+    if any(metrics.get(k) is not None for k in METRIC_KEYS):
+        _write_cache(metrics)
+
+    logger.info(
+        f"[metrics_extractor] 提取完成: {symbol}@{trade_date} "
+        f"missing={len(metrics['_missing'])} source={metrics['_source']}"
+    )
+    return metrics
+
+
+# ==================== 硬数据块渲染 ====================
+
+def format_metrics_block(metrics: Dict[str, Any],
+                         currency_name: str = "人民币") -> str:
+    """
+    把 metrics dict 渲染成「硬数据块」字符串，注入 prompt。
+
+    这是 LLM 唯一应该引用的估值数字源 —— 任何与本块不一致的数字
+    都是幻觉，应被视为错误。
+
+    Args:
+        metrics: extract_fundamentals_metrics 返回的 dict
+        currency_name: 货币名称（用于显示，默认人民币）
+
+    Returns:
+        str: 渲染好的硬数据块（多行文本）
+    """
+    as_of = (metrics.get("as_of_date")
+             or metrics.get("_trade_date", "N/A"))
+    symbol = metrics.get("_symbol", "N/A")
+
+    def fmt_num(val, unit: str = "", digits: int = 2) -> str:
+        if val is None:
+            return "数据缺失"
+        return f"{val:.{digits}f}{unit}"
+
+    def fmt_pct(val) -> str:
+        if val is None:
+            return "数据缺失"
+        return f"{val:.2f}%"
+
+    def fmt_mv(val) -> str:
+        # Tushare total_mv/circ_mv 单位是"万元"
+        if val is None:
+            return "数据缺失"
+        if val >= 10000:  # 万元 → 亿元（除以 10000）
+            return f"{val / 10000:.2f} 亿元"
+        return f"{val:.2f} 万元"
+
+    def fmt_yoy(val) -> str:
+        if val is None:
+            return "数据缺失"
+        sign = "+" if val >= 0 else ""
+        return f"{sign}{val:.2f}%"
+
+    lines = [
+        "【数据库真值 - 来源: Tushare/MongoDB，禁止修改】",
+        f"股票: {symbol} (as of {as_of})",
+        "-" * 50,
+        "【估值类】",
+        f"  当前股价:       {fmt_num(metrics.get('close'), ' 元')}",
+        f"  PE_TTM:         {fmt_num(metrics.get('pe_ttm'), ' 倍')}",
+        f"  PE(静):         {fmt_num(metrics.get('pe_static'), ' 倍')}",
+        f"  PB:             {fmt_num(metrics.get('pb'), ' 倍')}",
+        f"  PS_TTM:         {fmt_num(metrics.get('ps_ttm'), ' 倍')}",
+        f"  总市值:         {fmt_mv(metrics.get('total_mv'))}",
+        f"  流通市值:       {fmt_mv(metrics.get('circ_mv'))}",
+        f"  股息率TTM:      {fmt_pct(metrics.get('dv_ratio_ttm'))}",
+        "-" * 50,
+        "【盈利能力】",
+        f"  EPS:            {fmt_num(metrics.get('eps'), ' 元')}",
+        f"  ROE_TTM:        {fmt_pct(metrics.get('roe_ttm'))}",
+        f"  毛利率:         {fmt_pct(metrics.get('gross_margin'))}",
+        f"  净利率:         {fmt_pct(metrics.get('net_margin'))}",
+        f"  资产负债率:     {fmt_pct(metrics.get('debt_to_assets'))}",
+        "-" * 50,
+        "【成长性】",
+        f"  营收 YoY:      {fmt_yoy(metrics.get('sales_yoy'))}",
+        f"  归母净利 YoY:  {fmt_yoy(metrics.get('net_profit_yoy'))}",
+        "-" * 50,
+    ]
+
+    if metrics.get("fina_period"):
+        lines.append(
+            f"【数据日期】财务指标披露期: {metrics['fina_period']}"
+        )
+
+    missing = metrics.get("_missing", [])
+    if missing:
+        lines.append(
+            f"【缺失字段】{', '.join(missing)} （请写\"数据缺失\"，禁止猜测）"
+        )
+    else:
+        lines.append("【缺失字段】无")
+
+    lines.extend([
+        "-" * 50,
+        "铁律: 所有数字均为数据库真值，请【逐字引用】,",
+        "严禁任何形式的重写、估算、四舍五入或推测。",
+        f"货币单位: {currency_name}",
+    ])
+
+    return "\n".join(lines)

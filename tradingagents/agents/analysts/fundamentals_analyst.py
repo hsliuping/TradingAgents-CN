@@ -211,6 +211,11 @@ def create_fundamentals_analyst(llm, toolkit):
             "- 基于真实数据进行分析"
             "- 提供具体的价位区间和目标价"
             "- 使用中文投资建议（买入/持有/卖出）"
+            "🚨 估值数字铁律（反幻觉）:"
+            "- PE/PB/ROE/营收/净利润/股价等数字必须逐字使用【数据库真值】中的数值"
+            "- 严禁任何估算、四舍五入、推测"
+            "- 缺失字段必须显式标注'数据缺失'"
+            "- 数字格式与真值块完全一致(倍/%/亿元)"
             "现在立即开始调用工具！不要说任何其他话！"
         )
 
@@ -639,21 +644,57 @@ def create_fundamentals_analyst(llm, toolkit):
                     logger.debug(f"📊 [DEBUG] 统一工具调用异常: {e}")
                 
                 currency_info = f"{market_info['currency_name']}（{market_info['currency_symbol']}）"
-                
-                # 生成基于真实数据的分析报告
-                analysis_prompt = f"""基于以下真实数据，对{company_name}（股票代码：{ticker}）进行详细的基本面分析：
 
+                # 🚨 反幻觉: 提取真实指标并格式化为硬数据块（不让 LLM 参与数字本身）
+                from tradingagents.dataflows.metrics_extractor import (
+                    extract_fundamentals_metrics,
+                    format_metrics_block,
+                )
+                try:
+                    hard_metrics = extract_fundamentals_metrics(ticker, current_date)
+                    hard_block = format_metrics_block(
+                        hard_metrics,
+                        currency_name=market_info['currency_name'],
+                    )
+                    logger.info(
+                        f"✅ [反幻觉] 提取硬数据: {ticker} "
+                        f"missing={len(hard_metrics.get('_missing', []))} "
+                        f"source={hard_metrics.get('_source')}"
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ [反幻觉] 提取失败 [{ticker}]: {e}")
+                    hard_metrics = {}
+                    hard_block = (
+                        "(硬数据块提取失败，请基于 combined_data 谨慎分析，"
+                        "严禁编造 PE/PB/ROE 等数字)"
+                    )
+
+                # 生成基于真实数据的分析报告
+                analysis_prompt = f"""{hard_block}
+
+公司: {company_name}（股票代码: {ticker}）
+日期: {current_date}
+货币: {currency_info}
+
+🚨 强制约束（反幻觉）:
+1. 所有 PE/PB/ROE/营收/净利润/股价等数字,必须【逐字】引用上方【数据库真值】块
+2. 严禁出现"约 X 倍""20 多倍""大概 X%"等估算表达
+3. 数字必须带单位(倍/%/亿元),格式与真值块完全一致
+4. 缺失字段必须显式标注"数据缺失",禁止猜测或填默认值
+5. 如果【数据库真值】与下方"原始数据参考"冲突,以真值块为准
+
+原始数据参考(可能不准确,仅作为辅助理解):
 {combined_data}
 
-请提供：
-1. 公司基本信息分析（{company_name}，股票代码：{ticker}）
+请提供:
+1. 公司基本信息分析({company_name},股票代码:{ticker})
 2. 财务状况评估
 3. 盈利能力分析
-4. 估值分析（使用{currency_info}）
-5. 投资建议（买入/持有/卖出）
+4. 估值分析(使用{currency_info})
+5. 投资建议(买入/持有/卖出)
 
-要求：
-- 基于提供的真实数据进行分析
+要求:
+- 优先使用【数据库真值】中的数字,不要修改
 - 正确使用公司名称"{company_name}"和股票代码"{ticker}"
 - 价格使用{currency_info}
 - 投资建议使用中文
