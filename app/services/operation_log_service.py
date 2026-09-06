@@ -66,7 +66,7 @@ class OperationLogService:
             
         except Exception as e:
             logger.error(f"创建操作日志失败: {e}")
-            raise Exception(f"创建操作日志失败: {str(e)}")
+            return ""
     
     async def get_logs(self, query: OperationLogQuery) -> Tuple[List[OperationLogResponse], int]:
         """获取操作日志列表"""

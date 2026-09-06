@@ -21,6 +21,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from urllib.parse import quote_plus, urlparse
 import argparse
 
 # 添加项目根目录到路径
@@ -281,6 +282,36 @@ def load_export_file(file_path: str) -> Dict[str, Any]:
         sys.exit(1)
 
 
+def _mask_mongo_uri(uri: str) -> str:
+    """隐藏连接串中的密码"""
+    return re.sub(r"://([^:/]+):([^@]+)@", r"://\1:***@", uri)
+
+
+def _compose_mongo_uri(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    database: str,
+    auth_source: str,
+) -> str:
+    """用离散字段组装 MongoDB URI（密码做 URL 编码）"""
+    if username and password:
+        return (
+            f"mongodb://{quote_plus(str(username))}:{quote_plus(str(password))}"
+            f"@{host}:{port}/{database}?authSource={auth_source}"
+        )
+    return f"mongodb://{host}:{port}/{database}"
+
+
+def _connection_string_username(uri: str) -> Optional[str]:
+    """从连接串中解析用户名，解析失败时返回 None"""
+    try:
+        return urlparse(uri).username
+    except Exception:
+        return None
+
+
 def connect_mongodb(use_docker: bool = True, config: dict = None) -> MongoClient:
     """连接到 MongoDB
 
@@ -302,27 +333,34 @@ def connect_mongodb(use_docker: bool = True, config: dict = None) -> MongoClient
 
     database = config['mongodb_database']
     auth_source = config.get('mongodb_auth_source') or 'admin'
-    mongo_uri = config.get('mongodb_connection_string')
+    host = 'mongodb' if use_docker else config['mongodb_host']
+    port = config.get('mongodb_port', 27017)
+    username = config.get('mongodb_username') or ''
+    password = config.get('mongodb_password') or ''
+    conn_str = config.get('mongodb_connection_string')
     env_name = "Docker 容器内" if use_docker else "宿主机"
 
-    if not mongo_uri:
-        # 构建 MongoDB URI
-        host = 'mongodb' if use_docker else config['mongodb_host']
-        port = config['mongodb_port']
-        username = config['mongodb_username']
-        password = config['mongodb_password']
-        mongo_uri = f"mongodb://{username}:{password}@{host}:{port}/{database}?authSource={auth_source}"
-        masked_uri = f"mongodb://{username}:***@{host}:{port}/{database}?authSource={auth_source}"
-    else:
-        # 如果是 Docker 模式，并且 .env 写的是 localhost，则替换成容器内服务名
+    # 离散账号优先：.env 里 MONGODB_CONNECTION_STRING 经常和 USERNAME/PASSWORD 不一致
+    if username and password:
+        conn_user = _connection_string_username(conn_str) if conn_str else None
+        if conn_user and conn_user != username:
+            print(
+                f"⚠️  MONGODB_CONNECTION_STRING 用户为 '{conn_user}'，"
+                f"与 MONGODB_USERNAME='{username}' 不一致，已改用离散字段"
+            )
+        mongo_uri = _compose_mongo_uri(host, port, username, password, database, auth_source)
+    elif conn_str:
+        mongo_uri = conn_str
         if use_docker:
             mongo_uri = mongo_uri.replace("@localhost:", "@mongodb:")
             mongo_uri = mongo_uri.replace("//localhost:", "//mongodb:")
-        masked_uri = re.sub(r"://([^:/]+):([^@]+)@", r"://\1:***@", mongo_uri)
+    else:
+        mongo_uri = _compose_mongo_uri(host, port, username, password, database, auth_source)
 
     print(f"\n🔌 连接到 MongoDB ({env_name})...")
-    print(f"   URI: {masked_uri}")
+    print(f"   URI: {_mask_mongo_uri(mongo_uri)}")
     print(f"   数据库: {database}")
+    print(f"   认证: 用户={username or '(无)'}  authSource={auth_source}")
 
     try:
         client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
@@ -339,6 +377,8 @@ def connect_mongodb(use_docker: bool = True, config: dict = None) -> MongoClient
         else:
             print(f"   请确保 MongoDB 正在运行并监听端口 {port}")
             print(f"   检查端口: netstat -an | findstr {port}")
+        print(f"   请核对 .env 中的 MONGODB_USERNAME / MONGODB_PASSWORD / MONGODB_AUTH_SOURCE")
+        print(f"   以及 MONGODB_CONNECTION_STRING 是否与上面三项一致")
         sys.exit(1)
 
 

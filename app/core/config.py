@@ -7,6 +7,18 @@ import re
 import getpass
 from pathlib import Path
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILE = _PROJECT_ROOT / ".env"
+
+# 始终从项目根目录加载 .env，避免从 app/ 目录启动时读不到配置
+if _ENV_FILE.exists():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(_ENV_FILE, override=False)
+    except ImportError:
+        pass
+
 # Legacy env var aliases (deprecated): map API_HOST/PORT/DEBUG -> HOST/PORT/DEBUG
 _LEGACY_ENV_ALIASES = {
     "API_HOST": "HOST",
@@ -331,7 +343,11 @@ class Settings(BaseSettings):
         return not self.DEBUG
 
     # Ignore any extra environment variables present in .env or process env
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE) if _ENV_FILE.exists() else ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 settings = Settings()
 
