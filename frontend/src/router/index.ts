@@ -3,14 +3,13 @@ import type { RouteRecordRaw } from 'vue-router'
 import { nextTick } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
-import AdvancedSampleReport from '@/views/Learning/AdvancedSampleReport.vue'
 import { ElMessage } from 'element-plus'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
 import { isJdyunMode } from '@/utils/config'
 // Pro 专属路由（v3.6.0 社区版开源分离 M1）：集中定义于 pro.routes.ts，
 // 社区版发布时整文件替换为空导出，本文件无需修改
-import { proWorkflowRoutes, proTradingSystemRoutes, proAnalysisChildren, proSettingsChildren } from './pro.routes'
+import { proWorkflowRoutes, proTradingSystemRoutes, proAnalysisChildren, proSettingsChildren, proLearningChildren } from './pro.routes'
 
 // 配置NProgress
 NProgress.configure({
@@ -213,15 +212,8 @@ const routes: RouteRecordRaw[] = [
           requiresAuth: false
         }
       },
-      {
-        path: 'advanced/sample/:sampleId',
-        name: 'AdvancedSampleReport',
-        component: AdvancedSampleReport,
-        meta: {
-          title: '高级课程示例报告',
-          requiresAuth: false
-        }
-      },
+      // 高级课程示例报告（Pro，付费课程样本）→ pro.routes.ts
+      ...proLearningChildren,
       {
         path: 'advanced/:category/:lesson',
         name: 'AdvancedLesson',

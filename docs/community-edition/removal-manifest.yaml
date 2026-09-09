@@ -11,7 +11,7 @@
 #   - 清单变更后必须重新生成并通过全部校验（import 自检 / vue-tsc / build / 泄露扫描）
 # =============================================================================
 
-version: "2026-09-09-r2"
+version: "2026-09-09-r3"
 description: "v3.6.0 社区版开源分离 · 第一版全量剔除清单"
 
 # ---------------------------------------------------------------------------
@@ -33,9 +33,14 @@ delete_dirs:
   - docs/07-courses/v3.0/phase-06-long-term
   - docs/07-courses/v3.0/phase-07-extension
   - docs/07-courses/v3.0/phase-08-personal-plan
-  # --- 内部文档（产品/手册/开发/运维/设计/知识/归档，不开源；社区版手册 M4 另出）---
+  # --- 内部文档（产品/开发/运维/设计/知识/归档，不开源；社区版手册 M4 另出）---
   - docs/01-product
-  - docs/02-user-guide
+  # 02-user-guide：仅保留 user-manual-v3.0.md 与 learning-01..08（前端 userManualContent.ts
+  # 与学习中心 Article.vue 引用）；内部子目录与旧版/京东云私有文档剔除
+  - docs/02-user-guide/advanced
+  - docs/02-user-guide/configuration
+  - docs/02-user-guide/features
+  - docs/02-user-guide/getting-started
   - docs/03-development
   - docs/04-operations
   - docs/05-design
@@ -178,6 +183,19 @@ delete_files_root:
   - .env.jdyun.example
 
 # ---------------------------------------------------------------------------
+# 整文件删除：02-user-guide 根目录旧文档（未被前端引用，手册仅保留 user-manual-v3.0.md）
+# ---------------------------------------------------------------------------
+delete_files_docs:
+  - docs/02-user-guide/faq.md
+  - docs/02-user-guide/jdyun-quick-start.md
+  - docs/02-user-guide/jdyun-user-manual-v3.0.md
+  - docs/02-user-guide/learning-README.md
+  - docs/02-user-guide/usage-deepseek-usage-guide.md
+  - docs/02-user-guide/usage-investment_analysis_guide.md
+  - docs/02-user-guide/usage-web-interface-detailed-guide.md
+  - docs/02-user-guide/usage-web-interface-guide.md
+
+# ---------------------------------------------------------------------------
 # 整文件替换：社区版模板（scripts/community_templates/ → 目标路径）
 # ---------------------------------------------------------------------------
 replace_files:
@@ -235,14 +253,23 @@ keep_notes:
   - core/tools/implementations/agent_builder/*  # 顶层 import Pro 服务，但加载链均在 try/except 内（thread_worker/agent_builder_nodes），社区版不触发顶层加载，运行时安全降级
   - docs/images                         # 课程/页面图片（无害保留）
   - docs/07-courses/v3.0/phase-01-discover  # 免费课程 5 课（社区版学习中心引用）
+  - docs/02-user-guide/user-manual-v3.0.md  # 标准版手册（userManualContent.ts 引用）
+  - docs/02-user-guide/learning-01..08  # 学习中心文章 10 篇（Article.vue 引用；论文中文版已自 features/ 迁入 learning-06-resources/）
 
 # ---------------------------------------------------------------------------
 # 泄露扫描模式
 # - 源码扫描：只扫高价值商业内容（符号名/文案类模式误报率高，代码层防线由
 #   import 自检 + vue-tsc 承担）
 # - dist 扫描：前端构建产物，宽扫描（任何 Pro 痕迹都不应出现）
-# - M4 待办（文案级残留，已知可接受）：共享页面"高级学员"死分支提示语、
-#   USER_AGREEMENT 条款、channel_config"企业微信"枚举、stores/license 提示文案
+# - M4 待办（文案级残留，dist 扫描已知命中 17 处，均为死分支/字符串级，无功能性泄露）：
+#   1) 共享页面"高级学员"死分支提示语（PositionReviewDialog/DataImport/BasicLayout 等 v-if 门控分支）
+#   2) stores/license.ts Pro 功能键列表（watchlist_groups/scheduled_analysis/prompt_templates）
+#   3) DatabaseManagement.vue 演示数据导出的 Pro 集合名（社区版集合不存在，导出自动跳过）
+#   4) SkillGenerationCreate.vue Agent 工坊承接死分支（社区版无 from_agent_workshop 查询入口）
+#   5) ReviewDetailDialog/StockOperationHistoryDialog 交易计划展示死分支（社区版报告无该字段）
+#   6) api/review.ts trading_system_id/name 可选类型字段（类型声明，无运行时痕迹）
+#   7) user-manual-v3.0.md 含 Pro 功能说明（社区版手册 M4 另出后替换）
+#   8) USER_AGREEMENT 条款、channel_config"企业微信"枚举
 # ---------------------------------------------------------------------------
 scan_source_patterns:
   - "知识星球"

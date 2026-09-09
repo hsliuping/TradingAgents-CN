@@ -359,3 +359,18 @@ export const proSettingsChildren: RouteRecordRaw[] = [
     meta: { title: '股票数据批量导入 API', requiresAuth: true }
   }
 ]
+
+/**
+ * Pro 子路由：/learning 下的高级课程示例报告（付费课程样本，内容位于 docs/07-courses/advanced）
+ */
+export const proLearningChildren: RouteRecordRaw[] = [
+  {
+    path: 'advanced/sample/:sampleId',
+    name: 'AdvancedSampleReport',
+    component: () => import('@/views/pro/Learning/AdvancedSampleReport.vue'),
+    meta: {
+      title: '高级课程示例报告',
+      requiresAuth: false
+    }
+  }
+]

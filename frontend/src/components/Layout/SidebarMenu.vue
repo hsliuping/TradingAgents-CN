@@ -135,7 +135,7 @@
           {{ item.label }}
           <el-tag v-if="item.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
-        <el-menu-item v-if="!isJdyunMode()" :index="proLicenseMenuItem.path">
+        <el-menu-item v-if="!isJdyunMode() && proLicenseMenuItem" :index="proLicenseMenuItem.path">
           {{ proLicenseMenuItem.label }}
           <el-icon style="margin-left: 4px;"><Key /></el-icon>
         </el-menu-item>

@@ -6,11 +6,11 @@
  * 引用组件（持仓复盘/操作历史弹窗的"关联交易计划"下拉）自然降级为空列表。
  */
 
-/** 交易计划最小类型（仅声明社区版引用组件使用的字段） */
+/** 交易计划最小类型（仅声明社区版引用组件使用的字段；style 必填与 Pro 原版类型一致） */
 export interface TradingSystem {
   id?: string
   name: string
-  style?: string
+  style: string
   is_active?: boolean
 }
 

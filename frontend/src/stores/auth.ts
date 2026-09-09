@@ -4,6 +4,7 @@ import { authApi } from '@/api/auth'
 import type { User, LoginForm, RegisterForm, UserUpdatePayload } from '@/types/auth'
 import { useAppStore } from './app'
 import { isJdyunMode } from '@/utils/config'
+import { ElMessage } from 'element-plus'
 
 export interface AuthState {
   // 认证状态
