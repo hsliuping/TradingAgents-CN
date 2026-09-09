@@ -297,6 +297,8 @@ keep_notes:
 #   8) USER_AGREEMENT 条款、channel_config"企业微信"枚举
 #   9) 社区页面加载"分析流程"下拉框调 GET /api/workflows 返回 404（SingleAnalysis/GeneralAnalysis/
 #      PositionReviewDialog/PositionAnalysisDialog，前端 catch 兜底回退默认分析模式，仅 Console 网络层红字，功能无损）
+#   10) UserProfile.vue 初始化 license store 调 GET /api/license/status 返回 404（授权路由已剔除，
+#      store catch 后按 Free 档处理——正是社区版徽章/菜单降级的数据来源；仅 Console 红字）
 # ---------------------------------------------------------------------------
 scan_source_patterns:
   - "知识星球"
