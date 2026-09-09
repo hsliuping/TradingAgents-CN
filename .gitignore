@@ -103,8 +103,8 @@ hk_stock_cache.json
 
 # 根目录运行产物
 /src/
-backend/
-vendors/
+/backend/
+/vendors/
 
 # AI 工具目录
 .trae/
