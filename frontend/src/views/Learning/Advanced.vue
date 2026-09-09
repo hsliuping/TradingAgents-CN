@@ -5,7 +5,7 @@
       <p class="subtitle">30节系统课程，按炒股全生命周期组织：发现 → 跟踪 → 持仓 → 复盘 → 扩展</p>
       <div class="header-badges">
         <el-tag type="success" size="default">{{ freeCount }}节免费预览</el-tag>
-        <el-tag type="warning" size="default">完整版需加入知识星球</el-tag>
+        <PaidCourseBadge />
       </div>
     </div>
 
@@ -85,6 +85,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { advancedCourseCategories, isFreeLesson } from '@/config/advancedCourses'
 import { useLicenseStore } from '@/stores/license'
 import KnowledgePlanetPromotion from '@/components/KnowledgePlanetPromotion.vue'
+import PaidCourseBadge from '@/components/PaidCourseBadge.vue'
 import { ArrowRight } from '@element-plus/icons-vue'
 
 const router = useRouter()

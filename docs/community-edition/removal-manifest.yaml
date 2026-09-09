@@ -209,6 +209,8 @@ replace_files:
     target: frontend/src/components/KnowledgePlanetPromotion.vue
   - template: frontend/LicenseAlert.vue
     target: frontend/src/components/Layout/LicenseAlert.vue
+  - template: frontend/PaidCourseBadge.vue
+    target: frontend/src/components/PaidCourseBadge.vue
 
 # ---------------------------------------------------------------------------
 # 保留说明（不剔除，防误删备案）

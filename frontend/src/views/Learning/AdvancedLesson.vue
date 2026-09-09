@@ -44,7 +44,7 @@
       </div>
     </div>
 
-    <!-- 未解锁：知识星球引流 -->
+    <!-- 未解锁：完整版入口（社区版为空壳，不渲染） -->
     <KnowledgePlanetPromotion v-else />
   </div>
 </template>
