@@ -155,7 +155,6 @@ delete_files_frontend:
   - frontend/src/api/templates.ts
   - frontend/src/api/templates_debug.ts
   - frontend/src/api/tools.ts
-  - frontend/src/api/tradingSystem.ts
   - frontend/src/api/watchlist-groups.ts
   - frontend/src/api/workflowGeneration.ts
   - frontend/src/api/executionTrace.ts
@@ -211,6 +210,12 @@ replace_files:
     target: frontend/src/components/Layout/LicenseAlert.vue
   - template: frontend/PaidCourseBadge.vue
     target: frontend/src/components/PaidCourseBadge.vue
+  # 前端：Pro API 空壳（被社区共享组件引用：持仓复盘/操作历史的"关联交易计划"下拉，返回空数据自然降级）
+  - template: frontend/tradingSystem.ts
+    target: frontend/src/api/tradingSystem.ts
+  # 前端：Pro 功能弹窗空壳（执行轨迹查看，被社区任务中心引用）
+  - template: frontend/ExecutionTraceDialog.vue
+    target: frontend/src/views/Tasks/components/ExecutionTraceDialog.vue
 
 # ---------------------------------------------------------------------------
 # 保留说明（不剔除，防误删备案）
