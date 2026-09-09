@@ -26,11 +26,12 @@
       <template #title>单股研究</template>
     </el-menu-item>
 
-    <el-menu-item index="/analysis/batch">
+    <!-- Pro：批量分析（社区版发布时 navigation.pro.ts 整文件替换为空配置，菜单自动隐藏） -->
+    <el-menu-item v-for="item in proTopLevelItems" :key="item.path" :index="item.path">
       <el-icon><DataAnalysis /></el-icon>
       <template #title>
-        批量分析
-        <el-tag v-if="isAdvancedMenuItem('/analysis/batch')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        {{ item.label }}
+        <el-tag v-if="item.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </template>
     </el-menu-item>
 
@@ -54,32 +55,18 @@
       <template #title>研究报告</template>
     </el-menu-item>
 
-    <el-sub-menu index="/workflow">
+    <!-- Pro：分析流子菜单（社区版发布时自动隐藏，见 navigation.pro.ts） -->
+    <el-sub-menu :index="proWorkflowMenu.path">
       <template #title>
         <el-icon><SetUp /></el-icon>
-        <span>分析流</span>
-        <el-tag v-if="isAdvancedMenuItem('/workflow')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        <span>{{ proWorkflowMenu.label }}</span>
+        <el-tag v-if="proWorkflowMenu.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </template>
-      <el-menu-item index="/workflow">
-        流程管理
-        <el-tag v-if="isAdvancedMenuItem('/workflow')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      <el-menu-item v-for="child in proWorkflowMenu.children" :key="child.path" :index="child.path">
+        {{ child.label }}
+        <el-tag v-if="child.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        <el-tag v-else-if="child.badge" :type="child.badge.type" size="small" style="margin-left: 4px; transform: scale(0.85);">{{ child.badge.text }}</el-tag>
       </el-menu-item>
-      <el-menu-item index="/workflow/tools">
-        工具配置
-        <el-tag v-if="isAdvancedMenuItem('/workflow/tools')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/agent-workshop">
-        Agent 工坊
-        <el-tag type="primary" size="small" style="margin-left: 4px; transform: scale(0.85);">迭代</el-tag>
-      </el-menu-item>
-      <el-menu-item index="/workflow/skills">
-          Skill 中心
-          <el-tag v-if="isAdvancedMenuItem('/workflow/skills')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-        </el-menu-item>
-        <el-menu-item index="/workflow/mcp-servers">
-          MCP 服务器
-          <el-tag v-if="isAdvancedMenuItem('/workflow/mcp-servers')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-        </el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/tasks/unified">
@@ -133,24 +120,13 @@
         <el-menu-item index="/settings?tab=security">安全设置</el-menu-item>
         <el-menu-item index="/settings?tab=assistant">助理设置</el-menu-item>
 
-        <el-menu-item index="/settings/email">
-          邮件通知
-          <el-tag v-if="isAdvancedMenuItem('/settings/email')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        <!-- Pro：个人设置项（社区版发布时自动隐藏，见 navigation.pro.ts） -->
+        <el-menu-item v-for="item in proPersonalSettingsItems" :key="item.path" :index="item.path">
+          {{ item.label }}
+          <el-tag v-if="item.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
-        <el-menu-item index="/settings/channel-configs">
-          渠道推送
-          <el-tag v-if="isAdvancedMenuItem('/settings/channel-configs')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-        </el-menu-item>
-        <el-menu-item index="/settings/watchlist-groups">
-          定时分析分组
-          <el-tag v-if="isAdvancedMenuItem('/settings/watchlist-groups')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-        </el-menu-item>
-        <el-menu-item index="/settings/scheduled-analysis">
-          定时分析配置
-          <el-tag v-if="isAdvancedMenuItem('/settings/scheduled-analysis')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-        </el-menu-item>
-        <el-menu-item v-if="!isJdyunMode()" index="/settings/license">
-          授权管理
+        <el-menu-item v-if="!isJdyunMode()" :index="proLicenseMenuItem.path">
+          {{ proLicenseMenuItem.label }}
           <el-icon style="margin-left: 4px;"><Key /></el-icon>
         </el-menu-item>
       </el-sub-menu>
@@ -168,17 +144,10 @@
       <!-- 分析配置 -->
       <el-sub-menu index="/settings-analysis">
         <template #title>分析配置</template>
-        <el-menu-item index="/settings/templates">
-          提示词模板
-          <el-tag v-if="isAdvancedMenuItem('/settings/templates')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-        </el-menu-item>
-        <el-menu-item index="/settings/prompt-policies">
-          注入策略管理
-          <el-tag v-if="isAdvancedMenuItem('/settings/prompt-policies')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-        </el-menu-item>
-        <el-menu-item index="/settings/prompt-design">
-          Prompt 设计助手
-          <el-tag v-if="isAdvancedMenuItem('/settings/prompt-design')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        <!-- Pro：分析配置项（社区版发布时自动隐藏，见 navigation.pro.ts） -->
+        <el-menu-item v-for="item in proAnalysisSettingsItems" :key="item.path" :index="item.path">
+          {{ item.label }}
+          <el-tag v-if="item.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/analysis-profiles">
           行业/个股配置
@@ -217,6 +186,15 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { isJdyunMode } from '@/utils/config'
+// Pro 专属菜单项（v3.6.0 社区版开源分离 M1）：集中配置于 navigation.pro.ts，
+// 社区版发布时整文件替换为空配置，Pro 菜单项自动不渲染
+import {
+  proTopLevelItems,
+  proWorkflowMenu,
+  proPersonalSettingsItems,
+  proLicenseMenuItem,
+  proAnalysisSettingsItems
+} from '@/config/navigation.pro'
 import {
   Odometer,
   Reading,
@@ -242,19 +220,6 @@ const route = useRoute()
 const appStore = useAppStore()
 
 const advancedMenuItems = new Set([
-  '/analysis/batch',
-  '/workflow',
-  '/workflow/tools',
-  '/workflow/agents',
-  '/workflow/skills',
-  '/workflow/mcp-servers',
-  '/settings/templates',
-  '/settings/email',
-  '/settings/channel-configs',
-  '/settings/watchlist-groups',
-  '/settings/scheduled-analysis',
-  '/settings/prompt-policies',
-  '/settings/prompt-design',
   '/settings/data-import'
 ])
 

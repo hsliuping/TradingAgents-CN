@@ -8,6 +8,9 @@ import { ElMessage } from 'element-plus'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
 import { isJdyunMode } from '@/utils/config'
+// Pro 专属路由（v3.6.0 社区版开源分离 M1）：集中定义于 pro.routes.ts，
+// 社区版发布时整文件替换为空导出，本文件无需修改
+import { proWorkflowRoutes, proAnalysisChildren, proSettingsChildren } from './pro.routes'
 
 // 配置NProgress
 NProgress.configure({
@@ -108,11 +111,8 @@ const routes: RouteRecordRaw[] = [
         name: 'SingleAnalysis',
         component: () => import('@/views/Analysis/SingleAnalysis.vue')
       },
-      {
-        path: 'batch',
-        name: 'BatchAnalysis',
-        component: () => import('@/views/Analysis/BatchAnalysis.vue')
-      },
+      // 批量分析（Pro）→ pro.routes.ts
+      ...proAnalysisChildren,
       {
         path: 'general',
         name: 'GeneralAnalysis',
@@ -590,92 +590,14 @@ const routes: RouteRecordRaw[] = [
             title: '社媒消息管理',
             requiresAuth: true
           }
-        }
-      ,
-      {
-        path: 'templates',
-        name: 'TemplateAgentSelector',
-        component: () => import('@/views/Settings/TemplateAgentSelector.vue'),
-        meta: {
-          title: '模板类型选择',
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
-        }
-      },
-      {
-        path: 'templates/manage',
-        name: 'TemplateManagement',
-        component: () => import('@/views/Settings/TemplateManagement.vue'),
-        meta: {
-          title: '模板管理',
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
-        }
-      }
-      ,
-      {
-        path: 'templates/debug',
-        name: 'TemplateDebug',
-        component: () => import('@/views/Settings/TemplateDebug.vue'),
-        meta: { 
-          title: '模板调试台', 
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
-        }
-      },
-      {
-        path: 'email',
-        name: 'EmailNotification',
-        component: () => import('@/views/Settings/EmailNotification.vue'),
-        meta: { title: '邮件通知', requiresAuth: true }
-      },
-      {
-        path: 'channel-configs',
-        name: 'ChannelConfigs',
-        component: () => import('@/views/Settings/ChannelConfigs.vue'),
-        meta: { title: '渠道推送', requiresAuth: true, requiresPro: true }
-      },
-      {
-        path: 'watchlist-groups',
-        name: 'WatchlistGroups',
-        component: () => import('@/views/Settings/WatchlistGroups.vue'),
-        meta: { title: '定时分析分组', requiresAuth: true }
-      },
-      {
-        path: 'scheduled-analysis',
-        name: 'ScheduledAnalysis',
-        component: () => import('@/views/Settings/ScheduledAnalysis.vue'),
-        meta: { title: '定时分析配置', requiresAuth: true }
-      },
-      {
-        path: 'license',
-        name: 'LicenseSettings',
-        component: () => import('@/views/Settings/LicenseSettings.vue'),
-        meta: { title: '授权管理', requiresAuth: true }
-      },
+        },
+      // Pro 页面子路由（模板三件套/Prompt 三件套/推送/分组/定时分析/授权管理）→ pro.routes.ts
+      ...proSettingsChildren,
       {
         path: 'analysis-profiles',
         name: 'AnalysisProfiles',
         component: () => import('@/views/Settings/AnalysisProfiles.vue'),
         meta: { title: '行业/个股配置', requiresAuth: true }
-      },
-      {
-        path: 'prompt-preview',
-        name: 'PromptPreview',
-        component: () => import('@/views/Settings/PromptPreview.vue'),
-        meta: { title: 'Prompt 预览', requiresAuth: true, requiresPro: true }
-      },
-      {
-        path: 'prompt-policies',
-        name: 'PromptPolicyManager',
-        component: () => import('@/views/Settings/PromptPolicyManager.vue'),
-        meta: { title: '注入策略管理', requiresAuth: true, requiresPro: true }
-      },
-      {
-        path: 'prompt-design',
-        name: 'PromptDesignWorkspace',
-        component: () => import('@/views/Settings/PromptDesignWorkspace.vue'),
-        meta: { title: 'Prompt 设计助手', requiresAuth: true, requiresPro: true }
       },
       {
         path: 'jdyun-config',
@@ -826,170 +748,8 @@ const routes: RouteRecordRaw[] = [
       }
     ]
   },
-  {
-    path: '/workflow',
-    name: 'Workflow',
-    component: () => import('@/layouts/BasicLayout.vue'),
-    meta: {
-      title: '分析流',
-      icon: 'SetUp',
-      requiresAuth: true,
-      requiresPro: true,  // 🔥 需要高级学员权限
-      transition: 'fade'
-    },
-    children: [
-      {
-        path: '',
-        name: 'WorkflowHome',
-        component: () => import('@/views/Workflow/index.vue'),
-        meta: {
-          title: '分析流管理',
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
-        }
-      },
-      {
-        path: 'tools',
-        name: 'WorkflowTools',
-        component: () => import('@/views/Workflow/Tools.vue'),
-        meta: {
-          title: '工具配置',
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
-        }
-      },
-      {
-        path: 'agents',
-        redirect: '/workflow/agent-workshop'
-      },
-      {
-        path: 'skills',
-        name: 'WorkflowSkills',
-        component: () => import('@/views/Workflow/SkillCenter.vue'),
-        meta: {
-          title: 'Skill 中心',
-          requiresAuth: true,
-          requiresPro: true
-        }
-      },
-      {
-        path: 'mcp-servers',
-        name: 'MCPServers',
-        component: () => import('@/views/Workflow/McpServers.vue'),
-        meta: {
-          title: 'MCP 服务器',
-          requiresAuth: true,
-          requiresPro: true  // 🔥 需要高级学员权限
-        }
-      },
-      {
-        path: 'skill-gaps',
-        redirect: '/workflow/skills'
-      },
-      {
-        path: 'skill-generation',
-        redirect: '/workflow/skills'
-      },
-      {
-        path: 'skill-generation/create',
-        name: 'SkillGenerationCreate',
-        component: () => import('@/views/Workflow/SkillGenerationCreate.vue'),
-        meta: {
-          title: '创建 Skill',
-          requiresAuth: true,
-          requiresPro: true,
-          hideInMenu: true
-        }
-      },
-      {
-        path: 'workflow-generation/create',
-        name: 'WorkflowGenerationCreate',
-        component: () => import('@/views/Workflow/WorkflowGeneration.vue'),
-        meta: {
-          title: 'AI 工作流架构师',
-          requiresAuth: true,
-          requiresPro: true,
-          hideInMenu: true
-        }
-      },
-      {
-        path: 'agent-workshop',
-        name: 'AgentWorkshop',
-        component: () => import('@/views/Workflow/AgentWorkshopLanding.vue'),
-        meta: {
-          title: 'Agent 工坊',
-          requiresAuth: true,
-          requiresPro: true
-        }
-      },
-      {
-        path: 'agent-workshop/manage',
-        name: 'AgentWorkshopManager',
-        component: () => import('@/views/Workflow/AgentWorkshopManager.vue'),
-        meta: {
-          title: 'Agent 管理',
-          requiresAuth: true,
-          requiresPro: true,
-          hideInMenu: true
-        }
-      },
-      {
-        path: 'agent-workshop/create',
-        name: 'AgentWorkshopCreate',
-        component: () => import('@/views/Workflow/AgentWorkshop.vue'),
-        meta: {
-          title: 'Agent 工坊工作页',
-          requiresAuth: true,
-          requiresPro: true,
-          hideInMenu: true
-        }
-      },
-      {
-        path: 'agent-studio',
-        name: 'AgentStudio',
-        component: () => import('@/views/Workflow/AgentStudio.vue'),
-        meta: {
-          title: 'Agent 工坊助手',
-          requiresAuth: true,
-          requiresPro: true,
-          hideInMenu: true
-        }
-      },
-      {
-        path: 'agents/:id',
-        name: 'AgentDetail',
-        component: () => import('@/views/Workflow/AgentDetail.vue'),
-        meta: {
-          title: 'Agent详情',
-          requiresAuth: true,
-          requiresPro: true,  // 🔥 需要高级学员权限
-          hideInMenu: true
-        }
-      },
-      {
-        path: 'editor/:id',
-        name: 'WorkflowEditor',
-        component: () => import('@/views/Workflow/Editor.vue'),
-        meta: {
-          title: '工作流编辑器',
-          requiresAuth: true,
-          requiresPro: true,  // 🔥 需要高级学员权限
-          hideInMenu: true
-        }
-      },
-      {
-        path: 'execute/:id',
-        name: 'WorkflowExecute',
-        component: () => import('@/views/Workflow/Execute.vue'),
-        meta: {
-          title: '执行工作流',
-          requiresAuth: true,
-          requiresPro: true,  // 🔥 需要高级学员权限
-          hideInMenu: true
-        }
-      }
-    ]
-  },
+  // 分析流模块（Pro）→ pro.routes.ts
+  ...proWorkflowRoutes,
 
   {
     path: '/:pathMatch(.*)*',
