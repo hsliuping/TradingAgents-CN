@@ -295,6 +295,8 @@ keep_notes:
 #   6) api/review.ts trading_system_id/name 可选类型字段（类型声明，无运行时痕迹）
 #   7) user-manual-v3.0.md 含 Pro 功能说明（社区版手册 M4 另出后替换）
 #   8) USER_AGREEMENT 条款、channel_config"企业微信"枚举
+#   9) 社区页面加载"分析流程"下拉框调 GET /api/workflows 返回 404（SingleAnalysis/GeneralAnalysis/
+#      PositionReviewDialog/PositionAnalysisDialog，前端 catch 兜底回退默认分析模式，仅 Console 网络层红字，功能无损）
 # ---------------------------------------------------------------------------
 scan_source_patterns:
   - "知识星球"
