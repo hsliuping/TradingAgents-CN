@@ -83,7 +83,10 @@ eval_data/
 results/
 web/results/
 web/eval_results/
-cache/
+/cache/
+# 源码目录中的运行时缓存：忽略运行产物但保留 .py 源码（修复社区版快照丢包问题）
+tradingagents/dataflows/cache/*
+!tradingagents/dataflows/cache/*.py
 dataflows/data_cache/
 tradingagents/dataflows/data_cache/metadata/
 finnhub_data/
@@ -175,3 +178,4 @@ nanobot_sessions/
 deploy-all-in-one/wheels/
 
 nul
+node_modules
