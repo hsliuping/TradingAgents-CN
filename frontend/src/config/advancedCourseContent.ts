@@ -1,56 +1,32 @@
 /**
  * 高级课程内容静态导入映射 v3.0
- * 
+ *
  * 所有课程文件位于 docs/07-courses/v3.0/
+ *
+ * v3.6.0 社区版开源分离 M1 §7.4：免费/付费 loader 物理分离——
+ * 本文件仅承载免费课程正文 loader（phase-01，前 5 节）；
+ * 付费部分（第 6-30 节）在 advancedCourseContent.pro.ts，
+ * 社区版发布时该文件整文件删除、下方 proCourseContentMap 替换为空对象，
+ * 付费正文不进入社区版前端构建产物。
  */
 
-// 课程文件导入映射
-const courseContentMap: Record<string, () => Promise<{ default: string }>> = {
+// Pro 付费课程正文 loader（社区版发布时整文件剔除，此行替换为空对象）
+import { proCourseContentMap } from './advancedCourseContent.pro'
+
+// 免费课程文件导入映射（前 5 节，社区版保留）
+const communityCourseContentMap: Record<string, () => Promise<{ default: string }>> = {
   // 阶段1：发现
   'phase-01-discover/lesson-01-stock-screening.md': () => import('../../../docs/07-courses/v3.0/phase-01-discover/lesson-01-stock-screening.md?raw'),
   'phase-01-discover/lesson-02-batch-analysis.md': () => import('../../../docs/07-courses/v3.0/phase-01-discover/lesson-02-batch-analysis.md?raw'),
   'phase-01-discover/lesson-03-single-analysis-basic.md': () => import('../../../docs/07-courses/v3.0/phase-01-discover/lesson-03-single-analysis-basic.md?raw'),
   'phase-01-discover/lesson-04-single-analysis-multi-scenario.md': () => import('../../../docs/07-courses/v3.0/phase-01-discover/lesson-04-single-analysis-multi-scenario.md?raw'),
   'phase-01-discover/lesson-05-discover-pitfalls.md': () => import('../../../docs/07-courses/v3.0/phase-01-discover/lesson-05-discover-pitfalls.md?raw'),
+}
 
-  // 阶段2：跟踪
-  'phase-02-track/lesson-06-ai-assistant-overview.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-06-ai-assistant-overview.md?raw'),
-  'phase-02-track/lesson-07-ai-assistant-industry-research.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-07-ai-assistant-industry-research.md?raw'),
-  'phase-02-track/lesson-08-ai-assistant-daily-research.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-08-ai-assistant-daily-research.md?raw'),
-  'phase-02-track/lesson-09-scheduled-track-rhythm.md': () => import('../../../docs/07-courses/v3.0/phase-02-track/lesson-09-scheduled-track-rhythm.md?raw'),
-
-  // 阶段3：持仓
-  'phase-03-position/lesson-10-paper-trading.md': () => import('../../../docs/07-courses/v3.0/phase-03-position/lesson-10-paper-trading.md?raw'),
-  'phase-03-position/lesson-11-position-research.md': () => import('../../../docs/07-courses/v3.0/phase-03-position/lesson-11-position-research.md?raw'),
-  'phase-03-position/lesson-12-add-reduce-decision.md': () => import('../../../docs/07-courses/v3.0/phase-03-position/lesson-12-add-reduce-decision.md?raw'),
-  'phase-03-position/lesson-13-risk-tracking.md': () => import('../../../docs/07-courses/v3.0/phase-03-position/lesson-13-risk-tracking.md?raw'),
-  'phase-03-position/lesson-14-position-pitfalls.md': () => import('../../../docs/07-courses/v3.0/phase-03-position/lesson-14-position-pitfalls.md?raw'),
-  'phase-03-position/lesson-15-ai-assistant-position.md': () => import('../../../docs/07-courses/v3.0/phase-03-position/lesson-15-ai-assistant-position.md?raw'),
-
-  // 阶段4：复盘
-  'phase-04-review/lesson-16-trade-review.md': () => import('../../../docs/07-courses/v3.0/phase-04-review/lesson-16-trade-review.md?raw'),
-  'phase-04-review/lesson-17-case-library.md': () => import('../../../docs/07-courses/v3.0/phase-04-review/lesson-17-case-library.md?raw'),
-  'phase-04-review/lesson-18-review-to-action.md': () => import('../../../docs/07-courses/v3.0/phase-04-review/lesson-18-review-to-action.md?raw'),
-  'phase-04-review/lesson-19-continuous-improvement.md': () => import('../../../docs/07-courses/v3.0/phase-04-review/lesson-19-continuous-improvement.md?raw'),
-
-  // 阶段5：短线
-  'phase-05-short-term/lesson-20-short-system-design.md': () => import('../../../docs/07-courses/v3.0/phase-05-short-term/lesson-20-short-system-design.md?raw'),
-  'phase-05-short-term/lesson-21-short-case-1.md': () => import('../../../docs/07-courses/v3.0/phase-05-short-term/lesson-21-short-case-1.md?raw'),
-  'phase-05-short-term/lesson-22-short-case-2.md': () => import('../../../docs/07-courses/v3.0/phase-05-short-term/lesson-22-short-case-2.md?raw'),
-
-  // 阶段6：中长线
-  'phase-06-long-term/lesson-23-long-system-design.md': () => import('../../../docs/07-courses/v3.0/phase-06-long-term/lesson-23-long-system-design.md?raw'),
-  'phase-06-long-term/lesson-24-long-case-1.md': () => import('../../../docs/07-courses/v3.0/phase-06-long-term/lesson-24-long-case-1.md?raw'),
-  'phase-06-long-term/lesson-25-long-case-2.md': () => import('../../../docs/07-courses/v3.0/phase-06-long-term/lesson-25-long-case-2.md?raw'),
-
-  // 阶段7：平台扩展
-  'phase-07-extension/lesson-26-ai-workflow-architect.md': () => import('../../../docs/07-courses/v3.0/phase-07-extension/lesson-26-ai-workflow-architect.md?raw'),
-  'phase-07-extension/lesson-27-agent-skill-workshop.md': () => import('../../../docs/07-courses/v3.0/phase-07-extension/lesson-27-agent-skill-workshop.md?raw'),
-  'phase-07-extension/lesson-28-buffett-workflow-case.md': () => import('../../../docs/07-courses/v3.0/phase-07-extension/lesson-28-buffett-workflow-case.md?raw'),
-
-  // 阶段8：个人计划
-  'phase-08-personal-plan/lesson-29-personal-trading-plan.md': () => import('../../../docs/07-courses/v3.0/phase-08-personal-plan/lesson-29-personal-trading-plan.md?raw'),
-  'phase-08-personal-plan/lesson-30-continuous-growth.md': () => import('../../../docs/07-courses/v3.0/phase-08-personal-plan/lesson-30-continuous-growth.md?raw'),
+// 课程文件导入映射 = 免费部分 + Pro 付费部分（社区版发布后仅剩免费部分）
+const courseContentMap: Record<string, () => Promise<{ default: string }>> = {
+  ...communityCourseContentMap,
+  ...proCourseContentMap
 }
 
 /**
