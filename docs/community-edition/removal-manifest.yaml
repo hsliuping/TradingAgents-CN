@@ -257,6 +257,10 @@ replace_files:
   # 前端：Pro 功能弹窗空壳（执行轨迹查看，被社区任务中心引用）
   - template: frontend/ExecutionTraceDialog.vue
     target: frontend/src/views/Tasks/components/ExecutionTraceDialog.vue
+  # 前端：license store 空壳（社区版无授权体系：不发 /api/license/status 探活请求，
+  # isPro 恒 false、hasFeature 仅放行免费功能，接口与 Pro 版完全一致，消费方零改动）
+  - template: frontend/license.ts
+    target: frontend/src/stores/license.ts
 
 # ---------------------------------------------------------------------------
 # 保留说明（不剔除，防误删备案）
@@ -297,8 +301,7 @@ keep_notes:
 #   8) USER_AGREEMENT 条款、channel_config"企业微信"枚举
 #   9) 社区页面加载"分析流程"下拉框调 GET /api/workflows 返回 404（SingleAnalysis/GeneralAnalysis/
 #      PositionReviewDialog/PositionAnalysisDialog，前端 catch 兜底回退默认分析模式，仅 Console 网络层红字，功能无损）
-#   10) UserProfile.vue 初始化 license store 调 GET /api/license/status 返回 404（授权路由已剔除，
-#      store catch 后按 Free 档处理——正是社区版徽章/菜单降级的数据来源；仅 Console 红字）
+#      ※ license/status 404 原第 10 项已修复：stores/license.ts 整文件替换为无网络请求 stub
 # ---------------------------------------------------------------------------
 scan_source_patterns:
   - "知识星球"
