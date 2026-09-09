@@ -1,0 +1,238 @@
+# =============================================================================
+# 社区版剔除清单（removal-manifest）
+# =============================================================================
+# 用途：scripts/publish_community.py 按本清单将私有仓代码生成为社区版快照。
+# 铁律：剔除动作必须是"整文件删除 / 整目录删除 / 整文件替换"，禁止行级修改。
+#
+# 变更纪律：
+#   - 新增 Pro 路由 → 登记 delete_files（app/routers/xxx.py + app/pro_routers.py 内登记）
+#   - 新增 Pro 页面 → 放入 frontend/src/views/pro/，自动随目录剔除
+#   - 新增 Pro API 封装 → 登记 delete_files
+#   - 清单变更后必须重新生成并通过全部校验（import 自检 / vue-tsc / build / 泄露扫描）
+# =============================================================================
+
+version: "2026-09-09"
+description: "v3.6.0 社区版开源分离 · 第一版全量剔除清单"
+
+# ---------------------------------------------------------------------------
+# 整目录删除
+# ---------------------------------------------------------------------------
+delete_dirs:
+  # --- 前端 Pro 页面（M1 §7.2 目录化，37+ 个组件）---
+  - frontend/src/views/pro
+  # --- 前端 Pro 死页面（引用被剔除的 Pro API，无路由注册）---
+  - frontend/src/views/Debug/LicenseDebug.vue
+  - frontend/src/views/Debug/AgentAvailability.vue
+  # --- 付费课程正文（docs/07-courses/v3.0/ 仅保留 phase-01）---
+  - docs/07-courses/v3.0/phase-02
+  - docs/07-courses/v3.0/phase-03
+  - docs/07-courses/v3.0/phase-04
+  - docs/07-courses/v3.0/phase-05
+  - docs/07-courses/v3.0/phase-06
+  - docs/07-courses/v3.0/phase-07
+  - docs/07-courses/v3.0/phase-08
+  # --- 内部文档（设计文档/商业文档/公众号草稿，不开源）---
+  - docs/05-design
+  - docs/08-blog
+  # --- 内部开发工具脚本堆（一次性调试/修复/种子脚本，数百个）---
+  - scripts
+  # --- 京东云 All-in-One 部署（私有交付物：源码保护脚本/签名/jdyun 配置）---
+  - deploy-all-in-one
+
+# ---------------------------------------------------------------------------
+# 整文件删除：后端 Pro 路由（26 个注册 + 2 个死代码）
+# ---------------------------------------------------------------------------
+delete_files_backend_routers:
+  # 分析流模块
+  - app/routers/workflows.py
+  - app/routers/agents.py
+  - app/routers/tools.py
+  - app/routers/agent_workshop.py
+  - app/routers/workflow_generation.py
+  - app/routers/agent_assertions.py
+  - app/routers/execution_trace.py
+  - app/routers/mcp.py
+  # 交易计划（trading_plan_check 门控）
+  - app/routers/trading_system.py
+  # 定时/推送/分组
+  - app/routers/scheduled_analysis.py
+  - app/routers/email.py
+  - app/routers/watchlist_groups.py
+  # License 体系
+  - app/routers/license.py
+  # 报告导出（export_reports 门控）
+  - app/routers/reports_export.py
+  # 手动数据管理入口（require_pro 门控；数据同步 worker 为社区共享链路，保留）
+  - app/routers/stock_data.py
+  - app/routers/financial_data.py
+  - app/routers/historical_data.py
+  - app/routers/news_data.py
+  - app/routers/social_media.py
+  # 提示词模板体系（prompt_templates 门控）
+  - app/routers/prompt_templates.py
+  - app/routers/template_history.py
+  - app/routers/user_template_configs.py
+  - app/routers/prompt_preview.py
+  - app/routers/prompt_injection_policies.py
+  - app/routers/prompt_design.py
+  - app/routers/templates_debug.py
+  # 死代码（从未注册，v3.6-community 已确认）
+  - app/routers/backtest.py
+  - app/routers/channel_configs.py
+
+# ---------------------------------------------------------------------------
+# 整文件删除：后端 Pro 服务（引用链已核对，仅 Pro 域引用或 try/except 防护）
+# ---------------------------------------------------------------------------
+delete_files_backend_services:
+  - app/services/agent_workshop_service.py
+  - app/services/agent_assertion_service.py
+  - app/services/workflow_generation_service.py
+  - app/services/execution_trace_service.py
+  - app/services/trading_system_service.py
+  - app/services/trading_plan_evaluation_service.py
+  - app/services/prompt_template_service.py
+  - app/services/template_history_service.py
+  - app/services/user_template_config_service.py
+  - app/services/prompt_design_assistant_service.py
+  - app/services/social_media_service.py
+  - app/services/mcp_service.py
+  - app/services/skill_review_service.py        # HITL 审核（Agent 工坊链路）；社区版 Skill 创建走免审核直通
+  - app/services/backtest_service.py            # 死代码
+
+# ---------------------------------------------------------------------------
+# 整文件删除：后端 Pro 模型与工具
+# （引用链已核对：仅被上述被删路由/服务引用；email/channel_config/prompt_injection_policy
+#   模型被社区通知与 prompt 组装链路引用，保留）
+# ---------------------------------------------------------------------------
+delete_files_backend_models:
+  - app/models/agent_assertion.py
+  - app/models/agent_workshop.py
+  - app/models/execution_trace.py
+  - app/models/social_media.py
+  - app/models/trading_system.py
+  - app/models/prompt_template.py
+  - app/models/template_history.py
+  - app/models/user_template_config.py
+  - app/models/watchlist_group.py
+  - app/models/scheduled_analysis.py
+  - app/utils/social_media_parser.py
+
+# ---------------------------------------------------------------------------
+# 整文件删除：licensing 付费验证体系（社区版替换为 community_stub）
+# ---------------------------------------------------------------------------
+delete_files_licensing:
+  - core/licensing/validator.py
+  - core/licensing/manager.py
+  - core/licensing/features.py
+  - app/pro_routers.py
+
+# ---------------------------------------------------------------------------
+# 整文件删除：前端 Pro 资产（API 封装 / store / 组件 / 付费课程数据）
+# ---------------------------------------------------------------------------
+delete_files_frontend:
+  # API 封装层（仅被 views/pro 与死页面引用；workflow.ts 为社区页面共享，保留）
+  - frontend/src/api/agents.ts
+  - frontend/src/api/agentWorkshop.ts
+  - frontend/src/api/channelConfigs.ts
+  - frontend/src/api/email.ts
+  - frontend/src/api/mcp.ts
+  - frontend/src/api/promptDesign.ts
+  - frontend/src/api/promptPolicies.ts
+  - frontend/src/api/promptPreview.ts
+  - frontend/src/api/scheduled-analysis.ts
+  - frontend/src/api/socialMedia.ts
+  - frontend/src/api/templates.ts
+  - frontend/src/api/templates_debug.ts
+  - frontend/src/api/tools.ts
+  - frontend/src/api/tradingSystem.ts
+  - frontend/src/api/watchlist-groups.ts
+  - frontend/src/api/workflowGeneration.ts
+  - frontend/src/api/executionTrace.ts
+  # store（仅被 views/pro 引用）
+  - frontend/src/stores/tradingSystem.ts
+  # 组件（仅被 views/pro 引用）
+  - frontend/src/components/Workflow/SkillReviewCard.vue
+  - frontend/src/components/Workflow/ToolSelectDialog.vue
+  # 付费课程数据（M1 §7.4 物理分离）
+  - frontend/src/config/advancedCourses.pro.ts
+  - frontend/src/config/advancedCourseContent.pro.ts
+
+# ---------------------------------------------------------------------------
+# 整文件删除：根目录商业/私有配置
+# ---------------------------------------------------------------------------
+delete_files_root:
+  - 付费功能清单.md
+  - .env.jdyun.example
+
+# ---------------------------------------------------------------------------
+# 整文件替换：社区版模板（scripts/community_templates/ → 目标路径）
+# ---------------------------------------------------------------------------
+replace_files:
+  # 后端：门控薄壳（re-export community_stub，调用方零改动）
+  - template: backend/permissions.py
+    target: app/core/permissions.py
+  - template: backend/license_service.py
+    target: app/services/license_service.py
+  - template: backend/licensing__init__.py
+    target: core/licensing/__init__.py
+  # 前端：空配置（消费方零改动）
+  - template: frontend/pro.routes.ts
+    target: frontend/src/router/pro.routes.ts
+  - template: frontend/navigation.pro.ts
+    target: frontend/src/config/navigation.pro.ts
+  # 前端：免费课程配置（去除付费 import）
+  - template: frontend/advancedCourses.ts
+    target: frontend/src/config/advancedCourses.ts
+  - template: frontend/advancedCourseContent.ts
+    target: frontend/src/config/advancedCourseContent.ts
+  # 社区版 README
+  - template: README.md
+    target: README.md
+
+# ---------------------------------------------------------------------------
+# 保留说明（不剔除，防误删备案）
+# ---------------------------------------------------------------------------
+keep_notes:
+  - app/services/email_service.py       # 通知链路共享；邮箱配置入口已删，功能不可达
+  - app/services/channel_notifier.py    # 社区通知（站内）链路引用；渠道配置入口已死
+  - app/models/email.py                 # 同上
+  - app/models/channel_config.py        # 同上
+  - app/models/prompt_injection_policy.py  # prompt_assembly_service（社区分析链路）引用
+  - app/services/prompt_injection_policy_service.py  # 同上
+  - app/services/workflow_growth_service.py  # 社区路由 workflow_growth（成长记忆）
+  - app/services/{historical,news,financial,stock_data}_data_service.py  # 数据同步 worker 共享链路
+  - frontend/src/api/workflow.ts        # 社区页面（单股/通用研究/复盘/任务）共享
+  - core/licensing/community_stub.py    # 社区版门控实现（保留）
+  - core/licensing/models.py            # 配额模型（保留）
+
+# ---------------------------------------------------------------------------
+# 泄露扫描模式（生成后对源码扫描；前端构建后对 dist 复扫）
+# 命中即失败。注意与保留文件冲突的模式勿列入。
+# ---------------------------------------------------------------------------
+scan_source_patterns:
+  - "require_pro"
+  - "pro_routers"
+  - "PRO_ROUTERS"
+  - "trading_system_service"
+  - "agent_workshop_service"
+  - "workflow_generation_service"
+  - "social_media_service"
+  - "prompt_template_service"
+  - "skill_review_service"
+  - "LicenseValidator"
+  - "advancedCourses.pro"
+  - "知识星球"
+scan_dist_patterns:
+  - "require_pro"
+  - "trading_system"
+  - "agent_workshop"
+  - "workflow_generation"
+  - "social_media"
+  - "prompt_templates"
+  - "watchlist_groups"
+  - "scheduled_analysis"
+  - "execution_trace"
+  - "mcp_service"
+  - "知识星球"
+  - "付费"
+  - "高级学员"
