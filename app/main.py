@@ -29,26 +29,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
-from app.routers import sync as sync_router, multi_source_sync
-from app.routers import stocks as stocks_router
-from app.routers import stock_data as stock_data_router
-from app.routers import stock_sync as stock_sync_router
-from app.routers import multi_market_stocks as multi_market_stocks_router
-from app.routers import notifications as notifications_router
-from app.routers import analysis_profiles as analysis_profiles_router
-from app.routers import websocket_notifications as websocket_notifications_router
-from app.routers import scheduler as scheduler_router
-from app.routers import prompt_templates as prompt_templates_router
-from app.routers import templates_debug as templates_debug_router  # ⚠️ DEPRECATED: v1 调试路由，v4.0 移除
-from app.routers import prompt_injection_policies as prompt_injection_policies_router
-from app.routers import prompt_preview as prompt_preview_router
-from app.routers import prompt_design as prompt_design_router
-from app.routers import analysis_preferences as analysis_preferences_router
-from app.routers import user_template_configs as user_template_configs_router
-from app.routers import template_history as template_history_router
-from app.routers import advanced_courses as advanced_courses_router
-from app.routers import embedded_nanobot as embedded_nanobot_router
+from app.router_registry import register_routers
 from app.services.basics_sync_service import get_basics_sync_service
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
 from app.services.scheduler_service import set_scheduler_instance
@@ -83,14 +64,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from app.services.quotes_ingestion_service import QuotesIngestionService
-from app.routers import paper as paper_router
-from app.routers import portfolio as portfolio_router
-from app.routers import review as review_router
-from app.routers import email as email_router
-from app.routers import intelligent_assistant as intelligent_assistant_router
-from app.routers import intelligent_screening as intelligent_screening_router
-from app.routers import memory as memory_router
-from app.routers import workflow_growth as workflow_growth_router
 
 
 def get_version() -> str:
@@ -1174,71 +1147,23 @@ async def test_log():
     return {"message": "测试成功", "timestamp": time.time()}
 
 
-# 路由注册辅助函数（带日志记录）
-def register_router_with_log(app_instance, router, router_name: str, prefix: str = None, tags: list = None):
-    """
-    注册路由并记录日志
-    
-    Args:
-        app_instance: FastAPI 应用实例
-        router: 要注册的路由器
-        router_name: 路由器名称（用于日志）
-        prefix: 路由前缀（可选）
-        tags: 标签列表（可选）
-    """
-    logger = logging.getLogger("app.main")
-    try:
-        # 获取路由器的前缀和路由信息
-        router_prefix = getattr(router, 'prefix', '')
-        routes = getattr(router, 'routes', [])
-        
-        # 记录路由信息
-        route_paths = []
-        for route in routes:
-            if hasattr(route, 'path'):
-                route_path = route.path
-                methods = getattr(route, 'methods', set())
-                route_paths.append(f"{', '.join(methods)} {route_path}")
-        
-        # 注册路由
-        kwargs = {}
-        if prefix:
-            kwargs['prefix'] = prefix
-        if tags:
-            kwargs['tags'] = tags
-        
-        app_instance.include_router(router, **kwargs)
-        
-        # 记录成功信息
-        full_prefix = prefix or router_prefix or ''
-        route_info = '\n    '.join(route_paths[:5])  # 只显示前5个路由
-        if len(route_paths) > 5:
-            route_info += f'\n    ... 还有 {len(route_paths) - 5} 个路由'
-        
-        logger.info(f"✅ 路由注册成功: {router_name}")
-        logger.debug(f"   前缀: {full_prefix}")
-        logger.debug(f"   路由列表:\n    {route_info}")
-        
-        return True
-    except Exception as e:
-        logger.error(f"❌ 路由注册失败: {router_name} - {str(e)}", exc_info=True)
-        return False
+# =============================================================================
+# 路由注册
+# v3.6.0 社区版开源分离（M1 收敛改造）：全部路由注册收敛至 app/router_registry.py，
+# COMMUNITY_ROUTERS 与 PRO_ROUTERS 分列，社区版发布时整体剔除 PRO_ROUTERS 段。
+# 见 docs/05-design/v3.0/v3.6.0-community-edition-separation-plan.md §7.1
+# =============================================================================
+register_routers(app)
 
-
-# 注册路由
 logger = logging.getLogger("app.main")
-logger.info("=" * 70)
-logger.info("🚀 开始注册路由...")
-logger.info("=" * 70)
 
-app.include_router(health.router, prefix="/api", tags=["health"])
 
 @app.get("/api/system/info", tags=["system"])
 async def get_system_info():
     """获取系统版本信息"""
     version = get_version()
     build_info = get_build_info()
-    
+
     # 如果BUILD_INFO存在，使用其中的信息
     if build_info:
         return {
@@ -1250,7 +1175,7 @@ async def get_system_info():
             "git_commit": build_info.get("git_commit"),
             "build_type": build_info.get("build_type"),
         }
-    
+
     # 否则只返回主版本号
     return {
         "version": version,
@@ -1261,174 +1186,6 @@ async def get_system_info():
         "git_commit": None,
         "build_type": None,
     }
-
-app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
-app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
-app.include_router(reports.router, tags=["reports"])
-app.include_router(screening.router, prefix="/api/screening", tags=["screening"])
-app.include_router(intelligent_screening_router.router, tags=["screening-intelligent"])
-app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
-app.include_router(favorites.router, prefix="/api", tags=["favorites"])
-app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])
-app.include_router(multi_market_stocks_router.router, prefix="/api", tags=["multi-market"])
-app.include_router(stock_data_router.router, tags=["stock-data"])
-app.include_router(stock_sync_router.router, tags=["stock-sync"])
-app.include_router(tags.router, prefix="/api", tags=["tags"])
-app.include_router(config.router, prefix="/api", tags=["config"])
-app.include_router(model_capabilities.router, tags=["model-capabilities"])
-app.include_router(usage_statistics.router, tags=["usage-statistics"])
-app.include_router(database.router, prefix="/api/system", tags=["database"])
-app.include_router(cache.router, tags=["cache"])
-app.include_router(operation_logs.router, prefix="/api/system", tags=["operation_logs"])
-app.include_router(logs.router, prefix="/api/system", tags=["logs"])
-# 新增：系统配置只读摘要
-from app.routers import system_config as system_config_router
-app.include_router(system_config_router.router, prefix="/api/system", tags=["system"])
-
-# 自动更新
-from app.routers import update as update_router
-app.include_router(update_router.router, tags=["update"])
-
-# 通知模块（REST + SSE）
-app.include_router(notifications_router.router, prefix="/api", tags=["notifications"])
-
-# 🔥 WebSocket 通知模块（替代 SSE + Redis PubSub）
-app.include_router(websocket_notifications_router.router, prefix="/api", tags=["websocket"])
-
-# 定时任务管理
-app.include_router(scheduler_router.router, tags=["scheduler"])
-
-# 分析画像
-app.include_router(analysis_profiles_router.router, tags=["analysis-profiles"])
-
-app.include_router(sse.router, prefix="/api/stream", tags=["streaming"])
-app.include_router(sync_router.router)
-app.include_router(multi_source_sync.router)
-app.include_router(paper_router.router, prefix="/api", tags=["paper"])
-app.include_router(portfolio_router.router, prefix="/api", tags=["portfolio"])
-app.include_router(review_router.router, prefix="/api", tags=["review"])
-app.include_router(email_router.router, tags=["email"])
-app.include_router(intelligent_assistant_router.router, tags=["assistant"])
-app.include_router(memory_router.router, tags=["memory"])
-app.include_router(workflow_growth_router.router, tags=["workflow-growth"])
-app.include_router(tushare_init.router, prefix="/api", tags=["tushare-init"])
-app.include_router(akshare_init.router, prefix="/api", tags=["akshare-init"])
-app.include_router(baostock_init.router, prefix="/api", tags=["baostock-init"])
-app.include_router(historical_data.router, tags=["historical-data"])
-app.include_router(multi_period_sync.router, tags=["multi-period-sync"])
-app.include_router(financial_data.router, tags=["financial-data"])
-app.include_router(news_data.router, tags=["news-data"])
-app.include_router(social_media.router, tags=["social-media"])
-app.include_router(internal_messages.router, tags=["internal-messages"])
-
-# 提示词模板系统路由
-app.include_router(prompt_templates_router.router, tags=["prompt-templates"])
-app.include_router(templates_debug_router.router, tags=["templates-debug"])  # ⚠️ DEPRECATED: v1 调试路由
-app.include_router(prompt_injection_policies_router.router, tags=["prompt-policies"])
-app.include_router(prompt_preview_router.router, tags=["prompt-preview"])
-app.include_router(prompt_design_router.router, tags=["prompt-design"])
-app.include_router(analysis_preferences_router.router, tags=["analysis-preferences"])
-app.include_router(user_template_configs_router.router, tags=["user-template-configs"])
-app.include_router(template_history_router.router, tags=["template-history"])
-app.include_router(advanced_courses_router.router, tags=["advanced-courses"])
-app.include_router(embedded_nanobot_router.router, tags=["embedded-nanobot"])
-
-# 股票关注列表分组管理路由
-from app.routers import watchlist_groups as watchlist_groups_router
-app.include_router(watchlist_groups_router.router, tags=["watchlist-groups"])
-
-# 定时分析配置路由
-from app.routers import scheduled_analysis as scheduled_analysis_router
-app.include_router(scheduled_analysis_router.router, tags=["scheduled-analysis"])
-
-# 授权验证路由
-from app.routers import license as license_router
-register_router_with_log(app, license_router.router, "授权验证路由 (license)", tags=["license"])
-
-# v2.0 工作流、智能体、工具和 Skill 路由
-from app.routers import workflows as workflows_router
-from app.routers import agents as agents_router
-from app.routers import tools as tools_router
-from app.routers import skills as skills_router
-from app.routers import skill_generation as skill_generation_router
-from app.routers import skill_gaps as skill_gaps_router
-from app.routers import skill_center as skill_center_router
-from app.routers import agent_workshop as agent_workshop_router
-from app.routers import workflow_generation as workflow_generation_router
-from app.routers import agent_assertions as agent_assertions_router
-from app.routers import execution_trace as execution_trace_router
-register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
-register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
-register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
-register_router_with_log(app, skills_router.router, "Skill 管理路由 (skills)", tags=["skills"])
-register_router_with_log(app, skill_generation_router.router, "AI Skill 工坊路由 (skill-generation)", tags=["skill-generation"])
-register_router_with_log(app, skill_gaps_router.router, "Skill 缺口路由 (skill-gaps)", tags=["skill-gaps"])
-register_router_with_log(app, skill_center_router.router, "Skill 中心聚合路由 (skill-center)", tags=["skill-center"])
-register_router_with_log(app, agent_workshop_router.router, "Agent 工坊路由 (agent-workshop)", tags=["agent-workshop"])
-register_router_with_log(app, workflow_generation_router.router, "AI 工作流创建路由 (workflow-generation)", tags=["workflow-generation"])
-register_router_with_log(app, agent_assertions_router.router, "Agent 断言管理路由 (agent-assertions)", tags=["agent-assertions"])
-register_router_with_log(app, execution_trace_router.router, "执行轨迹路由 (execution-traces)", tags=["execution-traces"])
-
-# v2.0 个人交易计划路由
-from app.routers import trading_system as trading_system_router
-register_router_with_log(app, trading_system_router.router, "交易计划路由 (trading-systems)", tags=["trading-systems"])
-
-# v2.0 统一任务中心路由
-from app.routers import unified_tasks as unified_tasks_router
-register_router_with_log(app, unified_tasks_router.router, "统一任务中心路由 (unified-tasks)", tags=["unified-task-center"])
-
-# MCP 路由
-from app.routers import mcp as mcp_router
-from app.routers import capability_index as capability_index_router
-from app.routers import quality_metrics as quality_metrics_router
-app.include_router(mcp_router.router)
-
-# 能力索引路由
-app.include_router(capability_index_router.router, prefix="/api", tags=["capability-index"])
-
-# 报告质量指标路由（v3.6.0 项5）
-app.include_router(quality_metrics_router.router)
-
-# 路由注册完成，打印总结
-logger.info("=" * 70)
-logger.info("✅ 路由注册完成")
-logger.info("=" * 70)
-
-# 验证关键路由是否已注册
-logger.info("🔍 验证关键路由注册状态:")
-key_routes = [
-    "/api/license/status",
-    "/api/v2/tasks/list",
-    "/api/v2/tasks/statistics"
-]
-
-for route_path in key_routes:
-    route_found = False
-    matching_routes = []
-    for route in app.routes:
-        if not hasattr(route, 'path'):
-            continue
-        # FastAPI 路由路径可能包含前缀，直接用完整路径匹配
-        if route.path == route_path:
-            methods = getattr(route, 'methods', set())
-            matching_routes.append((route.path, methods))
-            route_found = True
-            break
-        # 兼容子路由匹配：路径末尾匹配（处理 /api/license 前缀下的 /status 等）
-        if route.path.endswith(route_path) or route_path.endswith(route.path):
-            methods = getattr(route, 'methods', set())
-            matching_routes.append((route.path, methods))
-            route_found = True
-            break
-    
-    if route_found:
-        for path, methods in matching_routes:
-            logger.info(f"  ✅ {route_path} -> {path} - 方法: {', '.join(methods)}")
-    else:
-        # 降级为 INFO：路由已注册但检查逻辑未匹配到完整路径，不代表路由缺失
-        logger.info(f"  ℹ️  {route_path} - 未在 app.routes 中精确匹配（可能因为 prefix 拆分），路由已通过 include_router 注册")
-
-logger.info("=" * 70)
 
 
 @app.get("/")
