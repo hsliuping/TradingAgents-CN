@@ -511,50 +511,15 @@ const routes: RouteRecordRaw[] = [
         }
       },
         {
-          path: 'scheduler',
-          name: 'SchedulerManagement',
-          component: () => import('@/views/System/SchedulerManagement.vue'),
-          meta: {
+        path: 'scheduler',
+        name: 'SchedulerManagement',
+        component: () => import('@/views/System/SchedulerManagement.vue'),
+        meta: {
             title: '定时任务',
             requiresAuth: true
-          }
-        },
-        {
-          path: 'social-media',
-          name: 'SocialMedia',
-          component: () => import('@/views/SocialMedia/index.vue'),
-          meta: {
-            title: '社媒消息管理',
-            requiresAuth: true
-          }
-        },
-        {
-          path: 'social-media/api-guide',
-          name: 'SocialMediaApiGuide',
-          component: () => import('@/views/SocialMedia/ApiGuide.vue'),
-          meta: {
-            title: 'API接入指南',
-            requiresAuth: true
-          }
-        },
-        {
-          path: 'social-media/template/:type',
-          name: 'SocialMediaTemplate',
-          component: () => import('@/views/SocialMedia/TemplateViewer.vue'),
-          meta: {
-            title: '模板文件',
-            requiresAuth: true
-          }
-        },
-        {
-          path: 'social-media/api-example',
-          name: 'SocialMediaApiExample',
-          component: () => import('@/views/SocialMedia/TemplateViewer.vue'),
-          meta: {
-            title: 'API示例代码',
-            requiresAuth: true
-          }
-        },
+        }
+      },
+        // 社媒消息管理（Pro 数据保存）→ pro.routes.ts
         {
           path: 'data-import',
           name: 'DataImport',
@@ -573,25 +538,7 @@ const routes: RouteRecordRaw[] = [
             requiresAuth: true
           }
         },
-        {
-          path: 'stock-data/api-guide',
-          name: 'StockDataApiGuide',
-          component: () => import('@/views/Stocks/ApiGuide.vue'),
-          meta: {
-            title: '股票数据批量导入 API',
-            requiresAuth: true
-          }
-        },
-        {
-          path: 'social-media',
-          name: 'SocialMediaOld',
-          redirect: '/settings/social-media',
-          meta: {
-            title: '社媒消息管理',
-            requiresAuth: true
-          }
-        },
-      // Pro 页面子路由（模板三件套/Prompt 三件套/推送/分组/定时分析/授权管理）→ pro.routes.ts
+      // Pro 页面子路由（模板三件套/Prompt 三件套/推送/分组/定时分析/授权管理/社媒消息管理/数据API指南）→ pro.routes.ts
       ...proSettingsChildren,
       {
         path: 'analysis-profiles',

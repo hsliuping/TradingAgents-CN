@@ -274,5 +274,37 @@ export const proSettingsChildren: RouteRecordRaw[] = [
     name: 'PromptDesignWorkspace',
     component: () => import('@/views/pro/settings/PromptDesignWorkspace.vue'),
     meta: { title: 'Prompt 设计助手', requiresAuth: true, requiresPro: true }
+  },
+  {
+    // 社媒消息管理（数据保存类 Pro 功能，后端 social_media.py 在 PRO_ROUTERS）
+    path: 'social-media',
+    name: 'SocialMedia',
+    component: () => import('@/views/pro/settings/SocialMedia/index.vue'),
+    meta: { title: '社媒消息管理', requiresAuth: true }
+  },
+  {
+    path: 'social-media/api-guide',
+    name: 'SocialMediaApiGuide',
+    component: () => import('@/views/pro/settings/SocialMedia/ApiGuide.vue'),
+    meta: { title: 'API接入指南', requiresAuth: true }
+  },
+  {
+    path: 'social-media/template/:type',
+    name: 'SocialMediaTemplate',
+    component: () => import('@/views/pro/settings/SocialMedia/TemplateViewer.vue'),
+    meta: { title: '模板文件', requiresAuth: true }
+  },
+  {
+    path: 'social-media/api-example',
+    name: 'SocialMediaApiExample',
+    component: () => import('@/views/pro/settings/SocialMedia/TemplateViewer.vue'),
+    meta: { title: 'API示例代码', requiresAuth: true }
+  },
+  {
+    // 股票数据批量导入 API 指南（数据保存类 Pro 功能，后端 stock_data.py 在 PRO_ROUTERS）
+    path: 'stock-data/api-guide',
+    name: 'StockDataApiGuide',
+    component: () => import('@/views/pro/settings/StockDataApiGuide.vue'),
+    meta: { title: '股票数据批量导入 API', requiresAuth: true }
   }
 ]

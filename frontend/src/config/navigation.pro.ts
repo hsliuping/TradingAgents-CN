@@ -69,3 +69,8 @@ export const proAnalysisSettingsItems: ProMenuItem[] = [
   { path: '/settings/prompt-policies', label: '注入策略管理', advanced: true },
   { path: '/settings/prompt-design', label: 'Prompt 设计助手', advanced: true }
 ]
+
+/** 系统管理组中的 Pro 项（社媒消息管理，数据保存类付费功能） */
+export const proAdminSettingsItems: ProMenuItem[] = [
+  { path: '/settings/social-media', label: '社媒消息管理', advanced: true }
+]

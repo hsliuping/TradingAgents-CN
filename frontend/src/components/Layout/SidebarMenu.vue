@@ -164,7 +164,11 @@
         <el-menu-item index="/settings/sync">多数据源同步</el-menu-item>
         <el-menu-item index="/settings/capability-index">工具能力索引</el-menu-item>
         <el-menu-item index="/settings/scheduler">定时任务</el-menu-item>
-        <el-menu-item index="/settings/social-media">社媒消息管理</el-menu-item>
+        <!-- Pro：系统管理项（社区版发布时自动隐藏，见 navigation.pro.ts） -->
+        <el-menu-item v-for="item in proAdminSettingsItems" :key="item.path" :index="item.path">
+          {{ item.label }}
+          <el-tag v-if="item.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        </el-menu-item>
         <el-menu-item index="/settings/data-import">
           数据导入管理
           <el-tag v-if="isAdvancedMenuItem('/settings/data-import')" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
@@ -193,7 +197,8 @@ import {
   proWorkflowMenu,
   proPersonalSettingsItems,
   proLicenseMenuItem,
-  proAnalysisSettingsItems
+  proAnalysisSettingsItems,
+  proAdminSettingsItems
 } from '@/config/navigation.pro'
 import {
   Odometer,
