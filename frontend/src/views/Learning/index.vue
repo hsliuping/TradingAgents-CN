@@ -93,9 +93,9 @@
         <div class="header-content">
           <h2>🎓 从散户到系统交易者：AI赋能的可进化投资法</h2>
           <el-tag type="success" size="large">{{ freeLessonCount }}节免费</el-tag>
-          <PaidCourseBadge size="large" text="完整版·知识星球" />
+          <PaidCourseBadge variant="tag-short" size="large" />
         </div>
-        <p class="section-subtitle">30节系统课程，按炒股全生命周期组织：发现 → 跟踪 → 持仓 → 复盘 → 扩展。前{{ freeLessonCount }}节免费预览。<PaidCourseBadge size="small" text="完整版加入知识星球付费学习" /></p>
+        <p class="section-subtitle">30节系统课程，按炒股全生命周期组织：发现 → 跟踪 → 持仓 → 复盘 → 扩展。前{{ freeLessonCount }}节免费预览。<PaidCourseBadge variant="text" /></p>
       </div>
 
       <!-- 课程分类（所有人可见） -->

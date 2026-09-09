@@ -4,5 +4,5 @@
 
 <script setup lang="ts">
 // 社区版空壳组件：由发布管道生成，保持引用兼容
-defineProps<{ size?: 'small' | 'default' | 'large'; text?: string }>()
+defineProps<{ variant?: 'tag' | 'tag-short' | 'text'; size?: 'small' | 'default' | 'large' }>()
 </script>
