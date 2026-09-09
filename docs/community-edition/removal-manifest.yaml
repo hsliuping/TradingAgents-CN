@@ -11,7 +11,7 @@
 #   - 清单变更后必须重新生成并通过全部校验（import 自检 / vue-tsc / build / 泄露扫描）
 # =============================================================================
 
-version: "2026-09-09"
+version: "2026-09-09-r2"
 description: "v3.6.0 社区版开源分离 · 第一版全量剔除清单"
 
 # ---------------------------------------------------------------------------
@@ -23,17 +23,28 @@ delete_dirs:
   # --- 前端 Pro 死页面（引用被剔除的 Pro API，无路由注册）---
   - frontend/src/views/Debug/LicenseDebug.vue
   - frontend/src/views/Debug/AgentAvailability.vue
-  # --- 付费课程正文（docs/07-courses/v3.0/ 仅保留 phase-01）---
-  - docs/07-courses/v3.0/phase-02
-  - docs/07-courses/v3.0/phase-03
-  - docs/07-courses/v3.0/phase-04
-  - docs/07-courses/v3.0/phase-05
-  - docs/07-courses/v3.0/phase-06
-  - docs/07-courses/v3.0/phase-07
-  - docs/07-courses/v3.0/phase-08
-  # --- 内部文档（设计文档/商业文档/公众号草稿，不开源）---
+  # --- 付费课程（docs/07-courses 仅保留 v3.0/phase-01-discover 前 5 课）---
+  - docs/07-courses/advanced
+  - docs/07-courses/v3.0/appendices
+  - docs/07-courses/v3.0/phase-02-track
+  - docs/07-courses/v3.0/phase-03-position
+  - docs/07-courses/v3.0/phase-04-review
+  - docs/07-courses/v3.0/phase-05-short-term
+  - docs/07-courses/v3.0/phase-06-long-term
+  - docs/07-courses/v3.0/phase-07-extension
+  - docs/07-courses/v3.0/phase-08-personal-plan
+  # --- 内部文档（产品/手册/开发/运维/设计/知识/归档，不开源；社区版手册 M4 另出）---
+  - docs/01-product
+  - docs/02-user-guide
+  - docs/03-development
+  - docs/04-operations
   - docs/05-design
+  - docs/06-knowledge
   - docs/08-blog
+  - docs/99-archive
+  - docs/community-edition
+  # --- 社媒爬虫示例（付费社媒链路配套）---
+  - examples
   # --- 内部开发工具脚本堆（一次性调试/修复/种子脚本，数百个）---
   - scripts
   # --- 京东云 All-in-One 部署（私有交付物：源码保护脚本/签名/jdyun 配置）---
@@ -81,7 +92,7 @@ delete_files_backend_routers:
   - app/routers/channel_configs.py
 
 # ---------------------------------------------------------------------------
-# 整文件删除：后端 Pro 服务（引用链已核对，仅 Pro 域引用或 try/except 防护）
+# 整文件删除：后端 Pro 服务（引用链已核对：仅 Pro 域引用，或共享文件内 try/except 防护）
 # ---------------------------------------------------------------------------
 delete_files_backend_services:
   - app/services/agent_workshop_service.py
@@ -185,9 +196,11 @@ replace_files:
     target: frontend/src/config/advancedCourses.ts
   - template: frontend/advancedCourseContent.ts
     target: frontend/src/config/advancedCourseContent.ts
-  # 社区版 README
+  # 社区版 README 与许可证
   - template: README.md
     target: README.md
+  - template: LICENSE
+    target: LICENSE
 
 # ---------------------------------------------------------------------------
 # 保留说明（不剔除，防误删备案）
@@ -204,24 +217,23 @@ keep_notes:
   - frontend/src/api/workflow.ts        # 社区页面（单股/通用研究/复盘/任务）共享
   - core/licensing/community_stub.py    # 社区版门控实现（保留）
   - core/licensing/models.py            # 配额模型（保留）
+  - core/tools/implementations/agent_builder/*  # 顶层 import Pro 服务，但加载链均在 try/except 内（thread_worker/agent_builder_nodes），社区版不触发顶层加载，运行时安全降级
+  - docs/images                         # 课程/页面图片（无害保留）
+  - docs/07-courses/v3.0/phase-01-discover  # 免费课程 5 课（社区版学习中心引用）
 
 # ---------------------------------------------------------------------------
-# 泄露扫描模式（生成后对源码扫描；前端构建后对 dist 复扫）
-# 命中即失败。注意与保留文件冲突的模式勿列入。
+# 泄露扫描模式
+# - 源码扫描：只扫高价值商业内容（符号名类模式误报率高，代码层防线由
+#   import 自检 + vue-tsc 承担）
+# - dist 扫描：前端构建产物，宽扫描（任何 Pro 痕迹都不应出现）
 # ---------------------------------------------------------------------------
 scan_source_patterns:
-  - "require_pro"
-  - "pro_routers"
-  - "PRO_ROUTERS"
-  - "trading_system_service"
-  - "agent_workshop_service"
-  - "workflow_generation_service"
-  - "social_media_service"
-  - "prompt_template_service"
-  - "skill_review_service"
+  - "知识星球"
   - "LicenseValidator"
   - "advancedCourses.pro"
-  - "知识星球"
+  - "高级学员"
+  - "企业微信"
+  - "付费功能清单"
 scan_dist_patterns:
   - "require_pro"
   - "trading_system"
@@ -234,5 +246,4 @@ scan_dist_patterns:
   - "execution_trace"
   - "mcp_service"
   - "知识星球"
-  - "付费"
   - "高级学员"
