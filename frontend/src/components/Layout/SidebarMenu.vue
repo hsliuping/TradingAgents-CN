@@ -105,9 +105,13 @@
       <template #title>操作复盘</template>
     </el-menu-item>
 
-    <el-menu-item index="/trading-system">
+    <!-- Pro：交易计划（社区版发布时自动隐藏，见 navigation.pro.ts） -->
+    <el-menu-item v-for="item in proTradingSystemMenuItems" :key="item.path" :index="item.path">
       <el-icon><Tickets /></el-icon>
-      <template #title>交易计划</template>
+      <template #title>
+        {{ item.label }}
+        <el-tag v-if="item.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </template>
     </el-menu-item>
 
     <el-sub-menu index="/settings">
@@ -200,6 +204,7 @@ import { isJdyunMode } from '@/utils/config'
 // 社区版发布时整文件替换为空配置，Pro 菜单项自动不渲染
 import {
   proTopLevelItems,
+  proTradingSystemMenuItems,
   proWorkflowMenu,
   proPersonalSettingsItems,
   proLicenseMenuItem,

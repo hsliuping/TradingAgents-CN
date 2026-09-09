@@ -170,6 +170,69 @@ export const proWorkflowRoutes: RouteRecordRaw[] = [
 ]
 
 /**
+ * Pro 顶级路由：交易计划模块（/trading-system 整组，trading_plan_check 付费功能）
+ */
+export const proTradingSystemRoutes: RouteRecordRaw[] = [
+  {
+    path: '/trading-system',
+    name: 'TradingSystem',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '交易计划',
+      icon: 'Tickets',
+      requiresAuth: true,
+      requiresPro: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: '',
+        name: 'TradingSystemList',
+        component: () => import('@/views/pro/TradingSystem/List.vue'),
+        meta: {
+          title: '交易计划列表',
+          requiresAuth: true,
+          requiresPro: true
+        }
+      },
+      {
+        path: 'create',
+        name: 'TradingSystemCreate',
+        component: () => import('@/views/pro/TradingSystem/Create.vue'),
+        meta: {
+          title: '创建交易计划',
+          requiresAuth: true,
+          requiresPro: true,
+          hideInMenu: true
+        }
+      },
+      {
+        path: ':id',
+        name: 'TradingSystemDetail',
+        component: () => import('@/views/pro/TradingSystem/Detail.vue'),
+        meta: {
+          title: '交易计划详情',
+          requiresAuth: true,
+          requiresPro: true,
+          hideInMenu: true
+        }
+      },
+      {
+        path: ':id/edit',
+        name: 'TradingSystemEdit',
+        component: () => import('@/views/pro/TradingSystem/Create.vue'),
+        meta: {
+          title: '编辑交易计划',
+          requiresAuth: true,
+          requiresPro: true,
+          hideInMenu: true
+        }
+      }
+    ]
+  }
+]
+
+/**
  * Pro 子路由：/analysis 下的批量分析（batch_analysis 付费功能）
  */
 export const proAnalysisChildren: RouteRecordRaw[] = [

@@ -10,7 +10,7 @@ import 'nprogress/nprogress.css'
 import { isJdyunMode } from '@/utils/config'
 // Pro 专属路由（v3.6.0 社区版开源分离 M1）：集中定义于 pro.routes.ts，
 // 社区版发布时整文件替换为空导出，本文件无需修改
-import { proWorkflowRoutes, proAnalysisChildren, proSettingsChildren } from './pro.routes'
+import { proWorkflowRoutes, proTradingSystemRoutes, proAnalysisChildren, proSettingsChildren } from './pro.routes'
 
 // 配置NProgress
 NProgress.configure({
@@ -390,28 +390,6 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
-    path: '/backtest',
-    name: 'Backtest',
-    component: () => import('@/layouts/BasicLayout.vue'),
-    meta: {
-      title: '策略回测',
-      icon: 'TrendCharts',
-      requiresAuth: true,
-      transition: 'fade'
-    },
-    children: [
-      {
-        path: '',
-        name: 'BacktestHome',
-        component: () => import('@/views/Backtest/index.vue'),
-        meta: {
-          title: '策略回测',
-          requiresAuth: true
-        }
-      }
-    ]
-  },
-  {
     path: '/reports',
     name: 'Reports',
     component: () => import('@/layouts/BasicLayout.vue'),
@@ -676,60 +654,10 @@ const routes: RouteRecordRaw[] = [
       }
     ]
   },
-  {
-    path: '/trading-system',
-    name: 'TradingSystem',
-    component: () => import('@/layouts/BasicLayout.vue'),
-    meta: {
-      title: '交易计划',
-      icon: 'Tickets',
-      requiresAuth: true,
-      transition: 'slide-up'
-    },
-    children: [
-      {
-        path: '',
-        name: 'TradingSystemList',
-        component: () => import('@/views/TradingSystem/List.vue'),
-        meta: {
-          title: '交易计划列表',
-          requiresAuth: true
-        }
-      },
-      {
-        path: 'create',
-        name: 'TradingSystemCreate',
-        component: () => import('@/views/TradingSystem/Create.vue'),
-        meta: {
-          title: '创建交易计划',
-          requiresAuth: true,
-          hideInMenu: true
-        }
-      },
-      {
-        path: ':id',
-        name: 'TradingSystemDetail',
-        component: () => import('@/views/TradingSystem/Detail.vue'),
-        meta: {
-          title: '交易计划详情',
-          requiresAuth: true,
-          hideInMenu: true
-        }
-      },
-      {
-        path: ':id/edit',
-        name: 'TradingSystemEdit',
-        component: () => import('@/views/TradingSystem/Create.vue'),
-        meta: {
-          title: '编辑交易计划',
-          requiresAuth: true,
-          hideInMenu: true
-        }
-      }
-    ]
-  },
   // 分析流模块（Pro）→ pro.routes.ts
   ...proWorkflowRoutes,
+  // 交易计划（Pro，trading_plan_check 付费功能）→ pro.routes.ts
+  ...proTradingSystemRoutes,
 
   {
     path: '/:pathMatch(.*)*',

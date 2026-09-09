@@ -35,6 +35,11 @@ export const proTopLevelItems: ProMenuItem[] = [
   { path: '/analysis/batch', label: '批量分析', advanced: true }
 ]
 
+/** 顶级菜单中的 Pro 项（交易计划，trading_plan_check 付费功能） */
+export const proTradingSystemMenuItems: ProMenuItem[] = [
+  { path: '/trading-system', label: '交易计划', advanced: true }
+]
+
 /** 分析流子菜单（整组 Pro；Skill 中心已免费，移至社区菜单 /skills） */
 export const proWorkflowMenu: ProMenuGroup = {
   path: '/workflow',
