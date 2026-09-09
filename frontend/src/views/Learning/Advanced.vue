@@ -74,7 +74,7 @@
       </el-card>
     </div>
 
-    <!-- 知识星球引流卡片 -->
+    <!-- 完整版入口卡片（社区版为空壳，不渲染） -->
     <KnowledgePlanetPromotion />
   </div>
 </template>
