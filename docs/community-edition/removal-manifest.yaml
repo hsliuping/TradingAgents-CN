@@ -11,7 +11,7 @@
 #   - 清单变更后必须重新生成并通过全部校验（import 自检 / vue-tsc / build / 泄露扫描）
 # =============================================================================
 
-version: "2026-09-09-r3"
+version: "2026-09-09-r4"
 description: "v3.6.0 社区版开源分离 · 第一版全量剔除清单"
 
 # ---------------------------------------------------------------------------
@@ -54,6 +54,20 @@ delete_dirs:
   - scripts
   # --- 京东云 All-in-One 部署（私有交付物：源码保护脚本/签名/jdyun 配置）---
   - deploy-all-in-one
+  # --- AI 助手内部配置（私有开发规则/技能库，非开源交付物）---
+  - .augment
+  - .claude
+  - .cursor
+  # --- 软著申请材料（源码 PDF/PPT/截图，私有）---
+  - copyright_submission
+  # --- 内部合规审计导出与 DB 模板备份（工作产物）---
+  - exports
+  # --- 内部发布工件（历史版本 manifest/升级建议，私有发布流程产物）---
+  - releases
+  # --- GPLv3 回测微服务（消费者 app/services/backtest_service.py 已剔除；compose 中为 profile 可选服务，默认不启动，hub compose 无引用）---
+  - backtest-service
+  # --- 7zip 二进制（仅私有打包脚本引用；backups.py 等运行时路径均有 os.path.exists 防护，缺失优雅降级）---
+  - vendors
 
 # ---------------------------------------------------------------------------
 # 整文件删除：后端 Pro 路由（26 个注册 + 2 个死代码）
@@ -181,6 +195,15 @@ delete_files_frontend:
 delete_files_root:
   - 付费功能清单.md
   - .env.jdyun.example
+  # AI 助手内部配置
+  - .cursorrules
+  - CLAUDE.md
+  # 私有商务/法律文件（京东云合作协议往来件、论文投稿稿）
+  - 京东云合作协议-修改说明邮件.md
+  - 京东云合作协议-修改说明邮件.txt
+  - 京东云AgentEngine测试合作协议-修改稿.md
+  - 京东云AgentEngine测试合作协议-修改稿.txt
+  - Seed-Evolving-Demo描述-投稿稿.md
 
 # ---------------------------------------------------------------------------
 # 整文件删除：02-user-guide 根目录旧文档（未被前端引用，手册仅保留 user-manual-v3.0.md）
@@ -255,6 +278,8 @@ keep_notes:
   - docs/07-courses/v3.0/phase-01-discover  # 免费课程 5 课（社区版学习中心引用）
   - docs/02-user-guide/user-manual-v3.0.md  # 标准版手册（userManualContent.ts 引用）
   - docs/02-user-guide/learning-01..08  # 学习中心文章 10 篇（Article.vue 引用；论文中文版已自 features/ 迁入 learning-06-resources/）
+  - data/analysis_results  # 历史样例分析报告（公开仓 v1.x 同名目录先例）
+  - reports                # 内部修复报告（公开仓 v1.x 同名目录先例，内容一致）
 
 # ---------------------------------------------------------------------------
 # 泄露扫描模式
@@ -275,6 +300,10 @@ scan_source_patterns:
   - "知识星球"
   - "LicenseValidator"
   - "advancedCourses.pro"
+  - "京东云合作协议"
+  - "AgentEngine"
+  - "投稿稿"
+  - "copyright_submission"
 scan_dist_patterns:
   - "require_pro"
   - "trading_system"
