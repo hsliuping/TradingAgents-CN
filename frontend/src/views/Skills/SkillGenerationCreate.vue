@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="skill-create-page">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -1010,7 +1010,7 @@ const scrollChat = () => {
 }
 
 const goBack = () => {
-  router.push('/workflow/skill-generation')
+  router.push('/skills')
 }
 
 const copyText = async (text: string, successMessage: string) => {

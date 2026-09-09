@@ -258,11 +258,11 @@ function viewSessionSkill(session: any) {
       return
     }
   }
-  router.push('/workflow/skill-generation/create?sessionId=' + session.session_id)
+  router.push('/skills/generation/create?sessionId=' + session.session_id)
 }
 
 function resumeSession(sessionId: string) {
-  router.push('/workflow/skill-generation/create?sessionId=' + sessionId)
+  router.push('/skills/generation/create?sessionId=' + sessionId)
 }
 
 function iterateSkill(skill: any) {
@@ -274,7 +274,7 @@ function iterateSkill(skill: any) {
   params.set('category', skill.category || '')
   params.set('mode', 'iterate')
   detailVisible.value = false
-  router.push('/workflow/skill-generation/create?' + params.toString())
+  router.push('/skills/generation/create?' + params.toString())
 }
 
 async function deleteSession(sessionId: string) {

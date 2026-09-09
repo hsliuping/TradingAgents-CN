@@ -818,7 +818,7 @@ async function loadAgents() {
 }
 
 function handleCreateSkill() {
-  window.location.href = '/workflow/skill-generation/create'
+  window.location.href = '/skills/generation/create'
 }
 
 async function searchClawHubSkills() {

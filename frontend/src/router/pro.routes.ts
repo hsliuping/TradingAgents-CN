@@ -52,16 +52,6 @@ export const proWorkflowRoutes: RouteRecordRaw[] = [
         redirect: '/workflow/agent-workshop'
       },
       {
-        path: 'skills',
-        name: 'WorkflowSkills',
-        component: () => import('@/views/pro/workflow/SkillCenter.vue'),
-        meta: {
-          title: 'Skill 中心',
-          requiresAuth: true,
-          requiresPro: true
-        }
-      },
-      {
         path: 'mcp-servers',
         name: 'MCPServers',
         component: () => import('@/views/pro/workflow/McpServers.vue'),
@@ -72,23 +62,21 @@ export const proWorkflowRoutes: RouteRecordRaw[] = [
         }
       },
       {
+        // Skill 中心已免费（v3.6.0）：旧路径重定向到社区路由 /skills
+        path: 'skills',
+        redirect: '/skills'
+      },
+      {
         path: 'skill-gaps',
-        redirect: '/workflow/skills'
+        redirect: '/skills'
       },
       {
         path: 'skill-generation',
-        redirect: '/workflow/skills'
+        redirect: '/skills'
       },
       {
         path: 'skill-generation/create',
-        name: 'SkillGenerationCreate',
-        component: () => import('@/views/pro/workflow/SkillGenerationCreate.vue'),
-        meta: {
-          title: '创建 Skill',
-          requiresAuth: true,
-          requiresPro: true,
-          hideInMenu: true
-        }
+        redirect: '/skills/generation/create'
       },
       {
         path: 'workflow-generation/create',

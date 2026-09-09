@@ -69,6 +69,11 @@ from app.routers import update as update_router
 from app.routers import capability_index as capability_index_router
 from app.routers import quality_metrics as quality_metrics_router
 from app.routers import unified_tasks as unified_tasks_router
+# Skill 中心（v3.6.0 起免费开放，随社区版开源）
+from app.routers import skills as skills_router
+from app.routers import skill_generation as skill_generation_router
+from app.routers import skill_gaps as skill_gaps_router
+from app.routers import skill_center as skill_center_router
 
 # (router, 注册名, include_router kwargs)
 COMMUNITY_ROUTERS = [
@@ -117,6 +122,11 @@ COMMUNITY_ROUTERS = [
     (unified_tasks_router.router, "unified_tasks", {"tags": ["unified-task-center"]}),
     (capability_index_router.router, "capability_index", {"prefix": "/api", "tags": ["capability-index"]}),
     (quality_metrics_router.router, "quality_metrics", {}),
+    # --- Skill 中心（v3.6.0 起免费开放，随社区版开源）---
+    (skills_router.router, "skills", {"tags": ["skills"]}),
+    (skill_generation_router.router, "skill_generation", {"tags": ["skill-generation"]}),
+    (skill_gaps_router.router, "skill_gaps", {"tags": ["skill-gaps"]}),
+    (skill_center_router.router, "skill_center", {"tags": ["skill-center"]}),
 ]
 
 # =============================================================================
@@ -125,10 +135,6 @@ COMMUNITY_ROUTERS = [
 from app.routers import workflows as workflows_router
 from app.routers import agents as agents_router
 from app.routers import tools as tools_router
-from app.routers import skills as skills_router
-from app.routers import skill_generation as skill_generation_router
-from app.routers import skill_gaps as skill_gaps_router
-from app.routers import skill_center as skill_center_router
 from app.routers import agent_workshop as agent_workshop_router
 from app.routers import workflow_generation as workflow_generation_router
 from app.routers import agent_assertions as agent_assertions_router
@@ -155,14 +161,10 @@ from app.routers import templates_debug as templates_debug_router  # ⚠️ DEPR
 
 # (router, 注册名, include_router kwargs)
 PRO_ROUTERS = [
-    # --- 分析流模块（workflows / agents / tools / skills / MCP）---
+    # --- 分析流模块（workflows / agents / tools / MCP）---
     (workflows_router.router, "workflows", {"tags": ["workflows"]}),
     (agents_router.router, "agents", {"tags": ["agents"]}),
     (tools_router.router, "tools", {"tags": ["tools"]}),
-    (skills_router.router, "skills", {"tags": ["skills"]}),
-    (skill_generation_router.router, "skill_generation", {"tags": ["skill-generation"]}),
-    (skill_gaps_router.router, "skill_gaps", {"tags": ["skill-gaps"]}),
-    (skill_center_router.router, "skill_center", {"tags": ["skill-center"]}),
     (agent_workshop_router.router, "agent_workshop", {"tags": ["agent-workshop"]}),
     (workflow_generation_router.router, "workflow_generation", {"tags": ["workflow-generation"]}),
     (agent_assertions_router.router, "agent_assertions", {"tags": ["agent-assertions"]}),

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="agent-workshop-page">
     <div class="page-header">
       <div class="page-title-block">
@@ -3337,12 +3337,12 @@ const buildSkillGenerationDescription = (target: string | AgentWorkshopToolingPl
 const goToSkillWorkshop = (target?: string | AgentWorkshopToolingPlanItem) => {
   const description = target ? buildSkillGenerationDescription(target) : ''
   if (!description) {
-    router.push('/workflow/skill-generation/create')
+    router.push('/skills/generation/create')
     return
   }
 
   router.push({
-    path: '/workflow/skill-generation/create',
+    path: '/skills/generation/create',
     query: {
       description,
       from_agent_workshop: selectedSpecId.value || '',

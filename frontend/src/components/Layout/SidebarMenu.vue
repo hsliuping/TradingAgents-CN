@@ -50,6 +50,12 @@
       <template #title>AI 记忆</template>
     </el-menu-item>
 
+    <!-- Skill 中心（v3.6.0 起免费开放） -->
+    <el-menu-item index="/skills">
+      <el-icon><MagicStick /></el-icon>
+      <template #title>Skill 中心</template>
+    </el-menu-item>
+
     <el-menu-item index="/reports">
       <el-icon><Document /></el-icon>
       <template #title>研究报告</template>
@@ -219,6 +225,7 @@ import {
   Tickets,
   ChatDotRound,
   Coin,
+  MagicStick,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

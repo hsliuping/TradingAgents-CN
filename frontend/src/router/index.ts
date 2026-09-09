@@ -357,6 +357,39 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    // Skill 中心（v3.6.0 起免费开放，随社区版开源）
+    path: '/skills',
+    name: 'SkillCenter',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: 'Skill 中心',
+      icon: 'MagicStick',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'SkillCenterHome',
+        component: () => import('@/views/Skills/SkillCenter.vue'),
+        meta: {
+          title: 'Skill 中心',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'generation/create',
+        name: 'SkillGenerationCreate',
+        component: () => import('@/views/Skills/SkillGenerationCreate.vue'),
+        meta: {
+          title: '创建 Skill',
+          requiresAuth: true,
+          hideInMenu: true
+        }
+      }
+    ]
+  },
+  {
     path: '/backtest',
     name: 'Backtest',
     component: () => import('@/layouts/BasicLayout.vue'),

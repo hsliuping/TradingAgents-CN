@@ -35,7 +35,7 @@ export const proTopLevelItems: ProMenuItem[] = [
   { path: '/analysis/batch', label: '批量分析', advanced: true }
 ]
 
-/** 分析流子菜单（整组 Pro） */
+/** 分析流子菜单（整组 Pro；Skill 中心已免费，移至社区菜单 /skills） */
 export const proWorkflowMenu: ProMenuGroup = {
   path: '/workflow',
   label: '分析流',
@@ -44,7 +44,6 @@ export const proWorkflowMenu: ProMenuGroup = {
     { path: '/workflow', label: '流程管理', advanced: true },
     { path: '/workflow/tools', label: '工具配置', advanced: true },
     { path: '/workflow/agent-workshop', label: 'Agent 工坊', badge: { text: '迭代', type: 'primary' } },
-    { path: '/workflow/skills', label: 'Skill 中心', advanced: true },
     { path: '/workflow/mcp-servers', label: 'MCP 服务器', advanced: true }
   ]
 }

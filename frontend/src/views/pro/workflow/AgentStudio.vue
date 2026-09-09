@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="agent-studio-page">
     <header class="topbar">
       <div class="topbar-left">
@@ -1806,7 +1806,7 @@ const canPublishVersionDetail = computed(() => !!versionDetailVersion.value && v
 const openSkillTrace = (skillId?: string) => {
   const normalized = String(skillId || '').trim()
   if (!normalized) return
-  router.push({ path: '/workflow/skill-generation', query: { skill_id: normalized, source: 'agent_studio_auto_gap_resolution' } })
+  router.push({ path: '/skills', query: { skill_id: normalized, source: 'agent_studio_auto_gap_resolution' } })
 }
 
 const startEditingVersionMetadata = () => {
