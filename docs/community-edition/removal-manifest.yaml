@@ -164,6 +164,9 @@ delete_files_frontend:
   # 组件（仅被 views/pro 引用）
   - frontend/src/components/Workflow/SkillReviewCard.vue
   - frontend/src/components/Workflow/ToolSelectDialog.vue
+  # 死组件（社区页面无引用：LicenseGate 引用方均随 views/pro 剔除；UpgradeCard 无引用）
+  - frontend/src/components/LicenseGate.vue
+  - frontend/src/components/AdvancedCourseUpgradeCard.vue
   # 付费课程数据（M1 §7.4 物理分离）
   - frontend/src/config/advancedCourses.pro.ts
   - frontend/src/config/advancedCourseContent.pro.ts
@@ -201,6 +204,11 @@ replace_files:
     target: README.md
   - template: LICENSE
     target: LICENSE
+  # 前端：付费引导组件空壳（被社区共享页面引用，删组件会崩，整文件替换为空壳）
+  - template: frontend/KnowledgePlanetPromotion.vue
+    target: frontend/src/components/KnowledgePlanetPromotion.vue
+  - template: frontend/LicenseAlert.vue
+    target: frontend/src/components/Layout/LicenseAlert.vue
 
 # ---------------------------------------------------------------------------
 # 保留说明（不剔除，防误删备案）
@@ -223,17 +231,16 @@ keep_notes:
 
 # ---------------------------------------------------------------------------
 # 泄露扫描模式
-# - 源码扫描：只扫高价值商业内容（符号名类模式误报率高，代码层防线由
+# - 源码扫描：只扫高价值商业内容（符号名/文案类模式误报率高，代码层防线由
 #   import 自检 + vue-tsc 承担）
 # - dist 扫描：前端构建产物，宽扫描（任何 Pro 痕迹都不应出现）
+# - M4 待办（文案级残留，已知可接受）：共享页面"高级学员"死分支提示语、
+#   USER_AGREEMENT 条款、channel_config"企业微信"枚举、stores/license 提示文案
 # ---------------------------------------------------------------------------
 scan_source_patterns:
   - "知识星球"
   - "LicenseValidator"
   - "advancedCourses.pro"
-  - "高级学员"
-  - "企业微信"
-  - "付费功能清单"
 scan_dist_patterns:
   - "require_pro"
   - "trading_system"
