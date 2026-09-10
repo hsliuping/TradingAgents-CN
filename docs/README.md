@@ -68,6 +68,7 @@
   - [京东云登录认证设计](./05-design/v3.0/jdyun-auth-design.md)
   - [v3.6.0 社区版开源分离方案](./05-design/v3.0/v3.6.0-community-edition-separation-plan.md)
 - **[v4.0（下一版本）](./05-design/v4.0/)** - 下一版本规划
+  - [现状与远期目标映射（基准文档）](./05-design/v4.0/current-state-and-vision-mapping.md) ⭐ 三层架构定位、代码现状盘点、目标修订记录（R1-R8）与四泳道统一路线图
 - **[v5.0（远期愿景）](./05-design/v5.0/)** - 远期愿景
 - [前沿探索](./05-design/research/) - 不绑定版本的前沿研究
 
