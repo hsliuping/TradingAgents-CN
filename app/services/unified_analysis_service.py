@@ -119,6 +119,10 @@ class UnifiedAnalysisService:
             if parameters.research_depth:
                 # 保持research_depth为字符串值，用于workflow inputs
                 config["research_depth"] = parameters.research_depth
+                # 🧠 A1b: 深度档位 → 思考预算（传给 builder，与 DB 显式配置合并，仅火山方舟推理模型注入）
+                config["depth_reasoning_effort"] = RESEARCH_DEPTH_REASONING_EFFORT.get(
+                    str(parameters.research_depth).strip(), "medium"
+                )
 
             if parameters.selected_analysts:
                 config["selected_analysts"] = parameters.selected_analysts

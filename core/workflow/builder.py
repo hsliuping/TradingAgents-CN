@@ -390,6 +390,21 @@ class LegacyDependencyProvider:
                 f"deep={deep_model}={deep_max_tokens}"
             )
 
+            # 🧠 A1b: 深度档位 → reasoning_effort 思考预算
+            # 合并语义与旧链路一致（resolve_reasoning_efforts）：DB 显式配置 > 档位默认，
+            # 仅火山方舟 Agent Plan（provider=volcengine）注入；快速模型在档位基础上降两档
+            from tradingagents.graph.trading_graph import resolve_reasoning_efforts
+            _effort_cfg = dict(self._config)
+            _effort_cfg.setdefault("quick_provider", quick_provider)
+            _effort_cfg.setdefault("deep_provider", deep_provider)
+            quick_effort, deep_effort = resolve_reasoning_efforts(_effort_cfg, quick_db_cfg, deep_db_cfg)
+            if self._config.get("depth_reasoning_effort"):
+                logger.info(
+                    f"🧠 [依赖提供者] reasoning_effort: 档位默认={self._config.get('depth_reasoning_effort')}"
+                    f" → quick={quick_model}={quick_effort}, deep={deep_model}={deep_effort}"
+                    f"（DB显式配置优先，仅火山注入）"
+                )
+
             # 创建快速模型
             self._quick_llm = create_llm_by_provider(
                 provider=quick_provider,
@@ -399,7 +414,7 @@ class LegacyDependencyProvider:
                 max_tokens=quick_max_tokens,
                 timeout=self._config.get("quick_timeout") or quick_db_cfg.get("timeout", 60),
                 api_key=quick_api_key,
-                reasoning_effort=quick_db_cfg.get("reasoning_effort"),
+                reasoning_effort=quick_effort,
             )
 
             # 创建深度模型
@@ -411,7 +426,7 @@ class LegacyDependencyProvider:
                 max_tokens=deep_max_tokens,
                 timeout=self._config.get("deep_timeout") or deep_db_cfg.get("timeout", 120),
                 api_key=deep_api_key,
-                reasoning_effort=deep_db_cfg.get("reasoning_effort"),
+                reasoning_effort=deep_effort,
             )
 
             logger.info("[依赖提供者] LLM 实例创建成功")
@@ -478,9 +493,17 @@ class LegacyDependencyProvider:
             else self._config.get(f"{llm_type}_timeout") or db_cfg.get("timeout", 60 if llm_type == "quick" else 120)
         )
 
+        # 🧠 A1b: reasoning_effort 合并（DB 显式配置 > 档位默认；仅火山方舟注入；quick 降两档）
+        from tradingagents.graph.trading_graph import _lower_reasoning_effort
+        resolved_effort = db_cfg.get("reasoning_effort")
+        _depth_effort = self._config.get("depth_reasoning_effort")
+        if _depth_effort and not resolved_effort and str(provider or "").lower() == "volcengine":
+            resolved_effort = _lower_reasoning_effort(_depth_effort) if llm_type == "quick" else _depth_effort
+
         logger.info(
             f"[依赖提供者] 创建自定义 LLM: type={llm_type}, model={model}, "
             f"temperature={resolved_temperature}, timeout={resolved_timeout}, max_tokens={resolved_max_tokens}"
+            + (f", reasoning_effort={resolved_effort}" if resolved_effort else "")
         )
         logger.info(f"  - API Key 来源: {'用户显式指定' if api_key_from_config else ('数据库配置' if api_key_from_db else '未配置（将使用环境变量）')}")
         if api_key:
@@ -496,7 +519,7 @@ class LegacyDependencyProvider:
             max_tokens=resolved_max_tokens,
             timeout=resolved_timeout,
             api_key=api_key,
-            reasoning_effort=db_cfg.get("reasoning_effort"),
+            reasoning_effort=resolved_effort,
         )
 
     def _get_llm_config_from_db(self) -> Dict[str, Any]:

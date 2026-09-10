@@ -666,6 +666,18 @@ class UnifiedAnalysisEngine:
             legacy_config["selected_analysts"] = workflow_inputs["selected_analysts"]
             self.logger.info(f"🎯 选中的分析师: {workflow_inputs['selected_analysts']}")
 
+        # 🧠 A1b: 深度档位 → 思考预算（传给 builder，与 DB 显式配置合并，仅火山方舟推理模型注入）
+        try:
+            from app.services.simple_analysis_service import RESEARCH_DEPTH_REASONING_EFFORT
+            _depth_key = str(workflow_inputs.get("research_depth") or "标准").strip()
+            legacy_config["depth_reasoning_effort"] = RESEARCH_DEPTH_REASONING_EFFORT.get(_depth_key, "medium")
+            self.logger.info(
+                f"🧠 [reasoning_effort] 档位={_depth_key} → 思考预算默认={legacy_config['depth_reasoning_effort']}"
+                f"（DB 显式配置优先，仅火山方舟推理模型注入）"
+            )
+        except ImportError:
+            pass
+
         # 从任务参数中提取 LLM 配置；若未指定，则从数据库系统配置读取默认值
         quick_model = workflow_inputs.get("quick_analysis_model")
         deep_model = workflow_inputs.get("deep_analysis_model")
