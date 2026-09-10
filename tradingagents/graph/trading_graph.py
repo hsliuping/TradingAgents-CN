@@ -176,10 +176,15 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm, normalize_openai_temperature
 
     # 🔧 reasoning_effort: 火山方舟推理模型思考深度控制，通过 model_kwargs 传递
+    # 🛡️ Q1: 推理模型（reasoning_effort 已设置）深度思考耗时长（实测单次 300s+），
+    # SDK 重试从全局默认降为 1 次（共 2 次尝试），避免最坏 3×timeout 空等
     _extra = {}
+    _base_max_retries = get_llm_max_retries()
     if reasoning_effort:
         _extra["model_kwargs"] = {"reasoning_effort": reasoning_effort}
-        logger.info(f"🔧 [reasoning_effort] 设置为 {reasoning_effort}")
+        if _base_max_retries > 1:
+            _base_max_retries = 1
+        logger.info(f"🔧 [reasoning_effort] 设置为 {reasoning_effort}（max_retries=1）")
 
     normalized_provider, normalized_model = _normalize_provider_qualified_model(provider, model)
     if normalized_provider != provider or normalized_model != model:
@@ -274,7 +279,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
-            max_retries=get_llm_max_retries(),
+            max_retries=_base_max_retries,
             **_extra
         )
 
@@ -306,7 +311,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
 
         # JDYun 模式：底层只保留 1 次快速重试（应对瞬时网络抖动），
         # 429 限流由 _JDYunRateLimitedLLM 用长间隔处理
-        _max_retries = 1 if provider.lower() == "jdyun" else get_llm_max_retries()
+        _max_retries = 1 if provider.lower() == "jdyun" else _base_max_retries
         llm = ChatOpenAI(
             model=model,
             base_url=backend_url,
@@ -339,7 +344,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
-            max_retries=get_llm_max_retries(),
+            max_retries=_base_max_retries,
             **_extra
         )
 
@@ -367,7 +372,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
-            max_retries=get_llm_max_retries(),
+            max_retries=_base_max_retries,
             **_extra
         )
 
@@ -406,7 +411,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout,
-            max_retries=get_llm_max_retries(),
+            max_retries=_base_max_retries,
             **_extra
         )
 

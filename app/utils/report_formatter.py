@@ -83,12 +83,35 @@ STANDARD_REPORT_FIELDS = [
 ]
 
 
+def _failure_shape_message(value: dict) -> Optional[str]:
+    """🛡️ Q1: 识别失败/空响应包装 dict，返回用户友好提示（非失败形态返回 None）。
+
+    覆盖 {'success': False, 'error': ...}（节点异常）与
+    {'content': '', 'success': True}（空响应被包装成成功）两类。
+    """
+    if not isinstance(value, dict):
+        return None
+    content_val = value.get("content")
+    if value.get("success") is False or (
+        value.get("success") is True
+        and not (isinstance(content_val, str) and content_val.strip())
+    ):
+        err = value.get("error") or "模型响应异常（空内容）"
+        return f"> ⚠️ **本节生成失败**：{err}。建议重新分析以获取完整报告。"
+    return None
+
+
 def _extract_report_text(report_key: str, value: Any) -> Optional[str]:
     text_value = None
 
     if isinstance(value, str):
         text_value = value.strip()
     elif isinstance(value, dict):
+        # 🛡️ Q1: 失败/空响应形态 → 渲染友好提示而非跳过（裸 dict 严禁进报告）
+        _failure_msg = _failure_shape_message(value)
+        if _failure_msg:
+            logger.warning(f"⚠️ [ReportFormatter] {report_key} 为失败/空响应形态，渲染提示")
+            return _failure_msg
         for key in ("content", "markdown", "text", "message", "report"):
             nested_value = value.get(key)
             if isinstance(nested_value, str) and nested_value.strip():
@@ -275,6 +298,14 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
             if isinstance(value, str):
                 text_value = value.strip()
             elif isinstance(value, dict):
+                # 🛡️ Q1: 失败/空响应形态 → 渲染友好提示（裸 dict 严禁进报告）
+                _failure_msg = _failure_shape_message(value)
+                if _failure_msg:
+                    logger.warning(
+                        f"⚠️ [ReportFormatter] 备选提取 {report_key} <- {alt_field} 为失败/空响应形态，渲染提示"
+                    )
+                    reports[report_key] = _failure_msg
+                    break
                 for k in ("content", "markdown", "text", "message", "report"):
                     v = value.get(k)
                     if isinstance(v, str) and v.strip():

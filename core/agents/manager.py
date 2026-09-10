@@ -220,6 +220,27 @@ class ManagerAgent(BaseAgent):
                 _t0 = _time.time()
                 response = self._llm.invoke(messages)
                 _llm_duration_ms = int((_time.time() - _t0) * 1000)
+
+                # 🛡️ Q1: 空响应防线——推理模型偶发"瞬时异常"返回空 content（HTTP 成功但可见内容为 0）
+                # 记录 finish_reason/思考token 后退避重试 1 次；仍为空则走失败路径，禁止把空内容包装成成功
+                if not (getattr(response, "content", "") or "").strip():
+                    _meta = getattr(response, "response_metadata", None) or {}
+                    _usage = getattr(response, "usage_metadata", None) or {}
+                    _reasoning = ((_usage.get("output_token_details") or {}).get("reasoning"))
+                    logger.warning(
+                        f"⚠️ [{self.agent_id}] LLM 返回空内容（finish_reason={_meta.get('finish_reason')}, "
+                        f"reasoning_tokens={_reasoning}, 耗时={_llm_duration_ms}ms），5s 后自动重试 1 次"
+                    )
+                    _time.sleep(5)
+                    _t0 = _time.time()
+                    response = self._llm.invoke(messages)
+                    _llm_duration_ms = int((_time.time() - _t0) * 1000)
+                    if not (getattr(response, "content", "") or "").strip():
+                        _meta = getattr(response, "response_metadata", None) or {}
+                        raise ValueError(
+                            f"LLM 返回空内容（重试 1 次后仍为空，finish_reason={_meta.get('finish_reason')}）"
+                        )
+
                 if recorder:
                     recorder.record_llm_response(response, llm_duration_ms=_llm_duration_ms)
                 logger.info(f"✅ [{self.agent_id}] LLM 调用成功")

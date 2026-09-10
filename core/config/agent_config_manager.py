@@ -128,7 +128,9 @@ class AgentConfigManager:
             "enabled": True,
             "config": {
                 "max_iterations": 3,
-                "timeout": 120,
+                # timeout 故意不设默认值：由模型级配置（界面“大模型设置”中的 timeout，
+                # 经 unified_analysis_engine → workflow deep_timeout/quick_timeout）决定；
+                # 仅当用户在“智能体管理”中为该 Agent 显式配置 timeout 时才覆盖模型级配置。
                 "temperature": default_temperature,  # 🔥 使用类型特定的默认温度
             },
             "prompt_template_type": metadata.category.value if hasattr(metadata.category, 'value') else "general",

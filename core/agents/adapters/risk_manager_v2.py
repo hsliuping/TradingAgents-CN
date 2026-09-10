@@ -456,6 +456,23 @@ class RiskManagerV2(ManagerAgent):
         # 调用父类方法获取基本输出
         result = super().execute(state)
 
+        # 🛡️ Q1: 父类执行失败（超时/空响应等异常包装 dict）时直接透传，
+        # 不做 schema 校验与文本化——否则 {'error','success':False} 会被 _extract_text
+        # 字符串化后写回 state，最终以裸 dict 形态混入报告（见 engine/report_formatter 的失败形态处理）
+        _raw_output = result.get(self.output_field)
+        if isinstance(_raw_output, dict) and (
+            _raw_output.get("success") is False
+            or (
+                _raw_output.get("success") is True
+                and not str(_raw_output.get("content") or "").strip()
+            )
+        ):
+            logger.warning(
+                f"⚠️ [RiskManagerV2] 父类执行失败（{_raw_output.get('error')}），"
+                f"跳过 schema 校验，失败形态直接透传给下游渲染层"
+            )
+            return result
+
         # 提取风险评估原始文本
         risk_assessment_raw = result.get(self.output_field)
         risk_assessment_text = self._extract_text(risk_assessment_raw)

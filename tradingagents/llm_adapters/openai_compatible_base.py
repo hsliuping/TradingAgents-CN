@@ -183,6 +183,26 @@ class OpenAICompatibleBase(ChatOpenAI):
 
     def _track_token_usage(self, result: ChatResult, kwargs: Dict, start_time: float):
         """记录token使用量并输出日志"""
+        # 🛡️ Q1-3: finish_reason 永久留痕（不受 TOKEN_TRACKING_ENABLED 开关影响）
+        # stop=正常结束；length=输出被 max_tokens 截断；空内容配合此字段可 5 秒定位"思考耗尽/瞬时异常"
+        finish_reason, content_len, reasoning_tokens = None, None, None
+        try:
+            _gen = result.generations[0] if getattr(result, "generations", None) else None
+            _msg = getattr(_gen, "message", None) if _gen else None
+            _meta = getattr(_msg, "response_metadata", None) or {}
+            finish_reason = _meta.get("finish_reason")
+            content_len = len(getattr(_msg, "content", "") or "")
+            _usage_meta = getattr(_msg, "usage_metadata", None) or {}
+            reasoning_tokens = ((_usage_meta.get("output_token_details") or {}).get("reasoning"))
+            if (finish_reason is not None and finish_reason != "stop") or content_len == 0:
+                logger.warning(
+                    f"⚠️ [LLM响应异常特征] Provider: {getattr(self, 'provider_name', 'unknown')}, "
+                    f"Model: {getattr(self, 'model_name', 'unknown')}, "
+                    f"finish_reason={finish_reason}, 内容长度={content_len}, 思考tokens={reasoning_tokens}"
+                )
+        except Exception as e:
+            logger.debug(f"finish_reason 记录失败: {e}")
+
         if not TOKEN_TRACKING_ENABLED:
             return
         try:
@@ -195,7 +215,8 @@ class OpenAICompatibleBase(ChatOpenAI):
             elapsed = time.time() - start_time
             logger.info(
                 f"📊 Token使用 - Provider: {getattr(self, 'provider_name', 'unknown')}, Model: {getattr(self, 'model_name', 'unknown')}, "
-                f"总tokens: {total_tokens}, 提示: {prompt_tokens}, 补全: {completion_tokens}, 用时: {elapsed:.2f}s"
+                f"总tokens: {total_tokens}, 提示: {prompt_tokens}, 补全: {completion_tokens}, 用时: {elapsed:.2f}s, "
+                f"finish_reason: {finish_reason}, 思考tokens: {reasoning_tokens}, 内容长度: {content_len}"
             )
         except Exception as e:
             logger.warning(f"⚠️ Token跟踪记录失败: {e}")
