@@ -119,7 +119,7 @@ class TestResearchDepth5Levels:
         """测试所有深度级别的递进关系"""
         depths = ["快速", "基础", "标准", "深度", "全面"]
         configs = []
-        
+
         for depth in depths:
             config = create_analysis_config(
                 research_depth=depth,
@@ -136,27 +136,77 @@ class TestResearchDepth5Levels:
                 "memory": config["memory_enabled"],
                 "online": config["online_tools"]
             })
-        
+
         # 验证辩论轮次递增（除了前3级都是1轮）
         assert configs[0]["debate_rounds"] == 1  # 快速
         assert configs[1]["debate_rounds"] == 1  # 基础
         assert configs[2]["debate_rounds"] == 1  # 标准
         assert configs[3]["debate_rounds"] == 2  # 深度
         assert configs[4]["debate_rounds"] == 3  # 全面
-        
+
         # 验证风险讨论轮次
         assert configs[0]["risk_rounds"] == 1  # 快速
         assert configs[1]["risk_rounds"] == 1  # 基础
         assert configs[2]["risk_rounds"] == 2  # 标准
         assert configs[3]["risk_rounds"] == 2  # 深度
         assert configs[4]["risk_rounds"] == 3  # 全面
-        
+
         # 验证记忆和在线工具（快速分析禁用，其他启用）
         assert configs[0]["memory"] is False  # 快速
         assert configs[0]["online"] is False  # 快速
         for i in range(1, 5):
             assert configs[i]["memory"] is True
             assert configs[i]["online"] is True
+
+
+class TestDepthReasoningEffortMapping:
+    """测试研究深度档位 → reasoning_effort 思考预算映射（A1）"""
+
+    def test_five_depths_map_to_efforts(self):
+        """五档深度应映射到火山方舟 reasoning_effort 档位"""
+        expected = {
+            "快速": "minimal",
+            "基础": "low",
+            "标准": "medium",
+            "深度": "high",
+            "全面": "xhigh",
+        }
+        for depth, effort in expected.items():
+            config = create_analysis_config(
+                research_depth=depth,
+                selected_analysts=["market", "fundamentals"],
+                quick_model="qwen-plus",
+                deep_model="qwen-max",
+                llm_provider="dashscope",
+                market_type="A股"
+            )
+            assert config["depth_reasoning_effort"] == effort, f"{depth} 应映射到 {effort}"
+
+    def test_numeric_depth_maps_effort(self):
+        """数字档位（1-5）同样映射"""
+        expected = {1: "minimal", 2: "low", 3: "medium", 4: "high", 5: "xhigh"}
+        for level, effort in expected.items():
+            config = create_analysis_config(
+                research_depth=level,
+                selected_analysts=["market", "fundamentals"],
+                quick_model="qwen-plus",
+                deep_model="qwen-max",
+                llm_provider="dashscope",
+                market_type="A股"
+            )
+            assert config["depth_reasoning_effort"] == effort
+
+    def test_unknown_depth_defaults_effort_medium(self):
+        """未知深度档位的 effort 回落到 medium"""
+        config = create_analysis_config(
+            research_depth="不存在的档位",
+            selected_analysts=["market", "fundamentals"],
+            quick_model="qwen-plus",
+            deep_model="qwen-max",
+            llm_provider="dashscope",
+            market_type="A股"
+        )
+        assert config["depth_reasoning_effort"] == "medium"
 
 
 class TestAnalysisParametersDefault:

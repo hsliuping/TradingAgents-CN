@@ -116,6 +116,45 @@ def _normalize_provider_qualified_model(provider: str, model: str) -> tuple[str,
     return normalized_provider, raw_model
 
 
+# 火山方舟 reasoning_effort 档位顺序（低→高）
+_REASONING_EFFORT_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+
+def _lower_reasoning_effort(effort: Optional[str], steps: int = 2) -> Optional[str]:
+    """快速模型思考预算在深度档位基础上降档（最低到 minimal，不降到 none 以免关闭思考）"""
+    if not effort:
+        return None
+    try:
+        idx = _REASONING_EFFORT_ORDER.index(effort)
+    except ValueError:
+        return effort
+    return _REASONING_EFFORT_ORDER[max(1, idx - steps)]
+
+
+def resolve_reasoning_efforts(
+    config: dict, quick_model_config: dict, deep_model_config: dict
+) -> tuple:
+    """合并快速/深度模型的 reasoning_effort。
+
+    优先级：DB 模型配置显式值 > 本次分析档位映射默认（config["depth_reasoning_effort"]）。
+    档位默认仅注入火山方舟 Agent Plan（provider=volcengine）推理模型；
+    Coding Plan（volcengine_coding）与其他厂家不注入；快速模型在深度档位上降两档。
+    """
+    quick_effort = quick_model_config.get("reasoning_effort")
+    deep_effort = deep_model_config.get("reasoning_effort")
+    depth_effort = config.get("depth_reasoning_effort")
+    if not depth_effort:
+        return quick_effort, deep_effort
+
+    quick_provider = (config.get("quick_provider") or config.get("llm_provider") or "").lower()
+    deep_provider = (config.get("deep_provider") or config.get("llm_provider") or "").lower()
+    if not quick_effort and quick_provider == "volcengine":
+        quick_effort = _lower_reasoning_effort(depth_effort)
+    if not deep_effort and deep_provider == "volcengine":
+        deep_effort = depth_effort
+    return quick_effort, deep_effort
+
+
 def create_llm_by_provider(provider: str, model: str, backend_url: str, temperature: float, max_tokens: int, timeout: int, api_key: str = None, reasoning_effort: Optional[str] = None):
     """
     根据 provider 创建对应的 LLM 实例
@@ -415,9 +454,18 @@ class TradingAgentsGraph:
         deep_temperature = deep_config.get("temperature", 0.7)
         deep_timeout = deep_config.get("timeout", 180)
 
-        # 🔧 reasoning_effort: 火山方舟推理模型思考深度控制
-        quick_reasoning_effort = quick_config.get("reasoning_effort")
-        deep_reasoning_effort = deep_config.get("reasoning_effort")
+        # 🔧 reasoning_effort 合并：DB 模型配置显式值 > 本次分析档位映射默认（depth_reasoning_effort）
+        # 档位默认仅注入火山方舟 Agent Plan（volcengine）推理模型；Coding Plan 与其他厂家不注入；
+        # 快速模型在深度档位基础上降两档（轻查询用低档提效）
+        quick_reasoning_effort, deep_reasoning_effort = resolve_reasoning_efforts(
+            self.config, quick_config, deep_config
+        )
+        depth_reasoning_effort = self.config.get("depth_reasoning_effort")
+        if depth_reasoning_effort:
+            logger.info(
+                f"🧠 [reasoning_effort] 档位默认={depth_reasoning_effort}，"
+                f"quick={quick_reasoning_effort or '未设置'}，deep={deep_reasoning_effort or '未设置'}"
+            )
 
         # 🔧 检查是否为混合模式（快速模型和深度模型来自不同厂家）
         quick_provider = self.config.get("quick_provider")

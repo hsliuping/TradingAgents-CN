@@ -35,6 +35,16 @@ from app.services.progress_log_handler import register_analysis_tracker, unregis
 
 ETF_CODE_PREFIXES = ("50", "51", "52", "56", "58", "15", "16", "18")
 
+# 研究深度档位 → 火山方舟推理模型思考预算（reasoning_effort 七档：none/minimal/low/medium/high/xhigh/max）
+# 档位映射仅作为默认值：DB 模型配置中显式设置的 reasoning_effort 优先级更高（见 trading_graph 合并逻辑）
+RESEARCH_DEPTH_REASONING_EFFORT = {
+    "快速": "minimal",
+    "基础": "low",
+    "标准": "medium",
+    "深度": "high",
+    "全面": "xhigh",
+}
+
 # 股票基础信息获取（用于补充显示名称）
 try:
     from tradingagents.dataflows.data_source_manager import get_data_source_manager
@@ -693,6 +703,10 @@ def create_analysis_config(
         config["memory_enabled"] = True
         config["online_tools"] = True
 
+    # 🔧 A1: 研究深度档位 → reasoning_effort 思考预算默认值
+    # 仅火山方舟推理模型在 graph 层注入生效；DB 模型配置显式设置时以 DB 为准
+    config["depth_reasoning_effort"] = RESEARCH_DEPTH_REASONING_EFFORT.get(research_depth, "medium")
+
     # 🔧 获取 backend_url 和 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
     try:
         # 1️⃣ 优先从数据库获取（包含模型配置的 api_base、API Key 和厂家的 default_base_url、API Key）
@@ -772,6 +786,7 @@ def create_analysis_config(
     logger.info(f"📋 ========== 创建分析配置完成 ==========")
     logger.info(f"   🎯 研究深度: {research_depth}")
     logger.info(f"   🔥 辩论轮次: {config['max_debate_rounds']}")
+    logger.info(f"   🧠 推理思考预算: {config['depth_reasoning_effort']}（火山方舟推理模型生效，DB显式配置优先）")
     logger.info(f"   ⚖️ 风险讨论轮次: {config['max_risk_discuss_rounds']}")
     logger.info(f"   💾 记忆功能: {config['memory_enabled']}")
     logger.info(f"   🌐 在线工具: {config['online_tools']}")
