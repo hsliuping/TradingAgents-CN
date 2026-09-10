@@ -1000,6 +1000,24 @@ class WorkflowAPI:
         prepared["_max_debate_rounds"] = depth_config["debate"]
         prepared["_max_risk_rounds"] = depth_config["risk"]
 
+        # A9-P1: 风险自我辩论开关（单节点替代风险三角多轮辩论，仅深度/全面档）
+        # 优先级：环境变量 RISK_SELF_DEBATE（on/off，一键回退）> 输入显式覆盖 > 档位默认
+        _self_debate_mode = str(os.environ.get("RISK_SELF_DEBATE", "auto")).strip().lower()
+        if _self_debate_mode in ("on", "1", "true"):
+            prepared["_risk_self_debate"] = True
+        elif _self_debate_mode in ("off", "0", "false"):
+            prepared["_risk_self_debate"] = False
+        elif "risk_self_debate" in prepared:
+            # 允许调用方按任务显式覆盖（truthy 判定）
+            prepared["_risk_self_debate"] = bool(prepared.get("risk_self_debate"))
+        else:
+            # 默认：仅深度/全面档启用，其余档位走原风险三角路径
+            prepared["_risk_self_debate"] = research_depth in ("深度", "全面")
+        logger.info(
+            f"[A9-P1] 风险自我辩论开关: {prepared['_risk_self_debate']} "
+            f"(mode={_self_debate_mode}, depth={research_depth})"
+        )
+
         # 映射字段名以兼容原有智能体
         if "ticker" in prepared:
             prepared["company_of_interest"] = prepared["ticker"]

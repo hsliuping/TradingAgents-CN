@@ -349,6 +349,8 @@ class WorkflowEngine:
             "risk_debate_state": FieldType.OBJECT,
             "_max_debate_rounds": FieldType.NUMBER,
             "_max_risk_rounds": FieldType.NUMBER,
+            # A9-P1: 风险自我辩论开关（True=深度/全面档走单节点自我辩论路径）
+            "_risk_self_debate": FieldType.BOOLEAN,
             "context": FieldType.OBJECT,
             "skip_cache": FieldType.BOOLEAN,
             "prompt_overrides": FieldType.OBJECT,
@@ -1378,6 +1380,20 @@ class WorkflowEngine:
 
         if isinstance(value, dict):
             logger.debug(f"🔍 [_extract_text_from_state] {field} 是字典，字段: {list(value.keys())}")
+            # 🛡️ Q1: 失败/空响应形态不进报告——识别 {'success': False, 'error': ...}（节点异常）
+            # 与 {'content': '', 'success': True}（空响应被包装成成功）两类异常包装，
+            # 渲染友好提示而非裸 dict 字符串
+            _content_val = value.get("content")
+            if value.get("success") is False or (
+                value.get("success") is True
+                and not (isinstance(_content_val, str) and _content_val.strip())
+            ):
+                _err = value.get("error") or "模型响应异常（空内容）"
+                logger.warning(
+                    f"⚠️ [_extract_text_from_state] {field} 为失败/空响应形态，"
+                    f"将以提示替代报告内容: success={value.get('success')}, error={_err}"
+                )
+                return f"> ⚠️ **本节生成失败**：{_err}。建议重新分析以获取完整报告。"
             # 尝试从字典中提取文本
             for key in ("content", "markdown", "text", "message", "report"):
                 text = value.get(key)

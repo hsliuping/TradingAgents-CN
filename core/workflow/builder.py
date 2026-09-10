@@ -199,6 +199,8 @@ _DEFAULT_CALLABLE_SURFACES = {"assistant", "workflow"}
 _DEEP_AGENTS = {
     "research_manager_v2", "risk_manager_v2",
     "risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2",
+    # A9-P1: 风险自我辩论节点使用深度 LLM（单次调用承载三视角辩论）
+    "risk_self_debate_v2",
     "index_analyst_v2", "sector_analyst_v2",
     "research_manager", "risk_manager",
 }
@@ -1125,8 +1127,31 @@ class WorkflowBuilder:
                 graph.add_node(clear_node_id, self._create_msg_clear_node(node.id, analyst_type))
                 logger.info(f"[工具节点] 添加消息清理节点: {clear_node_id}")
 
+        # A9-P1: 为每个风险辩论添加隐藏的自我辩论单节点
+        # 仅当运行时 state["_risk_self_debate"]=True（深度/全面档且开关开启）时被路由到，
+        # 默认走原风险三角多 agent 路径。节点创建失败时降级为不加节点（保留原路径），
+        # 不阻塞整个工作流构建。
+        risk_self_debate_nodes: Set[str] = set()
+        for debate_id in debate_configs:
+            if "risk" in debate_id.lower():
+                self_debate_node_id = f"{debate_id}_self_debate"
+                try:
+                    graph.add_node(
+                        self_debate_node_id,
+                        self._create_risk_self_debate_node_func(debate_id),
+                    )
+                    risk_self_debate_nodes.add(self_debate_node_id)
+                    logger.info(f"[图构建] ✅ 添加风险自我辩论节点: {self_debate_node_id} (A9-P1)")
+                except Exception as e:
+                    logger.warning(
+                        f"[图构建] ⚠️ 风险自我辩论节点创建失败，回退原风险三角路径: {e}"
+                    )
+
         # 添加边（使用过滤后的定义）
-        self._add_edges(graph, filtered_definition, debate_configs, analyst_nodes_info)
+        self._add_edges(
+            graph, filtered_definition, debate_configs, analyst_nodes_info,
+            risk_self_debate_nodes=risk_self_debate_nodes,
+        )
 
         # 编译
         return graph.compile()
@@ -1497,6 +1522,11 @@ class WorkflowBuilder:
             # 辩论配置
             _max_debate_rounds: Annotated[int, keep_non_empty]
             _max_risk_rounds: Annotated[int, keep_non_empty]
+
+            # A9-P1: 风险自我辩论开关（True=深度/全面档走单节点自我辩论路径，
+            # False/缺省=走原风险三角多 agent 辩论路径）。keep_non_empty 保证
+            # 一旦注入 True 不会被并行节点的空返回覆盖。
+            _risk_self_debate: Annotated[bool, keep_non_empty]
 
             # 分析师独立消息历史（避免并行执行时消息混乱）
             # 注意：这些字段用于工具调用循环，每个分析师使用自己的消息历史
@@ -2433,6 +2463,25 @@ class WorkflowBuilder:
 
         return wrapped
 
+    def _create_risk_self_debate_node_func(self, debate_id: str) -> Callable:
+        """
+        A9-P1: 创建风险自我辩论节点函数（单节点替代风险三角多轮辩论）。
+
+        构造合成 NodeDefinition 复用 _create_agent_node 的完整创建链
+        （数据库配置合并、deep LLM 选择、执行轨迹包装等），
+        agent 实现为 core/agents/adapters/risk_self_debate_v2.py。
+        """
+        node = NodeDefinition(
+            id=f"{debate_id}_self_debate",
+            type=NodeType.RISK,
+            agent_id="risk_self_debate_v2",
+            label="风险三视角自我辩论",
+            config={
+                "description": "单节点内完成高弹性/防御/基准三视角质证（A9-P1 深度档路径）",
+            },
+        )
+        return self._create_agent_node(node)
+
     def _create_manager_with_debate_reflection(
         self,
         node: NodeDefinition,
@@ -2483,7 +2532,8 @@ class WorkflowBuilder:
         graph: StateGraph,
         definition: WorkflowDefinition,
         debate_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-        analyst_nodes_info: Optional[Dict[str, str]] = None
+        analyst_nodes_info: Optional[Dict[str, str]] = None,
+        risk_self_debate_nodes: Optional[Set[str]] = None,
     ) -> None:
         """
         添加边到图
@@ -2492,6 +2542,8 @@ class WorkflowBuilder:
         - 辩论节点 → 第一个参与者（普通边）
         - 参与者之间使用条件边（检查计数决定继续或结束）
         - 最后一个参与者 → 下一阶段（通过条件边控制）
+        - A9-P1：风险辩论入口使用条件边，state["_risk_self_debate"]=True 时
+          路由到隐藏的自我辩论单节点（深度/全面档），否则走原参与者路径
 
         分析师工具循环设计：
         - 分析师节点 → 条件边 → 工具节点/消息清理节点
@@ -2517,6 +2569,9 @@ class WorkflowBuilder:
         if analyst_nodes_info is None:
             analyst_nodes_info = {}
 
+        if risk_self_debate_nodes is None:
+            risk_self_debate_nodes = set()
+
         # 收集所有辩论参与者
         all_participants: Set[str] = set()
         for config in debate_configs.values():
@@ -2531,11 +2586,57 @@ class WorkflowBuilder:
         for debate_id, config in debate_configs.items():
             participants = config["participants"]
 
-            # 辩论节点 → 第一个参与者
-            graph.add_edge(debate_id, participants[0])
-            added_edges.add((debate_id, participants[0]))
+            # A9-P1: 风险辩论入口条件路由
+            # state["_risk_self_debate"]=True → 单节点自我辩论路径（深度/全面档）
+            # 否则 → 原风险三角多 agent 辩论路径（默认，行为不变）
+            self_debate_node_id = f"{debate_id}_self_debate"
+            if self_debate_node_id in risk_self_debate_nodes:
+                def debate_entry_router(
+                    state,
+                    _first_participant=participants[0],
+                    _self_debate_node=self_debate_node_id,
+                    _debate_id=debate_id,
+                ):
+                    if state.get("_risk_self_debate"):
+                        logger.info(
+                            f"[A9-P1] 风险自我辩论已启用: {_debate_id} -> {_self_debate_node}"
+                        )
+                        return _self_debate_node
+                    return _first_participant
 
-            # 为每个参与者添加条件边
+                graph.add_conditional_edges(
+                    debate_id,
+                    debate_entry_router,
+                    [participants[0], self_debate_node_id],
+                )
+                added_edges.add((debate_id, participants[0]))
+                added_edges.add((debate_id, self_debate_node_id))
+
+                # 自我辩论节点 → 辩论后的下一节点（如 risk_manager）
+                next_node = config["next_node"]
+                if next_node:
+                    next_node_def = definition.get_node(next_node)
+                    if (
+                        next_node_def
+                        and next_node_def.type == NodeType.MERGE
+                        and merge_waits_all(next_node_def)
+                    ):
+                        add_merge_predecessor(next_node, self_debate_node_id)
+                    else:
+                        graph.add_edge(self_debate_node_id, next_node)
+                    added_edges.add((self_debate_node_id, next_node))
+                else:
+                    graph.add_edge(self_debate_node_id, END)
+                logger.info(
+                    f"[A9-P1] 风险辩论入口条件路由: {debate_id} -> "
+                    f"[{participants[0]}(原路径), {self_debate_node_id}(自我辩论)]"
+                )
+            else:
+                # 辩论节点 → 第一个参与者（原路径）
+                graph.add_edge(debate_id, participants[0])
+                added_edges.add((debate_id, participants[0]))
+
+            # 为每个参与者添加条件边（原逻辑保留，自我辩论路径不会经过）
             for i, participant in enumerate(participants):
                 self._add_participant_conditional_edge(
                     graph, participant, config, i, debate_id
