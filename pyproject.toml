@@ -64,6 +64,7 @@ dependencies = [
     # 数据处理和分析
     "pandas>=2.3.0",
     "xlrd>=2.0.2",
+    "openpyxl>=3.1.0",  # 估值测算 Excel 交付物（A10-D1）
 
     # 网络爬虫和解析
     "curl-cffi>=0.6.0",  # 模拟真实浏览器TLS指纹，绕过反爬虫检测

@@ -27,6 +27,7 @@ from .fundamentals.standard_financial_tools import (
     get_historical_valuation_percentile_tool,
     get_profitability_stability_metrics_tool,
 )
+from .fundamentals.valuation_excel_tool import generate_valuation_excel_tool
 from .news.stock_news import get_stock_news_unified
 from .social.stock_sentiment import get_stock_sentiment_unified
 from . import legacy_bridge

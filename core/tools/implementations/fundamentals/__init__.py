@@ -20,6 +20,7 @@ from .standard_financial_tools import (
     get_historical_valuation_percentile_tool,
     get_profitability_stability_metrics_tool,
 )
+from .valuation_excel_tool import generate_valuation_excel_tool
 from .bond_tools import (
     get_bond_yield_calculation,
     get_credit_spread_analysis,
@@ -53,6 +54,7 @@ __all__ = [
     'get_profitability_stability_metrics_tool',
     'get_cashflow_quality_trend_tool',
     'get_historical_valuation_percentile_tool',
+    'generate_valuation_excel_tool',
     'get_bond_yield_calculation',
     'get_credit_spread_analysis',
     'get_bond_duration_convexity',

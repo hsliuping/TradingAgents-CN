@@ -519,6 +519,36 @@ async def planned_analysis_stream(
     )
 
 
+@router.get("/deliverables/{filename}")
+async def download_assistant_deliverable(
+    filename: str,
+    current_user=Depends(get_current_user),
+):
+    """下载智能助手生成的交付物文件（当前支持估值测算 xlsx）。
+
+    安全约束：文件名仅允许字母/数字/下划线/点/横线，且必须为 .xlsx，
+    限定在 data/deliverables 目录内，防路径穿越。
+    """
+    import re
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+
+    if not re.fullmatch(r"[A-Za-z0-9_.\-]+", filename) or not filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="非法的文件名")
+
+    base_dir = (Path.cwd() / "data" / "deliverables").resolve()
+    file_path = (base_dir / filename).resolve()
+    if base_dir not in file_path.parents or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
 # ============================================================
 # v3.5.0 项4：智能助手 HITL（关键操作确认）API
 # ============================================================
