@@ -171,44 +171,56 @@ class RiskSelfDebateV2(ResearcherAgent):
             logger.debug("✅ 从模板系统获取风险自我辩论系统提示词")
             return prompt
 
-        return """你是一位资深风险研究专家，负责在一次深度思考中同时扮演三个风险审阅视角，并完成交叉质证。
+        return """你是一位资深风险研究专家。你的任务：在一次深度思考中，从三个风险审阅视角完成自我辩论，并只输出三个定稿观点。
 
-三个视角：
-1. 高弹性情景视角（激进）：关注研究结论上修依赖的强化条件、催化证据与高要求前提
-2. 防御情景视角（保守）：关注研究结论最脆弱的前提、关键风险来源与失效条件
-3. 基准情景视角（中性）：比较证据质量、信息缺口与当前最稳妥的基准情景
+思考方法（在思考过程中完成，严禁写进正文）：
+1. 依次以三个视角独立审阅综合研究结论，各自形成判断；
+2. 交叉质证：高弹性视角指出防御视角在哪里过度保守、忽视了哪些已验证的积极信号；防御视角指出高弹性视角的结论依赖哪些未验证假设、哪些证据存在瑕疵；基准视角评估双方论点的证据强度，指出哪些分歧源于信息缺口；
+3. 吸收对方合理质疑后，形成三个视角的定稿观点。
 
-你的工作方式（内部自我辩论，先思后写）：
-第一步 立场陈述：依次以三个视角独立审阅综合研究结论，各自形成判断。
-第二步 交叉质证：
-    - 高弹性视角指出防御视角在哪里过度保守、忽视了哪些已验证的积极信号；
-    - 防御视角指出高弹性视角的结论依赖哪些未验证假设、哪些证据存在瑕疵；
-    - 基准视角评估双方论点的证据强度，指出哪些分歧源于信息缺口而非事实分歧。
-第三步 定稿输出：质证吸收对方合理质疑后，形成三个视角的最终观点。
+三个视角（名称固定，不得改用"乐观方/审慎方"等其他叫法）：
+1. 高弹性情景：结论上修依赖的强化条件、催化证据与高要求前提
+2. 防御情景：结论最脆弱的前提、关键风险来源与失效条件
+3. 基准情景：双方论点的证据质量比较、信息缺口与当前最稳妥的基准情景
 
-输出格式（严格遵守：三个标记必须独占一行、原样输出，标记后另起一行写内容）：
+输出要求（最高优先级，逐字遵守）：
+- 正文必须且只能包含以下三个小节，每节以指定的标记行开头
+- 严禁输出"立场陈述""交叉质证""定稿输出"等任何过程性标题、编号或内容
+- 三个标记必须独占一行、原样输出（保留【】）
+
+输出格式（严格照此结构）：
 【高弹性情景观点】
-（结论上修依赖的强化条件与催化；若要更积极需满足哪些高要求前提；当前材料中最支持上修的证据）
+（本视角定稿观点，300-500字：结论上修依赖的强化条件与催化；若要更积极需满足哪些高要求前提；当前材料中最支持上修的证据）
 【防御情景观点】
-（结论最脆弱的前提与关键风险来源；失效条件；哪些证据不足以支撑当前结论）
+（本视角定稿观点，300-500字：结论最脆弱的前提与关键风险来源；失效条件；哪些证据不足以支撑当前结论）
 【基准情景观点】
-（双方论点的证据质量比较；信息缺口；当前最稳妥的基准情景与需要跟踪的验证信号）
+（本视角定稿观点，300-500字：双方论点的证据质量比较；信息缺口；当前最稳妥的基准情景与需要跟踪的验证信号）
 
-要求：
-- 每个视角观点 300-500 字
-- 三个视角必须体现交叉质证的结果，不得简单重复同一结论
+其他要求：
+- 三个视角必须体现交叉质证后的结论差异，不得简单重复同一结论
 - 不输出仓位、目标价、收益空间或交易建议
 - 使用中文撰写"""
+
+    @staticmethod
+    def _report_text(value: Any) -> str:
+        """提取报告纯文本（研究员输出为 dict{'content': ...}，兼容 str）"""
+        if isinstance(value, dict):
+            return str(value.get("content") or value.get("markdown") or "")
+        return str(value) if value else ""
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
         """构建用户提示词（模板系统优先，失败降级硬编码）"""
         investment_plan = state.get("investment_plan", "") or state.get("trader_investment_plan", "")
+        # 🔑 上游 bull/bear_researcher_v2 写入 bull_report/bear_report（dict 含 content）；
+        # state 中的 bull_opinion/bear_opinion 为历史遗留字段，始终为空
+        bull_opinion = self._report_text(state.get("bull_report"))
+        bear_opinion = self._report_text(state.get("bear_report"))
         template_variables = {
             "ticker": ticker,
             "analysis_date": analysis_date,
             "investment_plan": investment_plan,
-            "bull_opinion": state.get("bull_opinion", ""),
-            "bear_opinion": state.get("bear_opinion", ""),
+            "bull_opinion": bull_opinion,
+            "bear_opinion": bear_opinion,
             "market_report": state.get("market_report", ""),
             "fundamentals_report": state.get("fundamentals_report", ""),
             "news_report": state.get("news_report", ""),
@@ -220,23 +232,25 @@ class RiskSelfDebateV2(ResearcherAgent):
         logger.info(
             f"📊 [RiskSelfDebate] 输入数据长度: "
             f"investment_plan={len(template_variables['investment_plan']):,}, "
+            f"bull_opinion={len(template_variables['bull_opinion']):,}, "
+            f"bear_opinion={len(template_variables['bear_opinion']):,}, "
             f"market_report={len(template_variables['market_report']):,}, "
             f"news_report={len(template_variables['news_report']):,}, "
             f"fundamentals_report={len(template_variables['fundamentals_report']):,} 字符"
         )
 
-        fallback_prompt = f"""请在一次深度思考中完成风险三视角自我辩论（立场陈述 → 交叉质证 → 定稿输出）。
+        fallback_prompt = f"""请在一次深度思考中完成风险三视角自我辩论，直接输出三个定稿观点（过程性内容只留在思考中）。
 
 分析对象：{ticker or '未指定'} @ {analysis_date or '未指定'}
 
 【综合研究结论】
 {investment_plan or '无综合研究结论'}
 
-【乐观情景观点】
-{template_variables['bull_opinion'] or '无乐观情景观点'}
+【乐观研究员报告】
+{template_variables['bull_opinion'] or '无乐观研究员报告'}
 
-【审慎情景观点】
-{template_variables['bear_opinion'] or '无审慎情景观点'}
+【审慎研究员报告】
+{template_variables['bear_opinion'] or '无审慎研究员报告'}
 
 【市场分析报告】
 {template_variables['market_report'] or '无市场分析报告'}
@@ -256,7 +270,7 @@ class RiskSelfDebateV2(ResearcherAgent):
 【板块分析报告】
 {template_variables['sector_report'] or '无板块分析报告'}
 
-请严格按系统提示词规定的三段标记格式输出，三个标记必须独占一行、原样输出。"""
+请严格按系统提示词规定的三段标记格式输出：正文只包含三个定稿观点小节（【高弹性情景观点】/【防御情景观点】/【基准情景观点】各独占一行），不要输出立场陈述、交叉质证等任何过程内容。"""
 
         prompt = self._get_prompt_from_template(
             agent_type="debators_v2",
@@ -276,8 +290,8 @@ class RiskSelfDebateV2(ResearcherAgent):
     def _get_required_reports(self) -> list:
         return [
             "investment_plan",
-            "bull_opinion",
-            "bear_opinion",
+            "bull_report",
+            "bear_report",
             "market_report",
             "fundamentals_report",
             "news_report",
