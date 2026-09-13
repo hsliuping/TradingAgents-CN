@@ -1,6 +1,6 @@
 # 智能助手质量架构重构设计（A11）
 
-> 状态：设计定稿 v2（契约型关卡修订版），待实施
+> 状态：设计定稿 v2（契约型关卡修订版）；阶段 0/1/2 已实施（详见 §5.2）
 > 排期：2026-09-16 Demo 后启动；Demo 前冻结主链路
 > 关联：docs/05-design/v3.0/valuation-excel-deliverable-design.md（估值 Excel 交付物，触发本次架构反思的系列工作之一）
 
@@ -303,6 +303,20 @@ async def handle(msg: str, ctx) -> dict:
 8. 多轮引用历史工具数字 → 不误判为编造（history_tool 来源可信）
 9. 风险自我辩论三观点互异（A9-P1 回归项，联动）
 10. web_search 摘要无数值时问行业成本 → "搜索结果未包含该数值"+链接，不得填记忆数字
+
+### 5.2 实施进度（阶段 0/1/2 已落地）
+
+| 阶段 | 状态 | 落点 |
+|------|------|------|
+| 0 安全网 | ✅ 已落地 | `tests/unit/test_assistant_quality.py`（18 条纯单测：路径契约 / 四道防线 / 两级降级 / data_refs 去重）；§5.1 中依赖真实 LLM 的案例 4/5/6/9 属集成层，另行验证 |
+| 1 证据集 | ✅ 已落地 | `core/assistant/models.py`（Evidence / ReplyCandidate / extract_data_refs）；chat() 主路径与快路径产出 evidence；返回体 `data_refs` 由真实证据导出（仅 tool/search 来源、按三元组去重） |
+| 2 统一出口 | ✅ 已落地（chat 侧） | `core/assistant/defense.py`（四道防线+数字溯源从 service 物理收编为唯一事实源，净减约 481 行重复实现）；`core/assistant/reply_gate.py`（契约校验 + fallback_evidence 降级）；chat() 九个返回点全部经 `_finalize` 过 gate |
+| 3 收口 | ⬜ 未开始 | paths 注册表 + Orchestrator + chat_stream 合并（流式本批不改，仍直接复用 defense 纯函数） |
+| 4 意图与度量 | ⬜ 未开始 | — |
+
+**chat() 出口契约**：answer 型须 `llm_processed=True` 且过四道防线，失败自动回退为已登记的 `fallback_evidence`（局限说明 + 证据摘录）；passthrough 型 route_id 必须命中 `REGISTERED_PASSTHROUGH` 白名单（hitl / unsupported_asset / data_precheck / llm_unavailable / timeout / error / fallback_evidence）。
+
+**既存失败（非本次引入，另案处理）**：`tests/services/test_intelligent_assistant_memory_filters.py`（收集期 ImportError：`_extract_memory_metadata_filters` 缺失）与 `tests/unit/app/test_intelligent_assistant_thread_summary.py` 中 1 例失败，均来自更早提交 `8c73d64f7`（项目记忆闭环：测试与实现签名在本分支不一致）；相关函数相对本次改动零变更。
 
 ---
 
