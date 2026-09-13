@@ -18,12 +18,25 @@ from core.assistant import (
     EVIDENCE_TOOL,
     EVIDENCE_USER_MESSAGE,
     REGISTERED_PASSTHROUGH,
+    ROUTE_TYPE_PASSTHROUGH,
     Evidence,
     ReplyCandidate,
     ReplyGate,
     extract_data_refs,
 )
 from core.assistant.reply_gate import build_fallback_candidate
+from core.assistant.paths import (
+    AssistantRequest,
+    PathRegistry,
+    PRIORITY_HITL,
+    PRIORITY_UNSUPPORTED_ASSET,
+    PRIORITY_FAST_SEARCH,
+    PRIORITY_DATA_PRECHECK,
+    PRIORITY_MAIN_LLM,
+    ROUTE_HITL,
+    ROUTE_FAST_SEARCH,
+    ROUTE_MAIN_LLM,
+)
 
 
 @pytest.fixture
@@ -216,6 +229,82 @@ class TestFallback:
         result = gate.run(c, "问题")
         fb = build_fallback_candidate(c, result.failures)
         assert "未获取到可引用的原始资料" in fb.reply
+
+
+# ─────────────────────────── 路径注册表（S5 显式优先级 / S1 不可绕过）───────────────────────────
+
+class TestPathRegistry:
+    @staticmethod
+    def _req():
+        return AssistantRequest(service=None, user_message="问题")
+
+    @pytest.mark.asyncio
+    async def test_resolve_picks_first_match_by_priority(self):
+        calls = []
+
+        async def hitl_handler(req):
+            calls.append(ROUTE_HITL)
+            return None
+
+        async def fast_handler(req):
+            calls.append(ROUTE_FAST_SEARCH)
+            return None
+
+        async def main_handler(req):
+            calls.append(ROUTE_MAIN_LLM)
+            return ReplyCandidate.answer("主路径", ROUTE_MAIN_LLM, llm_processed=True)
+
+        registry = PathRegistry()
+        registry.register(ROUTE_HITL, PRIORITY_HITL, hitl_handler,
+                          route_type=ROUTE_TYPE_PASSTHROUGH)
+        registry.register(ROUTE_FAST_SEARCH, PRIORITY_FAST_SEARCH, fast_handler)
+        registry.register(ROUTE_MAIN_LLM, PRIORITY_MAIN_LLM, main_handler)
+
+        cand = await registry.resolve(self._req())
+        assert cand.route_id == ROUTE_MAIN_LLM
+        assert calls == [ROUTE_HITL, ROUTE_FAST_SEARCH, ROUTE_MAIN_LLM]  # 严格按优先级
+        assert cand.meta["route_priority"] == PRIORITY_MAIN_LLM
+
+    @pytest.mark.asyncio
+    async def test_higher_priority_match_short_circuits(self):
+        async def hitl(req):
+            return ReplyCandidate.passthrough("已确认", ROUTE_HITL)
+
+        async def forbidden_main(req):
+            raise AssertionError("HITL 命中后不应再执行主路径")
+
+        registry = PathRegistry()
+        registry.register(ROUTE_HITL, PRIORITY_HITL, hitl,
+                          route_type=ROUTE_TYPE_PASSTHROUGH)
+        registry.register(ROUTE_MAIN_LLM, PRIORITY_MAIN_LLM, forbidden_main)
+
+        cand = await registry.resolve(self._req())
+        assert cand.route_id == ROUTE_HITL
+        assert cand.meta["route_priority"] == PRIORITY_HITL
+
+    def test_priority_order_matches_legacy_precedence(self):
+        """快路径(40) 必须先于 数据预检查(50)——保持重构前 chat() 的实际行为。"""
+        assert PRIORITY_HITL < PRIORITY_UNSUPPORTED_ASSET
+        assert PRIORITY_UNSUPPORTED_ASSET < PRIORITY_FAST_SEARCH
+        assert PRIORITY_FAST_SEARCH < PRIORITY_DATA_PRECHECK
+        assert PRIORITY_DATA_PRECHECK < PRIORITY_MAIN_LLM
+
+    def test_duplicate_route_rejected(self):
+        async def h(req):
+            return None
+
+        registry = PathRegistry().register(ROUTE_FAST_SEARCH, PRIORITY_FAST_SEARCH, h)
+        with pytest.raises(ValueError):
+            registry.register(ROUTE_FAST_SEARCH, PRIORITY_FAST_SEARCH + 1, h)
+
+    @pytest.mark.asyncio
+    async def test_no_match_raises(self):
+        async def none_path(req):
+            return None
+
+        registry = PathRegistry().register("x", 1, none_path)
+        with pytest.raises(RuntimeError):
+            await registry.resolve(self._req())
 
 
 # ─────────────────────────── data_refs 真实现 ───────────────────────────
