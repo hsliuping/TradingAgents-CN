@@ -2447,6 +2447,64 @@ class IntelligentAssistantService:
         logger.info(f"[智能助手] 已加载 {len(self._openai_tools)} 个工具")
         return True
 
+    async def _summarize_search_result(
+        self,
+        tool_text: str,
+        user_message: str,
+        history_messages: Optional[List[Message]] = None,
+        conversation_id: str = "",
+    ) -> str:
+        """近期搜索快路径：将搜索结果交由 LLM 做针对性总结（chat/chat_stream 共用）。
+
+        v3.x 修复：快路径原实现把搜索工具返回值直接透传给用户，导致
+        "提问收到一堆搜索链接列表"。现在搜索结果注入 LLM 总结回答，并过
+        数字溯源防线；返回空串表示降级（调用方回退为返回原始搜索结果）。
+        """
+        summarize_messages = [
+            Message(
+                role=MessageRole.SYSTEM,
+                content=(
+                    "你是 TradingAgents-CN 智能助手。系统已根据用户问题执行联网搜索，"
+                    "搜索结果见下方【联网搜索返回】。请严格依据该材料回答用户问题：\n"
+                    "1. 直接回答用户问的内容并提炼要点，不要罗列链接、不要照搬搜索结果的列表格式；\n"
+                    "2. 只使用搜索结果中出现的信息，材料里没有的不要编造；材料不足以回答的部分要明确说明；\n"
+                    "3. 涉及数据/时间的信息注明来源与日期，注意时效（较早的信息要提示发布时间）；\n"
+                    "4. 区分官方确证与媒体报道口径，不要把媒体报道说成官方确认；\n"
+                    "5. 涉及投资判断时提醒不构成投资建议即可，无需长篇免责声明。"
+                ),
+            ),
+            Message(
+                role=MessageRole.SYSTEM,
+                content=f"【联网搜索返回】\n{tool_text}",
+            ),
+        ]
+        if history_messages:
+            summarize_messages.extend(history_messages)
+        summarize_messages.append(
+            Message(role=MessageRole.USER, content=user_message.strip())
+        )
+        try:
+            resp = await self._llm_client.achat(summarize_messages)
+            await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
+            summarized = (getattr(resp, "content", "") or "").strip()
+        except Exception as sum_err:
+            logger.warning(f"[智能助手] 搜索结果 LLM 总结失败，降级返回原始结果: {sum_err}")
+            return ""
+        if not summarized:
+            return ""
+        # 数字溯源防线：总结中的数字必须能在搜索结果原文中溯源
+        fast_tool_results = [{"tool": "search_recent_information", "content": tool_text}]
+        if _has_fabricated_tool_json(summarized) or _has_untraced_risky_numbers(
+            summarized,
+            fast_tool_results,
+            ["search_recent_information"],
+            user_message,
+            [],
+        ):
+            logger.warning("[智能助手] 快路径总结未过溯源校验，降级返回原始搜索结果")
+            return ""
+        return summarized
+
     def _build_tool_interceptor(self, conversation_id: str):
         """构建 HITL 工具拦截器（v3.6.0：提取为类方法，供 chat/chat_stream 共用）。
 
@@ -2562,6 +2620,8 @@ class IntelligentAssistantService:
 
         # 快路径：对“最新/截至目前/近期确认”类事实问题，优先直接执行近期搜索工具，
         # 避免模型在首轮未触发工具时退回训练期知识。
+        # v3.x 修复：搜索结果不再直接透传给用户（原实现导致“提问收到一堆搜索链接列表”），
+        # 改为注入 LLM 做针对性总结回答，并过数字溯源防线；LLM 失败/校验不过时降级返回原始结果。
         if _should_use_recent_search(resolved_user_message):
             try:
                 from core.tools.implementations.assistant_ops.recent_search import run_recent_information_search
@@ -2571,9 +2631,12 @@ class IntelligentAssistantService:
                     tool_result = await tool_result
                 tool_text = str(tool_result or "").strip()
                 if tool_text:
-                    logger.info("[智能助手] 命中近期搜索快路径，直接返回搜索结果")
+                    logger.info("[智能助手] 命中近期搜索快路径，搜索结果交由 LLM 总结回答")
+                    summarized = await self._summarize_search_result(
+                        tool_text, resolved_user_message, history_messages, conversation_id,
+                    )
                     return {
-                        "reply": tool_text,
+                        "reply": summarized or tool_text,
                         "tools_used": ["search_recent_information"],
                         "data_refs": None,
                     }
@@ -2970,13 +3033,22 @@ class IntelligentAssistantService:
         if _should_use_recent_search(resolved_user_message):
             try:
                 from core.tools.implementations.assistant_ops.recent_search import run_recent_information_search
+
                 tool_result = run_recent_information_search(resolved_user_message.strip())
                 if inspect.isawaitable(tool_result):
                     tool_result = await tool_result
                 tool_text = str(tool_result or "").strip()
                 if tool_text:
-                    logger.info("[智能助手·流式] 命中近期搜索快路径")
-                    yield _sse("token", {"content": tool_text})
+                    logger.info("[智能助手·流式] 命中近期搜索快路径，搜索结果交由 LLM 总结回答")
+                    # v3.x 修复：与 chat 同步——搜索结果注入 LLM 总结回答（不再直接透传链接列表）
+                    summarized = await self._summarize_search_result(
+                        tool_text, resolved_user_message, history_messages, conversation_id,
+                    )
+                    reply_text = summarized or tool_text
+                    # 按段落分块流式输出（保持前端流式渲染体验）
+                    for para in reply_text.split("\n\n"):
+                        if para.strip():
+                            yield _sse("token", {"content": para + "\n\n"})
                     yield _sse("done", {"tools_used": ["search_recent_information"]})
                     return
             except Exception as e:
