@@ -587,13 +587,16 @@ class MemoryManager:
         self.embedding_manager = embedding_manager
         self._agent_memories: Dict[str, Any] = {}
         self._use_mem0_compat = str(os.getenv("MEMORY_USE_MEM0_COMPAT", "true")).strip().lower() in {"1", "true", "yes", "on"}
+        # A3: mem0 实例构造非线程安全（并发构造 AsyncMemory 会死锁），
+        # get_agent_memory 的 check-then-create 需串行化（并行开局场景两研究员同时取记忆）
+        self._memory_lock = threading.Lock()
         logger.info("🧠 记忆管理器初始化完成")
         if not self._use_mem0_compat:
             logger.warning("⚠️ MemoryManager 当前显式使用 legacy-only AgentMemory 路径，建议迁回 mem0 主路径")
 
     def get_agent_memory(self, agent_id: str) -> Any:
         """
-        获取指定 Agent 的记忆实例
+        获取指定 Agent 的记忆实例（线程安全：mem0 构造串行化）
 
         Args:
             agent_id: Agent ID
@@ -601,11 +604,12 @@ class MemoryManager:
         Returns:
             AgentMemory 实例
         """
-        if agent_id not in self._agent_memories:
-            if self._use_mem0_compat:
-                self._agent_memories[agent_id] = Mem0AgentMemory(agent_id)
-            else:
-                self._agent_memories[agent_id] = AgentMemory(agent_id, self.embedding_manager)
+        with self._memory_lock:
+            if agent_id not in self._agent_memories:
+                if self._use_mem0_compat:
+                    self._agent_memories[agent_id] = Mem0AgentMemory(agent_id)
+                else:
+                    self._agent_memories[agent_id] = AgentMemory(agent_id, self.embedding_manager)
 
         return self._agent_memories[agent_id]
 

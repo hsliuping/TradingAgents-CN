@@ -351,6 +351,8 @@ class WorkflowEngine:
             "_max_risk_rounds": FieldType.NUMBER,
             # A9-P1: 风险自我辩论开关（True=深度/全面档走单节点自我辩论路径）
             "_risk_self_debate": FieldType.BOOLEAN,
+            # A3: 投资辩论并行开局开关（True=第一轮乐观/审慎研究员并行出简报）
+            "_parallel_opening": FieldType.BOOLEAN,
             "context": FieldType.OBJECT,
             "skip_cache": FieldType.BOOLEAN,
             "prompt_overrides": FieldType.OBJECT,

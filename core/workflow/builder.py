@@ -11,7 +11,9 @@
 
 import logging
 import os
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -1147,10 +1149,36 @@ class WorkflowBuilder:
                         f"[图构建] ⚠️ 风险自我辩论节点创建失败，回退原风险三角路径: {e}"
                     )
 
+        # A3: 为投资辩论（非风险）添加隐藏的并行开局节点
+        # 仅当运行时 state["_parallel_opening"]=True（默认启用，可一键关闭）时被路由到，
+        # 第一轮乐观/审慎研究员并行出简报，后续轮次回原轮循对抗。节点创建失败时
+        # 降级为不加节点（保留原串行路径），不阻塞整个工作流构建。
+        parallel_opening_nodes: Set[str] = set()
+        for debate_id, debate_config in debate_configs.items():
+            if "risk" in debate_id.lower():
+                continue  # 风险辩论：深度档由 A9-P1 接管，低档位保留原串行三角
+            if len(debate_config["participants"]) < 2:
+                continue  # 单参与者无从并行
+            po_node_id = f"{debate_id}_parallel_opening"
+            try:
+                graph.add_node(
+                    po_node_id,
+                    self._create_parallel_opening_node_func(
+                        debate_id, debate_config, filtered_definition
+                    ),
+                )
+                parallel_opening_nodes.add(po_node_id)
+                logger.info(f"[图构建] ✅ 添加投资辩论并行开局节点: {po_node_id} (A3)")
+            except Exception as e:
+                logger.warning(
+                    f"[图构建] ⚠️ 并行开局节点创建失败，回退原串行路径: {e}"
+                )
+
         # 添加边（使用过滤后的定义）
         self._add_edges(
             graph, filtered_definition, debate_configs, analyst_nodes_info,
             risk_self_debate_nodes=risk_self_debate_nodes,
+            parallel_opening_nodes=parallel_opening_nodes,
         )
 
         # 编译
@@ -2463,6 +2491,100 @@ class WorkflowBuilder:
 
         return wrapped
 
+    @staticmethod
+    def _merge_debate_states(
+        old: Optional[Dict[str, Any]],
+        new: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """A3: 按发言顺序合并两个辩论状态（并行开局专用）
+
+        规则：
+        - history：按参与者顺序拼接（保证完整辩论史有序）
+        - 其他字段（各自的 *_history / current_response / latest_speaker）：
+          非空值优先（避免并行双方基于同一初始 state 拷贝时互相覆盖为空）
+        """
+        if not old:
+            return dict(new)
+        merged = dict(old)
+        for k, v in new.items():
+            if k == "history":
+                merged["history"] = (
+                    str(merged.get("history") or "") + "\n" + str(v or "")
+                ).strip("\n")
+            elif v not in (None, ""):
+                merged[k] = v
+        return merged
+
+    def _create_parallel_opening_node_func(
+        self,
+        debate_id: str,
+        config: Dict[str, Any],
+        definition: WorkflowDefinition,
+    ) -> Callable:
+        """A3: 创建投资辩论第一轮并行开局节点
+
+        内部以线程池并行执行全部参与者（乐观/审慎研究员各自基于同一份
+        分析师材料独立产出初始简报），手动合并共享 debate_state，
+        count 增量 = 参与者数（operator.add reducer 累加）。
+
+        出边由 _add_edges 挂条件路由：count >= max → next_node（如
+        research_manager）；否则回到轮循（participants[count % N] 继续
+        对抗辩论）。原串行路径通过 state["_parallel_opening"] 开关保留。
+        """
+        participants = list(config["participants"])
+        debate_key = config["debate_key"]
+        # 投资辩论专用（风险辩论由 A9-P1 接管深度档，不走此路径）
+        debate_state_field = "investment_debate_state"
+
+        # 预创建参与者原始执行函数（每次独立创建 Agent 实例，并发安全）
+        participant_funcs = []
+        for pid in participants:
+            node_def = definition.get_node(pid)
+            if node_def is None:
+                raise ValueError(f"并行开局：参与者节点不存在: {pid}")
+            participant_funcs.append((pid, self._create_node_function(node_def)))
+
+        def parallel_opening_node(state):
+            t0 = time.time()
+            logger.info(
+                f"[节点执行] ⚡ {debate_id}_parallel_opening (辩论并行开局) - "
+                f"参与者并行执行: {participants}"
+            )
+            # 浅拷贝 state 隔离并发读写
+            with ThreadPoolExecutor(max_workers=len(participant_funcs)) as pool:
+                futures = {
+                    pid: pool.submit(fn, dict(state))
+                    for pid, fn in participant_funcs
+                }
+                # 按参与顺序收集（保证 history 拼接顺序确定）
+                results = {pid: futures[pid].result() for pid, _ in participant_funcs}
+
+            # 合并：独立字段（bull_report / bear_report 等）直接并集；
+            # 共享 debate_state 深合并
+            merged: Dict[str, Any] = {}
+            merged_debate: Optional[Dict[str, Any]] = None
+            for pid, res in (results or {}).items():
+                if not isinstance(res, dict):
+                    logger.warning(f"[A3] 参与者 {pid} 返回非 dict 结果，跳过: {type(res)}")
+                    continue
+                for k, v in res.items():
+                    if k == debate_state_field and isinstance(v, dict):
+                        merged_debate = self._merge_debate_states(merged_debate, v)
+                    else:
+                        merged[k] = v
+            if merged_debate is None:
+                merged_debate = dict(state.get(debate_state_field) or {})
+            merged[debate_state_field] = merged_debate
+            # count 增量 = 参与者数（operator.add reducer 累加到当前值）
+            merged[debate_key] = len(participants)
+            logger.info(
+                f"[节点执行] ✅ {debate_id}_parallel_opening - 并行开局完成, "
+                f"耗时 {time.time() - t0:.1f}s, 参与者 {len(participants)} 个"
+            )
+            return merged
+
+        return parallel_opening_node
+
     def _create_risk_self_debate_node_func(self, debate_id: str) -> Callable:
         """
         A9-P1: 创建风险自我辩论节点函数（单节点替代风险三角多轮辩论）。
@@ -2534,6 +2656,7 @@ class WorkflowBuilder:
         debate_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         analyst_nodes_info: Optional[Dict[str, str]] = None,
         risk_self_debate_nodes: Optional[Set[str]] = None,
+        parallel_opening_nodes: Optional[Set[str]] = None,
     ) -> None:
         """
         添加边到图
@@ -2544,6 +2667,9 @@ class WorkflowBuilder:
         - 最后一个参与者 → 下一阶段（通过条件边控制）
         - A9-P1：风险辩论入口使用条件边，state["_risk_self_debate"]=True 时
           路由到隐藏的自我辩论单节点（深度/全面档），否则走原参与者路径
+        - A3：投资辩论入口使用条件边，state["_parallel_opening"]=True 时
+          路由到隐藏的并行开局节点（第一轮乐观/审慎研究员并行出简报，
+          后续轮次回原轮循），否则走原串行参与者路径
 
         分析师工具循环设计：
         - 分析师节点 → 条件边 → 工具节点/消息清理节点
@@ -2571,6 +2697,9 @@ class WorkflowBuilder:
 
         if risk_self_debate_nodes is None:
             risk_self_debate_nodes = set()
+
+        if parallel_opening_nodes is None:
+            parallel_opening_nodes = set()
 
         # 收集所有辩论参与者
         all_participants: Set[str] = set()
@@ -2632,9 +2761,78 @@ class WorkflowBuilder:
                     f"[{participants[0]}(原路径), {self_debate_node_id}(自我辩论)]"
                 )
             else:
-                # 辩论节点 → 第一个参与者（原路径）
-                graph.add_edge(debate_id, participants[0])
-                added_edges.add((debate_id, participants[0]))
+                # A3: 投资辩论入口条件路由
+                # state["_parallel_opening"]=True → 并行开局节点（第一轮并行出简报）
+                # 否则 → 原串行路径（辩论节点 → 第一个参与者）
+                po_node_id = f"{debate_id}_parallel_opening"
+                if po_node_id in parallel_opening_nodes:
+                    def opening_entry_router(
+                        state,
+                        _first_participant=participants[0],
+                        _po_node=po_node_id,
+                        _debate_id=debate_id,
+                    ):
+                        if state.get("_parallel_opening"):
+                            logger.info(
+                                f"[A3] 投资辩论并行开局已启用: {_debate_id} -> {_po_node}"
+                            )
+                            return _po_node
+                        return _first_participant
+
+                    graph.add_conditional_edges(
+                        debate_id,
+                        opening_entry_router,
+                        [participants[0], po_node_id],
+                    )
+                    added_edges.add((debate_id, participants[0]))
+                    added_edges.add((debate_id, po_node_id))
+
+                    # 并行开局 → 条件路由（复用轮循语义）：
+                    # count >= rounds × 参与者数 → next_node（如 research_manager）
+                    # 否则 → participants[count % N] 继续对抗辩论（原参与者条件边接管后续）
+                    _po_max_rounds = int(config["rounds"]) if config["rounds"] else 1
+                    _po_debate_key = config["debate_key"]
+                    _po_next_node = config["next_node"]
+                    _po_num_participants = len(participants)
+                    _po_participants = list(participants)
+
+                    def opening_exit_router(
+                        state,
+                        _debate_key=_po_debate_key,
+                        _max_rounds=_po_max_rounds,
+                        _next_node=_po_next_node,
+                        _num_participants=_po_num_participants,
+                        _participants=_po_participants,
+                    ):
+                        count = state.get(_debate_key, 0)
+                        dynamic_rounds = state.get("_max_debate_rounds", _max_rounds)
+                        max_count = dynamic_rounds * _num_participants
+                        if count >= max_count:
+                            logger.info(
+                                f"[A3] 并行开局路由: count={count} >= {max_count} "
+                                f"-> {_next_node or 'END'} (辩论结束)"
+                            )
+                            return _next_node if _next_node else END
+                        target = _participants[count % _num_participants]
+                        logger.info(
+                            f"[A3] 并行开局路由: count={count} -> {target} (继续辩论)"
+                        )
+                        return target
+
+                    _po_exit_targets = list(participants)
+                    if _po_next_node and _po_next_node not in _po_exit_targets:
+                        _po_exit_targets.append(_po_next_node)
+                    graph.add_conditional_edges(
+                        po_node_id, opening_exit_router, _po_exit_targets
+                    )
+                    logger.info(
+                        f"[A3] 投资辩论入口条件路由: {debate_id} -> "
+                        f"[{participants[0]}(原路径), {po_node_id}(并行开局)]"
+                    )
+                else:
+                    # 辩论节点 → 第一个参与者（原路径）
+                    graph.add_edge(debate_id, participants[0])
+                    added_edges.add((debate_id, participants[0]))
 
             # 为每个参与者添加条件边（原逻辑保留，自我辩论路径不会经过）
             for i, participant in enumerate(participants):

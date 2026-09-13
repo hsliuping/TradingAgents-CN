@@ -16,6 +16,7 @@ import asyncio
 import inspect
 import logging
 import os
+import threading
 from typing import Any, Dict, List, Optional
 
 from .models import MemoryItem, MemoryScope, StockAnalysisMemory, StoreResult
@@ -69,14 +70,18 @@ class MemoryService:
         self._db = db
         self._mem: Any = None
         self._init_error: str = ""
-        self._init_lock = asyncio.Lock()
+        # A3: 初始化锁必须用 threading.Lock（跨线程安全）。
+        # asyncio.Lock 非线程安全：并行开局场景下两个研究员线程各自的
+        # event loop await 同一把 asyncio.Lock，持有者释放时无法唤醒
+        # 另一线程的等待 future → 永久挂起（实测 E2E bear 线程卡死根因）
+        self._init_lock = threading.Lock()
 
     @property
     def available(self) -> bool:
         return self._mem is not None
 
     async def _ensure_init(self, config: Optional[Dict[str, Any]] = None) -> bool:
-        """延迟初始化 mem0 AsyncMemory 实例（asyncio.Lock 保证并发安全）"""
+        """延迟初始化 mem0 AsyncMemory 实例（threading.Lock 保证跨线程并发安全）"""
         if self._mem is not None:
             return True
         if self._init_error:
@@ -86,7 +91,7 @@ class MemoryService:
             self._init_error = "MEM0_ENABLED=false，记忆层已禁用"
             return False
 
-        async with self._init_lock:
+        with self._init_lock:
             if self._mem is not None:
                 return True
             if self._init_error:

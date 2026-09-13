@@ -1018,6 +1018,27 @@ class WorkflowAPI:
             f"(mode={_self_debate_mode}, depth={research_depth})"
         )
 
+        # A3: 投资辩论并行开局开关（第一轮乐观/审慎研究员并行出简报，替代串行接力）
+        # 优先级：环境变量 RESEARCH_PARALLEL_OPENING（on/off，一键回退）> 输入显式覆盖 > 默认启用
+        _parallel_opening_mode = str(
+            os.environ.get("RESEARCH_PARALLEL_OPENING", "auto")
+        ).strip().lower()
+        if _parallel_opening_mode in ("on", "1", "true"):
+            prepared["_parallel_opening"] = True
+        elif _parallel_opening_mode in ("off", "0", "false"):
+            prepared["_parallel_opening"] = False
+        elif "parallel_opening" in prepared:
+            # 允许调用方按任务显式覆盖（truthy 判定）
+            prepared["_parallel_opening"] = bool(prepared.get("parallel_opening"))
+        else:
+            # 默认全档位启用：并行开局只是把第一轮串行接力改为并行，
+            # 辩论语义不变（各自基于同一份分析师材料独立出初始简报）
+            prepared["_parallel_opening"] = True
+        logger.info(
+            f"[A3] 投资辩论并行开局开关: {prepared['_parallel_opening']} "
+            f"(mode={_parallel_opening_mode})"
+        )
+
         # 映射字段名以兼容原有智能体
         if "ticker" in prepared:
             prepared["company_of_interest"] = prepared["ticker"]
