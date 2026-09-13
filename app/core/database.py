@@ -447,6 +447,13 @@ async def init_database_views_and_indexes():
         except Exception as assertion_exc:
             logger.warning(f"⚠️ 断言索引初始化失败（不影响应用启动）: {assertion_exc}")
 
+        # 5. 创建助手质量埋点集合索引（A11 阶段4 S9）
+        try:
+            from core.assistant import quality_metrics
+            await quality_metrics.create_indexes(db)
+        except Exception as metrics_exc:
+            logger.warning(f"⚠️ 质量埋点索引初始化失败（不影响应用启动）: {metrics_exc}")
+
         logger.info("✅ 数据库视图和索引初始化完成")
 
     except Exception as e:

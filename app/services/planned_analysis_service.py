@@ -68,83 +68,18 @@ async def _store_planned_analysis_memory(
 # ============================================================
 # 不支持品种检测
 # ============================================================
-
-# ETF / 基金关键词（已支持 ETF 分析，不再阻止）
-# 注意：ETF 分析已支持，仅保留用于可能的差异化提示
-_ETF_FUND_KEYWORDS = []  # 清空，不再阻止 ETF 相关提问
-
-# 港股关键词
-_HK_STOCK_KEYWORDS = [
-    "港股", "恒生", "恒指", "H股", "h股", "港交所", "港币",
-    "腾讯控股", "美团", "小米集团", "阿里巴巴-SW", "京东集团-SW",
-]
-
-# 美股关键词
-_US_STOCK_KEYWORDS = [
-    "美股", "纳斯达克", "标普", "道琼斯", "NYSE", "NASDAQ",
-    "苹果公司", "特斯拉", "英伟达", "谷歌", "亚马逊", "微软",
-    "中概股",
-]
-
-# 港股/美股代码模式
-_HK_CODE_PATTERN = re.compile(r'\b\d{5}\.HK\b', re.IGNORECASE)
-_US_CODE_PATTERN = re.compile(r'\b[A-Z]{1,5}\b')  # 简单匹配，需配合关键词
-_US_TICKER_PATTERN = re.compile(r'(?<![A-Za-z])(AAPL|TSLA|NVDA|GOOGL|GOOG|AMZN|MSFT|META|NFLX|AMD|BABA|JD|PDD|NIO|XPEV|LI)(?![A-Za-z])', re.IGNORECASE)
+# 词表与检测逻辑已收编至 core.assistant.lexicon（A11 阶段4：词典收敛单处，
+# 助手路由与规划分析共用同一套品种闸门），此处仅保留兼容委托。
 
 
 def _check_unsupported_asset(question: str) -> Optional[str]:
-    """
-    检测用户问题是否涉及不支持的品种类型。
+    """检测用户问题是否涉及不支持的品种类型（事实源：core.assistant.lexicon）。
 
     Returns:
         如果检测到不支持的品种，返回提示信息；否则返回 None。
     """
-    q = question.strip()
-
-    # 检测 ETF / 基金（已支持，不再阻止）
-    # for kw in _ETF_FUND_KEYWORDS:
-    #     if kw in q:
-    #         return "暂不支持..."  # 已移除
-
-    # 检测港股
-    for kw in _HK_STOCK_KEYWORDS:
-        if kw in q:
-            return (
-                "🚫 **暂不支持港股分析**\n\n"
-                "当前系统专注于 **A股市场**（沪深两市），港股分析功能尚在开发中。\n\n"
-                "您可以尝试：\n"
-                "- 分析 A 股个股（如「帮我分析比亚迪」）\n"
-                "- 分析行业板块（如「新能源汽车板块怎么样」）"
-            )
-
-    # 检测美股
-    for kw in _US_STOCK_KEYWORDS:
-        if kw in q:
-            return (
-                "🚫 **暂不支持美股分析**\n\n"
-                "当前系统专注于 **A股市场**（沪深两市），美股分析功能尚在开发中。\n\n"
-                "您可以尝试：\n"
-                "- 分析 A 股个股（如「帮我分析宁德时代」）\n"
-                "- 分析行业板块（如「半导体板块最近走势如何」）"
-            )
-
-    # 检测美股代码
-    if _US_TICKER_PATTERN.search(q):
-        return (
-            "🚫 **暂不支持美股分析**\n\n"
-            "检测到您输入了美股代码。当前系统专注于 **A股市场**（沪深两市）。\n\n"
-            "您可以尝试输入 A 股代码（如 600519、000858）或股票名称进行分析。"
-        )
-
-    # 检测港股代码
-    if _HK_CODE_PATTERN.search(q):
-        return (
-            "🚫 **暂不支持港股分析**\n\n"
-            "检测到您输入了港股代码。当前系统专注于 **A股市场**（沪深两市）。\n\n"
-            "您可以尝试输入 A 股代码（如 600519、000858）或股票名称进行分析。"
-        )
-
-    return None
+    from core.assistant.lexicon import detect_unsupported_asset
+    return detect_unsupported_asset(question)
 
 # 整体超时
 PLANNED_ANALYSIS_TIMEOUT = int(os.environ.get("PLANNED_ANALYSIS_TIMEOUT", "180"))

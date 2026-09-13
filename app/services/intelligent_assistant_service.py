@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
@@ -61,7 +62,11 @@ from core.assistant import (
     ROUTE_TYPE_PASSTHROUGH,
     ROUTE_TYPE_ANSWER,
     ROUTE_UNSUPPORTED_ASSET,
+    detect_unsupported_asset,
+    extract_a_share_code,
     extract_data_refs,
+    quality_metrics,
+    stock_directory,
 )
 from core.assistant.reply_gate import build_fallback_candidate
 from core.assistant.defense import (
@@ -139,8 +144,6 @@ def _build_fallback_memory_facts(user_msg: str, assistant_msg: str, limit: int =
     return facts
 
 
-# 股票代码正则（6位数字，A股主板/创业板/科创板）
-_STOCK_CODE_RE = re.compile(r"\b(00|30|60|68)\d{4}\b")
 # 数据相关关键词——用于判断用户问题是否涉及股票数据查询
 _STOCK_DATA_KEYWORDS = [
     "财报", "利润", "营收", "收入", "净利润", "毛利率", "现金流", "资产", "负债",
@@ -153,19 +156,15 @@ _STOCK_DATA_KEYWORDS = [
 
 
 def _extract_stock_code(user_message: str) -> Optional[str]:
-    """从用户消息中提取 6 位 A 股股票代码。"""
-    if not user_message:
-        return None
-    match = _STOCK_CODE_RE.search(user_message)
-    if match:
-        return match.group(0)
-    return None
+    """从用户消息中提取 6 位 A 股股票代码（正则事实源：core.assistant.lexicon）。"""
+    return extract_a_share_code(user_message)
 
 
 async def _resolve_stock_name_to_code(user_message: str, db=None) -> Optional[str]:
     """尝试从用户消息中匹配股票名称并返回股票代码。
 
-    查询 stock_basic_info 集合，用消息中的文本匹配 stock_name 字段。
+    事实源：core.assistant.lexicon.stock_directory（stock_basic_info 全量
+    名称→代码目录 + TTL 缓存），替代历史上的硬编码常见名 + 每请求 regex 查库。
     db 参数优先；未传时尝试 get_mongo_db()（某些上下文会失败）。
     """
     if not user_message:
@@ -174,36 +173,7 @@ async def _resolve_stock_name_to_code(user_message: str, db=None) -> Optional[st
         if db is None:
             from app.core.database import get_mongo_db
             db = get_mongo_db()
-        # 取消息中可能的股票名称关键词（含"股份""集团"等后缀的词）
-        # 简单策略：用消息中的连续中文字符段去匹配 stock_name
-        import re as _re
-        chinese_segments = _re.findall(r"[\u4e00-\u9fa5]{2,8}(?:股份|集团|科技|新能|汽车|银行|证券|保险|能源)", user_message)
-        if not chinese_segments:
-            # 也尝试匹配一些常见简称
-            common_names = ["牧原", "赛力斯", "比亚迪", "宁德", "温氏", "新希望", "万科", "茅台", "五粮液"]
-            for name in common_names:
-                if name in user_message:
-                    chinese_segments = [name]
-                    break
-
-        if not chinese_segments:
-            return None
-
-        # 查询数据库匹配股票名称（字段为 name/symbol）
-        for segment in chinese_segments:
-            doc = await db["stock_basic_info"].find_one(
-                {"name": {"$regex": segment, "$options": "i"}},
-                {"symbol": 1, "name": 1, "code": 1}
-            )
-            if not doc:
-                doc = await db["stock_basic_info"].find_one(
-                    {"name": {"$regex": segment[:2], "$options": "i"}},
-                    {"symbol": 1, "name": 1, "code": 1}
-                )
-            if doc and doc.get("symbol"):
-                return doc["symbol"]
-
-        return None
+        return await stock_directory.resolve_symbol(user_message, db)
     except Exception as e:
         logger.warning("[智能助手] 股票名称解析失败: %s", e)
         return None
@@ -435,41 +405,10 @@ def _extract_related_terms(
     return sorted(terms)[:8]
 
 
-# 股票名称→代码 映射缓存（懒加载）。用于从会话文本提取股票关联：
-# 行业类记忆（如"生猪养殖完全成本"）虽不含股票名，但保存时的会话上下文
-# （用户在聊牧原）可建立关联，检索时问该股票即命中——解决"问个股时
-# 想要行业背景记忆"的语义桥梁问题
-_STOCK_NAME_MAP_CACHE: Optional[Dict[str, str]] = None
-
-
-async def _get_stock_name_map(db) -> Dict[str, str]:
-    global _STOCK_NAME_MAP_CACHE
-    if _STOCK_NAME_MAP_CACHE is None:
-        try:
-            mapping: Dict[str, str] = {}
-            async for doc in db["stock_basic_info"].find({}, {"symbol": 1, "name": 1}):
-                name = (doc.get("name") or "").strip()
-                sym = (doc.get("symbol") or "").strip()
-                if name and sym and 2 <= len(name) <= 6:
-                    mapping[name] = sym
-            _STOCK_NAME_MAP_CACHE = mapping
-            logger.info("[智能助手·记忆] 股票名称缓存已加载: %d 条", len(mapping))
-        except Exception as e:
-            logger.warning("[智能助手·记忆] 加载股票名称缓存失败: %s", e)
-            _STOCK_NAME_MAP_CACHE = {}
-    return _STOCK_NAME_MAP_CACHE
-
-
-def _match_stock_refs(texts) -> set:
-    """从多段文本提取股票线索集合：6位代码 + 股票名称子串匹配。"""
-    joined = " ".join(str(t) for t in texts if t)
-    if not joined:
-        return set()
-    refs = set(re.findall(r"\b\d{6}\b", joined))
-    for name, sym in (_STOCK_NAME_MAP_CACHE or {}).items():
-        if name in joined:
-            refs.add(sym)
-    return refs
+# 记忆链路的股票名称→代码映射改用 core.assistant.lexicon.stock_directory
+# （全量 + TTL 缓存），不再维护本模块私有缓存。语义桥梁说明：行业类记忆
+# （如"生猪养殖完全成本"）虽不含股票名，但保存时的会话上下文（用户在聊牧原）
+# 可建立关联，检索时问该股票即命中——解决"问个股时想要行业背景记忆"的问题
 
 
 def _clean_fact_line(text: str) -> str:
@@ -584,7 +523,7 @@ async def _persist_memory_facts(
     """
     saved = 0
     try:
-        name_map = await _get_stock_name_map(db)
+        name_map = await stock_directory.get_name_map(db)
         related_terms = _extract_related_terms(user_message, related_context, name_map=name_map)
         facts = _extract_fact_sentences(assistant_reply or "")
         if not facts:
@@ -650,7 +589,7 @@ async def _recall_memory_facts(
     try:
         now_iso = datetime.now().isoformat(timespec="seconds")
         user_tokens = _extract_match_tokens(user_message or "")
-        name_map = await _get_stock_name_map(db)
+        name_map = await stock_directory.get_name_map(db)
         user_terms = set(_extract_related_terms(user_message, name_map=name_map))
         if not user_tokens and not user_terms:
             return []
@@ -2199,9 +2138,8 @@ class IntelligentAssistantService:
     async def _path_unsupported_asset(
         self, req: AssistantRequest
     ) -> Optional[ReplyCandidate]:
-        """路径2：不支持品种类型（港股/美股等）系统提示。"""
-        from app.services.planned_analysis_service import _check_unsupported_asset
-        message = _check_unsupported_asset(req.user_message)
+        """路径2：不支持品种类型（港股/美股等）系统提示（词表事实源：lexicon）。"""
+        message = detect_unsupported_asset(req.user_message)
         if not message:
             return None
         return ReplyCandidate.passthrough(
@@ -2425,6 +2363,8 @@ class IntelligentAssistantService:
 
         tools_used: List[str] = req.tools_used
         tool_results: List[Dict[str, Any]] = []
+        # 质量信号（S9 埋点）：防线触发/重试记录，最终随 candidate.meta 落库
+        quality_signals: List[str] = []
 
         async def _emit_progress(payload: Dict[str, Any]) -> None:
             if req.on_progress is None:
@@ -2454,6 +2394,7 @@ class IntelligentAssistantService:
 
             # 兜底："应走工具"的个人数据查询首轮未调工具时，二次强制引导
             if not tools_used and _should_force_tool_retry(user_message):
+                quality_signals.append("forced_tool_retry")
                 logger.warning("[智能助手] 首轮未调用工具，触发工具重试兜底")
                 retry_messages = list(messages)
                 retry_messages.append(Message(
@@ -2492,6 +2433,7 @@ class IntelligentAssistantService:
             trusted_texts = _extract_history_tool_contents(messages) + memory_trusted_contents
 
             if _has_fabricated_tool_json(reply_content):
+                quality_signals.append("fabricated_json")
                 logger.warning("[智能助手] 检测到编造的工具JSON结果，硬拦截回复")
                 return (
                     "抱歉，我在呈现工具返回结果时出现了格式错误（把工具返回改写成了结构化数据），"
@@ -2499,6 +2441,7 @@ class IntelligentAssistantService:
                     "请重新提问，我会严格按工具返回的原始内容为您呈现分析结果。"
                 )
             if _has_fabricated_tool_refs(reply_content, tools_used):
+                quality_signals.append("fabricated_refs")
                 logger.warning("[智能助手] 检测到伪造工具调用痕迹，拦截回复（tools_used=%s）", tools_used)
                 return (
                     "抱歉，我在生成回复时出现了数据来源标注错误。\n\n"
@@ -2512,6 +2455,7 @@ class IntelligentAssistantService:
                     len(_SPECIFIC_NUMBER_RE.findall(reply_content)),
                 )
                 if _retry_attempt < 1:
+                    quality_signals.append("unsourced_retry")
                     await _emit_progress({
                         "event": "progress",
                         "stage": "retry",
@@ -2521,6 +2465,7 @@ class IntelligentAssistantService:
                     messages.append(_retry_message("user", _UNSOURCED_RETRY_PROMPT))
                     logger.info("[智能助手] 已拦截未溯源数字回复，自动纠错重试（第1次）")
                     return await _do_chat(_retry_attempt + 1)
+                quality_signals.append("unsourced_blocked")
                 return (
                     "抱歉，我刚才两次都未能先调用工具获取真实数据，为避免误导已停止回答。\n\n"
                     "请换一个更具体的问法（例如指明行业或股票，如\"养殖行业最近走势如何\"），"
@@ -2532,6 +2477,7 @@ class IntelligentAssistantService:
             ):
                 logger.warning("[智能助手] 检测到无法溯源的高风险数字（疑似训练记忆填充/单位换算错误），拦截回复")
                 if _retry_attempt < 1:
+                    quality_signals.append("untraced_retry")
                     await _emit_progress({
                         "event": "progress",
                         "stage": "retry",
@@ -2547,6 +2493,7 @@ class IntelligentAssistantService:
                     messages.append(_retry_message("user", retry_prompt))
                     logger.info("[智能助手] 已拦截无法溯源数字回复，自动纠错重试（第1次）")
                     return await _do_chat(_retry_attempt + 1)
+                quality_signals.append("untraced_blocked")
                 untraced_detail = "、".join(_get_untraced_risky_numbers(
                     reply_content, tool_results, user_message, trusted_texts
                 )[:6])
@@ -2592,6 +2539,8 @@ class IntelligentAssistantService:
 
         # 透明化附注（推导/估算值↔工具原始值）经 meta 透传，gate 通过后由适配器追加
         meta: Dict[str, Any] = {}
+        if quality_signals:
+            meta["quality_signals"] = quality_signals
         if tools_used:
             note = _build_data_transparency_note(
                 reply, tool_results, user_message,
@@ -2612,7 +2561,10 @@ class IntelligentAssistantService:
     def _through_gate(
         self, candidate: ReplyCandidate, req: AssistantRequest
     ) -> ReplyCandidate:
-        """唯一质量出口（两种模式共用）：契约 + 四道防线；answer 失败回退证据。"""
+        """唯一质量出口（两种模式共用）：契约 + 四道防线；answer 失败回退证据。
+
+        关卡结果写入 meta["gate"]（S9 埋点在适配器统一采集）。
+        """
         trusted = (
             _extract_history_tool_contents(req.history_messages)
             if req.history_messages else []
@@ -2620,10 +2572,23 @@ class IntelligentAssistantService:
         result = ReplyGate().run(candidate, req.user_message, trusted)
         if not result.passed and candidate.route_type == ROUTE_TYPE_ANSWER:
             logger.warning("[智能助手] gate 出口拦截，回退证据: %s", result.failed_checks)
-            candidate = build_fallback_candidate(candidate, result.failures)
+            fallback = build_fallback_candidate(candidate, result.failures)
+            fallback.meta["gate"] = {
+                "passed": False,
+                "failed": list(result.failed_checks),
+                "fallback": True,
+            }
+            candidate = fallback
         elif not result.passed:
             # passthrough 未登记属程序缺陷（正常不应发生），仅记录，不臆造回复
             logger.error("[智能助手] passthrough 路径未登记: %s", result.failed_checks)
+            candidate.meta["gate"] = {
+                "passed": False,
+                "failed": list(result.failed_checks),
+                "fallback": False,
+            }
+        else:
+            candidate.meta["gate"] = {"passed": True, "failed": [], "fallback": False}
         return candidate
 
     def _finalize_result(
@@ -2639,6 +2604,43 @@ class IntelligentAssistantService:
             "tools_used": candidate.tools_used,
             "data_refs": extract_data_refs(candidate.evidence),
         }
+
+    def _record_metrics(
+        self,
+        result: Dict[str, Any],
+        candidate: ReplyCandidate,
+        req: AssistantRequest,
+        t0: float,
+        streaming: bool,
+        error: Optional[str] = None,
+    ) -> None:
+        """S9 质量埋点：一次对话回合一条事件（fire-and-forget，绝不影响主链路）。"""
+        try:
+            meta = candidate.meta or {}
+            gate = meta.get("gate") or {}
+            quality_metrics.record(
+                db=self._db,
+                streaming=streaming,
+                conversation_id=req.conversation_id,
+                user_id=self._user_id,
+                message_preview=(req.user_message or "")[:120],
+                route_id=candidate.route_id,
+                route_priority=meta.get("route_priority"),
+                route_type=candidate.route_type,
+                llm_processed=candidate.llm_processed,
+                gate_passed=gate.get("passed"),
+                gate_failed=gate.get("failed") or [],
+                fallback_used=bool(gate.get("fallback")),
+                quality_signals=meta.get("quality_signals") or [],
+                evidence_count=len(candidate.evidence),
+                data_refs_count=len(result.get("data_refs") or []),
+                reply_chars=len(result.get("reply") or ""),
+                tools_used=result.get("tools_used") or [],
+                duration_ms=int((time.monotonic() - t0) * 1000),
+                error=error,
+            )
+        except Exception as exc:  # 埋点组装失败也不影响对话
+            logger.debug("[智能助手] 质量埋点组装失败（忽略）: %s", exc)
 
     async def chat(
         self,
@@ -2658,6 +2660,7 @@ class IntelligentAssistantService:
         Returns:
             {"reply": str, "tools_used": List[str], "data_refs": List[dict]}
         """
+        t0 = time.monotonic()
         resolved_user_message = _rewrite_number_selection_reply(user_message, history_messages)
 
         req = AssistantRequest(
@@ -2697,7 +2700,9 @@ class IntelligentAssistantService:
             )
 
         candidate = self._through_gate(candidate, req)
-        return self._finalize_result(candidate, req)
+        result = self._finalize_result(candidate, req)
+        self._record_metrics(result, candidate, req, t0, streaming=False)
+        return result
 
     async def chat_stream(
         self,
@@ -2722,6 +2727,7 @@ class IntelligentAssistantService:
         def _sse(event: str, data: dict) -> str:
             return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+        t0 = time.monotonic()
         resolved_user_message = _rewrite_number_selection_reply(user_message, history_messages)
         logger.info("[智能助手·流式] chat_stream 开始，user_message=%r", resolved_user_message[:50])
 
@@ -2762,6 +2768,7 @@ class IntelligentAssistantService:
             candidate = task.result()
             candidate = self._through_gate(candidate, req)
             result = self._finalize_result(candidate, req)
+            self._record_metrics(result, candidate, req, t0, streaming=True)
             reply = result["reply"]
 
             # 整段过 gate 后切块，保持前端逐段渲染体验
@@ -2777,15 +2784,30 @@ class IntelligentAssistantService:
         except asyncio.CancelledError:
             if not task.done():
                 task.cancel()
+            self._record_metrics(
+                {"tools_used": req.tools_used, "data_refs": [], "reply": ""},
+                ReplyCandidate.passthrough("", route_id="cancelled"),
+                req, t0, streaming=True, error="cancelled",
+            )
             yield _sse("error", {"message": "请求已取消"})
             yield _sse("done", {"tools_used": req.tools_used, "error": True})
         except asyncio.TimeoutError:
             timeout_used = self._effective_timeout(req.tools_used)
             logger.warning("[智能助手·流式] 请求超时（%ss）", timeout_used)
+            self._record_metrics(
+                {"tools_used": req.tools_used, "data_refs": [], "reply": ""},
+                ReplyCandidate.passthrough("", route_id=ROUTE_TIMEOUT),
+                req, t0, streaming=True, error=f"timeout:{timeout_used}s",
+            )
             yield _sse("error", {"message": f"处理超时（已超过 {timeout_used} 秒），请尝试更简短的问题。"})
             yield _sse("done", {"tools_used": req.tools_used, "error": True})
         except Exception as e:
             logger.exception("[智能助手·流式] 对话失败")
+            self._record_metrics(
+                {"tools_used": req.tools_used, "data_refs": [], "reply": ""},
+                ReplyCandidate.passthrough("", route_id=ROUTE_ERROR),
+                req, t0, streaming=True, error=str(e)[:200],
+            )
             yield _sse("error", {"message": f"处理请求时发生错误：{str(e)}"})
             yield _sse("done", {"tools_used": req.tools_used, "error": True})
 

@@ -9,6 +9,8 @@
 运行：env/Scripts/python -m pytest tests/unit/test_assistant_quality.py -v
 """
 
+import asyncio
+
 import pytest
 
 from core.assistant import (
@@ -37,6 +39,12 @@ from core.assistant.paths import (
     ROUTE_FAST_SEARCH,
     ROUTE_MAIN_LLM,
 )
+from core.assistant.lexicon import (
+    StockDirectory,
+    detect_unsupported_asset,
+    extract_a_share_code,
+)
+from core.assistant.metrics import AssistantQualityMetrics
 
 
 @pytest.fixture
@@ -329,3 +337,231 @@ class TestDataRefs:
     def test_empty_evidence_returns_empty_refs(self):
         assert extract_data_refs(None) == []
         assert extract_data_refs([]) == []
+
+
+# ─────────────────────────── 词典事实源（阶段 4：lexicon）───────────────────────────
+
+class TestAShareCodeExtraction:
+    def test_extract_from_plain_text(self):
+        assert extract_a_share_code("600519 现在估值多少") == "600519"
+        # \b 在中文与数字之间无边界（与历史 _STOCK_CODE_RE 行为一致），需空白/标点分隔
+        assert extract_a_share_code("帮我分析一下 000858") == "000858"
+        assert extract_a_share_code("300750 和 601127 哪个好") == "300750"  # 首个命中
+
+    def test_no_code_returns_none(self):
+        assert extract_a_share_code("") is None
+        assert extract_a_share_code(None) is None  # type: ignore[arg-type]
+        assert extract_a_share_code("分析一下贵州茅台") is None
+
+    def test_word_boundaries_reject_longer_digits(self):
+        """7 位数字串不应截出 6 位代码（\\b 边界与历史行为一致）。"""
+        assert extract_a_share_code("订单号3007501请查收") is None
+
+
+class TestUnsupportedAssetGate:
+    """品种闸门检测（service 与 planned 共用同一事实源，此处验证词表行为）。"""
+
+    def test_hk_keyword_hits_hk_message(self):
+        msg = detect_unsupported_asset("腾讯控股最近怎么样")
+        assert msg is not None
+        assert "港股" in msg
+
+    def test_us_keyword_hits_us_message(self):
+        msg = detect_unsupported_asset("特斯拉还能买吗")
+        assert msg is not None
+        assert "美股" in msg
+
+    def test_us_ticker_hits_us_code_message(self):
+        msg = detect_unsupported_asset("TSLA 现在多少钱")
+        assert msg is not None
+        assert "美股代码" in msg
+
+    def test_hk_code_hits_hk_code_message(self):
+        msg = detect_unsupported_asset("00700.HK 值得关注吗")
+        assert msg is not None
+        assert "港股代码" in msg
+
+    def test_a_share_question_not_blocked(self):
+        assert detect_unsupported_asset("分析一下 600519 茅台") is None
+        assert detect_unsupported_asset("") is None
+        assert detect_unsupported_asset(None) is None  # type: ignore[arg-type]
+
+    def test_hk_takes_precedence_over_us(self):
+        """历史行为：港股词先于美股词检测。"""
+        msg = detect_unsupported_asset("港股和美股哪个好")
+        assert msg is not None
+        assert "港股" in msg
+
+
+class _FakeCursor:
+    """最小异步游标桩：支持 async for。"""
+
+    def __init__(self, docs):
+        self._docs = docs
+
+    def __aiter__(self):
+        self._iter = iter(self._docs)
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._iter)
+        except StopIteration:
+            raise StopAsyncIteration from None
+
+
+class _FakeCollection:
+    def __init__(self, docs, fail=False):
+        self._docs = docs
+        self._fail = fail
+        self.find_calls = 0
+
+    def find(self, *args, **kwargs):
+        self.find_calls += 1
+        if self._fail:
+            raise RuntimeError("数据库暂时不可用")
+        return _FakeCursor(self._docs)
+
+
+class _FakeDB:
+    def __init__(self, docs, fail=False):
+        self.stock_basic_info = _FakeCollection(docs, fail=fail)
+
+    def __getitem__(self, name):
+        assert name == "stock_basic_info"
+        return self.stock_basic_info
+
+
+class _FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def _basic_docs():
+    return [
+        {"symbol": "600519", "name": "贵州茅台"},
+        {"symbol": "601127", "name": "赛力斯集团"},
+        {"symbol": "688777", "name": "赛力斯"},
+        {"symbol": "000001", "name": "平安银行"},
+        {"symbol": "999999", "name": "超"},                        # 1 字名称应被过滤
+        {"symbol": "888888", "name": "这是一个超过六个字的名称"},   # >6 字过滤
+        {"symbol": "111111", "name": "同名重复"},                  # 同名保留先出现
+        {"symbol": "222222", "name": "同名重复"},
+    ]
+
+
+class TestStockDirectory:
+    @pytest.mark.asyncio
+    async def test_full_load_with_name_filter(self):
+        clock = _FakeClock()
+        directory = StockDirectory(ttl_seconds=3600, clock=clock)
+        name_map = await directory.get_name_map(_FakeDB(_basic_docs()))
+        # 全量加载：2~6 字名称全部入库，1 字/超长被过滤
+        assert name_map["贵州茅台"] == "600519"
+        assert name_map["赛力斯"] == "688777"
+        assert "超" not in name_map
+        assert "这是一个超过六个字的名称" not in name_map
+        assert name_map["同名重复"] == "111111"  # 同名保留先出现的代码
+
+    @pytest.mark.asyncio
+    async def test_ttl_cache_avoids_second_query(self):
+        clock = _FakeClock()
+        db = _FakeDB(_basic_docs())
+        directory = StockDirectory(ttl_seconds=3600, clock=clock)
+        await directory.get_name_map(db)
+        clock.now += 1800  # TTL 内
+        await directory.get_name_map(db)
+        assert db.stock_basic_info.find_calls == 1  # TTL 内零查询
+
+    @pytest.mark.asyncio
+    async def test_expired_ttl_triggers_refresh(self):
+        clock = _FakeClock()
+        db = _FakeDB(_basic_docs())
+        directory = StockDirectory(ttl_seconds=3600, clock=clock)
+        await directory.get_name_map(db)
+        clock.now += 3601  # 过期
+        await directory.get_name_map(db)
+        assert db.stock_basic_info.find_calls == 2
+
+    @pytest.mark.asyncio
+    async def test_refresh_failure_keeps_old_cache(self):
+        """刷新失败沿用旧缓存——词典故障不阻断路由。"""
+        clock = _FakeClock()
+        db = _FakeDB(_basic_docs())
+        directory = StockDirectory(ttl_seconds=3600, clock=clock)
+        await directory.get_name_map(db)
+        db.stock_basic_info._fail = True
+        clock.now += 3601
+        name_map = await directory.get_name_map(db)
+        assert name_map["贵州茅台"] == "600519"  # 旧数据仍可用
+        assert directory.is_fresh()  # 失败也刷新时间戳，避免每请求重试打库
+
+    @pytest.mark.asyncio
+    async def test_resolve_prefers_code_then_longest_name(self):
+        db = _FakeDB(_basic_docs())
+        directory = StockDirectory(ttl_seconds=3600, clock=_FakeClock())
+        assert await directory.resolve_symbol("600519 的估值", db) == "600519"  # 代码优先
+        assert await directory.resolve_symbol("赛力斯集团的业绩", db) == "601127"  # 长名优先
+        assert await directory.resolve_symbol("赛力斯怎么样", db) == "688777"
+        assert await directory.resolve_symbol("完全无关的闲聊内容", db) is None
+
+
+# ─────────────────────────── 质量埋点（阶段 4：metrics）───────────────────────────
+
+class _MetricsColl:
+    def __init__(self, fail=False):
+        self.inserted = []
+        self._fail = fail
+
+    async def insert_one(self, doc):
+        if self._fail:
+            raise RuntimeError("boom")
+        self.inserted.append(doc)
+
+    async def create_index(self, *args, **kwargs):
+        return None
+
+
+class _MetricsDB:
+    def __init__(self, fail=False):
+        self.events = _MetricsColl(fail=fail)
+
+    def __getitem__(self, name):
+        assert name == "assistant_quality_events"
+        return self.events
+
+
+class TestQualityMetrics:
+    def test_record_without_loop_drops_silently(self):
+        """同步上下文（无事件循环）静默丢弃——埋点不可阻断主链路。"""
+        db = _MetricsDB()
+        AssistantQualityMetrics().record(db=db, route_id="main_llm")  # 不应抛异常
+        assert db.events.inserted == []
+
+    @pytest.mark.asyncio
+    async def test_record_persists_event(self):
+        db = _MetricsDB()
+        metrics = AssistantQualityMetrics()
+        metrics.record(db=db, route_id="main_llm", streaming=False,
+                       gate_passed=True, quality_signals=["fabricated_json"])
+        await asyncio.sleep(0.01)  # 让 fire-and-forget 任务执行
+        assert len(db.events.inserted) == 1
+        event = db.events.inserted[0]
+        assert event["route_id"] == "main_llm"
+        assert event["quality_signals"] == ["fabricated_json"]
+        assert event["created_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_insert_failure_never_raises(self):
+        db = _MetricsDB(fail=True)
+        AssistantQualityMetrics().record(db=db, route_id="x")
+        await asyncio.sleep(0.01)  # 任务内部吞掉异常，不向外传播
+        assert db.events.inserted == []
+
+    @pytest.mark.asyncio
+    async def test_record_without_db_drops(self):
+        """有事件循环但无 db 句柄 → 静默丢弃。"""
+        AssistantQualityMetrics().record(db=None, route_id="x")  # 不应抛异常

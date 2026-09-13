@@ -284,7 +284,7 @@ async def handle(msg: str, ctx) -> dict:
 | **1 证据集** | models.py（Evidence/ReplyCandidate 契约）+ 主/快路径产出 evidence + **data_refs 真实现**（前端可展示来源） | S6 | **直接兑现"结论高亮回链数据源"卖点** |
 | **2 统一出口** | reply_gate.py（4 道防线抽离收编 + 契约校验）；chat() 全部出口过 gate；两级降级 | S1(chat侧)/S7 | 快路径类问题结构性不再发生 |
 | **3 收口** | paths.py 注册表（priority + route_type）+ Orchestrator + chat_stream 合并为输出适配器 | S1(全部)/S2/S5 | 框架橱窗；贡献者加路径的制度约束 |
-| **4 意图与度量** | 股票名走 stock_basic_info 全量+TTL缓存（替代硬编码），词典收敛单处；埋点落库（route 命中/gate 拦截/降级路径/文本信号离线统计） | S4/S3部分/S9 | 平台化运营可见性；路由规则可审计 |
+| **4 意图与度量** | 股票名走 stock_basic_info 全量+TTL缓存（替代硬编码），词典收敛单处；埋点落库（route 命中/gate 拦截/降级路径/文本信号离线统计）；意图关键词规则去留待埋点数据决策，暂保留 service 现状 | S4/S3部分/S9 | 平台化运营可见性；路由规则可审计 |
 | **并行** | system prompt 治理（§7） | S8 | 不治理则持续制造 S3 类问题 |
 
 **依赖**：阶段 0 必须最先；阶段 1 与 2 可紧接（2 消费 1 的契约）；3 依赖 2；4 可在 3 后。每阶段独立提交、可回退；只抽新模块 + 改出口，不整体搬迁 5000 行单文件。
@@ -304,7 +304,7 @@ async def handle(msg: str, ctx) -> dict:
 9. 风险自我辩论三观点互异（A9-P1 回归项，联动）
 10. web_search 摘要无数值时问行业成本 → "搜索结果未包含该数值"+链接，不得填记忆数字
 
-### 5.2 实施进度（阶段 0/1/2/3 已落地）
+### 5.2 实施进度（阶段 0/1/2/3/4 已落地）
 
 | 阶段 | 状态 | 落点 |
 |------|------|------|
@@ -312,7 +312,7 @@ async def handle(msg: str, ctx) -> dict:
 | 1 证据集 | ✅ 已落地 | `core/assistant/models.py`（Evidence / ReplyCandidate / extract_data_refs）；主路径与快路径产出 evidence；返回体 `data_refs` 由真实证据导出（仅 tool/search 来源、按三元组去重） |
 | 2 统一出口 | ✅ 已落地 | `core/assistant/defense.py`（四道防线+数字溯源从 service 物理收编为唯一事实源，净减约 481 行重复实现）；`core/assistant/reply_gate.py`（契约校验 + fallback_evidence 降级） |
 | 3 收口 | ✅ 已落地 | `core/assistant/paths.py`（AssistantRequest / RegisteredPath / PathRegistry，priority 显式 + 同 priority 按 route_id 稳定排序 + register 查重 + resolve 首命中/全不命中抛错）；service 内六路径 handler（hitl 10 / unsupported_asset 20 / llm_unavailable 30 / fast_search 40 / data_precheck 50 / main_llm 100）+ `_route_candidate`/`_through_gate`/`_finalize_result` 单一管道；`chat()` 与 `chat_stream()` 降为 JSON/SSE 两个输出适配器（双实现再净减约 199 行）。双模式防线行为拉齐：流式补齐 untraced 重试；透明化附注统一在 gate 之后经 `meta["transparency_note"]` 追加；流式 done 事件新增真实 `data_refs`（封装层外层 done 透传） |
-| 4 意图与度量 | ⬜ 未开始 | — |
+| 4 意图与度量 | ✅ 已落地（意图规则演进 ⏸ 待埋点数据决策） | `core/assistant/lexicon.py`（StockDirectory：stock_basic_info **全量**名称→代码 + TTL 6h 缓存 + asyncio.Lock 防击穿 + 刷新失败沿用旧缓存，替代硬编码 9 名单与每请求 regex 查库；A 股代码正则单一事实源；港股/美股词表与 `detect_unsupported_asset` 从 planned 物理收编，service/planned 共用）；`core/assistant/metrics.py`（`assistant_quality_events` 落库：route_id/priority/type、gate 通过与失败项、quality_signals（unsourced/untraced/fabricated 等纠错信号）、streaming、耗时，fire-and-forget 绝不影响主链路；管道 `_record_metrics` 在 chat/chat_stream 双适配器出口采集，含超时/取消/异常分支）；`database.py` 启动建索引。**意图关键词规则（快路径/预检查）保持 service 现状不动**，去留（保留 / 前置小模型 / 归还主 agent 工具选择）凭 1~2 周埋点数据决策（D6） |
 
 **chat() 出口契约**：answer 型须 `llm_processed=True` 且过四道防线，失败自动回退为已登记的 `fallback_evidence`（局限说明 + 证据摘录）；passthrough 型 route_id 必须命中 `REGISTERED_PASSTHROUGH` 白名单（hitl / unsupported_asset / data_precheck / llm_unavailable / timeout / error / fallback_evidence）。
 
@@ -326,7 +326,7 @@ async def handle(msg: str, ctx) -> dict:
 |---|------|------|------|
 | S1 旁路绕过防线 | 阶段2+3 | ✅ 根治：所有路径必经 gate，架构上不存在绕过 |
 | S2 双实现 | 阶段3 | ✅ 合并为单一管道 |
-| S3 规则层抢决策权 | 阶段4 部分 | ⚠️ 路由集中可审计、词典全量化；决策权是否进一步交给 LLM，由阶段 4 埋点的真实误路由率数据决定（D6） |
+| S3 规则层抢决策权 | 阶段4 部分 | ⚠️ 路由集中可审计、词典全量化、埋点已上线；决策权是否进一步交给 LLM（意图规则演进），凭埋点 1~2 周真实失败分布决策（D6） |
 | S4 词典硬编码 | 阶段4 | ✅ 全量索引+缓存 |
 | S5 优先级=代码顺序 | 阶段3 | ✅ priority 显式化 |
 | S6 data_refs 空壳 | 阶段1 | ✅ evidence 结构化后导出，兑现可展示溯源 |
