@@ -304,7 +304,7 @@ async def handle(msg: str, ctx) -> dict:
 9. 风险自我辩论三观点互异（A9-P1 回归项，联动）
 10. web_search 摘要无数值时问行业成本 → "搜索结果未包含该数值"+链接，不得填记忆数字
 
-### 5.2 实施进度（阶段 0/1/2/3/4 已落地）
+### 5.2 实施进度（阶段 0/1/2/3/4 + S8 prompt 治理 已落地）
 
 | 阶段 | 状态 | 落点 |
 |------|------|------|
@@ -313,6 +313,7 @@ async def handle(msg: str, ctx) -> dict:
 | 2 统一出口 | ✅ 已落地 | `core/assistant/defense.py`（四道防线+数字溯源从 service 物理收编为唯一事实源，净减约 481 行重复实现）；`core/assistant/reply_gate.py`（契约校验 + fallback_evidence 降级） |
 | 3 收口 | ✅ 已落地 | `core/assistant/paths.py`（AssistantRequest / RegisteredPath / PathRegistry，priority 显式 + 同 priority 按 route_id 稳定排序 + register 查重 + resolve 首命中/全不命中抛错）；service 内六路径 handler（hitl 10 / unsupported_asset 20 / llm_unavailable 30 / fast_search 40 / data_precheck 50 / main_llm 100）+ `_route_candidate`/`_through_gate`/`_finalize_result` 单一管道；`chat()` 与 `chat_stream()` 降为 JSON/SSE 两个输出适配器（双实现再净减约 199 行）。双模式防线行为拉齐：流式补齐 untraced 重试；透明化附注统一在 gate 之后经 `meta["transparency_note"]` 追加；流式 done 事件新增真实 `data_refs`（封装层外层 done 透传） |
 | 4 意图与度量 | ✅ 已落地（意图规则演进 ⏸ 待埋点数据决策） | `core/assistant/lexicon.py`（StockDirectory：stock_basic_info **全量**名称→代码 + TTL 6h 缓存 + asyncio.Lock 防击穿 + 刷新失败沿用旧缓存，替代硬编码 9 名单与每请求 regex 查库；A 股代码正则单一事实源；港股/美股词表与 `detect_unsupported_asset` 从 planned 物理收编，service/planned 共用）；`core/assistant/metrics.py`（`assistant_quality_events` 落库：route_id/priority/type、gate 通过与失败项、quality_signals（unsourced/untraced/fabricated 等纠错信号）、streaming、耗时，fire-and-forget 绝不影响主链路；管道 `_record_metrics` 在 chat/chat_stream 双适配器出口采集，含超时/取消/异常分支）；`database.py` 启动建索引。**意图关键词规则（快路径/预检查）保持 service 现状不动**，去留（保留 / 前置小模型 / 归还主 agent 工具选择）凭 1~2 周埋点数据决策（D6） |
+| S8 prompt 治理 | ✅ 已落地 | `_get_system_prompt` 分层重组：核心身份→诚实与能力边界→领域边界（吸收政治类/非金融模板/产业知识三条）→**数据纪律 13 条**（原【诚实原则】【空数据处理】【当前/最近交易日块】【工具使用原则】四处防编造细则合并去重，与 A 类检查项对齐）→合规（吸收 A 股交易规则块）→工具与数据获取（原【工具使用原则】【Web 搜索策略】合并，"传交易日参数""优先调 Agent"两处重复收敛单处）。19 块→14 块，8317→5547 字符（**-33.3%**，验收线 ≥30%）；动态注入（日期/IM/记忆指引/主题/股票上下文/画像/RAG/usage_helper 分流）全部保持原机制。验证：`tests/unit/test_assistant_prompt.py` 10 条（分层结构/动态注入/字数防回弹/13 条数据纪律锚点/合规与工具锚点）；E2E 4 场景 10/10（§5.1 案例 4 合规话术逐字命中、案例 5 编号承接、非金融话题拒绝、主路径三字段回归），语义零丢失对照清单存 `data/temp/s8_rule_mapping.md`（60+ 条规则全部映射到新去处） |
 
 **chat() 出口契约**：answer 型须 `llm_processed=True` 且过四道防线，失败自动回退为已登记的 `fallback_evidence`（局限说明 + 证据摘录）；passthrough 型 route_id 必须命中 `REGISTERED_PASSTHROUGH` 白名单（hitl / unsupported_asset / data_precheck / llm_unavailable / timeout / error / fallback_evidence）。
 
@@ -331,7 +332,7 @@ async def handle(msg: str, ctx) -> dict:
 | S5 优先级=代码顺序 | 阶段3 | ✅ priority 显式化 |
 | S6 data_refs 空壳 | 阶段1 | ✅ evidence 结构化后导出，兑现可展示溯源 |
 | S7 防线不可复用 | 阶段2 | ✅ 抽为独立模块 |
-| S8 prompt 膨胀 | 并行治理 | 🟡 独立工作项（§7），不做会持续复发 |
+| S8 prompt 膨胀 | §7 并行治理 | ✅ 已治理：分层重组+四处防编造细则合并+三处工具指引去重，8317→5547 字符（-33.3%），语义零丢失（60+ 条规则映射清单+E2E 实证） |
 | S9 无度量 | 阶段4 | ✅ 埋点；文本信号离线化 |
 | S10 无回归测试 | 阶段0 | ✅ 测试集先行 |
 
@@ -339,18 +340,20 @@ async def handle(msg: str, ctx) -> dict:
 
 **C 类（意图）结论——已知边界**："回复是否回应了问题"没有廉价的确定性校验（行业性难题）。本方案做到路由集中可审计、词典全量化、埋点可见异常率；**是否引入 LLM 裁判取决于阶段 4 采集的真实失败分布，不在当前承诺内**。只能缓解，是否继续投入由数据决定。
 
-**总评**：10 项问题中 8 项根治、1 项数据驱动缓解（S3）、1 项并行治理（S8）。"发现一个修一个"模式在阶段 2+3 完成后被结构性终结；同时阶段 1 独立交付一个用户可见的产品能力（可展示溯源）。
+**总评**：10 项问题中 9 项根治（含 S8 prompt 治理）、1 项数据驱动缓解（S3）。"发现一个修一个"模式在阶段 2+3 完成后被结构性终结；同时阶段 1 独立交付一个用户可见的产品能力（可展示溯源）。
 
 ---
 
-## 7. 配套工作：system prompt 治理（与阶段 1 并行）
+## 7. 配套工作：system prompt 治理（✅ 已落地，2026-09-13）
 
 独立于本方案但必须并行，否则 3000+ 字 prompt 持续膨胀并持续制造 S3 类问题：
 
-1. **分层重组**：核心身份 → 领域边界 → 数据纪律（防编造细则合并去重，与 A 类检查项对齐）→ 合规 → 工具指引
-2. **规则去重**：工具使用原则 3 处重复合并为 1 处
-3. **动态注入保持**：当前日期/交易日/股票上下文/报告清单等动态段维持现有注入机制
-4. **验收**：字数缩减 ≥30%，语义零丢失（对照 §5.1 回归测试集逐条验证）
+1. **分层重组**：核心身份 → 领域边界 → 数据纪律（防编造细则合并去重，与 A 类检查项对齐）→ 合规 → 工具指引 ✅
+2. **规则去重**：工具使用原则 3 处重复合并为 1 处；防编造细则从【诚实原则】【空数据处理】【当前/最近交易日块】【工具使用原则】四处合并为【数据纪律】13 条 ✅
+3. **动态注入保持**：当前日期/交易日/股票上下文/报告清单等动态段维持现有注入机制 ✅
+4. **验收**：字数缩减 ≥30%（实测 8317→5547 字符，-33.3%），语义零丢失（对照 §5.1 回归测试集：案例 4 合规话术 E2E 逐字命中、案例 5 编号承接 E2E 通过；60+ 条旧规则映射清单逐条核对）✅
+
+实现落点：`_get_system_prompt` 单函数内重组（主路径与快路径 planned `_synthesize` 共用，一处改两处生效）；`tests/unit/test_assistant_prompt.py` 10 条防回弹（分层结构/动态注入/字数上限/锚点）。
 
 ---
 
@@ -370,6 +373,7 @@ async def handle(msg: str, ctx) -> dict:
 
 - **2026-09-13 v1**：方案初稿（启发式关卡 + 逐项豁免 + 三级降级）。
 - **2026-09-13 v2**：评审修订。① B 类改契约强制、删除文本启发式与豁免机制（D1/D2）；② 降级收敛两级（D3）；③ Evidence/data_refs 提至首批（D4）；④ 文本信号离线化（D5）；⑤ LLM 裁判类移出承诺、改数据驱动（D6）。
+- **2026-09-13 S8 落地**：prompt 分层重组+去重（8317→5547 字符，-33.3%）；阶段 4 同日落地（词典全量化/品种闸门收敛/质量埋点）。方案内 10 项问题全部处置完毕，唯一遗留 D6（意图规则演进）凭埋点数据再议。
 - 快路径缺陷（触发事件）修复 `_summarize_search_result` 已先行落地，不依赖本方案。
 - 排期决策：Demo（9-16）前冻结主链路；Demo 后按阶段 0→1→2 启动。
 - 本方案属 A11 工作线（智能助手质量架构），与 A10（估值交付物）、A9-P1（风险辩论）、A3（并行开局）互不阻塞。
