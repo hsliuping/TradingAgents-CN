@@ -7,6 +7,7 @@
 
 import asyncio
 import logging
+import random
 import time
 from typing import Any, Awaitable, Callable, Optional, TypeVar
 
@@ -50,8 +51,9 @@ def retry_sync(
     for attempt in range(max_retries + 1):
         try:
             if attempt > 0:
-                wait = min(2 ** attempt, max_wait)
-                logger.info("[%s] 等待 %ds 后重试（%d/%d）...", label, wait, attempt, max_retries)
+                # 指数退避 + 随机抖动，避免多请求同步重试形成风暴（如 429 限流场景）
+                wait = min(2 ** attempt, max_wait) + random.uniform(0, 1)
+                logger.info("[%s] 等待 %.1fs 后重试（%d/%d）...", label, wait, attempt, max_retries)
                 time.sleep(wait)
             return fn(*args, **kwargs)
         except Exception as e:
@@ -78,8 +80,9 @@ async def retry_async(
     for attempt in range(max_retries + 1):
         try:
             if attempt > 0:
-                wait = min(2 ** attempt, max_wait)
-                logger.info("[%s] 等待 %ds 后重试（%d/%d）...", label, wait, attempt, max_retries)
+                # 指数退避 + 随机抖动，避免多请求同步重试形成风暴（如 429 限流场景）
+                wait = min(2 ** attempt, max_wait) + random.uniform(0, 1)
+                logger.info("[%s] 等待 %.1fs 后重试（%d/%d）...", label, wait, attempt, max_retries)
                 await asyncio.sleep(wait)
             return await fn(*args, **kwargs)
         except Exception as e:

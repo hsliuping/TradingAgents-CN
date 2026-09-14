@@ -334,6 +334,13 @@ interface ApiOk<T> {
 
 const BASE = '/api/skill-generation'
 
+// LLM 慢接口专用配置：
+// - 超时提高到 20 分钟：需求对话/规格生成涉及多次 LLM 调用，可能超过全局默认 600s，
+//   超时截断会导致后端还在跑、前端却已报错（旧会话即因此出现连环重发）
+// - retryCount: 0 禁止超时自动重发：这些 POST 非幂等（会新建会话/推进轮次/触发生成），
+//   自动重发会在后端堆积重复的长耗时任务并触发 LLM 限流
+const SLOW_LLM_OP_CONFIG = { timeout: 1200000, retryCount: 0 }
+
 export const skillGenerationApi = {
   // ---------- 模型选择 ----------
 
@@ -359,37 +366,37 @@ export const skillGenerationApi = {
 
   /** 开始创建会话 */
   startSession: async (data: StartSessionRequest): Promise<SessionStartResult> => {
-    const res = await request.post<ApiOk<SessionStartResult>>(`${BASE}/sessions/start`, data)
+    const res = await request.post<ApiOk<SessionStartResult>>(`${BASE}/sessions/start`, data, SLOW_LLM_OP_CONFIG)
     return (res as any).data
   },
 
   /** 回复对话 */
   respondToSession: async (sessionId: string, message: string): Promise<SessionRespondResult> => {
-    const res = await request.post<ApiOk<SessionRespondResult>>(`${BASE}/sessions/${sessionId}/respond`, { message })
+    const res = await request.post<ApiOk<SessionRespondResult>>(`${BASE}/sessions/${sessionId}/respond`, { message }, SLOW_LLM_OP_CONFIG)
     return (res as any).data
   },
 
   /** 预览规格（不执行管线），用于规格确认步骤 */
   previewSpec: async (sessionId: string, message: string = '确认'): Promise<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null; fact_report?: ImplementationFactReportView | null }> => {
-    const res = await request.post<ApiOk<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null; fact_report?: ImplementationFactReportView | null }>>(`${BASE}/sessions/${sessionId}/preview-spec`, { message })
+    const res = await request.post<ApiOk<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null; fact_report?: ImplementationFactReportView | null }>>(`${BASE}/sessions/${sessionId}/preview-spec`, { message }, SLOW_LLM_OP_CONFIG)
     return (res as any).data
   },
 
   /** 确认规格并生成（异步，返回 generating 后需轮询 getSession 获取最终结果） */
   confirmSpec: async (sessionId: string, message: string = '确认'): Promise<ConfirmResult> => {
-    const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/confirm`, { message })
+    const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/confirm`, { message }, SLOW_LLM_OP_CONFIG)
     return (res as any).data
   },
 
   /** 先让 AI 解释它理解到的问题和修正计划 */
   previewRepairSession: async (sessionId: string, feedback: string): Promise<RepairPlanResult> => {
-    const res = await request.post<ApiOk<RepairPlanResult>>(`${BASE}/sessions/${sessionId}/repair-plan`, { feedback })
+    const res = await request.post<ApiOk<RepairPlanResult>>(`${BASE}/sessions/${sessionId}/repair-plan`, { feedback }, SLOW_LLM_OP_CONFIG)
     return (res as any).data
   },
 
   /** 当修正计划确认后，再真正重新生成 */
   repairSession: async (sessionId: string, feedback: string, repairPlan: string = ''): Promise<ConfirmResult> => {
-    const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/repair`, { feedback, repair_plan: repairPlan })
+    const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/repair`, { feedback, repair_plan: repairPlan }, SLOW_LLM_OP_CONFIG)
     return (res as any).data
   },
 

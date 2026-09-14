@@ -160,10 +160,14 @@ class RequirementAnalyzer:
         llm_client: Optional[UnifiedLLMClient] = None,
         provider: str = "deepseek",
         model: Optional[str] = None,
+        quick_llm_client: Optional[UnifiedLLMClient] = None,
     ):
         self._client = llm_client
         self._provider = provider
         self._model = model
+        # 快速模型客户端：清晰度评估/边界检测/对话回复/规格生成等轻推理
+        # 环节优先使用；未配置时全部回退主模型，行为与旧版一致
+        self._quick_client = quick_llm_client
 
     def _get_client(self) -> UnifiedLLMClient:
         """懒加载 LLM 客户端"""
@@ -182,6 +186,42 @@ class RequirementAnalyzer:
                 except Exception as e:
                     logger.warning(f"更新需求分析 LLM 超时时间失败: {e}")
         return self._client
+
+    def _get_quick_client(self) -> Optional[UnifiedLLMClient]:
+        """轻量判断专用快速模型客户端；未配置时返回 None（调用方回退主模型）。"""
+        if self._quick_client is None:
+            return None
+        adapter = getattr(self._quick_client, "_adapter", None)
+        config = getattr(adapter, "config", None)
+        if config and getattr(config, "timeout", 0) < ANALYZER_LLM_TIMEOUT_SECONDS:
+            config.timeout = ANALYZER_LLM_TIMEOUT_SECONDS
+            try:
+                adapter.initialize()
+            except Exception as e:
+                logger.warning(f"更新快速模型超时时间失败: {e}")
+        return self._quick_client
+
+    def _chat_with_quick_fallback(
+        self, messages: List[Message], *, stage: str
+    ) -> str:
+        """轻推理调用（对话回复/规格生成）：优先快速模型，失败时回退主模型。
+
+        需求对话（复述/澄清/确认引导）与规格生成（结构化转录）不需要深度
+        推理，快速非思考模型可将响应从分钟级降到秒级；快速模型不可用
+        （欠费/超时/空回复）时回退主模型，保障功能可用性。
+        """
+        quick = self._get_quick_client()
+        if quick is not None:
+            try:
+                response = quick.chat(messages)
+                content = (response.content or "").strip()
+                if content:
+                    return content
+                logger.warning(f"{stage}: 快速模型返回空内容，回退主模型")
+            except Exception as exc:
+                logger.warning(f"{stage}: 快速模型调用失败，回退主模型: {exc}")
+        response = self._get_client().chat(messages)
+        return (response.content or "").strip()
 
     @staticmethod
     def _raise_analysis_error(stage: str, error: Optional[Exception] = None) -> None:
@@ -1195,7 +1235,7 @@ class RequirementAnalyzer:
 
     def _assess_clarity(self, user_message: str) -> ClarityLevel:
         """评估需求清晰度"""
-        client = self._get_client()
+        client = self._get_quick_client() or self._get_client()
         prompt = (
             "请评估以下用户需求的清晰度（1-5分）。\n"
             "5分=非常清晰（明确了数据源、参数、输出），"
@@ -1224,7 +1264,7 @@ class RequirementAnalyzer:
         self, user_message: str, conversation_context: Optional[str] = None
     ) -> BoundaryCheck:
         """检测需求是否超出单个 Skill 范围。若有对话历史，基于最新共识重新评估。"""
-        client = self._get_client()
+        client = self._get_quick_client() or self._get_client()
         if conversation_context:
             prompt = (
                 "你是 Skill 边界检测专家。一个 Skill 应该聚焦一个明确、可复用的功能单元。"
@@ -1287,7 +1327,6 @@ class RequirementAnalyzer:
 
     def _build_round1_response(self, session: SkillCreationSession, user_message: str) -> str:
         """第 1 轮：初步理解 + 功能点拆解 + 数据源引导"""
-        client = self._get_client()
         catalog_context = self._build_catalog_context(user_message)
         handoff_context = self._build_handoff_context_text(session)
         handoff_guardrails = self._build_handoff_guardrails(session)
@@ -1318,8 +1357,9 @@ class RequirementAnalyzer:
             f"用户描述: {user_message}"
         )
         try:
-            response = client.chat([Message(role="user", content=prompt)])
-            content = (response.content or "").strip()
+            content = self._chat_with_quick_fallback(
+                [Message(role="user", content=prompt)], stage="第1轮需求分析"
+            )
             if content:
                 return content
             self._raise_analysis_error("第1轮需求分析")
@@ -1334,7 +1374,6 @@ class RequirementAnalyzer:
         skill_context: str,
     ) -> str:
         """迭代模式第 1 轮：展示现有 Skill 现状，引导用户描述需要调整的内容"""
-        client = self._get_client()
         prompt = (
             "你是 Skill 迭代优化专家。用户正在优化一个已有的 Skill，以下是当前 Skill 的信息：\n\n"
             f"```json\n{skill_context}\n```\n\n"
@@ -1353,8 +1392,9 @@ class RequirementAnalyzer:
             "- 如果用户的想法跟当前 Skill 实现完全冲突，温和建议重新创建"
         )
         try:
-            response = client.chat([Message(role="user", content=prompt)])
-            content = (response.content or "").strip()
+            content = self._chat_with_quick_fallback(
+                [Message(role="user", content=prompt)], stage="迭代模式第1轮需求分析"
+            )
             if content:
                 return content
             self._raise_analysis_error("迭代模式第1轮需求分析")
@@ -1367,7 +1407,6 @@ class RequirementAnalyzer:
     ) -> str:
         """第 2 轮：技术细化"""
         history = self._collect_conversation(session, user_message)
-        client = self._get_client()
         catalog_context = self._build_catalog_context(history)
         handoff_context = self._build_handoff_context_text(session)
         handoff_guardrails = self._build_handoff_guardrails(session)
@@ -1389,8 +1428,9 @@ class RequirementAnalyzer:
             f"对话历史:\n{history}"
         )
         try:
-            response = client.chat([Message(role="user", content=prompt)])
-            content = (response.content or "").strip()
+            content = self._chat_with_quick_fallback(
+                [Message(role="user", content=prompt)], stage="第2轮需求分析"
+            )
             if content:
                 return content
             self._raise_analysis_error("第2轮需求分析")
@@ -1403,7 +1443,6 @@ class RequirementAnalyzer:
     ) -> str:
         """最后一轮：生成规格确认摘要"""
         history = self._collect_conversation(session, user_message)
-        client = self._get_client()
         catalog_context = self._build_catalog_context(history)
         handoff_context = self._build_handoff_context_text(session)
         handoff_guardrails = self._build_handoff_guardrails(session)
@@ -1429,8 +1468,9 @@ class RequirementAnalyzer:
             f"对话历史:\n{history}"
         )
         try:
-            response = client.chat([Message(role="user", content=prompt)])
-            content = (response.content or "").strip()
+            content = self._chat_with_quick_fallback(
+                [Message(role="user", content=prompt)], stage="规格确认摘要生成"
+            )
             if content:
                 return content
             self._raise_analysis_error("规格确认摘要生成")
@@ -1486,7 +1526,8 @@ class RequirementAnalyzer:
             fact_report: 侦察报告（侦察前置模式），包含真实字段可用性
             session: 当前会话（用于迭代模式识别，传入时会保留原 tool_id 等版本关系）
         """
-        client = self._get_client()
+        # 规格生成本质是结构化转录（对话已把参数/字段确认清楚），
+        # 优先走快速模型，失败回退主模型
         catalog_context = self._build_catalog_context(conversation)
         handoff_guardrails = ""
         if "[系统交接上下文]:" in conversation:
@@ -1583,7 +1624,9 @@ class RequirementAnalyzer:
         for attempt in range(max_attempts):
             try:
                 if attempt == 0:
-                    response = client.chat([Message(role="user", content=prompt)])
+                    last_raw = self._chat_with_quick_fallback(
+                        [Message(role="user", content=prompt)], stage="规格生成"
+                    )
                 else:
                     # 第 2 次：将上次失败的输出反馈给 LLM，要求修正
                     retry_prompt = (
@@ -1592,13 +1635,15 @@ class RequirementAnalyzer:
                         f"错误: {last_error}\n\n"
                         "请只输出纯 JSON，不要包含任何 Markdown 标记或解释文字。"
                     )
-                    response = client.chat([
-                        Message(role="user", content=prompt),
-                        Message(role="assistant", content=last_raw[:8000]),
-                        Message(role="user", content=retry_prompt),
-                    ])
+                    last_raw = self._chat_with_quick_fallback(
+                        [
+                            Message(role="user", content=prompt),
+                            Message(role="assistant", content=last_raw[:8000]),
+                            Message(role="user", content=retry_prompt),
+                        ],
+                        stage="规格生成",
+                    )
 
-                last_raw = response.content or ""
                 logger.info(f"SkillSpec LLM 原始返回 (attempt {attempt + 1}/{max_attempts}, {len(last_raw)} 字符):\n{last_raw}")
                 data = self._parse_llm_json(last_raw)
                 if data:

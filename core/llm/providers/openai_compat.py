@@ -82,6 +82,10 @@ class OpenAICompatAdapter(BaseAdapter):
         client_kwargs = {
             "api_key": api_key,
             "timeout": self.config.timeout,
+            # 关闭 SDK 自带重试：重试统一由应用层 retry_sync/retry_async 控制。
+            # 否则 SDK(默认2次) x 应用层(3次) 双层叠加，单次调用最坏可达
+            # 十几分钟级等待，且 timeout 语义变得不可预期。
+            "max_retries": 0,
         }
         
         if self.config.base_url:

@@ -96,6 +96,7 @@ async def _get_service_with_llm(
     """
     from app.services.intelligent_assistant_service import (
         get_coding_llm_config,
+        get_quick_llm_config,
         get_reasoning_llm_config,
     )
     from core.llm import UnifiedLLMClient
@@ -112,6 +113,14 @@ async def _get_service_with_llm(
     )
     if reasoning_client:
         logger.debug("Skill 需求分析使用深度推理大模型")
+
+    # 需求对话：快速模型（清晰度评估/边界检测/多轮回复），显著降低轮次响应延迟
+    quick_config = await get_quick_llm_config(db)
+    quick_client = (
+        UnifiedLLMClient.from_config(quick_config) if quick_config else None
+    )
+    if quick_client:
+        logger.debug("Skill 需求对话使用快速模型")
 
     # 代码生成：编程大模型
     coding_config = None
@@ -130,6 +139,7 @@ async def _get_service_with_llm(
         db=db,
         reasoning_llm_client=reasoning_client,
         coding_llm_client=coding_client,
+        quick_llm_client=quick_client,
         provider=provider,
         model=model,
     )

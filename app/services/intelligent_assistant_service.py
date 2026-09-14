@@ -1775,6 +1775,30 @@ async def get_reasoning_llm_config(db=None):
     return await _get_assistant_llm_config(db, use_reasoning_model=True)
 
 
+async def get_quick_llm_config(db=None):
+    """
+    获取快速模型配置，用于低延迟轻量判断场景
+    （Skill 需求对话的清晰度评估、边界检测、多轮回复等）
+    """
+    from app.core.database import get_mongo_db
+    db = db if db is not None else get_mongo_db()
+    config_doc = await db.system_configs.find_one(
+        {"is_active": True},
+        sort=[("version", -1)]
+    )
+    if not config_doc or "llm_configs" not in config_doc:
+        return None
+    quick_selection = _resolve_model_selection(config_doc, "quick_analysis_model")
+    model_name = _selection_model_name(quick_selection)
+    if not model_name:
+        return None
+    return await _get_llm_config_for_model(
+        db,
+        model_name,
+        target_config_id=_selection_config_id(quick_selection),
+    )
+
+
 async def get_coding_llm_config(db=None):
     """
     获取编程模型配置，用于策略 DSL 生成等需要结构化 JSON 输出的场景

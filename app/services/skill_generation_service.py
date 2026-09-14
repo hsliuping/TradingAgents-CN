@@ -30,6 +30,7 @@ from core.tools.external import (
     SessionStatus,
     PipelineResult,
 )
+from core.tools.external.requirement_analyzer import classify_requirement_mode
 
 logger = logging.getLogger("webapi")
 
@@ -56,21 +57,26 @@ class SkillGenerationService:
         db: AsyncIOMotorDatabase,
         reasoning_llm_client=None,
         coding_llm_client=None,
+        quick_llm_client=None,
         provider: str = "deepseek",
         model: Optional[str] = None,
     ):
         """
         Args:
             db: MongoDB 数据库
-            reasoning_llm_client: 需求分析用（深度推理大模型），多轮对话、澄清需求
+            reasoning_llm_client: 需求分析用（深度推理大模型），规格生成等重推理环节
             coding_llm_client: 代码生成用（编程大模型），生成代码、Judge 评分
+            quick_llm_client: 需求对话用（快速模型），清晰度/边界/多轮回复等低延迟环节
             provider, model: 回退用，当上述客户端均为空时使用
         """
         self._db = db
         self._provider = provider
         self._model = model
         self._analyzer = RequirementAnalyzer(
-            llm_client=reasoning_llm_client, provider=provider, model=model
+            llm_client=reasoning_llm_client,
+            provider=provider,
+            model=model,
+            quick_llm_client=quick_llm_client,
         )
         self._reconnaissance = DefaultReconnaissanceController(
             llm_client=coding_llm_client, provider=provider, model=model,
@@ -1010,10 +1016,19 @@ test_input: {spec.test_input}
         )
         logger.info("🧭 侦察完成 (preview)，置信度: %.0f%%", fact_report.confidence * 100)
 
-        # 第二遍：基于侦察事实重新生成 enriched spec
-        enriched_spec = await asyncio.get_event_loop().run_in_executor(
-            None, self._analyzer.preview_spec, session, user_message, fact_report
-        )
+        # 第二遍：基于侦察事实重新生成 enriched spec。
+        # 仅在侦察产出字段级实证事实且非 external_api 模式时执行——
+        # external_api 模式侦察不探测外部接口，报告内容均为模式派生的静态指引
+        # （字段清单还是从草稿回抄的），二次生成输入与草稿无实质差异，
+        # 只会白白多花一次 LLM 调用（思考模型下约 5 分钟）。
+        enriched_spec = None
+        if (
+            classify_requirement_mode(draft_spec) != "external_api"
+            and fact_report.has_spec_grounding_facts
+        ):
+            enriched_spec = await asyncio.get_event_loop().run_in_executor(
+                None, self._analyzer.preview_spec, session, user_message, fact_report
+            )
         final_spec = enriched_spec or draft_spec
 
         # 缓存 spec 与 fact_report 到 session，confirm_spec 时直接复用，

@@ -187,6 +187,20 @@ class ImplementationFactReport(BaseModel):
     confidence: float = 0.0
     notes: List[str] = Field(default_factory=list)
 
+    @property
+    def has_spec_grounding_facts(self) -> bool:
+        """是否包含可落进 spec 的字段级实证事实（helper / 库字段实况 / 样本字段 / schema 契约）。
+
+        用于判断「基于侦察事实二次生成 spec」是否有增量价值：
+        无实证事实时二次生成的输入与草稿无实质差异，应跳过以节省一次 LLM 调用。
+        """
+        return bool(
+            self.available_helpers
+            or self.schema_facts
+            or self.sample_fields
+            or self.schema_bundle_context
+        )
+
 
 class EvalScore(BaseModel):
     """评估打分"""
