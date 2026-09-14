@@ -363,6 +363,10 @@ class DefaultBusinessVerifier(BusinessVerifier):
             status = None
             if isinstance(output, dict):
                 status = output.get("status", "success")
+            elif isinstance(output, list):
+                # list[dict] 输出（expected_output.type="list[dict]"）没有 status 字段契约，
+                # 沙箱执行成功即视为成功形态；此前误将 list 判为失败导致正确实现被误杀
+                status = "success"
             if not isinstance(status, str) or status.lower() not in ("success", "ok"):
                 self._record_issue(
                     result,
@@ -611,6 +615,10 @@ class DefaultBusinessVerifier(BusinessVerifier):
             # 回退：若 output 中没有名为 value_path 的嵌套 key，
             # 则将 output 本身视为目标（兼容扁平输出结构）。
             return output
+        if isinstance(output, list):
+            # list[dict] 输出：字段检查针对记录本身，返回列表由 _resolve_sample
+            # 取首条记录检查；此前 list 直接返回 None 导致全部字段检查误判失败
+            return output
         return None
 
     @staticmethod
@@ -630,10 +638,17 @@ class DefaultBusinessVerifier(BusinessVerifier):
             return
 
         def _collect_numeric_values(obj: Any, path: str = "") -> Dict[str, float]:
-            """递归收集所有数值字段及其路径"""
+            """递归收集所有数值字段及其路径。
+
+            跳过 raw_data / raw 原始回显字段：它们是外部接口的完整原始返回
+            （溯源用途），内部存在大量与业务无关的恒零噪声字段（如懂车帝榜单
+            的 score/descender_price），不应参与业务数值合理性判断。
+            """
             values: Dict[str, float] = {}
             if isinstance(obj, dict):
                 for k, v in obj.items():
+                    if str(k).lower() in ("raw_data", "raw"):
+                        continue
                     full_path = f"{path}.{k}" if path else k
                     if isinstance(v, (int, float)) and not isinstance(v, bool):
                         values[full_path] = float(v)
@@ -736,7 +751,13 @@ class DefaultBusinessVerifier(BusinessVerifier):
             log_block = "\n".join(log_lines[-60:])
 
         # 构建内联 user message
+        # ⚠️ 必须注入当前系统日期：LLM 对"当前时间"的感知来自训练数据（常滞后数月），
+        # 曾据此把已完结月份误判为"未来月份"，导致正确实现被反复误杀
+        from datetime import datetime as _dt
+        current_date = _dt.now().strftime("%Y-%m-%d")
         user_msg = (
+            f"当前系统日期: {current_date}（判断任何时间合理性问题时必须以此为准，"
+            f"严禁使用你训练记忆中的时间）\n"
             f"测试标的: {test_symbol} {test_name}\n"
             f"Skill 功能: {spec.description}\n\n"
             f"【沙箱执行结果】\n"
@@ -749,7 +770,9 @@ class DefaultBusinessVerifier(BusinessVerifier):
             f"1. 日志中的数据是否与输出矛盾？(helper 有数据但输出为空 → has_contradiction=true)\n"
             f"2. 输出是否业务合理？(蓝筹股无质押数据 → is_business_valid=true)\n"
             f"3. success=True 说明代码已成功执行，函数必然存在。\n"
-            f"4. 🚨 跨 helper 一致性检查：如果 Skill 调用了多个 helper，\n"
+            f"4. 时间合理性以最上方的【当前系统日期】为基准：早于或等于该日期的查询周期"
+            f"均为合法的历史/当前周期，不得判为'未来月份'。\n"
+            f"5. 🚨 跨 helper 一致性检查：如果 Skill 调用了多个 helper，\n"
             f"   检查它们的返回是否互相矛盾。例如：\n"
             f"   - 一个 helper 说'无质押'（status=no_pledge），另一个返回了质押股东列表 → has_contradiction=true, severity=critical\n"
             f"   - 一个 helper 返回空趋势序列，另一个返回非空数据 → has_contradiction=true\n"
