@@ -25,7 +25,7 @@
           </el-statistic>
           <el-statistic title="AI 生成" :value="stats.external" suffix="个">
             <template #prefix>
-              <el-icon class="icon" size="20"><Sparkles /></el-icon>
+              <el-icon class="icon" size="20"><MagicStick /></el-icon>
             </template>
           </el-statistic>
           <el-statistic title="绑定数" :value="stats.bindings" suffix="个">
