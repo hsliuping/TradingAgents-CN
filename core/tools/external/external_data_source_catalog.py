@@ -169,6 +169,28 @@ SOURCE_CATEGORY_HINTS: Dict[str, Sequence[str]] = {
     "finnhub": ("news", "market"),
 }
 
+
+def is_known_external_source(name: str) -> bool:
+    """判断给定来源名是否属于已知外部数据源目录（source_id / display_name / 关键词别名）。
+
+    用于需求分流：用户指定的来源（如 "dongchedi"）若不在目录中，
+    调用方应显式标注"目录外数据源"而不是 fallback 凑推荐。
+    """
+    text = (name or "").strip().lower()
+    if not text:
+        return False
+    if text in {item["source_id"] for item in EXTERNAL_DATA_SOURCE_CATALOG}:
+        return True
+    for item in EXTERNAL_DATA_SOURCE_CATALOG:
+        display = (item.get("display_name") or "").lower()
+        if display and (display in text or text in display):
+            return True
+    for keywords in SOURCE_KEYWORDS.values():
+        for keyword in keywords:
+            if keyword.lower() in text:
+                return True
+    return False
+
 SOURCE_KEYWORDS: Dict[str, Sequence[str]] = {
     "akshare": (
         "akshare", "东方财富", "eastmoney", "免费", "盘口", "实时", "历史行情", "etf", "板块",

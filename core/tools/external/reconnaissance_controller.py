@@ -168,6 +168,108 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             strategy.append("先确认价格、财务口径和增长率路径，再固化估值公式")
         return "；".join(strategy)
 
+    # ==================== 需求类型分流（改进点 1） ====================
+
+    # 外部 HTTP API 集成的显式信号词（出现在描述/约束中）
+    EXTERNAL_API_SIGNAL_KEYWORDS = (
+        "http://", "https://", "endpoint", "rest api", "open api",
+        "公开接口", "公开http接口", "网页接口", "外部接口", "第三方接口", "爬取", "抓取",
+    )
+
+    @staticmethod
+    def _classify_requirement_mode(spec: SkillSpec) -> str:
+        """识别需求类型：external_api（外部 API 集成） / local_data（本地数据复用，默认）。
+
+        判定信号（任一命中即 external_api）：
+        1. spec.data_source 明确指定了目录外数据源（如 dongchedi / 懂车帝）；
+        2. 描述或约束中出现外部接口集成信号词（URL、公开接口、爬取等）。
+
+        external_api 模式下：不推荐本地股票集合、不把向量召回的本地工具当作
+        "数据源已覆盖"，策略改为直接集成外部接口。
+        """
+        from .external_data_source_catalog import is_known_external_source
+
+        data_source = (getattr(spec, "data_source", "") or "").strip()
+        if data_source and not is_known_external_source(data_source):
+            return "external_api"
+
+        text = " ".join(
+            [
+                getattr(spec, "description", "") or "",
+                " ".join(getattr(spec, "constraints", []) or []),
+            ]
+        ).lower()
+        if any(k in text for k in DefaultReconnaissanceController.EXTERNAL_API_SIGNAL_KEYWORDS):
+            return "external_api"
+        return "local_data"
+
+    @staticmethod
+    def _build_external_api_strategy(spec: SkillSpec, unknown_data_source: str = "") -> str:
+        """external_api 模式的实现策略话术。"""
+        source_name = unknown_data_source or (getattr(spec, "data_source", "") or "用户指定来源")
+        return (
+            f"本需求为外部 HTTP API 集成（数据源: {source_name}，不属于系统本地股票数据体系）。"
+            "实现以直接调用该外部接口为主：requests/httpx + 合法请求头（UA/Referer）+ 超时与失败降级；"
+            "不使用本地股票集合、不复用股票类 helper 作为数据来源。"
+            "接口规格（URL、请求方式、参数、认证、返回字段）必须以用户确认的信息为准，"
+            "未确认前不得臆造接口细节与字段名。"
+        )
+
+    # ==================== 验收字段一致性校验（改进点 3） ====================
+
+    @staticmethod
+    def _normalize_field_token(name: str) -> str:
+        return "".join(ch for ch in str(name or "").lower() if ch.isalnum())
+
+    def _validate_expected_field_coverage(
+        self,
+        spec: SkillSpec,
+        report: ImplementationFactReport,
+        requirement_mode: str,
+    ) -> None:
+        """校验 expected_output.fields 与命中资产的能力一致性。
+
+        - local_data 模式：字段应能由 helper 返回字段 / 本地集合样本字段产出，
+          覆盖率过低时降置信度并提示澄清（防止规格臆造字段）。
+        - external_api 模式：字段来自外部接口实际响应，不做本地覆盖校验，
+          只提示"字段须以接口实际响应为准、不得声明接口不存在的层级"。
+        """
+        expected_output = getattr(spec, "expected_output", None)
+        expected = [str(f).strip() for f in (getattr(expected_output, "fields", None) or []) if str(f or "").strip()]
+        if not expected:
+            return
+
+        if requirement_mode == "external_api":
+            report.notes.append(
+                "⚠️ 验收字段须以外部接口实际响应为准：expected_output.fields 不得包含接口未提供的字段"
+                "（例如接口按车系 series 级返回时，不应声明 model_id/model_name/manufacturer_id 等"
+                "接口不存在的层级字段）；字段清单需在规格确认时与用户核对。"
+            )
+            return
+
+        # local_data 模式：收集命中资产可产出的字段池
+        pool: set = set()
+        for fields in (report.sample_fields or {}).values():
+            pool.update(self._normalize_field_token(f) for f in fields or [])
+        for helper in report.available_helpers:
+            for fname in self._analyzer._extract_return_field_names(helper.description or ""):
+                pool.add(self._normalize_field_token(fname))
+        for fact in report.schema_facts:
+            if fact.field:
+                pool.add(self._normalize_field_token(fact.field))
+        if not pool:
+            return  # 无任何资产字段信息时不强判
+
+        missing = [f for f in expected if self._normalize_field_token(f) not in pool]
+        coverage = 1 - len(missing) / len(expected)
+        if missing and coverage < 0.5:
+            report.notes.append(
+                f"⚠️ 验收字段覆盖不足（{len(expected) - len(missing)}/{len(expected)}）："
+                f"{', '.join(missing[:8])} 无法由当前命中的 helper/本地集合产出。"
+                "这些字段需由外部数据源或自行计算提供，规格确认前建议向用户澄清字段来源。"
+            )
+            report.confidence = min(report.confidence, 0.45)
+
     @staticmethod
     def _infer_helpers(spec: SkillSpec) -> list[ImplementationHelper]:
         normalized = f"{spec.display_name} {spec.description} {spec.category}".lower()
@@ -544,11 +646,48 @@ class DefaultReconnaissanceController(ReconnaissanceController):
         )
 
         recommendations = self._analyzer.build_recommendations(spec=spec)
+
+        # ── 需求类型分流（改进点 1）：外部 API 集成 vs 本地数据复用 ──
+        requirement_mode = self._classify_requirement_mode(spec)
+        unknown_data_source = ""
+        if requirement_mode == "external_api":
+            data_source_raw = (getattr(spec, "data_source", "") or "").strip()
+            if data_source_raw:
+                from .external_data_source_catalog import is_known_external_source
+                if not is_known_external_source(data_source_raw):
+                    unknown_data_source = data_source_raw
+            # 外部 API 集成模式：本地股票集合与目录外部源均与需求无关，清空避免凑数误导
+            recommendations["stock_collections"] = []
+            recommendations["external_sources"] = []
+
         report = ImplementationFactReport(
             task_summary=spec.description,
-            recommended_strategy=self._build_strategy(spec, recommendations),
+            recommended_strategy=(
+                self._build_external_api_strategy(spec, unknown_data_source)
+                if requirement_mode == "external_api"
+                else self._build_strategy(spec, recommendations)
+            ),
             confidence=0.45,
         )
+
+        # ── 目录外数据源显式标注（改进点 2）：不再静默 fallback，登记运行时缺口 ──
+        if unknown_data_source:
+            from .external_data_source_catalog import EXTERNAL_DATA_SOURCE_CATALOG
+            known_names = "、".join(item["display_name"] for item in EXTERNAL_DATA_SOURCE_CATALOG)
+            gap_reason = (
+                f"数据源 '{unknown_data_source}' 不在系统已知外部数据源目录（{known_names}）。"
+                "本 Skill 属目录外数据源集成：需要用户提供或确认接口规格"
+                "（URL、请求方式、参数、认证方式、返回字段），"
+                "生成代码时不得臆造接口细节与字段；规格不完整时应先向用户澄清。"
+            )
+            report.runtime_gaps.append(
+                ImplementationIssue(
+                    path=f"external_data_source:{unknown_data_source}",
+                    reason=gap_reason,
+                    severity="warning",
+                )
+            )
+            report.notes.append(f"⚠️ {gap_reason}")
         symbol = self._extract_probe_symbol(spec)
 
         rule_based_helpers = self._infer_helpers(spec)
@@ -718,16 +857,34 @@ class DefaultReconnaissanceController(ReconnaissanceController):
 
         # 向量搜索召回的分析工具推荐（语义匹配，比关键词规则更精准）
         if capability_hits:
-            vector_helpers = self._convert_capability_hits_to_helpers(capability_hits)
-            report.available_helpers.extend(vector_helpers)
-            if vector_helpers:
+            if requirement_mode == "external_api":
+                # 改进点 1：外部 API 集成模式下，向量召回的本地工具与指定外部数据源无关，
+                # 不纳入 available_helpers（避免"数据源已覆盖"的误导性结论）
+                logger.info(
+                    "🧭 [侦察层] 外部API集成模式：跳过 %d 个向量召回工具（与指定外部数据源无关）",
+                    len(capability_hits),
+                )
                 report.schema_facts.append(
                     ImplementationFact(
                         source="capability_index",
-                        fact=f"向量搜索召回 {len(vector_helpers)} 个语义相关工具（top score={capability_hits[0].score if capability_hits else 0:.2f}）",
-                        evidence="CapabilityIndexService.search_capabilities",
+                        fact=(
+                            f"向量搜索召回 {len(capability_hits)} 个本地工具，"
+                            "因需求为外部 API 集成模式未采纳（本地工具与指定外部数据源无关）"
+                        ),
+                        evidence="RequirementMode=external_api",
                     )
                 )
+            else:
+                vector_helpers = self._convert_capability_hits_to_helpers(capability_hits)
+                report.available_helpers.extend(vector_helpers)
+                if vector_helpers:
+                    report.schema_facts.append(
+                        ImplementationFact(
+                            source="capability_index",
+                            fact=f"向量搜索召回 {len(vector_helpers)} 个语义相关工具（top score={capability_hits[0].score if capability_hits else 0:.2f}）",
+                            evidence="CapabilityIndexService.search_capabilities",
+                        )
+                    )
         report.blocked_paths.extend(self._infer_blocked_paths(spec))
         report.validation_checks.extend(self._infer_validation_checks(spec))
         report.notes.extend(self._infer_notes(spec, recommendations))
@@ -736,6 +893,8 @@ class DefaultReconnaissanceController(ReconnaissanceController):
             self._enrich_schema_bundle_guidance(report, schema_context)
         if report.sample_fields:
             report.confidence = max(report.confidence, 0.65)
+        # ── 验收字段一致性校验（改进点 3）：覆盖率过低时降置信度并提示澄清 ──
+        self._validate_expected_field_coverage(spec, report, requirement_mode)
         return report
 
     def _probe_helpers_and_judge(

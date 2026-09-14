@@ -849,7 +849,20 @@ class RequirementAnalyzer:
         # helper 函数内部已封装数据访问，直接推荐集合/来源会让用户困惑该以哪个为准。
         # category_hint / data_source_hint / recommended_factor_packs 等元信息仍然返回。
         has_recon_helpers = bool(fact_report and getattr(fact_report, "available_helpers", None))
-        if has_recon_helpers:
+
+        # ── 目录外数据源检测（改进点 2）：用户明确指定的来源不在已知目录时，
+        # 显式返回 unknown_data_source 且不 fallback 凑推荐外部源，避免误导 ──
+        from .external_data_source_catalog import is_known_external_source
+        unknown_data_source = ""
+        if spec is not None:
+            spec_source = (getattr(spec, "data_source", "") or "").strip()
+            if spec_source and not is_known_external_source(spec_source):
+                unknown_data_source = spec_source
+
+        if unknown_data_source:
+            stock_collections: List[str] = []
+            external_sources: List[str] = []
+        elif has_recon_helpers:
             stock_collections: List[str] = []
             external_sources: List[str] = []
         else:
@@ -879,6 +892,7 @@ class RequirementAnalyzer:
             "data_source_hint": data_source,
             "stock_collections": stock_collections,
             "external_sources": external_sources,
+            "unknown_data_source": unknown_data_source,
             "recommended_factor_packs": infer_recommended_factor_packs(
                 description,
                 category=category,
