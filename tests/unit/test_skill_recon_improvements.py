@@ -118,11 +118,14 @@ class TestBuildRecommendationsUnknownSource:
         assert rec["unknown_data_source"] == "dongchedi"
         assert rec["stock_collections"] == []
         assert rec["external_sources"] == []
+        # 需求模式下发给前端：external_api 模式不展示本地/目录资产
+        assert rec["requirement_mode"] == "external_api"
 
     def test_known_source_keeps_recommendations(self):
         rec = RequirementAnalyzer().build_recommendations(spec=_news_spec())
         assert rec["unknown_data_source"] == ""
         assert "akshare" in rec["external_sources"]
+        assert rec["requirement_mode"] == "local_data"
 
 
 class TestExternalApiModeRecon:

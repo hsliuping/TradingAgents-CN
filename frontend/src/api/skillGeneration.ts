@@ -210,6 +210,10 @@ export interface SkillGenerationRecommendations {
   data_source_hint: string
   stock_collections: string[]
   external_sources: string[]
+  /** 目录外数据源名（如 dongchedi）；非空表示需求指定了系统目录之外的来源 */
+  unknown_data_source?: string
+  /** 需求类型：external_api（外部 API 集成，不评估本地/目录资产）/ local_data（默认） */
+  requirement_mode?: 'external_api' | 'local_data'
 }
 
 export interface ReconToolTrace {

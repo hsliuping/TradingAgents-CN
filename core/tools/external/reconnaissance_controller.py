@@ -170,38 +170,16 @@ class DefaultReconnaissanceController(ReconnaissanceController):
 
     # ==================== 需求类型分流（改进点 1） ====================
 
-    # 外部 HTTP API 集成的显式信号词（出现在描述/约束中）
-    EXTERNAL_API_SIGNAL_KEYWORDS = (
-        "http://", "https://", "endpoint", "rest api", "open api",
-        "公开接口", "公开http接口", "网页接口", "外部接口", "第三方接口", "爬取", "抓取",
-    )
-
     @staticmethod
     def _classify_requirement_mode(spec: SkillSpec) -> str:
         """识别需求类型：external_api（外部 API 集成） / local_data（本地数据复用，默认）。
 
-        判定信号（任一命中即 external_api）：
-        1. spec.data_source 明确指定了目录外数据源（如 dongchedi / 懂车帝）；
-        2. 描述或约束中出现外部接口集成信号词（URL、公开接口、爬取等）。
-
-        external_api 模式下：不推荐本地股票集合、不把向量召回的本地工具当作
-        "数据源已覆盖"，策略改为直接集成外部接口。
+        判定逻辑统一实现在 requirement_analyzer.classify_requirement_mode，
+        此处保留方法壳供侦察层内部与既有测试调用。
         """
-        from .external_data_source_catalog import is_known_external_source
+        from .requirement_analyzer import classify_requirement_mode
 
-        data_source = (getattr(spec, "data_source", "") or "").strip()
-        if data_source and not is_known_external_source(data_source):
-            return "external_api"
-
-        text = " ".join(
-            [
-                getattr(spec, "description", "") or "",
-                " ".join(getattr(spec, "constraints", []) or []),
-            ]
-        ).lower()
-        if any(k in text for k in DefaultReconnaissanceController.EXTERNAL_API_SIGNAL_KEYWORDS):
-            return "external_api"
-        return "local_data"
+        return classify_requirement_mode(spec)
 
     @staticmethod
     def _build_external_api_strategy(spec: SkillSpec, unknown_data_source: str = "") -> str:

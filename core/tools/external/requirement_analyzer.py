@@ -114,6 +114,39 @@ SKILL_BOUNDARY_EXAMPLES = (
     "- 在多个候选方法之间做开放式策略选择并解释取舍\n"
 )
 
+# 外部 HTTP API 集成的显式信号词（出现在描述/约束中）
+EXTERNAL_API_SIGNAL_KEYWORDS = (
+    "http://", "https://", "endpoint", "rest api", "open api",
+    "公开接口", "公开http接口", "网页接口", "外部接口", "第三方接口", "爬取", "抓取",
+)
+
+
+def classify_requirement_mode(spec: Any) -> str:
+    """需求类型分流：external_api（外部 API 集成） / local_data（本地数据复用，默认）。
+
+    判定信号（任一命中即 external_api）：
+    1. spec.data_source 明确指定了目录外数据源（如 dongchedi / 懂车帝）；
+    2. 描述或约束中出现外部接口集成信号词（URL、公开接口、爬取等）。
+
+    external_api 模式下：不推荐本地股票集合、不把向量召回的本地工具当作
+    "数据源已覆盖"，策略改为直接集成外部接口，前端不展示本地/目录资产。
+    """
+    from .external_data_source_catalog import is_known_external_source
+
+    data_source = (getattr(spec, "data_source", "") or "").strip()
+    if data_source and not is_known_external_source(data_source):
+        return "external_api"
+
+    text = " ".join(
+        [
+            getattr(spec, "description", "") or "",
+            " ".join(getattr(spec, "constraints", []) or []),
+        ]
+    ).lower()
+    if any(k in text for k in EXTERNAL_API_SIGNAL_KEYWORDS):
+        return "external_api"
+    return "local_data"
+
 
 class RequirementAnalyzer:
     """
@@ -893,6 +926,7 @@ class RequirementAnalyzer:
             "stock_collections": stock_collections,
             "external_sources": external_sources,
             "unknown_data_source": unknown_data_source,
+            "requirement_mode": classify_requirement_mode(spec) if spec is not None else "local_data",
             "recommended_factor_packs": infer_recommended_factor_packs(
                 description,
                 category=category,

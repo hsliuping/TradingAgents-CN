@@ -252,7 +252,7 @@
                 </div>
                 <div v-else class="recommendation-empty">当前优先本地即可，外部来源不是必需</div>
               </div>
-              <div v-if="matchedStockCollections.length || matchedExternalSources.length" class="recommendation-block">
+              <div v-if="!isExternalApiMode && (matchedStockCollections.length || matchedExternalSources.length)" class="recommendation-block">
                 <div class="recommendation-label">快速定位</div>
                 <div class="recommendation-actions">
                   <el-button v-if="matchedStockCollections.length" size="small" type="success" plain @click="focusFirstMatchedStockCard">定位本地命中</el-button>
@@ -261,7 +261,15 @@
               </div>
             </div>
           </div>
-          <div class="spec-catalog-card">
+          <div v-if="isExternalApiMode" class="spec-catalog-card">
+            <div class="spec-catalog-header">
+              <div>
+                <h4>外部数据源集成模式</h4>
+                <p>本需求的数据源「{{ externalApiSourceName }}」不在系统目录内，已跳过本地股票资产与目录内外部来源的评估。请确保需求中包含接口规格：URL、请求方式、参数、认证方式、返回字段；缺失时生成器会要求澄清，不会臆造接口细节与字段名。</p>
+              </div>
+            </div>
+          </div>
+          <div v-if="!isExternalApiMode" class="spec-catalog-card">
             <div class="spec-catalog-header">
               <div>
                 <h4>本地股票数据目录</h4>
@@ -319,7 +327,7 @@
               </el-collapse-item>
             </el-collapse>
           </div>
-          <div class="spec-catalog-card">
+          <div v-if="!isExternalApiMode" class="spec-catalog-card">
             <div class="spec-catalog-header">
               <div>
                 <h4>外部接口与数据源目录</h4>
@@ -404,6 +412,7 @@
                 <div v-if="preflightLocalCollections.length" class="tag-wrap">
                   <el-tag v-for="entry in preflightLocalCollections" :key="`preflight-local-${entry}`" class="tag-item" type="success" effect="plain">{{ entry }}</el-tag>
                 </div>
+                <div v-else-if="isExternalApiMode" class="recommendation-empty">外部数据源集成模式：不评估本地股票资产。</div>
                 <div v-else-if="preflightSelfContainedHelpers.length" class="recommendation-empty">数据源已由 helper 函数覆盖，无需额外命中本地集合。</div>
                 <div v-else class="recommendation-empty">当前没有明确命中的本地集合，生成时会更多依赖需求描述和目录上下文。</div>
               </div>
@@ -412,6 +421,7 @@
                 <div v-if="preflightExternalSources.length" class="tag-wrap">
                   <el-tag v-for="entry in preflightExternalSources" :key="`preflight-source-${entry}`" class="tag-item" type="warning" effect="plain">{{ entry }}</el-tag>
                 </div>
+                <div v-else-if="isExternalApiMode" class="recommendation-empty">需求指定的外部数据源（{{ externalApiSourceName }}）不在系统目录，以用户提供的接口规格为准。</div>
                 <div v-else-if="preflightSelfContainedHelpers.length" class="recommendation-empty">数据源已由 helper 函数覆盖，外部来源不是必须项。</div>
                 <div v-else class="recommendation-empty">当前优先本地数据即可，外部来源不是必须项。</div>
               </div>
@@ -774,6 +784,13 @@ const normalizeSpecText = (spec: Record<string, any> | null) => {
 const specPreviewText = computed(() => normalizeSpecText(specPreview.value))
 const recommendedStockCollectionSet = computed(() => new Set((backendRecommendations.value?.stock_collections || []).map(item => item.toLowerCase())))
 const recommendedExternalSourceSet = computed(() => new Set((backendRecommendations.value?.external_sources || []).map(item => item.toLowerCase())))
+// 外部 API 集成模式：目录外数据源需求，不展示/不评估本地股票资产与目录内外部源
+const isExternalApiMode = computed(() => backendRecommendations.value?.requirement_mode === 'external_api')
+const externalApiSourceName = computed(
+  () => backendRecommendations.value?.unknown_data_source
+    || String(specPreview.value?.data_source || '').trim()
+    || '目录外数据源'
+)
 
 const isStockCollectionMatched = (item: StockDataCatalogCollection) => {
   if (recommendedStockCollectionSet.value.has(item.collection.toLowerCase())) return true
