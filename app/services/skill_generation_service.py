@@ -88,6 +88,7 @@ class SkillGenerationService:
             model=model,
             max_iterations=SKILL_PIPELINE_MAX_ITERATIONS,
             reconnaissance_controller=self._reconnaissance,
+            quick_llm_client=quick_llm_client,
         )
 
     def _build_session_recommendations(
@@ -607,7 +608,13 @@ test_input: {spec.test_input}
         initial_feedback: str = "",
         initial_code: str = "",
         fact_report: Optional[ImplementationFactReport] = None,
+        codegen_timeout: Optional[int] = None,
     ) -> Dict[str, Any]:
+        # 代码生成单次调用超时（秒）：None 用管线默认值；仅接受 60~1800 的整数
+        if isinstance(codegen_timeout, bool) or not isinstance(codegen_timeout, int):
+            codegen_timeout = None
+        elif not (60 <= codegen_timeout <= 1800):
+            codegen_timeout = None
         session.status = SessionStatus.GENERATING
         if session.pipeline_result is not None:
             session.pipeline_history.append(session.pipeline_result)
@@ -690,6 +697,7 @@ test_input: {spec.test_input}
                         initial_code=initial_code,
                         progress_callback=_progress_cb,
                         fact_report=_fr,
+                        codegen_timeout=codegen_timeout,
                     ),
                 )
                 session.status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
@@ -1045,13 +1053,18 @@ test_input: {spec.test_input}
         }
 
     async def confirm_spec(
-        self, session_id: str, user_message: str = "确认"
+        self, session_id: str, user_message: str = "确认", codegen_timeout: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         确认规格并触发代码生成
 
         流程：复用 preview 阶段缓存的 fact_report，若无则现场侦察。
         将 fact_report 同时注入 spec 生成和管线执行，实现"侦察→定规→生成"闭环。
+
+        Args:
+            session_id: 会话 ID
+            user_message: 确认消息
+            codegen_timeout: 代码生成单次 LLM 调用超时（秒），None 用默认值
 
         Returns:
             包含 status, spec, generation_result 等信息的 dict
@@ -1106,7 +1119,8 @@ test_input: {spec.test_input}
 
         # fact_report 同时传递给管线，跳过内部重复侦察
         return await self._launch_pipeline_task(
-            session=session, spec=spec, fact_report=fact_report
+            session=session, spec=spec, fact_report=fact_report,
+            codegen_timeout=codegen_timeout,
         )
 
     async def repair_session(
@@ -1114,6 +1128,7 @@ test_input: {spec.test_input}
         session_id: str,
         feedback: str,
         repair_plan: str = "",
+        codegen_timeout: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         基于当前失败会话重新修正并生成。
@@ -1158,6 +1173,7 @@ test_input: {spec.test_input}
             spec=session.spec,
             initial_feedback=initial_feedback,
             initial_code=initial_code,
+            codegen_timeout=codegen_timeout,
         )
 
     async def preview_repair_session(

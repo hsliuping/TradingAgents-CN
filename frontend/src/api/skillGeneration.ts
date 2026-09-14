@@ -383,8 +383,8 @@ export const skillGenerationApi = {
   },
 
   /** 确认规格并生成（异步，返回 generating 后需轮询 getSession 获取最终结果） */
-  confirmSpec: async (sessionId: string, message: string = '确认'): Promise<ConfirmResult> => {
-    const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/confirm`, { message }, SLOW_LLM_OP_CONFIG)
+  confirmSpec: async (sessionId: string, message: string = '确认', codegenTimeout?: number): Promise<ConfirmResult> => {
+    const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/confirm`, { message, codegen_timeout: codegenTimeout ?? null }, SLOW_LLM_OP_CONFIG)
     return (res as any).data
   },
 
@@ -395,8 +395,8 @@ export const skillGenerationApi = {
   },
 
   /** 当修正计划确认后，再真正重新生成 */
-  repairSession: async (sessionId: string, feedback: string, repairPlan: string = ''): Promise<ConfirmResult> => {
-    const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/repair`, { feedback, repair_plan: repairPlan }, SLOW_LLM_OP_CONFIG)
+  repairSession: async (sessionId: string, feedback: string, repairPlan: string = '', codegenTimeout?: number): Promise<ConfirmResult> => {
+    const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/repair`, { feedback, repair_plan: repairPlan, codegen_timeout: codegenTimeout ?? null }, SLOW_LLM_OP_CONFIG)
     return (res as any).data
   },
 

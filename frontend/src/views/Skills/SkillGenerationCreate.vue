@@ -487,6 +487,18 @@
           <div v-if="pipelineFailureSummary.length" class="repair-summary-list">
             <div v-for="entry in pipelineFailureSummary" :key="entry" class="catalog-note-item">{{ entry }}</div>
           </div>
+          <div class="repair-timeout-row">
+            <span class="repair-timeout-label">代码生成超时（秒）</span>
+            <el-input-number
+              v-model="codegenTimeout"
+              :min="60"
+              :max="1800"
+              :step="60"
+              controls-position="right"
+              style="width: 160px"
+            />
+            <span class="repair-timeout-hint">单次代码生成调用允许的最长等待；若因超时失败，调大后重新生成</span>
+          </div>
           <el-input
             v-model="repairFeedback"
             type="textarea"
@@ -851,6 +863,8 @@ const repairPlanning = ref(false)
 const repairFeedback = ref('')
 const repairPlan = ref('')
 const repairPlanFeedback = ref('')
+// 代码生成单次 LLM 调用超时（秒）：默认 480；超时失败后可调大重新提交
+const codegenTimeout = ref(480)
 const generatedTestLoading = ref(false)
 const generatedTestArgs = ref<Record<string, any>>({})
 const generatedTestResult = ref<TestResult | null>(null)
@@ -1483,7 +1497,7 @@ const handleConfirmAndGenerate = async () => {
   pipelineDetails.value = []
 
   try {
-    const res = await skillGenerationApi.confirmSpec(sessionId.value, '确认')
+    const res = await skillGenerationApi.confirmSpec(sessionId.value, '确认', codegenTimeout.value)
     if (res.status === 'generating') {
       const pollInterval = 1500
       const poll = async () => {
@@ -1554,6 +1568,7 @@ const handleRepairAndRegenerate = async () => {
       sessionId.value,
       repairFeedback.value.trim(),
       repairPlan.value.trim(),
+      codegenTimeout.value,
     )
     wizardStep.value = 2
     genProgress.value = 0
@@ -2402,6 +2417,25 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 12px;
   margin-top: 16px;
+}
+
+.repair-timeout-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.repair-timeout-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.repair-timeout-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .repair-plan-card {

@@ -54,6 +54,7 @@ class RespondRequest(BaseModel):
 class ConfirmSpecRequest(BaseModel):
     """确认规格"""
     message: str = Field(default="确认", description="确认消息或补充说明")
+    codegen_timeout: Optional[int] = Field(default=None, ge=60, le=1800, description="代码生成单次 LLM 调用超时（秒），不传用默认值")
 
 
 class UpdateStatusRequest(BaseModel):
@@ -75,6 +76,7 @@ class RepairSessionRequest(BaseModel):
     """基于失败结果修正当前创建会话"""
     feedback: str = Field(..., min_length=2, description="告诉 AI 本轮生成哪里有问题，以及你希望怎么改")
     repair_plan: Optional[str] = Field(default="", description="用户确认通过的修正计划文本")
+    codegen_timeout: Optional[int] = Field(default=None, ge=60, le=1800, description="代码生成单次 LLM 调用超时（秒），不传用默认值")
 
 
 # =============================================================================
@@ -295,7 +297,7 @@ async def confirm_spec(
     """确认 Skill 规格并触发代码生成管线"""
     try:
         svc = await _get_service_with_llm(db)
-        result = await svc.confirm_spec(session_id, req.message)
+        result = await svc.confirm_spec(session_id, req.message, codegen_timeout=req.codegen_timeout)
         return ok(result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -313,7 +315,10 @@ async def repair_session(
     """当生成/验证失败后，基于失败原因和用户反馈重新修正并生成"""
     try:
         svc = await _get_service_with_llm(db)
-        result = await svc.repair_session(session_id, req.feedback, req.repair_plan or "")
+        result = await svc.repair_session(
+            session_id, req.feedback, req.repair_plan or "",
+            codegen_timeout=req.codegen_timeout,
+        )
         return ok(result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

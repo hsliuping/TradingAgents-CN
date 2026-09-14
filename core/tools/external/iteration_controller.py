@@ -31,7 +31,7 @@ from core.skill_runtime.project_access import PROJECT_DATA_ACCESS_DOC
 from core.skill_runtime.data_access import LOCAL_DATA_API_DOC
 
 from .business_verifier import BusinessVerifierRegistry
-from .code_generator import CodeGenerator
+from .code_generator import CODEGEN_LLM_TIMEOUT_SECONDS, CodeGenerator
 from .output_evaluator import OutputEvaluator
 from .reconnaissance_controller import DefaultReconnaissanceController, ReconnaissanceController
 from .sandbox_runner import SandboxRunner
@@ -118,6 +118,7 @@ class IterationController:
         max_iterations: int = MAX_ITERATIONS,
         skip_judge: bool = False,
         reconnaissance_controller: Optional[ReconnaissanceController] = None,
+        quick_llm_client: Optional[UnifiedLLMClient] = None,
     ):
         self._generator = CodeGenerator(
             llm_client=llm_client, provider=provider, model=model
@@ -129,6 +130,7 @@ class IterationController:
             provider=provider,
             model=model,
             skip_judge=skip_judge,
+            quick_llm_client=quick_llm_client,
         )
         self._business_verifiers = BusinessVerifierRegistry(
             llm_client=llm_client,
@@ -156,6 +158,7 @@ class IterationController:
         initial_code: str = "",
         progress_callback: Optional[Callable[[str, str, int, float], None]] = None,
         fact_report: Optional[ImplementationFactReport] = None,
+        codegen_timeout: Optional[int] = None,
     ) -> PipelineResult:
         """
         执行完整的生成管线
@@ -166,6 +169,7 @@ class IterationController:
             initial_code: 初始代码（优化场景使用）
             progress_callback: 进度回调 (stage, message, iteration, progress)
             fact_report: 预构建的侦察报告（侦察前置模式），为 None 时内部自动执行侦察
+            codegen_timeout: 代码生成单次 LLM 调用超时（秒），None 用默认值
 
         Returns:
             PipelineResult: 管线最终结果
@@ -231,6 +235,7 @@ class IterationController:
                     feedback=feedback,
                     previous_code=previous_code,
                     fact_report=fact_report,
+                    timeout_seconds=codegen_timeout,
                 )
                 iteration.generated_code = generated
                 # 详细日志：代码摘要
@@ -1151,6 +1156,7 @@ class IterationController:
         initial_code: str = "",
         progress_callback: Optional[Callable[[str, str, int, float], None]] = None,
         fact_report: Optional[ImplementationFactReport] = None,
+        codegen_timeout: Optional[int] = None,
     ) -> PipelineResult:
         """SkillGeneration 专用 Agent Loop。
 
@@ -1207,6 +1213,7 @@ class IterationController:
             "previous_code": previous_code,
             "verified_facts": verified_facts,
             "progress_callback": _report,
+            "codegen_timeout": codegen_timeout,
         }
         tools = self._build_agentic_tools(
             spec=spec,
@@ -1601,6 +1608,7 @@ class IterationController:
                 fact_report=fact_report,
                 progress_callback=state.get("progress_callback"),
                 verified_facts=state.get("verified_facts") or [],
+                codegen_timeout=state.get("codegen_timeout"),
             )
             self._last_agentic_pipeline_result = result
             state["feedback"] = result.failure_summary or state.get("feedback", "")
@@ -1751,6 +1759,7 @@ class IterationController:
         fact_report: Optional[ImplementationFactReport],
         progress_callback: Optional[Callable[[str, str, int, float], None]],
         verified_facts: List[str],
+        codegen_timeout: Optional[int] = None,
     ) -> PipelineToolResult:
         iteration = IterationRound(round_number=round_num)
 
@@ -1794,6 +1803,7 @@ class IterationController:
                 feedback=feedback,
                 previous_code=previous_code,
                 fact_report=fact_report,
+                timeout_seconds=codegen_timeout,
             )
             iteration.generated_code = generated
             self._persist_stage_artifact(
@@ -2007,6 +2017,19 @@ class IterationController:
             )
         except Exception as exc:
             logger.error("pipeline_tool 单轮执行异常: %s", exc, exc_info=True)
+            # 异常（尤其是代码生成超时）必须显式上报到进度流，
+            # 否则前端停留在“正在生成代码...”看不到失败原因
+            exc_text = str(exc)
+            is_timeout = "timed out" in exc_text.lower() or "timeout" in exc_text.lower()
+            if is_timeout:
+                _report(
+                    "error",
+                    f"第 {round_num} 轮代码生成超时（{codegen_timeout or CODEGEN_LLM_TIMEOUT_SECONDS}s）: {exc_text}。"
+                    "可在生成失败后调大超时时长重新提交。",
+                    0.95,
+                )
+            else:
+                _report("error", f"第 {round_num} 轮执行异常: {exc_text}", 0.95)
             iteration.decision = "FAIL"
             iteration.feedback = f"pipeline_tool 执行异常: {exc}"
             return _finish("blocked", iteration.feedback, should_retry=False)

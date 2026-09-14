@@ -27,7 +27,9 @@ from .stock_data_catalog import build_stock_data_collection_doc_for_skill
 
 logger = logging.getLogger(__name__)
 
-CODEGEN_LLM_TIMEOUT_SECONDS = 240
+# 深度思考模型生成完整 Skill 代码常需 3-6 分钟，240s 曾多次超时；
+# 可通过 run_agentic(codegen_timeout=...) 按次覆盖（前端失败后可调大重试）
+CODEGEN_LLM_TIMEOUT_SECONDS = 480
 
 # ==================== 内置工具模板映射 ====================
 
@@ -89,18 +91,19 @@ class CodeGenerator:
         self._provider = provider
         self._model = model
 
-    def _get_client(self) -> UnifiedLLMClient:
-        """懒加载 LLM 客户端"""
+    def _get_client(self, timeout_seconds: Optional[int] = None) -> UnifiedLLMClient:
+        """懒加载 LLM 客户端；timeout_seconds 可按次覆盖默认超时"""
+        timeout = timeout_seconds or CODEGEN_LLM_TIMEOUT_SECONDS
         if self._client is None:
-            kwargs = {"timeout": CODEGEN_LLM_TIMEOUT_SECONDS}
+            kwargs = {"timeout": timeout}
             if self._model:
                 kwargs["model"] = self._model
             self._client = UnifiedLLMClient.from_provider(self._provider, **kwargs)
         else:
             adapter = getattr(self._client, "_adapter", None)
             config = getattr(adapter, "config", None)
-            if config and getattr(config, "timeout", 0) < CODEGEN_LLM_TIMEOUT_SECONDS:
-                config.timeout = CODEGEN_LLM_TIMEOUT_SECONDS
+            if config and getattr(config, "timeout", 0) != timeout:
+                config.timeout = timeout
                 try:
                     adapter.initialize()
                 except Exception as e:
@@ -113,6 +116,7 @@ class CodeGenerator:
         feedback: str = "",
         previous_code: str = "",
         fact_report: Optional[ImplementationFactReport] = None,
+        timeout_seconds: Optional[int] = None,
     ) -> GeneratedCode:
         """
         生成 Skill 代码
@@ -121,12 +125,13 @@ class CodeGenerator:
             spec: Skill 规格书
             feedback: 上一轮的反馈（迭代时使用）
             previous_code: 上一轮生成的代码（迭代时使用）
+            timeout_seconds: 单次 LLM 调用超时（秒），None 用默认值
 
         Returns:
             GeneratedCode 包含代码、元数据和测试用例
         """
         start = time.time()
-        client = self._get_client()
+        client = self._get_client(timeout_seconds)
 
         # 构建 Prompt
         system_prompt = self._build_system_prompt(spec)

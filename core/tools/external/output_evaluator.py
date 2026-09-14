@@ -39,6 +39,7 @@ class OutputEvaluator:
         provider: str = "deepseek",
         model: Optional[str] = None,
         skip_judge: bool = False,
+        quick_llm_client: Optional[UnifiedLLMClient] = None,
     ):
         """
         Args:
@@ -46,11 +47,13 @@ class OutputEvaluator:
             provider: LLM 提供商
             model: 模型名称
             skip_judge: 跳过 Judge LLM（仅做基础检查）
+            quick_llm_client: 快速模型客户端（Judge 评分优先使用，失败回退主模型）
         """
         self._client = llm_client
         self._provider = provider
         self._model = model
         self._skip_judge = skip_judge
+        self._quick_client = quick_llm_client
 
     def _get_client(self) -> UnifiedLLMClient:
         """懒加载 LLM 客户端"""
@@ -248,16 +251,32 @@ class OutputEvaluator:
             logger.warning(f"Judge LLM 评分失败，保留基础检查分数: {e}")
 
     def _call_judge_llm_simple(self, user_msg: str, tool_id: str) -> Optional[str]:
-        """简单 LLM 调用（无工具，单次请求 + 超时保护）"""
+        """简单 LLM 调用（无工具，单次请求 + 超时保护）。
+
+        Judge 评分是判断类任务，优先走快速模型（秒级），
+        快速模型失败或空回复时回退主模型。
+        """
         result_queue: "queue.Queue[tuple[str, Any]]" = queue.Queue(maxsize=1)
 
         def _worker() -> None:
             try:
-                client = self._get_client()
                 messages = [
                     Message(role="system", content="你是金融数据评估专家，评估 Skill 工具的输出质量。严格按格式输出 <verdict> JSON。"),
                     Message(role="user", content=user_msg),
                 ]
+                if self._quick_client is not None:
+                    try:
+                        response = self._quick_client.chat(
+                            messages, temperature=0.0, max_tokens=2048
+                        )
+                        content = (response.content or "").strip()
+                        if content:
+                            result_queue.put(("ok", content))
+                            return
+                        logger.warning("Judge 快速模型返回空内容，回退主模型")
+                    except Exception as quick_exc:
+                        logger.warning(f"Judge 快速模型调用失败，回退主模型: {quick_exc}")
+                client = self._get_client()
                 response = client.chat(messages, temperature=0.0, max_tokens=2048)
                 result_queue.put(("ok", response.content or ""))
             except Exception as exc:
