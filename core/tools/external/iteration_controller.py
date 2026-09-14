@@ -2155,7 +2155,9 @@ class IterationController:
 
             # 用线程超时包装 LLM 调用
             import threading
-            REFLECTION_LLM_TIMEOUT = 120
+            # agentic 反思含最多 5 轮工具调用往返，配合深度推理模型需要充足时间；
+            # 此前 120s 屡屡超时，且超时被误判为"不可修复"直接终止迭代
+            REFLECTION_LLM_TIMEOUT = 300
             response_holder: Dict[str, Any] = {"raw": None, "error": None}
 
             def _call_reflection_llm() -> None:
@@ -2194,10 +2196,13 @@ class IterationController:
                 logger.warning(
                     f"⚠️ [Reflection] LLM 调用超时（{REFLECTION_LLM_TIMEOUT}s），跳过反思 | tool_id={spec.tool_id}"
                 )
+                # 反思超时属于基础设施问题，不是"不可修复"的业务判定：
+                # 回退为继续重试（无定向修复计划），不得因反思超时直接终止迭代
                 return ReflectionResult(
-                    root_cause=f"反思 LLM 调用超时（{REFLECTION_LLM_TIMEOUT}s）",
+                    root_cause=f"反思 LLM 调用超时（{REFLECTION_LLM_TIMEOUT}s），已跳过反思分析，回退为普通重试",
                     fix_plan=[],
-                    should_retry=False,
+                    should_retry=True,
+                    confidence=0.3,
                 )
 
             if response_holder["error"]:
