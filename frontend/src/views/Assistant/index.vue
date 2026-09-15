@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="assistant-page">
     <div class="page-header">
       <div class="header-left">
@@ -1057,6 +1057,8 @@ const handleSendStream = (text: string) => {
           streamingToolHint.value = `${event.tool} 完成${summary}`
         } else if (eName === 'tool_round_started') {
           streamingToolHint.value = `第 ${event.round} 轮工具调用（${event.tool_count} 个工具）`
+        } else if (eName === 'llm_thinking') {
+          streamingToolHint.value = event.message || '正在思考…'
         }
       },
       onDone(data) {

@@ -464,6 +464,54 @@ class UnifiedLLMClient:
             )
         
         return response
+
+    def chat_stream(
+        self,
+        messages: List[Message],
+        on_delta: Optional[Callable[[str, str], None]] = None,
+        **kwargs,
+    ) -> LLMResponse:
+        """同步流式聊天：逐段回调思考/正文增量，最终返回完整 LLMResponse。
+
+        Args:
+            messages: 消息列表（仅支持无工具调用的单轮场景）
+            on_delta: 回调 on_delta(kind, text)，kind ∈ {"reset", "reasoning", "content"}；
+                      重试开始前会先发一次 ("reset", "") 让调用方清空已收内容
+            **kwargs: 其他参数（max_tokens、temperature 等）
+
+        适配器不支持流式时自动回退到普通 chat，并把完整回复作为一次 content 增量回调。
+        """
+        stream_adapter = getattr(self._adapter, "chat_stream_deltas", None)
+
+        if stream_adapter is None:
+            response = self.chat(messages, **kwargs)
+            if on_delta and response.content:
+                on_delta("content", response.content)
+            return response
+
+        def _consume(**call_kwargs: Any) -> str:
+            if on_delta:
+                on_delta("reset", "")
+            parts: List[str] = []
+            for delta in stream_adapter(messages, **call_kwargs):
+                if delta.get("type") == "content":
+                    parts.append(delta.get("text") or "")
+                if on_delta:
+                    on_delta(delta.get("type", ""), delta.get("text") or "")
+            return "".join(parts)
+
+        content = retry_sync(
+            _consume,
+            max_retries=self._max_retries,
+            label="UnifiedLLMStream",
+            **kwargs,
+        )
+        return LLMResponse(
+            content=content,
+            model=getattr(self._adapter.config, "model", None),
+            provider=getattr(self._adapter.config, "provider", None),
+            finish_reason="stop",
+        )
     
     async def achat(
         self,
@@ -789,6 +837,13 @@ class UnifiedLLMClient:
                     messages=current_messages,
                 )
             retry_started_at = time.perf_counter()
+            # 工具结果回传后的下一轮 LLM 思考同样可能持续较长时间（推理模型），
+            # 发一条进度事件避免前端在「工具完成」后陷入长时间静默
+            await self._emit_progress(progress_callback, {
+                "event": "llm_thinking",
+                "round": rounds + 2,
+                "message": f"正在结合第 {rounds + 1} 轮工具结果继续分析…",
+            })
             current_response = await self._aretry_chat(current_messages, tools, **kwargs)
             if log_payloads:
                 self._log_llm_payload(

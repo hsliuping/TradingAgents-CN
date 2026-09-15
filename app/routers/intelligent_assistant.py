@@ -3,10 +3,11 @@
 """
 
 import asyncio
+import contextlib
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.routers.auth_db import get_current_user
@@ -50,6 +51,68 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 logger = logging.getLogger(__name__)
+
+
+# SSE 心跳间隔：必须小于前端 fetchSSE 的 90s 空闲超时
+_SSE_HEARTBEAT_INTERVAL = 15
+
+
+async def sse_stream_with_heartbeat(agen, heartbeat_interval: int = _SSE_HEARTBEAT_INTERVAL):
+    """把异步生成器包装成带心跳的 SSE 事件流。
+
+    ⚠️ 关键约束：心跳超时**绝不能取消底层生成器**。
+
+    旧实现 `await asyncio.wait_for(gen.__anext__(), timeout=15)` 在超时取消时
+    会把 CancelledError 注入生成器的挂起点，导致第一次超过 15s 的静默就把
+    整条流杀死（最小复现实证：超时后第二次 ``__anext__()`` 直接抛
+    StopAsyncIteration）。智能助手里长工具执行（估值 Excel：数据装配 +
+    最多 3 次 LLM 规格生成，合法耗时 30-180s）正好命中，表现为流被静默掐断
+    或前端等待到 90s 空闲超时后报"服务器长时间未响应"。
+
+    正确模式：独立 pump 任务把生成器产出推进队列，``wait_for`` 只作用于
+    ``queue.get()``——超时只丢弃一次队列等待，pump 任务与底层生成器
+    完全不受影响，随后继续正常产出。
+
+    生成器内部抛出的异常在这里转成 error 事件（与旧实现行为一致）。
+    """
+    import json as _json
+
+    queue: "asyncio.Queue[object]" = asyncio.Queue()
+    sentinel = object()
+
+    async def _pump() -> None:
+        try:
+            async for chunk in agen:
+                await queue.put(chunk)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 转成 error 事件下发前端
+            logger.exception("[智能助手 API·流式] 底层生成器异常")
+            await queue.put(
+                "event: error\n"
+                f"data: {_json.dumps({'message': str(exc)}, ensure_ascii=False)}\n\n"
+            )
+        finally:
+            await queue.put(sentinel)
+
+    pump_task = asyncio.create_task(_pump())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval)
+            except asyncio.TimeoutError:
+                # 队列为空（长工具执行等静默期）：只发心跳，pump 继续跑
+                yield ": keepalive\n\n"
+                continue
+            if item is sentinel:
+                break
+            yield item
+    finally:
+        # 客户端断开或结束：停泵并关闭底层生成器（触发其内部 finally 清理）
+        pump_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pump_task
+        await agen.aclose()
 
 
 @router.post("/user-manual-index/rebuild")
@@ -363,10 +426,7 @@ async def assistant_chat_stream(
     user_id = str(current_user["id"])
     quick_model, deep_model, quick_model_config_id, deep_model_config_id = _resolve_requested_model(request)
 
-    _HEARTBEAT_INTERVAL = 15  # seconds
-
     async def event_generator():
-        import json as _json
         gen = stream_chat_with_assistant(
             db=db,
             user_message=request.message.strip(),
@@ -377,22 +437,8 @@ async def assistant_chat_stream(
             assistant_role=request.assistant_role,
             user_context=request.user_context,
         )
-        try:
-            while True:
-                try:
-                    chunk = await asyncio.wait_for(
-                        gen.__anext__(), timeout=_HEARTBEAT_INTERVAL
-                    )
-                    yield chunk
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-                except StopAsyncIteration:
-                    break
-        except Exception as e:
-            logger.exception("[智能助手 API·流式] 处理失败")
-            yield f"event: error\ndata: {_json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
-        finally:
-            await gen.aclose()
+        async for chunk in sse_stream_with_heartbeat(gen):
+            yield chunk
 
     return StreamingResponse(
         event_generator(),
@@ -480,11 +526,8 @@ async def planned_analysis_stream(
 
     user_id = str(current_user["id"])
     quick_model, deep_model, quick_model_config_id, deep_model_config_id = _resolve_requested_model(request)
-    _HEARTBEAT_INTERVAL = 15
 
     async def event_generator():
-        import json as _json
-
         gen = stream_planned_analysis_with_assistant(
             db=db,
             user_message=request.message.strip(),
@@ -493,20 +536,8 @@ async def planned_analysis_stream(
             model=deep_model or quick_model,
             model_config_id=deep_model_config_id or quick_model_config_id,
         )
-        try:
-            while True:
-                try:
-                    chunk = await asyncio.wait_for(gen.__anext__(), timeout=_HEARTBEAT_INTERVAL)
-                    yield chunk
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-                except StopAsyncIteration:
-                    break
-        except Exception as e:
-            logger.exception("[规划分析 API·流式] 处理失败")
-            yield f"event: error\ndata: {_json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
-        finally:
-            await gen.aclose()
+        async for chunk in sse_stream_with_heartbeat(gen):
+            yield chunk
 
     return StreamingResponse(
         event_generator(),
@@ -521,20 +552,40 @@ async def planned_analysis_stream(
 
 @router.get("/deliverables/{filename}")
 async def download_assistant_deliverable(
+    request: Request,
     filename: str,
-    current_user=Depends(get_current_user),
+    exp: Optional[int] = Query(None),
+    sig: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    """下载智能助手生成的交付物文件（当前支持估值测算 xlsx）。
+    """下载智能助手生成的交付物文件（估值测算 / 表格导出 xlsx）。
 
-    安全约束：文件名仅允许字母/数字/下划线/点/横线，且必须为 .xlsx，
-    限定在 data/deliverables 目录内，防路径穿越。
+    鉴权采用双通道：
+    1. 签名链接（工具生成文件时附加 ?exp=&sig=，HMAC-SHA256 + 时效）——
+       浏览器直接点击 markdown 下载链接的场景（不带 JWT 头）；
+    2. 签名缺失/无效时回退 get_current_user（JWT 头 / Session Cookie），
+       API 直接调用场景行为与原来一致。
+
+    安全约束：文件名仅允许字母/数字/下划线/点/横线/中文/括号，且必须为
+    .xlsx，限定在 data/deliverables 目录内，防路径穿越。
     """
     import re
     from pathlib import Path
 
     from fastapi.responses import FileResponse
 
-    if not re.fullmatch(r"[A-Za-z0-9_.\-]+", filename) or not filename.lower().endswith(".xlsx"):
+    from core.deliverables.download_links import verify_deliverable_signature
+
+    if not verify_deliverable_signature(filename, exp, sig):
+        # 无有效签名 → 必须登录（失败时 get_current_user 抛 401）
+        await get_current_user(request, authorization)
+
+    # 允许中文与全角括号（AI 生成文件名含中文标题），禁止路径分隔符
+    if (
+        not re.fullmatch(r"[A-Za-z0-9_.\-\u4e00-\u9fff（）()]+", filename)
+        or ".." in filename
+        or not filename.lower().endswith(".xlsx")
+    ):
         raise HTTPException(status_code=400, detail="非法的文件名")
 
     base_dir = (Path.cwd() / "data" / "deliverables").resolve()

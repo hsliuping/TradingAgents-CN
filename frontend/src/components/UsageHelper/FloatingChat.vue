@@ -308,6 +308,8 @@ const sendMessage = async (text?: string) => {
           toolInProgress.value = ''
         } else if (eventType === 'tool_round_started') {
           toolInProgress.value = `工具调用第 ${event?.round || '?'} 轮...`
+        } else if (eventType === 'llm_thinking') {
+          toolInProgress.value = event?.message || '正在思考…'
         }
       },
       onDone: (data: any) => {

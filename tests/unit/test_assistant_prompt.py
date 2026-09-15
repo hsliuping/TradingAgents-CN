@@ -13,8 +13,9 @@ from app.services.intelligent_assistant_service import _get_system_prompt
 
 # 阶段 4 重写前的静态规则文本基线（2026-09-13 实测）
 _BASELINE_CHARS = 8317
-# 验收线：字数缩减 ≥30%
-_MAX_CHARS = 5822
+# 验收线：字数缩减 ≥30%（2026-09-15 上调至 6050：新增表格 Excel 导出工具说明、
+# 数据纪律第 14/15 条——导出透传与"复用对话已有结果"防重复拉数规则）
+_MAX_CHARS = 6050
 
 
 class TestSystemPromptS8:

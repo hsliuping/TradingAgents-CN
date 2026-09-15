@@ -104,14 +104,17 @@ def test_thread_doc_to_item_hides_legacy_raw_abstract_summary():
     assert item["current_summary"] is None
 
 
-def test_store_thread_summary_memory_persists_confirmed_facts(monkeypatch):
-    captured = {}
+def test_store_thread_summary_memory_is_noop(monkeypatch):
+    """契约：主题摘要只保留在 Mongo 线程集合，不再写入 mem0 长期记忆。
+
+    （旧测试断言写入 mem0，但该函数已改为 no-op；保留测试防止行为被意外改回。）
+    """
+    called = {"count": 0}
 
     class DummyMemoryService:
         async def store(self, messages, **kwargs):
-            captured["messages"] = messages
-            captured["kwargs"] = kwargs
-            return SimpleNamespace(facts_extracted=len(messages), success=True, error="")
+            called["count"] += 1
+            return SimpleNamespace(facts_extracted=0, success=True, error="")
 
     monkeypatch.setattr("core.memory.service.get_memory_service", lambda db: DummyMemoryService())
 
@@ -123,7 +126,7 @@ def test_store_thread_summary_memory_persists_confirmed_facts(monkeypatch):
             title="宁德时代",
             summary={
                 "abstract": "宁德时代当前更接近高位震荡而不是极端泡沫。",
-                "confirmed_facts": ["最新一轮已比较价格偏离与 RSI 位置", "PEG 仍低于 1"],
+                "confirmed_facts": ["PEG 仍低于 1"],
                 "open_questions": [],
                 "next_actions": [],
                 "focus_score": 0.82,
@@ -132,11 +135,7 @@ def test_store_thread_summary_memory_persists_confirmed_facts(monkeypatch):
         )
     )
 
-    assert captured["kwargs"]["scope"] == "analysis_insight"
-    assert captured["kwargs"]["infer"] is False
-    assert captured["kwargs"]["metadata"]["source_agent"] == "assistant_summary"
-    assert captured["messages"][0]["content"] == "宁德时代：最新一轮已比较价格偏离与 RSI 位置"
-    assert captured["messages"][1]["content"] == "宁德时代：PEG 仍低于 1"
+    assert called["count"] == 0
 
 
 def _async_return(value):
@@ -144,6 +143,86 @@ def _async_return(value):
         return value
 
     return _inner
+
+
+class TestSummaryTranscriptBudget:
+    def test_total_budget_caps_length_and_keeps_latest(self):
+        """总量封顶 6000 字符，超预算时保留最新消息（旧消息被舍弃）"""
+        messages = (
+            [{"role": "user", "content": "老问题" + "甲" * 700}]
+            + [
+                {"role": "assistant", "content": f"第{i}条回复" + "乙" * 700}
+                for i in range(9)
+            ]
+            + [{"role": "user", "content": "最新问题" + "丙" * 700}]
+        )  # 共 11 条，每条约 700+ 字符，总计远超 6000
+
+        text = service._format_messages_for_summary(messages)
+
+        assert len(text) <= 6100  # 允许编号/角色前缀的少量开销
+        assert "最新问题" in text
+        assert "老问题" not in text  # 最老的消息被预算挤出
+
+    def test_short_conversation_kept_intact(self):
+        messages = [
+            {"role": "user", "content": "问界最近销量"},
+            {"role": "assistant", "content": "M9 月销过万"},
+        ]
+        text = service._format_messages_for_summary(messages)
+        assert "问界最近销量" in text
+        assert "M9 月销过万" in text
+        # 编号按时间顺序
+        assert text.index("1. [user]") < text.index("2. [assistant]")
+
+    def test_empty_content_skipped(self):
+        messages = [
+            {"role": "user", "content": ""},
+            {"role": "assistant", "content": "有内容"},
+        ]
+        text = service._format_messages_for_summary(messages)
+        assert "有内容" in text
+
+
+class TestSaveAssistantMessageSummaryScheduling:
+    def test_summary_runs_in_background_without_blocking_save(self, monkeypatch):
+        """消息同步落库，摘要 fire-and-forget：save 返回时摘要尚未执行，
+        让出事件循环后后台执行。"""
+        appended = []
+
+        async def fake_append(db, *, user_id, role, content, conversation_id=None, **kw):
+            appended.append(role)
+            return "thr-bg-1"
+
+        summary_started = asyncio.Event()
+        summary_done = asyncio.Event()
+
+        async def fake_summarize(db, user_id, conversation_id=None, summary_type="manual"):
+            summary_started.set()
+            # 模拟 LLM 摘要耗时；关键路径不应等待它
+            await asyncio.sleep(0.05)
+            summary_done.set()
+
+        monkeypatch.setattr(service, "append_assistant_message", fake_append)
+        monkeypatch.setattr(service, "summarize_assistant_thread", fake_summarize)
+
+        async def scenario():
+            await service.save_assistant_message(
+                db=object(),
+                user_id="u1",
+                user_content="问界销量",
+                assistant_content="M9 过万",
+                tools_used=["dongchedi_x"],
+                conversation_id=None,
+            )
+            # save 已返回：两条消息同步落库……
+            assert appended == ["user", "assistant"]
+            # ……但摘要仍在后台排队/执行中（未阻塞 save）
+            assert not summary_done.is_set()
+            # 等待后台任务跑完
+            await asyncio.wait_for(summary_done.wait(), timeout=2)
+            assert summary_started.is_set()
+
+        asyncio.run(scenario())
 
 
 def _fake_llm_config() -> LLMConfig:

@@ -17,8 +17,13 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from bson import ObjectId
 
-# 智能助手整体超时（LLM + 多轮工具调用），默认 300 秒
-ASSISTANT_TIMEOUT_SECONDS = int(os.environ.get("ASSISTANT_TIMEOUT_SECONDS", "300"))
+# 智能助手整体超时（LLM + 多轮工具调用）。
+# 设计对齐主流 Agent（ChatGPT/Manus 等）：agent 循环不设短的全局超时，
+# 依靠「单步超时（工具 tier 15/180s）+ 轮次上限（max_tool_rounds=8）+
+# 流式进度反馈 + 用户手动停止」控制时长；全局超时只是防挂死的安全网。
+# 实测：推理模型（长思考）+ 277 工具 schema + 长会话历史，首轮 LLM 思考
+# 可达 4 分钟，300s 会在工具刚执行完就被掐断（2026-09-15 营收预测导出案例）。
+ASSISTANT_TIMEOUT_SECONDS = int(os.environ.get("ASSISTANT_TIMEOUT_SECONDS", "900"))
 # 当对话中使用了重型工具（Agent 调用等）时，额外追加的超时余量
 ASSISTANT_HEAVY_TOOL_EXTRA_SECONDS = 120
 
@@ -811,6 +816,80 @@ def _should_use_recent_search(user_message: str) -> bool:
     return has_recency and has_fact
 
 
+# 领域词匹配的噪声词：接口工程术语、时间词、通用动词/虚词等，
+# 出现在任何工具描述里都不代表业务领域。数据驱动匹配时必须剔除，
+# 否则「销量数据接口」这类描述会因「数据/接口」与任意问题误匹配。
+_SKILL_DOMAIN_STOPGRAMS = {
+    "接口", "数据", "参数", "返回", "结果", "查询", "获取", "调用", "支持",
+    "提供", "相关", "信息", "时间", "月份", "月度", "类型", "情况", "变化",
+    "最新", "最近", "全国", "各类", "可以", "使用", "通过", "按照", "指定",
+    "功能", "工具", "能力", "记录", "列表", "名称", "条件", "筛选",
+    "输入", "输出", "字段", "结构", "格式", "内容", "自动", "进行", "根据",
+    "以及", "或者", "如果", "需要", "请求", "响应", "服务", "系统", "方法",
+}
+
+
+def _domain_terms(text: str) -> set:
+    """从文本提取领域词集合：连续中文段的 2-gram + 长度≥2 的英文/数字词。
+
+    不用分词库：2-gram 对「车型/销量/问界/懂车帝」这类领域词召回稳定，
+    噪声由 _SKILL_DOMAIN_STOPGRAMS 通用词表统一剔除。
+    """
+    terms: set = set()
+    text = (text or "").lower()
+    # 英文/数字词（品牌英文、型号等，如 model、m9）
+    for token in re.findall(r"[a-z0-9]{2,}", text):
+        terms.add(token)
+    # 连续中文段逐字取 2-gram
+    for segment in re.findall(r"[\u4e00-\u9fa5]{2,}", text):
+        for i in range(len(segment) - 1):
+            gram = segment[i:i + 2]
+            if gram not in _SKILL_DOMAIN_STOPGRAMS:
+                terms.add(gram)
+    return terms
+
+
+def _matches_generated_skill(user_message: str) -> Optional[tuple]:
+    """判断问题是否能被某个「用户生成的外部 Skill」结构化承接。
+
+    近期搜索快路径是股票时代留下的关键词规则（「最近」+「变化/持股」即
+    直接网页搜索），系统支持自定义外部 Skill 后，它会在 LLM 工具选择之前
+    抢先拦截本应由专用工具回答的问题（真实案例：「问界各车型最近半年销量
+    变化」→ 没走懂车帝销量 Skill，直接网页搜索，只拿到新闻标题）。
+
+    匹配完全数据驱动：只读取注册表里 source=generated 的 Skill 元数据
+    （名称/描述/when_to_use），与用户问题做领域词交集；交集≥2 个不同领域
+    词才算命中（单词命中过宽，容易被「品牌/销量」之类的偶然共现误判）。
+    不写死任何具体 Skill 名称或行业关键词——新装任何领域的 Skill 同样生效。
+
+    Returns:
+        命中时返回 (tool_id, tool_name)；否则 None
+    """
+    msg_terms = _domain_terms(user_message)
+    if len(msg_terms) < 2:
+        return None
+    try:
+        from core.tools import get_tool_registry
+        registry = get_tool_registry()
+    except Exception:
+        return None
+    for skill in registry.get_external_skills():
+        if not getattr(skill, "fc_enabled", True):
+            continue
+        skill_text = " ".join(
+            str(getattr(skill, attr, "") or "")
+            for attr in ("name", "description", "when_to_use")
+        )
+        overlap = msg_terms & _domain_terms(skill_text)
+        if len(overlap) >= 2:
+            logger.info(
+                "[智能助手] 问题命中专用 Skill「%s」领域词 %s，搜索快路径让路",
+                getattr(skill, "id", ""), sorted(overlap),
+            )
+            return (getattr(skill, "id", ""), getattr(skill, "name", ""))
+    return None
+
+
 def _extract_numbered_options(text: str) -> Dict[int, str]:
     options: Dict[int, str] = {}
     for raw_line in (text or "").splitlines():
@@ -1283,7 +1362,8 @@ def _get_system_prompt(
 - **定时分析**：创建/管理周期性自动分析（如每天早9点分析关注列表；仅限分析任务，不支持闹钟等无关功能）
 - **股票关注列表**：查看/添加/移除/分组/按标签筛选
 - **数据查询**：行情、财务三表、技术指标（MACD/RSI/布林带等）、新闻
-- **估值测算表格**：用户明确要求"估值测算表格""估值测算 Excel"等交付物时，调用 `generate_valuation_excel_tool`（symbol 传 6 位代码）
+- **表格 Excel 导出**：用户要求把**对话中已有的数据/表格/预测结果**做成 Excel 时，调用 `export_table_excel_tool`（把回复中出现过的 Markdown 表格原文逐字透传，多表用 `## 表名` 分隔）
+- **估值测算表格**：仅当用户明确要求"估值测算表格""估值模型 Excel""盈利推演模型"（需要公式联动的财务模型）时，调用 `generate_valuation_excel_tool`（symbol 传 6 位代码）；普通数据导出 Excel 禁止走估值工具
 - **单股数据同步**：按代码同步历史行情与财务数据，必要时补充基础数据
 - **持仓分析**：查看持仓（实盘/模拟）、获取最新 AI 分析、发起新持仓分析（研究观察/关键验证价位/风险审阅）
 - **交易复盘**：查看复盘历史与详情、发起新复盘（评分/总结/改进建议/经验教训）
@@ -1318,6 +1398,8 @@ def _get_system_prompt(
 11. **工具结果忠实原样呈现**：工具真实返回都是 Markdown 文本，引用时保持原格式原文；不得改写成 JSON 对象（"字段名: 数值"花括号块）；不得添加返回中不存在的字段和数字（如 sentiment_score、post_count、hot_score）；不得改来源描述（"基于新闻标题分析"不得说成"雪球/股吧讨论量"）；需结构化时只能用 Markdown 表格罗列**工具原文中出现过的**数字和文字
 12. **时间逻辑基于当前日期**：涉及年份、季度、披露周期的问题必须基于当前日期推理，严禁用训练记忆中的历史日期回答
 13. **估值 Excel 交付物**：`generate_valuation_excel_tool` 返回的目标价摘要表和下载链接**原样呈现**，不改写数字或链接；返回失败说明时如实转述原因并建议先同步数据
+14. **表格 Excel 导出**：`export_table_excel_tool` 的 `markdown_tables` 参数必须**逐字复制**对话中已生成的 Markdown 表格（含表头与数据行），严禁改写、增删、四舍五入任何数字——导出的是已验证结果的存档，不是重新生成；返回的下载链接原样呈现
+15. **复用对话已有结果**：用户要求"做成模型/生成表格/导出"某项**对话中已经生成过的**分析结果（预测、测算、对比表等）时，严禁重新调用数据工具拉取原始数据重建——直接复用对话上下文中的现成结果；只有当所需数据从未在对话中出现过时才调用数据工具获取
 
 【合规原则】
 - 你是助理+教练，不是投顾：教分析方法，不给"买入/卖出/持有"建议，不提供目标价、仓位建议、具体买卖时点；观点必须有工具数据支撑，不做主观臆断
@@ -2133,6 +2215,12 @@ class IntelligentAssistantService:
         """
         if not _should_use_recent_search(req.user_message):
             return None
+        # 专用外部 Skill 能结构化承接的问题（如车型销量库），快路径必须让路——
+        # 否则「最近+变化」关键词组合会在 LLM 工具选择之前把问题劫持去网页搜索，
+        # 专用工具连出场机会都没有。匹配基于注册表元数据，不写死具体 Skill。
+        if _matches_generated_skill(req.user_message):
+            logger.info("[智能助手] 命中近期搜索关键词但存在专用 Skill，转常规工具选择路径")
+            return None
         try:
             from core.tools.implementations.assistant_ops.recent_search import (
                 run_recent_information_search,
@@ -2353,6 +2441,13 @@ class IntelligentAssistantService:
             # 仅流式模式注入进度回调（tool_started / tool_completed 等事件）
             if req.on_progress is not None:
                 achat_kwargs["progress_callback"] = req.on_progress
+                # 首轮 LLM 思考可能持续数分钟（推理模型+大工具表+长历史），
+                # 先发一条反馈避免用户面对无任何提示的静默等待
+                await _emit_progress({
+                    "event": "llm_thinking",
+                    "round": 1,
+                    "message": "正在分析问题并规划处理步骤…",
+                })
 
             resp = await self._llm_client.achat(messages, **achat_kwargs)
             await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
@@ -2647,10 +2742,11 @@ class IntelligentAssistantService:
             logger.warning("[智能助手] 请求超时（%ss）", timeout_used)
             candidate = ReplyCandidate.passthrough(
                 reply=(
-                    f"抱歉，处理您的问题用时过长（已超过 {timeout_used} 秒），为避免长时间等待已中断。\n\n"
+                    f"抱歉，处理您的问题用时过长（已超过 {timeout_used} 秒），已中断。\n\n"
+                    "常见原因：模型正在处理较复杂的分析（多轮工具调用+长思考）。\n"
                     "建议您：\n"
+                    "• 若刚才对话中已生成过结果表格，可直接要求\"把刚才的表格导出成Excel\"（秒级完成）\n"
                     "• 尝试将问题拆分得更具体一些\n"
-                    "• 检查网络连接是否稳定\n"
                     "• 稍后重试"
                 ),
                 route_id=ROUTE_TIMEOUT,
@@ -2764,7 +2860,7 @@ class IntelligentAssistantService:
                 ReplyCandidate.passthrough("", route_id=ROUTE_TIMEOUT),
                 req, t0, streaming=True, error=f"timeout:{timeout_used}s",
             )
-            yield _sse("error", {"message": f"处理超时（已超过 {timeout_used} 秒），请尝试更简短的问题。"})
+            yield _sse("error", {"message": f"处理超时（已超过 {timeout_used} 秒）。若对话中已生成过结果表格，可直接要求导出成 Excel；或稍后重试。"})
             yield _sse("done", {"tools_used": req.tools_used, "error": True})
         except Exception as e:
             logger.exception("[智能助手·流式] 对话失败")
@@ -3767,15 +3863,32 @@ def _extract_sentences(text: str) -> List[str]:
 
 
 def _format_messages_for_summary(messages: List[Dict[str, Any]], limit: int = 12) -> str:
-    formatted: List[str] = []
-    for index, message in enumerate(messages[-limit:], start=1):
+    """格式化最近消息供主题摘要使用。
+
+    双层预算：最近 limit 条、每条 800 字符，总量封顶 6000 字符——
+    摘要只需把握主题焦点，不需要完整正文；超长输入既费 token 又抬高
+    慢端点下的超时概率。超预算时优先保留最近消息（从尾部累积）。
+    """
+    _PER_MSG_BUDGET = 800
+    _TOTAL_BUDGET = 6000
+    recent = messages[-limit:]
+    # 倒序累积（优先保住最新消息），最后再按时间顺序输出
+    picked: List[str] = []
+    used = 0
+    for back_index, message in enumerate(reversed(recent), start=1):
         role = str(message.get("role") or "assistant").strip() or "assistant"
         content = str(message.get("content") or "").strip()
         if not content:
             continue
         content = re.sub(r"\s+", " ", content)
-        formatted.append(f"{index}. [{role}] {content[:800]}")
-    return "\n".join(formatted)
+        index = len(recent) - back_index + 1
+        line = f"{index}. [{role}] {content[:_PER_MSG_BUDGET]}"
+        if used + len(line) > _TOTAL_BUDGET:
+            # 更老的消息不再纳入
+            break
+        picked.append(line)
+        used += len(line)
+    return "\n".join(reversed(picked))
 
 
 def _strip_json_code_fence(text: str) -> str:
@@ -3841,7 +3954,11 @@ async def _build_thread_summary_with_llm(
         summary_config = llm_config.model_copy(deep=True) if hasattr(llm_config, "model_copy") else llm_config.copy(deep=True)
         summary_config.temperature = 0.1
         summary_config.max_tokens = min(int(summary_config.max_tokens or 600), 600)
-        summary_config.timeout = min(int(summary_config.timeout or 45), 45)
+        # 摘要是后台展示任务（失败即回退规则摘要），超时与重试必须收紧：
+        # 输出仅 600 token 的 JSON，正常几秒返回；25s 不返回基本是端点卡死，
+        # 再指数退避重试 3 次（旧配置 45s×3 ≈ 2.5 分钟）毫无收益。
+        summary_config.timeout = 25
+        summary_config.retry_times = 0
 
         client = UnifiedLLMClient.from_config(summary_config)
         messages_for_llm = [
@@ -4285,7 +4402,13 @@ async def save_assistant_message(
     tools_used: List[str],
     conversation_id: Optional[str] = None,
 ) -> None:
-    """将会话追加写入 MongoDB"""
+    """将会话追加写入 MongoDB。
+
+    消息持久化同步完成（用户刷新页面必须能看到本轮对话）；
+    主题摘要（侧边栏卡片用，LLM 生成、失败有规则摘要兜底）改为后台任务，
+    绝不阻塞回复返回——历史教训：coding 端点偶发慢响应时，45s 超时 × 3 次
+    指数退避重试让用户为一个纯展示维护任务干等约 2.5 分钟。
+    """
     thread_id = await append_assistant_message(
         db,
         user_id=user_id,
@@ -4301,12 +4424,33 @@ async def save_assistant_message(
         conversation_id=thread_id,
         tools_used=tools_used,
     )
-    await summarize_assistant_thread(
-        db,
-        user_id=user_id,
-        conversation_id=thread_id,
-        summary_type="auto",
-    )
+    _schedule_thread_summary(db, user_id, thread_id)
+
+
+def _schedule_thread_summary(db, user_id: str, thread_id: str) -> None:
+    """后台生成线程摘要（fire-and-forget）。
+
+    必须自行兜底全部异常：create_task 的异常若无人消费会抛
+    "Task exception was never retrieved"。
+    """
+    async def _run() -> None:
+        try:
+            await summarize_assistant_thread(
+                db,
+                user_id=user_id,
+                conversation_id=thread_id,
+                summary_type="auto",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("[智能助手摘要] 后台摘要任务失败（不影响会话）: %s", exc)
+
+    try:
+        asyncio.create_task(_run())
+    except RuntimeError:
+        # 无运行中的事件循环（极端场景）：摘要本就是可丢弃的展示任务，直接跳过
+        logger.debug("[智能助手摘要] 无事件循环，跳过本轮后台摘要")
 
 
 async def get_assistant_conversation(
@@ -4548,13 +4692,15 @@ async def chat_with_assistant(
         current_topic_title=current_topic_title,
         memory_block=memory_block,
     )
-    if user_id and result.get("reply"):
+    if user_id and user_message.strip():
+        # 回复为空（异常/超时等）也保存：用户提问不能因失败而丢失
+        assistant_content = (result.get("reply") or "").strip() or "⚠️ 本轮回复生成失败（未收到任何内容）"
         try:
             await save_assistant_message(
                 db,
                 user_id=user_id,
                 user_content=user_message.strip(),
-                assistant_content=result["reply"],
+                assistant_content=assistant_content,
                 tools_used=result.get("tools_used") or [],
                 conversation_id=conversation_id,
             )
@@ -4665,6 +4811,7 @@ async def stream_chat_with_assistant(
     collected_reply = ""
     collected_tools: List[str] = []
     collected_data_refs: List[Dict[str, Any]] = []
+    error_note = ""  # 本轮错误说明（内层超时/异常/取消，或外层生成器异常），随会话落库
 
     logger.info("[智能助手·流式] 准备调用 service.chat_stream")
 
@@ -4694,23 +4841,47 @@ async def stream_chat_with_assistant(
                     collected_reply += data.get("content", "")
                 except Exception:
                     pass
+            elif event_str.startswith("event: error\n"):
+                # 记录内层错误（超时/异常/取消），随会话落库便于事后排查
+                try:
+                    data_line = event_str.split("\ndata: ", 1)[1].rstrip("\n")
+                    data = json.loads(data_line)
+                    if data.get("message"):
+                        error_note = str(data["message"])
+                except Exception:
+                    pass
             yield event_str
     except Exception as e:
         logger.error("[智能助手·流式] chat_stream 生成器抛出异常: %s", e, exc_info=True)
-        yield _sse("token", {"content": f"⚠️ 处理过程发生异常：{e}"})
-
-    if user_id and collected_reply:
-        try:
-            await save_assistant_message(
-                db,
-                user_id=user_id,
-                user_content=user_message.strip(),
-                assistant_content=collected_reply,
-                tools_used=collected_tools,
-                conversation_id=conversation_id,
-            )
-        except Exception as e:
-            logger.warning("[智能助手·流式] 保存会话失败: %s", e)
+        error_note = f"处理过程发生异常：{e}"
+        # 发 error 事件让前端明确感知失败（而不是把异常伪装成回复文本）
+        yield _sse("error", {"message": error_note})
+    finally:
+        # 会话持久化兜底：无论正常结束、内部错误还是客户端中途断开，
+        # 用户提问必须落库，已生成的部分回复与错误说明也要落库。
+        # 历史教训：原先只在「回复完整收集」时才保存，超时/中断后刷新
+        # 页面用户提问直接消失——既丢上下文，也无从排查当时出了什么错。
+        if user_id and user_message.strip():
+            assistant_content = collected_reply.strip()
+            if error_note:
+                assistant_content = (
+                    f"{assistant_content}\n\n---\n⚠️ {error_note}"
+                    if assistant_content
+                    else f"⚠️ {error_note}"
+                )
+            if not assistant_content:
+                assistant_content = "⚠️ 本轮回复生成失败（未收到任何内容）"
+            try:
+                await save_assistant_message(
+                    db,
+                    user_id=user_id,
+                    user_content=user_message.strip(),
+                    assistant_content=assistant_content,
+                    tools_used=collected_tools,
+                    conversation_id=conversation_id,
+                )
+            except Exception as e:
+                logger.warning("[智能助手·流式] 保存会话失败: %s", e)
 
         # 注：mem0 conversation scope 已废弃，对话不再自动写入长期记忆。
         # 用户偏好通过 `remember_this` 元工具显式登记，详见 mem0 §15.5 P0-1。
@@ -4724,4 +4895,5 @@ async def stream_chat_with_assistant(
         "tools_used": collected_tools,
         "data_refs": collected_data_refs,
         "conversation_id": conv_id,
+        **({"error": True} if error_note else {}),
     })

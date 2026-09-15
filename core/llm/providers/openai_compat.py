@@ -215,6 +215,40 @@ class OpenAICompatAdapter(BaseAdapter):
                 if delta and getattr(delta, 'content', None):
                     yield delta.content
     
+    def chat_stream_deltas(
+        self,
+        messages: List[Message],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        **kwargs
+    ):
+        """同步流式调用，逐段产出增量字典。
+
+        每个增量形如 {"type": "reasoning"|"content", "text": str}：
+        - reasoning: 思考模型的 reasoning_content 增量（如 DeepSeek R1）
+        - content: 正文增量
+
+        仅适用于无工具调用的单轮场景（如 Skill 代码生成）。
+        调用方负责拼接 content 得到完整回复。
+        """
+        if not self._sync_client:
+            self.initialize()
+
+        request_kwargs = self._build_request_kwargs(messages, tools, **kwargs)
+        request_kwargs["stream"] = True
+
+        stream = self._sync_client.chat.completions.create(**request_kwargs)
+        for chunk in stream:
+            if not getattr(chunk, "choices", None):
+                continue
+            delta = getattr(chunk.choices[0], "delta", None)
+            if not delta:
+                continue
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                yield {"type": "reasoning", "text": reasoning}
+            if getattr(delta, "content", None):
+                yield {"type": "content", "text": delta.content}
+
     def _parse_response(self, response) -> LLMResponse:
         """解析响应"""
         # 🔥 检查 choices 字段是否存在且不为空
