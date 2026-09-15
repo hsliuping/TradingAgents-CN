@@ -35,3 +35,5 @@ from core.tools.implementations.assistant_ops import data_sync_status  # noqa: F
 from core.tools.implementations.assistant_ops import paper_trading_status  # noqa: F401
 from core.tools.implementations.assistant_ops import token_usage  # noqa: F401
 from core.tools.implementations.assistant_ops import running_tasks  # noqa: F401
+# 通用表格 Excel 导出：确定性渲染（零 LLM 调用），对话数据 → xlsx 交付物
+from core.tools.implementations.assistant_ops import export_table_excel_tool  # noqa: F401

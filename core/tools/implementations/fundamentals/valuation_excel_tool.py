@@ -96,8 +96,10 @@ def _format_failure(title: str, detail: str) -> str:
         "生成前系统会自动校验年报/行情/股本数据是否已同步。"
     ),
     when_not_to_use=(
-        "用户仅询问估值指标（PE/PB/市值）或一般性估值知识时不要调用，"
-        "直接回答或使用行情/财务查询工具。"
+        "以下情况不要调用：1) 用户仅询问估值指标（PE/PB/市值）或一般性估值知识，"
+        "直接回答或使用行情/财务查询工具；2) 用户要求把**对话中已经生成的数据、表格、"
+        "预测结果**（如销量预测、营收测算等非估值模型）做成/导出 Excel——这不需要建模，"
+        "必须改用 export_table_excel_tool（秒级导出，本工具会重新建模耗时数分钟）。"
     ),
     returns=(
         "Markdown 文本：生成结果、估值情景目标价摘要表、文件下载链接、数据来源说明；"
@@ -161,6 +163,11 @@ def generate_valuation_excel_tool(
             errors = "\n".join(f"- {e}" for e in (check.get("errors") or ["未知原因"]))
             return _format_failure("生成文件校验未通过", errors)
 
+        # 签名下载链接：浏览器直接点击不带 JWT 头，必须用 presigned URL 鉴权
+        from core.deliverables.download_links import sign_deliverable_query
+
+        download_url = f"/api/assistant/deliverables/{filename}?{sign_deliverable_query(filename)}"
+
         # 5. 组装结果 Markdown
         scenarios = check.get("summary", {}).get("scenarios", {})
         scenario_rows = "\n".join(
@@ -182,7 +189,7 @@ def generate_valuation_excel_tool(
             f"| 情景 | 方法 | EPS（元） | 目标价（元） |\n"
             f"|------|------|-----------|--------------|\n"
             f"{scenario_rows}\n\n"
-            f"📎 [下载估值测算表](/api/assistant/deliverables/{filename})\n\n"
+            f"📎 [下载估值测算表]({download_url})\n\n"
             f"表格含两个 Sheet：盈利推演（营收/净利率假设格可编辑，公式自动联动）与估值情景（PE 倍数可调）。"
             f"{warning_lines}\n\n"
             f"**数据口径**：{data_notes}\n\n"

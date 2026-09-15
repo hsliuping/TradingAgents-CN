@@ -12,6 +12,7 @@ import 'dayjs/locale/zh-cn'
 import App from './App.vue'
 import router from './router'
 import { setupGlobalComponents } from './components'
+import { setupDeliverableDownloadInterceptor } from './utils/deliverableDownload'
 import { useAuthStore } from './stores/auth'
 import { useAppStore } from './stores/app'
 import './styles/index.scss'
@@ -45,6 +46,9 @@ app.use(ElementPlus, {
 
 // 注册全局组件
 setupGlobalComponents(app)
+
+// 智能助手交付物下载拦截（历史消息中的下载链接浏览器导航不带 JWT，全局委托改走 fetch+blob）
+setupDeliverableDownloadInterceptor()
 
 // 全局错误处理
 app.config.errorHandler = (err, _vm, info) => {
