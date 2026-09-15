@@ -99,12 +99,16 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="生成时间" />
-        <el-table-column label="操作" width="260">
+        <el-table-column prop="created_at" label="生成时间" width="170" />
+        <el-table-column label="操作" width="300">
           <template #default="scope">
-            <el-button size="small" @click="viewSkill(scope.row)">查看</el-button>
-            <el-button size="small" type="primary" @click="iterateSkill(scope.row)">迭代优化</el-button>
-            <el-button size="small" text type="danger" @click="deleteSkill(scope.row)">删除</el-button>
+            <div class="row-actions">
+              <el-button size="small" type="primary" @click="openTestDialog(scope.row)">测试</el-button>
+              <el-button size="small" @click="openEditDialog(scope.row)">编辑说明</el-button>
+              <el-button size="small" @click="viewSkill(scope.row)">查看</el-button>
+              <el-button size="small" @click="iterateSkill(scope.row)">迭代优化</el-button>
+              <el-button size="small" text type="danger" @click="deleteSkill(scope.row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -160,14 +164,125 @@
       </div>
       <template #footer>
         <el-button @click="detailVisible = false">关闭</el-button>
-        <el-button type="primary" @click="iterateSkill(detailSkill)">迭代优化</el-button>
+        <el-button type="primary" @click="detailSkill && openTestDialog(detailSkill)">测试</el-button>
+        <el-button @click="detailSkill && openEditDialog(detailSkill)">编辑说明</el-button>
+        <el-button type="primary" plain @click="iterateSkill(detailSkill)">迭代优化</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 在线测试对话框 -->
+    <el-dialog
+      v-model="testVisible"
+      :title="`测试 Skill：${testSkill?.display_name || ''}`"
+      width="760px"
+      destroy-on-close
+      class="skill-test-dialog"
+    >
+      <div v-if="testSkill" class="test-dialog-body">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="在沙箱中真实运行该 Skill，可直接修改参数后反复测试"
+          style="margin-bottom: 12px;"
+        />
+        <el-form label-position="top" size="small" class="test-form">
+          <el-form-item
+            v-for="param in testParamDefs"
+            :key="param.name"
+            :label="`${param.name}${param.required ? ' *' : ''}（${param.type || 'string'}）${param.description ? ' — ' + param.description : ''}`"
+          >
+            <el-switch
+              v-if="param.type === 'boolean'"
+              v-model="testArgs[param.name]"
+            />
+            <el-input-number
+              v-else-if="param.type === 'integer' || param.type === 'float'"
+              v-model="testArgs[param.name]"
+              :controls="false"
+              style="width: 100%"
+              :placeholder="param.default !== undefined && param.default !== null ? String(param.default) : '未填写则使用函数默认值'"
+            />
+            <el-input
+              v-else
+              v-model="testArgs[param.name]"
+              :placeholder="param.default !== undefined && param.default !== null ? String(param.default) : '未填写则使用函数默认值'"
+            />
+          </el-form-item>
+          <el-form-item v-if="!testParamDefs.length" label="参数">
+            <span class="form-hint">该 Skill 没有定义参数，可直接运行。</span>
+          </el-form-item>
+        </el-form>
+
+        <div v-if="testResult" class="test-result">
+          <el-alert
+            :type="testResult.success ? 'success' : 'error'"
+            :closable="false"
+            show-icon
+            :title="testResult.success
+              ? `执行成功（耗时 ${(testResult.execution_time || 0).toFixed(2)}s）`
+              : `执行失败（耗时 ${(testResult.execution_time || 0).toFixed(2)}s）`"
+            :description="testResult.error || ''"
+            style="margin-bottom: 8px;"
+          />
+          <div class="result-section-title">执行输出</div>
+          <pre class="result-json">{{ formatJson(testResult.output) }}</pre>
+          <el-collapse v-if="testResult.stderr" class="stderr-collapse">
+            <el-collapse-item title="错误日志（stderr）" name="stderr">
+              <pre class="result-stderr">{{ testResult.stderr }}</pre>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+      </div>
+      <template #footer>
+        <el-button
+          v-if="testSkill?.test_input && Object.keys(testSkill.test_input).length"
+          @click="fillExampleArgs"
+        >填入示例参数</el-button>
+        <el-button @click="testVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="testLoading" @click="runTest">运行测试</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑说明对话框 -->
+    <el-dialog
+      v-model="editVisible"
+      title="编辑 Skill 说明"
+      width="560px"
+      destroy-on-close
+    >
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="这里修改的是展示名称和功能说明；参数、代码与接口契约如需变更，请使用「迭代优化」生成新版本。"
+        style="margin-bottom: 14px;"
+      />
+      <el-form label-position="top">
+        <el-form-item label="名称" required>
+          <el-input v-model="editForm.display_name" maxlength="100" show-word-limit />
+        </el-form-item>
+        <el-form-item label="功能说明">
+          <el-input
+            v-model="editForm.description"
+            type="textarea"
+            :rows="5"
+            maxlength="2000"
+            show-word-limit
+            placeholder="说明这个 Skill 的用途、输入和返回内容"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" @click="saveEdit">保存</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { skillGenerationApi } from '@/api/skillGeneration'
@@ -180,6 +295,28 @@ const detailVisible = ref(false)
 const detailSkill = ref<any>(null)
 const skillCode = ref('')
 const codeLoading = ref(false)
+
+// 在线测试
+const testVisible = ref(false)
+const testLoading = ref(false)
+const testSkill = ref<any>(null)
+const testArgs = ref<Record<string, any>>({})
+const testResult = ref<any>(null)
+
+// 编辑说明
+const editVisible = ref(false)
+const editSaving = ref(false)
+const editForm = ref<{ tool_id: string; display_name: string; description: string }>({
+  tool_id: '',
+  display_name: '',
+  description: '',
+})
+
+// 测试表单只展示 Skill 已定义的参数
+const testParamDefs = computed(() => {
+  const params = testSkill.value?.parameters
+  return Array.isArray(params) ? params : []
+})
 
 function getStatusLabel(status: string) {
   const labels: Record<string, string> = {
@@ -303,6 +440,122 @@ async function deleteSkill(skill: any) {
   }
 }
 
+// ==================== 在线测试 ====================
+
+function buildInitialTestArgs(skill: any): Record<string, any> {
+  const args: Record<string, any> = {}
+  const example = skill.test_input || {}
+  for (const param of skill.parameters || []) {
+    const name = param.name
+    const exampleVal = example[name]
+    if (exampleVal !== undefined && exampleVal !== null && exampleVal !== '') {
+      args[name] = exampleVal
+    } else if (param.default !== undefined && param.default !== null) {
+      args[name] = param.default
+    } else if (param.type === 'boolean') {
+      args[name] = false
+    } else {
+      // 键先置空，输入框显示 placeholder（未填写则使用函数默认值）
+      args[name] = undefined
+    }
+  }
+  return args
+}
+
+function openTestDialog(skill: any) {
+  testSkill.value = skill
+  testArgs.value = buildInitialTestArgs(skill)
+  testResult.value = null
+  detailVisible.value = false
+  testVisible.value = true
+}
+
+function fillExampleArgs() {
+  if (testSkill.value) {
+    testArgs.value = buildInitialTestArgs(testSkill.value)
+  }
+}
+
+async function runTest() {
+  if (!testSkill.value) return
+  // 只提交已填写的参数；0/false 是合法入参，必须保留
+  const args: Record<string, any> = {}
+  for (const [key, value] of Object.entries(testArgs.value)) {
+    if (value !== null && value !== undefined && value !== '') {
+      args[key] = value
+    }
+  }
+  testLoading.value = true
+  testResult.value = null
+  try {
+    testResult.value = await skillGenerationApi.testSkill(testSkill.value.tool_id, args)
+  } catch (error: any) {
+    testResult.value = {
+      success: false,
+      output: null,
+      stderr: '',
+      execution_time: 0,
+      error: error?.response?.data?.detail || error?.message || '测试请求失败',
+    }
+  } finally {
+    testLoading.value = false
+  }
+}
+
+function formatJson(value: any): string {
+  if (value === null || value === undefined) return '（无输出）'
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+// ==================== 编辑说明 ====================
+
+function openEditDialog(skill: any) {
+  editForm.value = {
+    tool_id: skill.tool_id,
+    display_name: skill.display_name || '',
+    description: skill.description || '',
+  }
+  detailVisible.value = false
+  editVisible.value = true
+}
+
+async function saveEdit() {
+  const displayName = editForm.value.display_name.trim()
+  if (!displayName) {
+    ElMessage.warning('名称不能为空')
+    return
+  }
+  editSaving.value = true
+  try {
+    await skillGenerationApi.updateSkillInfo(
+      editForm.value.tool_id,
+      displayName,
+      editForm.value.description.trim(),
+    )
+    ElMessage.success('说明已更新')
+    editVisible.value = false
+    // 同步本地列表与详情缓存，避免重新拉取前展示旧名称
+    const target = recentSkills.value.find(s => s.tool_id === editForm.value.tool_id)
+    if (target) {
+      target.display_name = displayName
+      target.description = editForm.value.description.trim()
+    }
+    if (detailSkill.value?.tool_id === editForm.value.tool_id) {
+      detailSkill.value.display_name = displayName
+      detailSkill.value.description = editForm.value.description.trim()
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '保存失败')
+  } finally {
+    editSaving.value = false
+  }
+}
+
 async function loadRecentSkills() {
   try {
     const result = await skillGenerationApi.listSkills({ page: 1, page_size: 10 })
@@ -361,6 +614,56 @@ onMounted(() => {
 .empty-hint {
   padding: 40px;
   text-align: center;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+}
+
+.form-hint {
+  color: #909399;
+  font-size: 13px;
+}
+
+.test-dialog-body {
+  .test-result {
+    margin-top: 14px;
+  }
+
+  .result-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #303133;
+    margin: 8px 0 6px;
+  }
+
+  .result-json,
+  .result-stderr {
+    margin: 0;
+    padding: 10px;
+    background: #f5f7fa;
+    border-radius: 4px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #303133;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 320px;
+    overflow: auto;
+  }
+
+  .result-stderr {
+    background: #fef0f0;
+    color: #f56c6c;
+  }
+
+  .stderr-collapse {
+    margin-top: 8px;
+  }
 }
 
 .skill-detail {

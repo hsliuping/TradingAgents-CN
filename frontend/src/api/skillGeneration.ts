@@ -70,6 +70,9 @@ export interface ConfirmResult {
   total_time: number
   final_score: number | null
   error: string | null
+  /** 外部接口预检拦截时的说明 */
+  message?: string | null
+  interface_preflight?: InterfacePreflightResult | null
 }
 
 export interface RepairPlanResult {
@@ -112,6 +115,24 @@ export interface PipelineResultDetail {
   total_rounds?: number
   total_time?: number
   error?: string | null
+}
+
+/** 质量评估实时结果（Judge 白盒评分） */
+export interface PipelineEvalResult {
+  executability: number
+  authenticity: number
+  completeness: number
+  relevance: number
+  format_quality: number
+  total: number
+  /** 第几轮评估（从 1 开始） */
+  round?: number
+  /** 是否达到通过阈值 */
+  passed: boolean
+  /** Judge 专家一句话评语 */
+  expert_comment?: string
+  /** 业务验收（黑盒）是否通过，agentic 路径下可能返回 */
+  business_passed?: boolean
 }
 
 /** 边界检测 */
@@ -225,6 +246,24 @@ export interface ReconToolTrace {
   error?: string
 }
 
+/** 外部接口预检结果（规格确认阶段的连通性验证） */
+export interface InterfacePreflightResult {
+  /** verified=连通且有数据 / warning=可达但无数据 / failed=不可用 */
+  status: 'verified' | 'warning' | 'failed'
+  message: string
+  url?: string
+  http_status?: number
+  data_items?: number
+  sample_fields?: string[]
+  /** 差分测试：实测被接口忽略的参数（传入与否返回相同数据，须本地过滤） */
+  ignored_params?: string[]
+  /** 差分测试：实测会改变接口返回的业务参数（服务端过滤疑似生效，可拼 URL） */
+  server_filter_params?: string[]
+  /** 实测验证可用的查询参数（用户 URL 文档化查询参数） */
+  probed_params?: Record<string, any>
+  checked_at?: string
+}
+
 export interface ImplementationFactReportView {
   task_summary: string
   recommended_strategy: string
@@ -281,12 +320,17 @@ export interface SessionDetail {
   pipeline_message?: string
   pipeline_iteration?: number
   pipeline_progress?: number
+  /** 代码生成的实时思考过程（reasoning_content 尾部片段） */
+  pipeline_thinking?: string
+  /** 最近一轮质量评估结果（Judge 评分，评估完成即出现） */
+  pipeline_eval_result?: PipelineEvalResult | null
   pipeline_details?: Array<{
     stage: string
     message: string
     iteration: number
     progress: number
     timestamp?: string
+    eval_result?: PipelineEvalResult
   }>
   created_at: string
   updated_at: string
@@ -377,8 +421,8 @@ export const skillGenerationApi = {
   },
 
   /** 预览规格（不执行管线），用于规格确认步骤 */
-  previewSpec: async (sessionId: string, message: string = '确认'): Promise<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null; fact_report?: ImplementationFactReportView | null }> => {
-    const res = await request.post<ApiOk<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null; fact_report?: ImplementationFactReportView | null }>>(`${BASE}/sessions/${sessionId}/preview-spec`, { message }, SLOW_LLM_OP_CONFIG)
+  previewSpec: async (sessionId: string, message: string = '确认'): Promise<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null; fact_report?: ImplementationFactReportView | null; interface_preflight?: InterfacePreflightResult | null; upgrade_change_points?: string[] | null }> => {
+    const res = await request.post<ApiOk<{ spec: Record<string, any>; recommendations?: SkillGenerationRecommendations | null; fact_report?: ImplementationFactReportView | null; interface_preflight?: InterfacePreflightResult | null; upgrade_change_points?: string[] | null }>>(`${BASE}/sessions/${sessionId}/preview-spec`, { message }, SLOW_LLM_OP_CONFIG)
     return (res as any).data
   },
 
@@ -452,6 +496,19 @@ export const skillGenerationApi = {
   /** 更新 Skill 状态 */
   updateSkillStatus: async (skillId: string, status: string): Promise<any> => {
     const res = await request.put<ApiOk<any>>(`${BASE}/skills/${skillId}/status`, { status })
+    return (res as any).data
+  },
+
+  /** 更新 Skill 展示名称与功能说明 */
+  updateSkillInfo: async (
+    skillId: string,
+    displayName: string,
+    description: string,
+  ): Promise<{ tool_id: string; display_name: string; description: string }> => {
+    const res = await request.put<ApiOk<any>>(`${BASE}/skills/${skillId}/info`, {
+      display_name: displayName,
+      description: description,
+    })
     return (res as any).data
   },
 

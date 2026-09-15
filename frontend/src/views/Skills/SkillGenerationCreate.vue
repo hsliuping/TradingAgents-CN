@@ -164,6 +164,13 @@
             <el-descriptions-item label="数据源">{{ specPreview.data_source }}</el-descriptions-item>
             <el-descriptions-item label="描述">{{ specPreview.description }}</el-descriptions-item>
           </el-descriptions>
+          <div v-if="upgradeChangePoints.length" class="upgrade-change-points">
+            <el-alert type="success" :closable="false" show-icon title="本次升级变更点（其余全部继承父版本已验证的规格）">
+              <div v-for="(point, idx) in upgradeChangePoints" :key="`upgrade-point-${idx}`" class="catalog-note-item">
+                {{ idx + 1 }}. {{ point }}
+              </div>
+            </el-alert>
+          </div>
           <div v-if="previewFactReport" class="spec-catalog-card">
             <div class="spec-catalog-header">
               <div>
@@ -267,6 +274,40 @@
                 <h4>外部数据源集成模式</h4>
                 <p>本需求的数据源「{{ externalApiSourceName }}」不在系统目录内，已跳过本地股票资产与目录内外部来源的评估。请确保需求中包含接口规格：URL、请求方式、参数、认证方式、返回字段；缺失时生成器会要求澄清，不会臆造接口细节与字段名。</p>
               </div>
+            </div>
+            <div v-if="interfaceSpecConstraints.length" class="interface-spec-list">
+              <div class="recommendation-label">已识别的接口规格（代码生成将逐字使用，严禁改写路径）</div>
+              <div v-for="(entry, idx) in interfaceSpecConstraints" :key="`iface-spec-${idx}`" class="interface-spec-item">{{ entry }}</div>
+            </div>
+            <el-alert
+              v-else
+              type="warning"
+              :closable="false"
+              show-icon
+              title="未在当前规格中识别到接口 URL"
+              description="接口地址是外部集成的唯一事实源。建议在需求中补充完整接口规格（URL、请求方式、参数、请求头）后重新确认，避免生成器要求澄清或臆造接口。"
+              style="margin-top: 10px;"
+            />
+            <div v-if="interfacePreflight" class="interface-preflight-block">
+              <el-alert
+                :type="interfacePreflight.status === 'verified' ? 'success' : (interfacePreflight.status === 'warning' ? 'warning' : 'error')"
+                :closable="false"
+                show-icon
+                :title="interfacePreflight.status === 'verified'
+                  ? `接口连通性已验证（HTTP ${interfacePreflight.http_status || 200}，返回 ${interfacePreflight.data_items || 0} 条数据）`
+                  : (interfacePreflight.status === 'warning' ? '接口可达，但数据存疑' : '接口预检失败')"
+                :description="interfacePreflight.message"
+              />
+              <div v-if="interfacePreflight.sample_fields?.length" class="catalog-notes" style="margin-top: 6px;">
+                <div class="catalog-note-item">返回样例字段：{{ interfacePreflight.sample_fields.join('、') }}</div>
+                <div v-if="interfacePreflight.ignored_params?.length" class="catalog-note-item" style="color: #e6a23c;">
+                  实测被接口忽略的参数（生成代码将拉全量后本地过滤）：{{ interfacePreflight.ignored_params.join('、') }}
+                </div>
+              </div>
+            </div>
+            <div v-if="otherSpecConstraints.length" class="catalog-notes" style="margin-top: 10px;">
+              <div class="recommendation-label">行为约束</div>
+              <div v-for="(entry, idx) in otherSpecConstraints" :key="`spec-constraint-${idx}`" class="catalog-note-item">{{ entry }}</div>
             </div>
           </div>
           <div v-if="!isExternalApiMode" class="spec-catalog-card">
@@ -458,6 +499,40 @@
             <span>{{ s.label }}</span>
           </div>
         </div>
+        <div v-if="pipelineThinking" class="thinking-panel">
+          <div class="thinking-header" @click="thinkingExpanded = !thinkingExpanded">
+            <span>AI 思考过程（实时）</span>
+            <el-icon :class="['thinking-arrow', { collapsed: !thinkingExpanded }]"><ArrowDown /></el-icon>
+          </div>
+          <pre v-show="thinkingExpanded" ref="thinkingBodyRef" class="thinking-body">{{ pipelineThinking }}</pre>
+        </div>
+        <div v-if="pipelineEvalResult" class="eval-result-panel">
+          <div class="eval-result-header">
+            <span>质量评估结果</span>
+            <span :class="['eval-total', pipelineEvalResult.passed ? 'pass' : 'fail']">
+              {{ pipelineEvalResult.total }}/10（{{ pipelineEvalResult.passed ? '达标' : '未达标' }}）
+            </span>
+          </div>
+          <div class="eval-dimensions">
+            <div v-for="dim in evalDimensions" :key="dim.key" class="eval-dim">
+              <span class="eval-dim-label">{{ dim.label }}</span>
+              <el-progress
+                :percentage="Math.min(100, (pipelineEvalResult[dim.key] / 10) * 100)"
+                :stroke-width="8"
+                :show-text="false"
+                :color="evalScoreColor(pipelineEvalResult[dim.key])"
+                class="eval-dim-bar"
+              />
+              <span class="eval-dim-score">{{ pipelineEvalResult[dim.key] }}</span>
+            </div>
+          </div>
+          <div v-if="pipelineEvalResult.expert_comment" class="eval-comment">
+            {{ pipelineEvalResult.expert_comment }}
+          </div>
+          <div v-if="pipelineEvalResult.business_passed === false" class="eval-business-fail">
+            业务验收未通过
+          </div>
+        </div>
       </div>
 
       <!-- 步骤 3: 完成 -->
@@ -635,7 +710,9 @@ import type {
   ConfirmResult,
   ExternalDataSourceCatalogItem,
   ImplementationFactReportView,
+  InterfacePreflightResult,
   PipelineResultDetail,
+  PipelineEvalResult,
   ReconToolTrace,
   SessionDetail,
   SkillHandoffContext,
@@ -679,9 +756,38 @@ const canConfirm = computed(() => chatMessages.value.length >= 2)
 
 const specPreview = ref<Record<string, any> | null>(null)
 const previewFactReport = ref<ImplementationFactReportView | null>(null)
+const interfacePreflight = ref<InterfacePreflightResult | null>(null)
+// 升级补丁模式的变更点清单（迭代会话确认页 diff 式展示）
+const upgradeChangePoints = ref<string[]>([])
 const specConfirmLoading = ref(false)
 const pipelineMessage = ref('')
 const pipelineDetails = ref<Array<{ stage: string; message: string; iteration: number; progress: number; timestamp?: string }>>([])
+const pipelineThinking = ref('')
+const pipelineEvalResult = ref<PipelineEvalResult | null>(null)
+const thinkingExpanded = ref(true)
+const thinkingBodyRef = ref<HTMLElement | null>(null)
+
+/** 质量评估维度配置（顺序即展示顺序） */
+const evalDimensions = [
+  { key: 'executability', label: '可执行性' },
+  { key: 'authenticity', label: '真实性' },
+  { key: 'completeness', label: '完整性' },
+  { key: 'relevance', label: '相关性' },
+  { key: 'format_quality', label: '格式质量' },
+] as const
+
+/** 维度分数配色：<7 红色提示不足，7-8 橙色，≥8 绿色 */
+const evalScoreColor = (score: number): string => {
+  if (score < 7) return '#f56c6c'
+  if (score < 8) return '#e6a23c'
+  return '#67c23a'
+}
+
+watch(pipelineThinking, () => {
+  nextTick(() => {
+    if (thinkingBodyRef.value) thinkingBodyRef.value.scrollTop = thinkingBodyRef.value.scrollHeight
+  })
+})
 const stockCatalogLoading = ref(false)
 const stockCatalogDoc = ref('')
 const stockCatalogCollections = ref<StockDataCatalogCollection[]>([])
@@ -749,8 +855,32 @@ const preflightAvailableHelpers = computed(() => previewFactReport.value?.availa
 const preflightSelfContainedHelpers = computed(() =>
   preflightAvailableHelpers.value.filter(h => !h.data_source_handling || h.data_source_handling === 'self_contained')
 )
+// 外部 API 集成模式：目录外数据源需求，不展示/不评估本地股票资产与目录内外部源
+const isExternalApiMode = computed(() => backendRecommendations.value?.requirement_mode === 'external_api')
+const externalApiSourceName = computed(
+  () => backendRecommendations.value?.unknown_data_source
+    || String(specPreview.value?.data_source || '').trim()
+    || '目录外数据源'
+)
+// 接口规格约束：含 URL 的 constraints（外部接口集成模式的契约核心，代码生成逐字使用）
+const interfaceSpecConstraints = computed(() =>
+  (specPreview.value?.constraints || []).filter((entry: string) => /https?:\/\//.test(String(entry)))
+)
+// 其余行为约束（不含 URL）
+const otherSpecConstraints = computed(() =>
+  (specPreview.value?.constraints || []).filter((entry: string) => !/https?:\/\//.test(String(entry)))
+)
 const preflightNotes = computed(() => {
   const notes: string[] = []
+  // 外部接口集成模式：数据源在系统目录外，生成提醒不再输出本地优先话术
+  if (isExternalApiMode.value) {
+    notes.push(
+      `外部接口集成模式：数据源「${externalApiSourceName.value}」不在系统目录，将直接按用户提供的接口规格（URL、请求头、参数）实现。`
+    )
+    notes.push('不会复用本地股票集合或目录内外部来源；接口规格未提供时生成器会要求澄清，不会臆造接口细节。')
+    notes.push('本次仍会经过代码生成、静态校验、沙箱执行和质量评估，不会跳过验证。')
+    return notes
+  }
   // 优先展示命中的 helper 函数（这是数据源能力的核心信号，比本地集合更准确）
   if (preflightSelfContainedHelpers.value.length) {
     const helperNames = preflightSelfContainedHelpers.value.map(h => `${h.module.split('.').pop()}.${h.name}`)
@@ -796,13 +926,6 @@ const normalizeSpecText = (spec: Record<string, any> | null) => {
 const specPreviewText = computed(() => normalizeSpecText(specPreview.value))
 const recommendedStockCollectionSet = computed(() => new Set((backendRecommendations.value?.stock_collections || []).map(item => item.toLowerCase())))
 const recommendedExternalSourceSet = computed(() => new Set((backendRecommendations.value?.external_sources || []).map(item => item.toLowerCase())))
-// 外部 API 集成模式：目录外数据源需求，不展示/不评估本地股票资产与目录内外部源
-const isExternalApiMode = computed(() => backendRecommendations.value?.requirement_mode === 'external_api')
-const externalApiSourceName = computed(
-  () => backendRecommendations.value?.unknown_data_source
-    || String(specPreview.value?.data_source || '').trim()
-    || '目录外数据源'
-)
 
 const isStockCollectionMatched = (item: StockDataCatalogCollection) => {
   if (recommendedStockCollectionSet.value.has(item.collection.toLowerCase())) return true
@@ -1345,6 +1468,8 @@ const initFromRoute = async () => {
       previewFactReport.value = session.fact_report || null
       sessionPipelineResult.value = (session.pipeline_result || null) as PipelineResultDetail | null
       pipelineDetails.value = Array.isArray(session.pipeline_details) ? session.pipeline_details : []
+      pipelineThinking.value = session.pipeline_thinking || ''
+      pipelineEvalResult.value = session.pipeline_eval_result || null
 
       if (session.status === 'generating') {
         wizardStep.value = 2
@@ -1440,6 +1565,8 @@ const handleViewSpec = async () => {
     specPreview.value = res.spec
     backendRecommendations.value = res.recommendations || null
     previewFactReport.value = res.fact_report || null
+    interfacePreflight.value = res.interface_preflight || null
+    upgradeChangePoints.value = res.upgrade_change_points || []
     wizardStep.value = 1
   } catch (e: any) {
     ElMessage.error(e?.message || '获取规格失败')
@@ -1495,6 +1622,8 @@ const handleConfirmAndGenerate = async () => {
   genProgress.value = 0
   pipelineMessage.value = '正在确认规格并启动生成任务...'
   pipelineDetails.value = []
+  pipelineThinking.value = ''
+  pipelineEvalResult.value = null
 
   try {
     const res = await skillGenerationApi.confirmSpec(sessionId.value, '确认', codegenTimeout.value)
@@ -1504,6 +1633,8 @@ const handleConfirmAndGenerate = async () => {
         const session = await skillGenerationApi.getSession(sessionId.value)
         sessionPipelineResult.value = (session.pipeline_result || null) as PipelineResultDetail | null
         pipelineDetails.value = Array.isArray(session.pipeline_details) ? session.pipeline_details : []
+        pipelineThinking.value = session.pipeline_thinking || ''
+      pipelineEvalResult.value = session.pipeline_eval_result || null
         const stage = session.pipeline_stage
         const msg = session.pipeline_message
         const prog = session.pipeline_progress ?? 0
@@ -1541,6 +1672,11 @@ const handleConfirmAndGenerate = async () => {
         setTimeout(poll, pollInterval)
       }
       setTimeout(poll, pollInterval)
+    } else if (res.status === 'failed' && res.interface_preflight) {
+      // 外部接口预检拦截：留在确认页修正接口规格，不进入生成流程
+      interfacePreflight.value = res.interface_preflight
+      wizardStep.value = 1
+      ElMessage.error(res.message || '外部接口预检未通过，已阻止代码生成')
     } else {
       genProgress.value = 100
       genSteps.value.forEach(s => s.status = 'done')
@@ -1576,6 +1712,8 @@ const handleRepairAndRegenerate = async () => {
     genResult.value = null
     genSteps.value.forEach(s => s.status = 'pending')
     pipelineDetails.value = []
+    pipelineThinking.value = ''
+    pipelineEvalResult.value = null
     sessionPipelineResult.value = null
     repairPlan.value = ''
     repairPlanFeedback.value = ''
@@ -1585,6 +1723,8 @@ const handleRepairAndRegenerate = async () => {
       const session = await skillGenerationApi.getSession(sessionId.value)
       sessionPipelineResult.value = (session.pipeline_result || null) as PipelineResultDetail | null
       pipelineDetails.value = Array.isArray(session.pipeline_details) ? session.pipeline_details : []
+      pipelineThinking.value = session.pipeline_thinking || ''
+      pipelineEvalResult.value = session.pipeline_eval_result || null
       const stage = session.pipeline_stage
       const msg = session.pipeline_message
       const prog = session.pipeline_progress ?? 0
@@ -2226,6 +2366,23 @@ onMounted(async () => {
   color: var(--el-color-danger);
 }
 
+.interface-spec-list {
+  margin-top: 10px;
+}
+
+.interface-spec-item {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  background: var(--el-color-success-light-9, #f0f9eb);
+  border-left: 3px solid var(--el-color-success);
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin-top: 6px;
+  word-break: break-all;
+  color: var(--el-text-color-primary);
+}
+
 .spec-confirm-actions {
   margin-top: 20px;
   padding-bottom: 8px;
@@ -2317,6 +2474,125 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 24px;
   margin-top: 24px;
+}
+
+.thinking-panel {
+  max-width: 680px;
+  margin: 20px auto 0;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-extra-light);
+  overflow: hidden;
+  text-align: left;
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.thinking-arrow {
+  transition: transform 0.2s ease;
+}
+
+.thinking-arrow.collapsed {
+  transform: rotate(-90deg);
+}
+
+.thinking-body {
+  margin: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  border-top: 1px dashed var(--el-border-color-lighter);
+}
+
+.eval-result-panel {
+  max-width: 680px;
+  margin: 12px auto 0;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-bg-color);
+  padding: 12px 16px;
+  text-align: left;
+}
+
+.eval-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+  margin-bottom: 10px;
+}
+
+.eval-total.pass {
+  color: var(--el-color-success);
+}
+
+.eval-total.fail {
+  color: var(--el-color-danger);
+}
+
+.eval-dimensions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.eval-dim {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.eval-dim-label {
+  width: 60px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+}
+
+.eval-dim-bar {
+  flex: 1;
+}
+
+.eval-dim-score {
+  width: 32px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.eval-comment {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+
+.eval-business-fail {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-color-danger);
 }
 
 .gen-step {

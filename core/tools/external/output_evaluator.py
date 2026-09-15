@@ -242,6 +242,7 @@ class OutputEvaluator:
 
                 comment = str(scores.get("expert_comment", "")).strip()
                 if comment:
+                    score.expert_comment = comment
                     logger.info(f"🎯 Judge LLM 评分: {score.total} | {comment}")
                 else:
                     logger.info(f"🎯 Judge LLM 评分: {score.total}")

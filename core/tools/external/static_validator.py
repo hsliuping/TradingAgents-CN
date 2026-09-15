@@ -9,12 +9,25 @@
 """
 
 import ast
+import keyword
 import logging
+import re
 from typing import List, Set
 
 from .skill_spec import GeneratedCode, SkillSpec, ValidationResult
 
 logger = logging.getLogger(__name__)
+
+# 合法 Python 参数名模式（snake_case 等）；需求分析阶段可能把 HTTP 请求头
+# （如 headers.User-Agent / headers.Referer）误收录为函数参数，这类名字
+# 不可能出现在函数签名中，签名对比时直接跳过，避免必然失败的死循环重试。
+# Python 关键字（class/import 等）同样不可能作为参数名，一并跳过。
+_VALID_PYTHON_PARAM = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _is_unusable_param_name(name: str) -> bool:
+    """参数名是否不可能出现在 Python 函数签名中（非法标识符或关键字）"""
+    return not _VALID_PYTHON_PARAM.match(name) or keyword.iskeyword(name)
 
 
 # ==================== 黑名单 & 白名单 ====================
@@ -137,13 +150,58 @@ class StaticValidator:
         # 5. 占位代码检测
         self._check_placeholder_code(code.code, result)
 
+        # 6. 接口规格 URL 逐字比对（防 LLM 改写路径，如 rank_data → rank/data）
+        self._check_interface_urls(code.code, spec, result)
+
         if result.errors:
             result.passed = False
 
-        result.details["checks_run"] = 5
+        result.details["checks_run"] = 6
         return result
 
     # ==================== 检查 1: 语法 ====================
+
+    def _check_interface_urls(self, code: str, spec: SkillSpec, result: ValidationResult) -> None:
+        """接口规格 URL 双向校验。
+
+        正向：规格中给出的 URL 必须原样出现在代码里（防 LLM 改写路径，
+        如 rank_data → rank/data，沙箱 404 后浪费数轮迭代）。
+        反向：代码中出现的接口端点必须来自规格（防 LLM 臆造新端点做
+        品牌解析等映射，如 brand/all、select_series_v2，全部 404）。
+        查询串（?a=b）不计入比对——示例参数应以函数参数实现，不应硬编码。
+        URL 匹配仅限 ASCII URL 字符：中文紧贴 URL 时（如「rank_data发起请求」）
+        必须截断，否则会拿被污染的串去比对、误杀正确代码。
+        """
+        import re as _re
+
+        spec_base_urls: list[str] = []
+        for constraint in spec.constraints or []:
+            for m in _re.finditer(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+", str(constraint)):
+                base_url = m.group(0).split("?")[0].rstrip(".,;:")
+                spec_base_urls.append(base_url)
+                if base_url not in code:
+                    result.errors.append(
+                        f"接口 URL 改写违规: 代码中未包含规格指定的接口 URL「{base_url}」。"
+                        "接口路径必须逐字使用规格原文，严禁改写路径（如 rank_data 不得写成 rank/data）"
+                    )
+                else:
+                    logger.debug(f"[StaticValidator] 接口 URL 逐字校验通过: {base_url}")
+
+        # 反向：臆造端点检查（规格含接口 URL 时才启用）
+        if spec_base_urls:
+            reported: set[str] = set()
+            for m in _re.finditer(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+", code):
+                code_base = m.group(0).split("?")[0].rstrip(".,;:")
+                if code_base in spec_base_urls or code_base in reported:
+                    continue
+                reported.add(code_base)
+                result.errors.append(
+                    f"臆造接口端点违规: 代码中出现的接口「{code_base}」不在规格中。"
+                    "规格未提及的接口端点严禁自行编造（历史教训：臆造 brand/all、"
+                    "select_series_v2 等品牌解析端点全部 404）；业务过滤（如品牌→车型映射）"
+                    "接口不支持时，必须基于已拉取的数据在本地实现，无法覆盖时在输出中"
+                    "明确说明「接口不含品牌字段，结果可能不完整」的数据边界"
+                )
 
     def _check_syntax(self, code: str, result: ValidationResult) -> bool:
         """语法检查 — ast.parse()"""
@@ -277,8 +335,14 @@ class StaticValidator:
             if arg.arg != "self":
                 func_params.append(arg.arg)
 
-        # 对比 SkillSpec 中的参数
+        # 对比 SkillSpec 中的参数（跳过非法 Python 标识符/关键字参数，如 headers.User-Agent）
         spec_params = {p.name for p in spec.parameters}
+        skipped = {name for name in spec_params if _is_unusable_param_name(name)}
+        if skipped:
+            logger.warning(
+                f"[StaticValidator] SkillSpec 含非法 Python 标识符参数，签名对比已跳过: {sorted(skipped)}"
+            )
+        spec_params -= skipped
         func_params_set = set(func_params)
 
         missing_in_func = spec_params - func_params_set

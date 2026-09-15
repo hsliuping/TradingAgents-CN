@@ -62,6 +62,12 @@ class UpdateStatusRequest(BaseModel):
     status: str = Field(..., description="新状态: active / disabled / archived")
 
 
+class UpdateSkillInfoRequest(BaseModel):
+    """更新 Skill 展示名称与功能说明"""
+    display_name: str = Field(..., min_length=1, max_length=100, description="展示名称")
+    description: str = Field(default="", max_length=2000, description="功能说明")
+
+
 class TestSkillRequest(BaseModel):
     """测试 Skill"""
     args: Dict[str, Any] = Field(default_factory=dict, description="测试参数")
@@ -511,6 +517,34 @@ async def update_skill_status(
     if not updated:
         raise HTTPException(status_code=404, detail=f"Skill {skill_id} 不存在")
     return ok({"tool_id": skill_id, "status": req.status})
+
+
+@router.put("/skills/{skill_id}/info")
+async def update_skill_info(
+    skill_id: str,
+    req: UpdateSkillInfoRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """更新 Skill 的展示名称与功能说明（参数/代码等已验证契约不可在此修改）"""
+    try:
+        svc = await _get_service_with_llm(db)
+        updated = await svc.update_skill_info(
+            skill_id, req.display_name, req.description
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"Skill {skill_id} 不存在")
+        return ok({
+            "tool_id": skill_id,
+            "display_name": req.display_name.strip(),
+            "description": req.description.strip(),
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Skill 说明更新失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/skills/{skill_id}")

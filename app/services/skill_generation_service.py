@@ -609,12 +609,37 @@ test_input: {spec.test_input}
         initial_code: str = "",
         fact_report: Optional[ImplementationFactReport] = None,
         codegen_timeout: Optional[int] = None,
+        iteration_mode: str = "repair",
     ) -> Dict[str, Any]:
         # 代码生成单次调用超时（秒）：None 用管线默认值；仅接受 60~1800 的整数
         if isinstance(codegen_timeout, bool) or not isinstance(codegen_timeout, int):
             codegen_timeout = None
         elif not (60 <= codegen_timeout <= 1800):
             codegen_timeout = None
+
+        # external_api 模式：把接口预检实测事实（连通性/真实字段/实测查询参数）注入
+        # spec.metadata，代码生成 prompt 据此构造【接口实测事实】区块——
+        # LLM 不再臆造返回字段，也不再把业务过滤参数（如 brand）拼进 URL
+        try:
+            if classify_requirement_mode(spec) == "external_api":
+                sess_doc = await self._db[SESSION_COLLECTION].find_one(
+                    {"session_id": session.session_id}, {"interface_preflight": 1}
+                )
+                preflight = (sess_doc or {}).get("interface_preflight")
+                if preflight:
+                    metadata = dict(getattr(spec, "metadata", None) or {})
+                    metadata["interface_preflight"] = preflight
+                    spec.metadata = metadata
+                    logger.info(
+                        "[Preflight] 接口实测事实已注入代码生成: status=%s data_items=%s fields=%s probed_params=%s",
+                        preflight.get("status"),
+                        preflight.get("data_items"),
+                        preflight.get("sample_fields"),
+                        list((preflight.get("probed_params") or {}).keys()),
+                    )
+        except Exception as exc:
+            logger.debug("[Preflight] 实测事实注入代码生成失败（已忽略）: %s", exc)
+
         session.status = SessionStatus.GENERATING
         if session.pipeline_result is not None:
             session.pipeline_history.append(session.pipeline_result)
@@ -629,6 +654,8 @@ test_input: {spec.test_input}
                     "pipeline_message": "准备开始生成...",
                     "pipeline_iteration": 0,
                     "pipeline_progress": 0,
+                    "pipeline_thinking": "",
+                    "pipeline_eval_result": None,
                     "pipeline_details": [],
                     "updated_at": datetime.utcnow(),
                 }
@@ -639,27 +666,36 @@ test_input: {spec.test_input}
         sync_db = get_mongo_db_sync()
         session_id = session.session_id
 
-        def _progress_cb(stage: str, message: str, iteration: int, progress: float):
+        def _progress_cb(stage: str, message: str, iteration: int, progress: float,
+                         extra: Optional[Dict[str, Any]] = None):
             try:
+                detail_event: Dict[str, Any] = {
+                    "stage": stage,
+                    "message": message,
+                    "iteration": iteration,
+                    "progress": progress,
+                    "timestamp": datetime.utcnow(),
+                }
+                set_fields: Dict[str, Any] = {
+                    "pipeline_stage": stage,
+                    "pipeline_message": message,
+                    "pipeline_iteration": iteration,
+                    "pipeline_progress": progress,
+                    "updated_at": datetime.utcnow(),
+                }
+                # 质量评估完成：结构化结果实时落库，前端轮询即可看到分数/评语
+                eval_result = (extra or {}).get("eval_result")
+                if eval_result:
+                    detail_event["eval_result"] = eval_result
+                    set_fields["pipeline_eval_result"] = eval_result
+
                 sync_db[SESSION_COLLECTION].update_one(
                     {"session_id": session_id},
                     {
-                        "$set": {
-                            "pipeline_stage": stage,
-                            "pipeline_message": message,
-                            "pipeline_iteration": iteration,
-                            "pipeline_progress": progress,
-                            "updated_at": datetime.utcnow(),
-                        },
+                        "$set": set_fields,
                         "$push": {
                             "pipeline_details": {
-                                "$each": [{
-                                    "stage": stage,
-                                    "message": message,
-                                    "iteration": iteration,
-                                    "progress": progress,
-                                    "timestamp": datetime.utcnow(),
-                                }],
+                                "$each": [detail_event],
                                 "$slice": -30,
                             }
                         },
@@ -667,6 +703,41 @@ test_input: {spec.test_input}
                 )
             except Exception as e:
                 logger.warning(f"更新 pipeline 进度失败: {e}")
+
+        # 思考过程实时展示：缓冲 reasoning 增量，节流写入会话文档（前端轮询读取）
+        thinking_state = {"buf": "", "last_flush": 0.0}
+        THINKING_FLUSH_INTERVAL = 1.5   # 秒
+        THINKING_DOC_TAIL = 6000        # 文档中仅保留尾部，防止无限增长
+
+        def _flush_thinking() -> None:
+            try:
+                sync_db[SESSION_COLLECTION].update_one(
+                    {"session_id": session_id},
+                    {"$set": {
+                        "pipeline_thinking": thinking_state["buf"][-THINKING_DOC_TAIL:],
+                        "updated_at": datetime.utcnow(),
+                    }},
+                )
+            except Exception as e:
+                logger.warning(f"写入 pipeline_thinking 失败: {e}")
+
+        def _thinking_cb(kind: str, text: str):
+            try:
+                import time as _time
+                if kind == "reset":
+                    thinking_state["buf"] = ""
+                    thinking_state["last_flush"] = _time.time()
+                    _flush_thinking()
+                    return
+                if kind != "reasoning" or not text:
+                    return
+                thinking_state["buf"] = (thinking_state["buf"] + text)[-THINKING_DOC_TAIL * 2:]
+                now = _time.time()
+                if now - thinking_state["last_flush"] >= THINKING_FLUSH_INTERVAL:
+                    thinking_state["last_flush"] = now
+                    _flush_thinking()
+            except Exception as e:
+                logger.warning(f"更新 pipeline_thinking 失败: {e}")
 
         async def _run_pipeline():
             try:
@@ -698,8 +769,12 @@ test_input: {spec.test_input}
                         progress_callback=_progress_cb,
                         fact_report=_fr,
                         codegen_timeout=codegen_timeout,
+                        thinking_callback=_thinking_cb,
+                        iteration_mode=iteration_mode,
                     ),
                 )
+                # 流结束后冲刷剩余思考内容，避免尾部丢失
+                _flush_thinking()
                 session.status = SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
                 session.pipeline_result = result
                 await self._save_session(session)
@@ -995,6 +1070,220 @@ test_input: {spec.test_input}
             "boundary_check": session.boundary_check.model_dump() if session.boundary_check else None,
         }
 
+    async def _inherit_parent_interface_constraints(
+        self, spec: SkillSpec, parent_tool_id: str
+    ) -> bool:
+        """迭代模式：从父 Skill 继承接口规格约束（含 URL 的 constraints）。
+
+        背景：升级会话的对话中没有原始需求文本，规格生成的 URL 兜底提取
+        拿不到接口地址，导致新版本 spec 丢失接口契约——确认页出现
+        「未识别到接口 URL」警告，代码生成阶段会臆造 URL。
+        来源优先级：父 Skill 的 constraints 字段（新版本已持久化）；
+        老版本回退从父代码中提取接口 URL。
+        """
+        url_re = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
+
+        def _base_urls(text: str) -> set:
+            return {
+                m.group(0).split("?")[0].rstrip(".,;:")
+                for m in url_re.finditer(text or "")
+            }
+
+        try:
+            parent = await self._db[SKILL_COLLECTION].find_one(
+                {"tool_id": parent_tool_id},
+                {"constraints": 1, "code": 1, "session_id": 1},
+            )
+        except Exception as exc:
+            logger.warning("[Iterate] 加载父 Skill 失败（跳过接口约束继承）: %s", exc)
+            return False
+        if not parent:
+            return False
+
+        # 来源优先级：
+        # 1) 父 Skill 的 constraints 字段（_save_skill 已持久化，新版本技能可用）
+        # 2) 父 Skill 来源会话的 spec.constraints（老版本技能也有完整接口约束行）
+        # 3) 父代码中提取接口 URL（最后兜底，要求多级路径以排除 Referer 等纯域名）
+        interface_lines = [
+            str(c) for c in (parent.get("constraints") or []) if url_re.search(str(c))
+        ]
+        if not interface_lines:
+            origin_session_id = parent.get("session_id")
+            if origin_session_id:
+                try:
+                    origin_sess = await self._db[SESSION_COLLECTION].find_one(
+                        {"session_id": origin_session_id}, {"spec.constraints": 1}
+                    )
+                except Exception as exc:
+                    logger.debug("[Iterate] 加载父会话失败: %s", exc)
+                    origin_sess = None
+                if origin_sess and origin_sess.get("spec"):
+                    interface_lines = [
+                        str(c)
+                        for c in ((origin_sess["spec"] or {}).get("constraints") or [])
+                        if url_re.search(str(c))
+                    ]
+        if not interface_lines:
+            urls = [
+                u
+                for u in _base_urls(parent.get("code") or "")
+                # 域名后至少 2 级路径（如 /motor/pc/car/rank_data），
+                # 排除纯域名与单级路径的 Referer 引用
+                if len([s for s in u.split("//", 1)[-1].split("/") if s]) >= 3
+            ]
+            interface_lines = [
+                f"【接口规格 — 必须原样使用】接口 URL: {u}（继承自父版本 {parent_tool_id}，"
+                "路径/参数名严禁改写，如 rank_data 不得写成 rank/data；"
+                "URL 中的查询参数仅是示例，实现时以函数参数传参）"
+                for u in urls
+            ]
+        if not interface_lines:
+            return False
+
+        existing = _base_urls("\n".join(str(c) for c in (spec.constraints or [])))
+        added = False
+        for line in interface_lines:
+            line_urls = _base_urls(line)
+            if line_urls and not (line_urls & existing):
+                spec.constraints.insert(0, line)
+                existing |= line_urls
+                added = True
+        if added:
+            logger.info(
+                "[Iterate] 已继承父版本接口规格约束 (parent=%s)", parent_tool_id
+            )
+        return added
+
+    async def _load_parent_skill_code(self, parent_tool_id: str) -> str:
+        """迭代模式：加载父版本完整已验证代码作为升级基线。
+
+        背景：升级通常只是加字段/加参数等小调整，人类做法是在原代码上改几行。
+        若不带父代码，首轮生成从零重写，既浪费又会丢掉父版本多轮迭代才修好的
+        细节（分页/重试/本地过滤/字段映射等）。
+        """
+        try:
+            parent = await self._db[SKILL_COLLECTION].find_one(
+                {"tool_id": parent_tool_id},
+                {"code": 1, "implementation": 1, "status": 1},
+            )
+        except Exception as exc:
+            logger.warning("[Iterate] 加载父 Skill 代码失败（按从零生成处理）: %s", exc)
+            return ""
+        if not parent:
+            logger.warning("[Iterate] 未找到父 Skill: tool_id=%s", parent_tool_id)
+            return ""
+        code = parent.get("code") or parent.get("implementation") or ""
+        if code:
+            logger.info(
+                "[Iterate] 已加载父版本代码作为升级基线: parent=%s chars=%d status=%s",
+                parent_tool_id, len(code), parent.get("status"),
+            )
+        return code
+
+    async def _load_parent_skill_contract(
+        self, parent_tool_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """迭代模式：加载父版本完整契约（参数/约束/输出/完整代码）+ 计算新版本号。
+
+        升级补丁模式的事实源：规格生成 LLM 读它定位变更点，补丁套用
+        从它原样继承未提及的字段。版本号查询与 _save_skill 同一套逻辑，
+        保证 spec.tool_id 在生成期就与最终落库一致（codegen 函数名/
+        静态校验都按 tool_id 对齐，事后改会导致整轮作废）。
+        """
+        try:
+            parent = await self._db[SKILL_COLLECTION].find_one(
+                {"tool_id": parent_tool_id}
+            )
+        except Exception as exc:
+            logger.warning("[Iterate] 加载父 Skill 契约失败: %s", exc)
+            return None
+        if not parent:
+            logger.warning("[Iterate] 未找到父 Skill（契约加载）: tool_id=%s", parent_tool_id)
+            return None
+
+        root_tool_id = parent.get("parent_skill_id") or parent_tool_id
+        # 系列内最大版本号（含根版本），与 _save_skill 的版本计算保持一致
+        new_version = 2
+        try:
+            cursor = (
+                self._db[SKILL_COLLECTION]
+                .find({"$or": [{"tool_id": root_tool_id}, {"parent_skill_id": root_tool_id}]})
+                .sort("version", -1)
+                .limit(1)
+            )
+            max_docs = await cursor.to_list(1)
+            if max_docs:
+                new_version = int(max_docs[0].get("version") or 1) + 1
+        except Exception as exc:
+            logger.warning("[Iterate] 查询系列版本号失败，使用默认 v2: %s", exc)
+
+        contract = {
+            "tool_id": parent.get("tool_id") or parent_tool_id,
+            "root_tool_id": root_tool_id,
+            "new_tool_id": f"{root_tool_id}_v{new_version}",
+            "new_version": new_version,
+            "display_name": parent.get("display_name") or "",
+            "description": parent.get("description") or "",
+            "category": parent.get("category") or "utility",
+            "data_source": parent.get("data_source") or "",
+            "parameters": list(parent.get("parameters") or []),
+            "expected_output": dict(parent.get("expected_output") or {}),
+            "constraints": list(parent.get("constraints") or []),
+            "test_input": dict(parent.get("test_input") or {}),
+            "code": parent.get("code") or parent.get("implementation") or "",
+        }
+        logger.info(
+            "[Iterate] 已加载父版本契约（补丁模式基座）: parent=%s root=%s next=%s "
+            "params=%d constraints=%d code_chars=%d",
+            contract["tool_id"], root_tool_id, contract["new_tool_id"],
+            len(contract["parameters"]), len(contract["constraints"]),
+            len(contract["code"]),
+        )
+        return contract
+
+    async def _preflight_external_interface(
+        self, spec: SkillSpec, parent_code: str = ""
+    ) -> Optional[Dict[str, Any]]:
+        """external_api 模式：沙箱内真实调用接口做连通性预检。
+
+        在规格确认阶段就发现「URL 错误/接口不可达/参数问题」，
+        避免等代码生成（每轮 2-4 分钟）后沙箱执行才暴露。
+
+        parent_code: 升级场景的父版本代码——约束中只有裸 URL（无查询串）时，
+        从中提取父代码已验证的查询参数（如 count/offset）作为预检基线，
+        防止新 spec 参数（如 limit）被误判为接口可用参数。
+        """
+        from core.tools.external.interface_preflight import (
+            build_interface_probe,
+            interpret_probe_result,
+        )
+        from core.tools.external.sandbox_runner import SandboxRunner
+
+        probe = build_interface_probe(spec, parent_code=parent_code)
+        if probe is None:
+            return None
+        runner = SandboxRunner(timeout=25)
+        sandbox = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: runner.run(probe["code"], spec, test_input=probe["params"])
+        )
+        verdict = interpret_probe_result(sandbox)
+        verdict["url"] = probe["url"]
+        # 实测验证可用的查询参数 = 基线参数（用户 URL 文档化查询参数）。
+        # 疑似业务过滤参数（如 brand_name）经差分测试后落在
+        # ignored_params（被忽略→本地过滤）/ server_filter_params（服务端过滤生效）
+        baseline = probe.get("baseline_params") or {}
+        if baseline:
+            verdict["probed_params"] = dict(baseline)
+        verdict["checked_at"] = datetime.utcnow().isoformat()
+        logger.info(
+            "[Preflight] 外部接口预检 tool_id=%s url=%s status=%s message=%s",
+            spec.tool_id,
+            probe["url"],
+            verdict.get("status"),
+            verdict.get("message"),
+        )
+        return verdict
+
     async def preview_spec(
         self, session_id: str, user_message: str = "确认"
     ) -> Optional[Dict[str, Any]]:
@@ -1008,9 +1297,16 @@ test_input: {spec.test_input}
         if not session:
             raise ValueError(f"会话 {session_id} 不存在")
 
+        # 迭代模式：加载父版本契约，规格生成走升级补丁模式（父契约 + delta）
+        parent_contract = None
+        if session.iterate_skill_id:
+            parent_contract = await self._load_parent_skill_contract(
+                session.iterate_skill_id
+            )
+
         # 第一遍：生成草稿 spec（无侦察事实）
         draft_spec = await asyncio.get_event_loop().run_in_executor(
-            None, self._analyzer.preview_spec, session, user_message
+            None, self._analyzer.preview_spec, session, user_message, None, parent_contract
         )
         if not draft_spec:
             return None
@@ -1035,7 +1331,8 @@ test_input: {spec.test_input}
             and fact_report.has_spec_grounding_facts
         ):
             enriched_spec = await asyncio.get_event_loop().run_in_executor(
-                None, self._analyzer.preview_spec, session, user_message, fact_report
+                None, self._analyzer.preview_spec, session, user_message, fact_report,
+                parent_contract,
             )
         final_spec = enriched_spec or draft_spec
 
@@ -1043,13 +1340,47 @@ test_input: {spec.test_input}
         # 避免再次调用 LLM 生成规格导致前端长时间停留在 0%。
         session.spec = final_spec
         self._apply_handoff_context_to_spec(session.spec, session.handoff_context)
+        # 迭代模式：继承父版本接口规格约束（含 URL），确认页不再出现
+        # 「未识别到接口 URL」警告，代码生成也不丢接口契约
+        if session.iterate_skill_id:
+            await self._inherit_parent_interface_constraints(
+                session.spec, session.iterate_skill_id
+            )
         session.fact_report = fact_report
         await self._save_session(session)
+
+        # 外部接口预检：沙箱内真实调用接口验证连通性，结果展示在确认页
+        interface_preflight = None
+        if classify_requirement_mode(session.spec) == "external_api":
+            # 升级场景：带父代码，预检基线沿用父版本已验证的查询参数
+            preview_parent_code = ""
+            if session.iterate_skill_id:
+                preview_parent_code = await self._load_parent_skill_code(session.iterate_skill_id)
+            try:
+                interface_preflight = await self._preflight_external_interface(
+                    session.spec, parent_code=preview_parent_code
+                )
+            except Exception as exc:
+                logger.warning("[Preflight] 接口预检失败（不阻塞确认）: %s", exc)
+            if interface_preflight is not None:
+                try:
+                    await self._db[SESSION_COLLECTION].update_one(
+                        {"session_id": session.session_id},
+                        {"$set": {"interface_preflight": interface_preflight}},
+                    )
+                except Exception as exc:
+                    logger.warning("[Preflight] 预检结果落库失败: %s", exc)
 
         return {
             "spec": final_spec.model_dump(),
             "recommendations": self._build_session_recommendations(spec=final_spec, fact_report=fact_report),
             "fact_report": fact_report.model_dump() if fact_report else None,
+            "interface_preflight": interface_preflight,
+            # 升级补丁模式的变更点清单（确认页 diff 式展示：改了什么、其余继承）
+            "upgrade_change_points": (
+                (final_spec.metadata or {}).get("upgrade_change_points")
+                if parent_contract else None
+            ),
         }
 
     async def confirm_spec(
@@ -1077,8 +1408,13 @@ test_input: {spec.test_input}
         fact_report = session.fact_report
         if fact_report is None:
             # 需要先生成草稿 spec 用于侦察
+            draft_parent_contract = (
+                await self._load_parent_skill_contract(session.iterate_skill_id)
+                if session.iterate_skill_id else None
+            )
             draft_spec = await asyncio.get_event_loop().run_in_executor(
-                None, self._analyzer.preview_spec, session, user_message
+                None, self._analyzer.preview_spec, session, user_message,
+                None, draft_parent_contract,
             )
             if draft_spec:
                 # 向量搜索：从能力索引中召回语义相关的工具
@@ -1104,9 +1440,14 @@ test_input: {spec.test_input}
             session.updated_at = datetime.utcnow()
             await self._save_session(session)
         else:
-            # 基于侦察事实生成最终 SkillSpec
+            # 基于侦察事实生成最终 SkillSpec（迭代模式带父契约走补丁模式）
+            confirm_parent_contract = (
+                await self._load_parent_skill_contract(session.iterate_skill_id)
+                if session.iterate_skill_id else None
+            )
             session, spec = await asyncio.get_event_loop().run_in_executor(
-                None, self._analyzer.confirm_spec, session, user_message, fact_report
+                None, self._analyzer.confirm_spec, session, user_message, fact_report,
+                confirm_parent_contract,
             )
 
         if not spec:
@@ -1117,10 +1458,65 @@ test_input: {spec.test_input}
 
         self._apply_handoff_context_to_spec(spec, session.handoff_context)
 
+        # 迭代模式：继承父版本接口规格约束（含 URL）——preview 缓存复用路径
+        # 也要兜底，防止升级版丢失接口契约导致代码生成臆造 URL
+        if session.iterate_skill_id and await self._inherit_parent_interface_constraints(
+            spec, session.iterate_skill_id
+        ):
+            session.spec = spec
+            await self._save_session(session)
+
+        # 迭代模式：提前加载父版本代码（预检基线参数 + 管线升级基线共用，避免重复查库）
+        parent_code = ""
+        if session.iterate_skill_id:
+            parent_code = await self._load_parent_skill_code(session.iterate_skill_id)
+
+        # 外部接口预检拦截：接口明确不可用（不可达/4xx/5xx）时阻止代码生成，
+        # 避免烧掉 2-4 分钟/轮的生成后才在沙箱发现接口问题。
+        # preview 已缓存结果则复用；直接确认（跳过 preview）时现跑。
+        if classify_requirement_mode(spec) == "external_api":
+            preflight = None
+            try:
+                sess_doc = await self._db[SESSION_COLLECTION].find_one(
+                    {"session_id": session_id}, {"interface_preflight": 1}
+                )
+                preflight = (sess_doc or {}).get("interface_preflight")
+            except Exception:
+                preflight = None
+            if preflight is None:
+                try:
+                    preflight = await self._preflight_external_interface(
+                        spec, parent_code=parent_code
+                    )
+                except Exception as exc:
+                    logger.warning("[Preflight] 确认阶段预检失败（放行）: %s", exc)
+                if preflight is not None:
+                    try:
+                        await self._db[SESSION_COLLECTION].update_one(
+                            {"session_id": session_id},
+                            {"$set": {"interface_preflight": preflight}},
+                        )
+                    except Exception:
+                        pass
+            if preflight and preflight.get("status") == "failed":
+                return {
+                    "status": "failed",
+                    "message": (
+                        f"外部接口预检未通过，已阻止代码生成：{preflight.get('message')}。"
+                        "请修正接口规格（URL/请求头/参数）后重新确认。"
+                    ),
+                    "interface_preflight": preflight,
+                }
+
+        # 迭代模式：父版本代码作为升级基线（小改动场景，避免从零重写）
+        iteration_mode = "upgrade" if parent_code else "repair"
+
         # fact_report 同时传递给管线，跳过内部重复侦察
         return await self._launch_pipeline_task(
             session=session, spec=spec, fact_report=fact_report,
             codegen_timeout=codegen_timeout,
+            initial_code=parent_code,
+            iteration_mode=iteration_mode,
         )
 
     async def repair_session(
@@ -1535,6 +1931,56 @@ test_input: {spec.test_input}
 
         return result.modified_count > 0
 
+    async def update_skill_info(
+        self, skill_id: str, display_name: str, description: str
+    ) -> bool:
+        """更新 Skill 的展示名称与功能说明（用户手动编辑）。
+
+        仅允许改这两个展示字段——参数/代码/约束属于已验证契约，
+        要改请走迭代优化生成新版本。更新后同步运行时 ToolRegistry
+        （名称/描述是 ToolMetadata 的一部分）与能力索引。
+        """
+        clean_name = str(display_name or "").strip()
+        clean_desc = str(description or "").strip()
+        if not clean_name:
+            raise ValueError("Skill 名称不能为空")
+
+        skill_doc = await self._db[SKILL_COLLECTION].find_one({"tool_id": skill_id})
+        if not skill_doc:
+            return False
+
+        await self._db[SKILL_COLLECTION].update_one(
+            {"tool_id": skill_id},
+            {
+                "$set": {
+                    "display_name": clean_name,
+                    "description": clean_desc,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            },
+        )
+
+        # 同步运行时注册（用更新后的文档重新注册，ToolMetadata 名称/描述随之刷新）
+        try:
+            from core.tools.registry import get_tool_registry
+            from core.tools.external_skill_loader import register_single_external_skill
+
+            skill_doc["display_name"] = clean_name
+            skill_doc["description"] = clean_desc
+            skill_doc["status"] = skill_doc.get("status", "active")
+            register_single_external_skill(None, get_tool_registry(), skill_doc)
+        except Exception as e:
+            logger.warning(f"⚠️ Skill '{skill_id}' 说明更新后运行时同步失败: {e}")
+
+        # 能力索引含名称/描述，异步刷新
+        try:
+            from app.services.capability_index_service import CapabilityIndexService
+            asyncio.create_task(CapabilityIndexService(self._db).ensure_index())
+        except Exception as e:
+            logger.warning(f"⚠️ Skill '{skill_id}' 能力索引刷新失败: {e}")
+
+        return True
+
     async def delete_skill(self, skill_id: str) -> bool:
         """删除 Skill，并清理运行时注册和工具绑定。"""
         result = await self._db[SKILL_COLLECTION].delete_one({"tool_id": skill_id})
@@ -1568,9 +2014,10 @@ test_input: {spec.test_input}
         # 🔬 打印前端传来的 test_args
         logger.info(f"🔬 [test_skill] 原始 test_args={test_args}")
 
-        # 过滤掉空值参数，让函数默认值生效（前端表单可能把 null 渲染为 0）
+        # 过滤掉未填写的参数（None/空字符串），让函数默认值生效。
+        # 注意 0/False 是合法入参（如 offset=0），不能当 falsy 删掉。
         if test_args:
-            test_args = {k: v for k, v in test_args.items() if v is not None and v != '' and v != 0}
+            test_args = {k: v for k, v in test_args.items() if v is not None and v != ''}
             logger.info(f"🔬 [test_skill] 过滤后 test_args={test_args}")
 
         runner = SandboxRunner()
@@ -1801,6 +2248,9 @@ test_input: {spec.test_input}
             "data_source": spec.data_source,
             "parameters": [p.model_dump() for p in spec.parameters],
             "expected_output": spec.expected_output.model_dump(),
+            # 持久化行为/接口规格约束：迭代升级时从中继承接口契约（含 URL），
+            # 避免新版本丢失接口地址导致代码生成臆造 URL
+            "constraints": list(spec.constraints or []),
             "code": result.final_code,
             "metadata": metadata,
             "test_input": spec.test_input,

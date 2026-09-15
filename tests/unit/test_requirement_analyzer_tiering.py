@@ -236,7 +236,7 @@ class _StubAnalyzer:
         self._spec = spec
         self.preview_calls = []
 
-    def preview_spec(self, session, user_message, fact_report=None):
+    def preview_spec(self, session, user_message, fact_report=None, parent_contract=None):
         self.preview_calls.append(fact_report)
         return self._spec
 

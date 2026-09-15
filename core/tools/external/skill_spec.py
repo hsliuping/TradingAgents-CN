@@ -209,6 +209,7 @@ class EvalScore(BaseModel):
     completeness: float = 0.0       # 完整性 (0-10)
     relevance: float = 0.0          # 相关性 (0-10)
     format_quality: float = 0.0     # 格式质量 (0-10)
+    expert_comment: str = ""        # Judge 专家一句话评语（实时展示给用户）
 
     @property
     def total(self) -> float:

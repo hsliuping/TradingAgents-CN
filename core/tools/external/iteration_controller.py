@@ -27,9 +27,6 @@ from typing import Any, Callable, Dict, List, Optional
 from core.llm import UnifiedLLMClient, Message
 from core.llm.tool_normalizer import ToolCallNormalizer
 
-from core.skill_runtime.project_access import PROJECT_DATA_ACCESS_DOC
-from core.skill_runtime.data_access import LOCAL_DATA_API_DOC
-
 from .business_verifier import BusinessVerifierRegistry
 from .code_generator import CODEGEN_LLM_TIMEOUT_SECONDS, CodeGenerator
 from .output_evaluator import OutputEvaluator
@@ -159,6 +156,8 @@ class IterationController:
         progress_callback: Optional[Callable[[str, str, int, float], None]] = None,
         fact_report: Optional[ImplementationFactReport] = None,
         codegen_timeout: Optional[int] = None,
+        thinking_callback: Optional[Callable[[str, str], None]] = None,
+        iteration_mode: str = "repair",
     ) -> PipelineResult:
         """
         执行完整的生成管线
@@ -170,6 +169,8 @@ class IterationController:
             progress_callback: 进度回调 (stage, message, iteration, progress)
             fact_report: 预构建的侦察报告（侦察前置模式），为 None 时内部自动执行侦察
             codegen_timeout: 代码生成单次 LLM 调用超时（秒），None 用默认值
+            thinking_callback: 思考过程回调 on_thinking(kind, text)，透传给代码生成器实时展示
+            iteration_mode: "repair"=失败后定向修复；"upgrade"=在已验证旧版本上最小改动升级
 
         Returns:
             PipelineResult: 管线最终结果
@@ -180,10 +181,10 @@ class IterationController:
         feedback = initial_feedback
         previous_code = initial_code
 
-        def _report(stage: str, message: str, it: int, prog: float):
+        def _report(stage: str, message: str, it: int, prog: float, extra: Optional[Dict[str, Any]] = None):
             if progress_callback:
                 try:
-                    progress_callback(stage, message, it, prog)
+                    progress_callback(stage, message, it, prog, extra)
                 except Exception as e:
                     logger.warning(f"progress_callback 异常: {e}")
 
@@ -236,6 +237,9 @@ class IterationController:
                     previous_code=previous_code,
                     fact_report=fact_report,
                     timeout_seconds=codegen_timeout,
+                    on_thinking=thinking_callback,
+                    # 仅首轮（基于父版本代码）用升级文案；后续轮是在修新代码的问题
+                    iteration_mode=("upgrade" if iteration_mode == "upgrade" and round_num == 1 else "repair"),
                 )
                 iteration.generated_code = generated
                 # 详细日志：代码摘要
@@ -545,6 +549,15 @@ class IterationController:
                 f"   可执行性: {eval_score.executability} | 真实性: {eval_score.authenticity}\n"
                 f"   完整性: {eval_score.completeness} | 相关性: {eval_score.relevance}\n"
                 f"   格式质量: {eval_score.format_quality}"
+            )
+            # 评估结果实时透出：前端在评估完成的瞬间即可看到各维度分数与评语
+            _eval_passed = eval_score.total >= PASS_THRESHOLD
+            _report(
+                "output_evaluation",
+                f"质量评估完成：{eval_score.total}/10（{'达标' if _eval_passed else '未达标'}）",
+                round_num,
+                0.77,
+                extra=self._build_eval_result_extra(eval_score, round_num),
             )
 
             if eval_score.total < PASS_THRESHOLD:
@@ -1157,11 +1170,16 @@ class IterationController:
         progress_callback: Optional[Callable[[str, str, int, float], None]] = None,
         fact_report: Optional[ImplementationFactReport] = None,
         codegen_timeout: Optional[int] = None,
+        thinking_callback: Optional[Callable[[str, str], None]] = None,
+        iteration_mode: str = "repair",
     ) -> PipelineResult:
         """SkillGeneration 专用 Agent Loop。
 
         外层 LLM 可以在每轮 pipeline_tool 前后调用常驻查询/探针工具；pipeline_tool
         只执行单轮候选生成与质控，不在内部做多轮重试。
+
+        iteration_mode: "repair"=失败后定向修复；"upgrade"=在已验证旧版本
+        （initial_code）上做最小改动升级，首轮代码生成携带升级基线与指令。
         """
         start_time = time.time()
         run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1191,10 +1209,10 @@ class IterationController:
             bool(fact_report),
         )
 
-        def _report(stage: str, message: str, it: int, prog: float):
+        def _report(stage: str, message: str, it: int, prog: float, extra: Optional[Dict[str, Any]] = None):
             if progress_callback:
                 try:
-                    progress_callback(stage, message, it, prog)
+                    progress_callback(stage, message, it, prog, extra)
                 except Exception as e:
                     logger.warning("progress_callback 异常: %s", e)
 
@@ -1214,6 +1232,7 @@ class IterationController:
             "verified_facts": verified_facts,
             "progress_callback": _report,
             "codegen_timeout": codegen_timeout,
+            "thinking_callback": thinking_callback,
         }
         tools = self._build_agentic_tools(
             spec=spec,
@@ -1221,6 +1240,7 @@ class IterationController:
             iterations=iterations,
             fact_report=fact_report,
             state=agentic_state,
+            iteration_mode=iteration_mode,
         )
         tool_defs = [ToolCallNormalizer.normalize_tool_definition(func) for func in tools.values()]
         client = self._get_client()
@@ -1234,8 +1254,11 @@ class IterationController:
             len(known_context.get("known_verified_facts") or []),
             sorted(tools.keys()),
         )
-        agentic_system_prompt = self._build_agentic_system_prompt()
-        agentic_user_prompt = self._build_agentic_task_prompt(spec, initial_feedback, fact_report, known_context)
+        agentic_system_prompt = self._build_agentic_system_prompt(spec)
+        agentic_user_prompt = self._build_agentic_task_prompt(
+            spec, initial_feedback, fact_report, known_context,
+            parent_code=(initial_code if iteration_mode == "upgrade" else ""),
+        )
 
         # 将完整的 agentic prompt 写入日志文件，方便排查 LLM 未调用推荐 helper 的问题
         self._dump_agentic_prompt_to_logfile(spec, agentic_system_prompt, agentic_user_prompt, fact_report)
@@ -1346,19 +1369,34 @@ class IterationController:
                                         f"{latest.failure_summary}"
                                     ),
                                 ))
-                                if stale_failure_counts[signature] >= _STALE_FAILURE_THRESHOLD:
+                                # 静态验证是纯确定性检查（无环境噪声）：同一签名连续 2 次
+                                # 即说明 LLM 修不动，通常是规格级错误（如参数名不可实现），
+                                # 早熔断省一轮 2-4 分钟的代码生成
+                                is_static_sig = signature.startswith("静态验证失败")
+                                effective_threshold = 2 if is_static_sig else _STALE_FAILURE_THRESHOLD
+                                if stale_failure_counts[signature] >= effective_threshold:
+                                    blocked_hint = (
+                                        "该错误为确定性校验失败且两轮重试未变，"
+                                        "大概率是规格问题而非代码问题——请检查 SkillSpec 的参数定义是否可实现。"
+                                        if is_static_sig
+                                        else ""
+                                    )
                                     failure_result = PipelineToolResult(
                                         status="blocked",
                                         round_number=latest.round_number,
-                                        failure_summary=f"连续 {_STALE_FAILURE_THRESHOLD} 次出现相同失败，触发 stale failure 熔断。\n{latest.failure_summary}",
+                                        failure_summary=(
+                                            f"连续 {effective_threshold} 次出现相同失败，触发 stale failure 熔断。"
+                                            f"{blocked_hint}\n{latest.failure_summary}"
+                                        ),
                                         verified_facts=list(verified_facts),
                                         should_retry=False,
                                     )
                                     logger.warning(
-                                        "🤖 [AgenticSkill] stale_failure_blocked tool_id=%s signature=%s count=%s",
+                                        "🤖 [AgenticSkill] stale_failure_blocked tool_id=%s signature=%s count=%s threshold=%s",
                                         spec.tool_id,
                                         signature[:120],
                                         stale_failure_counts[signature],
+                                        effective_threshold,
                                     )
                                     break
                             if latest.status == "blocked" or not latest.should_retry:
@@ -1559,6 +1597,7 @@ class IterationController:
         iterations: List[IterationRound],
         fact_report: Optional[ImplementationFactReport],
         state: Dict[str, Any],
+        iteration_mode: str = "repair",
     ) -> Dict[str, Callable]:
         from .recon_tools import (
             check_field_coverage,
@@ -1599,6 +1638,9 @@ class IterationController:
             单轮包含：代码生成、静态校验、沙箱执行、Judge 评分、业务验收和边缘测试。
             不会在工具内部自动进入下一轮；下一步由 Agent Loop 决定。"""
             round_num = len(iterations) + 1
+            # 仅首轮（基于父版本代码）用升级文案；首轮之后 previous_code 已换成
+            # 本轮新生成的代码，属于失败修复语义
+            round_mode = "upgrade" if iteration_mode == "upgrade" and round_num == 1 else "repair"
             result = self._run_pipeline_tool_once(
                 spec=spec,
                 run_id=run_id,
@@ -1609,6 +1651,8 @@ class IterationController:
                 progress_callback=state.get("progress_callback"),
                 verified_facts=state.get("verified_facts") or [],
                 codegen_timeout=state.get("codegen_timeout"),
+                thinking_callback=state.get("thinking_callback"),
+                iteration_mode=round_mode,
             )
             self._last_agentic_pipeline_result = result
             state["feedback"] = result.failure_summary or state.get("feedback", "")
@@ -1635,7 +1679,49 @@ class IterationController:
         }
 
     @staticmethod
-    def _build_agentic_system_prompt() -> str:
+    def _build_agentic_system_prompt(spec: Optional[SkillSpec] = None) -> str:
+        """Agent Loop 协调者 system prompt，按需求类型分流。
+
+        external_api（外部接口集成，如懂车帝）：去掉本地 helper 复用/数据源标签/
+        股票代码预检等本地数据假设，替换为外部接口防御规则。
+        """
+        from .requirement_analyzer import classify_requirement_mode
+
+        mode = classify_requirement_mode(spec) if spec is not None else "local_data"
+        if mode == "external_api":
+            return """你是 SkillGeneration 专用 Agent Loop，不是普通聊天助手。
+目标：生成一个可注册的 Python Skill，并通过平台硬性质控。
+
+本需求为外部接口集成：数据来自外部 API（与本地股票数据库无关），不要建议查询本地股票集合或使用本地股票数据 helper。
+
+你可以调用工具：
+- pipeline_tool：执行一轮受治理的候选代码生成与质控（代码生成→静态校验→沙箱执行→评分）。这是核心工具，必须调用。
+- run_readonly_query：查询真实样本文档，确认字段和覆盖率（仅在 pipeline_tool 失败后需要核实字段时使用）。
+- probe_interface：真实调用已登记 helper，确认返回形状（仅在 pipeline_tool 失败后需要确认接口形状时使用）。
+- run_diagnostic_script：执行构建期诊断脚本，脚本内可直接 import core.skill_runtime.* 或 core.tools.implementations.* 来验证返回形状。
+- list_external_data_sources：列出系统已登记的外部数据源目录。
+- inspect_collection_schema / inspect_symbol_sample / check_field_coverage / describe_runtime_helper / list_runtime_functions：结构探测工具。
+
+关键规则（按优先级）：
+1. 侦察报告（fact_report）已经为你准备好了，包含接口事实、推荐策略和验证检查。请直接调用 pipeline_tool 生成代码，不要重复侦察。
+2. pipeline_tool 是核心工具。第一轮请直接调用 pipeline_tool，不要先做任何探索。
+3. 只有当 pipeline_tool 返回 failure_summary 且失败原因明确是"字段名错误""接口返回形状不匹配""数据源不可用"时，才使用 probe_interface / run_diagnostic_script 等工具针对性核实，然后再次调用 pipeline_tool。
+4. 最终 Skill 代码必须是独立可运行的同步纯 Python 函数（禁止 async def / await）；
+   允许使用 requests 等标准 HTTP 库直接调用外部接口，不要导入 core.skill_runtime 本地数据模块。
+   禁止依赖 hermes_tools、RPC stub、构建期诊断工具、agent_builder/assistant_ops/skill_builder 等流程类工具。
+5. 接口字段以实际响应为准：字段映射必须来自侦察报告确认的响应结构，禁止臆造字段名或路径。
+6. 不要跳过 pipeline_tool；只有 pipeline_tool pass 才算成功。
+7. 如果确认外部接口无法提供目标能力（限流/鉴权/字段缺失），应停止重试并说明阻塞原因。
+8. 最多 10 步。每步要么调用 pipeline_tool，要么做针对性核实，不要无目的探索。
+9. **探索节奏约束**：连续探索步数（非 pipeline_tool 调用）不得超过 2 步；累计探索步数不得超过 4 步。每 3 步内至少调用 1 次 pipeline_tool。
+10. 🛡️ 外部接口错误预防（生成的代码必须遵循，避免边缘测试失败）：
+   - 参数防御：必填参数缺失或格式非法时立即返回 {"status": "error", "error_code": "invalid_param", "message": ...}，不发起网络请求。
+   - HTTP 调用必须设置超时（timeout=10 左右）并 try-except 包裹；限流时短暂退避，不要在循环里逐条打接口。
+   - 数据为空时优雅返回：{"status": "success", "data": [], "message": "未找到xxx数据"}，绝不可伪造数据。
+   - 返回值一致性：无论成功失败，返回 dict 必须包含 status 字段（"success"/"error"）。
+   - 异常兜底：主函数体用 try-except 包裹，捕获异常后返回结构化错误响应，不要抛出未捕获异常。
+   - 边缘测试会传入非法参数值，代码必须在 5 秒内返回错误响应，不能超时。"""
+
         return """你是 SkillGeneration 专用 Agent Loop，不是普通聊天助手。
 目标：生成一个可注册的 Python Skill，并通过平台硬性质控。
 
@@ -1688,6 +1774,7 @@ class IterationController:
         initial_feedback: str,
         fact_report: Optional[ImplementationFactReport],
         known_context: Optional[Dict[str, List[str]]] = None,
+        parent_code: str = "",
     ) -> str:
         # 只提取关键摘要，避免注入完整 fact_report JSON（过大且不聚焦）
         recon_digest = ""
@@ -1726,11 +1813,39 @@ class IterationController:
         known_context = known_context or {}
         known_failures = "\n".join(f"- {item}" for item in list(known_context.get("known_failure_summaries") or [])[:5])
         known_facts = "\n".join(f"- {item}" for item in list(known_context.get("known_verified_facts") or [])[:12])
+
+        # 接口预检实测事实（external_api 模式）：与 codegen user prompt 共用同一区块，
+        # 协调者据此写反馈——不会给出「把被忽略的业务过滤参数拼进 URL」这类错误指导
+        from .interface_preflight import build_preflight_facts_text
+
+        preflight_block = build_preflight_facts_text(
+            (getattr(spec, "metadata", None) or {}).get("interface_preflight")
+        )
+
+        # 版本升级场景：父版本是已验证基线，协调者必须规划「最小改动」而非从零重做
+        upgrade_block = ""
+        if parent_code:
+            from .code_generator import CodeGenerator
+
+            parent_snippet = CodeGenerator._format_previous_code_for_prompt(parent_code)
+            upgrade_block = f"""
+【⬆️ 版本升级任务 — 这是对已有 Skill 的升级，不是从零生成】
+
+当前版本代码（已通过验证，是本次升级的基线）：
+```python
+{parent_snippet}
+```
+
+升级规划要求：
+- 先识别新规格与当前版本的差异点（加字段/加参数/调整过滤等），只让 pipeline_tool 改动差异相关代码
+- 当前版本的请求构造、分页、重试、响应解析、本地过滤、字段映射等已验证逻辑必须保留，严禁指示 pipeline_tool 重写
+- 若首轮候选把已验证逻辑改坏，后续反馈中明确要求回退到基线实现
+"""
         return f"""请完成以下 Skill 生成任务。
 
 【SkillSpec】
 {json.dumps(spec.model_dump(mode="json"), ensure_ascii=False, indent=2, default=str)}
-
+{preflight_block}{upgrade_block}
 【已有反馈/经验】
 {initial_feedback or '(无)'}
 
@@ -1760,12 +1875,14 @@ class IterationController:
         progress_callback: Optional[Callable[[str, str, int, float], None]],
         verified_facts: List[str],
         codegen_timeout: Optional[int] = None,
+        thinking_callback: Optional[Callable[[str, str], None]] = None,
+        iteration_mode: str = "repair",
     ) -> PipelineToolResult:
         iteration = IterationRound(round_number=round_num)
 
-        def _report(stage: str, message: str, progress: float) -> None:
+        def _report(stage: str, message: str, progress: float, extra: Optional[Dict[str, Any]] = None) -> None:
             if progress_callback:
-                progress_callback(stage, message, round_num, progress)
+                progress_callback(stage, message, round_num, progress, extra)
 
         def _finish(status: str, summary: str, should_retry: bool = True) -> PipelineToolResult:
             snapshot_path = self._persist_round_snapshot(spec.tool_id, run_id, round_num, iteration, fact_report)
@@ -1804,6 +1921,8 @@ class IterationController:
                 previous_code=previous_code,
                 fact_report=fact_report,
                 timeout_seconds=codegen_timeout,
+                on_thinking=thinking_callback,
+                iteration_mode=iteration_mode,
             )
             iteration.generated_code = generated
             self._persist_stage_artifact(
@@ -1915,6 +2034,16 @@ class IterationController:
                     "business_verification": business_verification.model_dump(),
                 },
                 code=generated.code,
+            )
+            # 评估结果实时透出（含业务验收是否通过）
+            _eval_extra = self._build_eval_result_extra(eval_score, round_num)
+            _eval_extra["eval_result"]["business_passed"] = business_verification.passed
+            _eval_passed = eval_score.total >= PASS_THRESHOLD
+            _report(
+                "output_evaluation",
+                f"质量评估完成：{eval_score.total}/10（{'达标' if _eval_passed else '未达标'}）",
+                0.77,
+                extra=_eval_extra,
             )
 
             if self._is_systemic_business_verifier_failure(business_verification):
@@ -2893,6 +3022,16 @@ class IterationController:
         parts.append("⚠️ 优先修复数据获取和业务逻辑问题，不要仅仅调整 status 字段值来规避验收。")
 
         return "\n".join(parts)
+
+    @staticmethod
+    def _build_eval_result_extra(score, round_num: int) -> Dict[str, Any]:
+        """构造质量评估实时事件数据（供前端在评估完成瞬间展示）。"""
+        data = score.model_dump()
+        # total 是 @property，model_dump 不包含，需显式带出
+        data["total"] = score.total
+        data["round"] = round_num
+        data["passed"] = score.total >= PASS_THRESHOLD
+        return {"eval_result": data}
 
     @staticmethod
     def _build_eval_errors(score) -> List[str]:

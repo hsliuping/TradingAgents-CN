@@ -12,16 +12,17 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from core.llm import UnifiedLLMClient, Message
 
 from .skill_spec import GeneratedCode, ImplementationFactReport, SkillSpec, TestCase
 from .symbol_utils import SYMBOL_NORMALIZE_INLINE
-from .external_data_source_catalog import build_external_data_source_doc_for_skill
+from .external_data_source_catalog import (
+    build_external_data_source_doc_for_skill,
+    is_known_external_source,
+)
 from .data_contracts import build_data_contract_doc_for_skill
-from core.skill_runtime.data_access import LOCAL_DATA_API_DOC
-from core.skill_runtime.project_access import PROJECT_DATA_ACCESS_DOC
 from core.skill_runtime import build_factor_catalog_prompt_context
 from .stock_data_catalog import build_stock_data_collection_doc_for_skill
 
@@ -62,6 +63,54 @@ CODING_PATTERNS = """\
 
 # 股票代码参数名（用于判断是否需要注入多格式支持）
 SYMBOL_PARAM_NAMES = frozenset({"symbol", "stock_code", "code", "stock_symbol"})
+
+# 本地数据 API 紧凑索引（local_data 模式注入；替代全量 LOCAL_DATA_API_DOC，
+# 详细签名/Returns 结构由侦察报告 fact_report 按需注入，避免 prompt 膨胀与注意力稀释）
+LOCAL_DATA_API_INDEX = """\
+【本地数据访问 — API 索引（详细签名与返回结构以侦察报告为准）】
+优先本地，再外部。from core.skill_runtime.data_access import ...
+- get_stock_basic_info(symbol) -> dict|None：股票基础信息（name/industry/total_mv/pe_ttm/pb）
+- get_stock_daily_quotes(symbol, start_date, end_date, period="daily", limit=1000) -> list：日线行情（open/high/low/close/volume）
+- get_stock_news(symbol, start_date=None, end_date=None, limit=20) -> list：股票新闻（title/content/publish_time/url）；按日期范围用 get_stock_news_by_date_range
+- get_market_quotes(symbol) -> dict|None：实时行情快照（close/pct_chg/volume/amount）
+- get_latest_stock_price(symbol) -> float|None：标准价格入口（估值类优先用，不要把价格设成 0）
+- get_stock_financial_data(symbol, start_date=None, end_date=None, limit=20) -> list：财务数据（兼容 report_period/report_date）
+- get_stock_financial_periods(symbol, limit=20) -> list：按报告期展开的标准财务记录（同比/CAGR/多期计算优先用）
+- get_stock_valuation_context(symbol) -> dict：估值标准入口（basic_info/market_quotes/current_price/pe_ttm/pb/ps_ttm/financial_data）
+- get_industry_peer_basic_info(industry, exclude_symbol=None, limit=200) -> list：本地同行样本（行业对比/相对估值）
+- summarize_industry_valuation(industry, metric="pb", exclude_symbol=None) -> dict：行业估值统计 average/median/min/max/count（相对估值优先用，不要自己写聚合）
+【标准结构化金融数据】from core.skill_runtime.standard_financial_apis import ...
+- get_historical_financial_annual_series(symbol, years=10) -> dict：最近 N 年年报序列（revenue/net_profit/roe/gross_margin/operating_cashflow/free_cashflow 等）
+- get_profitability_stability_metrics(symbol, years=10) -> dict：盈利稳定性统计（均值/中位数/波动率/变异系数）
+- get_cashflow_quality_trend(symbol, years=10) -> dict：现金流质量趋势（OCF/净利、FCF/净利、OCF/FCF margin）
+- get_historical_valuation_percentile(symbol, metrics=None, lookback_years=5) -> dict：pe_ttm/pb/ps_ttm/pcf_ttm 历史分位与当前值
+⚠️ 历史估值分位不要用 get_market_quotes/get_latest_stock_price（仅当前快照），用 get_historical_valuation_percentile。"""
+
+# 项目数据访问紧凑索引（local_data 模式注入；替代全量 PROJECT_DATA_ACCESS_DOC）
+PROJECT_ACCESS_INDEX = """\
+【项目数据访问 — API 索引（同步函数，禁止 async/await）】
+from core.skill_runtime.project_access import ...
+- query_stock_collection(collection, filters=None, projection=None, sort=None, limit=100) -> list：本地集合通用查询（stock_basic_info/market_quotes/stock_daily_quotes/stock_financial_data/stock_financial_periods/stock_news）
+- aggregate_stock_collection(collection, pipeline, limit=100) -> list：本地聚合（helper 无法满足时再用）
+- list_supported_stock_collections() -> list：可访问集合目录
+- get_external_stock_news(symbol, limit=10) -> dict：外部新闻 {source, data}
+- get_external_historical_data(symbol, start_date, end_date, period="daily") -> dict：外部历史行情（仅 OHLCV，不含估值）
+- get_external_financial_data(symbol, report_type="quarterly", limit=4) -> dict：外部财务数据
+- get_external_valuation_data(symbol, start_date, end_date) -> dict：外部历史估值序列（pe_ttm/pb_mrq/ps_ttm/pcf_ttm；估值类优先用这个）
+- get_external_query_news(query, curr_date, look_back_days=7) -> dict：Google News/Finnhub 新闻
+硬规则：不要 import pymongo/MongoClient；不要硬编码数据库名；不要直接 await provider；inspect_* 仅侦察用；不要导入 external_sources/sync_wrappers/catalog 内部模块。"""
+
+# 外部接口集成规则（external_api 模式注入；此类需求不涉及本地股票数据资产）
+EXTERNAL_API_RULES = """\
+⚠️ 外部接口集成关键要求：
+- 生成的代码必须是独立可运行的同步纯 Python 函数（禁止 async def / await）
+- HTTP 调用必须设置超时（如 requests.get(url, headers=..., timeout=10)），并用 try-except 包裹
+- 外部接口可能限流/偶发失败：单次执行内对同一接口的调用要有节制（合并请求、设置分页上限），必要时加 time.sleep 短暂退避；不要在循环里逐条打接口
+- 参数防御：必填参数缺失或格式非法时立即返回结构化错误，不发起网络请求
+- 数据为空/接口无返回时优雅返回：{"status": "success", "data": [], "message": "未找到xxx数据"}，绝不可伪造数据
+- 返回值一致性：无论成功失败，返回 dict 必须包含 status 字段（"success"/"error"）；失败时包含 error_code 与 message
+- 异常兜底：主函数体用 try-except 包裹，捕获异常后返回结构化错误响应，不要抛出未捕获异常
+- 接口字段以实际响应为准：字段映射必须来自侦察报告确认的响应结构，禁止臆造字段名"""
 
 VALUATION_KEYWORDS = (
     "估值", "valuation", "pe", "pb", "ps", "dcf", "市盈率", "市净率", "市销率",
@@ -117,6 +166,8 @@ class CodeGenerator:
         previous_code: str = "",
         fact_report: Optional[ImplementationFactReport] = None,
         timeout_seconds: Optional[int] = None,
+        on_thinking: Optional[Callable[[str, str], None]] = None,
+        iteration_mode: str = "repair",
     ) -> GeneratedCode:
         """
         生成 Skill 代码
@@ -126,6 +177,10 @@ class CodeGenerator:
             feedback: 上一轮的反馈（迭代时使用）
             previous_code: 上一轮生成的代码（迭代时使用）
             timeout_seconds: 单次 LLM 调用超时（秒），None 用默认值
+            on_thinking: 思考过程回调 on_thinking(kind, text)，
+                kind ∈ {"reset", "reasoning", "content"}，用于前端实时展示
+            iteration_mode: "repair"=失败后定向修复（默认）；
+                "upgrade"=在已验证的旧版本代码上做最小改动升级
 
         Returns:
             GeneratedCode 包含代码、元数据和测试用例
@@ -135,7 +190,9 @@ class CodeGenerator:
 
         # 构建 Prompt
         system_prompt = self._build_system_prompt(spec)
-        user_prompt = self._build_user_prompt(spec, feedback, previous_code, fact_report)
+        user_prompt = self._build_user_prompt(
+            spec, feedback, previous_code, fact_report, iteration_mode=iteration_mode
+        )
 
         # 将完整 prompt 写入日志文件，方便排查 LLM 未调用推荐 helper 的问题
         self._dump_prompt_to_logfile(spec, system_prompt, user_prompt, fact_report)
@@ -158,7 +215,12 @@ class CodeGenerator:
             f"{'...(截断)' if len(user_prompt) > 3000 else ''}\n"
             f"{'─'*50}"
         )
-        response = client.chat(messages, max_tokens=12288)
+        # 有思考回调时走流式（推理模型的 reasoning_content 增量实时透出），
+        # 无回调时保持原有非流式调用
+        if on_thinking is not None:
+            response = client.chat_stream(messages, on_delta=on_thinking, max_tokens=12288)
+        else:
+            response = client.chat(messages, max_tokens=12288)
         raw = response.content or ""
         logger.info(
             f"\n{'─'*50}\n"
@@ -182,13 +244,16 @@ class CodeGenerator:
         feedback: str = "",
         previous_code: str = "",
         fact_report: Optional[ImplementationFactReport] = None,
+        iteration_mode: str = "repair",
     ) -> GeneratedCode:
         """异步版本的 generate"""
         start = time.time()
         client = self._get_client()
 
         system_prompt = self._build_system_prompt(spec)
-        user_prompt = self._build_user_prompt(spec, feedback, previous_code, fact_report)
+        user_prompt = self._build_user_prompt(
+            spec, feedback, previous_code, fact_report, iteration_mode=iteration_mode
+        )
 
         # 将完整 prompt 写入日志文件，方便排查 LLM 未调用推荐 helper 的问题
         self._dump_prompt_to_logfile(spec, system_prompt, user_prompt, fact_report)
@@ -307,11 +372,69 @@ class CodeGenerator:
     # ==================== Prompt 构建 ====================
 
     def _build_system_prompt(self, spec: SkillSpec) -> str:
-        """构建系统提示词"""
+        """构建系统提示词（按需求类型裁剪文档，按需注入）。
+
+        - external_api（外部接口集成，如懂车帝）：只保留外部数据源说明 + 外部接口
+          规则 + 编码规范，不注入本地股票集合目录/数据契约/本地 API 文档/参考模板。
+        - local_data（默认）：用紧凑 API 索引替代全量 API 文档；详细签名和 Returns
+          结构由侦察报告（fact_report）在 user prompt 中按需注入。
+        """
+        from .requirement_analyzer import classify_requirement_mode
+
+        mode = classify_requirement_mode(spec)
+        external_source_doc = build_external_data_source_doc_for_skill(spec)
+
+        # 目录外数据源（如 dongchedi）：系统目录（AKShare/Tushare 等）与需求无关，
+        # 注入完整目录反而诱导 LLM 绕开用户指定接口；改为一条目录外集成说明。
+        if spec.data_source and not is_known_external_source(spec.data_source):
+            external_source_doc = (
+                f"【外部数据源】本次需求的数据源「{spec.data_source}」不在系统外部数据源目录"
+                "（AKShare、Tushare Pro 等）中，属于目录外接口集成：\n"
+                "- 以用户提供的接口规格（URL、请求头、参数、返回字段）为唯一事实源直接实现\n"
+                "- 严禁改用系统目录中的其他数据源（如 AKShare/Tushare）替代用户指定的接口\n"
+                "- 严禁臆造接口路径或字段；接口规格未提及的一律不要假设"
+            )
+
+        if mode == "external_api":
+            logger.info(
+                f"[CodeGenerator] requirement_mode=external_api，system prompt 仅注入外部接口规则 "
+                f"(tool_id={spec.tool_id}, data_source={spec.data_source})"
+            )
+            return f"""你是一个专业的 Python 工具函数生成器。你的任务是根据用户的需求规格书（SkillSpec），生成一个完整的、可直接运行的纯 Python 函数。
+
+本需求为外部接口集成：数据来自外部 API（与本地股票数据库无关）。不要导入 core.skill_runtime 下的任何本地数据模块，不要查询 MongoDB 股票集合，不要使用本地股票数据 helper。
+
+{external_source_doc}
+
+{EXTERNAL_API_RULES}
+
+{CODING_PATTERNS}
+
+【输出格式】
+你必须严格按照以下格式输出，用三个区块分隔：
+
+```python
+# === CODE START ===
+<完整的 Python 代码>
+# === CODE END ===
+```
+
+```json
+// === METADATA START ===
+{{"tool_id": "...", "name": "...", "description": "...", "category": "...", "is_online": true}}
+// === METADATA END ===
+```
+
+```json
+// === TESTS START ===
+[{{"input": {{}}, "expected_fields": [], "expected_type": "list"}}]
+// === TESTS END ===
+```
+"""
+
         template_code = self._get_builtin_template(spec.category)
         stock_data_doc = build_stock_data_collection_doc_for_skill(spec)
         data_contract_doc = build_data_contract_doc_for_skill(spec)
-        external_source_doc = build_external_data_source_doc_for_skill(spec)
         factor_catalog_doc = build_factor_catalog_prompt_context(
             spec.description,
             category=spec.category,
@@ -338,9 +461,9 @@ class CodeGenerator:
 ```"""
         return f"""你是一个专业的 Python 工具函数生成器。你的任务是根据用户的需求规格书（SkillSpec），生成一个完整的、可直接运行的纯 Python 函数。
 
-{LOCAL_DATA_API_DOC}
+{LOCAL_DATA_API_INDEX}
 
-{PROJECT_DATA_ACCESS_DOC}
+{PROJECT_ACCESS_INDEX}
 
 {stock_data_doc}
 
@@ -692,18 +815,47 @@ class CodeGenerator:
 
         return header + "\n\n" + "\n\n".join(sections)
 
+    def _build_preflight_facts_block(self, spec: SkillSpec) -> str:
+        """接口预检实测事实区块（spec.metadata.interface_preflight 存在时注入）。
+
+        预检在规格确认阶段已沙箱真实调用过接口，实测到连通性、返回条数、
+        返回条目的真实字段、验证可用的查询参数。把这些事实喂给 LLM：
+        - 引用字段以实测清单为准，不臆造字段名
+        - 业务过滤条件（如 brand）不在实测查询参数中 → 不得拼进 URL，
+          必须拉取全量数据后按返回字段本地过滤
+        区块文本与 Agent Loop 协调者 prompt 共用同一实现（interface_preflight.
+        build_preflight_facts_text），保证两处规则一致。
+        """
+        from .interface_preflight import build_preflight_facts_text
+
+        preflight = (getattr(spec, "metadata", None) or {}).get("interface_preflight")
+        return build_preflight_facts_text(preflight)
+
     def _build_user_prompt(
         self,
         spec: SkillSpec,
         feedback: str = "",
         previous_code: str = "",
         fact_report: Optional[ImplementationFactReport] = None,
+        iteration_mode: str = "repair",
     ) -> str:
         """构建用户提示词"""
+        from .requirement_analyzer import classify_requirement_mode
+
+        # 跳过非法 Python 标识符/关键字参数（需求分析可能把 HTTP 请求头如
+        # headers.User-Agent 误收录为函数参数，不可能出现在函数签名中）
+        from .static_validator import _is_unusable_param_name
+
+        valid_params = [p for p in spec.parameters if not _is_unusable_param_name(p.name)]
+        skipped_params = [p.name for p in spec.parameters if p not in valid_params]
+        if skipped_params:
+            logger.warning(
+                f"[CodeGenerator] spec 含非法标识符参数，user prompt 已跳过: {skipped_params}"
+            )
         params_desc = "\n".join(
             f"  - {p.name} ({p.type}): {p.description}"
             + (f" [可选, 默认={p.default}]" if not p.required else " [必填]")
-            for p in spec.parameters
+            for p in valid_params
         )
 
         output_desc = (
@@ -719,6 +871,26 @@ class CodeGenerator:
         ) or "  无"
 
         constraints_desc = "\n".join(f"  - {c}" for c in spec.constraints) or "  无"
+
+        # 接口规格区块：constraints 中含 URL 的条目单列，要求逐字使用。
+        # 背景：LLM 曾把用户提供的 rank_data 臆造改写为 rank/data 导致 404。
+        interface_lines = [c for c in spec.constraints if re.search(r"https?://", str(c))]
+        interface_block = ""
+        if interface_lines:
+            interface_desc = "\n".join(f"  {line}" for line in interface_lines)
+            interface_block = f"""
+
+【🌐 接口规格 — 唯一事实源，严禁改写】
+{interface_desc}
+
+- 接口 URL、路径段、查询参数名必须逐字使用上方规格中的原文，严禁按你的训练记忆"纠正"或改写路径
+  （例如规格给的是 rank_data，就绝不能写成 rank/data）
+- 规格未提及的路径/参数一律不要添加；请求头按规格要求设置
+"""
+
+        # 接口预检实测事实：external_api 模式下服务层把预检结果注入 spec.metadata，
+        # 告知 LLM 真实字段与实测可用参数（防臆造字段/臆造查询参数，含本地过滤规则）
+        preflight_block = self._build_preflight_facts_block(spec)
 
         is_valuation_skill = any(keyword in (spec.description or "").lower() for keyword in VALUATION_KEYWORDS)
         valuation_section = ""
@@ -766,11 +938,50 @@ financial_data = ctx["financial_data"]
 """
 
         fact_report_block = self._build_fact_report_block(fact_report)
-        factor_catalog_doc = build_factor_catalog_prompt_context(
-            spec.description,
-            category=spec.category,
-            expected_fields=list(spec.expected_output.fields or []),
-        )
+        # 因子白名单是股票分析因子目录（MA/RSI/MACD 等），与外部接口集成无关；
+        # 关键词匹配对非股票需求易误命中（如"月度/周期"命中 technical_core）
+        is_external_api = classify_requirement_mode(spec) == "external_api"
+        if is_external_api:
+            factor_catalog_doc = ""
+            # Skill Runtime 接口约束/因子约束是本地数据导向，外部接口需求不注入
+            runtime_interface_section = ""
+            factor_rules_section = ""
+            # 「付费 Token 改用 akshare/tushare 替代」会诱导 LLM 抛弃用户指定接口，替换为外部接口版本
+            no_mock_section = """
+【⚠️ 严禁模拟/占位 — 必须真实实现】
+- 禁止 mock、模拟、假数据、占位数据、_generate_mock_data 等
+- 禁止占位注释：如「这里需要实际的 API 调用」「由于无法直接调用」「需要配置密钥」等，必须写出可执行的 requests.get/post 真实调用
+- 不得改用其他数据源（AKShare/Tushare 等）替代用户指定的外部接口
+- 若无数据：返回 {{"status": "success", "data": [], "message": "未找到xxx数据"}}，不可返回伪造数据
+"""
+        else:
+            factor_catalog_doc = build_factor_catalog_prompt_context(
+                spec.description,
+                category=spec.category,
+                expected_fields=list(spec.expected_output.fields or []),
+            )
+            runtime_interface_section = """
+【⚠️ Skill Runtime 接口约束 — 必须遵守】
+- 本项目给生成 Skill 的正式运行时接口只有两个：core.skill_runtime.data_access 与 core.skill_runtime.project_access
+- 数据库 helper、外部数据源桥接、同步包装器都已经收口到 skill_runtime 内部；生成的代码不要直接导入其内部细分模块
+- 如果需要本地数据库数据，优先用 core.skill_runtime.data_access
+- 如果需要外部数据源桥接、同步 wrapper 或通用集合查询，优先用 core.skill_runtime.project_access
+- 严禁直接导入 tradingagents.dataflows.interface、tradingagents.dataflows.providers 或其任意子模块，即使你知道这些内部实现存在，也不能在生成代码中直接使用
+- 若某项能力当前在 skill_runtime 公开接口中不存在，也不要绕过公开接口直连内部 provider；应改用现有公开接口重构方案，或返回清晰的降级结果
+"""
+            factor_rules_section = """
+【⚠️ 常用分析因子约束 — 命中白名单时必须遵守】
+- 如果需求本质上只是 value_core / quality_core / growth_cashflow_core / technical_core 中的现有因子读取、组合或固定公式计算，优先复用现有 helper 或 bundle，不要重新发明同义字段。
+- 若 expected_output.fields 已经命中 catalog 因子字段，返回结构必须沿用这些 factor_id，不要改写为 growth_rate、profit_margin_pct、macdValue 这类新名字。
+- 若需求超出当前白名单因子范围，应明确新增的最小字段/计算缺口，不要把整个 Skill 实现都建立在自造底层因子上。
+"""
+            no_mock_section = """
+【⚠️ 严禁模拟/占位 — 必须真实实现】
+- 禁止 mock、模拟、假数据、占位数据、_generate_mock_data 等
+- 禁止占位注释：如「这里需要实际的 API 调用」「由于无法直接调用」「需要配置密钥」等，必须写出可执行的 requests.get/post 或 akshare 等真实调用
+- 若某 API 需付费 Token（如 JoinQuant），改用 akshare、tushare 等免费替代方案实现，不得用占位逻辑或返回「需配置 API」类提示
+- 若无数据：返回 {{"status": "success", "data": [], "message": "未找到xxx数据"}}，不可返回伪造数据
+"""
 
         prompt = f"""请根据以下 Skill 规格书生成 Python 工具函数代码：
 
@@ -797,37 +1008,47 @@ financial_data = ctx["financial_data"]
 
 【行为约束】
 {constraints_desc}
+{interface_block}
+{preflight_block}
 {valuation_section}
 {symbol_section}
 {factor_catalog_doc}
 {fact_report_block}
-
-【⚠️ Skill Runtime 接口约束 — 必须遵守】
-- 本项目给生成 Skill 的正式运行时接口只有两个：core.skill_runtime.data_access 与 core.skill_runtime.project_access
-- 数据库 helper、外部数据源桥接、同步包装器都已经收口到 skill_runtime 内部；生成的代码不要直接导入其内部细分模块
-- 如果需要本地数据库数据，优先用 core.skill_runtime.data_access
-- 如果需要外部数据源桥接、同步 wrapper 或通用集合查询，优先用 core.skill_runtime.project_access
-- 严禁直接导入 tradingagents.dataflows.interface、tradingagents.dataflows.providers 或其任意子模块，即使你知道这些内部实现存在，也不能在生成代码中直接使用
-- 若某项能力当前在 skill_runtime 公开接口中不存在，也不要绕过公开接口直连内部 provider；应改用现有公开接口重构方案，或返回清晰的降级结果
-
-【⚠️ 常用分析因子约束 — 命中白名单时必须遵守】
-- 如果需求本质上只是 value_core / quality_core / growth_cashflow_core / technical_core 中的现有因子读取、组合或固定公式计算，优先复用现有 helper 或 bundle，不要重新发明同义字段。
-- 若 expected_output.fields 已经命中 catalog 因子字段，返回结构必须沿用这些 factor_id，不要改写为 growth_rate、profit_margin_pct、macdValue 这类新名字。
-- 若需求超出当前白名单因子范围，应明确新增的最小字段/计算缺口，不要把整个 Skill 实现都建立在自造底层因子上。
-
-【⚠️ 严禁模拟/占位 — 必须真实实现】
-- 禁止 mock、模拟、假数据、占位数据、_generate_mock_data 等
-- 禁止占位注释：如「这里需要实际的 API 调用」「由于无法直接调用」「需要配置密钥」等，必须写出可执行的 requests.get/post 或 akshare 等真实调用
-- 若某 API 需付费 Token（如 JoinQuant），改用 akshare、tushare 等免费替代方案实现，不得用占位逻辑或返回「需配置 API」类提示
-- 若无数据：返回 {{"status": "success", "data": [], "message": "未找到xxx数据"}}，不可返回伪造数据
+{runtime_interface_section}
+{factor_rules_section}
+{no_mock_section}
 
 【测试输入】
 {json.dumps(spec.test_input, ensure_ascii=False) if spec.test_input else '无'}
 """
-        if feedback and previous_code:
+        if previous_code:
             truncated_code = self._format_previous_code_for_prompt(previous_code)
-            truncated_feedback = self._truncate_feedback_for_prompt(feedback)
-            prompt += f"""
+            if iteration_mode == "upgrade":
+                # 版本升级：父版本是已通过验证的基线，要求像人类维护者一样做最小改动，
+                # 而不是从零重写（历史教训：重写会丢掉父版本多轮迭代才修好的细节，
+                # 如分页/重试/本地过滤/品牌别名匹配等）
+                upgrade_ask = self._truncate_feedback_for_prompt(feedback) if feedback else ""
+                upgrade_ask_section = ""
+                if upgrade_ask:
+                    upgrade_ask_section = f"\n本次升级需求：\n{upgrade_ask}\n"
+                prompt += f"""
+【⬆️ 版本升级 — 在当前已验证版本的基础上做最小改动，严禁从零重写】
+
+当前版本代码（已通过验证，是本次升级的基线）：
+```python
+{truncated_code}
+```
+{upgrade_ask_section}
+【升级要求 — 极其重要】
+1. **最小改动**：像人类维护者改代码一样——加字段就只加字段、加参数就只加参数，只动与新需求直接相关的代码
+2. **保留已验证逻辑**：请求构造、分页/翻页、重试退避、响应解析、本地过滤、字段映射、异常处理等已跑通的逻辑原样保留，严禁顺手重写或「优化」
+3. **不重新设计**：保持函数结构、命名风格、返回结构不变（新规格明确要求变更的除外）
+4. **函数名以新规格为准**：输出的函数名/tool_id 必须与新规格一致（版本号可能已变化）
+5. **输出完整代码**：在基线上改完后输出完整函数代码，不要输出 diff，也不要用注释省略未改动部分
+"""
+            else:
+                truncated_feedback = self._truncate_feedback_for_prompt(feedback)
+                prompt += f"""
 【⚠️ 迭代修复 — 上一轮代码有问题，请定向修复】
 
 上一轮代码：
@@ -836,7 +1057,7 @@ financial_data = ctx["financial_data"]
 ```
 
 完整执行上下文与反馈：
-{truncated_feedback}
+{truncated_feedback or '(无)'}
 
 【修复要求 — 极其重要】
 1. **定向修复**：只修改有问题的代码，保留已正确工作的部分

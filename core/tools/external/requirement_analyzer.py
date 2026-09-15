@@ -32,6 +32,7 @@ from .financial_schema_context import (
     resolve_financial_schema_context,
 )
 from core.skill_runtime import build_factor_catalog_prompt_context, infer_recommended_factor_packs
+from .upgrade_patch import apply_upgrade_patch, build_upgrade_patch_prompt, parent_contract_to_json
 
 # standard_financial_apis 标准函数摘要 — 注入需求分析提示词，让 LLM 知道项目已内置哪些能力
 STANDARD_FINANCIAL_APIS_SUMMARY = (
@@ -1192,6 +1193,7 @@ class RequirementAnalyzer:
         session: SkillCreationSession,
         user_message: str,
         fact_report: Optional[ImplementationFactReport] = None,
+        parent_contract: Optional[Dict[str, Any]] = None,
     ) -> Tuple[SkillCreationSession, Optional[SkillSpec]]:
         """
         用户确认规格后，生成 SkillSpec
@@ -1200,6 +1202,8 @@ class RequirementAnalyzer:
             session: 当前会话
             user_message: 用户的确认消息（"确认" / 补充修改）
             fact_report: 侦察报告（侦察前置模式），用于增强 spec 生成
+            parent_contract: 迭代模式的父版本契约（含完整参数/约束/代码），
+                传入时走升级补丁模式：LLM 只输出 delta，父契约原样继承
 
         Returns:
             (更新后的会话, 生成的 SkillSpec 或 None)
@@ -1208,7 +1212,10 @@ class RequirementAnalyzer:
         conversation = self._collect_conversation(session, user_message)
 
         # LLM 生成结构化 SkillSpec
-        spec = self._generate_spec(conversation, fact_report=fact_report, session=session)
+        spec = self._generate_spec(
+            conversation, fact_report=fact_report, session=session,
+            parent_contract=parent_contract,
+        )
 
         if spec:
             session.spec = spec
@@ -1223,13 +1230,19 @@ class RequirementAnalyzer:
         session: SkillCreationSession,
         user_message: str = "确认",
         fact_report: Optional[ImplementationFactReport] = None,
+        parent_contract: Optional[Dict[str, Any]] = None,
     ) -> Optional[SkillSpec]:
         """
         仅生成 SkillSpec 预览，不修改会话状态。
         用于规格确认步骤展示，用户确认后再调用 confirm_spec 执行管线。
+
+        parent_contract: 迭代模式的父版本契约，传入时走升级补丁模式
         """
         conversation = self._collect_conversation(session, user_message)
-        return self._generate_spec(conversation, fact_report=fact_report, session=session)
+        return self._generate_spec(
+            conversation, fact_report=fact_report, session=session,
+            parent_contract=parent_contract,
+        )
 
     # ==================== 清晰度评估 ====================
 
@@ -1518,6 +1531,7 @@ class RequirementAnalyzer:
         conversation: str,
         fact_report: Optional[ImplementationFactReport] = None,
         session: Optional[SkillCreationSession] = None,
+        parent_contract: Optional[Dict[str, Any]] = None,
     ) -> Optional[SkillSpec]:
         """通过 LLM 将对话转化为结构化 SkillSpec
 
@@ -1525,7 +1539,21 @@ class RequirementAnalyzer:
             conversation: 收集的对话内容
             fact_report: 侦察报告（侦察前置模式），包含真实字段可用性
             session: 当前会话（用于迭代模式识别，传入时会保留原 tool_id 等版本关系）
+            parent_contract: 父版本契约（服务层加载，含完整参数/约束/代码）。
+                传入时优先走升级补丁模式（LLM 只输出 delta，父契约确定性继承），
+                补丁生成失败时降级为旧版全量生成（prompt 中注入父契约约束）。
         """
+        # 升级补丁模式：父契约 + delta，未提及的字段没有输出通道，
+        # 结构上杜绝「重新发明参数定义/接口约束」（曾把 int=11 重写成
+        # 字符串「月度销量榜」导致接口静默回退热度榜，死循环 4 次尝试）
+        if parent_contract:
+            spec = self._generate_upgrade_spec(conversation, parent_contract)
+            if spec:
+                return spec
+            logger.warning(
+                "[UpgradePatch] 补丁生成失败，降级为全量规格生成（注入父契约上下文）"
+            )
+
         # 规格生成本质是结构化转录（对话已把参数/字段确认清楚），
         # 优先走快速模型，失败回退主模型
         catalog_context = self._build_catalog_context(conversation)
@@ -1551,6 +1579,16 @@ class RequirementAnalyzer:
                 f"   - 这是对原 Skill 的升级，不是创建全新 Skill；功能要在原 Skill 基础上改进，不要完全推翻重写。\n"
                 f"   - 在 constraints 中追加一条：`本 Skill 是 {original_tool_id} 的迭代优化版本`。\n\n"
             )
+            # 降级路径的父契约注入：即使全量生成，参数定义/接口约束也必须以
+            # 父版本多轮验证的事实为准，不得重新发明
+            if parent_contract:
+                iteration_guardrails += (
+                    "10. **父版本契约（多轮实测验证的事实，必须原样继承）**：\n"
+                    f"```json\n{parent_contract_to_json(parent_contract)}\n```\n"
+                    "    - 同名参数的名称/类型/默认值/取值语义、接口约束（URL/请求头/取值要求）"
+                    "必须与父版本完全一致，除非升级需求明确要求修改\n"
+                    "    - 父版本已有的参数和输出字段不得丢失\n\n"
+                )
 
         # 侦察事实注入：将真实的字段可用性、Helper 函数信息注入 prompt
         recon_context = ""
@@ -1593,6 +1631,12 @@ class RequirementAnalyzer:
         prompt += f"对话内容:\n{conversation}\n\n"
         prompt += (
             "请严格用以下 JSON 格式输出（不要其他内容）：\n"
+            "参数命名规则（必须遵守）：\n"
+            "- parameters 中的 name 必须是合法 Python 标识符（snake_case，如 month、rank_data_type）\n"
+            "- HTTP 请求头（User-Agent/Referer/Token 等）、认证密钥、接口 URL 是实现细节，"
+            "写入 constraints（如\"请求需携带 User-Agent 和 Referer 请求头\"），严禁列为函数参数\n"
+            "- parameters 只收录调用方需要传入的业务参数（如月份、代码、类型），"
+            "函数内部写死的常量不收录\n\n"
             "{\n"
             '  "tool_id": "snake_case_id",\n'
             '  "display_name": "中文显示名称",\n'
@@ -1647,6 +1691,8 @@ class RequirementAnalyzer:
                 logger.info(f"SkillSpec LLM 原始返回 (attempt {attempt + 1}/{max_attempts}, {len(last_raw)} 字符):\n{last_raw}")
                 data = self._parse_llm_json(last_raw)
                 if data:
+                    self._sanitize_spec_params(data)
+                    self._ensure_interface_spec_constraints(data, conversation)
                     return self._ensure_spec_validation_checks(SkillSpec(**data))
 
                 last_error = ValueError("LLM 未返回合法 JSON")
@@ -1659,6 +1705,177 @@ class RequirementAnalyzer:
         logger.error(f"SkillSpec 生成最终失败: {last_error}")
         self._raise_analysis_error("SkillSpec 生成", last_error)
         return None
+
+    def _generate_upgrade_spec(
+        self, conversation: str, parent_contract: Dict[str, Any]
+    ) -> Optional[SkillSpec]:
+        """升级补丁模式：LLM 读父契约 + 父代码后只输出 delta，确定性套用成新 spec。
+
+        与全量规格生成的本质区别（对齐编程 agent 的 edit-apply）：
+        - LLM 的输出通道只有「变更清单」，未提及的参数/约束/字段
+          由 apply_upgrade_patch 从父版本原样继承——想重写都没有通道
+        - 父代码完整注入（不截断），满足「先读懂原代码再读新需求」
+
+        Returns:
+            套用补丁后的 SkillSpec；补丁生成/套用失败返回 None（调用方降级）
+        """
+        prompt = build_upgrade_patch_prompt(parent_contract, conversation)
+        last_raw = ""
+        last_error: Optional[Exception] = None
+
+        for attempt in range(2):
+            try:
+                if attempt == 0:
+                    last_raw = self._chat_with_quick_fallback(
+                        [Message(role="user", content=prompt)], stage="升级补丁生成"
+                    )
+                else:
+                    retry_prompt = (
+                        f"你上次的输出无法解析为补丁 JSON，请修正后重新输出。\n"
+                        f"上次输出:\n{last_raw[:6000]}\n\n"
+                        f"错误: {last_error}\n\n"
+                        "请只输出纯 JSON，不要包含任何 Markdown 标记或解释文字。"
+                    )
+                    last_raw = self._chat_with_quick_fallback(
+                        [
+                            Message(role="user", content=prompt),
+                            Message(role="assistant", content=last_raw[:6000]),
+                            Message(role="user", content=retry_prompt),
+                        ],
+                        stage="升级补丁生成",
+                    )
+
+                logger.info(
+                    f"[UpgradePatch] 补丁 LLM 原始返回 (attempt {attempt + 1}/2, "
+                    f"{len(last_raw)} 字符):\n{last_raw}"
+                )
+                patch = self._parse_llm_json(last_raw)
+                if not isinstance(patch, dict):
+                    raise ValueError("补丁必须是 JSON 对象")
+                spec = apply_upgrade_patch(parent_contract, patch)
+                logger.info(
+                    "[UpgradePatch] 补丁套用成功: tool_id=%s 变更点=%s",
+                    spec.tool_id,
+                    spec.metadata.get("upgrade_change_points"),
+                )
+                return spec
+            except Exception as e:
+                last_error = e
+                logger.warning(f"[UpgradePatch] 第 {attempt + 1}/2 次失败: {e}")
+
+        logger.error(f"[UpgradePatch] 补丁生成最终失败: {last_error}")
+        return None
+
+    @staticmethod
+    def _sanitize_spec_params(data: Dict[str, Any]) -> None:
+        """清洗 spec 参数：剔除非法 Python 标识符参数（如 headers.User-Agent）。
+
+        LLM 可能把 HTTP 请求头误收录为函数参数；这类名字不可能出现在函数
+        签名中，会直接导致静态校验死循环。剔除后把头部要求补进 constraints，
+        保证实现信息不丢失。
+        """
+        import keyword as _keyword
+        import re as _re
+
+        def _usable(name: str) -> bool:
+            return bool(_re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name)) and not _keyword.iskeyword(name)
+
+        params = data.get("parameters")
+        if not isinstance(params, list):
+            return
+        valid = []
+        dropped: list[str] = []
+        for p in params:
+            if isinstance(p, dict) and _usable(str(p.get("name") or "")):
+                valid.append(p)
+            elif isinstance(p, dict):
+                dropped.append(str(p.get("name") or "未命名"))
+        if dropped:
+            data["parameters"] = valid
+            constraints = data.get("constraints")
+            if not isinstance(constraints, list):
+                constraints = []
+            constraints.append(
+                f"请求所需的 HTTP 头/认证等实现细节（原参数: {', '.join(dropped)}）"
+                "应在函数内部写死，不作为函数参数暴露"
+            )
+            data["constraints"] = constraints
+            logger.warning(f"[RequirementAnalyzer] 已剔除非法标识符参数: {dropped}")
+
+    @staticmethod
+    def _ensure_interface_spec_constraints(data: Dict[str, Any], conversation: str) -> None:
+        """从对话原文提取接口规格（URL/方法/请求头），兜底写回 constraints。
+
+        背景：用户在外部接口需求中给出的 URL、请求头、参数说明是接口契约的
+        唯一事实源，但规格生成 LLM 可能将其摘要丢失（constraints 为空），
+        导致代码生成阶段臆造 URL（如把 rank_data 写成 rank/data → 404）。
+        """
+        import re as _re
+
+        if not conversation:
+            return
+        # 提取对话中出现的 http(s) URL；查询串是示例参数（应以函数参数实现），
+        # 只保留基础 URL 作为逐字契约，避免诱导 LLM 硬编码示例参数。
+        # 查询串单独作为「文档化查询参数」约束保留——它是接口预检差分测试
+        # 区分「接口真实参数」与「业务过滤参数」（如 brand_name）的依据。
+        # URL 匹配仅限 ASCII URL 字符：中文紧贴 URL 时（如「rank_data发起」）必须截断
+        urls: list[str] = []
+        url_queries: dict[str, str] = {}
+        for m in _re.finditer(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+", conversation):
+            raw = m.group(0)
+            base_url = raw.split("?")[0].rstrip(".,;:")
+            if base_url not in urls:
+                urls.append(base_url)
+            query = raw.split("?", 1)[1].rstrip(".,;:") if "?" in raw else ""
+            if query and base_url not in url_queries:
+                url_queries[base_url] = query
+        if not urls:
+            return
+
+        constraints = data.get("constraints")
+        if not isinstance(constraints, list):
+            constraints = []
+        existing = "\n".join(str(c) for c in constraints)
+
+        added: list[str] = []
+        for base_url in urls:
+            if base_url in existing:
+                continue
+            constraints.insert(
+                0,
+                f"【接口规格 — 必须原样使用】接口 URL: {base_url}（来自用户需求，路径/参数名严禁改写，"
+                "如 rank_data 不得写成 rank/data；URL 中的查询参数仅是示例，实现时以函数参数传参）",
+            )
+            added.append(base_url)
+
+        # 文档化查询参数：用户 URL 原文查询串（幂等：已存在则不重复写）
+        query_added = 0
+        for base_url, query in url_queries.items():
+            if query in existing:
+                continue
+            constraints.insert(
+                1,
+                f"【接口规格】接口查询参数（用户 URL 原文查询串）: {query}"
+                "——仅这些参数名为接口真实查询参数，可拼装进 URL 请求；"
+                "其余业务过滤条件（如品牌/厂商）接口不支持，必须拉取数据后按返回字段本地过滤",
+            )
+            query_added += 1
+
+        # 请求头要求
+        header_kws = ["User-Agent", "Referer", "Authorization", "Content-Type", "Token", "请求头"]
+        mentioned_headers = [kw for kw in header_kws if kw in conversation]
+        if mentioned_headers and "请求头" not in existing and "User-Agent" not in existing:
+            constraints.insert(
+                1,
+                f"【接口规格】请求需携带请求头: {'、'.join(dict.fromkeys(mentioned_headers))}（以用户需求描述为准）",
+            )
+
+        if added or query_added or mentioned_headers:
+            data["constraints"] = constraints
+            logger.warning(
+                f"[RequirementAnalyzer] 对话中检测到接口规格，已兜底写入 constraints: urls={added}, "
+                f"queries={query_added}, headers={mentioned_headers[:4]}"
+            )
 
     @staticmethod
     def _build_recon_context_for_spec(report: ImplementationFactReport) -> str:
