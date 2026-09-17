@@ -1,0 +1,15 @@
+# Docker Desktop override: databases are accessed through the Compose network.
+services:
+  backend:
+    image: hsliup/tradingagents-backend:v1.0.0-preview
+  frontend:
+    image: hsliup/tradingagents-frontend:v1.0.0-preview
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80/health"]
+  nginx:
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80/health"]
+  mongodb:
+    ports: !reset []
+  redis:
+    ports: !reset []

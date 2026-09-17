@@ -1,0 +1,4 @@
+region              = "ap-northeast-3"
+instance_type       = "t3.large"
+ssh_public_key_path = "~/.ssh/tradingagents.pub"
+admin_cidr          = "92.208.35.160" # Replace with your actual public IPv4.

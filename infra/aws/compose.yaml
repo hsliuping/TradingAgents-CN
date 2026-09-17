@@ -1,0 +1,86 @@
+name: tradingagents
+services:
+  mongodb:
+    image: mongo:4.4
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:?required}
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: [CMD, mongo, --quiet, --eval, "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
+    command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  backend:
+    image: hsliup/tradingagents-backend:v1.0.0-preview
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: "27017"
+      MONGODB_USERNAME: admin
+      MONGODB_PASSWORD: ${MONGODB_PASSWORD:?required}
+      MONGODB_DATABASE: tradingagentscn
+      MONGODB_AUTH_SOURCE: admin
+      MONGODB_URL: mongodb://admin:${MONGODB_PASSWORD}@mongodb:27017/tradingagentscn?authSource=admin
+      MONGODB_CONNECTION_STRING: mongodb://admin:${MONGODB_PASSWORD}@mongodb:27017/tradingagentscn?authSource=admin
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?required}
+      CSRF_SECRET: ${CSRF_SECRET:?required}
+      DOCKER_CONTAINER: "true"
+      TRADINGAGENTS_LOG_DIR: /app/logs
+      TRADINGAGENTS_LOG_FILE: /app/logs/tradingagents.log
+      AKSHARE_ENABLED: "true"
+      BAOSTOCK_ENABLED: "true"
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    depends_on:
+      mongodb: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:8000/api/health]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+  frontend:
+    image: hsliup/tradingagents-frontend:v1.0.0-preview
+    restart: unless-stopped
+    depends_on:
+      backend: {condition: service_healthy}
+  nginx:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    ports: ["80:80"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    healthcheck:
+      test: [CMD, wget, --quiet, --spider, http://127.0.0.1/api/health]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+volumes:
+  mongodb_data:
+  redis_data:

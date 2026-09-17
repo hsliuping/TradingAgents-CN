@@ -1,0 +1,7 @@
+.terraform/
+*.tfstate*
+*.tfplan
+terraform.tfvars
+*.auto.tfvars
+crash.log
+admin-initial-password.txt
