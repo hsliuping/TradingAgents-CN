@@ -47,6 +47,7 @@ from app.routers import stock_sync as stock_sync_router
 from app.routers import news_data as news_data_router
 from app.routers import stock_data as stock_data_router
 from app.routers import financial_data as financial_data_router
+from app.routers import workflows as workflows_router
 from app.routers import multi_market_stocks as multi_market_stocks_router
 from app.routers import notifications as notifications_router
 from app.routers import analysis_profiles as analysis_profiles_router
@@ -97,6 +98,10 @@ COMMUNITY_ROUTERS = [
     # Detail.vue 实际调用 sync-status；/save-* 批量导入写入端点经社区版 stub 放行）
     (stock_data_router.router, "stock_data", {"tags": ["stock-data"]}),
     (financial_data_router.router, "financial_data", {"tags": ["financial-data"]}),
+    # 工作流（分析流，r9 自 Pro 划回社区版）：读取列表/详情、执行配置好的流程是社区分析
+    # 基础功能（单股/通用研究/复盘/持仓分析页面共用）；创建/编辑/删除端点带 require_pro
+    # 门控，社区版无编辑 UI（views/pro/workflow 已剔除），API 直调经 stub 放行
+    (workflows_router.router, "workflows", {"tags": ["workflows"]}),
     (tags.router, "tags", {"prefix": "/api", "tags": ["tags"]}),
     (config.router, "config", {"prefix": "/api", "tags": ["config"]}),
     (model_capabilities.router, "model_capabilities", {"tags": ["model-capabilities"]}),

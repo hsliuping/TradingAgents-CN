@@ -8,7 +8,6 @@ router_registry.py 的 try-import 自动降级为空列表，无需任何行级�
 新增 Pro 路由时只改本文件；新增社区路由改 router_registry.py 的 COMMUNITY_ROUTERS。
 """
 
-from app.routers import workflows as workflows_router
 from app.routers import agents as agents_router
 from app.routers import tools as tools_router
 from app.routers import agent_workshop as agent_workshop_router
@@ -35,8 +34,7 @@ from app.routers import templates_debug as templates_debug_router  # ⚠️ DEPR
 # (router, 注册名, include_router kwargs)
 # 注意：与 COMMUNITY_ROUTERS 的 (router, name, kwargs) 结构一致
 PRO_ROUTERS = [
-    # --- 分析流模块（workflows / agents / tools / MCP）---
-    (workflows_router.router, "workflows", {"tags": ["workflows"]}),
+    # --- 分析流模块（agents / tools / MCP；workflows r9 划回社区版）---
     (agents_router.router, "agents", {"tags": ["agents"]}),
     (tools_router.router, "tools", {"tags": ["tools"]}),
     (agent_workshop_router.router, "agent_workshop", {"tags": ["agent-workshop"]}),

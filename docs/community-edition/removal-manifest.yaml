@@ -11,8 +11,8 @@
 #   - 清单变更后必须重新生成并通过全部校验（import 自检 / vue-tsc / build / 泄露扫描）
 # =============================================================================
 
-version: "2026-09-18-r8"
-description: "v3.6.0 社区版开源分离 · r8 stock_data/financial_data 划回社区版"
+version: "2026-09-18-r9"
+description: "v3.6.0 社区版开源分离 · r9 workflows 划回社区版（分析基础功能）"
 
 # ---------------------------------------------------------------------------
 # 整目录删除
@@ -73,8 +73,7 @@ delete_dirs:
 # 整文件删除：后端 Pro 路由（26 个注册 + 2 个死代码）
 # ---------------------------------------------------------------------------
 delete_files_backend_routers:
-  # 分析流模块
-  - app/routers/workflows.py
+  # 分析流模块（r9: workflows.py 划回社区版——"使用"是分析基础功能，见 M4 第 9 项备注）
   - app/routers/agents.py
   - app/routers/tools.py
   - app/routers/agent_workshop.py
@@ -300,6 +299,9 @@ keep_notes:
 #   8) USER_AGREEMENT 条款、channel_config"企业微信"枚举
 #   9) 社区页面加载"分析流程"下拉框调 GET /api/workflows 返回 404（SingleAnalysis/GeneralAnalysis/
 #      PositionReviewDialog/PositionAnalysisDialog，前端 catch 兜底回退默认分析模式，仅 Console 网络层红字，功能无损）
+#      ※ 第 9 项已修复（r9）：workflows.py 划回社区版 COMMUNITY_ROUTERS——工作流"使用"（读取列表/详情、
+#        执行配置好的流程）是社区分析基础功能；编辑/创建/删除等写端点带 require_pro 门控，社区版无编辑 UI
+#        （views/pro/workflow 已剔除），API 直调经 stub 放行（与 stock_data /save-* 同模式）
 #      ※ license/status 404 原第 10 项已修复：stores/license.ts 整文件替换为无网络请求 stub
 # ---------------------------------------------------------------------------
 scan_source_patterns:
