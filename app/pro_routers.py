@@ -22,8 +22,6 @@ from app.routers import email as email_router
 from app.routers import watchlist_groups as watchlist_groups_router
 from app.routers import license as license_router
 from app.routers import reports_export as reports_export_router
-from app.routers import stock_data as stock_data_router
-from app.routers import financial_data as financial_data_router
 from app.routers import historical_data as historical_data_router
 from app.routers import social_media as social_media_router
 from app.routers import prompt_templates as prompt_templates_router
@@ -56,9 +54,8 @@ PRO_ROUTERS = [
     (license_router.router, "license", {"tags": ["license"]}),
     # --- 报告导出（export_reports 门控，M1 自 reports.py 拆分）---
     (reports_export_router.router, "reports_export", {"tags": ["reports"]}),
-    # --- 数据保存（手动数据管理入口，require_pro 门控；news_data 为免费功能已移入社区版 r7）---
-    (stock_data_router.router, "stock_data", {"tags": ["stock-data"]}),
-    (financial_data_router.router, "financial_data", {"tags": ["financial-data"]}),
+    # --- 数据保存（手动数据管理入口，require_pro 门控；news_data r7、stock_data/financial_data
+    #     r8 为免费功能已移入社区版——读取端点本无门控且社区股票详情页实际调用）---
     (historical_data_router.router, "historical_data", {"tags": ["historical-data"]}),
     (social_media_router.router, "social_media", {"tags": ["social-media"]}),
     # --- 提示词模板体系（prompt_templates 门控）---

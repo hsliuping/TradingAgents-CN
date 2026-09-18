@@ -45,6 +45,8 @@ from app.routers import multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_sync as stock_sync_router
 from app.routers import news_data as news_data_router
+from app.routers import stock_data as stock_data_router
+from app.routers import financial_data as financial_data_router
 from app.routers import multi_market_stocks as multi_market_stocks_router
 from app.routers import notifications as notifications_router
 from app.routers import analysis_profiles as analysis_profiles_router
@@ -91,6 +93,10 @@ COMMUNITY_ROUTERS = [
     (stock_sync_router.router, "stock_sync", {"tags": ["stock-sync"]}),
     # 新闻数据中心（免费功能，r7 自 Pro 划回社区版；/save 写入端点经社区版 stub 放行）
     (news_data_router.router, "news_data", {"tags": ["news-data"]}),
+    # 股票/财务数据查询（免费功能，r8 自 Pro 划回社区版；读取端点本无门控，社区股票详情页
+    # Detail.vue 实际调用 sync-status；/save-* 批量导入写入端点经社区版 stub 放行）
+    (stock_data_router.router, "stock_data", {"tags": ["stock-data"]}),
+    (financial_data_router.router, "financial_data", {"tags": ["financial-data"]}),
     (tags.router, "tags", {"prefix": "/api", "tags": ["tags"]}),
     (config.router, "config", {"prefix": "/api", "tags": ["config"]}),
     (model_capabilities.router, "model_capabilities", {"tags": ["model-capabilities"]}),
