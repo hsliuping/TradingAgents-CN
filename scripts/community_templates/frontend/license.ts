@@ -77,7 +77,9 @@ export const useLicenseStore = defineStore('license', () => {
   const isPro = computed(() => false)
   const isEnterprise = computed(() => false)
   const isTrial = computed(() => false)
-  const plan = computed(() => 'free' as const)
+  // 类型保持与 Pro 版一致（完整联合类型），运行时值恒为 'free'，
+  // 消费方的 plan === 'pro' 等分支类型合法（运行时永不命中，走 free 兜底）
+  const plan = computed((): LicenseInfo['plan'] => 'free')
 
   const expireAt = computed(() => null)
   const daysRemaining = computed(() => null)
