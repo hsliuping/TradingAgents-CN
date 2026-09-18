@@ -328,7 +328,16 @@ class ManagerAgent(BaseAgent):
         不影响 agent 主流程。
         """
         from app.core.config import settings
-        from app.models.agent_assertion import AssertionRunResult
+        try:
+            from app.models.agent_assertion import AssertionRunResult
+        except ImportError:
+            # 社区版无断言体系（app/models/agent_assertion 等已随 Pro 开源分离剔除）：
+            # 返回"未运行"占位结果，调用方对 violations/has_error_violation/error_count
+            # 的属性访问均安全（空列表 + False），断言功能整体静默跳过
+            from types import SimpleNamespace
+            return SimpleNamespace(
+                ran=False, violations=[], has_error_violation=False, error_count=0
+            )
         if not getattr(settings, "AGENT_ASSERTION_ENABLED", True):
             return AssertionRunResult(ran=False)
         try:

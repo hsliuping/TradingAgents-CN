@@ -7,6 +7,10 @@
 4. 配置开关：settings.AGENT_EXECUTION_TRACE_ENABLED 控制是否启用
 """
 
+# 注解惰性化：社区版剔除 execution_trace 模型后，类型注解（如 trace -> AgentExecutionTrace）
+# 在 def 执行时不求值，避免 NameError；必须位于其他 import 之前
+from __future__ import annotations
+
 import hashlib
 import logging
 import threading
@@ -14,18 +18,28 @@ import uuid
 from typing import Any, Dict, Optional
 
 from app.core.config import settings
-from app.models.execution_trace import (
-    AgentExecutionTrace,
-    InputSnapshot,
-    LLMConfigSnapshot,
-    OutputSnapshot,
-    PromptSnapshot,
-    TokenUsage,
-    ToolCallRecord,
-    ValidationResult,
-)
-from app.services.execution_trace_service import execution_trace_service
 from app.utils.timezone import now_tz
+
+# 后端依赖可选导入：社区版（Apache 2.0 开源版）已将 app/models/execution_trace 与
+# app/services/execution_trace_service 随 Pro 开源分离剔除。import 失败时本模块
+# 降级为 no-op（is_trace_enabled 恒 False → 调用方 recorder 恒 None → 全部采集段跳过），
+# 8 个调用方（analyst/researcher/manager/universal/base/trader_v2/fundamentals_analyst_v2/
+# workflow builder）零改动，社区版分析主链路不受影响。
+try:
+    from app.models.execution_trace import (
+        AgentExecutionTrace,
+        InputSnapshot,
+        LLMConfigSnapshot,
+        OutputSnapshot,
+        PromptSnapshot,
+        TokenUsage,
+        ToolCallRecord,
+        ValidationResult,
+    )
+    from app.services.execution_trace_service import execution_trace_service
+    _TRACE_BACKEND_AVAILABLE = True
+except ImportError:  # 社区版路径：执行轨迹后端不可用
+    _TRACE_BACKEND_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +61,14 @@ def disable_trace_for_current_thread() -> None:
 def is_trace_enabled() -> bool:
     """检查是否启用轨迹采集
 
-    优先级：线程本地临时标记 > 全局配置
+    优先级：后端可用性 > 线程本地临时标记 > 全局配置
+    - 后端不可用（社区版）恒 False
     - 全局配置 AGENT_EXECUTION_TRACE_ENABLED 默认关闭
     - 分析任务可通过 enable_trace=true 参数临时开启（仅对本次执行生效）
     """
+    # 后端不可用（社区版已剔除 execution_trace 体系）→ 恒关闭
+    if not _TRACE_BACKEND_AVAILABLE:
+        return False
     # 线程本地标记优先
     if getattr(_trace_thread_local, "enabled", False):
         return True
