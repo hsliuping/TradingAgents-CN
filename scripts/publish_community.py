@@ -97,6 +97,8 @@ def do_removals(manifest: dict, output: Path) -> dict:
         ("前端", "delete_files_frontend"),
         ("根目录", "delete_files_root"),
         ("用户文档", "delete_files_docs"),
+        ("核心工具", "delete_files_core_tools"),
+        ("测试", "delete_files_tests"),
     ]:
         for rel in manifest.get(key, []) or []:
             target = output / rel

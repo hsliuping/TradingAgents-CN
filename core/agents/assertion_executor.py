@@ -19,19 +19,30 @@
         # 降级 validation_status
 """
 
+# 注解惰性化：社区版剔除 agent_assertion 模型后，类型注解（如 -> AssertionRunResult）
+# 在 def 执行时不求值，避免 NameError；必须位于其他 import 之前
+from __future__ import annotations
+
 import logging
 import re
 import threading
 from typing import Any, Dict, List, Optional
 
-from app.models.agent_assertion import (
-    AgentAssertion,
-    AssertionRunResult,
-    AssertionSeverity,
-    AssertionType,
-    AssertionViolation,
-)
-from app.services.agent_assertion_service import agent_assertion_service
+# 后端依赖可选导入：社区版（Apache 2.0 开源版）已将 app/models/agent_assertion 与
+# app/services/agent_assertion_service 随 Pro 开源分离剔除。import 失败时本模块降级：
+# run_assertions_sync 直接 raise，由调用方（trader_v2 / manager，均在 try 内）捕获降级
+try:
+    from app.models.agent_assertion import (
+        AgentAssertion,
+        AssertionRunResult,
+        AssertionSeverity,
+        AssertionType,
+        AssertionViolation,
+    )
+    from app.services.agent_assertion_service import agent_assertion_service
+    _ASSERTION_BACKEND_AVAILABLE = True
+except ImportError:  # 社区版路径：断言后端不可用
+    _ASSERTION_BACKEND_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +81,9 @@ class AssertionExecutor:
 
         全程 try/except，失败返回 AssertionRunResult(ran=False)。
         """
+        # 后端不可用（社区版已剔除断言体系）→ 抛出，调用方 try/except 降级
+        if not _ASSERTION_BACKEND_AVAILABLE:
+            raise ImportError("断言后端不可用（社区版无 agent_assertion 体系）")
         try:
             # 1. 加载启用断言（带缓存，由 service 层管理）
             assertions = agent_assertion_service.load_enabled_assertions_sync(agent_id)

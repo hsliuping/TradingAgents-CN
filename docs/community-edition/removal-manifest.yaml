@@ -11,8 +11,8 @@
 #   - 清单变更后必须重新生成并通过全部校验（import 自检 / vue-tsc / build / 泄露扫描）
 # =============================================================================
 
-version: "2026-09-18-r9"
-description: "v3.6.0 社区版开源分离 · r9 workflows 划回社区版（分析基础功能）"
+version: "2026-09-19-r10"
+description: "v3.6.0 社区版开源分离 · r10 Pro 工具/测试剔除 + 断言执行器自守卫"
 
 # ---------------------------------------------------------------------------
 # 整目录删除
@@ -215,6 +215,24 @@ delete_files_docs:
   - docs/02-user-guide/usage-investment_analysis_guide.md
   - docs/02-user-guide/usage-web-interface-detailed-guide.md
   - docs/02-user-guide/usage-web-interface-guide.md
+
+# ---------------------------------------------------------------------------
+# 整文件删除：核心工具（依赖已删 Pro 服务，社区版注册了也是假功能）
+# ---------------------------------------------------------------------------
+delete_files_core_tools:
+  # 交易计划查询工具（依赖 app/services/trading_system_service，已删）：
+  # 社区版保留时 agent 选中会返回错误文本（功能降级不断链），直接剔除
+  - core/tools/implementations/assistant_ops/trading_plan.py
+
+# ---------------------------------------------------------------------------
+# 整文件删除：依赖已删 Pro 模块的测试（社区版 CI 必红）
+# ---------------------------------------------------------------------------
+delete_files_tests:
+  - tests/services/test_agent_workshop_service_publish_flow.py
+  - tests/test_prompt_template_service_sync.py
+  - tests/test_scheduled_analysis_test_endpoint.py
+  # v1.0.1 时代测试目录（conftest import 已删的 prompt_template 服务，整体过时）
+  - tests/v1.0.1
 
 # ---------------------------------------------------------------------------
 # 整文件替换：社区版模板（scripts/community_templates/ → 目标路径）
