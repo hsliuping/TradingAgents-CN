@@ -68,6 +68,11 @@ delete_dirs:
   - backtest-service
   # --- 7zip 二进制（仅私有打包脚本引用；backups.py 等运行时路径均有 os.path.exists 防护，缺失优雅降级）---
   - vendors
+  # --- 个人运行时数据（源分支误跟踪的 ignored 文件：个人分析记录/报告/同步脚本/运行时缓存，禁止进快照）r7 ---
+  - data/analysis_results
+  - data/reports
+  - data/scripts
+  - tradingagents/dataflows/cache
 
 # ---------------------------------------------------------------------------
 # 整文件删除：后端 Pro 路由（26 个注册 + 2 个死代码）
@@ -203,6 +208,9 @@ delete_files_root:
   - 京东云合作协议-修改说明邮件.txt
   - 京东云AgentEngine测试合作协议-修改稿.md
   - 京东云AgentEngine测试合作协议-修改稿.txt
+  # --- 个人本地配置/测试文件（源分支误跟踪的 ignored 文件）r7 ---
+  - frontend/.env.jdyun
+  - tests/test_mongodb_connection.py
 
 # ---------------------------------------------------------------------------
 # 整文件删除：02-user-guide 根目录旧文档（未被前端引用，手册仅保留 user-manual-v3.0.md）
