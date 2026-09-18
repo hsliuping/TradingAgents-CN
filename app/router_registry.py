@@ -44,6 +44,7 @@ from app.routers import sync as sync_router
 from app.routers import multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_sync as stock_sync_router
+from app.routers import news_data as news_data_router
 from app.routers import multi_market_stocks as multi_market_stocks_router
 from app.routers import notifications as notifications_router
 from app.routers import analysis_profiles as analysis_profiles_router
@@ -88,6 +89,8 @@ COMMUNITY_ROUTERS = [
     (stocks_router.router, "stocks", {"prefix": "/api", "tags": ["stocks"]}),
     (multi_market_stocks_router.router, "multi_market_stocks", {"prefix": "/api", "tags": ["multi-market"]}),
     (stock_sync_router.router, "stock_sync", {"tags": ["stock-sync"]}),
+    # 新闻数据中心（免费功能，r7 自 Pro 划回社区版；/save 写入端点经社区版 stub 放行）
+    (news_data_router.router, "news_data", {"tags": ["news-data"]}),
     (tags.router, "tags", {"prefix": "/api", "tags": ["tags"]}),
     (config.router, "config", {"prefix": "/api", "tags": ["config"]}),
     (model_capabilities.router, "model_capabilities", {"tags": ["model-capabilities"]}),

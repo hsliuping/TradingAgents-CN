@@ -25,7 +25,6 @@ from app.routers import reports_export as reports_export_router
 from app.routers import stock_data as stock_data_router
 from app.routers import financial_data as financial_data_router
 from app.routers import historical_data as historical_data_router
-from app.routers import news_data as news_data_router
 from app.routers import social_media as social_media_router
 from app.routers import prompt_templates as prompt_templates_router
 from app.routers import template_history as template_history_router
@@ -57,11 +56,10 @@ PRO_ROUTERS = [
     (license_router.router, "license", {"tags": ["license"]}),
     # --- 报告导出（export_reports 门控，M1 自 reports.py 拆分）---
     (reports_export_router.router, "reports_export", {"tags": ["reports"]}),
-    # --- 数据保存（手动数据管理入口，require_pro 门控）---
+    # --- 数据保存（手动数据管理入口，require_pro 门控；news_data 为免费功能已移入社区版 r7）---
     (stock_data_router.router, "stock_data", {"tags": ["stock-data"]}),
     (financial_data_router.router, "financial_data", {"tags": ["financial-data"]}),
     (historical_data_router.router, "historical_data", {"tags": ["historical-data"]}),
-    (news_data_router.router, "news_data", {"tags": ["news-data"]}),
     (social_media_router.router, "social_media", {"tags": ["social-media"]}),
     # --- 提示词模板体系（prompt_templates 门控）---
     (prompt_templates_router.router, "prompt_templates", {"tags": ["prompt-templates"]}),

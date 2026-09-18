@@ -11,7 +11,7 @@
 #   - 清单变更后必须重新生成并通过全部校验（import 自检 / vue-tsc / build / 泄露扫描）
 # =============================================================================
 
-version: "2026-09-18-r6"
+version: "2026-09-18-r7"
 description: "v3.6.0 社区版开源分离 · 幽灵条目清理（Seed-Evolving 投稿稿已移出私有仓）"
 
 # ---------------------------------------------------------------------------
@@ -93,10 +93,10 @@ delete_files_backend_routers:
   # 报告导出（export_reports 门控）
   - app/routers/reports_export.py
   # 手动数据管理入口（require_pro 门控；数据同步 worker 为社区共享链路，保留）
+  # r7: news_data 为免费功能，移入社区版 COMMUNITY_ROUTERS（读取端点本无门控）
   - app/routers/stock_data.py
   - app/routers/financial_data.py
   - app/routers/historical_data.py
-  - app/routers/news_data.py
   - app/routers/social_media.py
   # 提示词模板体系（prompt_templates 门控）
   - app/routers/prompt_templates.py
