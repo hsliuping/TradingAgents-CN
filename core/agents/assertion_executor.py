@@ -420,16 +420,20 @@ class AssertionExecutor:
     _HANDLERS: Dict[AssertionType, Any] = {}
 
 
-# 填充 handler 映射
-AssertionExecutor._HANDLERS = {
-    AssertionType.TERM_FORBIDDEN: AssertionExecutor._check_term_forbidden,
-    AssertionType.FIELD_REQUIRED: AssertionExecutor._check_field_required,
-    AssertionType.FIELD_ENUM: AssertionExecutor._check_field_enum,
-    AssertionType.FIELD_RANGE: AssertionExecutor._check_field_range,
-    AssertionType.SCHEMA_MATCH: AssertionExecutor._check_schema_match,
-    AssertionType.REGEX_MATCH: AssertionExecutor._check_regex_match,
-    AssertionType.SECTION_REQUIRED: AssertionExecutor._check_section_required,
-}
+# 填充 handler 映射（社区版无 agent_assertion 模型，AssertionType 不可用 → 跳过填充；
+# run_assertions_sync 在后端不可用时已提前 raise，不会访问 _HANDLERS）
+try:
+    AssertionExecutor._HANDLERS = {
+        AssertionType.TERM_FORBIDDEN: AssertionExecutor._check_term_forbidden,
+        AssertionType.FIELD_REQUIRED: AssertionExecutor._check_field_required,
+        AssertionType.FIELD_ENUM: AssertionExecutor._check_field_enum,
+        AssertionType.FIELD_RANGE: AssertionExecutor._check_field_range,
+        AssertionType.SCHEMA_MATCH: AssertionExecutor._check_schema_match,
+        AssertionType.REGEX_MATCH: AssertionExecutor._check_regex_match,
+        AssertionType.SECTION_REQUIRED: AssertionExecutor._check_section_required,
+    }
+except NameError:  # 社区版路径：AssertionType 未定义
+    pass
 
 
 # 全局单例
