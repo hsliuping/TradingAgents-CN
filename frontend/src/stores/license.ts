@@ -1,14 +1,20 @@
 /**
- * 授权信息 Store
- * 
- * 管理用户的 PRO 授权状态和功能权限
+ * 授权信息 Store（社区版）
+ *
+ * 本文件由发布管道（scripts/publish_community.py）生成：
+ * 社区版无授权体系，本 stub 保持与 Pro 版 stores/license.ts 完全一致的公开接口，
+ * 消费方（Dashboard/UserProfile/featureAccess/Learning/DataImport/TradeReview）零改动。
+ *
+ * 行为语义：
+ * - 不发起任何网络请求（无 /api/license/status 探活，社区版无该路由）
+ * - isPro 恒为 false，plan 恒为 'free'
+ * - hasFeature 仅放行免费功能（与后端 community_stub FREE_ACCESS_FEATURES 对齐）
  */
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import request from '@/api/request'
 
-// 授权信息接口
+// 授权信息接口（与 Pro 版保持一致）
 export interface LicenseInfo {
   email: string
   plan: 'free' | 'trial' | 'pro' | 'enterprise'
@@ -19,221 +25,92 @@ export interface LicenseInfo {
   is_valid: boolean
   error_message?: string
   verified_at?: string
-  trial_end_at?: string  // 试用到期时间
-  pro_expire_at?: string  // PRO到期时间
-  offline_mode?: boolean  // 是否离线模式
+  trial_end_at?: string
+  pro_expire_at?: string
+  offline_mode?: boolean
 }
 
-// 高级学员功能列表
+// 高级学员功能列表（与 Pro 版保持一致，仅作为类型与枚举来源）
 export const PRO_FEATURES = [
-  'advanced_courses',        // 高级学员课程
-  'email_notification',      // 邮件通知
-  'watchlist_groups',        // 股票关注列表分组
-  'scheduled_analysis',      // 定时分析
-  'portfolio_analysis',      // 持仓研究
-  'trade_review',            // 操作复盘
-  'batch_analysis',          // 批量分析
-  'export_reports',          // 导出报告
-  'trading_plan_check',      // 交易计划一致性检查
-  'workflow',                // 分析流
-  'workflow_tools',          // 配置Tools
-  'workflow_agents',         // 配置Agent
-  'prompt_templates',        // 提示词模板
+  'advanced_courses',
+  'email_notification',
+  'watchlist_groups',
+  'scheduled_analysis',
+  'portfolio_analysis',
+  'trade_review',
+  'batch_analysis',
+  'export_reports',
+  'trading_plan_check',
+  'workflow',
+  'workflow_tools',
+  'workflow_agents',
+  'prompt_templates',
 ] as const
 
 export type ProFeature = typeof PRO_FEATURES[number]
 
+// 社区版免费放行的功能（与 core/licensing/community_stub.py FREE_ACCESS_FEATURES 对齐）
 const FREE_ACCESS_FEATURES = new Set<ProFeature>([
   'portfolio_analysis',
   'trade_review'
 ])
 
-export const useLicenseStore = defineStore('license', () => {
-  // 🔧 京东云模式：所有功能开放，无需 License 验证
-  const isJdyunMode = import.meta.env.VITE_JDYUN_MODE === 'true'
+// 社区版固定授权信息（Free 档）
+const COMMUNITY_LICENSE_INFO: LicenseInfo = {
+  email: '',
+  plan: 'free',
+  features: ['portfolio_analysis', 'trade_review'],
+  device_registered: false,
+  is_valid: true,
+  offline_mode: false
+}
 
-  // 状态
+export const useLicenseStore = defineStore('license', () => {
+  // 状态（保留接口兼容；licenseInfo 固定为 Free 档，不来自网络）
   const appToken = ref<string | null>(localStorage.getItem('app-token'))
-  const licenseInfo = ref<LicenseInfo | null>(null)
+  const licenseInfo = ref<LicenseInfo | null>({ ...COMMUNITY_LICENSE_INFO })
   const loading = ref(false)
   const error = ref<string | null>(null)
   const lastVerifiedAt = ref<Date | null>(null)
 
-  // 计算属性
-  const isPro = computed(() => {
-    // 🔧 京东云模式：直接返回 true，所有功能开放
-    if (isJdyunMode) return true
-    if (!licenseInfo.value) return false
-    return licenseInfo.value.is_valid &&
-           ['trial', 'pro', 'enterprise'].includes(licenseInfo.value.plan)
-  })
+  // 计算属性：社区版恒定值
+  const isPro = computed(() => false)
+  const isEnterprise = computed(() => false)
+  const isTrial = computed(() => false)
+  // 类型保持与 Pro 版一致（完整联合类型），运行时值恒为 'free'，
+  // 消费方的 plan === 'pro' 等分支类型合法（运行时永不命中，走 free 兜底）
+  const plan = computed((): LicenseInfo['plan'] => 'free')
 
-  const isEnterprise = computed(() => {
-    if (!licenseInfo.value) return false
-    return licenseInfo.value.is_valid &&
-           licenseInfo.value.plan === 'enterprise'
-  })
-
-  const isTrial = computed(() => {
-    if (!licenseInfo.value) return false
-    return licenseInfo.value.is_valid &&
-           licenseInfo.value.plan === 'trial'
-  })
-
-  const plan = computed(() => licenseInfo.value?.plan || 'free')
-
-  // 获取到期时间
-  const expireAt = computed(() => {
-    if (!licenseInfo.value) return null
-    if (licenseInfo.value.plan === 'trial' && licenseInfo.value.trial_end_at) {
-      return new Date(licenseInfo.value.trial_end_at)
-    }
-    if (licenseInfo.value.plan === 'pro' && licenseInfo.value.pro_expire_at) {
-      return new Date(licenseInfo.value.pro_expire_at)
-    }
-    return null
-  })
-
-  // 计算剩余天数
-  const daysRemaining = computed(() => {
-    if (!expireAt.value) return null
-    const now = new Date()
-    const diff = expireAt.value.getTime() - now.getTime()
-    return Math.ceil(diff / (1000 * 60 * 60 * 24))
-  })
-
-  // 是否即将到期（7天内）
-  const isExpiringSoon = computed(() => {
-    if (daysRemaining.value === null) return false
-    return daysRemaining.value > 0 && daysRemaining.value <= 7
-  })
-
-  // 是否已过期
-  const isExpired = computed(() => {
-    if (daysRemaining.value === null) return false
-    return daysRemaining.value <= 0
-  })
-
-  // 是否处于离线模式
-  const isOffline = computed(() => {
-    // 优先检查服务器返回的 offline_mode 标志
-    if (licenseInfo.value?.offline_mode) return true
-    // 其次检查前端错误状态
-    return error.value?.includes('网络') ?? false
-  })
-
-  // 是否有老会员课程访问权限（平台内付费高级学员）
-  // 京东云用户永远没有，只有标准版 pro 用户才有
-  const hasLegacyCourseAccess = computed(() => {
-    if (isJdyunMode) return false
-    if (!licenseInfo.value) return false
-    return licenseInfo.value.is_valid && licenseInfo.value.plan === 'pro'
-  })
+  const expireAt = computed(() => null)
+  const daysRemaining = computed(() => null)
+  const isExpiringSoon = computed(() => false)
+  const isExpired = computed(() => false)
+  const isOffline = computed(() => false)
+  const hasLegacyCourseAccess = computed(() => false)
 
   const hasFeature = (_feature: ProFeature) => {
-    // 🔧 京东云模式：所有功能开放
-    if (isJdyunMode) return true
-    if (FREE_ACCESS_FEATURES.has(_feature)) return true
-    if (!licenseInfo.value?.is_valid) return false
-    if (licenseInfo.value.features.includes(_feature)) return true
-    // trial、pro、enterprise 用户拥有所有 PRO 功能
-    if (['trial', 'pro', 'enterprise'].includes(licenseInfo.value.plan)) {
-      return true
-    }
-    return false
+    return FREE_ACCESS_FEATURES.has(_feature)
   }
 
-  // Actions
+  // Actions：本地空操作，不发网络请求
   const setAppToken = async (token: string) => {
     appToken.value = token
     localStorage.setItem('app-token', token)
-    // 立即刷新状态（强制跳过缓存）
-    await verifyLicense(true)
   }
 
   const clearAppToken = () => {
     appToken.value = null
-    licenseInfo.value = null
+    licenseInfo.value = { ...COMMUNITY_LICENSE_INFO }
     localStorage.removeItem('app-token')
   }
 
-  const verifyLicense = async (force = false, authServer?: string): Promise<boolean> => {
-    // 🔧 京东云模式：跳过 License 验证，直接设置 PRO 状态
-    if (isJdyunMode) {
-      licenseInfo.value = {
-        email: '',
-        plan: 'pro',
-        features: [],
-        device_registered: false,
-        is_valid: true,
-        offline_mode: false
-      }
-      lastVerifiedAt.value = new Date()
-      return true
-    }
-
-    loading.value = true
-    error.value = null
-
-    try {
-      // 调用 /status 接口获取授权状态，force=true 时强制刷新（跳过后端缓存）
-      // 注意：设备ID由后端基于硬件信息自动生成，前端不需要传递
-      const response: any = await request.get('/api/license/status', {
-        params: {
-          force_refresh: force,
-          ...(authServer ? { auth_server: authServer } : {})
-        }
-      })
-
-      if (response.success && response.data) {
-        // 如果用户没有配置 token
-        if (!response.data.has_token) {
-          licenseInfo.value = {
-            email: '',
-            plan: 'free',
-            features: [],
-            auth_server: response.data.auth_server,
-            auth_server_options: response.data.auth_server_options || [],
-            device_registered: false,
-            is_valid: true,
-          }
-          // 清除本地存储的 token
-          appToken.value = null
-          localStorage.removeItem('app-token')
-        } else {
-          licenseInfo.value = {
-            email: response.data.email || '',
-            plan: response.data.plan || 'free',
-            features: response.data.features || [],
-            auth_server: response.data.auth_server,
-            auth_server_options: response.data.auth_server_options || [],
-            device_registered: response.data.device_registered || false,
-            is_valid: response.data.is_valid !== false,
-            error_message: response.data.error_message,
-            trial_end_at: response.data.trial_end_at,
-            pro_expire_at: response.data.pro_expire_at,
-            offline_mode: response.data.offline_mode || false
-          }
-        }
-        lastVerifiedAt.value = new Date()
-        return licenseInfo.value.is_valid
-      } else {
-        error.value = response.message || '获取授权状态失败'
-        return false
-      }
-    } catch (e: any) {
-      error.value = e.message || '网络错误'
-      // 网络错误时保持之前的状态
-      return licenseInfo.value?.is_valid || false
-    } finally {
-      loading.value = false
-    }
+  const verifyLicense = async (_force = false, _authServer?: string): Promise<boolean> => {
+    // 社区版无授权体系：直接返回 Free 档有效状态，不发起请求
+    lastVerifiedAt.value = new Date()
+    return true
   }
 
-  // 初始化时验证
-  if (appToken.value) {
-    verifyLicense()
-  }
+  // 社区版无需初始化验证（不发请求）
 
   return {
     // State
@@ -259,4 +136,3 @@ export const useLicenseStore = defineStore('license', () => {
     verifyLicense
   }
 })
-

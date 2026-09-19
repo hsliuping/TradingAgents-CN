@@ -1,1 +1,0 @@
-import{A as t}from"./index-CrA_uZYV.js";const i={async list(){return await t.get("/api/tags")},async create(a){return await t.post("/api/tags",a)},async update(a,e){return await t.put(`/api/tags/${a}`,e)},async remove(a){return await t.delete(`/api/tags/${a}`)}};export{i as t};

@@ -1,17 +1,9 @@
 /**
- * 高级课程配置 v3.0
+ * 高级课程配置（社区版）
  *
- * 30节系统课程，按"炒股全生命周期"组织
- * 前 FREE_LESSON_COUNT 节免费预览，其余引导至知识星球付费
- *
- * v3.6.0 社区版开源分离 M1 §7.4：免费/付费数据物理分离——
- * 本文件仅承载免费课程元数据（phase-01，前 5 节）；
- * 付费部分（第 6-30 节）在 advancedCourses.pro.ts，
- * 社区版发布时该文件整文件删除、下方 proCourseCategories 替换为空数组。
+ * 本文件由发布管道（scripts/publish_community.py）生成：
+ * 仅承载免费课程元数据（phase-01，前 5 节），无付费内容。
  */
-
-// Pro 付费课程分类（社区版发布时整文件剔除，此行替换为空数组）
-import { proCourseCategories } from './advancedCourses.pro'
 
 export interface Lesson {
   id: string
@@ -57,10 +49,9 @@ const communityCourseCategories: CourseCategory[] = [
   }
 ]
 
-/** 全量课程分类 = 免费部分 + Pro 付费部分（社区版发布后仅剩免费部分） */
+/** 全量课程分类（社区版：仅免费部分） */
 export const advancedCourseCategories: CourseCategory[] = [
-  ...communityCourseCategories,
-  ...proCourseCategories
+  ...communityCourseCategories
 ]
 
 /**
@@ -69,7 +60,7 @@ export const advancedCourseCategories: CourseCategory[] = [
 export function getLesson(categoryId: string, lessonId: string): Lesson | null {
   const category = advancedCourseCategories.find(cat => cat.id === categoryId)
   if (!category) return null
-  
+
   return category.lessons.find(lesson => lesson.id === lessonId) || null
 }
 
@@ -112,9 +103,9 @@ export function getAdjacentLessons(categoryId: string, lessonId: string): {
     if (categoryIndex > 0) {
       const prevCategory = advancedCourseCategories[categoryIndex - 1]
       if (prevCategory.lessons.length > 0) {
-        prev = { 
-          category: prevCategory, 
-          lesson: prevCategory.lessons[prevCategory.lessons.length - 1] 
+        prev = {
+          category: prevCategory,
+          lesson: prevCategory.lessons[prevCategory.lessons.length - 1]
         }
       }
     }

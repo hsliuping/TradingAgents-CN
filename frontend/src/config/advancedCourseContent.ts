@@ -1,17 +1,9 @@
 /**
- * 高级课程内容静态导入映射 v3.0
+ * 高级课程内容静态导入映射（社区版）
  *
- * 所有课程文件位于 docs/07-courses/v3.0/
- *
- * v3.6.0 社区版开源分离 M1 §7.4：免费/付费 loader 物理分离——
- * 本文件仅承载免费课程正文 loader（phase-01，前 5 节）；
- * 付费部分（第 6-30 节）在 advancedCourseContent.pro.ts，
- * 社区版发布时该文件整文件删除、下方 proCourseContentMap 替换为空对象，
- * 付费正文不进入社区版前端构建产物。
+ * 本文件由发布管道（scripts/publish_community.py）生成：
+ * 仅承载免费课程正文 loader（phase-01，前 5 节），无付费正文。
  */
-
-// Pro 付费课程正文 loader（社区版发布时整文件剔除，此行替换为空对象）
-import { proCourseContentMap } from './advancedCourseContent.pro'
 
 // 免费课程文件导入映射（前 5 节，社区版保留）
 const communityCourseContentMap: Record<string, () => Promise<{ default: string }>> = {
@@ -23,10 +15,9 @@ const communityCourseContentMap: Record<string, () => Promise<{ default: string 
   'phase-01-discover/lesson-05-discover-pitfalls.md': () => import('../../../docs/07-courses/v3.0/phase-01-discover/lesson-05-discover-pitfalls.md?raw'),
 }
 
-// 课程文件导入映射 = 免费部分 + Pro 付费部分（社区版发布后仅剩免费部分）
+// 课程文件导入映射（社区版：仅免费部分）
 const courseContentMap: Record<string, () => Promise<{ default: string }>> = {
-  ...communityCourseContentMap,
-  ...proCourseContentMap
+  ...communityCourseContentMap
 }
 
 /**
@@ -39,7 +30,7 @@ export async function getCourseContent(filename: string): Promise<string> {
   if (!loader) {
     throw new Error(`课程文件未找到: ${filename}`)
   }
-  
+
   try {
     const module = await loader()
     return module.default

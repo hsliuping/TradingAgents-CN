@@ -1,9 +1,0 @@
-{
-  "name": "tradingagents-screenshots",
-  "version": "1.0.0",
-  "description": "Screenshot automation for course materials",
-  "private": true,
-  "dependencies": {
-    "playwright-core": "^1.44.0"
-  }
-}
