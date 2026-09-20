@@ -5,6 +5,7 @@ from .china_market_overview import get_china_market_overview
 from .technical_indicators import get_technical_indicators
 from .technical_factor_bundle_tool import get_technical_factor_bundle_tool
 from .qmt_market_tools import get_market_overview_qmt, get_sector_analysis_qmt
+from .dongchedi_sales_rank import get_auto_brand_monthly_sales
 
 # 大盘/指数分析工具
 from .index_market_tools import (
@@ -44,6 +45,7 @@ __all__ = [
     "get_limit_stats",
     "get_index_technical",
     "get_market_overview_qmt",
+    "get_auto_brand_monthly_sales",
     # 板块分析工具
     "get_sector_data",
     "get_fund_flow_data",

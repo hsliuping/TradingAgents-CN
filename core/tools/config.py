@@ -556,6 +556,33 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         related_tools=["get_market_environment", "get_market_overview"],
     ),
     
+    # === 汽车行业数据工具 ===
+    "get_auto_brand_monthly_sales": ToolMetadata(
+        id="get_auto_brand_monthly_sales",
+        name="汽车品牌月度销量",
+        description="查询指定汽车品牌在某个月份下全部车型的销量（懂车帝全国月度销量榜），返回车型排名、月销量、售价区间与名次变化。",
+        category=ToolCategory.MARKET,
+        data_source="dongchedi",
+        is_online=True,
+        icon="🚗",
+        color="#e67e22",
+        parameters=[
+            ToolParameter(name="brand", type="string", description="汽车品牌名称，如“问界”“比亚迪”“理想汽车”，支持模糊匹配", required=True),
+            ToolParameter(name="month", type="string", description="统计月份，格式 YYYYMM（如 202608）；也可传 500（近半年）/1000（近一年）聚合；留空则取最近一个完整月份", required=False, default=""),
+        ],
+        when_to_use="当需要了解某汽车品牌（或旗下车型）的月度销量、判断整车厂商终端销量景气度时使用。适用于汽车产业链（整车/零部件）相关个股的基本面与景气度研究。可用于多品牌销量横向对比。",
+        when_not_to_use="不提供股价、估值或财务数据（应使用 get_stock_fundamentals_unified）；不覆盖非乘用车（如商用车、卡车）的完整口径；不适用于非汽车行业。",
+        returns="返回 markdown 报告：品牌合计销量 + 车型明细表（排名 / 车型 / 月销量 / 售价区间 / 上期排名 / 名次变化），按车型销量排名排序。",
+        example="get_auto_brand_monthly_sales(brand='问界', month='202608')",
+        related_tools=["get_sector_data", "get_stock_fundamentals_unified"],
+        limitations="数据来自懂车帝公开榜单，覆盖乘用车车型零售销量；榜单仅收录有销量的车型，销量极低或未上市的车型可能缺失。",
+        capability_tags=["auto_sales", "brand_sales", "monthly_sales", "auto_industry", "dongchedi"],
+        tool_role_hint="specialized",
+        output_shape="report",
+        preferred_for=["汽车品牌月度销量查询", "品牌旗下车型销量对比", "整车厂商销量跟踪"],
+        not_replacement_for=["price_volume_analysis", "financial_statement_analysis"],
+    ),
+
     # === 板块分析工具 ===
     "get_sector_data": ToolMetadata(
         id="get_sector_data",
