@@ -86,9 +86,10 @@ def get_chip_distribution_akshare(ticker: str, trade_date: str) -> Optional[Dict
             "平均成本": "avg_cost",
             "90成本-低": "cost_90_low",
             "90成本-高": "cost_90_high",
-            "集中度": "concentration_90",
+            "90集中度": "concentration_90",
             "70成本-低": "cost_70_low",
             "70成本-高": "cost_70_high",
+            "70集中度": "concentration_70",
         }
 
         result: Dict[str, Any] = {
@@ -112,6 +113,10 @@ def get_chip_distribution_akshare(ticker: str, trade_date: str) -> Optional[Dict
                     result[en_key] = val
                 except (ValueError, TypeError):
                     pass
+
+        # 集中度是常见的静默失效点（接口列名变动时会全部退化为 0），显式留痕
+        if not result["concentration_90"] and not result["concentration_70"]:
+            logger.warning(f"[AkShare筹码] {symbol} 未取到集中度，接口实际列名: {list(df.columns)}")
 
         logger.info(f"[AkShare筹码] {symbol} 获取成功，来源日期: {result['date']}")
         return result
@@ -198,12 +203,13 @@ def get_chip_distribution_tushare(ticker: str, trade_date: str) -> Optional[Dict
             "cost_70_high": float(r.get("cost_85pct", 0)) if r.get("cost_85pct") else 0.0,
             "concentration_70": 0.0,
         }
-        # 计算集中度（价格区间宽度/均值，越小越集中）
-        if result["avg_cost"] > 0:
+        # 计算集中度：标准口径 (高-低)/(高+低)，与东财/通达信/同花顺一致，数值越小越集中
+        if result["cost_90_high"] + result["cost_90_low"] > 0:
             rng90 = result["cost_90_high"] - result["cost_90_low"]
-            result["concentration_90"] = round(rng90 / result["avg_cost"], 4)
+            result["concentration_90"] = round(rng90 / (result["cost_90_high"] + result["cost_90_low"]), 4)
+        if result["cost_70_high"] + result["cost_70_low"] > 0:
             rng70 = result["cost_70_high"] - result["cost_70_low"]
-            result["concentration_70"] = round(rng70 / result["avg_cost"], 4)
+            result["concentration_70"] = round(rng70 / (result["cost_70_high"] + result["cost_70_low"]), 4)
 
         logger.info(f"[Tushare筹码] {ts_code} 获取成功 (耗时={time.time() - t0:.2f}s)")
         return result
