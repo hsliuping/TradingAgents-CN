@@ -106,8 +106,9 @@ hk_stock_cache.json
 /backend/
 /vendors/
 
-# AI 工具目录
-.trae/
+# AI 工具目录（.trae/skills 项目 skill 需入库，其余忽略）
+.trae/*
+!.trae/skills/
 .augment/
 
 # 预览版与内部规划文档

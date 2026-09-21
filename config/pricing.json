@@ -1,114 +1,366 @@
 [
   {
-    "provider": "dashscope",
-    "model_name": "qwen-turbo",
-    "input_price_per_1k": 0.002,
-    "output_price_per_1k": 0.006,
-    "currency": "CNY"
-  },
-  {
-    "provider": "dashscope",
-    "model_name": "qwen-plus-latest",
-    "input_price_per_1k": 0.004,
-    "output_price_per_1k": 0.012,
-    "currency": "CNY"
-  },
-  {
-    "provider": "dashscope",
-    "model_name": "qwen-max",
-    "input_price_per_1k": 0.02,
-    "output_price_per_1k": 0.06,
-    "currency": "CNY"
-  },
-  {
-    "provider": "deepseek",
-    "model_name": "deepseek-chat",
-    "input_price_per_1k": 0.0014,
-    "output_price_per_1k": 0.0028,
-    "currency": "CNY"
-  },
-  {
-    "provider": "deepseek",
-    "model_name": "deepseek-coder",
-    "input_price_per_1k": 0.0014,
-    "output_price_per_1k": 0.0028,
-    "currency": "CNY"
-  },
-  {
-    "provider": "openai",
-    "model_name": "gpt-3.5-turbo",
-    "input_price_per_1k": 0.0015,
-    "output_price_per_1k": 0.002,
-    "currency": "USD"
-  },
-  {
-    "provider": "openai",
-    "model_name": "gpt-4",
-    "input_price_per_1k": 0.03,
-    "output_price_per_1k": 0.06,
-    "currency": "USD"
-  },
-  {
-    "provider": "openai",
-    "model_name": "gpt-4-turbo",
-    "input_price_per_1k": 0.01,
-    "output_price_per_1k": 0.03,
-    "currency": "USD"
-  },
-  {
     "provider": "google",
     "model_name": "gemini-2.5-pro",
-    "input_price_per_1k": 0.00025,
-    "output_price_per_1k": 0.0005,
-    "currency": "USD"
+    "input_price_per_1k": 1e-06,
+    "output_price_per_1k": 1e-06,
+    "currency": "CNY"
   },
   {
     "provider": "google",
     "model_name": "gemini-2.5-flash",
-    "input_price_per_1k": 0.00025,
-    "output_price_per_1k": 0.0005,
+    "input_price_per_1k": 1e-06,
+    "output_price_per_1k": 1e-06,
     "currency": "USD"
   },
   {
-    "provider": "google",
-    "model_name": "gemini-2.0-flash",
-    "input_price_per_1k": 0.00025,
-    "output_price_per_1k": 0.0005,
+    "provider": "qianfan",
+    "model_name": "ernie-3.5-8k",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "CNY"
+  },
+  {
+    "provider": "qianfan",
+    "model_name": "ernie-4.0-turbo-8k",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "CNY"
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "qwen3-max",
+    "input_price_per_1k": 0.006,
+    "output_price_per_1k": 0.024,
+    "currency": "CNY"
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "qwen-plus",
+    "input_price_per_1k": 0.0008,
+    "output_price_per_1k": 0.002,
+    "currency": "CNY"
+  },
+  {
+    "provider": "openrouter",
+    "model_name": "anthropic/claude-sonnet-4.5",
+    "input_price_per_1k": 0.003,
+    "output_price_per_1k": 0.015000000000000001,
     "currency": "USD"
   },
   {
-    "provider": "google",
-    "model_name": "gemini-1.5-pro",
-    "input_price_per_1k": 0.00025,
-    "output_price_per_1k": 0.0005,
+    "provider": "openrouter",
+    "model_name": "openai/gpt-5",
+    "input_price_per_1k": 0.00125,
+    "output_price_per_1k": 0.01,
     "currency": "USD"
   },
   {
-    "provider": "google",
-    "model_name": "gemini-1.5-flash",
-    "input_price_per_1k": 0.00025,
-    "output_price_per_1k": 0.0005,
+    "provider": "openrouter",
+    "model_name": "google/gemini-2.5-pro",
+    "input_price_per_1k": 0.00125,
+    "output_price_per_1k": 0.01,
     "currency": "USD"
   },
   {
-    "provider": "google",
-    "model_name": "gemini-2.5-flash-lite-preview-06-17",
-    "input_price_per_1k": 0.00025,
-    "output_price_per_1k": 0.0005,
+    "provider": "openrouter",
+    "model_name": "google/gemini-2.5-flash",
+    "input_price_per_1k": 0.0003,
+    "output_price_per_1k": 0.0025,
     "currency": "USD"
   },
   {
-    "provider": "google",
-    "model_name": "gemini-pro",
-    "input_price_per_1k": 0.00025,
-    "output_price_per_1k": 0.0005,
+    "provider": "openrouter",
+    "model_name": "openai/gpt-3.5-turbo",
+    "input_price_per_1k": 0.0005,
+    "output_price_per_1k": 0.0015,
     "currency": "USD"
   },
   {
-    "provider": "google",
-    "model_name": "gemini-pro-vision",
-    "input_price_per_1k": 0.00025,
-    "output_price_per_1k": 0.0005,
+    "provider": "openrouter",
+    "model_name": "google/gemini-2.0-flash-001",
+    "input_price_per_1k": 9.999999999999999e-05,
+    "output_price_per_1k": 0.00039999999999999996,
     "currency": "USD"
+  },
+  {
+    "provider": "test",
+    "model_name": "test1",
+    "input_price_per_1k": 0.002,
+    "output_price_per_1k": 0.001,
+    "currency": "CNY"
+  },
+  {
+    "provider": "siliconflow",
+    "model_name": "Pro/deepseek-ai/DeepSeek-V3.2-Exp",
+    "input_price_per_1k": 2.0,
+    "output_price_per_1k": 3.0,
+    "currency": "CNY"
+  },
+  {
+    "provider": "ollama",
+    "model_name": "qwen2.5:7b",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "CNY"
+  },
+  {
+    "provider": "siliconflow",
+    "model_name": "deepseek-ai/DeepSeek-V3.2",
+    "input_price_per_1k": 2.0,
+    "output_price_per_1k": 3.0,
+    "currency": "CNY"
+  },
+  {
+    "provider": "xiaomi",
+    "model_name": "mimo-v2-flash",
+    "input_price_per_1k": 0.07,
+    "output_price_per_1k": 0.21,
+    "currency": "CNY"
+  },
+  {
+    "provider": "kimi",
+    "model_name": "kimi-k2.5",
+    "input_price_per_1k": 1.0,
+    "output_price_per_1k": 1.0,
+    "currency": "CNY"
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "qwen3.6-plus",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "CNY"
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "glm-5.1",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "CNY"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "deepseek-v4-flash",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "deepseek",
+    "model_name": "deepseek-v4-pro",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "CNY"
+  },
+  {
+    "provider": "aihubmix",
+    "model_name": "glm-5",
+    "input_price_per_1k": 0.88,
+    "output_price_per_1k": 2.816,
+    "currency": "USD"
+  },
+  {
+    "provider": "aihubmix",
+    "model_name": "glm-5.1",
+    "input_price_per_1k": 0.845,
+    "output_price_per_1k": 3.38,
+    "currency": "USD"
+  },
+  {
+    "provider": "aihubmix",
+    "model_name": "gemini-3.1-pro-preview",
+    "input_price_per_1k": 2.0,
+    "output_price_per_1k": 12.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "aihubmix",
+    "model_name": "gemini-3-flash-preview-free",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "aihubmix",
+    "model_name": "claude-sonnet-4-6",
+    "input_price_per_1k": 3.0,
+    "output_price_per_1k": 15.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "aihubmix",
+    "model_name": "gpt-5.5",
+    "input_price_per_1k": 5.0,
+    "output_price_per_1k": 30.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "aihubmix",
+    "model_name": "gpt-4.1-free",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "aihubmix",
+    "model_name": "gpt-4o-free",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "aihubmix",
+    "model_name": "xiaomi-mimo-v2.5-free",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "aihubmix",
+    "model_name": "xiaomi-mimo-v2.5-pro-free",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "qwen-flash",
+    "input_price_per_1k": 0.00015,
+    "output_price_per_1k": 0.0015,
+    "currency": "CNY"
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "qwen3-coder-plus",
+    "input_price_per_1k": 0.004,
+    "output_price_per_1k": 0.016,
+    "currency": "CNY"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "doubao-seed-2.0-code",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "doubao-seed-2.0-pro",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "doubao-seed-2.0-lite",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "doubao-seed-code",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "glm-5.2",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "kimi-k2.7-code",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "minimax-m3",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "minimax-m2.7",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "kimi-k2.6",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine",
+    "model_name": "glm-5-2-260617",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine",
+    "model_name": "doubao-seed-2-1-turbo-260628",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine",
+    "model_name": "doubao-seed-2-1-pro-260628",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine",
+    "model_name": "deepseek-v4-flash-260425",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine",
+    "model_name": "deepseek-v4-pro-260425",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine",
+    "model_name": "doubao-seed-2-0-lite-260428",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine",
+    "model_name": "doubao-seed-2-0-pro-260215",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine",
+    "model_name": "doubao-seed-2-0-lite-260215",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "USD"
+  },
+  {
+    "provider": "volcengine_coding",
+    "model_name": "doubao-seed-evolving",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "CNY"
   }
 ]
