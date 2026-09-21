@@ -330,6 +330,14 @@ class TaskAnalysisService:
             if task.task_type in (AnalysisTaskType.STOCK_ANALYSIS, AnalysisTaskType.ETF_ANALYSIS):
                 _symbol = (task.task_params or {}).get("symbol", "")
                 _stock_name = formatted_result.get("stock_name") or formatted_result.get("stock_symbol") or _symbol
+                # 结果中的 stock_name 常常只是代码本身，回查数据库补全中文名（如 贵州茅台）
+                if _symbol and _stock_name == _symbol:
+                    try:
+                        from app.services.simple_analysis_service import _get_cached_security_name
+                        _stock_name = _get_cached_security_name(_symbol) or _stock_name
+                    except Exception as name_err:
+                        self.logger.debug(f"补全股票名称失败(忽略): {name_err}")
+                _name_label = f"{_stock_name}({_symbol})" if _stock_name and _stock_name != _symbol else _symbol
                 _summary = formatted_result.get("summary") or formatted_result.get("executive_summary") or ""
                 if _summary and len(_summary) > 80:
                     _summary = _summary[:80] + "…"
@@ -345,9 +353,9 @@ class TaskAnalysisService:
                     await get_notifications_service().create_and_publish(NotificationCreate(
                         user_id=str(task.user_id),
                         type="analysis",
-                        title=f"✅ {_stock_name}({_symbol}) 分析完成",
+                        title=f"✅ {_name_label} 分析完成",
                         content=_summary or "分析已完成，点击查看完整报告。",
-                        link=f"/analysis/{task.task_id}",
+                        link="/tasks/unified",
                         source="task_analysis",
                         severity="success",
                         metadata=_notif_meta,
