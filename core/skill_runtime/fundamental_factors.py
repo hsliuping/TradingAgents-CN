@@ -1112,11 +1112,13 @@ def _build_factor_diagnostics(context: Dict[str, Any], factors: Dict[str, Any]) 
     return diagnostics
 
 
-def get_value_factor_bundle(symbol: str) -> Dict[str, Any]:
+def get_value_factor_bundle(symbol: str, allow_remote_fetch: bool = True) -> Dict[str, Any]:
     """获取股票的价值因子 bundle（value_core）。
 
     Args:
         symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        allow_remote_fetch: 透传给 get_shareholder_return_metrics；
+            交互式接口（因子预览）应传 False 避免现场拉取 Tushare 分红数据
 
     Returns:
         dict: 字段说明（合并 _base_snapshot 后还包括 symbol/name/industry/current_price/
@@ -1162,7 +1164,7 @@ def get_value_factor_bundle(symbol: str) -> Dict[str, Any]:
         # 与 get_current_valuation_snapshot_tool / get_dividend_valuation_context 对齐：
         # 使用已实施分红 / 当前价格的可追溯口径，避免同一报告里股息率出现 0.09pct 左右差异。
         from core.skill_runtime.standard_financial_apis import get_shareholder_return_metrics
-        shareholder = get_shareholder_return_metrics(context["symbol"], years=5)
+        shareholder = get_shareholder_return_metrics(context["symbol"], years=5, allow_remote_fetch=allow_remote_fetch)
         canonical_pct = _to_float((shareholder.get("metrics") or {}).get("latest_dividend_yield_pct"))
         if canonical_pct is not None:
             dividend_yield = canonical_pct
@@ -1547,11 +1549,13 @@ def get_growth_cashflow_factor_bundle(symbol: str) -> Dict[str, Any]:
     }
 
 
-def get_fundamental_factor_snapshot(symbol: str) -> Dict[str, Any]:
+def get_fundamental_factor_snapshot(symbol: str, allow_remote_fetch: bool = True) -> Dict[str, Any]:
     """聚合价值/质量/成长三个 bundle，返回基本面因子综合快照。
 
     Args:
         symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        allow_remote_fetch: 透传给价值 bundle 的股东回报指标；
+            交互式接口（因子预览/财务明细页）应传 False，禁止现场拉取 Tushare
 
     Returns:
         dict: 字段说明——
@@ -1570,7 +1574,7 @@ def get_fundamental_factor_snapshot(symbol: str) -> Dict[str, Any]:
                 — quality_core: dict，质量 bundle 完整结果
                 — growth_cashflow_core: dict，成长与现金流 bundle 完整结果
     """
-    value_bundle = get_value_factor_bundle(symbol)
+    value_bundle = get_value_factor_bundle(symbol, allow_remote_fetch=allow_remote_fetch)
     quality_bundle = get_quality_factor_bundle(symbol)
     growth_bundle = get_growth_cashflow_factor_bundle(symbol)
 

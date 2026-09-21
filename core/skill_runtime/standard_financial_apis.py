@@ -2341,12 +2341,18 @@ def get_business_segment_trend(symbol: str, years: int = 5, segment_type: str = 
     }
 
 
-def get_shareholder_return_metrics(symbol: str, years: int = 5) -> Dict[str, Any]:
+def get_shareholder_return_metrics(
+    symbol: str, years: int = 5, allow_remote_fetch: bool = True
+) -> Dict[str, Any]:
     """返回股东回报指标第一版。
 
     Args:
         symbol: A 股股票代码（6 位数字或含交易所前后缀）
         years: 请求的年数（默认 5）
+        allow_remote_fetch: 本地无分红明细时是否现场拉取 Tushare。
+            分析期工具调用（用户已预期长耗时）可保持 True；
+            交互式接口（数据检验/因子预览等即时响应场景）必须传 False，
+            否则本地集合永远为空时会每次触发约 20 秒的外部拉取。
 
     Returns:
         dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
@@ -2375,7 +2381,7 @@ def get_shareholder_return_metrics(symbol: str, years: int = 5) -> Dict[str, Any
         limit=max(20, int(years or 5) * 4),
         sort_field="end_date",
     )
-    if not rows:
+    if not rows and allow_remote_fetch:
         rows = _load_tushare_dividend_rows(normalized_symbol, max(20, int(years or 5) * 4))
         source = "tushare" if rows else None
     # Tushare 分红表对同一次分红事件返回多个阶段（预案/股东大会通过/实施），
@@ -2449,7 +2455,11 @@ def get_shareholder_return_metrics(symbol: str, years: int = 5) -> Dict[str, Any
             "fcf_positive_ratio": _positive_ratio(fcf_values),
         },
         "coverage": {"dividend_record_count": len(records), "annual_count": len(annual_cash), "financial_years": len(financial.get("records") or [])},
-        "warnings": [] if records else ["未找到分红数据；需 Tushare dividend 权限或本地分红同步。"],
+        "warnings": [] if records else [
+            "本地未同步分红明细数据，股息率将降级使用基础信息快照口径（dv_ratio）。"
+            if not allow_remote_fetch
+            else "未找到分红数据；需 Tushare dividend 权限或本地分红同步。"
+        ],
     }
 
 
