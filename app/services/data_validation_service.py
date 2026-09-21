@@ -8,7 +8,6 @@
 4. 实时行情数据是否存在（可选）
 """
 
-import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Tuple
@@ -17,8 +16,6 @@ from dataclasses import dataclass
 from app.core.database import get_mongo_db
 
 logger = logging.getLogger(__name__)
-
-DATA_VALIDATION_FETCH_TIMEOUT_SECONDS = 8
 
 
 @dataclass
@@ -43,18 +40,6 @@ class DataValidationService:
             self.db = get_mongo_db()
         return self.db
 
-    async def _find_latest_trade_date_async(self, manager) -> Optional[str]:
-        return await asyncio.wait_for(
-            asyncio.to_thread(manager.find_latest_trade_date_with_fallback),
-            timeout=DATA_VALIDATION_FETCH_TIMEOUT_SECONDS,
-        )
-
-    async def _get_realtime_quotes_with_fallback_async(self, manager):
-        return await asyncio.wait_for(
-            asyncio.to_thread(manager.get_realtime_quotes_with_fallback),
-            timeout=DATA_VALIDATION_FETCH_TIMEOUT_SECONDS,
-        )
-    
     async def validate_stock_data(
         self,
         symbol: str,
@@ -441,39 +426,46 @@ class DataValidationService:
                     collection_names = await db.list_collection_names()
                     if coll_name not in collection_names:
                         continue
-                    
+
+                    # 🔥 探测该股票用哪个字段存储（symbol 或 code）
+                    # 集合只有 symbol 索引；直接用 $or 查询会让 code 分支全表扫描（百万级文档需数秒）
+                    if await db[coll_name].find_one({"symbol": symbol}, {"_id": 1}):
+                        stock_filter = {"symbol": symbol}
+                    else:
+                        stock_filter = {"code": symbol}
+
                     # 查询历史数据总数
                     total_count = await db[coll_name].count_documents({
-                        "$or": [{"symbol": symbol}, {"code": symbol}],
+                        **stock_filter,
                         "trade_date": {"$gte": start_date, "$lte": end_date}
                     })
-                    
+
                     if total_count > 0:
                         data_found = True
                         data_count = total_count
-                        
+
                         # 查询最早和最晚的日期
                         earliest_doc = await db[coll_name].find_one(
-                            {"$or": [{"symbol": symbol}, {"code": symbol}], "trade_date": {"$gte": start_date}},
+                            {**stock_filter, "trade_date": {"$gte": start_date}},
                             sort=[("trade_date", 1)]
                         )
                         latest_doc = await db[coll_name].find_one(
-                            {"$or": [{"symbol": symbol}, {"code": symbol}], "trade_date": {"$lte": end_date}},
+                            {**stock_filter, "trade_date": {"$lte": end_date}},
                             sort=[("trade_date", -1)]
                         )
-                        
+
                         if earliest_doc:
                             earliest_date = earliest_doc.get("trade_date")
                         if latest_doc:
                             latest_date = latest_doc.get("trade_date")
-                        
+
                         # 检查分析日期当天的数据是否存在
                         analysis_doc = await db[coll_name].find_one({
-                            "$or": [{"symbol": symbol}, {"code": symbol}],
+                            **stock_filter,
                             "trade_date": analysis_date
                         })
                         analysis_date_data = analysis_doc is not None
-                        
+
                         break  # 找到数据后退出循环
                 except Exception as e:
                     logger.debug(f"查询集合 {coll_name} 时出错: {e}")
@@ -526,26 +518,10 @@ class DataValidationService:
                                 
                                 logger.info(f"🔍 [数据校验] 分析日期是今天，当前时间：{current_time.strftime('%H:%M:%S')}，开盘时间：09:30，收盘时间：16:30")
                                 
-                                # 判断当天是否是交易日（通过获取最后交易日期，使用优先级最高的数据源）
-                                is_trading_day = False
-                                try:
-                                    from app.services.data_sources.manager import DataSourceManager
-                                    manager = DataSourceManager()
-                                    # 🔥 使用优先级最高的数据源获取最后交易日期
-                                    latest_trade_date = await self._find_latest_trade_date_async(manager)
-                                    if latest_trade_date:
-                                        latest_trade_dt = datetime.strptime(latest_trade_date, '%Y%m%d').date()
-                                        is_trading_day = (latest_trade_dt == today)
-                                        logger.info(f"🔍 [数据校验] 最后交易日期：{latest_trade_date} ({latest_trade_dt})，今天：{today}，是交易日：{is_trading_day}")
-                                    else:
-                                        logger.warning(f"⚠️ [数据校验] 无法获取最后交易日期，使用工作日判断")
-                                        is_trading_day = today.weekday() < 5
-                                except Exception as e:
-                                    logger.warning(f"⚠️ [数据校验] 获取最后交易日期失败: {e}，使用工作日判断")
-                                    # 如果获取失败，假设是交易日（工作日）
-                                    is_trading_day = today.weekday() < 5
-                                
-                                logger.info(f"🔍 [数据校验] 是否交易日：{is_trading_day}")
+                                # 🔥 检验只读本地库：交易日判断用工作日近似，不调外部数据接口
+                                # （拉取数据是"同步"按钮的事，检验只报告本地库现状）
+                                is_trading_day = today.weekday() < 5
+                                logger.info(f"🔍 [数据校验] 是否交易日（工作日近似）：{is_trading_day}")
                                 
                                 if is_trading_day:
                                     if current_time < market_open_time:
@@ -554,22 +530,12 @@ class DataValidationService:
                                         logger.info(f"ℹ️ 股票 {symbol} 分析日期 {analysis_date} 是交易日但尚未开盘，缺少当天数据属正常情况")
                                         warning_flag = False  # 开盘前不警告
                                     elif market_open_time <= current_time <= market_close_time:
-                                        # 在交易时间内，尝试用实时数据补充（使用优先级最高的数据源）
-                                        is_in_trading_hours = True  # 🔥 标记在交易时间内
-                                        logger.info(f"🔄 股票 {symbol} 分析日期 {analysis_date} 在交易时间内（{current_time.strftime('%H:%M')}），尝试用实时数据补充（使用优先级最高的数据源）")
-                                        supplemented = await self._supplement_with_realtime_data(
-                                            db, symbol, analysis_date, market_type, coll_name
-                                        )
-                                        if supplemented:
-                                            message += f"，已使用实时数据补充当天数据"
-                                            analysis_date_data = True  # 标记为已补充
-                                            warning_flag = False  # 已补充，不警告
-                                            logger.info(f"✅ 股票 {symbol} 已使用实时数据补充当天数据，warning_flag=False")
-                                        else:
-                                            # 🔥 在交易时间内，即使补充失败也不应该显示警告，因为当天还没闭市
-                                            message += f"，分析日期（{analysis_date}）在交易时间内，当天数据尚未生成（当前时间：{current_time.strftime('%H:%M')}），属正常情况"
-                                            warning_flag = False  # 交易时间内不警告
-                                            logger.info(f"ℹ️ 股票 {symbol} 分析日期 {analysis_date} 在交易时间内，当天数据尚未生成，属正常情况，warning_flag=False")
+                                        # 在交易时间内，当天数据尚未生成属正常情况
+                                        # 🔥 不再现场拉实时数据补充（检验只读，补数据请用"同步"功能）
+                                        is_in_trading_hours = True  # 标记在交易时间内（后续强制不警告）
+                                        message += f"，分析日期（{analysis_date}）在交易时间内，当天数据尚未生成（当前时间：{current_time.strftime('%H:%M')}），属正常情况"
+                                        warning_flag = False  # 交易时间内不警告
+                                        logger.info(f"ℹ️ 股票 {symbol} 分析日期 {analysis_date} 在交易时间内，当天数据尚未生成，属正常情况，warning_flag=False")
                                     else:
                                         # 已过收盘时间，应该已经有数据了
                                         message += f"，但分析日期（{analysis_date}）当天的数据不存在（最新数据日期：{latest_date}，相差 {days_diff} 天）"
@@ -632,109 +598,7 @@ class DataValidationService:
         except Exception as e:
             logger.error(f"检查历史数据时出错: {e}")
             return False, f"检查历史数据时出错: {str(e)}", {"error": str(e)}
-    
-    async def _supplement_with_realtime_data(
-        self,
-        db,
-        symbol: str,
-        analysis_date: str,
-        market_type: str,
-        collection_name: str
-    ) -> bool:
-        """
-        使用实时数据补充当天的历史数据
-        
-        Args:
-            db: 数据库连接
-            symbol: 股票代码
-            analysis_date: 分析日期（YYYY-MM-DD）
-            market_type: 市场类型
-            collection_name: 集合名称
-            
-        Returns:
-            是否成功补充数据
-        """
-        try:
-            # 只支持A股市场
-            if market_type != "cn":
-                return False
-            
-            # 🔥 使用数据源管理器获取完整的实时行情数据（按优先级顺序尝试）
-            from app.services.data_sources.manager import DataSourceManager
-            manager = DataSourceManager()
-            # get_realtime_quotes_with_fallback 会按照优先级顺序尝试各个数据源
-            quotes_dict, source_name = await self._get_realtime_quotes_with_fallback_async(manager)
-            logger.debug(f"📊 使用数据源 {source_name} 获取实时行情（优先级最高）")
-            
-            if not quotes_dict or symbol not in quotes_dict:
-                logger.debug(f"无法获取 {symbol} 的实时行情")
-                return False
-            
-            quote_data = quotes_dict[symbol]
-            
-            # 检查必要字段（至少需要close价格）
-            if not quote_data or quote_data.get('close') is None:
-                logger.debug(f"{symbol} 的实时行情数据缺少close价格")
-                return False
-            
-            # 获取前收盘价（用于计算涨跌幅）
-            pre_close = quote_data.get('pre_close')
-            close = float(quote_data.get('close', 0))
-            
-            # 如果没有前收盘价，尝试从历史数据获取
-            if pre_close is None:
-                try:
-                    latest_doc = await db[collection_name].find_one(
-                        {"$or": [{"symbol": symbol}, {"code": symbol}]},
-                        sort=[("trade_date", -1)]
-                    )
-                    if latest_doc:
-                        pre_close = latest_doc.get("close")
-                except Exception:
-                    pass
-            
-            # 计算涨跌幅和涨跌额
-            pct_chg = None
-            change = None
-            if pre_close and pre_close > 0:
-                pct_chg = ((close - pre_close) / pre_close) * 100
-                change = close - pre_close
-            
-            # 构建历史数据文档
-            doc = {
-                "symbol": symbol,
-                "code": symbol,
-                "trade_date": analysis_date,
-                "open": float(quote_data.get('open', close)) if quote_data.get('open') is not None else close,
-                "high": float(quote_data.get('high', close)) if quote_data.get('high') is not None else close,
-                "low": float(quote_data.get('low', close)) if quote_data.get('low') is not None else close,
-                "close": close,
-                "volume": float(quote_data.get('volume', 0)) if quote_data.get('volume') is not None else 0,
-                "amount": float(quote_data.get('amount', 0)) if quote_data.get('amount') is not None else None,
-                "pre_close": float(pre_close) if pre_close is not None else None,
-                "change": float(change) if change is not None else None,
-                "pct_chg": float(pct_chg) if pct_chg is not None else None,
-                "source": f"realtime_supplement_{source_name}",  # 标记为实时数据补充，包含数据源名称
-                "supplemented_at": datetime.now().isoformat()
-            }
-            
-            # 保存到数据库
-            await db[collection_name].update_one(
-                {
-                    "$or": [{"symbol": symbol}, {"code": symbol}],
-                    "trade_date": analysis_date
-                },
-                {"$set": doc},
-                upsert=True
-            )
-            
-            logger.info(f"✅ 已使用实时数据补充 {symbol} 在 {analysis_date} 的历史数据（数据源：{source_name}）")
-            return True
-            
-        except Exception as e:
-            logger.warning(f"使用实时数据补充历史数据失败: {e}", exc_info=True)
-            return False
-    
+
     async def _check_financial_data(
         self,
         db,
