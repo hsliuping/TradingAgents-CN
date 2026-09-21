@@ -7,6 +7,7 @@
 from datetime import date, datetime
 from typing import Optional, Dict, Any, List, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+import asyncio
 import logging
 import re
 
@@ -100,7 +101,10 @@ def _build_financial_raw_data(financial_data: Optional[Dict[str, Any]]) -> Dict[
 
 def _get_p0_fundamental_snapshot(symbol: str) -> Dict[str, Any]:
     try:
-        return get_fundamental_factor_snapshot(symbol) or {}
+        # allow_remote_fetch=False：本函数仅服务交互式接口（因子预览/财务明细页），
+        # 本地缺分红明细时禁止现场拉取 Tushare（约 20 秒），降级用已同步的股息率快照；
+        # 数据应通过数据同步功能主动获取，符合"检验只读、同步才拉"的语义
+        return get_fundamental_factor_snapshot(symbol, allow_remote_fetch=False) or {}
     except Exception as e:
         logger.warning("获取 P0 基本面 snapshot 失败 %s: %s", symbol, e)
         return {}
@@ -592,7 +596,9 @@ async def get_fundamentals(
     # A股：使用现有逻辑
     db = get_mongo_db()
     code6 = normalized_code
-    p0_snapshot = _get_p0_fundamental_snapshot(code6)
+    # P0 因子快照含同步 Mongo 查询与 Tushare 分红数据拉取，实测可达 20s+，
+    # 必须放线程池执行，否则会阻塞事件循环导致整个后端接口无响应
+    p0_snapshot = await asyncio.to_thread(_get_p0_fundamental_snapshot, code6)
 
     if _is_cn_etf_code(code6):
         if source:
@@ -679,7 +685,6 @@ async def get_fundamentals(
 
     # 3. 获取实时PE/PB（优先使用实时计算）
     from tradingagents.dataflows.realtime_metrics import get_pe_pb_with_fallback
-    import asyncio
 
     # 在线程池中执行同步的实时计算
     realtime_metrics = await asyncio.to_thread(
@@ -900,7 +905,8 @@ async def get_financials(
         )
 
     summary = _build_financial_summary(financial_data)
-    p0_snapshot = _get_p0_fundamental_snapshot(normalized_code)
+    # P0 因子快照为同步重计算（含外部数据源拉取），放线程池避免阻塞事件循环
+    p0_snapshot = await asyncio.to_thread(_get_p0_fundamental_snapshot, normalized_code)
     summary = _merge_snapshot_fields_into_financial_summary(summary, p0_snapshot)
     raw_data = _build_financial_raw_data(financial_data) if include_raw else {}
     available_fields = sorted(
