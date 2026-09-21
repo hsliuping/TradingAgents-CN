@@ -282,8 +282,8 @@
           </template>
         </el-step>
 
-        <!-- 步骤4：激活License -->
-        <el-step title="激活 License 授权" description="输入 License 密钥激活系统">
+        <!-- 步骤4：激活License（社区版无此接口，运行时自动隐藏） -->
+        <el-step v-if="licenseSupported" title="激活 License 授权" description="输入 License 密钥激活系统">
           <template #description>
             <div class="step-content">
               <p v-if="stepStatus.licenseValid" class="step-completed-tip">
@@ -458,6 +458,8 @@ const router = useRouter()
 const isJdyunModeRef = isJdyunMode()
 const currentStep = ref(0)
 const loading = ref(true)
+// License 步骤是否可用（社区版无 /api/license/status 接口，404 时自动隐藏该步骤）
+const licenseSupported = ref(true)
 
 // 京东云版状态
 const jdyunStatus = ref({
@@ -578,24 +580,30 @@ const checkAnalysisHistory = async () => {
 // 检测 License 状态
 const checkLicense = async () => {
   try {
-    const resp = await ApiClient.get('/api/license/status')
+    const resp = await ApiClient.get('/api/license/status', { skipErrorHandler: true } as any)
     if (resp.success && resp.data) {
       stepStatus.value.licenseValid = resp.data.is_valid || resp.data.has_token || false
     }
-  } catch (e) {
+  } catch (e: any) {
+    // 404 = 社区版（无 License 激活功能），隐藏引导中的激活步骤
+    if (e?.response?.status === 404) {
+      licenseSupported.value = false
+    }
     console.error('检查License状态失败:', e)
   }
 }
 
 // 根据完成状态计算当前步骤
 const updateCurrentStep = () => {
+  // 社区版隐藏 License 步骤后，后续步骤索引前移一位
+  const hasLicenseStep = licenseSupported.value
   let step = 0
   if (stepStatus.value.llmKey) step = 1
   if (stepStatus.value.dataKey) step = 2
   if (stepStatus.value.llmKey && stepStatus.value.dataKey) step = 3
-  if (stepStatus.value.licenseValid) step = 4
-  if (stepStatus.value.dataSynced) step = 5
-  if (stepStatus.value.hasAnalysis) step = 7
+  if (hasLicenseStep && stepStatus.value.licenseValid) step = 4
+  if (stepStatus.value.dataSynced) step = hasLicenseStep ? 5 : 4
+  if (stepStatus.value.hasAnalysis) step = hasLicenseStep ? 7 : 6
   currentStep.value = step
 }
 
