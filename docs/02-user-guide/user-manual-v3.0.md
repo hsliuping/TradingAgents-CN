@@ -1,4 +1,4 @@
-# TradingAgents-CN Pro v3.0 完整使用手册
+# TradingAgents-CN v3.0 完整使用手册
 
 > 版本：v3.0 | 更新日期：2026-07-25 | 适用对象：新用户与进阶用户
 >

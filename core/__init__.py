@@ -1,25 +1,20 @@
 """
-TradingAgents-CN Pro - 商业版核心模块
+TradingAgents-CN 核心模块
 
-此模块包含 TradingAgents-CN Pro 的商业版功能，包括：
+此模块包含 TradingAgents-CN 的核心功能层，包括：
 - 统一 LLM 客户端 (llm/)
 - 智能体基类和注册表 (agents/)
 - 工作流引擎 (workflow/)
 - 提示词管理增强 (prompts/)
 - 授权管理 (licensing/)
 
-许可证: 专有软件 (Proprietary)
-版权所有 (c) 2024-2025 TradingAgents-CN Pro
-
 与开源组件的关系:
 - 本模块构建在开源 'tradingagents' 包之上
-- 开源包使用 Apache 2.0 许可证
-- 本模块为专有扩展
+- 许可归属见本目录 LICENSE 文件
 """
 
 __version__ = "1.0.0"
-__author__ = "TradingAgents-CN Pro Team"
-__license__ = "Proprietary"
+__author__ = "TradingAgents-CN"
 
 # 延迟导入，避免循环依赖
 def get_version():
@@ -78,7 +73,6 @@ def get_agent_api():
 __all__ = [
     "__version__",
     "__author__",
-    "__license__",
     "get_version",
     "get_llm_client",
     "get_workflow_engine",

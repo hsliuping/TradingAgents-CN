@@ -1,6 +1,6 @@
 # Docker 部署文件说明（新版本 - 测试中）
 
-本目录包含 TradingAgents-CN Pro 的新版 Docker 部署配置，专门针对 Ubuntu 22.04 服务器上的编译版部署。
+本目录包含 TradingAgents-CN 的新版 Docker 部署配置，专门针对 Ubuntu 22.04 服务器上的编译版部署。
 
 ## 📁 目录结构
 
@@ -369,7 +369,7 @@ Docker 发布脚本现在统一支持按版本号发布：
 
 ### scripts/build-and-push-all.sh ⭐ 推荐（AMD64）
 
-一键构建并推送前后端镜像（Pro 版本专用，AMD64 架构）。
+一键构建并推送前后端镜像（v3.0 版本专用，AMD64 架构）。
 
 #### build-and-push-all 功能
 

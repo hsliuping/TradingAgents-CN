@@ -2,8 +2,8 @@
 TradingAgents-CN v2.1.0 FastAPI Backend
 主应用程序入口
 
-Copyright (c) 2025 hsliuping. All rights reserved.
-版权所有 (c) 2025 hsliuping。保留所有权利。
+Copyright (c) 2024-2026 hsliuping. All rights reserved.
+版权所有 (c) 2024-2026 hsliuping。保留所有权利。
 
 This software is proprietary and confidential. Unauthorized copying, distribution,
 or use of this software, via any medium, is strictly prohibited.

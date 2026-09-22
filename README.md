@@ -29,23 +29,25 @@
 git clone <本仓库地址>
 cd TradingAgents-CN
 
-# 2. 后端环境
+# 2. 后端环境（Python 3.11）
 python -m venv env
 env\Scripts\activate            # Windows
+source env/bin/activate         # Linux / macOS
 pip install -r requirements.txt
 
-# 3. 配置
-copy .env.example .env          # 按需填写 LLM API Key 等
+# 3. 配置（必填 MongoDB / Redis / JWT_SECRET，详见 .env.example 注释）
+copy .env.example .env          # Windows
+cp .env.example .env            # Linux / macOS
 
-# 4. 启动 MongoDB / Redis（本地或 Docker）
+# 4. 启动 MongoDB / Redis（本地或 Docker，账号密码与 .env 保持一致）
 
-# 5. 启动后端
-uvicorn app.main:app --port 8002
+# 5. 启动后端（默认 8000 端口，与前端默认代理一致）
+uvicorn app.main:app
 
 # 6. 启动前端
 cd frontend
 npm install
-npm run dev
+npm run dev                     # 默认 http://localhost:3000
 ```
 
 详细部署说明见 `docs/` 目录。
