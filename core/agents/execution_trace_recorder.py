@@ -26,7 +26,7 @@ from app.utils.timezone import now_tz
 # 8 个调用方（analyst/researcher/manager/universal/base/trader_v2/fundamentals_analyst_v2/
 # workflow builder）零改动，社区版分析主链路不受影响。
 try:
-    from app.models.execution_trace import (
+    from app.pro.models.execution_trace import (
         AgentExecutionTrace,
         InputSnapshot,
         LLMConfigSnapshot,
@@ -36,7 +36,7 @@ try:
         ToolCallRecord,
         ValidationResult,
     )
-    from app.services.execution_trace_service import execution_trace_service
+    from app.pro.services.execution_trace_service import execution_trace_service
     _TRACE_BACKEND_AVAILABLE = True
 except ImportError:  # 社区版路径：执行轨迹后端不可用
     _TRACE_BACKEND_AVAILABLE = False

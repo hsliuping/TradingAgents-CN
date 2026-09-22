@@ -4,13 +4,19 @@
 直接连接MongoDB获取模板，不通过HTTP API
 """
 
+from __future__ import annotations
+
 import os
 import re
-from typing import Optional, Dict, Any
-from tradingagents.agents.utils.agent_context import AgentContext
+from typing import TYPE_CHECKING, Optional, Dict, Any
 from pymongo import MongoClient
 from bson import ObjectId
 from tradingagents.utils.logging_init import get_logger
+
+if TYPE_CHECKING:
+    # 仅类型标注使用；顶层导入会触发 tradingagents.agents 包初始化，
+    # 与 agents/* 模块反向 import 本模块（get_agent_prompt）形成循环导入
+    from tradingagents.agents.utils.agent_context import AgentContext
 
 logger = get_logger("template_client")
 

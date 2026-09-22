@@ -329,7 +329,7 @@ class ManagerAgent(BaseAgent):
         """
         from app.core.config import settings
         try:
-            from app.models.agent_assertion import AssertionRunResult
+            from app.pro.models.agent_assertion import AssertionRunResult
         except ImportError:
             # 社区版无断言体系（app/models/agent_assertion 等已随 Pro 开源分离剔除）：
             # 返回"未运行"占位结果，调用方对 violations/has_error_violation/error_count

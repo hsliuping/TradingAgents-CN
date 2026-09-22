@@ -130,7 +130,7 @@ async def create_scheduled_analysis(
 
     # 注册到调度器
     try:
-        from app.routers.scheduled_analysis import _register_scheduled_tasks
+        from app.pro.routers.scheduled_analysis import _register_scheduled_tasks
         config_doc["id"] = config_id
         await _register_scheduled_tasks(config_doc)
     except Exception as e:
@@ -196,7 +196,7 @@ async def toggle_scheduled_config(
 
     # 更新调度器
     try:
-        from app.routers.scheduled_analysis import _register_scheduled_tasks, _unregister_scheduled_tasks
+        from app.pro.routers.scheduled_analysis import _register_scheduled_tasks, _unregister_scheduled_tasks
         if enabled:
             config["id"] = str(config.pop("_id"))
             config["enabled"] = True

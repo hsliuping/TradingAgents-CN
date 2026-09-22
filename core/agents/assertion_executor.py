@@ -32,14 +32,14 @@ from typing import Any, Dict, List, Optional
 # app/services/agent_assertion_service 随 Pro 开源分离剔除。import 失败时本模块降级：
 # run_assertions_sync 直接 raise，由调用方（trader_v2 / manager，均在 try 内）捕获降级
 try:
-    from app.models.agent_assertion import (
+    from app.pro.models.agent_assertion import (
         AgentAssertion,
         AssertionRunResult,
         AssertionSeverity,
         AssertionType,
         AssertionViolation,
     )
-    from app.services.agent_assertion_service import agent_assertion_service
+    from app.pro.services.agent_assertion_service import agent_assertion_service
     _ASSERTION_BACKEND_AVAILABLE = True
 except ImportError:  # 社区版路径：断言后端不可用
     _ASSERTION_BACKEND_AVAILABLE = False

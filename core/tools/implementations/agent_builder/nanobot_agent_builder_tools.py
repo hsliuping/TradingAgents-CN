@@ -16,9 +16,9 @@ from app.core.database import get_mongo_db
 from app.core.database import get_mongo_db_sync
 from app.models.capability_index import CapabilitySearchHit
 try:
-    from app.models.agent_workshop import AgentSpec, AgentSpecIOField, AgentSpecStatus
-    from app.models.prompt_template import TemplateContent
-    from app.services.agent_workshop_service import AgentWorkshopService
+    from app.pro.models.agent_workshop import AgentSpec, AgentSpecIOField, AgentSpecStatus
+    from app.pro.models.prompt_template import TemplateContent
+    from app.pro.services.agent_workshop_service import AgentWorkshopService
 except ImportError:  # 社区版无 Agent 工坊模块（manifest 剔除），本工具链在社区版停用
     AgentSpec = AgentSpecIOField = AgentSpecStatus = None  # type: ignore[assignment,misc]
     TemplateContent = None  # type: ignore[assignment,misc]
@@ -6668,7 +6668,7 @@ async def resolve_agent_workshop_blocking_gaps(
                 # 写入待审核记录（路径B HITL）
                 pending_reviews: list[dict[str, Any]] = []
                 try:
-                    from app.services.skill_review_service import SkillReviewService
+                    from app.pro.services.skill_review_service import SkillReviewService
                     review_service = SkillReviewService(db=db)
                     pending_reviews = await review_service.create_pending_reviews_for_workshop(
                         workshop_session_id=clean_session_id,

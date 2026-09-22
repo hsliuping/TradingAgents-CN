@@ -313,7 +313,7 @@ async def lifespan(app: FastAPI):
     # 恢复已启用的 MCP 服务器工具到 ToolRegistry
     # 后端重启后，MCP 工具不会自动注册，需要从 mcp_server_configs 集合恢复
     try:
-        from app.services.mcp_service import MCPService
+        from app.pro.services.mcp_service import MCPService
         mcp_service = MCPService(db)
         await mcp_service.restore_enabled_servers()
         logger.info("✅ MCP 服务器工具恢复完成")
@@ -946,7 +946,7 @@ async def lifespan(app: FastAPI):
         async def _expire_stale_skill_reviews():
             try:
                 from app.core.database import get_mongo_db
-                from app.services.skill_review_service import SkillReviewService
+                from app.pro.services.skill_review_service import SkillReviewService
                 db = get_mongo_db()
                 if db is not None:
                     svc = SkillReviewService(db=db)

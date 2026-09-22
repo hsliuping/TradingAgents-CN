@@ -1136,7 +1136,7 @@ class WorkflowGrowthService:
 
         if target == "workflow_generation" and mode == "start_session":
             try:
-                from app.services.workflow_generation_service import WorkflowGenerationService
+                from app.pro.services.workflow_generation_service import WorkflowGenerationService
 
                 service = WorkflowGenerationService(db=self.db)
                 description = payload.get("description") or suggestion_doc.get("summary") or suggestion_doc.get("title")

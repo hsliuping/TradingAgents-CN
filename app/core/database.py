@@ -435,14 +435,14 @@ async def init_database_views_and_indexes():
         # 3. 创建 agent 执行轨迹集合索引（P1 机器可读执行轨迹）
         # 局部导入避免循环依赖；服务初始化失败不影响应用启动
         try:
-            from app.services.execution_trace_service import execution_trace_service
+            from app.pro.services.execution_trace_service import execution_trace_service
             await execution_trace_service.create_indexes()
         except Exception as trace_exc:
             logger.warning(f"⚠️ 执行轨迹索引初始化失败（不影响应用启动）: {trace_exc}")
 
         # 4. 创建 agent 断言集合索引（P2 可执行断言）
         try:
-            from app.services.agent_assertion_service import agent_assertion_service
+            from app.pro.services.agent_assertion_service import agent_assertion_service
             await agent_assertion_service.create_indexes()
         except Exception as assertion_exc:
             logger.warning(f"⚠️ 断言索引初始化失败（不影响应用启动）: {assertion_exc}")

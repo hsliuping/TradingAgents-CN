@@ -2370,7 +2370,7 @@ async def node_generate_candidate_agent(
         if version_id:
             try:
                 from app.core.database import get_mongo_db
-                from app.services.agent_workshop_service import AgentWorkshopService
+                from app.pro.services.agent_workshop_service import AgentWorkshopService
                 db = get_mongo_db()
                 iterate_result = await AgentWorkshopService(db=db).iterate_version(
                     version_id,

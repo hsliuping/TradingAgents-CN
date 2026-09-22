@@ -304,7 +304,7 @@ class TraderV2(TraderAgent):
                     recorder.record_llm_response(_llm_response, llm_duration_ms=_llm_duration_ms)
                 else:
                     # response 不可达时，仅记录输出快照（无 token_usage）
-                    from app.models.execution_trace import OutputSnapshot
+                    from app.pro.models.execution_trace import OutputSnapshot
                     recorder.trace.output = OutputSnapshot(
                         output_raw_length=len(decision_text),
                         output_raw_preview=decision_text[:500] if decision_text else None,

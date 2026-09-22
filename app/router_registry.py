@@ -149,7 +149,7 @@ COMMUNITY_ROUTERS = [
 # Pro 路由集中定义于 app/pro_routers.py：社区版发布管道删除该文件后，
 # 此处 try-import 自动降级为空列表，router_registry 零行级改动。
 try:
-    from app.pro_routers import PRO_ROUTERS
+    from app.pro.pro_routers import PRO_ROUTERS
 except ImportError:  # 社区版：app/pro_routers.py 已被发布管道整体剔除
     PRO_ROUTERS = []
 
