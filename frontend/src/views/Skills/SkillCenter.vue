@@ -458,8 +458,8 @@
 
         <el-divider v-if="boundAgents.length" />
 
-        <!-- 添加新绑定 -->
-        <div class="bind-add-section">
+        <!-- 添加新绑定（无可选 Agent 时隐藏，如社区版） -->
+        <div v-if="availableAgents.length" class="bind-add-section">
           <h4 style="margin: 0 0 8px;">添加绑定</h4>
           <el-form :model="bindForm" label-width="80px">
             <el-form-item label="选择 Agent">
@@ -489,6 +489,7 @@
       <template #footer>
         <el-button @click="bindDialogVisible = false">关闭</el-button>
         <el-button
+          v-if="availableAgents.length"
           type="primary"
           :loading="bindLoading"
           :disabled="!bindForm.agentIds.length"
@@ -680,6 +681,8 @@ const bindLoading = ref(false)
 const boundAgents = ref<Array<{ agent_id: string; name: string; category: string; priority: number }>>([])
 const currentSkill = ref<SkillSummary | null>(null)
 const availableAgents = ref<{ id: string; name: string }[]>([])
+// Agent 列表是否已加载完成（成功或失败都算），用于绑定入口的懒加载守卫
+const agentsLoaded = ref(false)
 
 const testDialogVisible = ref(false)
 const currentTestSkill = ref<SkillSummary | null>(null)
@@ -816,6 +819,8 @@ async function loadAgents() {
     availableAgents.value = agents.map((a: any) => ({ id: a.id, name: a.name }))
   } catch (error) {
     console.debug('Agent 列表不可用（社区版无 Agent 管理体系），绑定下拉置空')
+  } finally {
+    agentsLoaded.value = true
   }
 }
 
@@ -1001,6 +1006,14 @@ function handleToggleStatus(skill: SkillSummary) {
 }
 
 async function handleBindAgent(skill: SkillSummary) {
+  // 无可绑定的 Agent 时不打开绑定弹窗（社区版无 Agent 工坊，列表为空）
+  if (!agentsLoaded.value) {
+    await loadAgents()
+  }
+  if (!availableAgents.value.length) {
+    ElMessage.warning('暂无可绑定的 Agent')
+    return
+  }
   currentSkill.value = skill
   bindForm.value = { agentIds: [], priority: 0 }
   bindDialogVisible.value = true
