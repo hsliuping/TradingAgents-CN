@@ -170,3 +170,5 @@ npm run dev                     # 默认 http://localhost:3000
 
 - [Tauric Research / TradingAgents](https://github.com/TauricResearch/TradingAgents) — 多智能体交易框架原版项目
 - 所有通过 PR 参与共建的贡献者
+
+完整致谢（含授权说明与数据源致谢）见 [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)。
