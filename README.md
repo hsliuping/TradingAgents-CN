@@ -1,8 +1,8 @@
 # TradingAgents-CN 社区版（Community Edition）
 
-**English**: TradingAgents-CN Community Edition is an open-source (Apache-2.0) multi-agent stock research assistant for the Chinese A-share market. It orchestrates LLM-based analyst agents for debate-style research, natural-language stock screening, paper trading and study courses. For learning and research only — **not investment advice**.
+**English**: TradingAgents-CN Community Edition is a hybrid-licensed (Apache-2.0 core engine + proprietary source-available application layer) multi-agent stock research assistant for the Chinese A-share market. It orchestrates LLM-based analyst agents for debate-style research, natural-language stock screening, paper trading and study courses. For learning and research only — **not investment advice**.
 
-[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](./LICENSE)
+[![License](https://img.shields.io/badge/License-Hybrid_(Apache--2.0_+_Proprietary)-blue.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
 [![Vue](https://img.shields.io/badge/Vue-3-brightgreen.svg)](https://vuejs.org/)
 
@@ -33,7 +33,7 @@
 | 定时分析 / 批量分析 | — | ✅ |
 | 专业报告导出（Word / PDF 多格式） | — | ✅ |
 | 高级课程（进阶 8 阶段） | — | ✅ |
-| 许可 | Apache 2.0 开源 | 商业许可 |
+| 许可 | 混合授权（核心引擎开源 + 应用层专有） | 商业许可 |
 
 Pro 版面向有更高阶研究工作流需求的用户，获取方式见项目主页或联系作者。
 
@@ -97,7 +97,12 @@ npm run dev                     # 默认 http://localhost:3000
 
 ## License
 
-本项目采用 [Apache-2.0](LICENSE) 许可证。提交贡献即表示同意签署 [贡献者许可协议（CLA）](CONTRIBUTING.md)。
+本项目采用**混合授权**，详见 [LICENSE](LICENSE)：
+
+- **Apache-2.0 开源组件**：`tradingagents/`（核心交易智能体库）、`cli/`、`docs/`、`tests/` 等——可自由使用、修改、分发
+- **专有组件（Source Available）**：`app/`（后端应用）、`frontend/`（前端应用）、`core/`（核心功能层）——源码可见，允许个人使用、评估与教育用途，**禁止再分发与商业使用**（商业许可请联系作者）
+
+提交贡献即表示同意签署[贡献者许可协议（CLA）](CONTRIBUTING.md)。
 
 ## 致谢
 
