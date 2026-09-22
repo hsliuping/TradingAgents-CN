@@ -809,11 +809,13 @@ async function loadStats() {
 
 async function loadAgents() {
   try {
-    const res: any = await ApiClient.get('/api/agents')
+    // Agent 元数据来自 Pro 路由（app/pro/routers/agents.py），社区版无此路由：
+    // 静默降级为空列表（关闭全局 404 弹窗），绑定下拉为空即"无 Agent 可绑"
+    const res: any = await ApiClient.get('/api/agents', undefined, { skipErrorHandler: true })
     const agents = Array.isArray(res) ? res : (res?.data || [])
     availableAgents.value = agents.map((a: any) => ({ id: a.id, name: a.name }))
   } catch (error) {
-    console.error('Failed to load agents:', error)
+    console.debug('Agent 列表不可用（社区版无 Agent 管理体系），绑定下拉置空')
   }
 }
 
