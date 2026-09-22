@@ -266,6 +266,21 @@ async def lifespan(app: FastAPI):
         # 如果需要强制要求迁移成功才启动，取消下一行注释：
         # raise
 
+    # 首次启动引导：空库时依据 ADMIN_DEFAULT_PASSWORD 创建初始管理员（社区版无注册接口）
+    try:
+        from app.services.user_service import bootstrap_first_admin
+        await bootstrap_first_admin()
+    except Exception as e:
+        logger.error(f"❌ 初始管理员引导异常: {e}")
+
+    # 首次启动自举：导入社区版最小系统配置（幂等，集合非空则跳过）
+    # 须在 ensure_system_prompt_templates 之前执行，否则 prompt_templates 被后者占位后本包跳过
+    try:
+        from app.services.community_bootstrap_service import import_bootstrap_config
+        await import_bootstrap_config()
+    except Exception as e:
+        logger.error(f"❌ 启动配置导入失败（不影响服务启动）: {e}", exc_info=True)
+
     # 初始化自定义工具
     try:
         from app.core.database import get_mongo_db

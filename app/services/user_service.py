@@ -649,5 +649,35 @@ class UserService:
             return False
 
 
+async def bootstrap_first_admin() -> bool:
+    """首次启动引导：users 集合为空时，依据 ADMIN_DEFAULT_PASSWORD 创建初始管理员。
+
+    社区版没有开放注册，首个登录账号由该引导创建（密码来自 .env 的
+    ADMIN_DEFAULT_PASSWORD，与 .env.example 注释对应）。仅在空库时触发，
+    不会覆盖或改动任何既有账号。
+    """
+    try:
+        if user_service.users_collection.count_documents({}) > 0:
+            return False
+
+        import os
+        password = os.getenv("ADMIN_DEFAULT_PASSWORD")
+        if not password:
+            logger.warning(
+                "⚠️ 用户集合为空且未设置 ADMIN_DEFAULT_PASSWORD，跳过初始管理员创建。"
+                "请在 .env 中设置 ADMIN_DEFAULT_PASSWORD（至少 8 位）后重启后端完成初始化。"
+            )
+            return False
+
+        admin = await user_service.create_admin_user(password=password)
+        if admin:
+            logger.info("✅ 已创建初始管理员账号: admin，请首次登录后立即修改密码")
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"❌ 初始管理员引导失败: {e}")
+        return False
+
+
 # 全局用户服务实例
 user_service = UserService()

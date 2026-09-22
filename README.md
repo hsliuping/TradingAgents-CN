@@ -52,7 +52,28 @@ Pro 版面向有更高阶研究工作流需求的用户，获取方式见项目�
 
 - Python 3.11
 - Node.js 18+
-- MongoDB 与 Redis（本地或 Docker）
+- MongoDB 7.0+（推荐 8.0）与 Redis 6+（推荐 7）—— 需自行安装，见下方「安装 MongoDB / Redis」
+
+### 安装 MongoDB / Redis
+
+本项目不自带数据库，请先自行安装并启动 MongoDB 与 Redis（版本要求见上）。任意一种安装方式都可以，只要**账号密码与端口和下一步的 `.env` 保持一致**。
+
+| 系统 | MongoDB | Redis |
+|------|---------|-------|
+| Windows | 官网安装包 https://www.mongodb.com/try/download/community （安装后作为服务自启） | WSL 里运行 `redis-server`，或使用 Memurai 等兼容实现 |
+| macOS | `brew tap mongodb/brew && brew install mongodb-community && brew services start mongodb-community` | `brew install redis && brew services start redis` |
+| Ubuntu / Debian | 参考 https://www.mongodb.com/docs/manual/installation/ | `sudo apt install redis-server && sudo systemctl enable --now redis-server` |
+
+也可以用 Docker 只跑这两个数据库（需要本机已装 Docker）：
+
+```bash
+docker run -d --name ta-mongo -p 27017:27017 \
+  -e MONGO_INITDB_ROOT_USERNAME=admin -e MONGO_INITDB_ROOT_PASSWORD=<你的密码> mongo:8.0
+docker run -d --name ta-redis -p 6379:6379 \
+  redis:7-alpine redis-server --requirepass <你的密码>
+```
+
+MongoDB 需开启认证（`authSource=admin`），并自行创建管理员账号；把用户名/密码、主机与端口写入下一步的 `.env`（本地默认 `localhost:27017` / `localhost:6379`）。
 
 ### 启动步骤
 
@@ -71,7 +92,7 @@ pip install -r requirements.txt
 copy .env.example .env          # Windows
 cp .env.example .env            # Linux / macOS
 
-# 4. 启动 MongoDB / Redis（本地或 Docker，账号密码与 .env 保持一致）
+# 4. 启动已安装好的 MongoDB / Redis（账号密码与 .env 保持一致）
 
 # 5. 启动后端（默认 8000 端口，与前端默认代理一致）
 uvicorn app.main:app
@@ -82,7 +103,18 @@ npm install
 npm run dev                     # 默认 http://localhost:3000
 ```
 
-首次使用请先在系统设置中配置大模型 API Key（OpenAI / DeepSeek / 通义千问等），并按需配置行情数据 Token。
+### 首次登录
+
+后端首次启动时会自动完成初始化（无需手动执行任何导入脚本）：
+
+1. 导入系统级配置（模型目录、提示词模板、Agent 配置、工作流等）
+2. 用户表为空时，用 `.env` 中的 `ADMIN_DEFAULT_PASSWORD` 创建管理员账号 `admin`
+
+| 账号 | 密码 |
+|------|------|
+| `admin` | `.env` 中的 `ADMIN_DEFAULT_PASSWORD` |
+
+登录后请先在系统设置中配置大模型 API Key（OpenAI / DeepSeek / 通义千问等），并按需配置行情数据 Token。
 
 ## 文档
 
