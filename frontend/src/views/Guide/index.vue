@@ -580,7 +580,9 @@ const checkAnalysisHistory = async () => {
 // 检测 License 状态
 const checkLicense = async () => {
   try {
-    const resp = await ApiClient.get('/api/license/status', { skipErrorHandler: true } as any)
+    // 注意：第三参数才是 RequestConfig；误传到第二参数会变成 URL query，
+    // 导致 skipErrorHandler 失效、社区版 404 弹窗
+    const resp = await ApiClient.get('/api/license/status', undefined, { skipErrorHandler: true })
     if (resp.success && resp.data) {
       stepStatus.value.licenseValid = resp.data.is_valid || resp.data.has_token || false
     }
@@ -588,8 +590,10 @@ const checkLicense = async () => {
     // 404 = 社区版（无 License 激活功能），隐藏引导中的激活步骤
     if (e?.response?.status === 404) {
       licenseSupported.value = false
+      console.debug('License 接口不可用（社区版），已隐藏激活步骤')
+    } else {
+      console.error('检查License状态失败:', e)
     }
-    console.error('检查License状态失败:', e)
   }
 }
 
