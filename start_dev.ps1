@@ -176,11 +176,15 @@ if ($Command -eq "docker" -or $Command -eq "all") {
 # ==========================================
 if ($Command -eq "backend" -or $Command -eq "all") {
     # 设置环境变量（版本指定时覆盖 .env 默认值）
+    # v3.0/jdyun 等版本的 Docker 库均启用认证（admin/tradingagents123，见 docker-compose.dev.yml），
+    # 必须注入用户名密码，否则所有数据库操作报 requires authentication
     if ($Version) {
         $env:PORT = "$BackendPort"
         $env:HOST = "127.0.0.1"
-        $env:MONGODB_HOST = "localhost"
+        $env:MONGODB_HOST = "127.0.0.1"
         $env:MONGODB_PORT = "$MongoDBPort"
+        $env:MONGODB_USERNAME = "admin"
+        $env:MONGODB_PASSWORD = "tradingagents123"
         $env:REDIS_HOST = "127.0.0.1"
         $env:REDIS_PORT = "$RedisPort"
     }

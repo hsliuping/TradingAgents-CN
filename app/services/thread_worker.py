@@ -147,7 +147,17 @@ class ThreadWorker:
             from core.tools.implementations.agent_builder.nanobot_agent_builder_tools import (
                 process_agent_workshop_gap_resolution_jobs_once,
             )
+        except ImportError:
+            # 社区版无 Agent 工坊模块（manifest 剔除 app/models/agent_workshop 等），
+            # 一次性提示后静默停用轮询，避免每 tick 刷 WARNING。
+            if not getattr(type(self), "_gap_job_unavailable_logged", False):
+                type(self)._gap_job_unavailable_logged = True
+                logger.info(
+                    "[GapJob] Agent 工坊模块不可用（社区版），缺口补齐轮询已停用"
+                )
+            return
 
+        try:
             result = await process_agent_workshop_gap_resolution_jobs_once(
                 limit=1,
                 worker_id=self.worker_id,

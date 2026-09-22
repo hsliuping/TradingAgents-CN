@@ -253,7 +253,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, markRaw } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useLicenseStore } from '@/stores/license'
@@ -297,14 +297,14 @@ const isJdyunMode = checkJdyunMode()
 
 // 京东云版"更多功能"折叠区配置
 const jdyunMoreFeatures = ref([
-  { path: '/assistant', title: '智能助手', description: '一句话描述需求，AI 自动完成', icon: ChatDotRound },
-  { path: '/screening', title: '选股助手', description: '多维度筛选符合条件的股票', icon: Search },
-  { path: '/workflow', title: '流程管理', description: '管理工作流和自定义流程', icon: Tools },
-  { path: '/workflow/agent-workshop', title: 'Agent 工坊', description: '可视化构建专属 Agent', icon: EditPen },
-  { path: '/review', title: '操作复盘', description: '对操作记录进行 AI 复盘分析', icon: DataAnalysis },
-  { path: '/settings/sync', title: '数据同步', description: '同步股票基础和行情数据', icon: Refresh },
-  { path: '/paper', title: '模拟交易', description: '使用虚拟资金练习模拟交易', icon: PieChart },
-  { path: '/learning', title: '学习中心', description: '24 节 AI 股票分析系统课程', icon: Reading }
+  { path: '/assistant', title: '智能助手', description: '一句话描述需求，AI 自动完成', icon: markRaw(ChatDotRound) },
+  { path: '/screening', title: '选股助手', description: '多维度筛选符合条件的股票', icon: markRaw(Search) },
+  { path: '/workflow', title: '流程管理', description: '管理工作流和自定义流程', icon: markRaw(Tools) },
+  { path: '/workflow/agent-workshop', title: 'Agent 工坊', description: '可视化构建专属 Agent', icon: markRaw(EditPen) },
+  { path: '/review', title: '操作复盘', description: '对操作记录进行 AI 复盘分析', icon: markRaw(DataAnalysis) },
+  { path: '/settings/sync', title: '数据同步', description: '同步股票基础和行情数据', icon: markRaw(Refresh) },
+  { path: '/paper', title: '模拟交易', description: '使用虚拟资金练习模拟交易', icon: markRaw(PieChart) },
+  { path: '/learning', title: '学习中心', description: '24 节 AI 股票分析系统课程', icon: markRaw(Reading) }
 ])
 
 // 响应式数据

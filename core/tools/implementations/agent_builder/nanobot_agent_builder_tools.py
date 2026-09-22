@@ -15,9 +15,14 @@ from langchain_core.tools import tool
 from app.core.database import get_mongo_db
 from app.core.database import get_mongo_db_sync
 from app.models.capability_index import CapabilitySearchHit
-from app.models.agent_workshop import AgentSpec, AgentSpecIOField, AgentSpecStatus
-from app.models.prompt_template import TemplateContent
-from app.services.agent_workshop_service import AgentWorkshopService
+try:
+    from app.models.agent_workshop import AgentSpec, AgentSpecIOField, AgentSpecStatus
+    from app.models.prompt_template import TemplateContent
+    from app.services.agent_workshop_service import AgentWorkshopService
+except ImportError:  # 社区版无 Agent 工坊模块（manifest 剔除），本工具链在社区版停用
+    AgentSpec = AgentSpecIOField = AgentSpecStatus = None  # type: ignore[assignment,misc]
+    TemplateContent = None  # type: ignore[assignment,misc]
+    AgentWorkshopService = None  # type: ignore[assignment,misc]
 from core.agents.factory import AgentFactory
 from core.config.binding_manager import BindingManager
 from app.services.capability_index_service import CapabilityIndexService

@@ -976,9 +976,12 @@ async def get_market_rules():
     db = get_mongo_db()
     rules = await db["paper_market_rules"].find({}, {"_id": 0}).to_list(None)
     if not rules:
-        # 如果没有配置，返回默认值
-        from scripts.init_paper_trading_market_rules import MARKET_RULES
-        return ok(MARKET_RULES)
+        # 如果没有配置，返回默认值（scripts 目录在社区版被剔除，缺失时返回空并提示初始化）
+        try:
+            from scripts.init_paper_trading_market_rules import MARKET_RULES
+            return ok(MARKET_RULES)
+        except ImportError:
+            return ok([])
     return ok(rules)
 
 
