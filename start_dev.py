@@ -91,8 +91,12 @@ def main():
             print(f"  Docs: http://127.0.0.1:{args.port}/docs")
             print()
             
+            # 用模块模式（-m app.main）而非脚本模式（app/main.py）启动：
+            # 脚本模式会把 sys.path[0] 设为 app/ 目录，导致 app/main.py 内部的
+            # `from app.core.config import settings` 解析不到项目根目录下的 app 包，
+            # 抛出 ModuleNotFoundError: No module named 'app'（Linux/macOS 复现）。
             backend_process = subprocess.Popen(
-                [python_exe, str(backend_main), "--port", str(args.port)],
+                [python_exe, "-m", "app.main", "--port", str(args.port)],
                 cwd=str(project_root),
                 env=os.environ.copy()
             )
