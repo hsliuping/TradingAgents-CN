@@ -1080,17 +1080,12 @@ class ConfigService:
             print(f"更新LLM配置失败: {e}")
             return False
 
-    async def batch_import_llm_configs(self, selected_providers: List[str] = None) -> Dict[str, Any]:
+    async def batch_import_llm_configs(self, selected_providers: Optional[List[str]] = None, selected_models: Optional[List[str]] = None) -> Dict[str, Any]:
         """一键导入：从模型目录 + 厂家配置批量创建大模型配置
 
         Args:
             selected_providers: 指定导入的厂家列表，为空则导入所有已配置API密钥的厂家
-
-        逻辑：
-        1. 获取所有已启用且有 API Key 的厂家（可按 selected_providers 过滤）
-        2. 获取这些厂家的模型目录
-        3. 对目录中每个模型，如果大模型配置中不存在则创建
-        4. 从 DEFAULT_MODEL_CAPABILITIES 获取能力分级等元数据
+            selected_models: 指定导入的模型名称列表（裸 model.name），为空则导入目录下所有模型
         """
         from app.constants.model_capabilities import DEFAULT_MODEL_CAPABILITIES
 
@@ -1144,6 +1139,10 @@ class ConfigService:
                     if model.is_deprecated:
                         continue
 
+                    # 按勾选的模型名筛选（裸 model.name，精确匹配）
+                    if selected_models and model.name not in selected_models:
+                        continue
+
                     config_key = f"{provider_name}/{model.name}"
                     if config_key in existing_keys:
                         skipped += 1
@@ -1172,10 +1171,13 @@ class ConfigService:
                             input_price_per_1k=model.input_price_per_1k,
                             output_price_per_1k=model.output_price_per_1k,
                             currency=model.currency or "CNY",
-                            capability_level=cap.get("capability_level", 5),
+                            # 未收录进 DEFAULT_MODEL_CAPABILITIES 的模型，按"标准"能力给默认值。
+                            # 历史实现给 capability_level=5（旗舰），会让未识别模型被误推为旗舰，
+                            # 甚至被推荐到深度决策位——此处与 ModelCapabilityService 的兜底值对齐。
+                            capability_level=cap.get("capability_level", 2),
                             suitable_roles=[r.value if hasattr(r, "value") else str(r) for r in cap.get("suitable_roles", ["both"])] or ["both"],
                             features=[f.value if hasattr(f, "value") else str(f) for f in cap.get("features", ["tool_calling", "long_context", "reasoning"])] or ["tool_calling", "long_context", "reasoning"],
-                            recommended_depths=cap.get("recommended_depths", ["快速", "基础", "标准", "深度", "全面"]) or ["快速", "基础", "标准", "深度", "全面"],
+                            recommended_depths=cap.get("recommended_depths", ["快速", "基础", "标准"]) or ["快速", "基础", "标准"],
                             performance_metrics=cap.get("performance_metrics"),
                         )
 
@@ -1222,6 +1224,228 @@ class ConfigService:
                 "skipped": 0,
                 "errors": [str(e)],
             }
+
+    async def onboard_llm_provider(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """一键接入：填 Key → 拉模型 → 勾选导入 → 设为默认（issue #785）
+
+        把原本分散在「厂家管理」「模型目录」「大模型配置」「系统设置」四个页面的
+        操作合并成一次请求。步骤：
+          1. upsert 厂家（保存 Key + base_url）
+          2. 调用厂家 API 拉取模型列表
+          3. 写入模型目录
+          4. 按勾选结果批量创建大模型配置
+          5. 设置默认快速 / 深度分析模型
+
+        Args:
+            payload: {
+                name, display_name, description, api_key, base_url,
+                embedding_model, test_model, api_secret, is_aggregator,
+                models: [裸模型名列表]（为空则拉取后全部导入）,
+                quick_analysis_model: 默认快速分析模型名（可选）,
+                deep_analysis_model: 默认深度分析模型名（可选）,
+            }
+
+        Returns:
+            每步的结果明细 + 最终可用的模型配置列表，供前端渲染成功页
+        """
+        from app.models.config import LLMProvider, ModelCatalog, ModelInfo
+        from app.utils.api_key_utils import is_valid_api_key
+        import re
+
+        name = (payload.get("name") or "").strip()
+        display_name = (payload.get("display_name") or "").strip() or name
+        requested_key = (payload.get("api_key") or "").strip()
+        base_url = (payload.get("base_url") or "").strip().rstrip("/")
+        selected_models = payload.get("models") or None
+
+        steps = []
+
+        if not name or not re.fullmatch(r"[a-z0-9_-]+", name):
+            return {"success": False, "message": f"厂家标识不合法：{name or '(空)'}", "steps": steps}
+
+        db = await self._get_db()
+        existing = await db.llm_providers.find_one({"name": name})
+
+        # API Key 解析：优先用本次提交的；本次没给则复用已保存的真实密钥。
+        # 这里直接从数据库取，拿到的是真值——后端 GET 接口对 api_key 脱敏，
+        # 前端也正因为如此而不会回读预填，避免把脱敏串当新 Key 提交。
+        api_key = requested_key or (existing or {}).get("api_key") or ""
+        reused_key = not requested_key and bool(api_key)
+
+        if not api_key or not is_valid_api_key(api_key):
+            msg = "API Key 无效" if api_key else (
+                "缺少 API Key" if not reused_key else "该厂家尚未保存可用 API Key"
+            )
+            return {"success": False, "message": msg, "steps": steps}
+        if not base_url:
+            return {"success": False, "message": "缺少 API 基础地址 (base_url)", "steps": steps}
+
+        provider = LLMProvider(
+            name=name,
+            display_name=display_name,
+            description=payload.get("description") or "",
+            default_base_url=base_url,
+            api_key=api_key,
+            api_secret=payload.get("api_secret") or None,
+            embedding_model=payload.get("embedding_model") or None,
+            test_model=payload.get("test_model") or None,
+            is_active=True,
+            supported_features=payload.get("supported_features") or ["chat"],
+            is_aggregator=bool(payload.get("is_aggregator", False)),
+            extra_config={"has_api_key": True, "source": "onboarding"},
+        )
+
+        # ---------- 步骤 1：保存厂家 ----------
+        try:
+            if existing:
+                upd = provider.model_dump(by_alias=True, exclude={"_id", "id", "created_at"})
+                ok = await self.update_llm_provider(str(existing["_id"]), upd)
+                steps.append({
+                    "step": "provider", "status": "updated" if ok else "failed",
+                    "message": f"已更新厂家「{display_name}」" if ok else "厂家更新失败",
+                    "id": str(existing["_id"]),
+                })
+            else:
+                pid = await self.add_llm_provider(provider)
+                steps.append({
+                    "step": "provider", "status": "created",
+                    "message": f"已创建厂家「{display_name}」", "id": pid,
+                })
+            if steps[-1]["status"] == "failed":
+                return {"success": False, "message": "厂家保存失败", "steps": steps}
+        except Exception as e:
+            steps.append({"step": "provider", "status": "failed", "message": f"厂家保存失败：{e}"})
+            logger.error("❌ [onboarding] 厂家保存失败", exc_info=True)
+            return {"success": False, "message": f"厂家保存失败：{e}", "steps": steps}
+
+        # ---------- 步骤 2：拉取模型列表 ----------
+        fetch = await self.fetch_provider_models(
+            name, None, api_key_override=api_key, base_url_override=base_url
+        )
+        if not fetch.get("success"):
+            steps.append({
+                "step": "fetch", "status": "failed",
+                "message": fetch.get("message", "拉取模型列表失败"),
+            })
+            return {
+                "success": False,
+                "message": f"拉取模型列表失败：{fetch.get('message')}",
+                "steps": steps,
+            }
+
+        models = fetch.get("models") or []
+        model_names = [m.get("name") or m.get("id") for m in models if m.get("name") or m.get("id")]
+        if not model_names:
+            steps.append({"step": "fetch", "status": "failed", "message": "厂家 API 返回 0 个模型"})
+            return {"success": False, "message": "厂家 API 未返回任何模型", "steps": steps}
+
+        # 只导入勾选的模型（前端勾选结果）
+        if selected_models:
+            picked = [n for n in model_names if n in selected_models]
+        else:
+            picked = list(model_names)
+        if not picked:
+            return {
+                "success": False,
+                "message": "未选择任何模型",
+                "steps": steps + [{"step": "fetch", "status": "done", "message": f"共拉取 {len(model_names)} 个模型"}],
+            }
+
+        steps.append({
+            "step": "fetch", "status": "done",
+            "message": f"拉取到 {len(model_names)} 个模型，已勾选 {len(picked)} 个",
+            "models": [
+                {"name": m.get("name"), "display_name": m.get("name"), "id": m.get("id")}
+                for m in models if (m.get("name") or m.get("id")) in picked
+            ],
+        })
+
+        # ---------- 步骤 3：写入模型目录 ----------
+        cat_models = []
+        for m in models:
+            mid = m.get("id", "")
+            if not mid or mid not in picked:
+                continue
+            cat_models.append(ModelInfo(
+                name=mid,
+                display_name=m.get("name") or mid,
+                description=m.get("description") or "",
+                context_length=m.get("context_length"),
+                input_price_per_1k=m.get("input_price_per_1k"),
+                output_price_per_1k=m.get("output_price_per_1k"),
+                currency=payload.get("currency") or "CNY",
+            ))
+        if cat_models:
+            cat_ok = await self.save_model_catalog(ModelCatalog(
+                provider=name, provider_name=display_name, models=cat_models,
+            ))
+            steps.append({
+                "step": "catalog", "status": "saved" if cat_ok else "failed",
+                "message": f"已保存 {len(cat_models)} 个模型到模型目录" if cat_ok else "模型目录保存失败",
+            })
+        else:
+            steps.append({"step": "catalog", "status": "skipped", "message": "无模型可写入目录"})
+
+        # ---------- 步骤 4：批量创建大模型配置 ----------
+        try:
+            imp = await self.batch_import_llm_configs(
+                selected_providers=[name], selected_models=picked,
+            )
+            steps.append({
+                "step": "import", "status": "done" if imp.get("success") else "failed",
+                "message": imp.get("message", "批量导入完成"),
+                "imported": imp.get("imported", 0),
+                "skipped": imp.get("skipped", 0),
+                "errors": imp.get("errors", []),
+            })
+        except Exception as e:
+            steps.append({"step": "import", "status": "failed", "message": f"批量导入失败：{e}"})
+            logger.error("❌ [onboarding] 批量导入失败", exc_info=True)
+
+        # ---------- 步骤 5：设置默认模型 ----------
+        settings: Dict[str, Any] = {}
+        quick = payload.get("quick_analysis_model")
+        deep = payload.get("deep_analysis_model")
+        if quick and quick in picked:
+            settings["quick_analysis_model"] = quick
+        if deep and deep in picked:
+            settings["deep_analysis_model"] = deep
+        if settings:
+            try:
+                ok = await self.update_system_settings(settings)
+                steps.append({
+                    "step": "defaults", "status": "saved" if ok else "failed",
+                    "message": "默认模型已更新：" + "、".join(f"{k}={v}" for k, v in settings.items()),
+                })
+            except Exception as e:
+                steps.append({"step": "defaults", "status": "failed", "message": f"默认模型保存失败：{e}"})
+
+        # ---------- 汇总 ----------
+        config = await self.get_system_config()
+        enabled = [c for c in (config.llm_configs if config else []) if c.enabled and c.provider == name]
+
+        imported = next((s for s in steps if s["step"] == "import"), {})
+        hard_failed = any(s["status"] == "failed" for s in steps if s["step"] in ("provider", "fetch"))
+        # 「已存在」不算失败：重跑向导（或配置已部分就绪）时，模型目录和配置可能都在，
+        # 只要本次成功落库或目标模型已就绪，都视为成功。
+        imported_n = imported.get("imported", 0)
+        skipped_n = imported.get("skipped", 0)
+        success = (not hard_failed) and (imported_n > 0 or skipped_n > 0)
+
+        message = f"接入完成：{display_name} 新增 {imported_n} 个模型"
+        if skipped_n:
+            message += f"，{skipped_n} 个已存在"
+
+        return {
+            "success": success,
+            "message": message,
+            "steps": steps,
+            "provider": {"name": name, "display_name": display_name},
+            "imported": imported.get("imported", 0),
+            "skipped": imported.get("skipped", 0),
+            "model_count": len(enabled),
+            "models": [c.model_dump() for c in enabled],
+        }
 
     async def test_llm_config(self, llm_config: LLMConfig) -> Dict[str, Any]:
         """测试大模型配置 - 真实调用API进行验证"""
@@ -4561,6 +4785,10 @@ class ConfigService:
             if not provider_data:
                 provider_data = await providers_collection.find_one({"_id": provider_id})
 
+            # 前端可能传的是厂家 name 而非 _id，按 name 兜底查找。
+            if not provider_data and provider_id:
+                provider_data = await providers_collection.find_one({"name": provider_id})
+
             if not provider_data:
                 return {
                     "success": False,
@@ -5427,12 +5655,21 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    async def fetch_provider_models(self, provider_id: str, filters: Optional[Dict[str, Any]] = None) -> dict:
+    async def fetch_provider_models(
+        self,
+        provider_id: str,
+        filters: Optional[Dict[str, Any]] = None,
+        api_key_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+    ) -> dict:
         """从厂家 API 获取模型列表
 
         Args:
             provider_id: 厂家 ID
             filters: 可选的筛选参数（前端拉取后在客户端筛选，服务端仅做兼容接收）
+            api_key_override: 直接使用指定的 API Key（用于向导流程：厂家还没落库，
+                但用户刚填了 Key）。传入时跳过数据库 / 环境变量查找。
+            base_url_override: 直接使用指定的 base_url（同上）。
         """
         try:
             filters = filters or {}
@@ -5452,13 +5689,31 @@ class ConfigService:
             if not provider_data:
                 provider_data = await providers_collection.find_one({"_id": provider_id})
 
-            if not provider_data:
-                return {
-                    "success": False,
-                    "message": f"厂家不存在 (ID: {provider_id})"
-                }
+            # 前端可能传的是厂家 name（如 "sensenova"）而非 _id，按 name 兜底查找。
+            if not provider_data and provider_id:
+                provider_data = await providers_collection.find_one({"name": provider_id})
 
-            provider_name = provider_data.get("name")
+            # 支持覆盖参数：向导流程下厂家可能尚未落库（provider_id 传占位符），
+            # 或用户刚填了新的 Key / base_url 还没保存。此时用覆盖值直连 API。
+            if api_key_override is None and base_url_override is None:
+                if not provider_data:
+                    return {
+                        "success": False,
+                        "message": f"厂家不存在 (ID: {provider_id})"
+                    }
+            else:
+                # 覆盖模式：用覆盖值构造最小厂家视图，缺省字段从数据库补齐
+                provider_data = dict(provider_data or {})
+                if base_url_override is not None:
+                    provider_data["default_base_url"] = base_url_override
+                if api_key_override is not None:
+                    provider_data["api_key"] = api_key_override
+                provider_data.setdefault("name", provider_id)
+                provider_data.setdefault("display_name", provider_data["name"])
+
+            # name 兜底：覆盖模式下 provider_data 可能由占位符 provider_id 构造；
+            # 数据库记录也可能缺 name 字段。缺省回落到 provider_id，避免下游拿到 None。
+            provider_name = provider_data.get("name") or provider_id
             api_key = provider_data.get("api_key")
             base_url = provider_data.get("default_base_url")
             display_name = provider_data.get("display_name", provider_name)
@@ -5507,7 +5762,7 @@ class ConfigService:
             # 调用 OpenAI 兼容的 /v1/models 端点
             import asyncio
             result = await asyncio.get_event_loop().run_in_executor(
-                None, self._fetch_models_from_api, api_key, base_url, display_name, provider_name
+                None, self._fetch_models_from_api, str(api_key or ""), str(base_url), str(display_name), str(provider_name)
             )
 
             return result
@@ -5712,85 +5967,59 @@ class ConfigService:
         return formatted
 
     def _filter_popular_models(self, models: list, provider_name: str = None) -> list:
-        """过滤模型列表，只保留主流大厂的常用模型"""
+        """过滤模型列表，剔除过时/预览版本，其余一律保留
+
+        历史实现只保留 OpenAI / Anthropic / Google 三大厂及 doubao/ep 前缀，
+        导致国产与聚合渠道模型（deepseek / qwen / glm / kimi / sensenova 等）
+        在 fetch-models 阶段被静默全部丢弃——用户看到的不是"配完不显示"，
+        而是"压根拉不出来"（issue #785）。现改为：只剔除明确过时/预览的版本，
+        不再做厂商白名单。
+        """
         import re
 
+        # 入参防御：调用方可能传 None（fetch 失败 / 厂商无模型），不能抛 TypeError
+        if not models:
+            return []
+
         # 火山方舟编程：不过滤，返回所有模型（API 已按套餐权限返回对应的模型）
-        # 火山方舟（非编程）：不过滤，返回所有模型
+        # 火山方舟（非编程）：同上
         if provider_name in ("volcengine_coding", "volcengine"):
             print(f"✅ [{provider_name}] 返回全部 {len(models)} 个模型（不过滤）")
             return models
 
-        # 只保留三大厂：OpenAI、Anthropic、Google
-        popular_providers = [
-            "openai",      # OpenAI
-            "anthropic",   # Anthropic
-            "google",      # Google
-        ]
+        # 统一的「分隔符 + 关键词」模式：避免裸子串误伤（如 flash 是 DeepSeek
+        # 稳定线名，pretrained 与 preview 无关）。三个分支：
+        #   1. 标签在最开头        —— free-basic、instruct-v3
+        #   2. 标签前有 -_:. 分隔  —— kimi-k2-preview、glm-4.5-online
+        #   3. 标签跟在 / 后       —— Ollama 写法 deepseek-v3/free、/free
+        exclude_pattern = re.compile(
+            r'(?:^'                                    # 分支1：字符串开头
+            r'|[-_:]\s*'                               # 分支2：- _ : . 分隔符
+            r'|/\s*)'                                  # 分支3：路径分隔符
+            r'(preview|experimental|alpha|beta|nitro|rc'
+            r'|online|extended|instruct|free)\b'
+        )
 
-        # 常见模型名称前缀（用于识别不带厂商前缀的模型）
-        model_prefixes = {
-            "gpt-": "openai",           # gpt-3.5-turbo, gpt-4, gpt-4o
-            "o1-": "openai",            # o1-preview, o1-mini
-            "claude-": "anthropic",     # claude-3-opus, claude-3-sonnet
-            "gemini-": "google",        # gemini-pro, gemini-1.5-pro
-            "gemini": "google",         # gemini (不带连字符)
-            "doubao-": "volcengine",    # 火山方舟豆包模型
-            "ep-": "volcengine",        # 火山方舟推理接入点 (Endpoint)
-        }
-
-        # 排除的关键词
-        exclude_keywords = [
-            "preview",
-            "experimental",
-            "alpha",
-            "beta",
-            "free",
-            "extended",
-            "nitro",
-            ":free",
-            ":extended",
-            "online",  # 排除带在线搜索的版本
-            "instruct",  # 排除 instruct 版本
-        ]
-
-        # 日期格式正则表达式（匹配 2024-05-13 这种格式）
-        date_pattern = re.compile(r'\d{4}-\d{2}-\d{2}')
+        # 带日期的版本快照（gpt-4o-2024-05-13 / deepseek-v3-20250110）
+        # 这类版本通常会被 API 侧的无前缀别名（gpt-4o、deepseek-v3）取代
+        date_pattern = re.compile(r'-\d{4}-\d{2}-\d{2}|\d{8}$')
 
         filtered = []
         for model in models:
-            model_id = model.get("id", "").lower()
-            model_name = model.get("name", "").lower()
+            model_id = model.get("id", "")
+            model_name = model.get("name", model_id)
 
-            # 检查是否属于三大厂
-            # 方式1：模型ID中包含厂商名称（如 openai/gpt-4）
-            is_popular_provider = any(provider in model_id for provider in popular_providers)
+            id_lower = model_id.lower()
+            name_lower = model_name.lower()
 
-            # 方式2：模型ID以常见前缀开头（如 gpt-4, claude-3-sonnet）
-            if not is_popular_provider:
-                for prefix, provider in model_prefixes.items():
-                    if model_id.startswith(prefix):
-                        is_popular_provider = True
-                        print(f"🔍 识别模型前缀: {model_id} -> {provider}")
-                        break
-
-            if not is_popular_provider:
+            if exclude_pattern.search(id_lower) or exclude_pattern.search(name_lower):
+                print(f"⏭️ 跳过预览/实验/功能变体版本: {model_id}")
                 continue
 
-            # 检查是否包含日期（排除带日期的旧版本）
-            if date_pattern.search(model_id):
-                print(f"⏭️ 跳过带日期的旧版本: {model_id}")
+            if date_pattern.search(id_lower):
+                print(f"⏭️ 跳过日期快照版本: {model_id}")
                 continue
 
-            # 检查是否包含排除关键词
-            has_exclude_keyword = any(keyword in model_id or keyword in model_name for keyword in exclude_keywords)
-
-            if has_exclude_keyword:
-                print(f"⏭️ 跳过排除关键词: {model_id}")
-                continue
-
-            # 保留该模型
-            print(f"✅ 保留模型: {model_id}")
             filtered.append(model)
 
         return filtered
