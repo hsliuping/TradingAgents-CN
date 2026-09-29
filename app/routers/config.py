@@ -516,6 +516,8 @@ class SetDefaultRequest(BaseModel):
 class FetchProviderModelsRequest(BaseModel):
     """获取厂家模型列表请求"""
     filters: Optional[Dict[str, Any]] = Field(default=None, description="可选的模型筛选参数")
+    api_key: Optional[str] = Field(default=None, description="直接指定 API Key（向导测试连接用，无需先保存厂家）")
+    base_url: Optional[str] = Field(default=None, description="直接指定 API 基础地址（同上）")
 
 
 @router.get("/system", response_model=SystemConfigResponse)
@@ -849,12 +851,21 @@ async def fetch_provider_models(
     request: Optional[FetchProviderModelsRequest] = None,
     current_user: User = Depends(get_current_user)
 ):
-    """从厂家 API 获取模型列表"""
+    """从厂家 API 获取模型列表
+
+    请求体可带 api_key / base_url：向导「测试连接」场景下厂家尚未落库，
+    直接直连用户刚填的 Key 与地址，无需先保存厂家配置。
+    """
     try:
         filters = request.model_dump(exclude_none=True) if request else None
+        api_key_override = filters.pop("api_key", None) if filters else None
+        base_url_override = filters.pop("base_url", None) if filters else None
+        filters = filters or None
         result = await config_service.fetch_provider_models(
             provider_id,
             filters,
+            api_key_override=api_key_override,
+            base_url_override=base_url_override,
         )
         return result
     except HTTPException:
@@ -1524,6 +1535,64 @@ async def set_default_llm(
 
 class BatchImportRequest(BaseModel):
     providers: List[str] = Field(default=[], description="要导入的厂家列表，为空则导入所有已配置API密钥的厂家")
+
+
+class LLMOnboardingRequest(BaseModel):
+    """一键接入请求（issue #785）
+
+    把「厂家管理 → 模型目录 → 大模型配置 → 系统设置」四步合并成一次请求。
+    """
+    name: str = Field(..., description="厂家唯一标识，仅小写字母/数字/_/-")
+    display_name: Optional[str] = Field(None, description="显示名称，缺省用 name")
+    api_key: Optional[str] = Field(None, description="API Key。留空则沿用该厂家已保存的密钥（新建厂家时必须填写）")
+    base_url: str = Field(..., description="OpenAI 兼容 API 基础地址，如 https://api.example.com/v1")
+    description: Optional[str] = Field("", description="厂家说明")
+    embedding_model: Optional[str] = Field(None, description="Embedding 模型名（可选）")
+    test_model: Optional[str] = Field(None, description="连接测试用的模型名（可选）")
+    api_secret: Optional[str] = Field(None, description="部分厂家需要（可选）")
+    is_aggregator: bool = Field(False, description="是否为聚合渠道（可选）")
+    supported_features: List[str] = Field(default_factory=lambda: ["chat"], description="支持的功能标签")
+    currency: str = Field("CNY", description="定价货币单位")
+    models: Optional[List[str]] = Field(None, description="要导入的模型名列表，为空则导入拉取到的全部")
+    quick_analysis_model: Optional[str] = Field(None, description="设为默认快速分析模型（可选）")
+    deep_analysis_model: Optional[str] = Field(None, description="设为默认深度分析模型（可选）")
+
+
+@router.post("/llm/onboarding", response_model=dict)
+async def onboard_llm_provider(
+    request: LLMOnboardingRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """一键接入大模型服务：保存厂家 → 拉取模型 → 勾选导入 → 设置默认（issue #785）"""
+    try:
+        result = await config_service.onboard_llm_provider(request.model_dump())
+
+        try:
+            await log_operation(
+                user_id=str(getattr(current_user, "id", "")),
+                username=getattr(current_user, "username", "unknown"),
+                action_type=ActionType.CONFIG_MANAGEMENT,
+                action="onboard_llm_provider",
+                details={
+                    "provider": request.name,
+                    "imported": result.get("imported"),
+                    "skipped": result.get("skipped"),
+                    "success": result.get("success"),
+                },
+                success=bool(result.get("success")),
+            )
+        except Exception:
+            pass
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"一键接入大模型服务失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"一键接入失败: {str(e)}"
+        )
 
 
 @router.post("/llm/batch-import", response_model=dict)

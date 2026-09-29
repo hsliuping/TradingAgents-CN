@@ -79,6 +79,9 @@ export interface FetchProviderModelsFilters {
   sort_by?: string
   sort_order?: string
   limit?: number
+  // 向导「测试连接」用：厂家尚未落库时直连用户刚填的凭据
+  api_key?: string
+  base_url?: string
   recommended_only?: boolean
   tools_only?: boolean
   exclude_preview?: boolean
@@ -474,6 +477,35 @@ export const configApi = {
   // 一键导入大模型配置（按厂家）
   batchImportLLMConfigs(providers?: string[]): Promise<{ success: boolean; message: string; imported: number; skipped: number; errors: string[] }> {
     return ApiClient.post('/api/config/llm/batch-import', { providers: providers || [] }) as any
+  },
+
+  // 一键接入大模型服务（issue #785）：保存厂家 → 拉取模型 → 勾选导入 → 设置默认
+  onboardLLMProvider(data: {
+    name: string
+    display_name?: string
+    api_key?: string
+    base_url: string
+    description?: string
+    embedding_model?: string
+    test_model?: string
+    api_secret?: string
+    is_aggregator?: boolean
+    supported_features?: string[]
+    currency?: string
+    models?: string[]
+    quick_analysis_model?: string
+    deep_analysis_model?: string
+  }): Promise<{
+    success: boolean
+    message: string
+    steps?: Array<{ step: string; status: string; message: string }>
+    provider?: { name: string; display_name: string }
+    imported?: number
+    skipped?: number
+    model_count?: number
+    models?: any[]
+  }> {
+    return ApiClient.post('/api/config/llm/onboarding', data) as any
   },
 
   // 获取所有数据源配置
