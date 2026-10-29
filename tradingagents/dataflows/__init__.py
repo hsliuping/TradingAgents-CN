@@ -84,6 +84,11 @@ from .interface import (
     get_stock_data_by_market,
 )
 
+try:
+    from .unified_dataframe import get_china_daily_df_unified
+except ImportError:
+    get_china_daily_df_unified = None
+
 __all__ = [
     # News and sentiment functions
     "get_finnhub_news",
@@ -114,4 +119,5 @@ __all__ = [
     "get_hk_stock_data_unified",
     "get_hk_stock_info_unified",
     "get_stock_data_by_market",
+    "get_china_daily_df_unified",
 ]
