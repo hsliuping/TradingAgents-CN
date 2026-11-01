@@ -45,3 +45,30 @@ pytest plugin loading, and rejects external network/DNS/process and real
 model/order calls. The stdlib asyncio wakeup socketpair is permitted; urllib3's
 local IPv6 capability probe is refused and recorded separately. No Redis,
 MongoDB, worker process, recovery, or resume service is started.
+
+GitHub Actions runs the same suites for pull requests targeting `v3.0`, including
+Drafts. The single Windows job checks out the exact PR head and the original
+baseline separately, creates a new Python 3.12.14 environment with pinned uv
+0.12.7 and the 38 distributions in `requirements-pr1.txt`, without installing
+the full application. `uv.lock` is not used or changed by this test job.
+Dependency preparation and artifact upload use the network; the test processes
+keep the existing offline guards and use no secrets or real services.
+
+`verify_pr1_results.py` requires runner exit codes `0/1/0` for regression,
+upstream comparison, and PR1 comparison respectively. It checks JUnit and JSON
+counts and identities, exact dependency versions and shared test bytes/inputs,
+the original BusinessMismatch failures, 60 normal Web field equalities, and the
+zero-attempt guards. Any collection/setup/teardown error, skip, unexpected
+failure, source mismatch, or boundary violation fails the job. The three run
+logs, JUnit files, JSON evidence, and summary are always uploaded as artifacts.
+
+For local verification, write the three actual runner exit codes to
+`process-exit-codes.json` in the output root, then run:
+
+```text
+python -I -B tests/offline/verify_pr1_results.py --results /absolute/output-root --candidate /absolute/this-checkout --baseline /absolute/upstream-checkout --head-sha FULL_CANDIDATE_SHA
+```
+
+The workflow uses read-only repository contents permission. A maintainer may
+need to approve an external contributor's workflow run under the upstream's
+Actions policy; the PR can remain a Draft throughout validation.
