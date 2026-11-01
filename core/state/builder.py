@@ -230,6 +230,7 @@ class StateSchemaBuilder:
         - string → Annotated[str, keep_non_empty]（保留非空值）
         - object → Annotated[dict, merge_dict]（智能合并字典）
         - array  → Annotated[list, keep_latest_list]（采用最新列表）
+        - quality_flags → Annotated[list, operator.add]（累计本任务质量发现）
         - messages → Annotated[List[BaseMessage], add_messages]（LangGraph 内置）
         """
         from typing import TypedDict, Annotated, List
@@ -243,6 +244,8 @@ class StateSchemaBuilder:
         for name, field in schema.fields.items():
             if name == "context":
                 annotations[name] = Annotated[Any, keep_non_empty]
+            elif name == "quality_flags":
+                annotations[name] = Annotated[list, operator.add]
             elif name.startswith("_debate_") and name.endswith("_count"):
                 annotations[name] = Annotated[int, operator.add]
             elif field.type == FieldType.LIST_MESSAGES:

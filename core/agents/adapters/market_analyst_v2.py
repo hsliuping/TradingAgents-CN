@@ -15,6 +15,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from ..analyst import AnalystAgent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
+from core.agents.quality_gate import validate_analyst_report
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,8 @@ class MarketAnalystV2(AnalystAgent):
         """
         覆盖执行逻辑以支持模板调试与提示词覆盖
         """
+        ticker = ""
+        node_id = (state.get("node_id") if isinstance(state, dict) else None) or self.agent_id
         try:
             ticker, analysis_date = self._extract_common_params(state)
 
@@ -221,7 +224,7 @@ class MarketAnalystV2(AnalystAgent):
 
             report = self._sanitize_report(report)
 
-            result = {self.output_field: report}
+            result = self._checked_report_result(report, ticker, node_id)
             # 🆕 附带工具调用摘要
             tool_summary = self._format_tool_call_summary()
             if tool_summary:
@@ -230,7 +233,33 @@ class MarketAnalystV2(AnalystAgent):
 
         except Exception as e:
             logger.error(f"[{self.agent_id}] 执行失败: {e}", exc_info=True)
-            return {self.output_field: GENERIC_REPORT_FALLBACK}
+            return self._checked_report_result(GENERIC_REPORT_FALLBACK, ticker, node_id)
+
+    def _checked_report_result(self, report: str, ticker: str, node_id: str) -> Dict[str, Any]:
+        """Check the existing lexical gate, retaining the report without retries."""
+        result = {self.output_field: report}
+        content = report if isinstance(report, str) else str(report) if report is not None else ""
+        quality = validate_analyst_report(content, agent_id=self.agent_id, ticker=ticker)
+        if quality.is_valid:
+            return result
+
+        result["quality_flags"] = [{
+            "agent_id": self.agent_id,
+            "analyst_type": self.analyst_type,
+            "ticker": ticker,
+            "reason": quality.reason,
+            "severity": quality.severity,
+            "retried": False,
+        }]
+        if quality.severity == "critical":
+            # Reuse workflow degradation/C1 delivery; do not raise or rerun tools.
+            result["_node_errors"] = {node_id: {
+                "agent_id": self.agent_id,
+                "label": self.agent_name,
+                "error": quality.reason,
+            }}
+        logger.warning("[QualityGate] %s %s: %s", self.agent_id, quality.severity, quality.reason)
+        return result
 
     def _build_system_prompt(self, market_type: str = None, context=None, state: Dict[str, Any] = None) -> str:
         """

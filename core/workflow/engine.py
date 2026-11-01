@@ -359,6 +359,7 @@ class WorkflowEngine:
             "_workflow_runtime": FieldType.OBJECT,
             "_node_errors": FieldType.OBJECT,
             "tool_call_summaries": FieldType.OBJECT,
+            "quality_flags": FieldType.ARRAY,
             "_condition_result": FieldType.BOOLEAN,
             "_condition_error": FieldType.STRING,
             "_analysis_data_source": FieldType.STRING,
@@ -484,11 +485,17 @@ class WorkflowEngine:
 
             logger.info(f"开始执行工作流: {self._definition.id if self._definition else 'unknown'}")
 
-            # 使用 stream 模式以获取节点级别的进度更新
-            # stream_mode 应该作为关键字参数传递，而不是放在 config 字典中
+            # updates 提供节点进度，values 提供经 LangGraph reducer 合并的状态。
+            # 不能用 dict.update 累积节点增量，否则会覆盖并行质量/降级标记。
             final_state = inputs.copy() if inputs else {}
 
-            for chunk in self._compiled_graph.stream(runtime_inputs, config=execution_config, stream_mode="updates"):
+            for mode, chunk in self._compiled_graph.stream(
+                runtime_inputs, config=execution_config, stream_mode=["updates", "values"]
+            ):
+                if mode == "values":
+                    final_state.update({key: value for key, value in chunk.items()
+                                        if key != "_workflow_runtime"})
+                    continue
                 # chunk 格式: {node_name: state_update}
                 if isinstance(chunk, dict):
                     for node_name, node_update in chunk.items():
@@ -502,22 +509,14 @@ class WorkflowEngine:
                         if progress is not None:
                             self._report_progress(progress, message, step_name)
 
-                        # 累积状态更新
+                        # 节点增量仅用于日志；最终状态由 values 事件提供。
                         if isinstance(node_update, dict):
-                            try:
-                                # 🔍 调试：打印节点更新的字段
-                                update_keys = list(node_update.keys())
-                                logger.debug(f"[执行引擎] 📝 节点 {node_name} 返回字段: {update_keys}")
-                                # 检查是否有 index_report 或 sector_report
-                                if "index_report" in node_update:
-                                    logger.debug(f"[执行引擎] ✅ 检测到 index_report ({len(str(node_update['index_report']))} 字符)")
-                                if "sector_report" in node_update:
-                                    logger.debug(f"[执行引擎] ✅ 检测到 sector_report ({len(str(node_update['sector_report']))} 字符)")
-                                final_state.update(node_update)
-                            except Exception:
-                                final_state[node_name] = node_update
-                        else:
-                            final_state[node_name] = node_update
+                            update_keys = list(node_update.keys())
+                            logger.debug(f"[执行引擎] 📝 节点 {node_name} 返回字段: {update_keys}")
+                            if "index_report" in node_update:
+                                logger.debug(f"[执行引擎] ✅ 检测到 index_report ({len(str(node_update['index_report']))} 字符)")
+                            if "sector_report" in node_update:
+                                logger.debug(f"[执行引擎] ✅ 检测到 sector_report ({len(str(node_update['sector_report']))} 字符)")
 
             # 使用累积的最终状态
             result = final_state
@@ -752,11 +751,16 @@ class WorkflowEngine:
 
             logger.info(f"开始异步执行工作流: {self._definition.id if self._definition else 'unknown'}")
 
-            # 使用 astream 模式以获取节点级别的进度更新
-            # stream_mode 应该作为关键字参数传递，而不是放在 config 字典中
+            # 与同步入口一致：进度使用 updates，最终结果使用 reducer 合并后的 values。
             final_state = inputs.copy() if inputs else {}
 
-            async for chunk in self._compiled_graph.astream(runtime_inputs, config=execution_config, stream_mode="updates"):
+            async for mode, chunk in self._compiled_graph.astream(
+                runtime_inputs, config=execution_config, stream_mode=["updates", "values"]
+            ):
+                if mode == "values":
+                    final_state.update({key: value for key, value in chunk.items()
+                                        if key != "_workflow_runtime"})
+                    continue
                 # chunk 格式: {node_name: state_update}
                 if isinstance(chunk, dict):
                     for node_name, node_update in chunk.items():
@@ -773,15 +777,6 @@ class WorkflowEngine:
                             # 🔥 关键：调用 progress_callback 会触发取消检查
                             # 如果任务被取消，wrapped_progress_callback 会抛出 TaskCancelledException
                             self._report_progress(progress, message, step_name)
-
-                        # 累积状态更新
-                        if isinstance(node_update, dict):
-                            try:
-                                final_state.update(node_update)
-                            except Exception:
-                                final_state[node_name] = node_update
-                        else:
-                            final_state[node_name] = node_update
 
             # 使用累积的最终状态
             result = final_state
