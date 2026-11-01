@@ -338,6 +338,12 @@ def test_task_entry_quality_and_degradation_reach_web(task_runtime, schema, cont
         assert response.status_code == 200, response.text
         data = response.json()["data"]
         assert data["reports"] and set(data.get("degraded_nodes", {})) == expected_nodes
+        if content == GOOD and not peer_failure:
+            assert data["reports"] == {
+                "market_report": GOOD, "news_report": GOOD, "bull_report": GOOD}
+        identities = {"entry_market": "market_analyst_v2", "entry_news": "news_analyst_v2"}
+        for node_id in expected_nodes:
+            assert data["degraded_nodes"][node_id]["agent_id"] == identities[node_id]
         assert "PRIVATE-" not in response.text
     rt.builders[0].offline.model.invoke.assert_called_once()
     rt.builders[0].offline.tool.invoke.assert_called_once()

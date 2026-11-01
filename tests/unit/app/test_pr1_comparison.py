@@ -74,6 +74,8 @@ def test_c1_formatter_persistence_web(service, web, source, degraded, evidence):
               value.get('degraded_nodes') == PUBLIC_NODES if degraded else not value.get('degraded_nodes')
               for stage, value in stages.items()}
     checks.update({'business report still available': bool(response.get('reports')),
+                   'business report content retained': response.get('reports') == {
+                       'market_report': raw['structured_reports']['market_report']['content']},
                    'raw input unchanged': raw == before,
                    'private exception not published': 'do-not-publish' not in json.dumps(response)})
     evidence({'raw': raw, 'source': source}, stages, checks)
@@ -179,7 +181,14 @@ def test_actual_entry_quality_to_web(task_runtime, schema, kind, evidence):
     }
     for source, data in responses.items():
         checks[source + ': correct degradation nodes'] = set(data.get('degraded_nodes', {})) == expected_nodes
+        identities = {'entry_market': 'market_analyst_v2', 'entry_news': 'news_analyst_v2'}
+        checks[source + ': correct node identities'] = all(
+            data.get('degraded_nodes', {}).get(node_id, {}).get('agent_id') == identities[node_id]
+            for node_id in expected_nodes)
         checks[source + ': report present'] = bool(data.get('reports'))
+        if kind == 'normal':
+            checks[source + ': complete normal reports retained'] = data.get('reports') == {
+                'market_report': GOOD, 'news_report': GOOD, 'bull_report': GOOD}
         checks[source + ': private details redacted'] = 'PRIVATE-' not in json.dumps(data)
     evidence({'schema': schema, 'kind': kind, 'content': rt.scenario.content}, {
         'engine': engine_output, 'consumer': consumed[0], 'prompt': prompt,
@@ -197,6 +206,7 @@ def test_engine_retains_parallel_merged_flags(graph_runtime, schema, asynchronou
     observed_flags = result.get('quality_flags', [])
     evidence({'schema': schema, 'async': asynchronous, 'market_report': '', 'peer_severity': 'critical'},
         {'output': result, 'consumer': consumed}, {
+        'exactly two parallel findings retained': len(observed_flags) == 2,
         'parallel flags both retained': {flag.get('agent_id') for flag in observed_flags} == {'market_analyst_v2', 'news_analyst_v2'},
         'engine agrees with merged consumer state': observed_flags == consumed.get('quality_flags', []),
         'empty later update does not erase degradation': set(result.get('degraded_nodes', {})) == {'market_node', 'news_node'},
