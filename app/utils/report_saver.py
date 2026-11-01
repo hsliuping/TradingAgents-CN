@@ -9,6 +9,8 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 import uuid
 
+from app.utils.result_metadata import public_degraded_nodes
+
 logger = logging.getLogger(__name__)
 
 
@@ -159,7 +161,8 @@ async def save_analysis_report(
     engine: str = "v2",
     user_id: Optional[str] = None,
     performance_metrics: Dict[str, Any] = None,
-    task_type: Optional[str] = None
+    task_type: Optional[str] = None,
+    degraded_nodes: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     保存分析报告到 analysis_reports 集合（统一方法）
@@ -176,6 +179,7 @@ async def save_analysis_report(
         confidence_score: 置信度
         risk_level: 风险等级
         ... (其他参数)
+        degraded_nodes: 可选的降级节点记录；只保存可公开的节点身份和失败说明
         
     Returns:
         analysis_id: 分析报告ID
@@ -234,6 +238,10 @@ async def save_analysis_report(
         # 🆕 性能指标数据
         "performance_metrics": performance_metrics or {}
     }
+
+    public_nodes = public_degraded_nodes(degraded_nodes)
+    if public_nodes is not None:
+        document["degraded_nodes"] = public_nodes
 
     # 如果有 user_id，添加到文档
     if user_id:

@@ -1515,7 +1515,8 @@ class WorkflowBuilder:
 
             # 🆕 v3.5.0 质量门禁标记（各分析师报告的质量检查结果，供下游和监控引用）
             # 每个元素是 {agent_id, analyst_type, ticker, reason, severity, retried} 字典
-            quality_flags: Annotated[list, keep_latest_list]
+            quality_flags: Annotated[list, operator.add]
+            _node_errors: Annotated[dict, merge_dict]
 
             # 研究结果
             bull_report: Annotated[str, keep_non_empty]

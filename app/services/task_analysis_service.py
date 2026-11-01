@@ -22,6 +22,7 @@ from app.services.unified_analysis_engine import UnifiedAnalysisEngine
 from app.services.workflow_registry import AnalysisWorkflowRegistry
 from app.core.database import get_mongo_db
 from app.utils.timezone import now_tz
+from app.utils.result_metadata import public_degraded_nodes
 
 logger = logging.getLogger(__name__)
 
@@ -1548,6 +1549,11 @@ class TaskAnalysisService:
         if raw_result.get("report_manifest"):
             formatted_result["report_manifest"] = raw_result["report_manifest"]
 
+        # Preserve recorded degradation independently of execution completion.
+        degraded_nodes = public_degraded_nodes(raw_result.get("degraded_nodes"))
+        if degraded_nodes is not None:
+            formatted_result["degraded_nodes"] = degraded_nodes
+
         # 🔥 调试日志：打印 decision 对象的完整内容
         self.logger.info(f"✅ 格式化结果完成: {len(reports)} 个报告")
         self.logger.info(f"🔍 [TaskAnalysisService] decision 对象完整内容: {formatted_decision}")
@@ -2042,6 +2048,7 @@ class TaskAnalysisService:
                 user_id=str(task.user_id) if task.user_id else None,
                 performance_metrics=result.get("performance_metrics", {}),
                 task_type=str(task.task_type),
+                degraded_nodes=result.get("degraded_nodes"),
             )
 
             self.logger.info(f"✅ 分析结果已保存到 analysis_reports: analysis_id={analysis_id}, task_id={task.task_id}")

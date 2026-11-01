@@ -1,0 +1,96 @@
+name: PR1 offline verification
+
+on:
+  pull_request:
+    branches: [v3.0]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: 95 regressions and 33 comparison pairs
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out the exact PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          persist-credentials: false
+
+      - name: Check out the original complete upstream baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: hsliuping/TradingAgents-CN
+          ref: 51060a7682cf51810b4bc3a704829438d18cd8dc
+          path: baseline
+          persist-credentials: false
+
+      - name: Install the pinned environment tool
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.12.7'
+          enable-cache: false
+          activate-environment: false
+
+      - name: Prepare an isolated test environment
+        env:
+          UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/pr1-python
+          UV_CACHE_DIR: ${{ runner.temp }}/pr1-uv-cache
+        run: |
+          $results = Join-Path $env:RUNNER_TEMP 'pr1-offline-results'
+          New-Item -ItemType Directory -Path $results -Force | Out-Null
+          $venv = Join-Path $env:RUNNER_TEMP 'pr1-offline-venv'
+          uv python install --no-config 3.12.14
+          if ($LASTEXITCODE -ne 0) { throw 'Python installation failed' }
+          uv venv --no-config --no-project --managed-python --python 3.12.14 $venv
+          if ($LASTEXITCODE -ne 0) { throw 'Environment creation failed' }
+          $python = Join-Path $venv 'Scripts/python.exe'
+          uv pip install --no-config --python $python --no-deps --only-binary ':all:' -r candidate/tests/offline/requirements-pr1.txt *> (Join-Path $results 'install.txt')
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned test dependency installation failed' }
+          uv pip check --python $python *> (Join-Path $results 'dependency-check.txt')
+          if ($LASTEXITCODE -ne 0) { throw 'Test dependency check failed' }
+          "PR1_PYTHON=$python" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PR1_RESULTS=$results" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run and validate offline suites
+        env:
+          PR1_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $runner = Join-Path $env:GITHUB_WORKSPACE 'candidate/tests/offline/run_pr1.py'
+          $candidate = Join-Path $env:GITHUB_WORKSPACE 'candidate'
+          $baseline = Join-Path $env:GITHUB_WORKSPACE 'baseline'
+          & $env:PR1_PYTHON -I -B $runner --output (Join-Path $env:PR1_RESULTS 'regression')
+          $codes = @{ regression = $LASTEXITCODE }
+          & $env:PR1_PYTHON -I -B $runner --suite comparison --source $baseline --output (Join-Path $env:PR1_RESULTS 'baseline')
+          $codes.baseline = $LASTEXITCODE
+          & $env:PR1_PYTHON -I -B $runner --suite comparison --output (Join-Path $env:PR1_RESULTS 'patched')
+          $codes.patched = $LASTEXITCODE
+          $codes | ConvertTo-Json | Set-Content -Path (Join-Path $env:PR1_RESULTS 'process-exit-codes.json') -Encoding utf8
+          & $env:PR1_PYTHON -I -B candidate/tests/offline/verify_pr1_results.py --results $env:PR1_RESULTS --candidate $candidate --baseline $baseline --head-sha $env:PR1_HEAD_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Offline result verification failed' }
+
+      - name: Publish the job summary
+        if: always()
+        run: |
+          $summary = Join-Path $env:RUNNER_TEMP 'pr1-offline-results/summary.md'
+          if (Test-Path -LiteralPath $summary) {
+            Get-Content -Raw -LiteralPath $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          }
+
+      - name: Preserve logs, JUnit and verification evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pr1-offline-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/pr1-offline-results/
+          if-no-files-found: error
+          retention-days: 14
