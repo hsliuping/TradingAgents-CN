@@ -27,6 +27,7 @@ from app.models.analysis import (
 from tradingagents.utils.stock_utils import StockUtils, StockMarket, SecurityType
 from app.core.database import get_mongo_db
 from app.utils.timezone import now_tz
+from app.utils.result_metadata import public_degraded_nodes
 from bson import ObjectId
 
 router = APIRouter()
@@ -990,6 +991,8 @@ async def get_task_result(
                     "decision": result.get("decision", {}),
                     "source": "unified_tasks"  # 标记数据来源
                 }
+                if "degraded_nodes" in result:
+                    result_data["degraded_nodes"] = result["degraded_nodes"]
                 
                 # 🔥 可选字段：根据查询参数决定是否包含
                 if include_state:
@@ -1058,6 +1061,8 @@ async def get_task_result(
                     "decision": mongo_result.get("decision", {}),
                     "source": "mongodb"  # 标记数据来源
                 }
+                if "degraded_nodes" in mongo_result:
+                    result_data["degraded_nodes"] = mongo_result["degraded_nodes"]
 
                 logger.info(f"📊 [RESULT] ========== MongoDB 格式化前 ==========")
                 logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
@@ -1073,8 +1078,9 @@ async def get_task_result(
                 logger.info(f"📊 [RESULT] ========== MongoDB 格式化后 ==========")
                 logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
                 logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
-            else:
-                # 兜底：analysis_tasks 集合中的 result 字段
+            elif not result_data:
+                # 兜底：不覆盖已选中的 unified_analysis_tasks 结果。
+                # analysis_tasks 集合中的 result 字段
                 tasks_doc = await db.analysis_tasks.find_one(
                     {"task_id": task_id},
                     {"result": 1, "symbol": 1, "stock_code": 1, "created_at": 1, "completed_at": 1}
@@ -1115,6 +1121,8 @@ async def get_task_result(
                         "decision": r.get("decision", {}),
                         "source": "analysis_tasks"  # 数据来源标记
                     }
+                    if "degraded_nodes" in r:
+                        result_data["degraded_nodes"] = r["degraded_nodes"]
                     
                     # 🔥 可选字段：根据查询参数决定是否包含
                     if include_state:
@@ -1487,6 +1495,11 @@ async def get_task_result(
             "decision": safe_dict(result_data.get("decision"))
         }
         
+        # Node degradation is public metadata, not debug-only workflow state.
+        degraded_nodes = public_degraded_nodes(result_data.get("degraded_nodes"))
+        if degraded_nodes is not None:
+            final_result_data["degraded_nodes"] = degraded_nodes
+
         # 🔥 可选字段：根据查询参数决定是否返回
         if include_state:
             final_result_data["state"] = safe_dict(result_data.get("state"))
