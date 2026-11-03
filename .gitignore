@@ -180,3 +180,10 @@ deploy-all-in-one/wheels/
 
 nul
 node_modules
+.ua
+tmp_install
+.serena
+.local
+.workbuddy
+backup
+.install-test
