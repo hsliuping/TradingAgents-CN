@@ -9,6 +9,48 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+def _resolve_mongodb_name(db_client=None) -> str:
+    """解析实际使用的 MongoDB 库名，避免写死 tradingagents。
+
+    行情写入走 app.core.config.MONGODB_DATABASE（本地常见值为 tradingagentscn），
+    若这里写死 tradingagents，会查到空库并误报「未找到实时行情」。
+    """
+    try:
+        from app.core.config import settings
+        name = getattr(settings, "MONGODB_DATABASE", None)
+        if name:
+            return str(name)
+    except Exception:
+        pass
+
+    try:
+        from tradingagents.config.database_manager import get_database_manager
+        db_manager = get_database_manager()
+        name = (getattr(db_manager, "mongodb_config", None) or {}).get("database")
+        if name:
+            return str(name)
+    except Exception:
+        pass
+
+    try:
+        if db_client is not None:
+            default_db = db_client.get_default_database()
+            name = getattr(default_db, "name", None)
+            if name:
+                return str(name)
+    except Exception:
+        pass
+
+    return "tradingagents"
+
+
+def _get_mongo_db(db_client):
+    """从客户端取出配置中的业务库。"""
+    db_name = _resolve_mongodb_name(db_client)
+    logger.debug(f"🔍 [实时PE计算] 使用 MongoDB 库: {db_name}")
+    return db_client[db_name]
+
+
 def calculate_realtime_pe_pb(
     symbol: str,
     db_client=None
@@ -60,10 +102,10 @@ def calculate_realtime_pe_pb(
             logger.debug(f"检测到异步客户端 {client_type}，转换为同步客户端")
             db_client = MongoClient(settings.MONGO_URI)
 
-        db = db_client['tradingagents']
+        db = _get_mongo_db(db_client)
         code6 = str(symbol).zfill(6)
 
-        logger.info(f"🔍 [实时PE计算] 开始计算股票 {code6}")
+        logger.info(f"🔍 [实时PE计算] 开始计算股票 {code6} (db={_resolve_mongodb_name(db_client)})")
 
         # 1. 获取实时行情（market_quotes）
         quote = db.market_quotes.find_one({"code": code6})
@@ -403,7 +445,7 @@ def get_pe_pb_with_fallback(
     logger.info("   💡 说明: 使用Tushare官方PE_TTM，基于昨日收盘价")
 
     try:
-        db = db_client['tradingagents']
+        db = _get_mongo_db(db_client)
         code6 = str(symbol).zfill(6)
 
         # 🔥 优先查询 Tushare 数据源
