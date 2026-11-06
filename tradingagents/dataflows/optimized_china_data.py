@@ -884,7 +884,7 @@ class OptimizedChinaDataProvider:
             if db_manager.is_mongodb_available():
                 try:
                     db_client = db_manager.get_mongodb_client()
-                    db = db_client['tradingagents']
+                    db = db_manager.get_mongodb_db() or db_client[db_manager.mongodb_config.get("database", "tradingagents")]
 
                     # 标准化股票代码为6位
                     code6 = symbol.replace('.SH', '').replace('.SZ', '').zfill(6)

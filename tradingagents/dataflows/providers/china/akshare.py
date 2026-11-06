@@ -1762,7 +1762,11 @@ class AKShareProvider(BaseStockDataProvider):
                 logger.warning(f"⚠️ [AKShare] 事件循环已关闭，停止获取 {code} 的历史数据")
                 self._event_loop_closed = True
                 return None
-            elif "Connection aborted" in error_msg or "RemoteDisconnected" in error_msg:
+            elif any(marker in error_msg.lower() for marker in (
+                "connection aborted", "remotedisconnected", "connectionerror",
+                "connection reset", "remote end closed connection",
+                "断开了连接", "断开连接", "限流",
+            )):
                 logger.warning(f"⚠️ {code} 东财历史接口网络异常，尝试回退到新浪/腾讯历史接口")
                 fallback_strategies = [
                     ("新浪", self._get_historical_data_sina_fallback),
@@ -1778,7 +1782,7 @@ class AKShareProvider(BaseStockDataProvider):
                     except Exception as fallback_error:
                         logger.warning(f"⚠️ {code} {fallback_name}历史接口回退失败: {fallback_error}")
 
-                message = f"{code} 网络连接中断，建议稍后重试或减小时间范围"
+                message = f"{code} 网络连接中断，建议稍后重试或减小时间范围；错误信息: {error_msg}"
                 logger.error(f"❌ {message}")
                 raise AKShareNetworkError(message) from (primary_error or e)
             else:
