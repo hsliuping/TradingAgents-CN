@@ -47,6 +47,27 @@ def _serialize_task_doc(task_doc: Optional[Dict[str, Any]]) -> Optional[Dict[str
     return serialized
 
 
+def _build_single_historical_sync_result(hist_result: Dict[str, Any]) -> Dict[str, Any]:
+    """保留历史同步的真实失败原因，避免前端只能显示未知错误。"""
+    records = hist_result.get("total_records", hist_result.get("historical_records", 0))
+    if hist_result.get("success_count", 0) > 0:
+        return {"success": True, "records": records, "message": f"同步了 {records} 条历史记录"}
+
+    reasons = []
+    for item in hist_result.get("errors") or []:
+        reason = (item.get("error") or item.get("message")) if isinstance(item, dict) else item
+        if reason and str(reason).strip():
+            reasons.append(str(reason).strip())
+    error = (
+        "；".join(dict.fromkeys(reasons))
+        or hist_result.get("error")
+        or hist_result.get("skip_reason")
+        or hist_result.get("message")
+        or "历史数据同步失败，未获取到可用历史数据"
+    )
+    return {"success": False, "records": records, "error": str(error)}
+
+
 def _get_single_task_message(symbol: str, result: Dict[str, Any]) -> str:
     if result.get("overall_success"):
         return f"股票 {symbol} 数据同步成功"
@@ -424,17 +445,11 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                         incremental=False
                     )
 
-                result["historical_sync"] = {
-                    "success": hist_result.get("success_count", 0) > 0,
-                    "records": hist_result.get("total_records", hist_result.get("historical_records", 0)),
-                    "message": (
-                        f"同步了 {hist_result.get('total_records', hist_result.get('historical_records', 0))} 条历史记录"
-                    )
-                }
-                logger.info(
-                    f"✅ {request.symbol} 历史数据同步完成: "
-                    f"{hist_result.get('total_records', hist_result.get('historical_records', 0))} 条记录"
-                )
+                result["historical_sync"] = _build_single_historical_sync_result(hist_result)
+                if result["historical_sync"]["success"]:
+                    logger.info(f"✅ {request.symbol} 历史数据同步完成: {result['historical_sync']['records']} 条记录")
+                else:
+                    logger.warning(f"⚠️ {request.symbol} 历史数据同步失败: {result['historical_sync']['error']}")
 
                 if hist_result.get("success_count", 0) > 0:
                     try:
