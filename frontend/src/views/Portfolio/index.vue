@@ -108,8 +108,37 @@
                         <template #default="{ row }">
                           <div class="name-cell">
                             <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
-                            <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag>
+                            <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag><el-tag v-if="row.position_layer" :type="row.position_layer === '底仓' ? 'primary' : 'warning'" size="small" effect="plain" :title="'仓位分层：' + row.position_layer + '（两层规则不互救）'">{{ row.position_layer }}</el-tag>
                           </div>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="行业周期" width="180">
+                        <template #default="{ row }">
+                          <template v-if="getCyclePosition(row.code)">
+                            <div class="cycle-cell">
+                              <el-tag size="small" effect="plain" type="info">
+                                {{ INDUSTRY_NAMES[classifyIndustry(row.code)!] }}
+                              </el-tag>
+                              <el-tooltip
+                                v-if="getCyclePosition(row.code)?.grade"
+                                :content="getCyclePosition(row.code)?.grade_cn"
+                                placement="top"
+                              >
+                                <el-tag
+                                  size="small"
+                                  :type="gradeTagType(getCyclePosition(row.code)!.grade)"
+                                  effect="dark"
+                                  style="margin-left:4px"
+                                >
+                                  {{ getCyclePosition(row.code)!.stage_label || getCyclePosition(row.code)!.grade }}
+                                </el-tag>
+                              </el-tooltip>
+                              <span v-else class="cycle-stage">
+                                {{ getCyclePosition(row.code)?.stage_label }}
+                              </span>
+                            </div>
+                          </template>
+                          <span v-else class="text-muted">-</span>
                         </template>
                       </el-table-column>
                       <el-table-column prop="quantity" label="数量" width="80" align="right" />
@@ -184,7 +213,7 @@
                     <template #default="{ row }">
                       <div class="name-cell">
                         <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
-                        <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag>
+                        <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag><el-tag v-if="row.position_layer" :type="row.position_layer === '底仓' ? 'primary' : 'warning'" size="small" effect="plain" :title="'仓位分层：' + row.position_layer + '（两层规则不互救）'">{{ row.position_layer }}</el-tag>
                       </div>
                     </template>
                   </el-table-column>
@@ -351,8 +380,37 @@
                         <template #default="{ row }">
                           <div class="name-cell">
                             <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
-                            <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag>
+                            <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag><el-tag v-if="row.position_layer" :type="row.position_layer === '底仓' ? 'primary' : 'warning'" size="small" effect="plain" :title="'仓位分层：' + row.position_layer + '（两层规则不互救）'">{{ row.position_layer }}</el-tag>
                           </div>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="行业周期" width="180">
+                        <template #default="{ row }">
+                          <template v-if="getCyclePosition(row.code)">
+                            <div class="cycle-cell">
+                              <el-tag size="small" effect="plain" type="info">
+                                {{ INDUSTRY_NAMES[classifyIndustry(row.code)!] }}
+                              </el-tag>
+                              <el-tooltip
+                                v-if="getCyclePosition(row.code)?.grade"
+                                :content="getCyclePosition(row.code)?.grade_cn"
+                                placement="top"
+                              >
+                                <el-tag
+                                  size="small"
+                                  :type="gradeTagType(getCyclePosition(row.code)!.grade)"
+                                  effect="dark"
+                                  style="margin-left:4px"
+                                >
+                                  {{ getCyclePosition(row.code)!.stage_label || getCyclePosition(row.code)!.grade }}
+                                </el-tag>
+                              </el-tooltip>
+                              <span v-else class="cycle-stage">
+                                {{ getCyclePosition(row.code)?.stage_label }}
+                              </span>
+                            </div>
+                          </template>
+                          <span v-else class="text-muted">-</span>
                         </template>
                       </el-table-column>
                       <el-table-column prop="quantity" label="数量" width="80" align="right" />
@@ -399,7 +457,7 @@
                     <template #default="{ row }">
                       <div class="name-cell">
                         <el-button link type="primary" @click="goToStockDetail(row.code)">{{ row.name }}</el-button>
-                        <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag>
+                        <el-tag v-if="isEtfPosition(row)" type="success" size="small" effect="plain">ETF</el-tag><el-tag v-if="row.position_layer" :type="row.position_layer === '底仓' ? 'primary' : 'warning'" size="small" effect="plain" :title="'仓位分层：' + row.position_layer + '（两层规则不互救）'">{{ row.position_layer }}</el-tag>
                       </div>
                     </template>
                   </el-table-column>
@@ -529,6 +587,8 @@ import { isJdyunMode } from '@/utils/config'
 import { Refresh, Plus, PieChart, List, Clock, ArrowDown } from '@element-plus/icons-vue'
 import type { TabPaneName } from 'element-plus'
 import { portfolioApi, type PositionItem, type PortfolioStats, type PortfolioAnalysisReport, type QMTPositionSyncPreview } from '@/api/portfolio'
+import { getPortfolioIndustryCycle, type CyclePosition } from '@/pro/api/portfolioIndustry'
+import { classifyIndustryByCode, INDUSTRY_REGISTRY, INDUSTRY_ORDER } from '@/pro/config/industryRegistry'
 import AddPositionDialog from './components/AddPositionDialog.vue'
 import AnalysisResultDialog from './components/AnalysisResultDialog.vue'
 import PositionAnalysisDialog from './components/PositionAnalysisDialog.vue'
@@ -580,6 +640,25 @@ const realPositions = ref<PositionItem[]>([])
 const paperPositions = ref<PositionItem[]>([])
 const filteredPositions = ref<PositionItem[]>([])
 const filteredPaperPositions = ref<PositionItem[]>([])
+
+// 持仓×行业周期联动数据（v4.0 P3）
+const industryCycleMap = ref<Record<string, CyclePosition>>({})
+
+// 行业周期注册表（单一事实来源：@/pro/config/industryRegistry，与后端
+// portfolio_industry_service.INDUSTRY_CYCLE_REGISTRY 保持一致）
+const classifyIndustry = classifyIndustryByCode
+
+const INDUSTRY_NAMES: Record<string, string> = Object.fromEntries(
+  INDUSTRY_ORDER.map(k => [k, INDUSTRY_REGISTRY[k].label]),
+)
+
+// 定级标签颜色
+const gradeTagType = (grade: string): 'success' | 'warning' | 'info' | 'danger' => {
+  if (grade.startsWith('A')) return 'success'
+  if (grade.startsWith('B')) return 'warning'
+  if (grade.startsWith('C')) return 'danger'
+  return 'info'
+}
 
 // 统计数据
 interface StatsData {
@@ -824,6 +903,9 @@ const loadPositions = async () => {
     realIndustryDistribution.value = calculateIndustryDistribution(realPositions.value)
     paperIndustryDistribution.value = calculateIndustryDistribution(paperPositions.value)
 
+    // 加载持仓×行业周期联动数据（v4.0 P3）
+    loadIndustryCycle()
+
     // 应用市场筛选
     filterPositions()
     filterPaperPositions()
@@ -832,6 +914,27 @@ const loadPositions = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 加载持仓×行业周期联动数据（v4.0 P3）
+const loadIndustryCycle = async () => {
+  try {
+    const res = await getPortfolioIndustryCycle()
+    const data = res.data
+    if (data?.industries) {
+      industryCycleMap.value = data.industries
+    }
+  } catch (e) {
+    // 联动数据获取失败不影响持仓主页面
+    console.warn('行业周期联动数据加载失败:', e)
+  }
+}
+
+// 根据持仓代码获取行业周期位置
+const getCyclePosition = (code: string): CyclePosition | null => {
+  const ind = classifyIndustry(code)
+  if (!ind) return null
+  return industryCycleMap.value[ind] || null
 }
 
 const loadStats = async () => {
@@ -1250,6 +1353,21 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.cycle-cell {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.cycle-stage {
+  font-size: 12px;
+  color: #606266;
+  margin-left: 4px;
+}
+.text-muted {
+  color: #c0c4cc;
 }
   display: flex;
   align-items: center;

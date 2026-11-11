@@ -9,6 +9,8 @@
 """
 
 # 导入各子模块，触发 @register_tool 自动注册
+import logging
+
 from core.tools.implementations.assistant_ops import analysis_trigger  # noqa: F401
 from core.tools.implementations.assistant_ops import report_query  # noqa: F401
 from core.tools.implementations.assistant_ops import schedule_manager  # noqa: F401
@@ -16,7 +18,10 @@ from core.tools.implementations.assistant_ops import watchlist_manager  # noqa: 
 from core.tools.implementations.assistant_ops import favorite_manager  # noqa: F401
 from core.tools.implementations.assistant_ops import position_analysis  # noqa: F401
 from core.tools.implementations.assistant_ops import trade_review_ops  # noqa: F401
-from core.tools.implementations.assistant_ops import trading_plan  # noqa: F401
+try:
+    from core.tools.implementations.assistant_ops import trading_plan  # noqa: F401
+except ImportError:  # 社区版：交易计划工具依赖交易系统（Pro），文件随删除清单剔除
+    logging.getLogger(__name__).warning("交易计划工具未加载（社区版无交易系统服务）")
 from core.tools.implementations.assistant_ops import risk_alerts  # noqa: F401
 from core.tools.implementations.assistant_ops import topic_manager  # noqa: F401
 from core.tools.implementations.assistant_ops import recent_search  # noqa: F401

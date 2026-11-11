@@ -79,6 +79,7 @@ class NotificationsService:
                 "alert": "alert",
                 "skill_gap": "skill_gap",
                 "system": "system",
+                "pig_signal": "alert",
             }
             channel_event = _type_map.get(event_type, "system")
             import asyncio
@@ -123,7 +124,7 @@ class NotificationsService:
         q: Dict[str, Any] = {"user_id": user_id}
         if status in ("read", "unread"):
             q["status"] = status
-        if ntype in ("analysis", "alert", "system"):
+        if ntype in ("analysis", "alert", "system", "pig_signal"):
             q["type"] = ntype
         total = await db[self.collection].count_documents(q)
         cursor = db[self.collection].find(q).sort("created_at", -1).skip((page-1)*page_size).limit(page_size)

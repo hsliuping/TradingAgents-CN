@@ -303,10 +303,10 @@ if __name__ == "__main__":
     # 过滤新闻
     filtered_news = filter.filter_news(test_news, min_score=30)
     
-    print(f"原始新闻: {len(test_news)}条")
-    print(f"过滤后新闻: {len(filtered_news)}条")
+    logger.info(f"原始新闻: {len(test_news)}条")
+    logger.info(f"过滤后新闻: {len(filtered_news)}条")
     
     if not filtered_news.empty:
-        print("\n过滤后的新闻:")
+        logger.info("过滤后的新闻:")
         for _, row in filtered_news.iterrows():
-            print(f"- {row['新闻标题']} (评分: {row['relevance_score']:.1f})")
+            logger.info(f"- {row['新闻标题']} (评分: {row['relevance_score']:.1f})")

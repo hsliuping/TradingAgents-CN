@@ -186,7 +186,8 @@ class AdaptiveCacheSystem:
                 'metadata': metadata,
                 'timestamp': datetime.now(),
                 'expires_at': datetime.now() + timedelta(seconds=ttl_seconds),
-                'backend': 'mongodb'
+                'backend': 'mongodb',
+                'write_path': 'cache'  # §七：缓存回写打标，与离线同步('sync')区分
             }
             
             collection.replace_one({'_id': cache_key}, cache_doc, upsert=True)

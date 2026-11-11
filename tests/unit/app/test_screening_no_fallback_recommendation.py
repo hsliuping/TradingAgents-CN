@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 
 def test_screening_tool_returns_hard_no_match_message(monkeypatch):
@@ -20,6 +21,14 @@ def test_screening_tool_returns_hard_no_match_message(monkeypatch):
 
 
 def test_system_prompt_forbids_recommending_other_stocks_on_empty_screening():
+    """主 system prompt 必须禁止在筛选空结果时推荐其它股票。
+
+    对齐说明（存量测试治理）：d8ce06110 对主 prompt 做分层重组后，旧文案
+    "严禁为了“给点参考”而推荐其它不符合筛选条件的股票"被改写为
+    "严禁为\"给点参考\"推荐不符合条件的股票或擅自放宽条件再给候选名单"
+    （见 intelligent_assistant_service.py 合规段），语义等价且约束更完整；
+    tests/unit/test_assistant_prompt.py 的合规锚点测试同样断言新文案。
+    """
     from app.services.intelligent_assistant_service import _get_system_prompt
     from app.services.intelligent_screening_service import IntelligentScreeningService
 
@@ -29,7 +38,7 @@ def test_system_prompt_forbids_recommending_other_stocks_on_empty_screening():
     planning_prompt = IntelligentScreeningService(db=object())._get_system_prompt("planning", "工具清单")
 
     assert "未找到符合条件的股票" in prompt
-    assert "严禁为了“给点参考”而推荐其它不符合筛选条件的股票" in prompt
+    assert '严禁为"给点参考"推荐不符合条件的股票' in prompt
     assert "如果用户使用“低估值”“低PE”“低PB”这类模糊估值描述" in confirmation_prompt
     assert "PE 相关口径要区分 `pe`（PE）和 `pe_ttm`（PE(TTM)）" in confirmation_prompt
     assert "PB 相关口径要区分 `pb`（PB）和 `pb_mrq`（PB(MRQ)）" in confirmation_prompt
@@ -274,9 +283,25 @@ def test_batch_profit_consistency_treats_insufficient_years_as_no_data():
 
 
 def test_init_database_skips_reinitialization_when_bindings_are_healthy(monkeypatch):
+    """模块级绑定健康时 init_database 必须直接跳过重复初始化。
+
+    对齐说明（存量测试治理）：af0ee59cc 引入按事件循环隔离的 Mongo 异步
+    绑定健康检查后，_get_current_mongo_loop_binding 的回退分支要求
+    mongo_client 未被关闭（_is_async_mongo_client_closed 经 delegate →
+    _topology 判定）。裸 object() 哨兵没有 delegate 属性会被判为"已关闭"，
+    导致 mongo_ready=False 误入重初始化。改为带 delegate 的哨兵，并补齐
+    _mongo_runtime_loop / db_manager.mongo_client/mongo_db 的 monkeypatch，
+    保证回退命中后 _store_mongo_loop_binding → _set_active_mongo_binding
+    写入的模块状态在 teardown 时完整还原；_mongo_loop_bindings 中的残留
+    条目由 _prune_closed_mongo_loop_bindings 自清理（哨兵的 no-op close
+    供其调用）。
+    """
     from app.core import database as database_module
 
-    sentinel_mongo_client = object()
+    sentinel_mongo_client = SimpleNamespace(
+        delegate=SimpleNamespace(_topology=None),
+        close=lambda: None,
+    )
     sentinel_mongo_db = object()
     sentinel_redis_client = object()
     sentinel_redis_pool = object()
@@ -289,6 +314,9 @@ def test_init_database_skips_reinitialization_when_bindings_are_healthy(monkeypa
 
     monkeypatch.setattr(database_module, "mongo_client", sentinel_mongo_client)
     monkeypatch.setattr(database_module, "mongo_db", sentinel_mongo_db)
+    monkeypatch.setattr(database_module, "_mongo_runtime_loop", None)
+    monkeypatch.setattr(database_module.db_manager, "mongo_client", None)
+    monkeypatch.setattr(database_module.db_manager, "mongo_db", None)
     monkeypatch.setattr(database_module, "redis_client", sentinel_redis_client)
     monkeypatch.setattr(database_module, "redis_pool", sentinel_redis_pool)
     monkeypatch.setattr(database_module.db_manager, "_mongo_healthy", True)

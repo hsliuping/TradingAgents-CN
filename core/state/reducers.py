@@ -22,6 +22,18 @@ def keep_non_empty(left: Any, right: Any) -> Any:
     return left if left else right
 
 
+def keep_latest_bool(left: Any, right: Any) -> Any:
+    """布尔字段取最新值（None 不覆盖）
+
+    布尔没有「空值」概念：False 是合法取值。若沿用 keep_non_empty，
+    一旦某节点写入 True，后续节点写 False 会被当成空值丢弃，
+    _condition_result / _skip_* 等开关将永久停留在 True（门控恒不跳段）。
+    """
+    if right is None:
+        return left
+    return right
+
+
 def merge_dict(left: dict, right: dict) -> dict:
     """智能合并两个字典，用于处理并发更新
 
@@ -32,6 +44,14 @@ def merge_dict(left: dict, right: dict) -> dict:
         return right
     if right is None:
         return left
+
+    # 防御：节点异常降级时可能把失败说明文本（str）写入 dict 字段
+    # （如 risk_profile_card / scenario_simulation），此时保留左侧已有值，
+    # 避免状态合并阶段崩溃中断整个工作流（宁缺勿造：宁可丢注入不炸流程）
+    if not isinstance(right, dict):
+        return left if isinstance(left, dict) else right
+    if not isinstance(left, dict):
+        return right
 
     result = left.copy()
 

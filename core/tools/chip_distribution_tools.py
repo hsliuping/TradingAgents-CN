@@ -38,9 +38,7 @@ def _normalize_ts_code(ticker: str) -> str:
 
 def get_chip_distribution_akshare(ticker: str, trade_date: str) -> Optional[Dict[str, Any]]:
     """
-    通过 AkShare 获取筹码分布数据
-    
-    使用 stock_cyq_em 接口获取东方财富筹码分布数据。
+    经 DataFacade 能力获取筹码分布数据（stock_cyq，东财）
     
     Args:
         ticker: 股票代码（如 000001）
@@ -50,52 +48,39 @@ def get_chip_distribution_akshare(ticker: str, trade_date: str) -> Optional[Dict
         筹码分布数据字典，或 None（失败时）
     """
     try:
-        import akshare as ak
+        from tradingagents.dataflows.capability import query_capability_sync
 
         symbol = _normalize_ticker(ticker)
         t0 = time.time()
-        logger.info(f"[AkShare筹码] 开始调用 stock_cyq_em: symbol={symbol}, adjust=''")
-        # akshare stock_cyq_em 返回历史筹码分布
-        df = ak.stock_cyq_em(symbol=symbol, adjust="")
+        logger.info(f"[筹码数据] 开始查询 stock_cyq 能力: symbol={symbol}")
+        # 能力返回按 trade_date 降序的历史筹码分布
+        df = query_capability_sync("stock_cyq", symbol=symbol)
         elapsed = time.time() - t0
-        logger.info(f"[AkShare筹码] stock_cyq_em 调用完成: 耗时={elapsed:.2f}s, 行数={len(df) if df is not None else 0}")
+        logger.info(f"[筹码数据] stock_cyq 调用完成: 耗时={elapsed:.2f}s, 行数={len(df) if df is not None else 0}")
 
         if df is None or df.empty:
-            logger.warning(f"[AkShare筹码] {symbol} 返回空数据 (耗时={elapsed:.2f}s)")
+            logger.warning(f"[筹码数据] {symbol} 返回空数据 (耗时={elapsed:.2f}s)")
             return None
 
-        # 将日期列规范化
-        date_col = "日期" if "日期" in df.columns else df.columns[0]
-        df[date_col] = df[date_col].astype(str)
+        df["trade_date"] = df["trade_date"].astype(str)
 
         # 尝试找最接近目标日期的数据
         target = trade_date.replace("-", "")
         # 优先精确匹配
-        row = df[df[date_col].str.replace("-", "") == target]
+        row = df[df["trade_date"].str.replace("-", "") == target]
         if row.empty:
-            # 取最近一条数据
-            row = df.tail(1)
+            # 能力降序返回，首行即最近一条数据
+            row = df.head(1)
 
         if row.empty:
             return None
 
         r = row.iloc[0]
-        # 列名映射（东财接口）
-        col_map = {
-            "获利比例": "profit_ratio",
-            "平均成本": "avg_cost",
-            "90成本-低": "cost_90_low",
-            "90成本-高": "cost_90_high",
-            "90集中度": "concentration_90",
-            "70成本-低": "cost_70_low",
-            "70成本-高": "cost_70_high",
-            "70集中度": "concentration_70",
-        }
 
         result: Dict[str, Any] = {
             "code": symbol,
-            "date": str(r.get(date_col, trade_date)),
-            "source": "akshare",
+            "date": str(r.get("trade_date", trade_date)),
+            "source": r.get("source", "akshare"),
             "profit_ratio": 0.0,
             "avg_cost": 0.0,
             "cost_90_low": 0.0,
@@ -106,26 +91,24 @@ def get_chip_distribution_akshare(ticker: str, trade_date: str) -> Optional[Dict
             "concentration_70": 0.0,
         }
 
-        for ch_col, en_key in col_map.items():
-            if ch_col in r.index:
+        for en_key in ("profit_ratio", "avg_cost", "cost_90_low", "cost_90_high",
+                       "concentration_90", "cost_70_low", "cost_70_high", "concentration_70"):
+            val = r.get(en_key)
+            if val is not None and val == val:
                 try:
-                    val = float(r[ch_col])
-                    result[en_key] = val
+                    result[en_key] = float(val)
                 except (ValueError, TypeError):
                     pass
 
-        # 集中度是常见的静默失效点（接口列名变动时会全部退化为 0），显式留痕
+        # 集中度是常见的静默失效点（接口字段变动时会全部退化为 0），显式留痕
         if not result["concentration_90"] and not result["concentration_70"]:
-            logger.warning(f"[AkShare筹码] {symbol} 未取到集中度，接口实际列名: {list(df.columns)}")
+            logger.warning(f"[筹码数据] {symbol} 未取到集中度，能力实际字段: {list(df.columns)}")
 
-        logger.info(f"[AkShare筹码] {symbol} 获取成功，来源日期: {result['date']}")
+        logger.info(f"[筹码数据] {symbol} 获取成功，来源日期: {result['date']}")
         return result
 
-    except ImportError:
-        logger.warning("[AkShare筹码] akshare 未安装")
-        return None
     except Exception as e:
-        logger.warning(f"[AkShare筹码] {ticker} 获取失败: {e}")
+        logger.warning(f"[筹码数据] {ticker} 获取失败: {e}")
         return None
 
 

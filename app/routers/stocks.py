@@ -1112,9 +1112,9 @@ async def get_kline(
         logger.info(f"📡 本地和缓存都无数据，降级到外部 API")
         try:
             import asyncio
-            from app.services.data_sources.manager import DataSourceManager
+            from app.services.data_sources.manager import DataAdapterOrchestrator
 
-            mgr = DataSourceManager()
+            mgr = DataAdapterOrchestrator()
             # 添加 10 秒超时保护
             items, source = await asyncio.wait_for(
                 asyncio.to_thread(mgr.get_kline_with_fallback, code_padded, period, limit, adj_norm),
@@ -1322,4 +1322,124 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
                 "items": []
             }
             return ok(data)
+
+
+@router.get("/{code}/announcements", response_model=dict)
+async def get_announcements(
+    code: str,
+    days: int = 90,
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取公司公告（公告独立读取入口，只返回公告数据；支持A股、港股、美股）
+
+    与 /{code}/news 相互独立：本端点只返回 category=company_announcement 的公告，
+    不受 get_news 的 include_announcements 参数影响。
+    """
+    from app.services.news_data_service import (
+        ANNOUNCEMENT_CATEGORY,
+        NewsQueryParams,
+        get_news_data_service,
+    )
+
+    # 检测股票类型
+    market, normalized_code = _detect_market_and_code(code)
+
+    if market in ("US", "HK"):
+        # 美股/港股：取海外新闻后只保留公告类条目
+        from app.services.foreign_stock_service import ForeignStockService
+
+        service = ForeignStockService()
+        if market == "US":
+            result = await service.get_us_news(normalized_code, days=days, limit=limit)
+        else:
+            result = await service.get_hk_news(normalized_code, days=days, limit=limit)
+
+        items = [
+            item for item in (result.get("items") or [])
+            if item.get("type") == "announcement"
+            or item.get("category") == ANNOUNCEMENT_CATEGORY
+        ]
+        return ok({
+            "code": normalized_code,
+            "days": days,
+            "limit": limit,
+            "data_type": "announcement",
+            "source": result.get("source"),
+            "items": items
+        })
+
+    # A股：走公告独立查询入口（只查 company_announcement）
+    try:
+        logger.info(f"📋 开始获取公告: code={code}, normalized_code={normalized_code}, days={days}, limit={limit}")
+
+        from app.worker.news_data_sync_service import get_news_data_sync_service
+
+        service = await get_news_data_service()
+        sync_service = await get_news_data_sync_service()
+
+        # 🔥 与 get_news 一致：不限制时间范围，直接取最新 N 条公告
+        params = NewsQueryParams(
+            symbol=normalized_code,
+            limit=limit,
+            sort_by="publish_time",
+            sort_order=-1
+        )
+
+        # 1. 先从数据库查询（公告独立查询，只返回公告）
+        announcements = await service.query_announcements(params)
+        data_source = "database"
+
+        # 2. 数据库无公告时触发公告独立同步（只补公告，不影响普通新闻）
+        if not announcements:
+            logger.info(f"⚠️ 数据库无公告数据，触发公告独立同步: {normalized_code}")
+            try:
+                await sync_service.sync_stock_announcements(
+                    symbol=normalized_code,
+                    max_news_per_source=limit
+                )
+                announcements = await service.query_announcements(params)
+                data_source = "realtime"
+            except Exception as e:
+                logger.error(f"❌ 公告独立同步异常: {e}", exc_info=True)
+
+        # 转换为旧格式（兼容前端）
+        items = []
+        for ann in announcements:
+            publish_time = ann.get("publish_time", "")
+            if isinstance(publish_time, datetime):
+                publish_time = publish_time.isoformat()
+
+            items.append({
+                "title": ann.get("title", ""),
+                "source": ann.get("source", ""),
+                "time": publish_time,
+                "url": ann.get("url", ""),
+                "type": "announcement",
+                "content": ann.get("content", ""),
+                "summary": ann.get("summary", ""),
+                "category": ann.get("category", ANNOUNCEMENT_CATEGORY)
+            })
+
+        logger.info(f"✅ 公告获取完成: {len(items)} 条 (source={data_source})")
+
+        return ok({
+            "code": normalized_code,
+            "days": days,
+            "limit": limit,
+            "data_type": "announcement",
+            "source": data_source,
+            "items": items
+        })
+
+    except Exception as e:
+        logger.error(f"❌ 获取公告失败: {e}", exc_info=True)
+        return ok({
+            "code": normalized_code,
+            "days": days,
+            "limit": limit,
+            "data_type": "announcement",
+            "source": None,
+            "items": []
+        })
 

@@ -277,15 +277,15 @@ class ConditionalLogic:
         current_speaker = state["investment_debate_state"]["current_response"]
 
         # 🔍 详细日志
-        logger.info(f"🔍 [投资辩论控制] 当前发言次数: {current_count}, 最大次数: {max_count} (配置轮次: {self.max_debate_rounds})")
-        logger.info(f"🔍 [投资辩论控制] 当前发言者: {current_speaker}")
+        logger.debug(f"🔍 [投资辩论控制] 当前发言次数: {current_count}, 最大次数: {max_count} (配置轮次: {self.max_debate_rounds})")
+        logger.debug(f"🔍 [投资辩论控制] 当前发言者: {current_speaker}")
 
         if current_count >= max_count:
-            logger.info(f"✅ [投资辩论控制] 达到最大次数，结束辩论 -> Research Manager")
+            logger.debug(f"✅ [投资辩论控制] 达到最大次数，结束辩论 -> Research Manager")
             return "Research Manager"
 
         next_speaker = "Bear Researcher" if current_speaker.startswith("Bull") else "Bull Researcher"
-        logger.info(f"🔄 [投资辩论控制] 继续辩论 -> {next_speaker}")
+        logger.debug(f"🔄 [投资辩论控制] 继续辩论 -> {next_speaker}")
         return next_speaker
 
     def should_continue_risk_analysis(self, state: AgentState) -> str:

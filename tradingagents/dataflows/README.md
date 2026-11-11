@@ -171,23 +171,7 @@ tradingagents/dataflows/
 
 ---
 
-### 6. unified_dataframe.py (5.77 KB)
-**职责**: 统一DataFrame格式，支持多数据源降级
-
-**主要功能**:
-- `get_china_daily_df_unified()` - 统一的A股日线数据获取
-- 多数据源降级：Tushare → AKShare → Baostock
-- DataFrame格式标准化
-
-**使用场景**: `app/services/screening_service.py`
-
-**与 data_source_manager 的区别**:
-- `unified_dataframe`: 返回 DataFrame，适合数据分析
-- `data_source_manager`: 返回格式化字符串，适合Agent使用
-
----
-
-### 7. providers_config.py (9.29 KB)
+### 6. providers_config.py (9.29 KB)
 **职责**: 数据源提供器配置管理
 
 **主要功能**:
@@ -208,7 +192,7 @@ tradingagents/dataflows/
 
 ---
 
-### 8. config.py (2.32 KB)
+### 7. config.py (2.32 KB)
 **职责**: Dataflows模块的通用配置管理
 
 **主要功能**:
@@ -221,7 +205,7 @@ tradingagents/dataflows/
 
 ---
 
-### 9. utils.py (1.17 KB)
+### 8. utils.py (1.17 KB)
 **职责**: 通用工具函数
 
 **主要功能**:
@@ -247,7 +231,7 @@ tradingagents/dataflows/
    - 备选: `interface.get_china_stock_fundamentals_tushare()`
 
 3. **数据分析场景**:
-   - 推荐使用: `unified_dataframe.get_china_daily_df_unified()`
+   - 推荐使用: `data_source_manager.get_stock_dataframe()`
    - 返回 DataFrame，适合 pandas 操作
 
 4. **简单查询场景**:
@@ -264,7 +248,6 @@ tradingagents/dataflows/
 2. **功能重叠**:
    - 不同文件服务不同场景，重叠是合理的
    - `data_source_manager`: Agent场景（返回字符串）
-   - `unified_dataframe`: 数据分析场景（返回DataFrame）
    - `stock_data_service`: MongoDB → TDX 降级场景
 
 3. **配置管理**:

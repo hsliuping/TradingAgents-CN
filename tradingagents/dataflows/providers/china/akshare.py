@@ -4,11 +4,23 @@ AKShare统一数据提供器
 """
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Union
 import pandas as pd
 
 from ..base_provider import BaseStockDataProvider
+# 数据能力声明（只加声明，不改实现）
+from tradingagents.dataflows.capability.registry import register_capability
+from tradingagents.dataflows.capability.schema import (
+    GRAIN_FUND_DAILY,
+    GRAIN_INDEX_DAILY,
+    GRAIN_MARKET_DAILY,
+    GRAIN_REFERENCE,
+    GRAIN_STOCK_DAILY,
+    GRAIN_STOCK_EVENT,
+)
+from tradingagents.dataflows.capability.schemas.pledge_detail import SOURCE_STATUS_ATTR
 
 logger = logging.getLogger(__name__)
 
@@ -1653,6 +1665,10 @@ class AKShareProvider(BaseStockDataProvider):
             hist_df = hist_df.sort_values('date').reset_index(drop=True)
             hist_df['pre_close'] = hist_df['close'].shift(1)
 
+        # 新浪日线成交量原生单位为股，统一换算为手（1手=100股），与东财主路径口径一致
+        if 'volume' in hist_df.columns:
+            hist_df['volume'] = pd.to_numeric(hist_df['volume'], errors='coerce') / 100
+
         return hist_df
 
     async def get_historical_data(
@@ -1783,6 +1799,90 @@ class AKShareProvider(BaseStockDataProvider):
                 raise AKShareNetworkError(message) from (primary_error or e)
             else:
                 logger.error(f"❌ 获取{code}历史数据失败: {e}")
+            return None
+
+    @register_capability(
+        "stock_daily",
+        "akshare",
+        field_mapping={
+            "change_percent": "pct_chg",
+            "full_symbol": "ts_code",
+        },
+    )
+    async def get_stock_daily_capability(
+        self, symbol: str, start_date: str, end_date: str = None
+    ) -> Optional[pd.DataFrame]:
+        """获取个股日线行情（能力 stock_daily，委托高层 get_historical_data 保留
+        qfq 复权/超 730 天分批/新浪腾讯回退语义；标准名=高层方法输出命名 date/volume）
+
+        单位归一（对齐 stock_daily Schema 声明单位，见 schemas/stock_daily.py）：
+        akshare 东财接口 volume 单位为股（tushare 口径为手，/100 归一）、
+        amount 单位为元（tushare 口径为千元，/1000 归一）。
+        """
+        if not self.is_available():
+            return None
+        try:
+            end = end_date or datetime.now().strftime('%Y-%m-%d')
+            df = await self.get_historical_data(symbol, start_date, end)
+        except Exception as e:
+            self.logger.error(f"❌ 获取个股日线行情失败 symbol={symbol}: {e}")
+            return None
+        if df is None:
+            return None
+        if df.empty:
+            return pd.DataFrame()
+        if 'volume' in df.columns:
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce') / 100
+        if 'amount' in df.columns:
+            df['amount'] = pd.to_numeric(df['amount'], errors='coerce') / 1000
+        return df
+
+    @register_capability("stock_news_cn", "akshare", field_mapping={"source": "media_source"})
+    async def get_stock_news_capability(
+        self, symbol: str, limit: int = 10, hours_back: int = 24
+    ) -> Optional[pd.DataFrame]:
+        """获取个股新闻（能力 stock_news_cn，委托高层 get_stock_news 保留
+        重试/Docker curl_cffi 回退语义；hours_back 为 tushare 语义，东财
+        接口原生返回最新新闻，实现内忽略）"""
+        if not self.is_available():
+            return None
+        try:
+            news = await self.get_stock_news(symbol=symbol, limit=limit)
+        except Exception as e:
+            self.logger.error(f"❌ 获取个股新闻失败 symbol={symbol}: {e}")
+            return None
+        if news is None:
+            return None
+        return pd.DataFrame(news) if news else pd.DataFrame()
+
+    @register_capability("trade_cal", "akshare", field_mapping={})
+    async def get_trade_cal_capability(
+        self, start_date: str, end_date: Optional[str] = None
+    ) -> Optional[pd.DataFrame]:
+        """获取交易日历（能力 trade_cal，新浪历史交易日历）
+
+        契约：请求失败/不可用返回 None（门面降级），成功但无数据返回空
+        DataFrame（不降级）。新浪日历仅含交易日（无休市行），实现内
+        区间过滤后统一 is_open=1。
+        """
+        if not self.is_available():
+            return None
+        try:
+            import akshare as ak
+
+            df = await asyncio.to_thread(ak.tool_trade_date_hist_sina)
+            if df is None or df.empty or "trade_date" not in df.columns:
+                return pd.DataFrame()
+            cal = pd.to_datetime(df["trade_date"], errors="coerce").dropna()
+            start = pd.Timestamp(start_date)
+            end = pd.Timestamp(end_date or datetime.now().strftime("%Y-%m-%d"))
+            mask = (cal >= start) & (cal <= end)
+            out = pd.DataFrame({"cal_date": cal[mask]})
+            out["is_open"] = 1
+            out["exchange"] = "SSE"
+            return out.sort_values("cal_date").reset_index(drop=True)
+        except Exception as e:
+            self.logger.error(f"❌ 获取交易日历失败: {e}")
             return None
 
     async def _get_historical_data_in_batches(
@@ -1971,6 +2071,98 @@ class AKShareProvider(BaseStockDataProvider):
         except Exception as e:
             logger.error(f"❌ 获取{code}财务数据失败: {e}")
             return {}
+
+    @staticmethod
+    def _to_em_symbol(symbol: str) -> str:
+        """6位数字代码转东财 EM 带交易所前缀形式（SH600519 / SZ000001 / BJ430047）"""
+        code = re.sub(r'\D', '', str(symbol))
+        if not code:
+            raise ValueError(f"无法解析股票代码: {symbol!r}")
+        first = code[0]
+        if first == '6':
+            return f"SH{code}"
+        if first in ('0', '3'):
+            return f"SZ{code}"
+        if first in ('4', '8'):
+            return f"BJ{code}"
+        raise ValueError(f"无法识别交易所前缀的股票代码: {symbol!r}")
+
+    async def _fetch_em_statement(self, code: str, fetch, capability: str) -> Optional[pd.DataFrame]:
+        """按报告期拉取东财 EM 单张财务报表的公共路径（能力 financial_*）
+
+        契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+        """
+        if not self.connected:
+            return None
+        try:
+            em_symbol = self._to_em_symbol(code)
+            df = await asyncio.to_thread(fetch, em_symbol)
+            if df is None or df.empty:
+                return pd.DataFrame()
+            logger.debug(f"✅ {em_symbol} {capability} 获取成功: {len(df)} 条记录")
+            return df
+        except Exception as e:
+            logger.error(f"❌ 获取{capability}数据失败 code={code}: {e}")
+            return None
+
+    @register_capability(
+        "financial_income", "akshare",
+        field_mapping={
+            "REPORT_DATE": "end_date",
+            "TOTAL_OPERATE_INCOME": "total_revenue",
+            "OPERATE_INCOME": "revenue",
+            "OPERATE_PROFIT": "operate_profit",
+            "PARENT_NETPROFIT": "n_income_attr_p",
+            "NETPROFIT": "n_income",
+            "BASIC_EPS": "basic_eps",
+        },
+    )
+    async def get_financial_income_capability(self, symbol: str, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
+        """个股利润表 — akshare 路径（东财 EM 报告期利润表，能力 financial_income）"""
+        def fetch(em_symbol):
+            return self.ak.stock_profit_sheet_by_report_em(symbol=em_symbol)
+        return await self._fetch_em_statement(symbol, fetch, "利润表")
+
+    @register_capability(
+        "financial_balance", "akshare",
+        field_mapping={
+            "REPORT_DATE": "end_date",
+            "TOTAL_ASSETS": "total_assets",
+            "TOTAL_LIABILITIES": "total_liab",
+            "TOTAL_PARENT_EQUITY": "total_hldr_eqy_exc_min_int",
+            "TOTAL_CURRENT_ASSETS": "total_cur_assets",
+            "TOTAL_CURRENT_LIAB": "total_cur_liab",
+            "MONETARYFUNDS": "money_cap",
+        },
+    )
+    async def get_financial_balance_capability(self, symbol: str, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
+        """个股资产负债表 — akshare 路径（东财 EM 报告期资产负债表，能力 financial_balance）"""
+        def fetch(em_symbol):
+            return self.ak.stock_balance_sheet_by_report_em(symbol=em_symbol)
+        return await self._fetch_em_statement(symbol, fetch, "资产负债表")
+
+    @register_capability(
+        "financial_cashflow", "akshare",
+        field_mapping={
+            "REPORT_DATE": "end_date",
+            "NETCASH_OPERATE": "n_cashflow_act",
+            "NETCASH_INVEST": "n_cashflow_inv_act",
+            "NETCASH_FINANCE": "n_cash_flows_fnc_act",
+            "BEGIN_CCE": "c_cash_equ_beg_period",
+            "END_CCE": "c_cash_equ_end_period",
+        },
+    )
+    async def get_financial_cashflow_capability(self, symbol: str, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
+        """个股现金流量表 — akshare 路径（东财 EM 报告期现金流量表，能力 financial_cashflow）
+
+        注：financial_indicators 能力不注册 akshare 源——EM 财务摘要
+        （stock_financial_abstract）为「指标名×报告期」纵表，指标名集合随个股漂移，
+        无法稳定映射为固定宽表列，不满足门面「一行一报告期」的粒度约束。
+        """
+        def fetch(em_symbol):
+            return self.ak.stock_cash_flow_sheet_by_report_em(symbol=em_symbol)
+        return await self._fetch_em_statement(symbol, fetch, "现金流量表")
 
     async def get_market_status(self) -> Dict[str, Any]:
         """
@@ -2529,10 +2721,14 @@ class AKShareProvider(BaseStockDataProvider):
                     except Exception:
                         df = None
 
-                if df is not None and not df.empty:
+                if df is None:
+                    return None
+                # facade 契约：成功但无数据返回空 DataFrame（不降级），失败返回 None
+                if df.empty:
+                    self.logger.info(f"⚠️ 获取股权质押明细: 无质押数据 | symbol={symbol}")
+                else:
                     self.logger.info(f"✅ 获取股权质押明细: {len(df)} 条 | symbol={symbol}")
-                    return df
-                return None
+                return df
             else:
                 if date:
                     date_clean = date.replace('-', '')
@@ -2550,6 +2746,778 @@ class AKShareProvider(BaseStockDataProvider):
 
         except Exception as e:
             self.logger.error(f"❌ 获取股权质押明细失败: {e}")
+            return None
+
+    @register_capability(
+        "pledge_detail", "akshare",
+        field_mapping={
+            "公告日期": "ann_date",
+            "股东名称": "holder_name",
+            "质押股份数量": "pledge_amount",
+            "质押数量": "pledge_amount",
+            "质押开始日期": "start_date",
+            "质押结束日期": "end_date",
+            "是否解押": "is_released",
+            "解押日期": "release_date",
+            "质押方": "pledgor",
+            "持股总数": "holding_amount",
+            "持股数量": "holding_amount",
+            "质押总数": "pledged_amount",
+            "占总股本比例": "pledge_total_ratio",
+            "占总股本比例(%)": "pledge_total_ratio",
+            "持股占总股本比例": "holding_total_ratio",
+            "是否回购": "is_buyback",
+        },
+        grain=GRAIN_STOCK_EVENT,
+    )
+    async def get_pledge_detail_capability(
+        self,
+        ts_code: str = None,
+        ann_date: str = None,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> Optional[pd.DataFrame]:
+        """股权质押明细 — akshare 路径（pledge_detail 能力统一参数适配）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）；空结果经 SOURCE_STATUS_ATTR
+        标记逐源状态，供调用方区分"成功无数据"与"全部失败"。
+
+        akshare 明细接口仅支持按股票查询，公告日期参数在本地过滤。
+
+        Args:
+            ts_code: 股票代码（TS 格式，如 600519.SH）
+            ann_date: 公告日期 YYYYMMDD
+            start_date: 公告开始日期 YYYYMMDD
+            end_date: 公告结束日期 YYYYMMDD
+        """
+        if not self.is_available():
+            return None
+
+        symbol = str(ts_code).split(".")[0].strip() if ts_code else None
+        if not symbol:
+            return None
+
+        df = await self.get_pledge_detail(symbol=symbol)
+        if df is None:
+            return None
+
+        df = df.copy()
+        df["ts_code"] = ts_code  # 标准列直通（不经 field_mapping 改名）
+
+        date_col = next((c for c in ("公告日期", "ann_date") if c in df.columns), None)
+        if date_col is not None and (ann_date or start_date or end_date):
+            digits = df[date_col].astype(str).str.replace("-", "", regex=False).str[:8]
+            if ann_date:
+                df = df[digits == ann_date.replace("-", "")]
+            if start_date:
+                df = df[digits >= start_date.replace("-", "")]
+            if end_date:
+                df = df[digits <= end_date.replace("-", "")]
+
+        if df.empty:
+            df.attrs[SOURCE_STATUS_ATTR] = {"akshare": "success_empty"}
+        return df
+
+    @register_capability(
+        "margin", "akshare",
+        field_mapping={
+            "日期": "trade_date",            # 全市场合计路径
+            "信用交易日期": "trade_date",     # 上交所/深交所路径
+            "融资余额": "margin_balance",
+            "融资买入额": "margin_buy_amount",
+            "融券余额": "short_balance",       # 全市场/深交所路径
+            "融券余量金额": "short_balance",   # 上交所路径（融券余额，元）
+            "融券卖出量": "short_sell_volume",
+            "融资融券余额": "total_balance",
+        },
+    )
+    async def get_margin_detail(
+        self,
+        trade_date: str = None,
+        start_date: str = None,
+        end_date: str = None,
+        exchange_id: str = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取融资融券交易汇总（两融余额）— akshare 路径
+
+        实现契约：数值已按 Schema 声明单位（金额=元）归一，列名保持源风格由
+        field_mapping 改名；请求失败/不可用返回 None（触发降级），成功但无数据
+        返回空 DataFrame（不降级）。
+
+        akshare 三个接口口径差异（实现内归一）：
+        - 全市场合计（默认）: stock_margin_account_info，单位亿元 -> 元，无交易所维度
+        - 上交所: stock_margin_sse(start_date, end_date)，单位元
+        - 深交所: stock_margin_szse(date) 仅单日快照（无日期列、单位亿元 -> 元），
+          范围查询不支持 -> 返回 None 降级到 tushare
+
+        Args:
+            trade_date: 交易日期 (YYYYMMDD)
+            start_date: 开始日期 (YYYYMMDD)
+            end_date: 结束日期 (YYYYMMDD)
+            exchange_id: 交易所代码 (SSE上交所, SZSE深交所)；缺省为全市场合计
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            import akshare as ak
+
+            exch = (exchange_id or "").upper()
+            date_clean = trade_date.replace('-', '') if trade_date else None
+            start_clean = start_date.replace('-', '') if start_date else None
+            end_clean = end_date.replace('-', '') if end_date else None
+
+            if exch in ("SZSE", "SZ"):
+                # 深交所接口仅提供单日快照，范围查询交给支持的数据源
+                if not date_clean:
+                    self.logger.info("akshare 深交所两融仅支持单日查询，范围查询降级")
+                    return None
+                df = await asyncio.to_thread(ak.stock_margin_szse, date=date_clean)
+                if df is None or df.empty:
+                    return pd.DataFrame()
+                df = df.copy()
+                df.insert(0, "信用交易日期", date_clean)
+                df["exchange_id"] = "SZSE"  # 标准列直通（不经 field_mapping 改名）
+                for col in ("融资余额", "融资买入额", "融券余额", "融资融券余额"):
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce") * 1e8  # 亿元 -> 元
+                self.logger.info(f"✅ 获取深交所两融数据: {len(df)} 条")
+                return df
+
+            if exch in ("SSE", "SH"):
+                df = await asyncio.to_thread(
+                    ak.stock_margin_sse,
+                    start_date=start_clean or date_clean,
+                    end_date=end_clean or date_clean,
+                )
+                if df is None or df.empty:
+                    return pd.DataFrame()
+                df = df.copy()
+                df["exchange_id"] = "SSE"  # 标准列直通（不经 field_mapping 改名）
+                self.logger.info(f"✅ 获取上交所两融数据: {len(df)} 条")
+                return df
+
+            # 全市场合计（一次拉全量历史，本地按日期过滤）
+            df = await asyncio.to_thread(ak.stock_margin_account_info)
+            if df is None or df.empty:
+                return pd.DataFrame()
+            df = df.copy()
+            df["日期"] = df["日期"].astype(str).str.replace("-", "", regex=False).str[:8]
+            if date_clean:
+                df = df[df["日期"] == date_clean]
+            else:
+                if start_clean:
+                    df = df[df["日期"] >= start_clean]
+                if end_clean:
+                    df = df[df["日期"] <= end_clean]
+            if df.empty:
+                return pd.DataFrame()
+            df["exchange_id"] = "TOTAL"  # 全市场合计行（标准列直通）
+            for col in ("融资余额", "融资买入额", "融券余额"):
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce") * 1e8  # 亿元 -> 元
+            # 同源字段计算合计列（列名与 field_mapping 对齐）
+            df["融资融券余额"] = df.get("融资余额", 0) + df.get("融券余额", 0)
+            self.logger.info(f"✅ 获取全市场两融数据: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取融资融券数据失败: {e}")
+            return None
+
+    @register_capability(
+        "index_daily", "akshare",
+        field_mapping={
+            "日期": "trade_date",
+            "开盘": "open",
+            "收盘": "close",
+            "最高": "high",
+            "最低": "low",
+            "涨跌幅": "pct_chg",
+            "涨跌额": "change",
+            "成交量": "vol",               # 东财指数成交量单位为手，与 Schema 一致
+            "成交额": "amount",            # 元（实现内 /1000 归一到 Schema 声明的千元）
+        },
+        grain=GRAIN_INDEX_DAILY,
+    )
+    async def get_index_daily_capability(
+        self,
+        ts_code: str,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> Optional[pd.DataFrame]:
+        """指数日线行情 — akshare 路径（index_daily 能力统一参数适配）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+
+        接口：东财 index_zh_a_hist（按指数代码自适应市场）。
+        start_date 缺省时取 end_date（或今天）前 90 天，避免全量历史拉取。
+        东财无昨收列，pre_close 落 NaN（非必填，不影响 quality）。
+        排序按 Schema 约定归一为 trade_date 降序（最新在前）。
+
+        Args:
+            ts_code: 指数代码（TS 格式，如 000001.SH）
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+        """
+        if not self.is_available():
+            return None
+
+        symbol = str(ts_code).split(".")[0].strip() if ts_code else None
+        if not symbol:
+            return None
+
+        try:
+            import akshare as ak
+
+            end_clean = end_date.replace('-', '') if end_date else datetime.now().strftime('%Y%m%d')
+            start_clean = start_date.replace('-', '') if start_date else (
+                datetime.strptime(end_clean, '%Y%m%d') - timedelta(days=90)
+            ).strftime('%Y%m%d')
+
+            df = await asyncio.to_thread(
+                ak.index_zh_a_hist,
+                symbol=symbol,
+                period="daily",
+                start_date=start_clean,
+                end_date=end_clean,
+            )
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            df = df.copy()
+            df["ts_code"] = ts_code  # 标准列直通（不经 field_mapping 改名）
+            df["日期"] = df["日期"].astype(str).str.replace("-", "", regex=False).str[:8]
+            if "成交额" in df.columns:
+                df["成交额"] = pd.to_numeric(df["成交额"], errors="coerce") / 1000  # 元 -> 千元
+            # 排序约定：trade_date 降序（最新在前），与 tushare 路径对齐
+            df = df.sort_values("日期", ascending=False)
+            self.logger.info(f"✅ 获取指数 {ts_code} 日线（akshare）: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取指数日线失败（akshare）: {e}")
+            return None
+
+    @register_capability(
+        "bond_china_yield", "akshare",
+        field_mapping={
+            "日期": "trade_date",
+            "曲线名称": "curve_name",
+            "3月": "yield_3m",
+            "6月": "yield_6m",
+            "1年": "yield_1y",
+            "3年": "yield_3y",
+            "5年": "yield_5y",
+            "7年": "yield_7y",
+            "10年": "yield_10y",
+            "30年": "yield_30y",
+        },
+        grain=GRAIN_MARKET_DAILY,
+    )
+    async def get_bond_china_yield_capability(self) -> Optional[pd.DataFrame]:
+        """国债及其他债券收益率曲线 — akshare 路径（bond_china_yield 能力）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+
+        接口约束：end_date - start_date 应小于一年，取 90 天窗口。
+        排序按 Schema 约定归一为 trade_date 降序（最新在前）；
+        多曲线共存于同一 DataFrame，由调用方按 curve_name 过滤。
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            import akshare as ak
+
+            start_clean = (datetime.now() - timedelta(days=90)).strftime('%Y%m%d')
+            end_clean = datetime.now().strftime('%Y%m%d')
+            df = await asyncio.to_thread(
+                ak.bond_china_yield, start_date=start_clean, end_date=end_clean
+            )
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            df = df.copy()
+            df["日期"] = df["日期"].astype(str)
+            df = df.sort_values("日期", ascending=False)
+            self.logger.info(f"✅ 获取收益率曲线（akshare）: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取收益率曲线失败（akshare）: {e}")
+            return None
+
+    @register_capability(
+        "bond_yield_cn_us", "akshare",
+        field_mapping={
+            "日期": "trade_date",
+            "中国国债收益率2年": "cn_yield_2y",
+            "中国国债收益率5年": "cn_yield_5y",
+            "中国国债收益率10年": "cn_yield_10y",
+            "中国国债收益率30年": "cn_yield_30y",
+            "中国国债收益率10年-2年": "cn_10y_2y_spread",
+            "美国国债收益率2年": "us_yield_2y",
+            "美国国债收益率5年": "us_yield_5y",
+            "美国国债收益率10年": "us_yield_10y",
+            "美国国债收益率30年": "us_yield_30y",
+        },
+        grain=GRAIN_MARKET_DAILY,
+    )
+    async def get_bond_yield_cn_us_capability(self) -> Optional[pd.DataFrame]:
+        """中美国债收益率对比 — akshare 路径（bond_yield_cn_us 能力）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+
+        显式传 90 天窗口，避免默认参数（1990 年起）分页拉取全量历史。
+        排序按 Schema 约定归一为 trade_date 降序（最新在前）。
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            import akshare as ak
+
+            start_clean = (datetime.now() - timedelta(days=90)).strftime('%Y%m%d')
+            df = await asyncio.to_thread(ak.bond_zh_us_rate, start_date=start_clean)
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            df = df.copy()
+            df["日期"] = df["日期"].astype(str)
+            df = df.sort_values("日期", ascending=False)
+            self.logger.info(f"✅ 获取中美收益率对比（akshare）: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取中美收益率对比失败（akshare）: {e}")
+            return None
+
+    @register_capability(
+        "stock_cyq", "akshare",
+        field_mapping={
+            "日期": "trade_date",
+            "获利比例": "profit_ratio",
+            "平均成本": "avg_cost",
+            "90成本-低": "cost_90_low",
+            "90成本-高": "cost_90_high",
+            "90集中度": "concentration_90",
+            "70成本-低": "cost_70_low",
+            "70成本-高": "cost_70_high",
+            "70集中度": "concentration_70",
+        },
+        grain=GRAIN_STOCK_DAILY,
+    )
+    async def get_stock_cyq_capability(self, symbol: str) -> Optional[pd.DataFrame]:
+        """个股筹码分布 — akshare 路径（stock_cyq 能力）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+
+        接口返回最近约 90 个交易日；排序按 Schema 约定归一为 trade_date 降序。
+
+        Args:
+            symbol: 股票代码（6位数字，如 000001）
+        """
+        if not self.is_available():
+            return None
+
+        clean = str(symbol or "").strip()
+        if not clean:
+            return None
+
+        try:
+            import akshare as ak
+
+            df = await asyncio.to_thread(ak.stock_cyq_em, symbol=clean, adjust="")
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            df = df.copy()
+            df["日期"] = df["日期"].astype(str)
+            df = df.sort_values("日期", ascending=False)
+            self.logger.info(f"✅ 获取筹码分布 {clean}（akshare）: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取筹码分布失败 {clean}（akshare）: {e}")
+            return None
+
+    @register_capability(
+        "stock_dividend_cninfo", "akshare",
+        field_mapping={
+            "实施方案公告日期": "announce_date",
+            "分红类型": "dividend_type",
+            "送股比例": "stock_bonus_ratio",
+            "转增比例": "transfer_ratio",
+            "派息比例": "cash_ratio",
+            "股权登记日": "record_date",
+            "除权日": "ex_date",
+            "派息日": "pay_date",
+            "股份到账日": "share_arrival_date",
+            "实施方案分红说明": "plan_description",
+            "报告时间": "report_period",
+        },
+        grain=GRAIN_STOCK_EVENT,
+    )
+    async def get_stock_dividend_cninfo_capability(
+        self, symbol: str
+    ) -> Optional[pd.DataFrame]:
+        """巨潮资讯个股历史分红 — akshare 路径（stock_dividend_cninfo 能力）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+
+        接口仅返回已实施方案记录（无"实施进度"列）；
+        排序按 announce_date 降序（最新方案在前）。
+
+        Args:
+            symbol: 股票代码（6位数字，如 600009）
+        """
+        if not self.is_available():
+            return None
+
+        clean = str(symbol or "").strip()
+        if not clean:
+            return None
+
+        try:
+            import akshare as ak
+
+            df = await asyncio.to_thread(ak.stock_dividend_cninfo, symbol=clean)
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            df = df.copy()
+            for col in ("实施方案公告日期", "股权登记日", "除权日", "派息日", "股份到账日"):
+                if col in df.columns:
+                    df[col] = df[col].astype(str)
+            df = df.sort_values("实施方案公告日期", ascending=False)
+            self.logger.info(f"✅ 获取历史分红 {clean}（akshare）: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取历史分红失败 {clean}（akshare）: {e}")
+            return None
+
+    @register_capability(
+        "fund_etf_spot", "akshare",
+        field_mapping={
+            "代码": "fund_code",
+            "基金代码": "fund_code",
+            "名称": "fund_name",
+            "基金名称": "fund_name",
+            "最新价": "latest_price",
+            "涨跌幅": "pct_change",
+            "成交量": "volume",
+            "成交额": "amount",
+        },
+        grain=GRAIN_REFERENCE,
+    )
+    async def get_fund_etf_spot_capability(self) -> Optional[pd.DataFrame]:
+        """ETF 场内实时行情快照 — akshare 路径（fund_etf_spot 能力）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+
+        全市场快照，无时间粒度（reference），不做排序。
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            import akshare as ak
+
+            df = await asyncio.to_thread(ak.fund_etf_spot_em)
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            self.logger.info(f"✅ 获取 ETF 实时快照（akshare）: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取 ETF 实时快照失败（akshare）: {e}")
+            return None
+
+    @register_capability(
+        "fund_etf_nav_daily", "akshare",
+        field_mapping={
+            "基金代码": "fund_code",
+            "基金简称": "fund_name",
+            "类型": "fund_type",
+            "单位净值": "unit_nav",
+            "累计净值": "accum_nav",
+            "增长值": "nav_change_value",
+            "增长率": "growth_rate",
+            "市价": "market_price",
+            "折价率": "discount_rate",
+        },
+        grain=GRAIN_REFERENCE,
+    )
+    async def get_fund_etf_nav_daily_capability(self) -> Optional[pd.DataFrame]:
+        """场内交易基金净值快照 — akshare 路径（fund_etf_nav_daily 能力）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+
+        源接口净值列名带动态日期后缀（如 "2026-10-24-单位净值"），
+        实现内先归一为固定列名（取首个即最新披露日），再经 field_mapping 改名。
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            import akshare as ak
+
+            df = await asyncio.to_thread(ak.fund_etf_fund_daily_em)
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            df = df.copy()
+            rename_map = {}
+            for target in ("单位净值", "累计净值"):
+                source_col = next(
+                    (c for c in df.columns if str(c).endswith(target)), None
+                )
+                if source_col and source_col != target:
+                    rename_map[source_col] = target
+            if rename_map:
+                df = df.rename(columns=rename_map)
+            self.logger.info(f"✅ 获取场内基金净值快照（akshare）: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取场内基金净值快照失败（akshare）: {e}")
+            return None
+
+    @register_capability(
+        "fund_etf_nav_info", "akshare",
+        field_mapping={
+            "净值日期": "nav_date",
+            "单位净值": "unit_nav",
+            "累计净值": "accum_nav",
+            "日增长率": "daily_growth",
+            "申购状态": "purchase_status",
+            "赎回状态": "redeem_status",
+        },
+        grain=GRAIN_FUND_DAILY,
+    )
+    async def get_fund_etf_nav_info_capability(
+        self,
+        fund: str,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> Optional[pd.DataFrame]:
+        """场内交易基金历史净值明细 — akshare 路径（fund_etf_nav_info 能力）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+
+        start_date 缺省时取 end_date（或今天）前 30 天，减少接口分页拉取。
+        排序按 Schema 约定归一为 nav_date 降序（最新在前）。
+
+        Args:
+            fund: 基金代码（6位，如 511280）
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+        """
+        if not self.is_available():
+            return None
+
+        clean = str(fund or "").strip()
+        if not clean:
+            return None
+
+        try:
+            import akshare as ak
+
+            end_clean = end_date.replace('-', '') if end_date else datetime.now().strftime('%Y%m%d')
+            start_clean = start_date.replace('-', '') if start_date else (
+                datetime.strptime(end_clean, '%Y%m%d') - timedelta(days=30)
+            ).strftime('%Y%m%d')
+
+            df = await asyncio.to_thread(
+                ak.fund_etf_fund_info_em,
+                fund=clean,
+                start_date=start_clean,
+                end_date=end_clean,
+            )
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            df = df.copy()
+            df["净值日期"] = df["净值日期"].astype(str)
+            df = df.sort_values("净值日期", ascending=False)
+            self.logger.info(f"✅ 获取基金 {clean} 历史净值（akshare）: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取基金历史净值失败 {clean}（akshare）: {e}")
+            return None
+
+    @register_capability(
+        "fund_etf_hist", "akshare",
+        field_mapping={
+            "日期": "trade_date",
+            "开盘": "open",
+            "收盘": "close",
+            "最高": "high",
+            "最低": "low",
+            "成交量": "volume",
+            "成交额": "amount",
+            "振幅": "amplitude",
+            "涨跌幅": "pct_change",
+            "涨跌额": "change",
+            "换手率": "turnover_rate",
+        },
+        grain=GRAIN_FUND_DAILY,
+    )
+    async def get_fund_etf_hist_capability(
+        self,
+        symbol: str,
+        start_date: str = None,
+        end_date: str = None,
+    ) -> Optional[pd.DataFrame]:
+        """ETF 历史日线行情 — akshare 路径（fund_etf_hist 能力）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+
+        start_date 缺省时取 end_date（或今天）前 30 天。
+        排序按 Schema 约定归一为 trade_date 降序（最新在前）。
+
+        Args:
+            symbol: 基金代码（6位，如 159707）
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+        """
+        if not self.is_available():
+            return None
+
+        clean = str(symbol or "").strip()
+        if not clean:
+            return None
+
+        try:
+            import akshare as ak
+
+            end_clean = end_date.replace('-', '') if end_date else datetime.now().strftime('%Y%m%d')
+            start_clean = start_date.replace('-', '') if start_date else (
+                datetime.strptime(end_clean, '%Y%m%d') - timedelta(days=30)
+            ).strftime('%Y%m%d')
+
+            df = await asyncio.to_thread(
+                ak.fund_etf_hist_em,
+                symbol=clean,
+                period="daily",
+                start_date=start_clean,
+                end_date=end_clean,
+                adjust="",
+            )
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            df = df.copy()
+            df["日期"] = df["日期"].astype(str)
+            df = df.sort_values("日期", ascending=False)
+            self.logger.info(f"✅ 获取 ETF {clean} 日线（akshare）: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取 ETF 日线失败 {clean}（akshare）: {e}")
+            return None
+
+    @register_capability("daily_stats", "akshare", field_mapping={})
+    async def get_daily_stats_capability(
+        self,
+        trade_date: str,
+    ) -> Optional[Dict[str, Any]]:
+        """全市场每日涨跌家数统计 — akshare 路径（乐咕乐股赚钱效应快照）
+
+        实现契约（DataFacade）：请求失败/不可用返回 None（触发降级），
+        成功但无数据返回空 DataFrame（不降级）。
+
+        口径归一（对齐 daily_stats schema，见 schemas/daily_stats.py）：
+        - legu 快照仅覆盖最新一个交易日（"统计日期"字段），请求日 ≠ 快照日
+          返回 None（宁缺勿造，不编造历史数据）
+        - total = 上涨 + 下跌 + 平盘 + 停牌（与 legu 自身"活跃度"分母同口径）
+        - up_ratio/down_ratio = 家数 / total * 100（% 口径，实现内归一）
+        - 涨跌幅分布 4 桶（up_gt5/up_3_5/down_gt5/down_3_5）快照无逐股明细
+          无法聚合 → 不输出（schema 可选字段，门面补 NaN，消费方需容错）
+
+        Args:
+            trade_date: 交易日期 (YYYYMMDD)
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            import akshare as ak
+
+            trade_date_clean = str(trade_date).replace('-', '')[:8]
+
+            df = await asyncio.to_thread(ak.stock_market_activity_legu)
+            if df is None or df.empty:
+                return None
+
+            # 纵表转 Dict：item/value 两列（涨停/真实涨停/活跃度等 schema 外字段不读取）
+            mapping = dict(zip(df['item'].astype(str).str.strip(), df['value']))
+
+            # 日期守卫：快照仅最新交易日，请求日不一致按失败降级
+            snapshot_raw = str(mapping.get('统计日期', '')).strip()
+            snapshot_date = snapshot_raw[:10].replace('-', '')
+            if len(snapshot_date) != 8 or not snapshot_date.isdigit():
+                self.logger.warning(f"⚠️ legu 快照统计日期异常: {snapshot_raw!r}")
+                return None
+            if trade_date_clean != snapshot_date:
+                self.logger.info(
+                    f"legu 快照日 {snapshot_date} 与请求日 {trade_date_clean} 不一致，降级"
+                )
+                return None
+
+            def _count(key: str) -> Optional[int]:
+                value = mapping.get(key)
+                try:
+                    return int(float(value))
+                except (TypeError, ValueError):
+                    return None
+
+            up_count = _count('上涨')
+            down_count = _count('下跌')
+            flat_count = _count('平盘')
+            suspended = _count('停牌')
+            if up_count is None or down_count is None or flat_count is None:
+                self.logger.warning("⚠️ legu 快照缺上涨/下跌/平盘核心家数，无法聚合")
+                return None
+
+            total = sum(
+                v for v in (up_count, down_count, flat_count, suspended)
+                if v is not None
+            )
+
+            stats = {
+                'trade_date': snapshot_date,
+                'total': total,
+                'up_count': up_count,
+                'down_count': down_count,
+                'flat_count': flat_count,
+                'up_ratio': up_count / total * 100 if total > 0 else 0,
+                'down_ratio': down_count / total * 100 if total > 0 else 0,
+                # 涨跌幅分布 4 桶：快照无逐股涨跌幅明细，宁缺勿造不输出
+            }
+
+            self.logger.info(
+                f"✅ 获取每日市场统计（legu 快照）: 涨{up_count}/跌{down_count}/平{flat_count}"
+            )
+            return stats
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取每日市场统计失败（akshare legu）: {e}")
             return None
 
 

@@ -24,9 +24,11 @@ from core.skill_runtime.standard_financial_apis import (
     get_historical_financial_annual_series,
     get_historical_valuation_percentile,
     get_industry_fundamental_summary,
+    get_intrinsic_value_range,
     get_industry_market_performance,
     get_business_segment_trend,
     get_margin_stability_metrics,
+    get_moat_metrics,
     get_peer_group,
     get_peer_relative_growth,
     get_peer_relative_quality,
@@ -605,7 +607,7 @@ def get_cashflow_quality_trend_tool(
     ],
     when_to_use="当需要历史 PE/PB/PS/PCF 分位、估值通道、安全边际或可审计估值分位数据时使用。",
     when_not_to_use="如果只需要当前 PE/PB 快照，可用 get_current_valuation_snapshot_tool 或 get_value_factor_bundle_tool。",
-    returns="返回 JSON 字符串，包含 window、data_source、metrics、warnings；metrics 内含 current_value、median、percentile、sample_count。",
+    returns="返回 JSON 字符串，包含 window、data_source、metrics、warnings；metrics 内含 current_value、median、percentile、sample_count、annual_lows（年度估值低点对照，周期底对比原料）、current_vs_min_pct。",
     example="get_historical_valuation_percentile_tool(symbol='600519', metrics='pe_ttm,pb,ps_ttm', lookback_years=5)",
     related_tools=["get_current_valuation_snapshot_tool", "get_value_factor_bundle_tool", "get_stock_fundamentals_unified"],
 )
@@ -1680,3 +1682,121 @@ def get_pledge_historical_series_tool(
     except Exception as exc:
         logger.error("股权质押历史趋势获取失败: %s", exc, exc_info=True)
         return _json_response({"status": "error", "message": f"股权质押历史趋势获取失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="get_moat_metrics_tool",
+    name="护城河结构化原料",
+    description=(
+        "聚合资本回报（ROE/ROA/ROIC）、利润率水平与稳定性、现金流含金量、财务结构、"
+        "成长质量、股东回报六个维度的年度序列统计（均值/中位数/极值/离散度 + 最近年报值），"
+        "作为评估竞争优势的结构化原料。仅做数据聚合，不含护城河评级。"
+    ),
+    category="fundamentals",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    capability_tags=[
+        "moat", "competitive_advantage", "economic_moat", "durability",
+        "roe_stability", "margin_stability", "cashflow_quality",
+        "financial_structure", "growth_quality", "dividend_continuity",
+        "capital_efficiency", "pricing_power", "moat_raw_material",
+    ],
+    tool_role_hint="specialized",
+    output_shape="structured_metrics",
+    preferred_for=[
+        "moat_assessment", "competitive_advantage_analysis",
+        "business_quality_evaluation", "durability_check",
+        "pricing_power_evaluation", "franchise_quality_analysis",
+        "long_term_quality_screen", "buffett_style_analysis",
+    ],
+    when_to_use="当需要评估公司护城河/竞争优势时，用本工具一次拿到六个维度的长期统计原料，再由分析师结合行业与商业模式定性判断；不要期望工具直接给出护城河评级。",
+    when_not_to_use="不用于单期财报解读（用 get_stock_fundamentals_unified）；不用于估值定价（用 get_intrinsic_value_range_tool）；不用于短期景气跟踪。",
+    returns="返回 JSON 字符串，包含 note、dimensions（六个维度各自 status/summary/latest/cagr/quality_flags/metrics）、dimension_status、years_used、warnings。",
+    example="get_moat_metrics_tool(symbol='600519', years=10)",
+    related_tools=[
+        "get_capital_efficiency_trend_tool", "get_margin_stability_metrics_tool",
+        "get_cashflow_quality_trend_tool", "get_debt_solvency_trend_tool",
+        "get_growth_quality_metrics_tool", "get_shareholder_return_metrics_tool",
+    ],
+)
+def get_moat_metrics_tool(
+    symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
+    years: Annotated[int, "年报年数，默认10，最大15"] = 10,
+    allow_remote_fetch: Annotated[bool, "本地无分红明细时是否现场拉取 Tushare；交互式场景保持 false"] = False,
+) -> str:
+    """获取护城河结构化原料（六维度统计聚合，不做评级）。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        years: 年报年数，默认10，最大15
+        allow_remote_fetch: 本地无分红明细时是否现场拉取 Tushare，交互式场景保持 false
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_moat_metrics`` 的 Returns ——
+            status, symbol, years_used, note, dimensions, dimension_status, warnings
+    """
+    try:
+        return _json_response(get_moat_metrics(symbol, years=years, allow_remote_fetch=allow_remote_fetch))
+    except Exception as exc:
+        logger.error("护城河结构化原料获取失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"护城河结构化原料获取失败: {exc}"})
+
+
+@tool
+@register_tool(
+    tool_id="get_intrinsic_value_range_tool",
+    name="简版内在价值区间",
+    description=(
+        "历史中枢回归法简版内在价值区间：以近 N 年历史 PE/PB 中枢区间（min/median/max）"
+        "乘最近年报 EPS/BPS 构造价格带（保守/中性/乐观），并给出当前价在历史分位与"
+        "价格带中的位置。非 DCF、不含增长假设，仅供估值背景参考，不构成投资建议。"
+    ),
+    category="fundamentals",
+    is_online=False,
+    auto_register=True,
+    timeout_tier="light",
+    capability_tags=[
+        "intrinsic_value", "valuation_range", "price_band",
+        "historical_center_regression", "pe_center", "pb_center",
+        "valuation_background", "value_reference",
+    ],
+    tool_role_hint="specialized",
+    output_shape="structured_metrics",
+    preferred_for=[
+        "intrinsic_value_estimation", "valuation_context",
+        "value_reference_range", "overvalued_undervalued_check",
+        "valuation_history_position", "buffett_style_analysis",
+    ],
+    when_to_use="当需要给出估值背景参考区间（当前价相对历史中枢价格带的位置、历史估值分位）时使用；输出是数据原料，分析师引用时应作为历史区间背景而非操作建议。",
+    when_not_to_use="不做 DCF/目标价/买卖点建议；不含增长假设；不替代历史估值分位序列分析（用 get_historical_valuation_percentile_tool）。",
+    returns="返回 JSON 字符串，包含 method_note、current_price、per_share_basis（最近年报 EPS/BPS 及口径来源）、historical_center（PE/PB 中枢统计）、price_band（pe_channel/pb_channel/combined 价格带）、position（现价相对价格带位置与历史分位）、warnings。",
+    example="get_intrinsic_value_range_tool(symbol='600519', lookback_years=10)",
+    related_tools=[
+        "get_historical_valuation_percentile_tool", "get_current_valuation_snapshot_tool",
+        "get_moat_metrics_tool", "get_shareholder_return_metrics_tool",
+    ],
+)
+def get_intrinsic_value_range_tool(
+    symbol: Annotated[str, "A 股股票代码，如 600519、000001"],
+    lookback_years: Annotated[int, "估值历史回溯年数，默认10，最大15"] = 10,
+) -> str:
+    """获取简版内在价值区间（历史中枢回归法，非 DCF）。
+
+    Args:
+        symbol: A 股股票代码，如 600519、000001
+        lookback_years: 估值历史回溯年数，默认10，最大15
+
+    Returns:
+        str: JSON 字符串。解析后的字段结构同
+            ``core.skill_runtime.standard_financial_apis.get_intrinsic_value_range`` 的 Returns ——
+            status, symbol, name, current_price, per_share_basis, historical_center,
+            price_band, position, method_note, warnings
+    """
+    try:
+        return _json_response(get_intrinsic_value_range(symbol, lookback_years=lookback_years))
+    except Exception as exc:
+        logger.error("简版内在价值区间获取失败: %s", exc, exc_info=True)
+        return _json_response({"status": "error", "message": f"简版内在价值区间获取失败: {exc}"})

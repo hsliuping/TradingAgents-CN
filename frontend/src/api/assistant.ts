@@ -35,6 +35,24 @@ export interface StockScope {
   }
 }
 
+/** 行业工作台研究对话上下文（四个工作台共用，行业无关） */
+export interface IndustryScope {
+  /** 行业 key（pig/insurance/battery/auto） */
+  industry?: string
+  /** 行业名称（如「电池产业链」） */
+  industry_name?: string
+  /** 工作台名称（如「电池产业链工作台」） */
+  workbench?: string
+  /** 当前周期位置（如「深度去化期」「锂价出清带 B」） */
+  position?: string
+  /** 位置口径补充（如仓位规则、档位说明） */
+  position_rule?: string
+  /** 关键读数（已格式化为「标签 值」或纯文本） */
+  key_metrics?: (string | { label?: string; value?: string })[]
+  /** 数据截至/新鲜度文本 */
+  data_as_of?: string
+}
+
 export interface UserContext {
   current_route?: string
   is_jdyun_mode?: boolean
@@ -42,6 +60,8 @@ export interface UserContext {
   recent_console_errors?: string[]
   /** 股票详情页上下文（仅 general 角色从详情页进入时使用，用于主题限定与报告聚合解读） */
   stock_scope?: StockScope
+  /** 行业工作台研究对话上下文（general 角色从研究对话抽屉进入时使用，用于注入页面当前读数） */
+  industry_scope?: IndustryScope
 }
 
 export interface ChatRequest {

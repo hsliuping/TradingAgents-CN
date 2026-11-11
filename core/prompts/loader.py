@@ -5,10 +5,13 @@
 """
 
 import os
+import logging
 from pathlib import Path
 from typing import Dict, Optional
 
 from .template import PromptTemplate
+
+logger = logging.getLogger(__name__)
 
 
 class PromptLoader:
@@ -89,7 +92,7 @@ class PromptLoader:
             return template
             
         except Exception as e:
-            print(f"加载提示词失败 {file_path}: {e}")
+            logger.error(f"加载提示词失败 {file_path}: {e}")
             return None
     
     def load_all(

@@ -34,6 +34,9 @@
       </div>
     </div>
 
+    <!-- P3 入口收敛：助手定位说明（说不清要点哪里时用） -->
+    <div class="entry-hint">💡 说不清该用哪个功能时，直接在这里用自然语言提问，助手会帮你找到合适的入口。</div>
+
     <div class="workspace-body">
       <aside v-if="showThreadSidebar" class="thread-sidebar">
         <div class="sidebar-header">
@@ -1283,6 +1286,13 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary);
   cursor: pointer;
   font-size: 16px;
+}
+
+// P3 入口收敛：助手定位说明
+.entry-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 .workspace-body {

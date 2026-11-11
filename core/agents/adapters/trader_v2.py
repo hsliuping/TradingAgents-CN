@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..trader import TraderAgent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
+from .flow_context import append_flow_context, safe_extract, all_degraded
+from core.agents.base import GENERIC_REPORT_FALLBACK
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,11 @@ TRADER_COMPLIANCE_PROMPT = """【合规性约束·必须严格遵守】
 ## 为什么这么看
 （概括最关键的 2-4 条证据，每条单独成行）
 
+## 驱动层与获利路径
+（第一句写本轮判断主要由哪一层驱动：交易层 / 景气层 / 价值层 / 混合，并引用上游结论中的具体依据；
+ 第二句写本判断赚的是哪条路的钱：成长 / 预期差 / 情绪 / 不确定，并说明依据。
+ 上游综合研究结论未提供上述字段时，如实写"上游未提供"，不得自行推断补造）
+
 ## 当前判断的限制
 （说明信息缺口、脆弱前提与结论边界）
 
@@ -66,10 +73,57 @@ TRADER_FORBIDDEN_TERMS: Tuple[str, ...] = (
 # 注意："持有" 在简报中可能出现于"持有该观点"等非交易语境，单独校验会产生误报，
 # 因此不放入强制禁用表，仅在 prompt 层面约束。如需更严格校验，可在此添加。
 
-# 简报必备章节标记（校验管线使用，与数据库模板 version 14 章节名一致）
+# 简报必备章节标记（校验管线使用，与 TRADER_COMPLIANCE_PROMPT 结构契约一致）
+# 「驱动层与获利路径」为 v4.0 方法论落点：把研究经理的 driver_layer / profit_path
+# 显式呈现给用户，缺该章节即校验告警，避免字段只留在中间 JSON 里用户看不到。
 TRADER_REQUIRED_SECTIONS: Tuple[str, ...] = (
-    "一句话结论", "为什么这么看",
+    "一句话结论", "为什么这么看", "驱动层与获利路径",
 )
+
+
+# ==================== 执行模式（个人决策参考，设计文档 §6.1） ====================
+# 仅当开关开 + 本地执行模板存在时启用（use_execution_output），发行版无效开关不触达此段。
+# 结构契约只约束章节与免责声明，具体内容指引由本地 execution 模板承载（内容不发行）。
+
+TRADER_EXECUTION_PROMPT = """【执行模式·个人决策参考】
+本输出仅供使用者个人决策参考。请按以下结构输出 Markdown 投资计划，每个章节标题必须出现且顺序一致：
+
+## 操作方向
+（BUY / SELL / HOLD 三选一，一句话说明核心理由）
+
+## 建议仓位
+（0-100% 仓位比例，结合风险审阅结论与波动率给出）
+
+## 入场区间
+（具体价格区间；已持仓则给出当前基准价与加减仓价位）
+
+## 分批计划
+（分批档位与触发价位，如"第1档：涨至 X 元减 1/3"）
+
+## 止损与移动止盈
+（止损参考价与移动止盈规则，如"收盘跌破 5 日线"）
+
+## 触发条件
+（需盯盘的具体信号：价位 / 量价 / 时间）
+
+## 核心依据
+（最关键的 2-4 条证据）
+
+## 免责声明
+本内容为执行模式输出，仅供使用者个人决策参考，不构成任何投资建议；据此操作风险自担。
+
+"""
+
+# 执行模式必备章节（校验管线使用；执行模式下跳过禁词扫描，仅校验结构）
+TRADER_EXECUTION_REQUIRED_SECTIONS: Tuple[str, ...] = (
+    "操作方向", "止损与移动止盈",
+)
+
+# 执行模式降级提示词（模板系统不可用时；仅执行模式 + 执行模板存在时触达）
+TRADER_EXECUTION_FALLBACK_PROMPT = """你是一位个人投资计划整合员（执行模式）。
+基于综合研究结论与风险审阅结论，输出包含操作方向、建议仓位、入场区间、分批计划、
+止损与移动止盈、触发条件的个人投资计划。所有价位与仓位必须基于已提供的报告数据，
+不得编造。结尾必须附免责声明：本内容为执行模式输出，仅供使用者个人决策参考。"""
 
 
 # 尝试导入工具函数
@@ -208,13 +262,26 @@ class TraderV2(TraderAgent):
         # 🔥 按硬约束"system prompt 必须将格式要求放在最前面"，
         # 将合规约束 & 简报结构契约前置到 prompt 最前面，确保 LLM 优先看到合规约束，
         # 不依赖数据库迁移即可立即生效。
+        # 🆕 执行模式路由（A1）：开关开 + 本地执行模板存在 → 换执行结构契约；
+        # 否则（含发行版无效开关）维持合规前置，行为与主分支一致。
+        from core.agents.advice_mode import use_execution_output
+        _use_execution = use_execution_output("trader_v2", "trader_v2")
+
         if prompt:
-            prompt = TRADER_COMPLIANCE_PROMPT + prompt
-            logger.info(f"📝 系统提示词长度: {len(prompt)} 字符（含合规约束）")
-            logger.debug("✅ 从模板系统获取研究整合员系统提示词（已前置合规约束）")
+            if _use_execution:
+                prompt = TRADER_EXECUTION_PROMPT + prompt
+                logger.info(f"🟢 [advice_mode] 执行模式：投资计划结构契约已前置 (长度: {len(prompt)})")
+            else:
+                prompt = TRADER_COMPLIANCE_PROMPT + prompt
+                logger.info(f"📝 系统提示词长度: {len(prompt)} 字符（含合规约束）")
+            logger.debug("✅ 从模板系统获取研究整合员系统提示词（已前置结构契约）")
             return prompt
 
         logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
+
+        if _use_execution:
+            # 执行模式降级路径（仅本地执行模板存在时触达）
+            return TRADER_EXECUTION_PROMPT + TRADER_EXECUTION_FALLBACK_PROMPT
 
         # 默认系统提示词（合规版本）— 同样前置合规约束，保证 fallback 路径也受约束
         return TRADER_COMPLIANCE_PROMPT + """你是一位研究整合员，负责根据风险审阅后的综合研究结论生成用户版研究简报。
@@ -257,6 +324,14 @@ class TraderV2(TraderAgent):
         logger.info("=" * 80)
         logger.info("📝 [TraderV2] 开始执行用户版研究简报生成")
         logger.info("=" * 80)
+
+        # 🛑 R3：投资计划或风险决策降级 → 跳过 LLM
+        if all_degraded(state, ["investment_plan"]) or all_degraded(state, ["risk_assessment"]):
+            logger.warning("⚠️ [TraderV2] investment_plan 或 risk_assessment 降级，跳过用户版简报生成")
+            return {
+                self.output_field: GENERIC_REPORT_FALLBACK,
+                "_node_errors": {"trader_v2": "上游投资计划或风险决策降级，用户版简报未生成"},
+            }
 
         # P1: 启动执行轨迹采集（TraderV2 自行管理，因为父类 TraderAgent 不在 ManagerAgent 改造范围）
         from core.agents.execution_trace_recorder import (
@@ -398,6 +473,9 @@ class TraderV2(TraderAgent):
         本方法采用"合规术语扫描 + 结构完整性检查"的轻量模式，
         检测到违规时返回警告字符串（保留原输出），通过则返回 None。
 
+        执行模式路由（A2，设计文档 §5.2）：开关开 + 本地执行模板存在时
+        跳过禁词扫描（操作方向/减仓档位为合法输出），改为校验执行章节结构。
+
         Args:
             text: LLM 输出的研究简报文本
 
@@ -409,6 +487,18 @@ class TraderV2(TraderAgent):
             return "输出为空"
 
         warnings: List[str] = []
+
+        # 🆕 执行模式：仅校验执行章节结构，跳过禁词扫描
+        from core.agents.advice_mode import use_execution_output
+        if use_execution_output("trader_v2", "trader_v2"):
+            missing_sections = [s for s in TRADER_EXECUTION_REQUIRED_SECTIONS if s not in text]
+            if missing_sections:
+                warnings.append(f"缺少执行计划必备章节: {missing_sections}")
+            if "仅供使用者个人决策参考" not in text:
+                warnings.append("缺少执行模式免责声明")
+            if warnings:
+                return "; ".join(warnings)
+            return None
 
         # 1. 合规术语扫描（检测交易指令或市场观点术语）
         found_forbidden = [term for term in TRADER_FORBIDDEN_TERMS if term in text]
@@ -468,13 +558,24 @@ class TraderV2(TraderAgent):
             except Exception as e:
                 logger.warning(f"获取市场信息失败: {e}")
         
-        # 🆕 提取报告内容（如果是字典，取 content 字段）
-        def extract_content(report):
-            """从报告中提取纯文本内容"""
-            if isinstance(report, dict):
-                return report.get('content', str(report))
-            return str(report) if report else ""
-        
+        # 风险审阅结论与综合研究结论（模板占位符：risk_management_decision /
+        # final_trade_decision）。前者取风险会审裁决，后者取 risk_manager_v2 产出的
+        # final_trade_decision（dict，含 Markdown content），缺失时回退裁决文本
+        risk_debate_state = state.get("risk_debate_state")
+        risk_decision_text = ""
+        if isinstance(risk_debate_state, dict):
+            risk_decision_text = safe_extract(risk_debate_state.get("judge_decision"))
+        if not risk_decision_text:
+            risk_decision_text = (
+                safe_extract(state.get("risk_assessment"))
+                or safe_extract(all_reports.get("risk_assessment", ""))
+            )
+        final_decision_text = (
+            safe_extract(state.get("final_trade_decision"))
+            or safe_extract(all_reports.get("final_trade_decision", ""))
+            or risk_decision_text
+        )
+
         # 准备模板变量（参考 research_manager_v2 的实现）
         # 🔑 注意：风险审阅已在上游完成，本阶段负责整合呈现综合研究结论
         template_variables = {
@@ -484,13 +585,16 @@ class TraderV2(TraderAgent):
             "current_date": analysis_date,
             "currency_name": currency_name,
             "currency_symbol": currency_symbol,
-            # 投资计划（转换为字符串）
-            "investment_plan": extract_content(investment_plan) if investment_plan else "",
-            # 🔑 可用的分析报告（不包括 risk_assessment）
-            "market_report": extract_content(all_reports.get("market_report", "")),
-            "fundamentals_report": extract_content(all_reports.get("fundamentals_report", "")),
-            "news_report": extract_content(all_reports.get("news_report", "")),
-            "sentiment_report": extract_content(all_reports.get("sentiment_report", "")),
+            # 投资计划（降级占位返回空串，不混入推理）
+            "investment_plan": safe_extract(investment_plan) if investment_plan else "",
+            # 风险会审结论与风险审阅后的综合研究结论
+            "risk_management_decision": risk_decision_text,
+            "final_trade_decision": final_decision_text,
+            # 🔑 可用的分析报告（risk_assessment 已由上面两个变量承载）
+            "market_report": safe_extract(all_reports.get("market_report", "")),
+            "fundamentals_report": safe_extract(all_reports.get("fundamentals_report", "")),
+            "news_report": safe_extract(all_reports.get("news_report", "")),
+            "sentiment_report": safe_extract(all_reports.get("sentiment_report", "")),
             # 历史交易记录（转换为字符串）
             "historical_trades": "\n".join([str(trade) for trade in historical_trades[:3]]) if historical_trades else "",
         }
@@ -500,7 +604,7 @@ class TraderV2(TraderAgent):
         excluded_keys = ["risk_assessment", "market_report", "fundamentals_report", "news_report", "sentiment_report"]
         for key, value in all_reports.items():
             if key not in excluded_keys:
-                template_variables[f"report_{key}"] = extract_content(value)
+                template_variables[f"report_{key}"] = safe_extract(value)
         
         # 使用基类的通用方法获取用户提示词（参考 research_manager_v2）
         # 基类会自动从 state 中提取系统变量（如 current_price、industry 等）
@@ -517,12 +621,12 @@ class TraderV2(TraderAgent):
         if prompt:
             logger.info(f"✅ 从模板系统获取研究整合员 v2.0 用户提示词 (长度: {len(prompt)})")
             logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
-            return prompt
+            return append_flow_context(prompt, state, include_profile=True, include_simulation=True)
         
         # 降级：使用默认用户提示词
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
 
-        summary_source = extract_content(all_reports.get("final_trade_decision", "")) or extract_content(all_reports.get("risk_management_decision", "")) or extract_content(investment_plan)
+        summary_source = safe_extract(all_reports.get("final_trade_decision", "")) or safe_extract(all_reports.get("risk_assessment", "")) or safe_extract(investment_plan)
         prompt = f"""请为 {company_name}（{ticker}）生成用户版研究简报：
 
 ## 基本信息
@@ -533,7 +637,7 @@ class TraderV2(TraderAgent):
 
     ## 风险审阅后的综合研究结论
 
-    {extract_content(investment_plan) if investment_plan else "无综合研究结论"}
+    {safe_extract(investment_plan) if investment_plan else "无综合研究结论"}
 
     ## 一句话结论
 
@@ -542,25 +646,25 @@ class TraderV2(TraderAgent):
 ## 可用分析报告
 
 ### 1. 市场分析报告
-{extract_content(all_reports.get("market_report", "")) or "无市场分析报告"}
+{safe_extract(all_reports.get("market_report", "")) or "无市场分析报告"}
 
 ### 2. 基本面分析报告
-{extract_content(all_reports.get("fundamentals_report", "")) or "无基本面分析报告"}
+{safe_extract(all_reports.get("fundamentals_report", "")) or "无基本面分析报告"}
 
 ### 3. 新闻分析报告
-{extract_content(all_reports.get("news_report", "")) or "无新闻分析报告"}
+{safe_extract(all_reports.get("news_report", "")) or "无新闻分析报告"}
 
 ### 4. 板块分析报告
-{extract_content(all_reports.get("sector_report", "")) or "无板块分析报告"}
+{safe_extract(all_reports.get("sector_report", "")) or "无板块分析报告"}
 
 ### 5. 大盘分析报告
-{extract_content(all_reports.get("index_report", "")) or "无大盘分析报告"}
+{safe_extract(all_reports.get("index_report", "")) or "无大盘分析报告"}
 
 ### 6. 乐观情景研究报告
-{extract_content(all_reports.get("bull_report", "")) or "无乐观情景研究报告"}
+{safe_extract(all_reports.get("bull_report", "")) or "无乐观情景研究报告"}
 
 ### 7. 审慎情景研究报告
-{extract_content(all_reports.get("bear_report", "")) or "无审慎情景研究报告"}
+{safe_extract(all_reports.get("bear_report", "")) or "无审慎情景研究报告"}
 
 ## 历史交易记录（如有）
 
@@ -584,8 +688,8 @@ class TraderV2(TraderAgent):
 
 **免责声明**：
 本研究简报仅供信息参考，不构成投资建议或交易承诺。请结合自身情况独立判断。"""
-        
-        return prompt
+
+        return append_flow_context(prompt, state, include_profile=True, include_simulation=True)
     
     def _get_company_name(self, ticker: str, market_info: dict) -> str:
         """获取公司名称"""

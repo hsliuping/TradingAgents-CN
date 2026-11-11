@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, ValidationError
 from core.agents.manager import ManagerAgent
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
+from .flow_context import append_flow_context, safe_extract, all_degraded
+from core.agents.base import GENERIC_REPORT_FALLBACK
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,79 @@ RISK_ASSESSMENT_SCHEMA_PROMPT = """【输出格式契约·必须严格遵守】
 输出必须是合法 JSON，不要在 JSON 前后添加任何文字或代码块标记。
 
 """
+
+
+# ==================== 执行模式 schema（设计文档 §6.1） ====================
+# 仅当开关开 + 本地执行模板存在时启用；最终决策放开操作词值域，价格字段转必填。
+
+class ExecutionFinalTradeDecision(BaseModel):
+    """执行版最终决策 schema：BUY/SELL/HOLD + 止损参考 + 建议仓位 + 分批档位"""
+    action: Literal["BUY", "SELL", "HOLD"]
+    confidence: float = Field(ge=0, le=1)
+    price_analysis_range: str
+    stop_loss_reference: str
+    position_ratio: float = Field(ge=0, le=1)
+    trim_plan: List[str] = Field(default_factory=list)
+    reasoning: str = ""
+    summary: str = ""
+    risk_warning: str = ""
+
+
+class ExecutionRiskAssessmentOutput(BaseModel):
+    """执行版风险审阅结论 schema：研究倾向保留，最终决策放开为操作口径"""
+    risk_level: Literal["低", "中", "高"]
+    risk_score: float = Field(ge=0, le=1)
+    reasoning: str
+    key_risks: List[str] = Field(default_factory=list)
+    risk_control: str = ""
+    investment_adjustment: Literal["乐观", "审慎", "中性"]
+    final_trade_decision: ExecutionFinalTradeDecision
+
+
+RISK_ASSESSMENT_EXECUTION_SCHEMA_PROMPT = """【输出格式契约·执行模式·必须严格遵守】
+你的输出必须是一个 JSON 对象，包含以下字段。只输出 JSON，不要包裹在 markdown 代码块中，不要有任何额外文字。
+
+{
+  "risk_level": "低" | "中" | "高",
+  "risk_score": 0.0-1.0 之间的浮点数,
+  "reasoning": "评估结论（字符串）",
+  "key_risks": ["核心风险1", "核心风险2"],
+  "risk_control": "风控要点（字符串）",
+  "investment_adjustment": "乐观" | "审慎" | "中性",
+  "final_trade_decision": {
+    "action": "BUY" | "SELL" | "HOLD",
+    "confidence": 0.0-1.0 之间的浮点数,
+    "price_analysis_range": "价格分析区间（必填，基于报告数据）",
+    "stop_loss_reference": "止损参考价（必填，基于报告数据）",
+    "position_ratio": 0.0-1.0 之间的浮点数（建议仓位比例）,
+    "trim_plan": ["第1档：涨至 X 减 1/3", "第2档：…"],
+    "reasoning": "分析推理",
+    "summary": "分析摘要",
+    "risk_warning": "风险提示"
+  }
+}
+
+【执行模式约束·必须遵守】
+1. investment_adjustment 仍只能取值 "乐观" / "审慎" / "中性"（研究倾向）。
+2. final_trade_decision.action 只能取值 "BUY" / "SELL" / "HOLD"（操作口径）。
+3. price_analysis_range / stop_loss_reference 必须严格基于报告中的真实数据，不得编造。
+4. position_ratio 为 0-1 浮点数（如 0.3 表示 30% 仓位），结合风险等级与波动率给出。
+5. 禁止承诺收益或保证盈利，必须提示风险。
+6. 所有结论必须基于已获取的数据，不得编造数据或指标。
+7. 本输出为执行模式输出，仅供使用者个人决策参考，不构成任何投资建议。
+
+输出必须是合法 JSON，不要在 JSON 前后添加任何文字或代码块标记。
+
+"""
+
+# 执行模式降级 fallback 提示词（仅执行模板存在时触达；内容与执行契约一致）
+_RISK_EXECUTION_FALLBACK = """【输出格式契约·执行模式】
+按 RISK_ASSESSMENT_EXECUTION_SCHEMA_PROMPT 的 JSON 契约输出：final_trade_decision.action 取 BUY/SELL/HOLD，
+price_analysis_range 与 stop_loss_reference 必填，position_ratio 为 0-1 仓位比例，trim_plan 列分批档位。
+本输出为执行模式输出，仅供使用者个人决策参考，不构成任何投资建议。
+
+"""
+
 
 # 尝试导入模板系统
 try:
@@ -187,6 +262,9 @@ class RiskManagerV2(ManagerAgent):
     # 是否需要辩论
     enable_debate = True
 
+    # 辩论状态字段（基类 _conduct_debate 从这里读取真实辩论记录）
+    debate_state_field = "risk_debate_state"
+
     def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:
         """
         构建系统提示词（参考 fundamentals_analyst_v2 的实现）
@@ -234,8 +312,14 @@ class RiskManagerV2(ManagerAgent):
             # 🔥 按硬约束"system prompt 必须将格式要求放在最前面"，
             # 将 schema 契约前置到 prompt 最前面，确保 LLM 优先看到格式与合规约束，
             # 不依赖数据库迁移即可立即生效。
-            prompt = RISK_ASSESSMENT_SCHEMA_PROMPT + prompt
-            logger.info(f"📝 系统提示词长度: {len(prompt)} 字符（含 schema 契约）")
+            # 🆕 执行模式路由（A4）：开关开 + 本地执行模板存在 → 前置执行版契约
+            from core.agents.advice_mode import use_execution_output
+            if use_execution_output("managers_v2", "risk_manager_v2"):
+                prompt = RISK_ASSESSMENT_EXECUTION_SCHEMA_PROMPT + prompt
+                logger.info(f"🟢 [advice_mode] 执行模式：风险决策执行契约已前置 (长度: {len(prompt)})")
+            else:
+                prompt = RISK_ASSESSMENT_SCHEMA_PROMPT + prompt
+                logger.info(f"📝 系统提示词长度: {len(prompt)} 字符（含 schema 契约）")
             logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
 
             # 检查是否包含输出格式要求
@@ -249,8 +333,12 @@ class RiskManagerV2(ManagerAgent):
 
         logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
 
+        # 🆕 执行模式降级路由：执行模板存在但模板系统不可用时，前置执行契约
+        from core.agents.advice_mode import use_execution_output
+        _use_execution = use_execution_output("managers_v2", "risk_manager_v2")
+
         # 默认提示词（合规版本）— 同样前置 schema 契约，保证 fallback 路径也受约束
-        return RISK_ASSESSMENT_SCHEMA_PROMPT + """你是一位风险评估师，负责综合各方稳健性审阅并形成风险审阅结论。
+        return (_RISK_EXECUTION_FALLBACK if _use_execution else RISK_ASSESSMENT_SCHEMA_PROMPT) + """你是一位风险评估师，负责综合各方稳健性审阅并形成风险审阅结论。
 
     **分析风格**: 客观、克制、以稳健性为核心，强调判断边界、约束条件、失效触发与后续观察。
 
@@ -308,11 +396,11 @@ class RiskManagerV2(ManagerAgent):
         neutral_opinion = inputs.get("neutral_opinion", "")
         investment_plan = inputs.get("investment_plan", "")
         
-        # 转换为字符串（如果不是）
-        risky_opinion_str = str(risky_opinion) if risky_opinion else ""
-        safe_opinion_str = str(safe_opinion) if safe_opinion else ""
-        neutral_opinion_str = str(neutral_opinion) if neutral_opinion else ""
-        investment_plan_str = str(investment_plan) if investment_plan else ""
+        # 转换为字符串（降级占位返回空串）
+        risky_opinion_str = safe_extract(risky_opinion)
+        safe_opinion_str = safe_extract(safe_opinion)
+        neutral_opinion_str = safe_extract(neutral_opinion)
+        investment_plan_str = safe_extract(investment_plan)
         
         logger.info(f"🔥 高弹性情景观点类型: {type(risky_opinion)}, 长度: {len(risky_opinion_str)} 字符")
         logger.info(f"🛡️ 防御情景观点类型: {type(safe_opinion)}, 长度: {len(safe_opinion_str)} 字符")
@@ -323,17 +411,11 @@ class RiskManagerV2(ManagerAgent):
         company_name = self._get_company_name(ticker, state)
         logger.info(f"🏢 公司名称: {company_name}")
         
-        # 🆕 提取报告内容（如果是字典，取 content 字段）
-        def extract_content(report):
-            """从报告中提取纯文本内容"""
-            if isinstance(report, dict):
-                return report.get('content', str(report))
-            return str(report) if report else ""
-        
-        risky_opinion_content = extract_content(inputs.get("risky_opinion"))
-        safe_opinion_content = extract_content(inputs.get("safe_opinion"))
-        neutral_opinion_content = extract_content(inputs.get("neutral_opinion"))
-        investment_plan_content = extract_content(inputs.get("investment_plan"))
+        # 🆕 提取报告内容（降级占位返回空串，不混入推理）
+        risky_opinion_content = safe_extract(inputs.get("risky_opinion"))
+        safe_opinion_content = safe_extract(inputs.get("safe_opinion"))
+        neutral_opinion_content = safe_extract(inputs.get("neutral_opinion"))
+        investment_plan_content = safe_extract(inputs.get("investment_plan"))
         
         logger.info(f"🔥 高弹性情景观点内容长度: {len(risky_opinion_content)} 字符")
         logger.info(f"🛡️ 防御情景观点内容长度: {len(safe_opinion_content)} 字符")
@@ -355,7 +437,7 @@ class RiskManagerV2(ManagerAgent):
         # 添加其他输入到模板变量
         for key, value in inputs.items():
             if key not in ["investment_plan", "risky_opinion", "safe_opinion", "neutral_opinion"]:
-                template_variables[key] = extract_content(value) if value else ""
+                template_variables[key] = safe_extract(value) if value else ""
         
         # 使用基类的通用方法获取用户提示词（基类会自动从 state 中提取系统变量）
         prompt = self._get_prompt_from_template(
@@ -370,11 +452,11 @@ class RiskManagerV2(ManagerAgent):
         
         if prompt:
             logger.info(f"✅ 从模板系统获取风险评估师用户提示词 (长度: {len(prompt)})")
-            return prompt
+            return append_flow_context(prompt, state, include_profile=True, include_simulation=True)
         
         # 降级：使用默认用户提示词
         logger.info("⚠️ 使用降级用户提示词")
-        return f"""请基于 {company_name}（{ticker}）的综合研究结论与三方稳健性审阅意见，形成风险审阅结论：
+        prompt = f"""请基于 {company_name}（{ticker}）的综合研究结论与三方稳健性审阅意见，形成风险审阅结论：
 
 📊 **基本信息**：
 - 股票代码：{ticker}
@@ -404,6 +486,7 @@ class RiskManagerV2(ManagerAgent):
 4. 明确不要直接给出具体操作建议、仓位安排、目标价、价格区间、止损止盈或执行节奏。
 
 输出目标是形成风险审阅结论，而不是具体操作建议。"""
+        return append_flow_context(prompt, state, include_profile=True, include_simulation=True)
 
     def _get_required_inputs(self) -> List[str]:
         """
@@ -452,6 +535,14 @@ class RiskManagerV2(ManagerAgent):
           final_trade_decision 走 _extract_final_trade_decision 兜底逻辑兼容。
         """
         import json
+
+        # 🛑 R3：三个风险观点都降级 → 跳过 LLM
+        if all_degraded(state, ["risky_opinion", "safe_opinion", "neutral_opinion"]):
+            logger.warning("⚠️ [RiskManagerV2] 三个风险观点均降级，跳过风险决策")
+            return {
+                self.output_field: GENERIC_REPORT_FALLBACK,
+                "_node_errors": {"risk_manager_v2": "上游风险观点均降级，风险决策未生成"},
+            }
 
         # 调用父类方法获取基本输出
         result = super().execute(state)
@@ -617,8 +708,15 @@ class RiskManagerV2(ManagerAgent):
             return None, f"JSON 顶层不是对象，实际类型: {type(json_obj).__name__}"
 
         # pydantic schema 校验（含合规术语枚举约束、数值范围约束）
+        # 🆕 执行模式路由（A4）：开关开 + 本地执行模板存在 → 用执行版 schema（BUY/SELL/HOLD）
+        from core.agents.advice_mode import use_execution_output
+        _schema_cls = (
+            ExecutionRiskAssessmentOutput
+            if use_execution_output("managers_v2", "risk_manager_v2")
+            else RiskAssessmentOutput
+        )
         try:
-            validated = RiskAssessmentOutput(**json_obj)
+            validated = _schema_cls(**json_obj)
             return validated.model_dump(), None
         except ValidationError as e:
             return None, f"Schema 校验失败: {e}"

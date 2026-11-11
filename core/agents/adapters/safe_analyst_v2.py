@@ -13,6 +13,8 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from ..researcher import ResearcherAgent
 from ..registry import register_agent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
+from .flow_context import append_flow_context, safe_extract, all_degraded
+from core.agents.base import GENERIC_REPORT_FALLBACK
 
 logger = logging.getLogger(__name__)
 
@@ -184,19 +186,19 @@ class SafeAnalystV2(ResearcherAgent):
         current_risky_response = risk_debate_state.get("current_risky_response", "")
         current_neutral_response = risk_debate_state.get("current_neutral_response", "")
 
-        # 准备模板变量（从 state 中提取所有数据）
+        # 准备模板变量（从 state 中提取所有数据，降级占位返回空串）
         template_variables = {
             "ticker": ticker,
             "analysis_date": analysis_date,
-            "investment_plan": state.get("investment_plan", "") or state.get("trader_investment_plan", ""),
-            "bull_opinion": state.get("bull_opinion", ""),
-            "bear_opinion": state.get("bear_opinion", ""),
-            "market_report": state.get("market_report", ""),
-            "fundamentals_report": state.get("fundamentals_report", ""),
-            "news_report": state.get("news_report", ""),
-            "sentiment_report": state.get("sentiment_report", ""),
-            "index_report": state.get("index_report", ""),
-            "sector_report": state.get("sector_report", ""),
+            "investment_plan": safe_extract(state.get("investment_plan")) or safe_extract(state.get("trader_investment_plan")),
+            "bull_opinion": safe_extract(state.get("bull_opinion")),
+            "bear_opinion": safe_extract(state.get("bear_opinion")),
+            "market_report": safe_extract(state.get("market_report")),
+            "fundamentals_report": safe_extract(state.get("fundamentals_report")),
+            "news_report": safe_extract(state.get("news_report")),
+            "sentiment_report": safe_extract(state.get("sentiment_report")),
+            "index_report": safe_extract(state.get("index_report")),
+            "sector_report": safe_extract(state.get("sector_report")),
             # 🆕 辩论相关变量
             "history": history,
             "current_risky_response": current_risky_response,
@@ -276,11 +278,11 @@ class SafeAnalystV2(ResearcherAgent):
         )
         if prompt:
             logger.info(f"✅ 从模板系统获取防御情景分析师用户提示词 (长度: {len(prompt)})")
-            return prompt
+            return append_flow_context(prompt, state, include_profile=False, include_simulation=True)
 
         # 降级：使用硬编码提示词
         logger.info(f"📝 [防御情景分析师] 使用降级提示词 (长度: {len(fallback_prompt)})")
-        return fallback_prompt
+        return append_flow_context(fallback_prompt, state, include_profile=False, include_simulation=True)
 
     def _get_required_reports(self) -> list:
         """
@@ -323,6 +325,14 @@ class SafeAnalystV2(ResearcherAgent):
         """
         ticker = state.get("ticker", "") or state.get("company_of_interest", "")
         analysis_date = state.get("analysis_date", "") or state.get("trade_date", "")
+
+        # 🛑 R3：investment_plan 降级 → 跳过 LLM
+        if all_degraded(state, ["investment_plan", "trader_investment_plan"]):
+            logger.warning("⚠️ [SafeAnalystV2] investment_plan 降级，跳过风险审阅")
+            return {
+                self.output_field: GENERIC_REPORT_FALLBACK,
+                "_node_errors": {"safe_analyst_v2": "上游投资计划降级，风险审阅未生成"},
+            }
 
         logger.info(f"🛡️ 防御情景分析师开始评估 {ticker} @ {analysis_date}")
 

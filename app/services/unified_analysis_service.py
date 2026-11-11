@@ -151,6 +151,12 @@ class UnifiedAnalysisService:
         """
         system_vars = {}
 
+        # 日期兼容：UI 任务路径的 analysis_date 可能是 datetime 的字符串形式
+        # （"YYYY-MM-DD HH:MM:SS"），统一截取日期部分，否则下方 strptime 报
+        # unconverted data remains，并连带跳过行业/个股维度注入（第 6 步）
+        if analysis_date:
+            analysis_date = str(analysis_date).strip()[:10]
+
         try:
             from tradingagents.utils.stock_utils import StockUtils
 
@@ -194,60 +200,121 @@ class UnifiedAnalysisService:
             system_vars["industry"] = industry
 
             # 2. 从数据库获取当前价格
+            # 口径约定（与市场分析工具 stock_market_data 对齐）：
+            #   current_price          = 不晚于分析日期的最近一个已完成交易日收盘价（分析基准价）
+            #   current_price_intraday = market_quotes 当日盘中最新快照（仅当晚于基准日时提供）
+            # 避免「研究结论用盘中实时价、市场报告用日线收盘价」的口径冲突。
             current_price = "未知"
+            current_price_date = ""
+            current_price_source = ""
+            intraday_price = None
+            intraday_price_date = ""
 
             if is_china:
                 try:
                     db = self._get_db()
                     logger.info(f"🔍 [价格查询] 开始查询股票 {stock_code} 的价格...")
 
-                    # 优先从 market_quotes 获取最新价格
-                    logger.info(f"🔍 [价格查询] 步骤1: 从 market_quotes 查询...")
+                    from tradingagents.utils.stock_utils import StockUtils as _SU2
+                    _is_fund = _SU2.is_fund(stock_code)
+
+                    # 步骤1: 最近已完成交易日收盘价（不晚于分析日期，杜绝用当日未定型日线）
+                    daily_collections = (
+                        ["etf_daily_quotes", "stock_daily_quotes"] if _is_fund else ["stock_daily_quotes"]
+                    )
+                    for coll_name in daily_collections:
+                        if coll_name == "etf_daily_quotes":
+                            daily_query = {"$or": [
+                                {"code": stock_code},
+                                {"symbol": stock_code},
+                                {"ts_code": {"$regex": f"^{stock_code}"}},
+                            ]}
+                        else:
+                            daily_query = {"$or": [{"code": stock_code}, {"symbol": stock_code}]}
+                        if analysis_date:
+                            daily_query["trade_date"] = {"$lte": analysis_date}
+                        daily = db[coll_name].find_one(
+                            daily_query,
+                            {"_id": 0, "close": 1, "trade_date": 1},
+                            sort=[("trade_date", -1)],
+                        )
+                        logger.info(f"🔍 [价格查询] {coll_name} 查询结果: {daily}")
+                        if daily and daily.get("close") is not None:
+                            current_price = str(daily["close"])
+                            current_price_date = str(daily.get("trade_date") or "")
+                            current_price_source = "最近已完成交易日收盘价"
+                            break
+
+                    # 步骤2: market_quotes 最新快照（兜底 + 盘中价来源）
                     quote = db.market_quotes.find_one(
                         {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
-                        {"_id": 0, "close": 1, "trade_date": 1},
-                        sort=[("trade_date", -1)]  # 按日期降序，获取最新数据
+                        {"_id": 0, "close": 1, "price": 1, "pre_close": 1, "trade_date": 1},
+                        sort=[("trade_date", -1)],
                     )
                     logger.info(f"🔍 [价格查询] market_quotes 查询结果: {quote}")
 
-                    if quote and quote.get("close"):
-                        current_price = str(quote["close"])
-                        logger.info(f"✅ [系统变量-数据库] 当前价格: ¥{current_price} (日期: {quote.get('trade_date', 'N/A')})")
-                    else:
-                        logger.info(f"🔍 [价格查询] market_quotes 未找到数据，尝试步骤2...")
-                        # 对 ETF，优先尝试 etf_daily_quotes
-                        from tradingagents.utils.stock_utils import StockUtils as _SU2
-                        if _SU2.is_fund(stock_code):
-                            logger.info(f"🔍 [价格查询] 步骤2a: ETF，从 etf_daily_quotes 查询...")
-                            etf_quote = db.etf_daily_quotes.find_one(
-                                {"$or": [{"code": stock_code}, {"symbol": stock_code}, {"ts_code": {"$regex": f"^{stock_code}"}}]},
-                                {"_id": 0, "close": 1, "trade_date": 1},
-                                sort=[("trade_date", -1)]
-                            )
-                            logger.info(f"🔍 [价格查询] etf_daily_quotes 查询结果: {etf_quote}")
-                            if etf_quote and etf_quote.get("close"):
-                                current_price = str(etf_quote["close"])
-                                logger.info(f"✅ [系统变量-数据库] ETF当前价格: ¥{current_price}")
-                        if current_price == "未知":
-                            # 回退到 stock_basic_info 的 current_price 字段
-                            logger.info(f"🔍 [价格查询] 步骤2b: 从 stock_basic_info 查询...")
-                            stock_info = db.stock_basic_info.find_one(
-                                {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
-                                {"_id": 0, "current_price": 1}
-                            )
-                            logger.info(f"🔍 [价格查询] stock_basic_info 查询结果: {stock_info}")
+                    quote_price = (quote.get("close") or quote.get("price")) if quote else None
+                    quote_date = str(quote.get("trade_date") or "") if quote else ""
 
-                            if stock_info and stock_info.get("current_price"):
-                                current_price = str(stock_info["current_price"])
-                                logger.info(f"✅ [系统变量-数据库] 当前价格(备用): ¥{current_price}")
-                            else:
-                                logger.warning(f"⚠️ 数据库中未找到股票 {stock_code} 的价格信息")
+                    if current_price == "未知" and quote:
+                        if quote_date and analysis_date and quote_date >= analysis_date and quote.get("pre_close") is not None:
+                            # 当日日线未落库：用昨收作分析基准，日期未知则不臆造
+                            current_price = str(quote["pre_close"])
+                            current_price_date = ""
+                            current_price_source = "上一交易日收盘价（当日日线未落库）"
+                            logger.info(f"✅ [系统变量-数据库] 当前价格(昨收基准): ¥{current_price}")
+                        elif quote_price is not None:
+                            current_price = str(quote_price)
+                            current_price_date = quote_date
+                            current_price_source = "实时快照（无可用日线数据）"
+                            logger.info(f"✅ [系统变量-数据库] 当前价格(快照): ¥{current_price} (日期: {current_price_date or 'N/A'})")
+
+                    # 步骤3: 盘中快照单独标注（晚于分析基准日时），不与基准价混用
+                    if quote_price is not None and quote_date and (
+                        not current_price_date or quote_date > current_price_date
+                    ):
+                        intraday_price = str(quote_price)
+                        intraday_price_date = quote_date
+                        logger.info(f"📸 [系统变量-数据库] 盘中快照: ¥{intraday_price} (日期: {intraday_price_date})")
+
+                    # 步骤4: 回退到 stock_basic_info 的 current_price 字段
+                    if current_price == "未知":
+                        logger.info(f"🔍 [价格查询] 步骤4: 从 stock_basic_info 查询...")
+                        stock_info = db.stock_basic_info.find_one(
+                            {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
+                            {"_id": 0, "current_price": 1}
+                        )
+                        logger.info(f"🔍 [价格查询] stock_basic_info 查询结果: {stock_info}")
+
+                        if stock_info and stock_info.get("current_price"):
+                            current_price = str(stock_info["current_price"])
+                            current_price_source = "基础信息缓存"
+                            logger.info(f"✅ [系统变量-数据库] 当前价格(备用): ¥{current_price}")
+                        else:
+                            logger.warning(f"⚠️ 数据库中未找到股票 {stock_code} 的价格信息")
                 except Exception as e:
                     logger.warning(f"⚠️ 从数据库获取当前价格失败: {e}")
                     import traceback
                     traceback.print_exc()
 
             system_vars["current_price"] = current_price
+            system_vars["current_price_date"] = current_price_date
+            system_vars["current_price_source"] = current_price_source
+            if intraday_price is not None:
+                system_vars["current_price_intraday"] = intraday_price
+                system_vars["current_price_intraday_date"] = intraday_price_date
+            # 供提示词直接引用的一句式口径说明（模板无法做条件判断，统一在此拼装）
+            price_note = current_price
+            if current_price_date:
+                price_note += f"（{current_price_date} 收盘）"
+            if current_price_source:
+                price_note += f"，口径：{current_price_source}"
+            if intraday_price is not None:
+                price_note += (
+                    f"；盘中快照 {intraday_price}"
+                    f"（{intraday_price_date}，仅参考，非分析基准）"
+                )
+            system_vars["current_price_note"] = price_note
 
             # 3. 市场信息
             market_name = "A股" if is_china else "港股" if market_info.get('is_hk') else "美股"
@@ -288,7 +355,9 @@ class UnifiedAnalysisService:
             logger.info(f"✅ [系统变量] 准备完成: {list(system_vars.keys())}")
             logger.info(f"   - company_name: {company_name}")
             logger.info(f"   - industry: {industry}")
-            logger.info(f"   - current_price: {current_price}")
+            logger.info(f"   - current_price: {current_price} (日期: {current_price_date or 'N/A'}, 口径: {current_price_source or 'N/A'})")
+            if intraday_price is not None:
+                logger.info(f"   - current_price_intraday: {intraday_price} (日期: {intraday_price_date})")
             logger.info(f"   - market_name: {market_name}")
             if system_vars.get("industry_dimensions"):
                 logger.info(f"   - 🏭 已注入行业分析维度")
@@ -314,14 +383,11 @@ class UnifiedAnalysisService:
         if parameters and getattr(parameters, "research_depth", None):
             research_depth = parameters.research_depth
 
-        depth_mapping = {
-            "快速": {"debate": 1, "risk": 1, "memory_enabled": False},  # 🔧 快速分析禁用记忆
-            "基础": {"debate": 1, "risk": 1, "memory_enabled": True},
-            "标准": {"debate": 1, "risk": 2, "memory_enabled": True},
-            "深度": {"debate": 2, "risk": 2, "memory_enabled": True},
-            "全面": {"debate": 3, "risk": 3, "memory_enabled": True},
-        }
-        depth_config = depth_mapping.get(research_depth, depth_mapping["标准"])
+        # 档位画像（DEPTH_PROFILES 单一注册表，收编原 depth_mapping）
+        from core.workflow.depth_profiles import get_profile, normalize_depth
+
+        research_depth = normalize_depth(research_depth)
+        profile = get_profile(research_depth)
 
         # 🆕 准备系统变量
         system_vars = self._prepare_system_variables(stock_code, analysis_date)
@@ -332,9 +398,10 @@ class UnifiedAnalysisService:
             "analysis_date": analysis_date,
             "trade_date": analysis_date,
             "research_depth": research_depth,
-            "_max_debate_rounds": depth_config["debate"],
-            "_max_risk_rounds": depth_config["risk"],
-            "memory_enabled": depth_config["memory_enabled"],  # 🔧 根据分析深度设置记忆开关
+            "_max_debate_rounds": profile.debate_rounds,
+            "_max_risk_rounds": profile.risk_rounds,
+            "memory_enabled": profile.memory_enabled,  # 兼容派生（memory_mode != off）
+            "data_scope": profile.data_scope,
             "messages": [],
             # 🆕 流程专属提示词：workflow_id 用于按流程+agent 获取对应提示词模板
             "workflow_id": workflow.id,
@@ -1285,6 +1352,10 @@ class UnifiedAnalysisService:
 
             logger.info(f"💾 [持仓分析服务] 保存文档: user_id={task_dict.get('user_id')} (类型: {type(task_dict.get('user_id'))})")
 
+            # 🆕 执行模式留痕（设计文档 §7.2）：区分研究/执行产物，便于事后审计
+            from core.agents.advice_mode import current_advice_mode
+            task_dict["advice_mode"] = current_advice_mode()
+
             await db.unified_analysis_tasks.insert_one(task_dict)
             logger.info(f"✅ [持仓分析服务] 已保存到数据库，任务ID: {task_id}")
             logger.info(f"✅ [持仓分析服务] 任务已创建: {task_id} - {code}")
@@ -1350,6 +1421,7 @@ class UnifiedAnalysisService:
             # 调用持仓分析服务
             from app.services.portfolio_service import get_portfolio_service
             from app.models.portfolio import PositionAnalysisByCodeRequest
+            from app.core.database import get_mongo_db
 
             portfolio_service = get_portfolio_service()
 
@@ -1599,6 +1671,10 @@ class UnifiedAnalysisService:
             if 'user_id' in task_dict and isinstance(task_dict['user_id'], str):
                 logger.info(f"🔄 [交易复盘服务] 转换 user_id 为 ObjectId")
                 task_dict['user_id'] = ObjectId(task_dict['user_id'])
+
+            # 🆕 执行模式留痕（设计文档 §7.2）
+            from core.agents.advice_mode import current_advice_mode
+            task_dict["advice_mode"] = current_advice_mode()
 
             await db.unified_analysis_tasks.insert_one(task_dict)
             logger.info(f"✅ [交易复盘服务] 任务已保存到数据库: {task_id}")

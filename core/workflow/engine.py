@@ -18,7 +18,10 @@ from .models import (
 )
 from core.state.models import FieldType
 from .builder import WorkflowBuilder, ANALYST_TOOL_MAPPING
+from .depth_profiles import build_depth_report_notice
+from .exceptions import WorkflowControlSignal
 from .validator import WorkflowValidator, ValidationResult
+from core.agents.adapters.flow_context import is_degraded_placeholder
 
 logger = logging.getLogger(__name__)
 
@@ -228,16 +231,19 @@ class WorkflowEngine:
         legacy_config: Optional[Dict[str, Any]] = None,
         task_id: Optional[str] = None,
         use_dynamic_state: bool = True,  # 🔥 改为默认启用，动态 Agent 工作流需要
-        llm: Optional[Any] = None
+        llm: Optional[Any] = None,
+        enable_checkpointer: bool = False,
     ):
         """
         初始化工作流引擎
 
         Args:
             legacy_config: 遗留智能体配置（用于创建 LLM 和 Toolkit）
-            task_id: 任务 ID（用于进度跟踪）
+            task_id: 任务 ID（用于进度跟踪；checkpointer 启用时同时作为 thread_id）
             use_dynamic_state: 是否使用动态状态生成（默认 True，支持动态 Agent 字段）
             llm: 可选的 LLM 实例（优先于 legacy_config）
+            enable_checkpointer: 是否启用 MongoDB 断点续跑（v4.0 T1；
+                Mongo 不可用时自动降级为裸编译，不影响执行）
         """
         self._definition: Optional[WorkflowDefinition] = None
         self._compiled_graph = None
@@ -247,6 +253,10 @@ class WorkflowEngine:
         self._validator = WorkflowValidator()
         self._current_execution: Optional[WorkflowExecution] = None
         self._progress_callback: Optional[Callable] = None
+
+        # 🆕 v4.0 T1 断点续跑：thread_id = task_id，compile 时解析实际 checkpointer
+        self._enable_checkpointer = enable_checkpointer
+        self._checkpointer: Optional[Any] = None
 
         # 🆕 进度跟踪状态（按已完成 agent 数 / 总数计算进度，只增不减）
         self._progress_agent_nodes = []      # 有 agent_id 的 agent 节点列表
@@ -321,8 +331,21 @@ class WorkflowEngine:
                 logger.info(f"[WorkflowEngine] 状态类生成成功: {state_schema.__name__ if state_schema else 'None'}")
                 logger.info(f"[WorkflowEngine] 状态字段: {list(schema.fields.keys())}")
 
+        # 🆕 v4.0 T1：启用断点续跑时挂 MongoDBSaver（不可用则降级裸编译）
+        if self._enable_checkpointer:
+            from .checkpointer import get_workflow_checkpointer
+            self._checkpointer = get_workflow_checkpointer()
+            if self._checkpointer is None:
+                logger.warning(
+                    "[WorkflowEngine] MongoDB checkpointer 不可用，本任务裸编译（断点续跑不可用）"
+                )
+
         # 构建图
-        self._compiled_graph = self._builder.build(self._definition, state_schema=state_schema)
+        self._compiled_graph = self._builder.build(
+            self._definition,
+            state_schema=state_schema,
+            checkpointer=self._checkpointer,
+        )
         return self
 
     def _extract_agent_ids(self, definition: WorkflowDefinition) -> list:
@@ -347,12 +370,34 @@ class WorkflowEngine:
         fields: Dict[str, FieldType] = {
             "investment_debate_state": FieldType.OBJECT,
             "risk_debate_state": FieldType.OBJECT,
+            # 风险审阅裁决（risk_manager_v2 返回 dict，含结构化字段 + Markdown content）。
+            # 未声明会被动态 State 丢弃，导致 trader 拼「风险审阅后的综合研究结论」时为空
+            "final_trade_decision": FieldType.OBJECT,
+            # v4.0 流程五段闭环：事前风险约束卡（risk_profile_v2 产出）
+            "risk_profile_card": FieldType.OBJECT,
+            # v4.0 流程五段闭环：情景效果试算（scenario_simulator_v2 产出）
+            "scenario_simulation": FieldType.OBJECT,
             "_max_debate_rounds": FieldType.NUMBER,
             "_max_risk_rounds": FieldType.NUMBER,
+            # M3 流程门控旗标（True=跳过该段）。必须在此声明：动态 State 会丢弃未声明的
+            # 输入键，未声明时 state.get('<旗标>') 恒为 None → 门控恒不跳过（快速/基础档失效）
+            "_skip_debate": FieldType.BOOLEAN,
+            "_skip_scenario_sim": FieldType.BOOLEAN,
+            "_skip_risk_review": FieldType.BOOLEAN,
+            # M2/M3/M4 档位上下文：档位契约块（agents/base.py）与环节运行清单、
+            # 报告档位标注（engine._append_depth_notices）都从 state 读，未声明同样会被丢弃
+            "research_depth": FieldType.STRING,
+            "depth_run_manifest": FieldType.ARRAY,
             # A9-P1: 风险自我辩论开关（True=深度/全面档走单节点自我辩论路径）
             "_risk_self_debate": FieldType.BOOLEAN,
+            # A9-P1: 风险自我辩论机械校验失败标记（True=回退原风险三角路径）
+            "_risk_self_debate_failed": FieldType.BOOLEAN,
             # A3: 投资辩论并行开局开关（True=第一轮乐观/审慎研究员并行出简报）
             "_parallel_opening": FieldType.BOOLEAN,
+            # P2: 研究自我辩论开关（True=深度/全面档走单节点双视角多轮辩论）
+            "_research_self_debate": FieldType.BOOLEAN,
+            # P2: 研究自我辩论机械校验失败标记（True=回退原双研究员轮循路径）
+            "_self_debate_failed": FieldType.BOOLEAN,
             "context": FieldType.OBJECT,
             "skip_cache": FieldType.BOOLEAN,
             "prompt_overrides": FieldType.OBJECT,
@@ -364,6 +409,8 @@ class WorkflowEngine:
             "_analysis_data_source": FieldType.STRING,
             # 外部事实记忆注入（智能助手联网提取的事实，供辩论/风险评估环节参考）
             "memory_facts_summary": FieldType.STRING,
+            # M5.2 上期结论块（结论快照对比基线，供研究/辩论/整合环节参考）
+            "prev_conclusion_block": FieldType.STRING,
             # 持仓分析工作流输入：position_info/portfolio_data 若不声明，LangGraph 动态
             # State 会丢弃未声明键，导致 agents 拿不到持仓数据并报 "Missing required parameters: ticker"
             "position_info": FieldType.OBJECT,
@@ -376,6 +423,33 @@ class WorkflowEngine:
             "ticker": FieldType.STRING,
             "symbol": FieldType.STRING,
             "company_of_interest": FieldType.STRING,
+            # 系统变量（workflow_api / unified_analysis_service 的 _prepare_system_variables
+            # 产出并合并进初始输入）。不声明同样会被 LangGraph 动态 State 丢弃，
+            # 导致行业画像注入（core/agents/base.py）和模板变量拿不到 industry/价格等
+            "company_name": FieldType.STRING,
+            "industry": FieldType.STRING,
+            "current_price": FieldType.STRING,
+            "current_price_context_date": FieldType.STRING,
+            # 价格口径标注（app/services/unified_analysis_service 产出）：分析基准价日期/来源，
+            # 以及晚于基准日的盘中快照。未声明会被动态 State 丢弃，模板拿不到口径说明。
+            "current_price_date": FieldType.STRING,
+            "current_price_source": FieldType.STRING,
+            "current_price_note": FieldType.STRING,
+            "current_price_intraday": FieldType.STRING,
+            "current_price_intraday_date": FieldType.STRING,
+            "market_name": FieldType.STRING,
+            "currency_name": FieldType.STRING,
+            "currency_symbol": FieldType.STRING,
+            "current_date": FieldType.STRING,
+            "start_date": FieldType.STRING,
+            "effective_data_date": FieldType.STRING,
+            "stable_data_note": FieldType.STRING,
+            # 行业/个股分析维度（AnalysisProfileService 注入的模板变量）
+            "industry_dimensions": FieldType.STRING,
+            "industry_focus": FieldType.STRING,
+            "industry_key_metrics": FieldType.STRING,
+            "stock_dimensions": FieldType.STRING,
+            "stock_special_notes": FieldType.STRING,
         }
 
         for node in definition.nodes:
@@ -423,6 +497,10 @@ class WorkflowEngine:
                     task_id=self._task_id,
                     **kwargs
                 )
+            except WorkflowControlSignal:
+                # 控制信号（取消/暂停/被新执行取代）必须向上传播以中断工作流执行，
+                # 不能当作普通回调失败吞掉
+                raise
             except Exception as e:
                 logger.warning(f"进度回调失败: {e}")
 
@@ -439,13 +517,52 @@ class WorkflowEngine:
             if recursion_limit is None and self._legacy_config:
                 recursion_limit = self._legacy_config.get("recursion_limit")
             execution_config["recursion_limit"] = int(recursion_limit or 100)
+        # 🆕 v4.0 T1：checkpointer 启用时 thread_id = 分析运行 ID（断点续跑/执行轨迹）
+        if self._checkpointer is not None:
+            execution_config.setdefault("configurable", {})
+            execution_config["configurable"].setdefault("thread_id", self._task_id)
         return execution_config
+
+    def _resolve_resume_mode(self) -> bool:
+        """校验 resume 请求：checkpointer 可用且该 thread 存在断点才算恢复模式
+
+        任一条件不满足都回退为全新执行（行为与历史版本一致，绝不半途造状态）。
+        """
+        if self._checkpointer is None:
+            logger.warning("[WorkflowEngine] resume 请求但 checkpointer 未启用，回退全新执行")
+            return False
+        try:
+            from .checkpointer import build_thread_config
+            if self._checkpointer.get_tuple(build_thread_config(self._task_id)) is None:
+                logger.warning(
+                    f"[WorkflowEngine] resume 请求但 thread {self._task_id} 无断点，回退全新执行"
+                )
+                return False
+            logger.info(f"[WorkflowEngine] 从断点恢复执行: thread_id={self._task_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"[WorkflowEngine] 断点查询失败，回退全新执行: {e}")
+            return False
+
+    def _merge_checkpoint_state(self, execution_config: Dict[str, Any], final_state: Dict[str, Any]) -> None:
+        """resume 模式下用最终 checkpoint 合并完整状态
+
+        断点恢复只产出「剩余节点」的增量更新，恢复点之前的报告需要从
+        checkpoint 全量状态里补齐，否则结果会缺分析师报告。
+        """
+        try:
+            snap = self._compiled_graph.get_state(execution_config)
+            if snap and snap.values:
+                final_state.update(dict(snap.values))
+        except Exception as e:
+            logger.warning(f"[WorkflowEngine] 读取恢复后完整状态失败（结果可能不完整）: {e}")
 
     def execute(
         self,
         inputs: Dict[str, Any],
         config: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable] = None,
+        resume: bool = False,
     ) -> Dict[str, Any]:
         """
         同步执行工作流（使用 stream 模式以获取节点级进度更新）
@@ -454,6 +571,7 @@ class WorkflowEngine:
             inputs: 输入参数
             config: 执行配置
             progress_callback: 进度回调函数
+            resume: 是否从断点恢复（v4.0 T1；无有效断点时自动回退全新执行）
 
         Returns:
             执行结果
@@ -465,13 +583,17 @@ class WorkflowEngine:
             self._report_progress(5, "编译工作流...", "compile")
             self.compile()
 
-        runtime_inputs = _prepare_workflow_runtime_inputs(
-            inputs,
-            self._definition.id if self._definition else None,
-            self._task_id,
-            task_id=self._task_id,
-        )
-        execution_config = self._build_execution_config(config, runtime_inputs)
+        resume_mode = resume and self._resolve_resume_mode()
+
+        runtime_inputs = None
+        if not resume_mode:
+            runtime_inputs = _prepare_workflow_runtime_inputs(
+                inputs,
+                self._definition.id if self._definition else None,
+                self._task_id,
+                task_id=self._task_id,
+            )
+        execution_config = self._build_execution_config(config, inputs)
 
         # 创建执行记录
         execution = self._create_execution(inputs)
@@ -486,9 +608,11 @@ class WorkflowEngine:
 
             # 使用 stream 模式以获取节点级别的进度更新
             # stream_mode 应该作为关键字参数传递，而不是放在 config 字典中
-            final_state = inputs.copy() if inputs else {}
+            # resume 模式下以 None 作为输入，LangGraph 自动从最后完成的节点继续
+            final_state = (inputs.copy() if inputs else {}) if not resume_mode else {}
+            stream_input = None if resume_mode else runtime_inputs
 
-            for chunk in self._compiled_graph.stream(runtime_inputs, config=execution_config, stream_mode="updates"):
+            for chunk in self._compiled_graph.stream(stream_input, config=execution_config, stream_mode="updates"):
                 # chunk 格式: {node_name: state_update}
                 if isinstance(chunk, dict):
                     for node_name, node_update in chunk.items():
@@ -513,11 +637,17 @@ class WorkflowEngine:
                                     logger.debug(f"[执行引擎] ✅ 检测到 index_report ({len(str(node_update['index_report']))} 字符)")
                                 if "sector_report" in node_update:
                                     logger.debug(f"[执行引擎] ✅ 检测到 sector_report ({len(str(node_update['sector_report']))} 字符)")
+                                # R3：先合并 _node_errors，再 update（避免后节点覆盖前节点的降级记录）
+                                self._merge_node_errors(final_state, node_update)
                                 final_state.update(node_update)
                             except Exception:
                                 final_state[node_name] = node_update
                         else:
                             final_state[node_name] = node_update
+
+            # 🆕 v4.0 T1：resume 模式下用最终 checkpoint 补齐恢复点之前的完整状态
+            if resume_mode:
+                self._merge_checkpoint_state(execution_config, final_state)
 
             # 使用累积的最终状态
             result = final_state
@@ -534,12 +664,13 @@ class WorkflowEngine:
             execution.state = WorkflowExecutionState.FAILED
             execution.error = str(e)
             execution.completed_at = datetime.now().isoformat()
-            self._report_progress(
-                progress=self._progress_max,
-                message=f"执行失败: {str(e)}",
-                step_name="error",
-                error=str(e)
-            )
+            if not isinstance(e, WorkflowControlSignal):
+                self._report_progress(
+                    progress=self._progress_max,
+                    message=f"执行失败: {str(e)}",
+                    step_name="error",
+                    error=str(e)
+                )
             raise
 
         finally:
@@ -715,6 +846,7 @@ class WorkflowEngine:
         inputs: Dict[str, Any],
         config: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable] = None,
+        resume: bool = False,
     ) -> Dict[str, Any]:
         """
         异步执行工作流（使用 stream 模式以获取节点级进度更新）
@@ -723,6 +855,7 @@ class WorkflowEngine:
             inputs: 输入参数
             config: 执行配置
             progress_callback: 进度回调函数
+            resume: 是否从断点恢复（v4.0 T1；无有效断点时自动回退全新执行）
 
         Returns:
             执行结果
@@ -734,13 +867,17 @@ class WorkflowEngine:
             self._report_progress(5, "编译工作流...", "compile")
             self.compile()
 
-        runtime_inputs = _prepare_workflow_runtime_inputs(
-            inputs,
-            self._definition.id if self._definition else None,
-            self._task_id,
-            task_id=self._task_id,
-        )
-        execution_config = self._build_execution_config(config, runtime_inputs)
+        resume_mode = resume and self._resolve_resume_mode()
+
+        runtime_inputs = None
+        if not resume_mode:
+            runtime_inputs = _prepare_workflow_runtime_inputs(
+                inputs,
+                self._definition.id if self._definition else None,
+                self._task_id,
+                task_id=self._task_id,
+            )
+        execution_config = self._build_execution_config(config, inputs)
 
         execution = self._create_execution(inputs)
         self._init_progress_tracking()
@@ -754,9 +891,11 @@ class WorkflowEngine:
 
             # 使用 astream 模式以获取节点级别的进度更新
             # stream_mode 应该作为关键字参数传递，而不是放在 config 字典中
-            final_state = inputs.copy() if inputs else {}
+            # resume 模式下以 None 作为输入，LangGraph 自动从最后完成的节点继续
+            final_state = (inputs.copy() if inputs else {}) if not resume_mode else {}
+            stream_input = None if resume_mode else runtime_inputs
 
-            async for chunk in self._compiled_graph.astream(runtime_inputs, config=execution_config, stream_mode="updates"):
+            async for chunk in self._compiled_graph.astream(stream_input, config=execution_config, stream_mode="updates"):
                 # chunk 格式: {node_name: state_update}
                 if isinstance(chunk, dict):
                     for node_name, node_update in chunk.items():
@@ -777,11 +916,17 @@ class WorkflowEngine:
                         # 累积状态更新
                         if isinstance(node_update, dict):
                             try:
+                                # R3：先合并 _node_errors，再 update（避免后节点覆盖前节点的降级记录）
+                                self._merge_node_errors(final_state, node_update)
                                 final_state.update(node_update)
                             except Exception:
                                 final_state[node_name] = node_update
                         else:
                             final_state[node_name] = node_update
+
+            # 🆕 v4.0 T1：resume 模式下用最终 checkpoint 补齐恢复点之前的完整状态
+            if resume_mode:
+                self._merge_checkpoint_state(execution_config, final_state)
 
             # 使用累积的最终状态
             result = final_state
@@ -798,12 +943,13 @@ class WorkflowEngine:
             execution.state = WorkflowExecutionState.FAILED
             execution.error = str(e)
             execution.completed_at = datetime.now().isoformat()
-            self._report_progress(
-                progress=self._progress_max,
-                message=f"执行失败: {str(e)}",
-                step_name="error",
-                error=str(e)
-            )
+            if not isinstance(e, WorkflowControlSignal):
+                self._report_progress(
+                    progress=self._progress_max,
+                    message=f"执行失败: {str(e)}",
+                    step_name="error",
+                    error=str(e)
+                )
             raise
 
         finally:
@@ -1118,7 +1264,8 @@ class WorkflowEngine:
             field = info["field"]
             raw = state.get(field)
             text = self._extract_text_value(raw)
-            has_content = bool(isinstance(text, str) and text.strip())
+            # U4：降级占位文本判为无内容，前端可见降级标注
+            has_content = bool(isinstance(text, str) and text.strip()) and not is_degraded_placeholder(text)
 
             structured[field] = {"content": text, "success": has_content}
             manifest.append({
@@ -1135,6 +1282,96 @@ class WorkflowEngine:
             })
 
         return structured, manifest
+
+    @staticmethod
+    def _merge_node_errors(
+        final_state: Dict[str, Any],
+        node_update: Dict[str, Any],
+    ) -> None:
+        """R3：合并节点的 _node_errors，避免后执行节点覆盖前执行节点的降级记录。
+
+        合并逻辑：取 final_state 中已有的 _node_errors 与 node_update 中的 _node_errors 并集，
+        同时写回 final_state 和 node_update（因为后续 final_state.update(node_update) 会覆盖）。
+        """
+        new_errors = node_update.get("_node_errors")
+        if not isinstance(new_errors, dict) or not new_errors:
+            return
+        existing = final_state.get("_node_errors")
+        if not isinstance(existing, dict):
+            existing = {}
+        # 合并：新节点的降级记录追加到已有记录中
+        merged = {**existing, **new_errors}
+        final_state["_node_errors"] = merged
+        # 写回 node_update，防止 final_state.update(node_update) 覆盖合并结果
+        node_update["_node_errors"] = merged
+
+    def _build_degradation_notice(self, node_errors: Dict[str, Any]) -> str:
+        """U3：生成统一格式的降级声明段（追加到报告末尾）。"""
+        if not node_errors:
+            return ""
+        lines = [
+            "",
+            "---",
+            "",
+            "## ⚠️ 数据可靠性声明",
+            "",
+            f"本次分析有 {len(node_errors)} 个节点降级，部分结论可能不完整：",
+            "",
+        ]
+        for node_id, reason in node_errors.items():
+            reason_str = reason if isinstance(reason, str) else str(reason)
+            lines.append(f"- **{node_id}**：{reason_str}")
+        lines.append("")
+        lines.append("降级节点的产出未参与投资建议生成，投资决策请结合其他信息源综合判断。")
+        return "\n".join(lines)
+
+    def _append_notice_text(
+        self, result: Dict[str, Any], notice: str, fallback_field: str
+    ) -> None:
+        """把声明段追加到 final_trade_decision 末尾（dict 形态优先 content/markdown/text）。"""
+        ftd = result.get("final_trade_decision")
+        if isinstance(ftd, str) and ftd.strip():
+            result["final_trade_decision"] = ftd + "\n" + notice
+        elif isinstance(ftd, dict):
+            # dict 形态：优先追加到 content/markdown/text 字段，确保前端渲染
+            for key in ("content", "markdown", "text"):
+                val = ftd.get(key)
+                if isinstance(val, str) and val.strip():
+                    ftd[key] = val + "\n" + notice
+                    result["final_trade_decision"] = ftd
+                    break
+            else:
+                # 没有可追加的文本字段，放独立字段
+                result[fallback_field] = notice
+        else:
+            # 没有 final_trade_decision 或为空，声明作为独立字段
+            result[fallback_field] = notice
+
+    def _append_degradation_notice(self, result: Dict[str, Any]) -> None:
+        """U3：将降级声明段追加到 final_trade_decision 末尾。"""
+        node_errors = result.get("_node_errors")
+        if not node_errors:
+            return
+        notice = self._build_degradation_notice(node_errors)
+        if not notice:
+            return
+        self._append_notice_text(result, notice, fallback_field="degradation_notice")
+        logger.info(f"[WorkflowEngine] 已追加降级声明段到报告")
+
+    def _append_depth_notices(self, result: Dict[str, Any]) -> None:
+        """M3.2：skipped 环节显式标注「本档不含」+ 跳过风险会审时静态风险声明。
+
+        合规底线：跳环节不跳免责——快速档跳过风险会审时，静态风险声明与
+        「不构成投资建议」常驻报告末尾，被跳过环节不静默消失。
+        """
+        manifest = result.get("depth_run_manifest")
+        if not manifest:
+            return
+        notice = build_depth_report_notice(result.get("research_depth"), manifest)
+        if not notice:
+            return
+        self._append_notice_text(result, notice, fallback_field="depth_notice")
+        logger.info("[WorkflowEngine] 已追加档位/跳环节标注到报告")
 
     def _build_output_results(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1173,6 +1410,11 @@ class WorkflowEngine:
                 f"[WorkflowEngine] 工作流存在降级节点: "
                 f"{list(node_errors.keys())}"
             )
+            # U3：追加降级声明段到报告末尾
+            self._append_degradation_notice(result)
+
+        # M3.2：档位/跳环节标注（skipped 显式声明 + 静态风险声明）
+        self._append_depth_notices(result)
 
         logger.info(
             f"[WorkflowEngine] 动态产出物收集完成: "
@@ -1237,7 +1479,8 @@ class WorkflowEngine:
                 continue
                 
             text = self._extract_text_value(result.get(f))
-            success = bool(isinstance(text, str) and text.strip())
+            # U4：降级占位文本判为无内容，前端可见降级标注
+            success = bool(isinstance(text, str) and text.strip()) and not is_degraded_placeholder(text)
             
             d = {"content": text, "success": success}
             if f == "bull_report":
@@ -1295,6 +1538,11 @@ class WorkflowEngine:
                 f"[WorkflowEngine] 内置工作流存在降级节点: "
                 f"{list(node_errors.keys())}"
             )
+            # U3：追加降级声明段到报告末尾
+            self._append_degradation_notice(result)
+
+        # M3.2：档位/跳环节标注（skipped 显式声明 + 静态风险声明）
+        self._append_depth_notices(result)
         return result
 
     def _generate_final_trade_decision(self, state: Dict[str, Any]) -> str:

@@ -164,7 +164,7 @@ if __name__ == "__main__":
         }
     ])
 
-    print("=== 测试增强新闻过滤器 ===")
+    logger.info("=== 测试增强新闻过滤器 ===")
 
     # 创建增强过滤器（仅使用规则过滤，避免模型依赖）
     enhanced_filter = create_enhanced_news_filter('600036', use_semantic=False, use_local_model=False)
@@ -172,11 +172,11 @@ if __name__ == "__main__":
     # 过滤新闻
     filtered_news = enhanced_filter.filter_news_enhanced(test_news, min_score=30)
 
-    print(f"原始新闻: {len(test_news)}条")
-    print(f"过滤后新闻: {len(filtered_news)}条")
-
+    logger.info(f"原始新闻: {len(test_news)}条")
+    logger.info(f"过滤后新闻: {len(filtered_news)}条")
+    
     if not filtered_news.empty:
-        print("\n过滤后的新闻:")
+        logger.info("过滤后的新闻:")
         for _, row in filtered_news.iterrows():
-            print(f"- {row['新闻标题']} (综合评分: {row['final_score']:.1f})")
-            print(f"  规则评分: {row['rule_score']:.1f}, 语义评分: {row['semantic_score']:.1f}, 分类评分: {row['classification_score']:.1f}")
+            logger.info(f"- {row['新闻标题']} (综合评分: {row['final_score']:.1f})")
+            logger.info(f"  规则评分: {row['rule_score']:.1f}, 语义评分: {row['semantic_score']:.1f}, 分类评分: {row['classification_score']:.1f}")

@@ -220,13 +220,34 @@ def _as_text(value: Any) -> str:
     return "" if value is None else str(value)
 
 
+def _execution_bypass_active() -> bool:
+    """执行模式清洗旁路是否生效（机器开关开 + 本地存在任一执行模板）。
+
+    设计文档 docs/05-design/v4.0/execution-advice-mode-design.md §5.1/§5.3：
+    - 发行版库中永无执行模板 → 恒 False，全部清洗照常（无效开关保证）
+    - 内容脱敏类（sanitize_report_artifacts / is_low_signal_text）不受此旁路影响
+    - 实现说明：原设计为"调用方包开关"，因调用点分散（trade_review_service 9 处等）
+      改为本文件内统一守卫——单文件、单模式、零漏包风险（设计文档 §11 风险 1 的缓解）
+    """
+    try:
+        from core.agents.advice_mode import any_execution_template_exists
+
+        return any_execution_template_exists()
+    except Exception:
+        return False
+
+
 def contains_actionable_content(text: str) -> bool:
+    if _execution_bypass_active():
+        return False
     if not text:
         return False
     return any(pattern.search(text) for pattern in _ACTIONABLE_PATTERNS)
 
 
 def contains_review_execution_guidance(text: str) -> bool:
+    if _execution_bypass_active():
+        return False
     if not text:
         return False
     normalized = _plain_text(text)
@@ -371,6 +392,10 @@ def sanitize_text_block(text: Any, fallback: str = "") -> str:
     if not raw_text:
         return fallback
 
+    # 执行模式旁路：保留 artifacts 脱敏，跳过指令/低信号行过滤
+    if _execution_bypass_active():
+        return raw_text
+
     lines: List[str] = []
     for chunk in re.split(r"\r?\n", raw_text):
         line = _plain_text(chunk)
@@ -395,6 +420,8 @@ def sanitize_text_block(text: Any, fallback: str = "") -> str:
 
 
 def contains_position_trigger_language(text: str) -> bool:
+    if _execution_bypass_active():
+        return False
     if not text:
         return False
     normalized = _plain_text(text)
@@ -441,6 +468,9 @@ def _iter_position_review_fragments(text: Any) -> Iterable[str]:
 
 
 def sanitize_position_text_block(text: Any, fallback: str = "") -> str:
+    # 执行模式旁路：原样返回文本（None/空 → fallback 语义保留）
+    if _execution_bypass_active():
+        return _plain_text(text) or fallback
     deduped: List[str] = []
     for fragment in _iter_position_review_fragments(text):
         if contains_position_trigger_language(fragment):
@@ -794,6 +824,9 @@ def _iter_review_fragments(text: Any) -> Iterable[str]:
 
 
 def sanitize_review_text_block(text: Any, fallback: str = "") -> str:
+    # 执行模式旁路：原样返回文本
+    if _execution_bypass_active():
+        return _plain_text(text) or fallback
     deduped: List[str] = []
     for fragment in _iter_review_fragments(text):
         if fragment not in deduped:
@@ -812,6 +845,10 @@ def sanitize_review_detail_block(text: Any, fallback: str = "") -> str:
     normalized = sanitize_report_artifacts(raw_text)
     if not normalized:
         return fallback
+
+    # 执行模式旁路：保留 artifacts 脱敏，跳过指令行过滤
+    if _execution_bypass_active():
+        return normalized
 
     cleaned_lines: List[str] = []
 
@@ -844,6 +881,14 @@ def sanitize_review_detail_block(text: Any, fallback: str = "") -> str:
 
 
 def sanitize_review_points(points: Any, fallback: Iterable[str] = ()) -> List[str]:
+    # 执行模式旁路：原样返回要点（空时回落 fallback）
+    if _execution_bypass_active():
+        items = points if isinstance(points, list) else ([] if points in (None, "") else [points])
+        out = [t for t in (_plain_text(i) for i in items) if t]
+        if out:
+            return out
+        return [t for t in (_plain_text(i) for i in fallback) if t]
+
     cleaned_points: List[str] = []
 
     if isinstance(points, list):
@@ -871,6 +916,12 @@ def sanitize_review_points(points: Any, fallback: Iterable[str] = ()) -> List[st
 
 
 def sanitize_brief_points(points: Any) -> List[str]:
+    # 执行模式旁路：原样返回要点
+    if _execution_bypass_active():
+        if not isinstance(points, list):
+            return []
+        return [t for t in (_plain_text(_as_text(i)) for i in points) if t]
+
     cleaned_points: List[str] = []
 
     if not isinstance(points, list):
@@ -895,6 +946,8 @@ def sanitize_brief_points(points: Any) -> List[str]:
 
 
 def contains_inferential_evidence(text: str) -> bool:
+    if _execution_bypass_active():
+        return False
     normalized = _plain_text(_as_text(text))
     if not normalized:
         return False
@@ -940,6 +993,10 @@ def sanitize_display_report_text(text: Any, fallback: str = "") -> str:
     raw_text = sanitize_report_artifacts(text)
     if not raw_text:
         return fallback
+
+    # 执行模式旁路：保留 artifacts 脱敏，跳过展示层行清洗
+    if _execution_bypass_active():
+        return raw_text
 
     cleaned_lines: List[str] = []
     in_disclaimer_block = False
@@ -1053,6 +1110,10 @@ def _build_position_appendix_sections(result_data: Dict[str, Any]) -> List[Dict[
 def filter_analysis_reports(reports: Any) -> Dict[str, str]:
     if not isinstance(reports, dict):
         return {}
+
+    # 执行模式旁路：不做键白名单过滤，全量透传
+    if _execution_bypass_active():
+        return {k: v for k, v in reports.items() if v}
 
     filtered: Dict[str, str] = {}
     for key in SAFE_REPORT_KEYS:
@@ -1207,6 +1268,10 @@ def sanitize_position_analysis_payload(
     if not isinstance(result_data, dict) or not result_data:
         return result_data
 
+    # 执行模式旁路（S1）：不强制 action=hold、不清空 price_targets/suggested_quantity/amount
+    if _execution_bypass_active():
+        return result_data
+
     sanitized = dict(result_data)
     appendix_sections = _build_position_appendix_sections(sanitized)
     action_reason, user_detailed_analysis, user_view = _build_position_user_action_reason(sanitized, position_snapshot)
@@ -1243,6 +1308,10 @@ def sanitize_position_analysis_payload(
 
 def sanitize_trade_review_payload(result_data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(result_data, dict) or not result_data:
+        return result_data
+
+    # 执行模式旁路（S3）：不删 optimal_pnl/missed_profit/avoided_loss，字段原样透传
+    if _execution_bypass_active():
         return result_data
 
     sanitized = dict(result_data)
@@ -1283,6 +1352,10 @@ def sanitize_trade_review_payload(result_data: Dict[str, Any]) -> Dict[str, Any]
 
 def sanitize_periodic_review_payload(result_data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(result_data, dict) or not result_data:
+        return result_data
+
+    # 执行模式旁路：字段原样透传
+    if _execution_bypass_active():
         return result_data
 
     sanitized = dict(result_data)

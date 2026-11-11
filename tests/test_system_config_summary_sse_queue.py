@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 # Import the router and its dependency to override
 from app.routers import system_config as system_cfg_router
-from app.routers.auth import get_current_user
+from app.routers.auth_db import get_current_user
 
 
 @pytest.fixture()

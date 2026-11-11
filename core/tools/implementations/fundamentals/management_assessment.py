@@ -1,6 +1,7 @@
 """管理层评估数据获取工具 - A股审计意见、信息披露评级、股权激励、违规处罚
 
-基于 Tushare Provider 的 stk_audit / disclosure_rating / equity_incentive / stk_penalty 接口
+经 DataFacade 数据能力（audit_opinion / disclosure_rating / equity_incentive /
+management_penalties）取数，不感知具体数据源；字段为能力标准字段。
 """
 
 import asyncio
@@ -9,6 +10,7 @@ import logging
 import threading
 from typing import Optional
 
+import pandas as pd
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
@@ -27,6 +29,23 @@ def _ticker_to_ts_code(ticker: str) -> str:
     elif ticker.startswith(("0", "3")):
         return f"{ticker}.SZ"
     return f"{ticker}.SH"
+
+
+def _cell(row, key: str) -> str:
+    """取单元格值转字符串，缺失（None/NaN/NA）转空串"""
+    value = row.get(key, "")
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
+async def _query_capability(capability_id: str, **params):
+    """经 DataFacade 查询数据能力"""
+    from tradingagents.dataflows.capability.facade import get_data_facade
+    return await get_data_facade().get_capability(capability_id).query(**params)
 
 
 def _run_async_in_thread(coro, timeout: int = 30):
@@ -73,16 +92,11 @@ def get_audit_opinion(
         end_date: 截止日期
     """
     try:
-        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-
-        provider = get_tushare_provider()
-        if not provider.is_available():
-            return json.dumps({"error": "Tushare 不可用（Token 未配置或库未安装）", "ticker": ticker}, ensure_ascii=False)
-
         ts_code = _ticker_to_ts_code(ticker)
 
         async def _fetch():
-            return await provider.get_audit_opinion(
+            return await _query_capability(
+                "audit_opinion",
                 ts_code=ts_code,
                 start_date=start_date,
                 end_date=end_date,
@@ -102,11 +116,11 @@ def get_audit_opinion(
         records = []
         for _, row in df.iterrows():
             rec = {
-                "公告日期": str(row.get("ann_date", row.get("公告日期", ""))),
-                "报告期": str(row.get("end_date", row.get("报告期", ""))),
-                "审计意见": str(row.get("audit_result", row.get("审计结果", ""))),
-                "审计机构": str(row.get("audit_company", row.get("审计机构", ""))),
-                "审计费用(元)": row.get("audit_fees", row.get("审计费用", "")),
+                "公告日期": _cell(row, "ann_date"),
+                "报告期": _cell(row, "report_period_end"),
+                "审计意见": _cell(row, "audit_result"),
+                "审计机构": _cell(row, "audit_firm"),
+                "审计费用(元)": _cell(row, "audit_fees"),
             }
             records.append(rec)
 
@@ -148,16 +162,11 @@ def get_disclosure_rating(
         end_date: 截止报告期
     """
     try:
-        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-
-        provider = get_tushare_provider()
-        if not provider.is_available():
-            return json.dumps({"error": "Tushare 不可用（Token 未配置或库未安装）", "ticker": ticker}, ensure_ascii=False)
-
         ts_code = _ticker_to_ts_code(ticker)
 
         async def _fetch():
-            return await provider.get_disclosure_rating(
+            return await _query_capability(
+                "disclosure_rating",
                 ts_code=ts_code,
                 end_date=end_date,
             )
@@ -173,12 +182,11 @@ def get_disclosure_rating(
                 "latest_rating": "未知",
             }, ensure_ascii=False)
 
-        # Tushare disclosure_rating 返回字段：ts_code, end_date, announcement_date, disclosure_result
         records = []
         for _, row in df.iterrows():
             rec = {
-                "考评年度": str(row.get("end_date", row.get("考评年度", ""))),
-                "考评结果": str(row.get("disclosure_result", row.get("考评结果", ""))),
+                "考评年度": _cell(row, "report_period_end"),
+                "考评结果": _cell(row, "disclosure_result"),
             }
             records.append(rec)
 
@@ -222,16 +230,11 @@ def get_equity_incentive(
         end_date: 截止日期
     """
     try:
-        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-
-        provider = get_tushare_provider()
-        if not provider.is_available():
-            return json.dumps({"error": "Tushare 不可用（Token 未配置或库未安装）", "ticker": ticker}, ensure_ascii=False)
-
         ts_code = _ticker_to_ts_code(ticker)
 
         async def _fetch():
-            return await provider.get_equity_incentive(
+            return await _query_capability(
+                "equity_incentive",
                 ts_code=ts_code,
                 start_date=start_date,
                 end_date=end_date,
@@ -251,13 +254,13 @@ def get_equity_incentive(
         records = []
         for _, row in df.iterrows():
             rec = {
-                "公告日期": str(row.get("ann_date", row.get("公告日期", ""))),
-                "激励方案": str(row.get("inc_plan", row.get("激励方案", ""))),
-                "授予数量(万股)": str(row.get("grant_num", row.get("授予数量", ""))),
-                "授予价格": str(row.get("grant_price", row.get("授予价格", ""))),
-                "激励年限": str(row.get("inc_duration", row.get("激励年限", ""))),
-                "行权条件": str(row.get("inc_perf", row.get("行权条件", ""))),
-                "总股本占比": str(row.get("stockholder_rt", row.get("总股本占比", ""))),
+                "公告日期": _cell(row, "ann_date"),
+                "激励方案": _cell(row, "incentive_plan"),
+                "授予数量(万股)": _cell(row, "grant_volume"),
+                "授予价格": _cell(row, "grant_price"),
+                "激励年限": _cell(row, "incentive_years"),
+                "行权条件": _cell(row, "performance_condition"),
+                "总股本占比": _cell(row, "total_share_ratio"),
             }
             records.append(rec)
 
@@ -300,16 +303,11 @@ def get_management_penalties(
         end_date: 截止日期
     """
     try:
-        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-
-        provider = get_tushare_provider()
-        if not provider.is_available():
-            return json.dumps({"error": "Tushare 不可用（Token 未配置或库未安装）", "ticker": ticker}, ensure_ascii=False)
-
         ts_code = _ticker_to_ts_code(ticker)
 
         async def _fetch():
-            return await provider.get_management_penalties(
+            return await _query_capability(
+                "management_penalties",
                 ts_code=ts_code,
                 start_date=start_date,
                 end_date=end_date,
@@ -330,12 +328,12 @@ def get_management_penalties(
         records = []
         for _, row in df.iterrows():
             rec = {
-                "公告日期": str(row.get("ann_date", row.get("公告日期", ""))),
-                "处罚类型": str(row.get("punish_type", row.get("处罚类型", ""))),
-                "处罚对象": str(row.get("punish_object", row.get("处罚对象", ""))),
-                "违规类型": str(row.get("violat_type", row.get("违规类型", ""))),
-                "违规事由": str(row.get("violate_content", row.get("违规事由", "")))[:300],
-                "处罚金额(万元)": str(row.get("punish_amount", row.get("处罚金额", ""))),
+                "公告日期": _cell(row, "ann_date"),
+                "处罚类型": _cell(row, "penalty_type"),
+                "处罚对象": _cell(row, "penalty_target"),
+                "违规类型": _cell(row, "violation_type"),
+                "违规事由": _cell(row, "violation_content")[:300],
+                "处罚金额(万元)": _cell(row, "penalty_amount"),
             }
             records.append(rec)
 

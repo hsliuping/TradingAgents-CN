@@ -108,7 +108,7 @@ def _build_jdyun_llm_configs(chat_models: List[str]) -> List[Dict[str, Any]]:
             "capability_level": 3,
             "suitable_roles": ["both"],
             "features": ["tool_calling", "function_calling"],
-            "recommended_depths": ["快速", "基础", "标准", "深度"],
+            "recommended_depths": ["快速", "标准", "深度"],
             "priority": 10 - i,
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),

@@ -184,16 +184,24 @@ class FavoritesService:
                 if not enabled_sources:
                     enabled_sources = ['tushare', 'akshare', 'baostock']
 
-                preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
-
-                # 从 stock_basic_info 获取板块信息（只查询优先级最高的数据源）
+                # 从 stock_basic_info 获取板块/交易所信息：取启用源全部记录，组内多源合并（非空字段互补）
+                from app.services.stock_basic_schema import merge_stock_basic_records
                 basic_info_coll = db["stock_basic_info"]
                 cursor = basic_info_coll.find(
-                    {"code": {"$in": codes}, "source": preferred_source},  # 🔥 添加数据源筛选
-                    {"code": 1, "sse": 1, "market": 1, "_id": 0}
+                    {"code": {"$in": codes}},
+                    {"code": 1, "sse": 1, "market": 1, "source": 1, "_id": 0}
                 )
                 basic_docs = await cursor.to_list(length=None)
-                basic_map = {str(d.get("code")).zfill(6): d for d in (basic_docs or [])}
+                enabled = set(enabled_sources)
+                grouped: dict[str, list[dict]] = {}
+                for d in (basic_docs or []):
+                    if str(d.get("source") or "") not in enabled:
+                        continue  # 用户禁用的数据源不参与合并
+                    grouped.setdefault(str(d.get("code") or "").zfill(6), []).append(d)
+                basic_map = {
+                    code: (merge_stock_basic_records(group) or {})
+                    for code, group in grouped.items()
+                }
 
                 # 收集 stock_basic_info 中未命中的代码，稍后查 etf_basic_info
                 missing_codes = []

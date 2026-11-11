@@ -55,12 +55,8 @@ class DatabaseCacheManager:
             mongodb_db: MongoDB数据库名
             redis_db: Redis数据库编号
         """
-        # 从配置文件获取正确的端口
-        mongodb_port = os.getenv("MONGODB_PORT", "27018")
-        redis_port = os.getenv("REDIS_PORT", "6380")
-        mongodb_password = os.getenv("MONGODB_PASSWORD", "tradingagents123")
-        redis_password = os.getenv("REDIS_PASSWORD", "tradingagents123")
-
+        # 连接串统一由环境变量（MONGODB_URL / build_*_connection_string 工具函数）构建，
+        # 不在此处读取散落端口/密码（历史遗留的死变量已清理，避免误导端口排查）
         # 使用统一工具函数构建连接字符串
         from tradingagents.config.mongodb_utils import build_mongodb_connection_string, build_redis_connection_string
 
@@ -252,6 +248,7 @@ class DatabaseCacheManager:
         if self.mongodb_db is not None:
             try:
                 collection = self.mongodb_db.stock_data
+                doc["write_path"] = "cache"  # §七：缓存回写打标，与离线同步('sync')区分
                 collection.replace_one({"_id": cache_key}, doc, upsert=True)
                 logger.info(f"💾 股票数据已保存到MongoDB: {symbol} -> {cache_key}")
             except Exception as e:
@@ -407,6 +404,7 @@ class DatabaseCacheManager:
         if self.mongodb_db is not None:
             try:
                 collection = self.mongodb_db.news_data
+                doc["write_path"] = "cache"  # §七：缓存回写打标，与离线同步('sync')区分
                 collection.replace_one({"_id": cache_key}, doc, upsert=True)
                 logger.info(f"📰 新闻数据已保存到MongoDB: {symbol} -> {cache_key}")
             except Exception as e:
@@ -458,6 +456,7 @@ class DatabaseCacheManager:
         if self.mongodb_db is not None:
             try:
                 collection = self.mongodb_db.fundamentals_data
+                doc["write_path"] = "cache"  # §七：缓存回写打标，与离线同步('sync')区分
                 collection.replace_one({"_id": cache_key}, doc, upsert=True)
                 logger.info(f"💼 基本面数据已保存到MongoDB: {symbol} -> {cache_key}")
             except Exception as e:

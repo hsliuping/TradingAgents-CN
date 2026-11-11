@@ -865,15 +865,14 @@ def get_dividend_data(
     """
     logger.info(f"💰 [分红数据] 查询股票: {ticker}, 最近{years}年")
     try:
-        provider = _get_tushare_provider()
-        if not provider or not provider.is_available():
-            return f"❌ Tushare 服务不可用，无法获取 {ticker} 的分红数据"
-
-        # 调用 Tushare dividend API（使用 _run_async 兼容 worker 线程）
+        # 经数据门面查询分红能力（源优先级由系统配置决定）
         try:
-            records = _run_async(provider.get_dividend_data(ticker, limit=years * 3))
+            from tradingagents.dataflows.capability import query_capability_sync
+
+            dividend_df = query_capability_sync("stock_dividend", symbol=ticker, limit=years * 3)
+            records = dividend_df.to_dict("records") if dividend_df is not None and not dividend_df.empty else []
         except Exception as e:
-            logger.warning(f"⚠️ [分红数据] Tushare 调用失败: {e}")
+            logger.warning(f"⚠️ [分红数据] 门面查询失败: {e}")
             return f"❌ 获取 {ticker} 分红数据失败: {e}（需要 Tushare 2000+ 积分权限）"
 
         if not records:

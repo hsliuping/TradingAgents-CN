@@ -98,7 +98,19 @@ class OpenAICompatAdapter(BaseAdapter):
         """转换消息格式为 OpenAI 格式"""
         result = []
         for msg in messages:
-            converted = {"role": msg.role, "content": msg.content or ""}
+            # 多模态：images 非空时组装 content 列表（text + image_url），
+            # 供视觉模型读图（OpenAI 兼容协议）。
+            images = getattr(msg, "images", None)
+            if images:
+                parts: List[Dict[str, Any]] = []
+                if msg.content:
+                    parts.append({"type": "text", "text": msg.content})
+                for img in images:
+                    parts.append({"type": "image_url",
+                                  "image_url": {"url": img}})
+                converted = {"role": msg.role, "content": parts}
+            else:
+                converted = {"role": msg.role, "content": msg.content or ""}
 
             # 推理模型（如 Qwen thinking / DeepSeek reasoning）在工具回合中
             # 需要回传上一轮 assistant 的 reasoning_content，否则 provider 会拒绝请求。

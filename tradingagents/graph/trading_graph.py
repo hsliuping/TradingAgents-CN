@@ -175,13 +175,15 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
     from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm, normalize_openai_temperature
 
-    # 🔧 reasoning_effort: 火山方舟推理模型思考深度控制，通过 model_kwargs 传递
+    # 🔧 reasoning_effort: 火山方舟推理模型思考深度控制，作为显式参数传入 ChatOpenAI
     # 🛡️ Q1: 推理模型（reasoning_effort 已设置）深度思考耗时长（实测单次 300s+），
     # SDK 重试从全局默认降为 1 次（共 2 次尝试），避免最坏 3×timeout 空等
     _extra = {}
     _base_max_retries = get_llm_max_retries()
     if reasoning_effort:
-        _extra["model_kwargs"] = {"reasoning_effort": reasoning_effort}
+        # 显式顶层参数（ChatOpenAI 已声明 reasoning_effort 字段）；
+        # 若塞进 model_kwargs 会触发 langchain 警告并被搬运一次，日志噪音大
+        _extra["reasoning_effort"] = reasoning_effort
         if _base_max_retries > 1:
             _base_max_retries = 1
         logger.info(f"🔧 [reasoning_effort] 设置为 {reasoning_effort}（max_retries=1）")

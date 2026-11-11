@@ -276,21 +276,48 @@ class SkillExecutor:
             raise ValueError(f"不支持的 MCP 传输协议: {transport}")
 
         manager = get_mcp_client_manager()
-        # MCPClientManager.call_tool 是同步方法（内部用后台事件循环），
+        # MCPClientManager.call_tool_ex 是同步方法（内部用后台事件循环），
         # 用 asyncio.to_thread 避免阻塞当前事件循环
+        #
+        # 失败/空数据语义（P5）：
+        #   - 请求失败（DNS/超时/HTTP 非 200 等）→ 抛 McpCallError（带 error_code），
+        #     原样上抛不包装，业务层按失败（降级/上抛）处理，禁止当空数据；
+        #   - 请求成功但无数据 → 返回 {"status": "empty", ...} 显式空数据结果。
+        from core.tools.mcp.errors import McpCallError
+
         try:
-            result = await asyncio.to_thread(
-                manager.call_tool,
+            outcome = await asyncio.to_thread(
+                manager.call_tool_ex,
                 config,
                 impl.tool_name,
                 kwargs,
                 60,
             )
+        except McpCallError:
+            logger.error(
+                f"[Skill MCP] 调用失败（非空数据）: server={impl.server_url} "
+                f"tool={impl.tool_name}",
+                exc_info=True,
+            )
+            raise
         except Exception as e:
             raise RuntimeError(
                 f"MCP 工具调用失败 (server={impl.server_url}, "
                 f"tool={impl.tool_name}): {e}"
             ) from e
+
+        result = outcome["data"]
+        if outcome["status"] == "empty":
+            # 请求成功但无数据：显式空数据结果（区别于失败）
+            logger.info(
+                f"[Skill MCP] 请求成功但无数据: server={impl.server_url} tool={impl.tool_name}"
+            )
+            return {
+                "status": "empty",
+                "data": "",
+                "error_code": None,
+                "data_source": outcome["data_source"],
+            }
 
         # 尝试将字符串结果解析为 JSON，便于下游处理
         if isinstance(result, str):

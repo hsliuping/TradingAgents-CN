@@ -228,6 +228,7 @@ class StateSchemaBuilder:
         生成的 TypedDict 每个字段都带有 Annotated reducer，
         确保并行节点执行时状态正确合并：
         - string → Annotated[str, keep_non_empty]（保留非空值）
+        - boolean → Annotated[bool, keep_latest_bool]（False 是有效值，必须覆盖旧 True）
         - object → Annotated[dict, merge_dict]（智能合并字典）
         - array  → Annotated[list, keep_latest_list]（采用最新列表）
         - messages → Annotated[List[BaseMessage], add_messages]（LangGraph 内置）
@@ -235,7 +236,7 @@ class StateSchemaBuilder:
         from typing import TypedDict, Annotated, List
         import operator
         from langgraph.graph.message import add_messages
-        from .reducers import keep_non_empty, merge_dict, keep_latest_list
+        from .reducers import keep_non_empty, keep_latest_bool, merge_dict, keep_latest_list
 
         # 动态创建字段（全部带 reducer 注解）
         annotations = {}
@@ -252,7 +253,7 @@ class StateSchemaBuilder:
             elif field.type == FieldType.NUMBER:
                 annotations[name] = Annotated[float, keep_non_empty]
             elif field.type == FieldType.BOOLEAN:
-                annotations[name] = Annotated[bool, keep_non_empty]
+                annotations[name] = Annotated[bool, keep_latest_bool]
             elif field.type == FieldType.OBJECT:
                 annotations[name] = Annotated[dict, merge_dict]
             elif field.type == FieldType.ARRAY:

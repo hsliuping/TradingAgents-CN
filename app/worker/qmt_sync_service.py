@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.services.historical_data_service import get_historical_data_service
 from app.services.financial_data_service import get_financial_data_service
 from app.services.data_sources.qmt_adapter import QMTAdapter
+from app.services.stock_basic_schema import normalize_stock_basic_doc
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +219,9 @@ class QMTSyncService:
                             "list_date": row.get("list_date", ""),
                             "updated_at": datetime.utcnow(),
                         }
+
+                        # 写入前对齐统一 Schema（字段口径 + write_path 标记）
+                        doc = normalize_stock_basic_doc(doc)
 
                         await self.db.stock_basic_info.update_one(
                             {"code": code, "source": "qmt"},

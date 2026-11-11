@@ -1065,6 +1065,19 @@ def _clean_markdown(text: str) -> str:
     return text.strip()
 
 
+def _extract_trader_brief(content: str) -> str:
+    """从用户版研究简报提取「一句话结论」段落；未找到标记时回退清理后前200字符"""
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("一句话结论"):
+            cleaned = _clean_markdown(stripped)
+            brief = cleaned[:200].strip()
+            return brief + ("..." if len(cleaned) > 200 else "")
+    cleaned = _clean_markdown(content)
+    summary = cleaned[:200].strip()
+    return summary + ("..." if len(cleaned) > 200 else "")
+
+
 def generate_summary_recommendation(
     reports: Dict[str, str],
     decision: Dict[str, Any],
@@ -1095,16 +1108,24 @@ def generate_summary_recommendation(
         if isinstance(reports[report_name], str):
             logger.info(f"🔍 [generate_summary_recommendation] reports['{report_name}'] 长度: {len(reports[report_name])}, 前100字符: {reports[report_name][:100]}")
 
-    # 🔥 重要：与旧引擎保持一致，summary（分析摘要）优先从 final_trade_decision 提取
-    # 旧引擎的处理方式：优先从 reports 中的 final_trade_decision 提取 summary（前200字符）
-    # 1. 优先从 final_trade_decision 提取 summary（与旧引擎保持一致）
-    logger.info(f"🔍 [generate_summary_recommendation] 检查 'final_trade_decision' 是否在 reports 中: {'final_trade_decision' in reports}")
-    if 'final_trade_decision' in reports:
-        content = reports['final_trade_decision']
-        logger.info(f"🔍 [generate_summary_recommendation] final_trade_decision 内容长度: {len(content)}")
-        logger.info(f"🔍 [generate_summary_recommendation] final_trade_decision 前300字符: {content[:300]}")
+    # 🔥 summary（分析摘要）优先取 trader_investment_plan（用户版研究简报）的「一句话结论」，
+    # 与用户手册 v3.0 展示口径一致；final_trade_decision 为内部综合结论，降为次级回退
+    # 1. 优先从 trader_investment_plan 提取「一句话结论」
+    logger.info(f"🔍 [generate_summary_recommendation] 检查 'trader_investment_plan' 是否在 reports 中: {'trader_investment_plan' in reports}")
+    if 'trader_investment_plan' in reports:
+        content = reports['trader_investment_plan']
+        logger.info(f"🔍 [generate_summary_recommendation] trader_investment_plan 内容长度: {len(content)}")
         if len(content) > 50:
-            # 清理 Markdown 格式，提取前200字符作为摘要（与旧引擎保持一致）
+            summary = _extract_trader_brief(content)
+            logger.info(f"🔍 [generate_summary_recommendation] ✅ 从 trader_investment_plan 提取摘要: {len(summary)}字符")
+            logger.info(f"🔍 [generate_summary_recommendation] summary 内容: {summary[:300]}")
+
+    # 2. 次级回退：final_trade_decision（内部综合结论，前200字符）
+    if not summary and 'final_trade_decision' in reports:
+        content = reports['final_trade_decision']
+        logger.info(f"🔍 [generate_summary_recommendation] 检查 'final_trade_decision': 存在，内容长度: {len(content)}")
+        if len(content) > 50:
+            # 清理 Markdown 格式，提取前200字符作为摘要
             cleaned_content = _clean_markdown(content)
             summary = cleaned_content[:200].strip()
             if len(cleaned_content) > 200:
@@ -1112,10 +1133,10 @@ def generate_summary_recommendation(
             logger.info(f"🔍 [generate_summary_recommendation] ✅ 从 final_trade_decision 提取摘要: {len(summary)}字符")
             logger.info(f"🔍 [generate_summary_recommendation] summary 内容: {summary[:300]}")
 
-    # 2. 如果没有 final_trade_decision，从其他报告中提取摘要
+    # 3. 如果前两级都没有，从其他报告中提取摘要
     if not summary:
-        logger.info(f"🔍 [generate_summary_recommendation] final_trade_decision 不存在或为空，尝试从其他报告提取")
-        for report_name in ['investment_plan', 'trader_investment_plan', 'research_team_decision', 'market_report']:
+        logger.info(f"🔍 [generate_summary_recommendation] 前两级来源均不存在或为空，尝试从其他报告提取")
+        for report_name in ['investment_plan', 'research_team_decision', 'market_report']:
             logger.info(f"🔍 [generate_summary_recommendation] 检查 '{report_name}': {'存在' if report_name in reports else '不存在'}")
             if report_name in reports:
                 content = reports[report_name]
@@ -1129,7 +1150,7 @@ def generate_summary_recommendation(
                     logger.info(f"🔍 [generate_summary_recommendation] summary 内容: {summary[:300]}")
                     break
 
-    # 3. 最后的备用方案
+    # 4. 最后的备用方案
     if not summary:
         summary = f"对{stock_code}的分析已完成，请查看详细报告。"
         logger.warning(f"⚠️ [Summary] 使用备用摘要")

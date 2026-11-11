@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.database import get_mongo_db
+from app.services.stock_basic_schema import merge_stock_basic_records, normalize_stock_basic_doc
 from app.models.stock_models import (
     StockBasicInfoExtended, 
     MarketQuotesExtended,
@@ -55,26 +56,14 @@ class StockDataService:
                 query["source"] = source
                 doc = await db[self.basic_info_collection].find_one(query, {"_id": 0})
             else:
-                # 🔥 未指定数据源，按优先级查询
-                source_priority = ["tushare", "multi_source", "akshare", "baostock"]
-                doc = None
-
-                for src in source_priority:
-                    query_with_source = query.copy()
-                    query_with_source["source"] = src
-                    doc = await db[self.basic_info_collection].find_one(query_with_source, {"_id": 0})
-                    if doc:
-                        logger.debug(f"✅ 使用数据源: {src}")
-                        break
-
-                # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
-                if not doc:
-                    doc = await db[self.basic_info_collection].find_one(
-                        {"$or": [{"symbol": symbol6}, {"code": symbol6}]},
-                        {"_id": 0}
+                # 🔥 未指定数据源：同 code 多 source 记录按优先级 + 非空字段互补合并
+                cursor = db[self.basic_info_collection].find(query, {"_id": 0})
+                docs = await cursor.to_list(length=None)
+                doc = merge_stock_basic_records(docs)
+                if doc:
+                    logger.debug(
+                        f"✅ 多源合并基础信息: {symbol6} sources={sorted(set(doc.get('_field_source', {}).values()))}"
                     )
-                    if doc:
-                        logger.warning(f"⚠️ 使用旧数据（无 source 字段）: {symbol6}")
 
             if not doc:
                 # stock_basic_info 中未找到，尝试 etf_basic_info 回退
@@ -263,6 +252,9 @@ class StockDataService:
             # 🔥 确保 source 字段存在
             if "source" not in update_data:
                 update_data["source"] = source
+
+            # 🔥 写入前对齐统一 Schema（字段口径 + write_path 标记）
+            update_data = normalize_stock_basic_doc(update_data)
 
             # 🔥 执行更新 (使用 code + source 联合查询)
             result = await db[self.basic_info_collection].update_one(

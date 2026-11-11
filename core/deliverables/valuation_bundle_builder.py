@@ -128,8 +128,16 @@ def build_valuation_bundle(
     symbol: str,
     context_notes: str = "",
     forecast_years: int = 2,
+    analysis_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """装配估值测算 bundle（数据全部来自本地同步库，缺失即报错）
+
+    Args:
+        symbol: 股票代码
+        context_notes: 研究结论摘要
+        forecast_years: 预测年数
+        analysis_date: 分析基准日（YYYY-MM-DD）。基准价按该日取「不晚于该日的最近
+            已完成交易日收盘价」，与系统变量 current_price 口径一致；不传则取当天。
 
     Returns:
         bundle dict：ticker / stock_name / analysis_date / current_price /
@@ -145,16 +153,22 @@ def build_valuation_bundle(
     sym = _normalize_symbol(symbol)
     notes: List[str] = []
 
+    analysis_date = str(analysis_date or "").strip()[:10] or datetime.now().strftime("%Y-%m-%d")
+
     basic_info = get_stock_basic_info(sym) or {}
     stock_name = str(basic_info.get("name") or basic_info.get("stock_name") or "").strip()
     if not stock_name:
         raise ValuationDataError(f"未找到股票 {sym} 的基础信息，请先执行数据同步")
 
-    current_price = get_latest_stock_price(sym)
+    current_price = get_latest_stock_price(sym, as_of_date=analysis_date)
     if not current_price or current_price <= 0:
         raise ValuationDataError(
             f"股票 {sym}（{stock_name}）最新行情未同步，无法确定现价，请先执行行情数据同步"
         )
+    notes.append(
+        f"基准价取不晚于 {analysis_date} 的最近已完成交易日收盘价"
+        "（当日日线未落库时用快照昨收），盘中实时价不作为估值基准"
+    )
 
     share_count_yi, share_notes = _resolve_share_count_yi(sym, basic_info)
     notes.extend(share_notes)
@@ -175,7 +189,7 @@ def build_valuation_bundle(
     bundle: Dict[str, Any] = {
         "ticker": sym,
         "stock_name": stock_name,
-        "analysis_date": datetime.now().strftime("%Y-%m-%d"),
+        "analysis_date": analysis_date,
         "current_price": float(current_price),
         "share_count": round(share_count_yi, 4),
         "financial_history": history,

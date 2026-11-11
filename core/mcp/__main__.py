@@ -26,16 +26,14 @@ project_root = str(Path(__file__).resolve().parent.parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(name)-24s | %(levelname)-5s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger("core.mcp")
+# 日志经共享初始化函数配置（日志治理 §5.3），在 main() 内初始化
+logger = logging.getLogger(__name__)
 
 
 def main():
+    from core.utils.logging_setup import setup_cli_logging
+    setup_cli_logging("INFO", fmt="%(asctime)s | %(name)-24s | %(levelname)-5s | %(message)s",
+                      datefmt="%Y-%m-%d %H:%M:%S")
     parser = argparse.ArgumentParser(description="TradingAgents-CN MCP Server")
     parser.add_argument(
         "--transport",

@@ -45,43 +45,55 @@ def _run_async_in_sync(coro):
         return future.result(timeout=120)
 
 
-def _coerce_records(value: Any) -> List[Dict[str, Any]]:
-    if value is None:
-        return []
-    if hasattr(value, 'to_dict'):
-        try:
-            value = value.to_dict('records')
-        except Exception:
-            return []
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, dict)]
+# 三大报表 + 财务指标按报告期查询的 4 个能力（DataFacade 能力框架，local → tushare → akshare 自动降级）
+_FINANCIAL_CAPABILITIES = (
+    'financial_income',
+    'financial_balance',
+    'financial_cashflow',
+    'financial_indicators',
+)
+
+# 能力 → payload 输出键（消费方 _format_china_financial_statements 等按这些键取数）
+_PAYLOAD_KEYS = {
+    'financial_income': 'income_statement',
+    'financial_balance': 'balance_sheet',
+    'financial_cashflow': 'cash_flow',
+    'financial_indicators': 'financial_indicators',
+}
 
 
-def _normalize_financial_payload(raw_data: Optional[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    """统一不同缓存/provider 的财务字段结构。"""
-    normalized = {
-        'income_statement': [],
-        'balance_sheet': [],
-        'cash_flow': [],
-        'financial_indicators': [],
-    }
-    if not isinstance(raw_data, dict):
-        return normalized
+def _dataframe_to_clean_records(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """DataFrame 转纯 JSON 可序列化 records（跳过门面元数据列，NaN/Timestamp 归一）。"""
+    records = []
+    for record in df.to_dict('records'):
+        cleaned: Dict[str, Any] = {}
+        for key, value in record.items():
+            if key in ('source', 'quality'):
+                continue
+            if isinstance(value, (pd.Timestamp, datetime)):
+                value = value.isoformat()
+            else:
+                try:
+                    if pd.isna(value):
+                        value = None
+                except (TypeError, ValueError):
+                    pass
+            cleaned[key] = value
+        records.append(cleaned)
+    return records
 
-    payload = raw_data
-    if isinstance(raw_data.get('raw_data'), dict):
-        payload = raw_data['raw_data']
-    elif isinstance(raw_data.get('financial_data'), dict):
-        payload = raw_data['financial_data']
 
-    normalized['income_statement'] = _coerce_records(payload.get('income_statement'))
-    normalized['balance_sheet'] = _coerce_records(payload.get('balance_sheet'))
-    normalized['cash_flow'] = _coerce_records(payload.get('cash_flow') or payload.get('cashflow_statement'))
-    normalized['financial_indicators'] = _coerce_records(
-        payload.get('financial_indicators') or payload.get('main_indicators')
-    )
-    return normalized
+def _aggregate_data_sources(frames: Dict[str, Optional[pd.DataFrame]]) -> str:
+    """聚合各能力 DataFrame 的 source 元数据列，按能力顺序首次出现去重拼接。"""
+    sources: List[str] = []
+    for capability in _FINANCIAL_CAPABILITIES:
+        df = frames.get(capability)
+        if df is None or df.empty or 'source' not in df.columns:
+            continue
+        source = str(df['source'].iloc[0])
+        if source and source not in sources:
+            sources.append(source)
+    return '+'.join(sources) if sources else 'unknown'
 
 
 def _period_token(record: Dict[str, Any]) -> str:
@@ -108,58 +120,47 @@ def _sort_and_trim_records(records: List[Dict[str, Any]], limit: int) -> List[Di
 
 
 def _load_recent_financial_data(ticker: str, limit: int = 4) -> Dict[str, Any]:
-    """优先走缓存/持久化数据，缺失时再降级到在线 provider。"""
+    """按报告期加载最近 N 期三大报表与财务指标（经 DataFacade 能力框架，自动按源降级）。"""
     from tradingagents.utils.stock_utils import StockUtils
 
     normalized_ticker = _normalize_china_ticker(ticker)
     market_info = StockUtils.get_market_info(normalized_ticker)
-    payload = None
-    data_source = 'unknown'
+
+    frames: Dict[str, Optional[pd.DataFrame]] = {
+        capability: None for capability in _FINANCIAL_CAPABILITIES
+    }
+
+    async def _query_all():
+        from tradingagents.dataflows.capability.facade import get_data_facade
+
+        facade = get_data_facade()
+
+        async def _query_one(capability: str) -> Optional[pd.DataFrame]:
+            try:
+                return await facade.get_capability(capability).query(
+                    symbol=normalized_ticker, limit=limit
+                )
+            except Exception as exc:
+                logger.warning(f"⚠️ 能力 {capability} 查询{normalized_ticker}失败: {exc}")
+                return None
+
+        results = await asyncio.gather(*(_query_one(c) for c in _FINANCIAL_CAPABILITIES))
+        return dict(zip(_FINANCIAL_CAPABILITIES, results))
 
     try:
-        from tradingagents.dataflows.optimized_china_data import OptimizedChinaDataProvider
-
-        provider = OptimizedChinaDataProvider()
-        if hasattr(provider, '_get_cached_raw_financial_data'):
-            payload = _normalize_financial_payload(provider._get_cached_raw_financial_data(normalized_ticker))
-            if any(payload.values()):
-                data_source = 'optimized_cache'
+        frames.update(_run_async_in_sync(_query_all()) or {})
     except Exception as exc:
-        logger.warning(f"⚠️ 财务缓存读取失败: {exc}")
+        logger.warning(f"⚠️ 财务数据能力查询失败: {exc}")
 
-    if not payload or not any(payload.values()):
-        try:
-            from tradingagents.dataflows.providers.china.tushare import TushareProvider
-
-            provider = TushareProvider()
-            raw_data = _run_async_in_sync(
-                provider.get_financial_data(normalized_ticker, report_type='quarterly', limit=limit)
-            )
-            payload = _normalize_financial_payload(raw_data)
-            if any(payload.values()):
-                data_source = 'tushare'
-        except Exception as exc:
-            logger.warning(f"⚠️ Tushare 财务数据获取失败: {exc}")
-
-    if not payload or not any(payload.values()):
-        try:
-            from tradingagents.dataflows.providers.china.akshare import AKShareProvider
-
-            provider = AKShareProvider()
-            raw_data = _run_async_in_sync(provider.get_financial_data(normalized_ticker))
-            payload = _normalize_financial_payload(raw_data)
-            if any(payload.values()):
-                data_source = 'akshare'
-        except Exception as exc:
-            logger.warning(f"⚠️ AKShare 财务数据获取失败: {exc}")
-
-    payload = payload or _normalize_financial_payload(None)
-    for key, records in payload.items():
-        payload[key] = _sort_and_trim_records(records, limit)
+    payload: Dict[str, Any] = {}
+    for capability in _FINANCIAL_CAPABILITIES:
+        df = frames.get(capability)
+        records = _dataframe_to_clean_records(df) if df is not None and not df.empty else []
+        payload[_PAYLOAD_KEYS[capability]] = _sort_and_trim_records(records, limit)
 
     payload['ticker'] = normalized_ticker
     payload['market_info'] = market_info
-    payload['data_source'] = data_source
+    payload['data_source'] = _aggregate_data_sources(frames)
     return payload
 
 
@@ -586,20 +587,13 @@ def _get_historical_valuation_summary(
     start_dt = end_dt - timedelta(days=365 * lookback_years)
 
     try:
-        from tradingagents.dataflows.providers.china.tushare import TushareProvider
+        from tradingagents.dataflows.capability import query_capability_sync
 
-        provider = TushareProvider()
-        if not provider.is_available():
-            provider.connect_sync()
-        if not provider.is_available() or provider.api is None:
-            return "工具结果未提供历史估值分位数据。"
-
-        ts_code = provider._normalize_ts_code(normalized_ticker)
-        valuation_df = provider.api.daily_basic(
-            ts_code=ts_code,
+        valuation_df = query_capability_sync(
+            "stock_daily_basic",
+            symbol=normalized_ticker,
             start_date=start_dt.strftime('%Y%m%d'),
             end_date=end_dt.strftime('%Y%m%d'),
-            fields='ts_code,trade_date,pe,pe_ttm,pb,ps_ttm',
         )
 
         return _build_historical_valuation_section_from_frame(

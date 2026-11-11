@@ -26,7 +26,9 @@ from app.models.analysis import (
 )
 from tradingagents.utils.stock_utils import StockUtils, StockMarket, SecurityType
 from app.core.database import get_mongo_db
+from app.core.response import ok
 from app.utils.timezone import now_tz
+from core.workflow.depth_profiles import build_profile_summaries
 from bson import ObjectId
 
 router = APIRouter()
@@ -90,7 +92,7 @@ def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
         reasoning = decision.get('reasoning', '')
         
         # 🔥 调试日志：记录 decision 字段
-        logger.info(f"🔍 [normalize_result_data] decision 字段检查: price_analysis_range={price_range}, risk_score={risk_score}, target_price={decision.get('target_price')}")
+        logger.debug(f"🔍 [normalize_result_data] decision 字段检查: price_analysis_range={price_range}, risk_score={risk_score}, target_price={decision.get('target_price')}")
 
         # 2. 格式化 recommendation（如果为空或包含旧术语）
         recommendation = result_data.get('recommendation', '')
@@ -173,7 +175,7 @@ def _summarize_result_completeness(result_data: Optional[Dict[str, Any]]) -> Dic
 
 def _log_result_completeness(source: str, task_id: str, result_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     completeness = _summarize_result_completeness(result_data)
-    logger.info(
+    logger.debug(
         f"📊 [RESULT] 来源={source} task={task_id} 完整性: "
         f"summary={completeness['has_summary']} recommendation={completeness['has_recommendation']} "
         f"reports={completeness['report_count']} action={completeness['has_action']} "
@@ -224,10 +226,10 @@ async def get_user_risk_preference(user_id: str) -> str:
         user = await users_collection.find_one({"_id": ObjectId(user_id)})
         if user and "preferences" in user:
             risk_pref = user["preferences"].get("risk_preference", "neutral")
-            logger.info(f"📊 获取用户 {user_id} 的风险偏好: {risk_pref}")
+            logger.debug(f"📊 获取用户 {user_id} 的风险偏好: {risk_pref}")
             return risk_pref
 
-        logger.info(f"📊 用户 {user_id} 未设置风险偏好，使用默认值: neutral")
+        logger.debug(f"📊 用户 {user_id} 未设置风险偏好，使用默认值: neutral")
         return "neutral"
     except Exception as e:
         logger.warning(f"⚠️ 获取用户风险偏好失败: {e}，使用默认值: neutral")
@@ -261,15 +263,15 @@ async def submit_single_analysis(
     """
     try:
         logger.info("🎯 收到单股分析请求")
-        logger.info(f"👤 用户信息: {user}")
-        logger.info(f"📊 请求数据: {request}")
+        logger.debug(f"👤 用户信息: {user}")
+        logger.debug(f"📊 请求数据: {request}")
 
         # 判断使用哪个引擎
         # v3.0 起默认使用 V2 引擎（旧版 legacy 已停用）
         engine_type = AnalysisEngine.V2
         if request.parameters and hasattr(request.parameters, "engine"):
             engine_type = request.parameters.engine
-            logger.info(f"🔍 [引擎判断] 从 request.parameters.engine 获取: {engine_type} (类型: {type(engine_type)})")
+            logger.debug(f"🔍 [引擎判断] 从 request.parameters.engine 获取: {engine_type} (类型: {type(engine_type)})")
             # v3.0 起拒绝 legacy 引擎
             if engine_type == AnalysisEngine.LEGACY:
                 raise HTTPException(
@@ -278,14 +280,14 @@ async def submit_single_analysis(
                     "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
                 )
         else:
-            logger.info(f"ℹ️ [引擎判断] request.parameters 中没有 engine 字段，使用默认引擎: {engine_type.value}")
+            logger.debug(f"ℹ️ [引擎判断] request.parameters 中没有 engine 字段，使用默认引擎: {engine_type.value}")
             if request.parameters:
-                logger.info(f"🔍 [引擎判断] request.parameters 类型: {type(request.parameters)}")
-                logger.info(f"🔍 [引擎判断] request.parameters 内容: {request.parameters}")
+                logger.debug(f"🔍 [引擎判断] request.parameters 类型: {type(request.parameters)}")
+                logger.debug(f"🔍 [引擎判断] request.parameters 内容: {request.parameters}")
                 if hasattr(request.parameters, "model_dump"):
-                    logger.info(f"🔍 [引擎判断] request.parameters.model_dump(): {request.parameters.model_dump()}")
+                    logger.debug(f"🔍 [引擎判断] request.parameters.model_dump(): {request.parameters.model_dump()}")
 
-        logger.info(f"🔧 [AB测试] 最终使用引擎: {engine_type.value} (枚举值: {engine_type})")
+        logger.debug(f"🔧 [AB测试] 最终使用引擎: {engine_type.value} (枚举值: {engine_type})")
 
         # 根据引擎类型选择任务创建方式
         # 🔍 兼容性检查：同时支持枚举和字符串比较
@@ -309,7 +311,7 @@ async def submit_single_analysis(
 
             # 🔥 修复：根据股票代码自动识别市场类型
             market_type = get_market_type_from_symbol(symbol)
-            logger.info(f"📊 [单股分析] 股票 {symbol} 识别为市场: {market_type}")
+            logger.debug(f"📊 [单股分析] 股票 {symbol} 识别为市场: {market_type}")
 
             task_params = {
                 "symbol": symbol,
@@ -327,7 +329,7 @@ async def submit_single_analysis(
             # 如果用户在 parameters 中指定了 market_type，优先使用用户指定的
             if request.parameters and hasattr(request.parameters, 'market_type') and request.parameters.market_type:
                 task_params["market_type"] = request.parameters.market_type
-                logger.info(f"📊 [单股分析] 使用用户指定的市场类型: {request.parameters.market_type}")
+                logger.debug(f"📊 [单股分析] 使用用户指定的市场类型: {request.parameters.market_type}")
 
             # 🔥 ETF 路由：用户选择 ETF 或代码识别为 ETF 时，使用 ETF 分析流程
             user_market = (request.parameters and getattr(request.parameters, 'market_type', None)) or market_type
@@ -336,15 +338,15 @@ async def submit_single_analysis(
                 task_type = AnalysisTaskType.ETF_ANALYSIS
                 task_params["market_type"] = "cn"  # ETF 仍属 A 股市场
                 task_params["selected_analysts"] = ["etf", "market", "news"]  # ETF 流程固定分析师
-                logger.info(f"📊 [单股分析] {symbol} 识别为 ETF，使用 ETF 分析流程")
+                logger.debug(f"📊 [单股分析] {symbol} 识别为 ETF，使用 ETF 分析流程")
             else:
                 task_type = AnalysisTaskType.STOCK_ANALYSIS
 
-            logger.info(f"📦 v2任务参数: {task_params}")
+            logger.debug(f"📦 v2任务参数: {task_params}")
 
             # 🔥 从用户偏好读取风险偏好设置
             preference_type = await get_user_risk_preference(user["id"])
-            logger.info(f"📊 [单股分析] 使用用户风险偏好: {preference_type}")
+            logger.debug(f"📊 [单股分析] 使用用户风险偏好: {preference_type}")
 
             # 创建统一任务（不执行）
             task = await task_service.create_task(
@@ -423,7 +425,7 @@ async def submit_single_analysis(
 @router.get("/test-route")
 async def test_route():
     """测试路由是否工作"""
-    logger.info("🧪 测试路由被调用了！")
+    logger.debug("🧪 测试路由被调用了！")
     return {"message": "测试路由工作正常", "timestamp": time.time()}
 
 
@@ -526,6 +528,21 @@ async def precheck_analysis(
         }
 
 
+# =============================================================================
+# 分析档位说明（DEPTH_PROFILES 五档差异，M4.1）
+# =============================================================================
+
+
+@router.get("/depth-profiles", response_model=Dict[str, Any])
+async def get_depth_profiles():
+    """五档分析画像摘要（环节清单/产出形态）。
+
+    前端档位选择器差异说明的数据源；档位差异单点维护在
+    core/workflow/depth_profiles.py，前端不硬编码档位差异。
+    """
+    return ok(build_profile_summaries())
+
+
 @router.get("/tasks/{task_id}/status", response_model=Dict[str, Any])
 async def get_task_status_new(
     task_id: str,
@@ -539,8 +556,8 @@ async def get_task_status_new(
     3. 内存状态管理器 - 仅作为缓存（进程内，Worker 和 API 进程分开）
     """
     try:
-        logger.info(f"🔍 [NEW ROUTE] 进入新版状态查询路由: {task_id}")
-        logger.info(f"👤 [NEW ROUTE] 用户: {user}")
+        logger.debug(f"🔍 [NEW ROUTE] 进入新版状态查询路由: {task_id}")
+        logger.debug(f"👤 [NEW ROUTE] 用户: {user}")
 
         # 🔥 优先从 MongoDB 查询（真实数据源，Worker 进程会更新这里）
         # 因为 Worker 进程和 API 进程是分开的，内存状态管理器不共享
@@ -680,7 +697,7 @@ async def get_task_status_new(
                             step["name"] for step in steps_info
                             if step.get("status") == "completed"
                         ]
-                        logger.info(f"📊 [STATUS] 从Redis获取到步骤信息: {len(steps_info)}个步骤, {len(completed_steps)}个已完成")
+                        logger.debug(f"📊 [STATUS] 从Redis获取到步骤信息: {len(steps_info)}个步骤, {len(completed_steps)}个已完成")
             except Exception as e:
                 # 其他异常（如连接错误等）只记录警告，不影响主流程
                 logger.debug(f"📊 [STATUS] 从Redis获取步骤信息失败（不影响主流程）: {e}")
@@ -690,6 +707,9 @@ async def get_task_status_new(
             if frontend_status == "cancelled":
                 # 取消状态：显示取消消息
                 display_message = error_message or "任务已被用户取消"
+            elif frontend_status == "suspended":
+                # 挂起/暂停状态：提示可断点继续
+                display_message = "任务已暂停，可从断点继续分析"
             elif frontend_status == "failed":
                 # 失败状态：显示错误消息
                 display_message = error_message or "任务执行失败"
@@ -738,17 +758,17 @@ async def get_task_status_new(
 
             # 🔥 格式化 result_data（如果存在）
             if status_data.get("result_data"):
-                logger.info(f"📊 [STATUS] ========== unified_tasks result_data 格式化前 ==========")
-                logger.info(f"📊 [STATUS] recommendation: {status_data['result_data'].get('recommendation', '')[:200]}")
-                logger.info(f"📊 [STATUS] key_points: {status_data['result_data'].get('key_points', [])[:3]}")
+                logger.debug(f"📊 [STATUS] ========== unified_tasks result_data 格式化前 ==========")
+                logger.debug(f"📊 [STATUS] recommendation: {status_data['result_data'].get('recommendation', '')[:200]}")
+                logger.debug(f"📊 [STATUS] key_points: {status_data['result_data'].get('key_points', [])[:3]}")
 
                 status_data["result_data"] = normalize_result_data(status_data["result_data"])
 
-                logger.info(f"📊 [STATUS] ========== unified_tasks result_data 格式化后 ==========")
-                logger.info(f"📊 [STATUS] recommendation: {status_data['result_data'].get('recommendation', '')[:200]}")
-                logger.info(f"📊 [STATUS] key_points: {status_data['result_data'].get('key_points', [])[:3]}")
+                logger.debug(f"📊 [STATUS] ========== unified_tasks result_data 格式化后 ==========")
+                logger.debug(f"📊 [STATUS] recommendation: {status_data['result_data'].get('recommendation', '')[:200]}")
+                logger.debug(f"📊 [STATUS] key_points: {status_data['result_data'].get('key_points', [])[:3]}")
 
-            logger.info(f"📊 [STATUS] 返回状态: status={status_data['status']}, progress={status_data['progress']}, step={status_data['current_step_name']}")
+            logger.debug(f"📊 [STATUS] 返回状态: status={status_data['status']}, progress={status_data['progress']}, step={status_data['current_step_name']}")
 
             return {
                 "success": True,
@@ -896,8 +916,8 @@ async def get_task_result(
     如需完整数据，可通过查询参数 include_state=true&include_detailed=true 获取。
     """
     try:
-        logger.info(f"🔍 [RESULT] 获取任务结果: {task_id}")
-        logger.info(f"👤 [RESULT] 用户: {user}")
+        logger.debug(f"🔍 [RESULT] 获取任务结果: {task_id}")
+        logger.debug(f"👤 [RESULT] 用户: {user}")
 
         analysis_service = get_simple_analysis_service()
         task_status = await analysis_service.get_task_status(task_id)
@@ -907,26 +927,26 @@ async def get_task_result(
         if task_status and task_status.get('status') == 'completed':
             # 从内存中获取结果数据
             result_data = task_status.get('result_data')
-            logger.info(f"📊 [RESULT] 从内存中获取到结果数据")
+            logger.debug(f"📊 [RESULT] 从内存中获取到结果数据")
 
             # 🔍 调试：检查内存中的数据结构
             if result_data:
-                logger.info(f"📊 [RESULT] ========== 格式化前 ==========")
-                logger.info(f"📊 [RESULT] 内存数据键: {list(result_data.keys())}")
-                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
-                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                logger.debug(f"📊 [RESULT] ========== 格式化前 ==========")
+                logger.debug(f"📊 [RESULT] 内存数据键: {list(result_data.keys())}")
+                logger.debug(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.debug(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
                 if result_data.get('decision'):
                     decision = result_data['decision']
-                    logger.info(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}, target_price={decision.get('target_price')}, price_analysis_range={decision.get('price_analysis_range')}")
+                    logger.debug(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}, target_price={decision.get('target_price')}, price_analysis_range={decision.get('price_analysis_range')}")
 
                 # 🔥 统一格式化结果数据
                 result_data = normalize_result_data(result_data)
 
                 completeness = _log_result_completeness("memory", task_id, result_data)
 
-                logger.info(f"📊 [RESULT] ========== 格式化后 ==========")
-                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
-                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                logger.debug(f"📊 [RESULT] ========== 格式化后 ==========")
+                logger.debug(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.debug(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
 
                 if not completeness["is_complete"]:
                     logger.warning(f"⚠️ [RESULT] 内存中的 result_data 不完整，继续回退查询持久化结果: {task_id}")
@@ -936,7 +956,7 @@ async def get_task_result(
 
         if not result_data:
             # 内存中没有找到，尝试从MongoDB中查找
-            logger.info(f"📊 [RESULT] 内存中未找到，尝试从MongoDB查找: {task_id}")
+            logger.debug(f"📊 [RESULT] 内存中未找到，尝试从MongoDB查找: {task_id}")
 
             from app.core.database import get_mongo_db
             db = get_mongo_db()
@@ -997,20 +1017,20 @@ async def get_task_result(
                 if include_detailed:
                     result_data["detailed_analysis"] = result.get("detailed_analysis", {})
 
-                logger.info(f"📊 [RESULT] ========== unified_tasks 格式化前 ==========")
-                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
-                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                logger.debug(f"📊 [RESULT] ========== unified_tasks 格式化前 ==========")
+                logger.debug(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.debug(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
                 if result_data.get('decision'):
                     decision = result_data['decision']
-                    logger.info(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}, target_price={decision.get('target_price')}, price_analysis_range={decision.get('price_analysis_range')}")
+                    logger.debug(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}, target_price={decision.get('target_price')}, price_analysis_range={decision.get('price_analysis_range')}")
 
                 # 🔥 统一格式化结果数据
                 result_data = normalize_result_data(result_data)
                 completeness = _log_result_completeness("unified_tasks", task_id, result_data)
 
-                logger.info(f"📊 [RESULT] ========== unified_tasks 格式化后 ==========")
-                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
-                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                logger.debug(f"📊 [RESULT] ========== unified_tasks 格式化后 ==========")
+                logger.debug(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.debug(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
 
                 # 🔑 防御性检查：如果 unified_analysis_tasks 数据不完整，
                 # 回退到 analysis_reports（可能已经先保存了完整数据）
@@ -1027,7 +1047,7 @@ async def get_task_result(
                     tasks_doc_for_id = await db.analysis_tasks.find_one({"task_id": task_id}, {"result.analysis_id": 1})
                     analysis_id = tasks_doc_for_id.get("result", {}).get("analysis_id") if tasks_doc_for_id else None
                     if analysis_id:
-                        logger.info(f"🔎 [RESULT] 按analysis_id兜底查询 analysis_reports: {analysis_id}")
+                        logger.debug(f"🔎 [RESULT] 按analysis_id兜底查询 analysis_reports: {analysis_id}")
                         mongo_result = await db.analysis_reports.find_one({"analysis_id": analysis_id})
             else:
                 # 如果从 unified_analysis_tasks 找到了结果，就不需要查询 analysis_reports
@@ -1059,20 +1079,20 @@ async def get_task_result(
                     "source": "mongodb"  # 标记数据来源
                 }
 
-                logger.info(f"📊 [RESULT] ========== MongoDB 格式化前 ==========")
-                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
-                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                logger.debug(f"📊 [RESULT] ========== MongoDB 格式化前 ==========")
+                logger.debug(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.debug(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
                 if result_data.get('decision'):
                     decision = result_data['decision']
-                    logger.info(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}")
+                    logger.debug(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}")
 
                 # 🔥 统一格式化结果数据
                 result_data = normalize_result_data(result_data)
                 _log_result_completeness("mongodb", task_id, result_data)
 
-                logger.info(f"📊 [RESULT] ========== MongoDB 格式化后 ==========")
-                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
-                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                logger.debug(f"📊 [RESULT] ========== MongoDB 格式化后 ==========")
+                logger.debug(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.debug(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
             else:
                 # 兜底：analysis_tasks 集合中的 result 字段
                 tasks_doc = await db.analysis_tasks.find_one(
@@ -1122,20 +1142,20 @@ async def get_task_result(
                     if include_detailed:
                         result_data["detailed_analysis"] = r.get("detailed_analysis", {})
 
-                    logger.info(f"📊 [RESULT] ========== analysis_tasks 格式化前 ==========")
-                    logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
-                    logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                    logger.debug(f"📊 [RESULT] ========== analysis_tasks 格式化前 ==========")
+                    logger.debug(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                    logger.debug(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
                     if result_data.get('decision'):
                         decision = result_data['decision']
-                        logger.info(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}")
+                        logger.debug(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}")
 
                     # 🔥 统一格式化结果数据
                     result_data = normalize_result_data(result_data)
                     _log_result_completeness("analysis_tasks", task_id, result_data)
 
-                    logger.info(f"📊 [RESULT] ========== analysis_tasks 格式化后 ==========")
-                    logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
-                    logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                    logger.debug(f"📊 [RESULT] ========== analysis_tasks 格式化后 ==========")
+                    logger.debug(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                    logger.debug(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
 
         if not result_data:
             logger.warning(f"❌ [RESULT] 所有数据源都未找到结果: {task_id}")
@@ -1190,12 +1210,12 @@ async def get_task_result(
                         result_data['summary'] = loaded_reports.get('summary')
                     if not result_data.get('recommendation') and loaded_reports.get('recommendation'):
                         result_data['recommendation'] = loaded_reports.get('recommendation')
-                    logger.info(f"📁 [RESULT] 从文件系统加载到 {len(loaded_reports)} 个报告: {list(loaded_reports.keys())}")
+                    logger.debug(f"📁 [RESULT] 从文件系统加载到 {len(loaded_reports)} 个报告: {list(loaded_reports.keys())}")
             except Exception as fs_err:
                 logger.warning(f"⚠️ [RESULT] 从文件系统加载报告失败: {fs_err}")
 
             if 'reports' not in result_data or not result_data['reports']:
-                logger.info(f"📊 [RESULT] reports字段缺失，尝试从state中提取")
+                logger.debug(f"📊 [RESULT] reports字段缺失，尝试从state中提取")
 
                 # 从state中提取报告内容
                 reports = {}
@@ -1269,7 +1289,7 @@ async def get_task_result(
                         if isinstance(risk_decision, str) and len(risk_decision.strip()) > 10:
                             reports['risk_management_decision'] = risk_decision.strip()
 
-                    logger.info(f"📊 [RESULT] 从state中提取到 {len(reports)} 个报告: {list(reports.keys())}")
+                    logger.debug(f"📊 [RESULT] 从state中提取到 {len(reports)} 个报告: {list(reports.keys())}")
                     result_data['reports'] = reports
                 else:
                     logger.warning(f"⚠️ [RESULT] state字段不是字典类型: {type(state)}")
@@ -1292,7 +1312,7 @@ async def get_task_result(
                     # 如果value为None或空字符串，则跳过该报告
 
                 result_data['reports'] = cleaned_reports
-                logger.info(f"📊 [RESULT] 清理reports字段，包含 {len(cleaned_reports)} 个有效报告")
+                logger.debug(f"📊 [RESULT] 清理reports字段，包含 {len(cleaned_reports)} 个有效报告")
 
                 # 如果清理后没有有效报告，设置为空字典
                 if not cleaned_reports:
@@ -1462,10 +1482,10 @@ async def get_task_result(
             return default
 
         # 🔍 调试：检查最终构建前的result_data
-        logger.info(f"🔍 [FINAL] 构建最终结果前，result_data键: {list(result_data.keys())}")
-        logger.info(f"🔍 [FINAL] result_data中有decision: {bool(result_data.get('decision'))}")
+        logger.debug(f"🔍 [FINAL] 构建最终结果前，result_data键: {list(result_data.keys())}")
+        logger.debug(f"🔍 [FINAL] result_data中有decision: {bool(result_data.get('decision'))}")
         if result_data.get('decision'):
-            logger.info(f"🔍 [FINAL] decision内容: {result_data['decision']}")
+            logger.debug(f"🔍 [FINAL] decision内容: {result_data['decision']}")
 
         # 构建严格验证的结果数据（基础字段，必须返回）
         final_result_data = {
@@ -1515,13 +1535,13 @@ async def get_task_result(
 
         logger.info(f"✅ [RESULT] 成功获取任务结果: {task_id}")
         logger.info(f"📊 [RESULT] 最终返回 {len(final_result_data.get('reports', {}))} 个报告")
-        logger.info(f"📊 [RESULT] 报告列表: {list(validated_reports.keys())}")
+        logger.debug(f"📊 [RESULT] 报告列表: {list(validated_reports.keys())}")
 
         # 🔍 调试：检查最终返回的数据
-        logger.info(f"🔍 [FINAL] 最终返回数据键: {list(final_result_data.keys())}")
-        logger.info(f"🔍 [FINAL] 最终返回中有decision: {bool(final_result_data.get('decision'))}")
+        logger.debug(f"🔍 [FINAL] 最终返回数据键: {list(final_result_data.keys())}")
+        logger.debug(f"🔍 [FINAL] 最终返回中有decision: {bool(final_result_data.get('decision'))}")
         if final_result_data.get('decision'):
-            logger.info(f"🔍 [FINAL] 最终decision内容: {final_result_data['decision']}")
+            logger.debug(f"🔍 [FINAL] 最终decision内容: {final_result_data['decision']}")
 
         return {
             "success": True,
@@ -1693,7 +1713,7 @@ async def submit_batch_analysis(
                     "详见 docs/99-archive/deprecated-features/legacy-agents-deprecation.md"
                 )
 
-        logger.info(f"🔧 [AB测试-批量] 使用引擎: {engine_type.value}")
+        logger.debug(f"🔧 [AB测试-批量] 使用引擎: {engine_type.value}")
 
         simple_service = get_simple_analysis_service()
         unified_service = get_unified_analysis_service()
@@ -1703,7 +1723,7 @@ async def submit_batch_analysis(
 
         # 获取股票代码列表 (兼容旧字段)
         stock_symbols = request.get_symbols()
-        logger.info(f"📊 [批量分析] 股票代码列表: {stock_symbols}")
+        logger.debug(f"📊 [批量分析] 股票代码列表: {stock_symbols}")
 
         # 验证股票代码列表
         if not stock_symbols:
@@ -1716,7 +1736,7 @@ async def submit_batch_analysis(
 
         # 为每只股票创建单股分析任务
         for i, symbol in enumerate(stock_symbols):
-            logger.info(f"📝 [批量分析] 正在创建第 {i+1}/{len(stock_symbols)} 个任务: {symbol}")
+            logger.debug(f"📝 [批量分析] 正在创建第 {i+1}/{len(stock_symbols)} 个任务: {symbol}")
 
             single_req = SingleAnalysisRequest(
                 symbol=symbol,
@@ -1736,7 +1756,7 @@ async def submit_batch_analysis(
                     # 🔥 修复：准备任务参数，确保包含必需的 market_type
                     # 根据股票代码自动识别市场类型
                     market_type = get_market_type_from_symbol(symbol)
-                    logger.info(f"📊 [批量分析] 股票 {symbol} 识别为市场: {market_type}")
+                    logger.debug(f"📊 [批量分析] 股票 {symbol} 识别为市场: {market_type}")
 
                     task_params = {
                         "symbol": symbol,
@@ -1754,11 +1774,11 @@ async def submit_batch_analysis(
                     # 如果用户在 parameters 中指定了 market_type，优先使用用户指定的
                     if request.parameters and hasattr(request.parameters, 'market_type') and request.parameters.market_type:
                         task_params["market_type"] = request.parameters.market_type
-                        logger.info(f"📊 [批量分析] 使用用户指定的市场类型: {request.parameters.market_type}")
+                        logger.debug(f"📊 [批量分析] 使用用户指定的市场类型: {request.parameters.market_type}")
 
                     # 🔥 从用户偏好读取风险偏好设置
                     preference_type = await get_user_risk_preference(user["id"])
-                    logger.info(f"📊 [批量分析] 使用用户风险偏好: {preference_type}")
+                    logger.debug(f"📊 [批量分析] 使用用户风险偏好: {preference_type}")
 
                     task = await task_service.create_task(
                         user_id=PyObjectId(user["id"]),
@@ -1777,7 +1797,7 @@ async def submit_batch_analysis(
 
                 task_ids.append(task_id)
                 mapping.append({"symbol": symbol, "stock_code": symbol, "task_id": task_id})
-                logger.info(f"✅ [批量分析] 已创建任务: {task_id} - {symbol}")
+                logger.debug(f"✅ [批量分析] 已创建任务: {task_id} - {symbol}")
             except Exception as create_error:
                 logger.error(f"❌ [批量分析] 创建任务失败: {symbol}, 错误: {create_error}", exc_info=True)
                 raise
@@ -1818,7 +1838,7 @@ async def submit_batch_analysis(
                     batch_id=batch_id,
                     task_id=task_id  # 使用已创建的任务ID
                 )
-                logger.info(f"✅ [批量分析] 任务已入队: {task_id} - {symbol} (引擎: {engine_type.value})")
+                logger.debug(f"✅ [批量分析] 任务已入队: {task_id} - {symbol} (引擎: {engine_type.value})")
             except ValueError as e:
                 # 并发限制错误
                 logger.warning(f"⚠️ [批量分析] 任务入队失败（并发限制）: {task_id} - {symbol}, 错误: {e}")
@@ -2062,7 +2082,7 @@ async def websocket_task_progress(websocket: WebSocket, task_id: str):
                 break
 
     except WebSocketDisconnect:
-        logger.info(f"🔌 WebSocket 客户端断开连接: {task_id}")
+        logger.debug(f"🔌 WebSocket 客户端断开连接: {task_id}")
     except Exception as e:
         logger.error(f"❌ WebSocket 连接错误: {e}")
     finally:
@@ -2241,7 +2261,7 @@ async def retry_task(
                 )
             
             # 旧任务格式：需要转换为新格式
-            logger.info(f"🔄 [重试任务] 找到旧格式任务: {task_id}")
+            logger.debug(f"🔄 [重试任务] 找到旧格式任务: {task_id}")
             
             # 从旧任务中提取参数
             task_params = old_task.get("parameters", {})
@@ -2256,7 +2276,7 @@ async def retry_task(
             
             # 🔥 从用户偏好读取风险偏好设置
             preference_type = await get_user_risk_preference(user["id"])
-            logger.info(f"📊 [重试任务] 使用用户风险偏好: {preference_type}")
+            logger.debug(f"📊 [重试任务] 使用用户风险偏好: {preference_type}")
 
             # 创建新任务
             task_service = get_task_analysis_service()
@@ -2346,7 +2366,7 @@ async def retry_task(
         
         # 🔥 从用户偏好读取风险偏好设置
         preference_type = await get_user_risk_preference(user["id"])
-        logger.info(f"📊 [重试任务] 使用用户风险偏好: {preference_type}")
+        logger.debug(f"📊 [重试任务] 使用用户风险偏好: {preference_type}")
 
         # 创建新任务（使用相同的参数）
         task_service = get_task_analysis_service()

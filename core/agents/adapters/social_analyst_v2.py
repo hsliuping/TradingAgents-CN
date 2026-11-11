@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from core.agents.analyst import AnalystAgent
-from core.agents.analyst import AnalystAgent
+from tradingagents.agents.utils.compliance_prompting import SOURCE_ANNOTATION_REQUIREMENT
 from core.agents.base import GENERIC_REPORT_FALLBACK
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
@@ -99,6 +99,9 @@ class SocialMediaAnalystV2(AnalystAgent):
             system_prompt = system_override or self._build_system_prompt(market_type, context=context, state=state)
             user_prompt = user_override or self._build_user_prompt(ticker, analysis_date, {}, state)
             analysis_prompt = analysis_override or self._build_analysis_prompt(ticker)
+
+            # 🆕 v4.0 T2：数字必须带来源标注（6 个分析师统一纪律）
+            system_prompt += SOURCE_ANNOTATION_REQUIREMENT
 
             messages = [
                 SystemMessage(content=system_prompt),

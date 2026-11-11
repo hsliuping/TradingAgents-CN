@@ -201,10 +201,12 @@ async def _check_stock_data_sync(symbol: str, db=None) -> dict:
         if "." in normalized:
             normalized = normalized.split(".", 1)[0]
 
-        # 基础数据
-        basic_doc = await db["stock_basic_info"].find_one(
-            {"symbol": normalized}, {"symbol": 1, "name": 1}
-        )
+        # 基础数据（多源记录合并后判断存在性并取名称）
+        from app.services.stock_basic_schema import merge_stock_basic_records
+        basic_docs = await db["stock_basic_info"].find(
+            {"symbol": normalized}, {"symbol": 1, "name": 1, "source": 1}
+        ).to_list(length=None)
+        basic_doc = merge_stock_basic_records(basic_docs or [])
 
         # 历史行情（stock_daily_quotes，兼容 symbol/code 两种字段）
         hist_count = await db["stock_daily_quotes"].count_documents({"symbol": normalized})
@@ -650,6 +652,108 @@ def _build_memory_injection(recalled: List[Dict[str, Any]]) -> str:
     return "\n\n".join(blocks)
 
 
+_INTEL_TIER_LABELS = {
+    'internal_firsthand': '内部一手',
+    'official': '官方披露',
+    'institutional': '机构研报',
+    'public_news': '公开资讯',
+    'social': '自媒体',
+}
+
+
+def _intel_hint_bigrams(text: str) -> set:
+    """轻量中文 2-gram 切分（去标点），用于问题与知识卡标题/标签的相关性交集。"""
+    cleaned = re.sub(r"[\s，。、,.;；:：!！?？'\"（）()《》\[\]【】·…\-—]+", "", text or "")
+    if not cleaned:
+        return set()
+    if len(cleaned) == 1:
+        return {cleaned}
+    return {cleaned[i:i + 2] for i in range(len(cleaned) - 1)}
+
+
+def _intel_material_grams(m: dict) -> set:
+    """资料条目的相关性语料：标题 + 股票代码 + 备注。"""
+    hay = " ".join([str(m.get("title") or ""), str(m.get("stock_code") or ""), str(m.get("remark") or "")])
+    return _intel_hint_bigrams(hay)
+
+
+def _list_user_materials_sync(user_id: str) -> list:
+    """同步拉取用户资料清单（标题/备注/股票/类型），供 to_thread 调用。"""
+    from app.core.database import get_mongo_db_sync
+
+    db = get_mongo_db_sync()
+    return list(
+        db["stock_materials"]
+        .find({"user_id": user_id}, {"title": 1, "remark": 1, "stock_code": 1, "kind": 1, "category": 1})
+        .sort("updated_at", -1)
+        .limit(50)
+    )
+
+
+async def _build_intel_cards_hint(user_id: str, user_message: str) -> str:
+    """构建用户私有资料提示：知识卡要点 + 资料原文清单，引导 LLM 优先检索私有资料
+    （query_pig_knowledge 查知识卡要点 / query_user_materials 搜资料原文），而非直接网络搜索。
+
+    轻量相关性预筛（问题与卡标题/标签、资料标题/备注的 2-gram 交集）；无交集但
+    总量很少时也全量提示，确保 LLM 至少知道用户有私有资料。任何异常静默返回空串。
+    """
+    if not user_id:
+        return ""
+
+    cards: list = []
+    try:
+        from core.pro.domain_models.pig_cycle import knowledge as pig_knowledge
+        cards = await asyncio.to_thread(pig_knowledge.list_intel_cards, user_id)
+    except Exception:
+        cards = []
+
+    materials: list = []
+    try:
+        materials = await asyncio.to_thread(_list_user_materials_sync, user_id)
+    except Exception:
+        materials = []
+
+    if not cards and not materials:
+        return ""
+
+    msg_grams = _intel_hint_bigrams(user_message)
+
+    def _card_grams(c: dict) -> set:
+        hay = " ".join(
+            [str(c.get("title") or ""), str(c.get("stock_code") or "")]
+            + [str(t) for t in (c.get("tag") or [])]
+        )
+        return _intel_hint_bigrams(hay)
+
+    related_cards = [c for c in cards if msg_grams & _card_grams(c)] or (cards if len(cards) <= 5 else [])
+    related_mats = [m for m in materials if msg_grams & _intel_material_grams(m)] or (materials if len(materials) <= 8 else [])
+    if not related_cards and not related_mats:
+        return ""
+
+    lines = []
+    if related_cards:
+        lines.append("已提炼的知识卡（要点结论）：")
+        for c in related_cards[:8]:
+            tier = str((c.get("body") or {}).get("source_tier") or "")
+            stock = c.get("stock_code") or "通用"
+            lines.append(f"- 《{c.get('title') or '未命名卡'}》（{stock}·{_INTEL_TIER_LABELS.get(tier, tier)}）")
+    if related_mats:
+        if lines:
+            lines.append("")
+        lines.append("存档的资料原文（部分可能尚未提炼）：")
+        for m in related_mats[:8]:
+            stock = m.get("stock_code") or "通用"
+            lines.append(f"- 《{m.get('title') or '未命名资料'}》（{stock}）")
+    return (
+        "【用户私有资料提示】该用户在系统内存有个人资料（仅本人可见）：\n"
+        + "\n".join(lines)
+        + "\n回答相关问题时，必须先调用 query_pig_knowledge 工具（category='user_intel'，可带 q 关键词）"
+        "检索已提炼的知识卡要点；需要原文细节或知识卡未覆盖时，调用 query_user_materials 工具"
+        "（q=关键词，可带 stock_code）检索资料原文片段。用户私有资料的结论优先于网络搜索结果，"
+        "回答时引用资料标题与信源等级；私有资料与网络信息冲突时按信源等级采信并说明取舍。"
+    )
+
+
 def _should_force_tool_retry(user_message: str) -> bool:
     """判断是否属于“应优先调用工具”的个人数据查询请求。"""
     text = (user_message or "").strip().lower()
@@ -826,6 +930,9 @@ _SKILL_DOMAIN_STOPGRAMS = {
     "功能", "工具", "能力", "记录", "列表", "名称", "条件", "筛选",
     "输入", "输出", "字段", "结构", "格式", "内容", "自动", "进行", "根据",
     "以及", "或者", "如果", "需要", "请求", "响应", "服务", "系统", "方法",
+    # 疑问/否定/持仓通用词（真实案例：长描述里的"没有"两字让「牧原分红」
+    # 误命中猪周期工具、"持有/比例/多少"让巴菲特持股问题误命中，均已剔除）
+    "有没", "没有", "多少", "是多", "例是", "持有", "比例",
 }
 
 
@@ -887,6 +994,53 @@ def _matches_generated_skill(user_message: str) -> Optional[tuple]:
                 getattr(skill, "id", ""), sorted(overlap),
             )
             return (getattr(skill, "id", ""), getattr(skill, "name", ""))
+    return None
+
+
+# 行业世界模型/工作台工具标签组：capability_tags 命中任一即属行业领域工具
+_INDUSTRY_CYCLE_TAGS = ("pig_cycle", "insurance_cycle", "battery_cycle", "auto_cycle")
+
+
+def _matches_industry_cycle_tool(user_message: str) -> Optional[tuple]:
+    """行业世界模型让路检查：问题命中任一行业（猪/保险/电池/汽车）工具领域词时，
+    快路径必须让路。
+
+    与 _matches_generated_skill 同理：「现在/是否」类关键词组合会在 LLM
+    工具选择之前把行业问题劫持去网页搜索（真实案例：「能繁母猪数据
+    还是 3 个月前的，是否可以推定现在已经达到政府限定的数量」→ 快路径
+    劫持 → 只搜到新闻标题，世界模型证据工具连出场机会都没有）。
+
+    匹配数据驱动：只读取注册表里 capability_tags 含任一行业标签
+    （_INDUSTRY_CYCLE_TAGS）的工具元数据（名称/描述/when_to_use），与用户
+    问题做领域词交集；交集≥2 个不同领域词才算命中。不写死任何行业关键词
+    ——工具元数据里 when_to_use 已明确覆盖此类问题（能繁数据滞后推算
+    调控下限、NBV/锂价/渗透率等）。
+    """
+    msg_terms = _domain_terms(user_message)
+    if len(msg_terms) < 2:
+        return None
+    try:
+        from core.tools import get_tool_registry
+        registry = get_tool_registry()
+    except Exception:
+        return None
+    for tool in registry.list_all():
+        tags = set(getattr(tool, "capability_tags", None) or [])
+        if not tags & set(_INDUSTRY_CYCLE_TAGS):
+            continue
+        if not getattr(tool, "fc_enabled", True):
+            continue
+        tool_text = " ".join(
+            str(getattr(tool, attr, "") or "")
+            for attr in ("name", "description", "when_to_use")
+        )
+        overlap = msg_terms & _domain_terms(tool_text)
+        if len(overlap) >= 2:
+            logger.info(
+                "[智能助手] 问题命中行业领域工具「%s」领域词 %s，搜索快路径让路",
+                getattr(tool, "id", ""), sorted(overlap),
+            )
+            return (getattr(tool, "id", ""), getattr(tool, "name", ""))
     return None
 
 
@@ -1246,6 +1400,60 @@ def _build_stock_scope_block(user_context: Optional[dict]) -> str:
     return "\n".join(lines)
 
 
+# 行业 → 证据工具提示（与 core/tools/implementations/<industry>_cycle_tools.py 对齐）
+_INDUSTRY_SCOPE_TOOL_HINTS = {
+    "pig": "猪周期证据工具（get_pig_cycle_state / get_pig_l0_evidence / query_pig_series 等）",
+    "insurance": "保险行业证据工具（query_insurance_series 等）",
+    "battery": "电池产业链证据工具（query_battery_series 等）",
+    "auto": "汽车产业链证据工具（query_auto_series 等）",
+    "bank": "银行业证据工具（query_bank_series 等）",
+}
+
+
+def _build_industry_scope_block(user_context: Optional[dict]) -> str:
+    """构建行业工作台「研究对话」上下文块（user_context.industry_scope）
+
+    与 stock_scope 同构：只注入页面当前读数（周期位置、关键读数、数据截至），
+    让用户不必复述「我在看什么」；推演仍由该行业证据工具取数，
+    页面读数不替代工具证据。行业无关，五个工作台（猪/保险/电池/汽车/银行）共用。
+    """
+    if not user_context:
+        return ""
+    scope = user_context.get("industry_scope")
+    if not scope or not isinstance(scope, dict):
+        return ""
+
+    industry = str(scope.get("industry") or "").strip()
+    workbench = str(scope.get("workbench") or scope.get("industry_name") or "行业工作台").strip()
+
+    lines = [f"【{workbench}研究对话上下文】"]
+    lines.append(f"- 用户正在「{workbench}」的研究对话抽屉中提问，以下为页面自动注入的当前读数：")
+    position = str(scope.get("position") or "").strip()
+    if position:
+        rule = str(scope.get("position_rule") or "").strip()
+        lines.append(f"- 当前周期位置：{position}{f'（{rule}）' if rule else ''}")
+    metrics = scope.get("key_metrics") or []
+    if metrics:
+        lines.append("- 关键读数（页面摘要）：")
+        for m in metrics[:5]:
+            if isinstance(m, dict):
+                label, value = str(m.get("label") or "").strip(), str(m.get("value") or "").strip()
+                text = f"{label}：{value}" if label else value
+            else:
+                text = str(m).strip()
+            if text:
+                lines.append(f"    • {text[:120]}")
+    data_as_of = str(scope.get("data_as_of") or "").strip()
+    if data_as_of:
+        lines.append(f"- 数据新鲜度：{data_as_of}")
+    hint = _INDUSTRY_SCOPE_TOOL_HINTS.get(industry, "该行业证据工具")
+    lines.append(
+        f"- 上述读数是页面上下文而非你的推演结论；涉及行业基本面判断仍须先调用{hint}取数，"
+        "结论按既有口径标注信源，不得用页面读数替代工具证据"
+    )
+    return "\n".join(lines)
+
+
 def _build_usage_helper_prompt(user_context: dict) -> str:
     """构建使用问答机器人专用系统提示词"""
     user_context_block = _format_user_context_block(user_context or {})
@@ -1330,6 +1538,11 @@ def _get_system_prompt(
     if stock_scope_block:
         stock_scope_block = "\n" + stock_scope_block + "\n"
 
+    # 行业工作台研究对话上下文（仅当从研究对话抽屉进入时存在 user_context.industry_scope）
+    industry_scope_block = _build_industry_scope_block(user_context)
+    if industry_scope_block:
+        stock_scope_block = stock_scope_block + "\n" + industry_scope_block + "\n"
+
     # 当存在记忆时，附加「多交易计划处理规则」指引；构造在 f-string 之外以避免 Py3.10 的反斜杠限制
     if memory_block:
         memory_directive = (
@@ -1382,7 +1595,7 @@ def _get_system_prompt(
 - 明显无关话题（娱乐八卦/菜谱/情感倾诉/通用编程教学）：不展开，礼貌拒绝并引导回金融问题，如「这个话题不在我的服务范围内。我主要提供金融研究与交易分析支持。」
 - 弱相关话题（时间管理/学习方法/情绪管理）：最多 1-2 句简短回应，快速引导到投资/交易场景；严禁为"显得有帮助"而长篇发挥
 - 政治类：纯立场/意识形态争论/站队评价不回答，直接说明不在服务范围；仅当用户明确关注"政策/监管对市场与行业的影响"时可答，只讨论金融影响路径（行业景气/估值/资金面/风险偏好/盈利预期），避免政治价值判断，结论优先基于工具或可验证数据
-- 产业知识、行业格局、政策动态等非结构化问题（如"中国还有散户养猪吗"）：优先 web_search 获取最新权威信息，不要仅凭训练记忆回答
+- 产业知识、行业格局、政策动态等非结构化问题（如"中国还有散户养猪吗"）：优先 web_search 获取最新权威信息，不要仅凭训练记忆回答；猪周期/生猪产能类问题**例外**：走世界模型证据工具（见【猪周期世界模型】）；保险/电池/汽车行业数据类问题**例外**：走对应行业数据工具（见【保险行业数据】【电池产业链数据】【汽车产业链数据】）
 
 【数据纪律（核心，逐条强制）】
 1. **数字只能来自工具返回**：股价、涨跌幅、估值（PE/PB/PS）、财务（营收/净利润/毛利率）、销量、技术指标（MACD/RSI/均线）、指数点位、成交额等必须工具实时获取；严禁引用训练记忆中的此类数字（记忆可能过时，如送转/拆股后价格大幅变化）；未调用行情工具时不得出现任何具体价格数字
@@ -1390,7 +1603,7 @@ def _get_system_prompt(
 3. **严禁编造来源**：不得编造文件名、报告名、政策文件名、统计数据来源（如"《XX统计年报》"）；引用的文件/报告必须由 web_search 或 fetch_url 结果明确提及并标注来源链接；未经工具验证一律不得引用
 4. **严禁伪造工具调用痕迹**：不得标注"数据来源：get_xxx_tool()""📌 数据来源：XXX工具"等，除非确实调用了该工具并拿到真实返回
 5. **web_search 摘要里没有的数字不能编**：摘要通常只有标题/链接/片段（专业数据多在付费研报正文，摘要抓不到）。若未包含用户要的数值，如实回答"搜索结果未包含该数值"并附最相关链接；严禁凭对来源的印象（如"涌益咨询周报口径"）编数字——这是最常见编造形态，系统逐数字比对工具原文，编造必被拦截
-6. **行业实时数据禁用记忆**：成本线（如养殖完全成本）、现货价（如生猪价）、市场均价、产能、库存、估值历史分位等快速变化的实时数据只能来自工具或 web_search；未返回时只能定性描述（如"当前猪价低于行业成本线"）并建议 web_search 查最新数值（例：成本线已从 15 元级降到 11-12 元级，凭记忆说"15.8元/公斤"完全错误）
+6. **行业实时数据禁用记忆**：成本线（如养殖完全成本）、现货价（如生猪价/碳酸锂价）、市场均价、产能、库存、保费/NBV/装机量/渗透率、估值历史分位等快速变化的实时数据只能来自工具或 web_search（猪/保险/电池/汽车行业序列优先走对应行业工具，见各行业段）；未返回时只能定性描述（如"当前猪价低于行业成本线"）并建议 web_search 查最新数值（例：成本线已从 15 元级降到 11-12 元级，凭记忆说"15.8元/公斤"完全错误）
 7. **估值分位数须数据支撑**：只有工具返回明确包含分位数字段才能说"处于X%分位"；只有 PE/PB 绝对值时只能说"PE为X倍"，严禁编造"近5年X%分位"
 8. **单位与换算逐字核对**：①字段名带 wan 后缀（如 outstanding_pledge_amount_wan）单位是"万"，换算成"亿"须除以10000（15764.6万=1.58亿，不是157.6亿）；②ratio 字段（如 total_pledge_ratio: 0.37）通常表示 0.37% 而非 37%（总质押37%是极端风险，多数在1%-10%）；③换算后用常识校验（千亿市值公司高管质押不可能达百亿级）。拿不准时直接引用工具原始字段与数值，不做换算
 9. **空数据如实告知**：工具返回空/空列表/None/"无数据"时必须告知"当前未获取到相关数据"，说明可能原因（未同步/日期范围不匹配/该股票不支持），建议同步数据或 web_search；严禁编数据并标注"数据来源：XXX工具"误导用户
@@ -1437,6 +1650,43 @@ def _get_system_prompt(
 - web_search 拆分关键词、每次搜一个维度（如"赛力斯 4月销量""赛力斯 5月销量"分别搜）；优先从摘要提取数字，不足再 fetch_url 抓全文；获取数据后做同比/环比与趋势分析，给有数据支撑的结论
 - 板块/行业类问题优先板块级工具（无需代码）；操作类请求（分析/报告/定时/关注列表）优先 assistant_ops 类工具
 - 股票筛选返回"未找到符合条件的股票"或空结果时，直接告知无符合条件标的；严禁为"给点参考"推荐不符合条件的股票或擅自放宽条件再给候选名单，只有用户明确要求才继续
+
+【猪周期世界模型（领域专用，优先级高于 web_search）】
+- 本平台内置猪周期世界模型：生猪产业的结构化推演库——存有 2021 年以来能繁母猪/猪价/成本/屠宰量等官方序列与月度净变化，政策参数（正常保有量、调控区间阈值）按历史时点自动切版本（现行 2026-05 版：3750 万头、绿色 92%~103%），并内置生物时滞（配种→出栏 10 个月）、去化速度分布、周期阶段判定等推演逻辑。它是第一手数据源，不是新闻摘要
+- 凡涉及能繁母猪/生猪产能/去化/猪周期阶段/调控政策（如"能繁是否触及调控下限""去化趋势如何""政策会不会托底"）的问题：**必须先调用猪周期证据工具**（get_pig_cycle_state / get_pig_l0_evidence / get_pig_sow_floor_inference / query_pig_series 等）取数推演，严禁直接 web_search 或凭记忆回答；工具覆盖不了的（政策文件原文、突发疫情新闻）才用 web_search 补充
+- **推定类问题禁止以"官方数据未出"为由拒答**：世界模型的价值就是用已知条件做合理推论，不是照字面念数据——能繁等官方读数滞后时调 get_pig_sow_floor_inference，拿分速度情景推算（现在约多少、离下限差多少、最快何时触及）、历史同类段基率（去化多为一阵一阵而非匀速）与猪价旁证；回答按"若按X速度→Y，按Z速度→W"分情景给结论并标明假设，末尾给验证信号（下次官方披露值落在哪个区间即支持/推翻哪种情景），不得只回"等数据出来"
+- 回答时优先引用工具返回的 plain_summary 大白话结论，术语按 jargon_map 翻译；政策阈值等数字以工具返回为准，不得用搜索结果覆盖工具数字
+- 用户问"模拟盘赚了还是亏了/几成仓/成交了吗/挂单呢"时，调用 get_pig_paper_status；模拟盘是零费用、次日收盘价成交的纸面跟踪，不是实盘，引用其数字时必须带上这层说明，不得把模拟盘盈亏当成荐股依据，也不能在对话里替用户手动补跑（补跑是后端操作）
+- 用户问"牧原/温氏/新希望这个月/最近卖了多少猪（或鸡）、卖猪收入多少、均价多少、出栏在放量还是收缩、屠宰量多少、月度销售简报"等**月频经营节奏**问题时，调用 get_pig_monthly_sales；它是公司自愿披露、未经审计的月报，只能当经营节奏看，不能当精确财报，也不能与季报利润混为一谈；引用时必须说明口径：猪按万头、鸡/鸡苗按万只，单位不同不能直接相加；牧原1-2月常发合并简报（合并数归入2月、1月缺行），不要把缺行误报成"数据异常"
+- 用户问"牧原/温氏/新希望的成本由什么构成、饲料/人工/折旧各占多少成本、成本结构怎么变、重资产折旧份量"等**年度成本结构**问题时，调用 get_pig_cost_structure；数据来自经审计年报，引用时必须讲清三家口径差异、不能直接比占比：牧原是纯猪口径（2021-2023按7项明细、2024年起合并为4项，"其他"口径变大，跨年比 other 要当心）；新希望2021-2023是含苗种成本的养殖混业口径、2024年起才是纯猪口径；温氏年报只给肉猪类板块总成本、不拆成本项。问的是每公斤成本"水平"而非"构成"时，仍走 get_pig_cycle_state/query_pig_series
+- 用户问"牧原/温氏/新希望的 PSY、料肉比、肉猪上市率/育肥成活率、窝均断奶数是多少、谁养殖效率更高、效率怎么变"等**养殖效率**问题时，调用 get_pig_efficiency；引用时必须讲清口径、不能把时点值当全年平均：新希望2024年起给全年平均、2022-2023多为四季度/年末时点值；温氏2023-2024给全年PSY与上市率，2021上市率为下半年回升水平、窝均健仔取区间下限，2022与2025年报不报PSY（2025仅有上半年投关锚点）；牧原年报不披露效率数值、仅有2026上半年锚点。各家披露年份不齐，缺数据如实说明、不猜不补；出栏均重三家年报均不披露，不要凭记忆给数
+- 用户问"牧原/温氏/新希望各业务（生猪/饲料/屠宰肉食/禽/鸡/食品）收入或毛利率是多少、猪业务和鸡业务分别赚不赚钱、做分部/SOTP 估值要分部收入成本、集团合并口径是否被其他业务摊薄"等**分产品盈亏**问题时，调用 get_pig_segment_profit（年度口径）；引用时必须守住口径纪律：这是**毛利不是净利**（不含期间费用/资产减值/财务费用），不得当分部净利润或据此直接算分部 PE；"主营业务"口径剔其他业务，与财报总营收有少量差异、勿强行对账；新希望2024年起处置禽与食品、分部由四个变两个（公司已重述可比期），勿跨年直接比业务结构；牧原2021仅生猪、2022起才有屠宰肉食行。年度数据无季度值，缺数据如实说明、不猜不补
+- 用户问"牧原/温氏/新希望短期债务/有息负债多少、现金够不够还短债、现金短债比、资产负债率、偿债压力"等**偿债安全**问题，或问"在建工程多少、固定资产、还在不在扩产、资本开支、自由现金流"等**产能扩张**问题时，调用 get_pig_solvency_capacity（2021Q1 起逐季）；引用时必须守住口径：短期有息债务=短期借款+一年内到期非流动负债+短期应付债券，**不含**应付账款/合同负债等经营性无息负债（这两项单列展示，勿算进有息债务）；有息负债总额再加长期借款+应付债券；现金短债比<1 表示账上货币资金不足以一次偿还短债。自由现金流=经营现金流净额−购建固定资产支出，连续为负说明在靠融资或耗现金扩张，勿与筹资活动净额混用；均为季末时点/单季值，缺数据如实说明、不猜不补
+- 用户问"牧原/温氏/新希望的利息费用多少、综合融资成本多少、未来几个季度的利润/经营现金流/货币资金/资产负债率怎么走、预测三表、按猪价 X 元做压力测试、现金撑不撑得住、负债率会不会继续升"等**前瞻推演**问题时，调用 get_pig_forecast_statements（8 季×三情景推演，参数近4季实际标定）；引用时必须守住口径：利息费用用利润表 fin_exp_int_exp 逐季口径（准确值），勿与现金流量表补充资料的"财务费用"混用；综合融资成本=近4季利息合计/最新有息负债；输出是**模型推演不是既成事实**——首4季用情景价、后4季回归中性价，一次性损益/减值默认 0、筹资按保最低现金平项（缺口增债、富余还债），引用结论必须带情景名与猪价假设（如"悲观情景 10.95 元/kg 下……"）；问的是**历史实际**利息/负债时改走 get_pig_solvency_capacity，不要把预测数字当已披露数引用
+
+【保险行业数据（领域专用，优先级高于 web_search）】
+- 本平台内置保险行业工作台数据（insurance_cycle 库，ingest 采集+人工核对）：行业月度保费与单月同比、上市险企 NBV 季度序列、代理人规模、继续率、偿付能力充足率、EVPS/DPS 等估值输入、AH 溢价等。它是第一手数据源，不是新闻摘要
+- 凡涉及保费增速/NBV/新业务价值/代理人/继续率/偿付能力/AH 溢价等保险行业数据的问题：**必须先调用 query_insurance_series** 取数（不传 series 先看目录拿 id），严禁直接 web_search 或凭记忆回答；工具覆盖不了的（政策文件原文、预定利率调整新闻）才用 web_search 补充
+- 四象限读数、估值锚（PEV/股息率/利差）、预定利率触发器等派生口径以保险工作台页面为准，本工具只出原始序列；缺数据如实说明，不外推不补数
+- 回答时优先引用工具返回的 plain_summary 大白话结论，术语按 jargon_map 翻译（如 NBV=新业务价值=新卖出的保单未来能赚的钱折到今天；EVPS=每股内含价值；继续率=客户第二年还愿意续保的比例）
+
+【电池产业链数据（领域专用，优先级高于 web_search）】
+- 本平台内置电池产业链工作台数据（battery_cycle 库，采集+人工核对）：鑫椤锂电材料日报价快照（正极/负极/隔膜/电解液等板块）、百川盈孚电芯日均价、动力电池月度装机量正式台账（含厂商榜）
+- 凡涉及锂电材料报价/碳酸锂相关品项价格/电芯价格/装机量的问题：**必须先调用 query_battery_series** 取数（不传 series 先看目录拿 id），严禁直接 web_search 或凭记忆回答；锂价日线与 8万/12万 档位判定属页面现取口径（/api/pro/battery/series/lithium），不在该工具范围
+- 鑫椤（区间价）与百川（日均价）两源口径不同，**禁止混算、禁止互相替代**；staging（待人工核对）数据只作参考，正式结论只引用正式台账
+- 回答时优先引用 plain_summary 大白话结论，术语按 jargon_map 翻译（如 GWh=吉瓦时=电池装车电量单位；出清带=锂价跌到多数上游厂亏现金、产能开始退出的价格区间）
+
+【汽车产业链数据（领域专用，优先级高于 web_search）】
+- 本平台内置汽车行业工作台数据（现取+缓存）：乘联会狭义乘用车月度产量/零售/NEV 销量/官方渗透率（近 36 个月）、懂车帝分品牌终端零售量（子品牌聚合，含份额与同比）、自算产能利用率（当月销量×12÷年产能台账，零售主口径/批发辅口径，含批零差）
+- 凡涉及乘用车需求大盘/新能源渗透率/品牌销量排名/产能利用率/批零差的问题：**必须先调用 query_auto_series** 取数（不传 data 先看目录拿 id），严禁直接 web_search 或凭记忆回答；单品牌旗下车型明细走 get_auto_brand_monthly_sales（懂车帝车型榜）
+- 口径纪律：乘联会为狭义乘用车口径（不含商用车），与中汽协总产量不是一回事；批发含出口与压库，与零售禁止混算；产能利用率是自算口径非官方数，年产能未核实的公司如实标 gap 不填估算
+- 回答时优先引用 plain_summary 大白话结论，术语按 jargon_map 翻译（如 NEV 渗透率=新能源车占全部乘用车销量的比例；批零差=批发−零售，正值在压库或出口、负值在去库存）
+
+【银行业数据（领域专用，优先级高于 web_search）】
+- 本平台内置银行业工作台数据（bank_cycle 库，ingest 采集）：42 家 A 股上市银行按报告期横截面四字段（净息差/不良率/拨备覆盖率/核心一级资本充足率，含中位与区间）、央行货政报告表 4 新发放贷款利率（官方加权口径，季频、滞后约两个月）、10Y 国债收益率 + 中证银行指数（日频）与 LPR 1Y/5Y（月度）
+- 凡涉及银行净息差/不良率/拨备覆盖率/核心一级资本/新发放贷款利率/LPR/10Y 国债收益率/银行板块指数的问题：**必须先调用 query_bank_series** 取数（不传 data 先看目录拿 id），严禁直接 web_search 或凭记忆回答；单家银行个股行情与财务三表走通用财报工具，不在该工具范围
+- 口径纪律：东财财报指标是上市银行报告期口径（季报，部分银行净息差/CAR 不披露，空值如实留空），央行表 4 是官方加权口径且季频滞后，两者**禁止混算、禁止互相替代**；中位/区间由系统按横截面现算，非加权平均
+- 回答时优先引用 plain_summary 大白话结论，术语按 jargon_map 翻译（如 NIM 净息差=拿存款放贷款赚的利差；拨备覆盖率=坏账准备金是坏账的几倍，越高越安全；LPR=每月公布的贷款定价基准利率）
 
 【长期记忆管理】
 - 用户**明确表达**「请记住」「请帮我记下」等意图时，调用 `remember_this` 写入长期记忆；仅在明确表达时调用，随口提到的不写入
@@ -2221,6 +2471,11 @@ class IntelligentAssistantService:
         if _matches_generated_skill(req.user_message):
             logger.info("[智能助手] 命中近期搜索关键词但存在专用 Skill，转常规工具选择路径")
             return None
+        # 行业世界模型/工作台同理（真实案例：「能繁数据是否可推定已达到
+        # 政府限定数量」被「现在+是否」劫持去网页搜索，绕开世界模型证据工具）。
+        if _matches_industry_cycle_tool(req.user_message):
+            logger.info("[智能助手] 命中近期搜索关键词但属行业领域（猪/保险/电池/汽车），转常规工具选择路径")
+            return None
         try:
             from core.tools.implementations.assistant_ops.recent_search import (
                 run_recent_information_search,
@@ -2404,6 +2659,14 @@ class IntelligentAssistantService:
         ]
         if memory_injection:
             messages.append(Message(role=MessageRole.SYSTEM, content=memory_injection))
+        # 用户情报卡提示：已有私有资料知识卡且与问题相关时，引导 LLM 优先检索而非直接网络搜索
+        try:
+            intel_hint = await _build_intel_cards_hint(self._user_id, user_message)
+        except Exception:
+            intel_hint = ""
+        if intel_hint:
+            messages.append(Message(role=MessageRole.SYSTEM, content=intel_hint))
+            logger.info("[智能助手] 已注入用户情报卡提示（%d 字符）", len(intel_hint))
         if req.history_messages:
             messages.extend(req.history_messages)
             logger.info("[智能助手] 已注入 %d 条历史消息", len(req.history_messages))
@@ -2449,9 +2712,16 @@ class IntelligentAssistantService:
                     "message": "正在分析问题并规划处理步骤…",
                 })
 
+            # 注入用户上下文：ContextVar 随 asyncio.to_thread 传播到线程池内的同步工具，
+            # query_pig_knowledge 据此隔离 user_intel 用户情报卡（无上下文时不泄露）
+            try:
+                from core.pro.domain_models.pig_cycle.knowledge import current_user_id as _pig_user_ctx
+                _pig_user_ctx.set(self._user_id or "")
+            except Exception:
+                pass
+
             resp = await self._llm_client.achat(messages, **achat_kwargs)
             await _record_assistant_token_usage(resp, conversation_id or "assistant_chat")
-
             # 兜底："应走工具"的个人数据查询首轮未调工具时，二次强制引导
             if not tools_used and _should_force_tool_retry(user_message):
                 quality_signals.append("forced_tool_retry")
@@ -4561,26 +4831,80 @@ async def _load_assistant_settings(db, user_id: str) -> Optional[dict]:
 #  mem0 统一记忆层 — 助手对话集成
 # ------------------------------------------------------------------
 
-async def _recall_memory_block(db, user_id: str, user_message: str) -> str:
-    """从 mem0 召回与当前用户/问题相关的记忆，格式化为可注入 prompt 的文本。
+def _extract_memory_metadata_filters(
+    current_topic_title: Optional[str] = None,
+    report_refs: Optional[List[Dict[str, Any]]] = None,
+) -> Optional[Dict[str, str]]:
+    """从当前主题标题/报告引用中提取记忆元数据过滤条件（当前仅 symbol）。"""
+    title = (current_topic_title or "").strip()
+
+    if title:
+        title_match = re.search(r"[（(]([A-Za-z]{1,5}|\d{5,6}|(?:sh|sz|bj|hk)\.\d{5,6})[)）]", title, re.IGNORECASE)
+        if title_match:
+            return {"symbol": title_match.group(1).upper()}
+
+        fallback_match = re.search(r"\b(?:sh|sz|bj|hk)\.\d{5,6}\b|\b\d{5,6}\b", title, re.IGNORECASE)
+        if fallback_match:
+            return {"symbol": fallback_match.group(0).upper()}
+
+    for ref in report_refs or []:
+        symbol = str(ref.get("symbol") or "").strip()
+        if symbol:
+            return {"symbol": symbol.upper()}
+
+    return None
+
+
+async def _recall_memory_block(
+    db,
+    user_id: str,
+    user_message: str,
+    current_topic_title: Optional[str] = None,
+    report_refs: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """召回可注入 prompt 的记忆块，组合 L4 项目长期记忆与 L5/L6 用户语义记忆。
 
     召回范围：
-    - user_preference: 用户偏好（通过 remember_this 显式登记）
-    - trade_pattern:   交易纪律记忆（复盘完成后写入）
+    - project memory:  项目长期记忆（输出约束等，经 project_memory_service）
+    - conversation / user_preference / analysis_insight / trade_pattern:
+      会话事实、用户偏好、分析洞察、交易纪律（经 mem0 统一记忆层）
+    - 若当前主题/报告引用可识别标的，则按 symbol 元数据过滤，避免跨标的记忆串扰
     """
+    blocks: List[str] = []
+
+    try:
+        from app.services.project_memory_service import get_project_memory_service
+
+        project_block = await get_project_memory_service(db).build_prompt_block(
+            max_items=4,
+            max_chars=600,
+        )
+        if project_block:
+            blocks.append(project_block)
+    except Exception as e:
+        logger.debug("[project-memory] 项目长期记忆召回失败（已忽略）: %s", e)
+
     try:
         from core.memory.service import get_memory_service
         svc = get_memory_service(db)
-        return await svc.recall_formatted(
+        metadata_filters = _extract_memory_metadata_filters(current_topic_title, report_refs=report_refs)
+        mem0_block = await svc.recall_formatted(
             query=user_message,
             user_id=user_id,
-            scopes=["user_preference", "trade_pattern"],
-            limit=6,
-            max_chars=800,
+            scopes=["conversation", "user_preference", "analysis_insight", "trade_pattern"],
+            limit=8,
+            max_chars=2000,
+            metadata_filters=metadata_filters,
+            ranking_profile="assistant",
+            group_by_scope=True,
+            per_scope_limit=3,
         )
+        if mem0_block:
+            blocks.append(mem0_block)
     except Exception as e:
         logger.debug("[mem0] 记忆召回失败（已忽略）: %s", e)
-        return ""
+
+    return "\n\n".join(block for block in blocks if block).strip()
 
 
 async def chat_with_assistant(
@@ -4622,6 +4946,7 @@ async def chat_with_assistant(
     # 加载用户画像（跨会话持久记忆）
     user_profile: Optional[dict] = None
     current_topic_title: Optional[str] = None
+    current_thread_report_refs: List[Dict[str, Any]] = []
     if user_id:
         try:
             user_profile = await load_user_profile(db, user_id)
@@ -4638,10 +4963,11 @@ async def chat_with_assistant(
                     "thread_id": current_thread_id,
                     "archived": {"$ne": True},
                 },
-                {"title": 1},
+                {"title": 1, "report_refs": 1},
             )
             if current_topic:
                 current_topic_title = (current_topic.get("title") or "").strip() or None
+                current_thread_report_refs = current_topic.get("report_refs") or []
         except Exception as e:
             logger.warning(f"[智能助手] 加载当前主题失败（已跳过）: {e}")
 
@@ -4666,7 +4992,13 @@ async def chat_with_assistant(
     # mem0 记忆召回（降级安全）
     memory_block = ""
     if user_id:
-        memory_block = await _recall_memory_block(db, user_id, user_message)
+        memory_block = await _recall_memory_block(
+            db,
+            user_id,
+            user_message,
+            current_topic_title=current_topic_title,
+            report_refs=current_thread_report_refs,
+        )
 
     service = IntelligentAssistantService(
         db,
@@ -4751,6 +5083,7 @@ async def stream_chat_with_assistant(
 
     user_profile: Optional[dict] = None
     current_topic_title: Optional[str] = None
+    current_thread_report_refs: List[Dict[str, Any]] = []
     if user_id:
         try:
             user_profile = await load_user_profile(db, user_id)
@@ -4762,10 +5095,11 @@ async def stream_chat_with_assistant(
         try:
             current_topic = await db.assistant_threads.find_one(
                 {"user_id": user_id, "thread_id": tid, "archived": {"$ne": True}},
-                {"title": 1},
+                {"title": 1, "report_refs": 1},
             )
             if current_topic:
                 current_topic_title = (current_topic.get("title") or "").strip() or None
+                current_thread_report_refs = current_topic.get("report_refs") or []
         except Exception:
             pass
 
@@ -4789,7 +5123,13 @@ async def stream_chat_with_assistant(
     # mem0 记忆召回
     memory_block = ""
     if user_id:
-        memory_block = await _recall_memory_block(db, user_id, user_message)
+        memory_block = await _recall_memory_block(
+            db,
+            user_id,
+            user_message,
+            current_topic_title=current_topic_title,
+            report_refs=current_thread_report_refs,
+        )
 
     logger.info("[智能助手·流式] mem0 召回完成，memory_block 长度=%d，准备创建 service", len(memory_block))
 

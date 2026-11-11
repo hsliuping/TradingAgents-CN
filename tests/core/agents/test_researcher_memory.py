@@ -39,25 +39,6 @@ class _LegacyStyleMemory:
     pass
 
 
-def test_researcher_agent_reads_history_from_mem0_style_memory():
-    memory = _Mem0StyleMemory()
-    agent = _TestResearcherAgent(memory=memory)
-
-    context = agent._get_memory_context("300750", {"market_report": "当前报告"})
-
-    assert "【历史经验】" in context
-    assert "历史研究经验 A" in context
-    assert memory.search_calls
-
-
-def test_researcher_agent_skips_history_when_memory_lacks_search_interface():
-    agent = _TestResearcherAgent(memory=_LegacyStyleMemory())
-
-    context = agent._get_memory_context("300750", {"market_report": "当前报告"})
-
-    assert context == ""
-
-
 def test_researcher_agent_saves_to_mem0_style_memory():
     memory = _Mem0StyleMemory()
     agent = _TestResearcherAgent(memory=memory)

@@ -36,19 +36,21 @@ def _make_index_daily_frame(days: int = 260) -> pd.DataFrame:
 def test_market_environment_uses_actual_trade_date_and_omits_pe_pb(monkeypatch) -> None:
     module = _load_module("core/tools/index_tools.py", "index_tools_market_environment")
 
-    class FakeProvider:
-        async def get_index_dailybasic(self, ts_code: str, trade_date: str) -> pd.DataFrame:
-            return pd.DataFrame([
-                {"turnover_rate": 1.23, "total_mv": 1_500_000_000_000}
-            ])
-
-        async def get_index_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+    async def fake_query(capability_id: str, **params) -> pd.DataFrame:
+        if capability_id == "index_daily":
             return _make_index_daily_frame(30)
+        if capability_id == "index_dailybasic":
+            return pd.DataFrame(
+                [
+                    {"turnover_rate": 1.23, "total_mv": 1_500_000_000_000}
+                ]
+            )
+        return pd.DataFrame()
 
     async def fake_latest_trade_date(trade_date: str) -> str:
         return "20260410"
 
-    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_query_capability", fake_query)
     monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
 
     report = asyncio.run(module.get_market_environment("2026-04-11"))
@@ -65,19 +67,19 @@ def test_market_environment_uses_actual_trade_date_and_omits_pe_pb(monkeypatch) 
 def test_market_breadth_omits_activity_labels(monkeypatch) -> None:
     module = _load_module("core/tools/index_tools.py", "index_tools_market_breadth")
 
-    class FakeProvider:
-        async def get_daily_info(self, trade_date: str) -> pd.DataFrame:
-            return pd.DataFrame(
-                [
-                    {"ts_code": "SH_MARKET", "amount": 9567.54, "vol": 250.00, "com_count": 2300},
-                    {"ts_code": "SZ_MARKET", "amount": 13678.81, "vol": 296.68, "com_count": 3100},
-                ]
-            )
+    async def fake_query(capability_id: str, **params) -> pd.DataFrame:
+        assert capability_id == "daily_info"
+        return pd.DataFrame(
+            [
+                {"ts_code": "SH_MARKET", "amount": 9567.54, "vol": 250.00, "com_count": 2300},
+                {"ts_code": "SZ_MARKET", "amount": 13678.81, "vol": 296.68, "com_count": 3100},
+            ]
+        )
 
     async def fake_latest_trade_date(trade_date: str) -> str:
         return "20260410"
 
-    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_query_capability", fake_query)
     monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
 
     report = asyncio.run(module.get_market_breadth("2026-04-11"))
@@ -91,14 +93,14 @@ def test_market_breadth_omits_activity_labels(monkeypatch) -> None:
 def test_identify_market_cycle_removes_operation_advice(monkeypatch) -> None:
     module = _load_module("core/tools/index_tools.py", "index_tools_market_cycle")
 
-    class FakeProvider:
-        async def get_index_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-            return _make_index_daily_frame(260)
+    async def fake_query(capability_id: str, **params) -> pd.DataFrame:
+        assert capability_id == "index_daily"
+        return _make_index_daily_frame(260)
 
     async def fake_latest_trade_date(trade_date: str) -> str:
         return "20260410"
 
-    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_query_capability", fake_query)
     monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
 
     report = asyncio.run(module.identify_market_cycle("2026-04-11"))
@@ -115,19 +117,19 @@ def test_identify_market_cycle_removes_operation_advice(monkeypatch) -> None:
 def test_north_flow_uses_actual_trade_date_in_report(monkeypatch) -> None:
     module = _load_module("core/tools/index_tools.py", "index_tools_north_flow")
 
-    class FakeProvider:
-        async def get_hsgt_moneyflow(self, start_date: str, end_date: str) -> pd.DataFrame:
-            return pd.DataFrame(
-                [
-                    {"trade_date": "20260410", "hgt": 120000.0, "sgt": 80000.0},
-                    {"trade_date": "20260409", "hgt": 100000.0, "sgt": 60000.0},
-                ]
-            )
+    async def fake_query(capability_id: str, **params) -> pd.DataFrame:
+        assert capability_id == "hsgt_moneyflow"
+        return pd.DataFrame(
+            [
+                {"trade_date": "20260410", "north_sh_flow": 120000.0, "north_sz_flow": 80000.0},
+                {"trade_date": "20260409", "north_sh_flow": 100000.0, "north_sz_flow": 60000.0},
+            ]
+        )
 
     async def fake_latest_trade_date(trade_date: str) -> str:
         return "20260410"
 
-    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_query_capability", fake_query)
     monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
 
     report = asyncio.run(module.get_north_flow("2026-04-11", lookback_days=10))
@@ -141,32 +143,32 @@ def test_north_flow_uses_actual_trade_date_in_report(monkeypatch) -> None:
 def test_margin_trading_flags_anomalous_change_fields(monkeypatch) -> None:
     module = _load_module("core/tools/index_tools.py", "index_tools_margin_trading")
 
-    class FakeProvider:
-        async def get_margin_detail(self, start_date: str, end_date: str) -> pd.DataFrame:
-            return pd.DataFrame(
-                [
-                    {"trade_date": "20260410", "exchange_id": "SSE", "rzye": 5000.00 * 100000000, "rqye": 40.00 * 100000000, "rzrqye": 5040.00 * 100000000},
-                    {"trade_date": "20260410", "exchange_id": "SZSE", "rzye": 7000.00 * 100000000, "rqye": 70.00 * 100000000, "rzrqye": 7070.00 * 100000000},
-                    {"trade_date": "20260410", "exchange_id": "BSE", "rzye": 1156.60 * 100000000, "rqye": 14.15 * 100000000, "rzrqye": 1170.75 * 100000000},
-                    {"trade_date": "20260409", "exchange_id": "SSE", "rzye": 3500.00 * 100000000, "rqye": 45.00 * 100000000, "rzrqye": 3545.00 * 100000000},
-                    {"trade_date": "20260409", "exchange_id": "SZSE", "rzye": 4800.00 * 100000000, "rqye": 60.00 * 100000000, "rzrqye": 4860.00 * 100000000},
-                    {"trade_date": "20260409", "exchange_id": "BSE", "rzye": 700.00 * 100000000, "rqye": 15.00 * 100000000, "rzrqye": 715.00 * 100000000},
-                    {"trade_date": "20260408", "exchange_id": "SSE", "rzye": 3200.00 * 100000000, "rqye": 40.00 * 100000000, "rzrqye": 3240.00 * 100000000},
-                    {"trade_date": "20260408", "exchange_id": "SZSE", "rzye": 4200.00 * 100000000, "rqye": 55.00 * 100000000, "rzrqye": 4255.00 * 100000000},
-                    {"trade_date": "20260408", "exchange_id": "BSE", "rzye": 600.00 * 100000000, "rqye": 15.00 * 100000000, "rzrqye": 615.00 * 100000000},
-                    {"trade_date": "20260407", "exchange_id": "SSE", "rzye": 2800.00 * 100000000, "rqye": 35.00 * 100000000, "rzrqye": 2835.00 * 100000000},
-                    {"trade_date": "20260407", "exchange_id": "SZSE", "rzye": 3600.00 * 100000000, "rqye": 50.00 * 100000000, "rzrqye": 3650.00 * 100000000},
-                    {"trade_date": "20260407", "exchange_id": "BSE", "rzye": 600.00 * 100000000, "rqye": 15.00 * 100000000, "rzrqye": 615.00 * 100000000},
-                    {"trade_date": "20260406", "exchange_id": "SSE", "rzye": 2400.00 * 100000000, "rqye": 30.00 * 100000000, "rzrqye": 2430.00 * 100000000},
-                    {"trade_date": "20260406", "exchange_id": "SZSE", "rzye": 3000.00 * 100000000, "rqye": 45.00 * 100000000, "rzrqye": 3045.00 * 100000000},
-                    {"trade_date": "20260406", "exchange_id": "BSE", "rzye": 600.00 * 100000000, "rqye": 15.00 * 100000000, "rzrqye": 615.00 * 100000000},
-                ]
-            )
+    async def fake_query(capability_id: str, **params) -> pd.DataFrame:
+        assert capability_id == "margin"
+        return pd.DataFrame(
+            [
+                {"trade_date": "20260410", "exchange_id": "SSE", "margin_balance": 5000.00 * 100000000, "short_balance": 40.00 * 100000000, "total_balance": 5040.00 * 100000000},
+                {"trade_date": "20260410", "exchange_id": "SZSE", "margin_balance": 7000.00 * 100000000, "short_balance": 70.00 * 100000000, "total_balance": 7070.00 * 100000000},
+                {"trade_date": "20260410", "exchange_id": "BSE", "margin_balance": 1156.60 * 100000000, "short_balance": 14.15 * 100000000, "total_balance": 1170.75 * 100000000},
+                {"trade_date": "20260409", "exchange_id": "SSE", "margin_balance": 3500.00 * 100000000, "short_balance": 45.00 * 100000000, "total_balance": 3545.00 * 100000000},
+                {"trade_date": "20260409", "exchange_id": "SZSE", "margin_balance": 4800.00 * 100000000, "short_balance": 60.00 * 100000000, "total_balance": 4860.00 * 100000000},
+                {"trade_date": "20260409", "exchange_id": "BSE", "margin_balance": 700.00 * 100000000, "short_balance": 15.00 * 100000000, "total_balance": 715.00 * 100000000},
+                {"trade_date": "20260408", "exchange_id": "SSE", "margin_balance": 3200.00 * 100000000, "short_balance": 40.00 * 100000000, "total_balance": 3240.00 * 100000000},
+                {"trade_date": "20260408", "exchange_id": "SZSE", "margin_balance": 4200.00 * 100000000, "short_balance": 55.00 * 100000000, "total_balance": 4255.00 * 100000000},
+                {"trade_date": "20260408", "exchange_id": "BSE", "margin_balance": 600.00 * 100000000, "short_balance": 15.00 * 100000000, "total_balance": 615.00 * 100000000},
+                {"trade_date": "20260407", "exchange_id": "SSE", "margin_balance": 2800.00 * 100000000, "short_balance": 35.00 * 100000000, "total_balance": 2835.00 * 100000000},
+                {"trade_date": "20260407", "exchange_id": "SZSE", "margin_balance": 3600.00 * 100000000, "short_balance": 50.00 * 100000000, "total_balance": 3650.00 * 100000000},
+                {"trade_date": "20260407", "exchange_id": "BSE", "margin_balance": 600.00 * 100000000, "short_balance": 15.00 * 100000000, "total_balance": 615.00 * 100000000},
+                {"trade_date": "20260406", "exchange_id": "SSE", "margin_balance": 2400.00 * 100000000, "short_balance": 30.00 * 100000000, "total_balance": 2430.00 * 100000000},
+                {"trade_date": "20260406", "exchange_id": "SZSE", "margin_balance": 3000.00 * 100000000, "short_balance": 45.00 * 100000000, "total_balance": 3045.00 * 100000000},
+                {"trade_date": "20260406", "exchange_id": "BSE", "margin_balance": 600.00 * 100000000, "short_balance": 15.00 * 100000000, "total_balance": 615.00 * 100000000},
+            ]
+        )
 
     async def fake_latest_trade_date(trade_date: str) -> str:
         return "20260410"
 
-    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_query_capability", fake_query)
     monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
 
     report = asyncio.run(module.get_margin_trading("2026-04-11", lookback_days=10))
@@ -183,21 +185,21 @@ def test_margin_trading_flags_anomalous_change_fields(monkeypatch) -> None:
 def test_margin_trading_reports_missing_exchange_coverage(monkeypatch) -> None:
     module = _load_module("core/tools/index_tools.py", "index_tools_margin_trading_incomplete")
 
-    class FakeProvider:
-        async def get_margin_detail(self, start_date: str, end_date: str) -> pd.DataFrame:
-            return pd.DataFrame(
-                [
-                    {"trade_date": "20260410", "exchange_id": "SSE", "rzye": 13156.60 * 100000000, "rqye": 124.15 * 100000000, "rzrqye": 13280.75 * 100000000},
-                    {"trade_date": "20260409", "exchange_id": "SSE", "rzye": 13000.00 * 100000000, "rqye": 120.00 * 100000000, "rzrqye": 13120.00 * 100000000},
-                    {"trade_date": "20260409", "exchange_id": "SZSE", "rzye": 12000.00 * 100000000, "rqye": 60.00 * 100000000, "rzrqye": 12060.00 * 100000000},
-                    {"trade_date": "20260409", "exchange_id": "BSE", "rzye": 902.06 * 100000000, "rqye": 5.05 * 100000000, "rzrqye": 907.11 * 100000000},
-                ]
-            )
+    async def fake_query(capability_id: str, **params) -> pd.DataFrame:
+        assert capability_id == "margin"
+        return pd.DataFrame(
+            [
+                {"trade_date": "20260410", "exchange_id": "SSE", "margin_balance": 13156.60 * 100000000, "short_balance": 124.15 * 100000000, "total_balance": 13280.75 * 100000000},
+                {"trade_date": "20260409", "exchange_id": "SSE", "margin_balance": 13000.00 * 100000000, "short_balance": 120.00 * 100000000, "total_balance": 13120.00 * 100000000},
+                {"trade_date": "20260409", "exchange_id": "SZSE", "margin_balance": 12000.00 * 100000000, "short_balance": 60.00 * 100000000, "total_balance": 12060.00 * 100000000},
+                {"trade_date": "20260409", "exchange_id": "BSE", "margin_balance": 902.06 * 100000000, "short_balance": 5.05 * 100000000, "total_balance": 907.11 * 100000000},
+            ]
+        )
 
     async def fake_latest_trade_date(trade_date: str) -> str:
         return "20260410"
 
-    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_query_capability", fake_query)
     monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
 
     report = asyncio.run(module.get_margin_trading("2026-04-11", lookback_days=10))
@@ -216,14 +218,14 @@ def test_margin_trading_reports_missing_exchange_coverage(monkeypatch) -> None:
 def test_index_technical_returns_rule_tags_without_summary_judgment(monkeypatch) -> None:
     module = _load_module("core/tools/index_tools.py", "index_tools_technical")
 
-    class FakeProvider:
-        async def get_index_daily(self, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
-            return _make_index_daily_frame(120)
+    async def fake_query(capability_id: str, **params) -> pd.DataFrame:
+        assert capability_id == "index_daily"
+        return _make_index_daily_frame(120)
 
     async def fake_latest_trade_date(trade_date: str) -> str:
         return "20260410"
 
-    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_query_capability", fake_query)
     monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
 
     report = asyncio.run(module.get_index_technical("2026-04-11", lookback_days=60))
@@ -247,9 +249,12 @@ def test_index_technical_returns_rule_tags_without_summary_judgment(monkeypatch)
 def test_limit_stats_uses_neutral_distribution_wording(monkeypatch) -> None:
     module = _load_module("core/tools/index_tools.py", "index_tools_limit_stats")
 
-    class FakeProvider:
-        async def get_daily_stats(self, trade_date: str):
-            return {
+    async def fake_query(capability_id: str, **params) -> pd.DataFrame:
+        if capability_id == "daily_stats":
+            assert params == {"trade_date": "20260410"}
+            return pd.DataFrame([{
+                "trade_date": "20260410",
+                "total": 5495,
                 "up_count": 3977,
                 "up_ratio": 72.4,
                 "down_count": 1397,
@@ -259,18 +264,18 @@ def test_limit_stats_uses_neutral_distribution_wording(monkeypatch) -> None:
                 "up_3_5": 324,
                 "down_gt5": 55,
                 "down_3_5": 111,
-            }
-
-        async def get_limit_list(self, trade_date: str) -> pd.DataFrame:
-            up_rows = [{"limit": "U", "up_stat": "2"} for _ in range(17)]
-            up_rows.extend({"limit": "U", "up_stat": "1"} for _ in range(42))
-            down_rows = [{"limit": "D", "up_stat": "0"} for _ in range(8)]
+            }])
+        if capability_id == "limit_list":
+            up_rows = [{"limit_type": "U", "limit_streak": "2"} for _ in range(17)]
+            up_rows.extend({"limit_type": "U", "limit_streak": "1"} for _ in range(42))
+            down_rows = [{"limit_type": "D", "limit_streak": "0"} for _ in range(8)]
             return pd.DataFrame(up_rows + down_rows)
+        return pd.DataFrame()
 
     async def fake_latest_trade_date(trade_date: str) -> str:
         return "20260410"
 
-    monkeypatch.setattr(module, "_get_tushare_provider", lambda: FakeProvider())
+    monkeypatch.setattr(module, "_query_capability", fake_query)
     monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
 
     report = asyncio.run(module.get_limit_stats("2026-04-11"))
@@ -290,3 +295,45 @@ def test_limit_stats_uses_neutral_distribution_wording(monkeypatch) -> None:
     assert "【口径差异摘要】" not in report
     assert "汇总口径" not in report
     assert "其中涨停家数" not in report
+
+
+def test_limit_stats_skips_distribution_section_when_buckets_missing(monkeypatch) -> None:
+    """daily_stats 分布 4 桶缺失（akshare legu 快照源，门面补 pd.NA）-> 跳过分布段且不输出 nan"""
+    module = _load_module("core/tools/index_tools.py", "index_tools_limit_stats_partial")
+
+    async def fake_query(capability_id: str, **params) -> pd.DataFrame:
+        if capability_id == "daily_stats":
+            assert params == {"trade_date": "20260410"}
+            return pd.DataFrame([{
+                "trade_date": "20260410",
+                "total": 5224,
+                "up_count": 4197,
+                "up_ratio": 80.34,
+                "down_count": 887,
+                "down_ratio": 16.98,
+                "flat_count": 135,
+                "up_gt5": pd.NA,
+                "up_3_5": pd.NA,
+                "down_gt5": pd.NA,
+                "down_3_5": pd.NA,
+            }])
+        if capability_id == "limit_list":
+            up_rows = [{"limit_type": "U", "limit_streak": "2"} for _ in range(17)]
+            up_rows.extend({"limit_type": "U", "limit_streak": "1"} for _ in range(42))
+            down_rows = [{"limit_type": "D", "limit_streak": "0"} for _ in range(8)]
+            return pd.DataFrame(up_rows + down_rows)
+        return pd.DataFrame()
+
+    async def fake_latest_trade_date(trade_date: str) -> str:
+        return "20260410"
+
+    monkeypatch.setattr(module, "_query_capability", fake_query)
+    monkeypatch.setattr(module, "_get_latest_trade_date", fake_latest_trade_date)
+
+    report = asyncio.run(module.get_limit_stats("2026-04-11"))
+
+    assert "【涨跌家数】" in report  # 核心家数字段齐全，照常输出
+    assert "  • 上涨: 4197 家 (80.3%)" in report
+    assert "【涨跌幅分布】" not in report  # 分布 4 桶缺失，整段跳过
+    assert "涨幅居前个股数量" not in report  # 分布信号依赖分布桶，一并跳过
+    assert "nan" not in report.lower()

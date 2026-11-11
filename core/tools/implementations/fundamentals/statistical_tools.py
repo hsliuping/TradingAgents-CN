@@ -59,28 +59,31 @@ def _dash_date(date_str: str) -> str:
 
 def _try_get_benchmark_quotes(benchmark_symbol: str, start_date_obj: datetime.date,
                                 end_date_obj: datetime.date, lookback_days: int) -> Any:
-    """获取基准指数行情，DB 无数据时用 AKShare 兜底。"""
+    """获取基准指数行情，DB 无数据时经 DataFacade 能力兜底。"""
     quotes = get_stock_daily_quotes(
         benchmark_symbol, start_date=start_date_obj.isoformat(), end_date=end_date_obj.isoformat(),
         period="daily", limit=lookback_days + 60,
     )
     if quotes:
         return quotes
-    # AKShare 兜底
+    # 指数日线能力兜底（仅沪深300）
     if benchmark_symbol in ("000300", "399300", "sh000300"):
         try:
-            import akshare as ak
-            import pandas as pd
-            df = ak.stock_zh_index_daily(symbol="sh000300")
-            # date 列是 datetime.date 类型，用 date 对象直接比较
-            sd = start_date_obj if isinstance(start_date_obj, datetime.date) else start_date_obj
-            ed = end_date_obj if isinstance(end_date_obj, datetime.date) else end_date_obj
-            df = df[df["date"] >= sd]
-            df = df[df["date"] <= ed]
+            from tradingagents.dataflows.capability import query_capability_sync
+
+            df = query_capability_sync(
+                "index_daily",
+                ts_code="000300.SH",
+                start_date=start_date_obj.strftime("%Y%m%d"),
+                end_date=end_date_obj.strftime("%Y%m%d"),
+            )
+            if df is None or df.empty:
+                return None
+            df = df.sort_values("trade_date")  # 能力降序返回，重排为正序
             records = []
             for _, row in df.iterrows():
                 records.append({
-                    "trade_date": str(row["date"]),
+                    "trade_date": _dash_date(str(row["trade_date"])),
                     "open": float(row["open"]),
                     "high": float(row["high"]),
                     "low": float(row["low"]),

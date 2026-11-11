@@ -138,6 +138,84 @@
           </el-descriptions>
         </el-card>
 
+        <!-- 执行轨迹（v4.0 T4 可观测性） -->
+        <el-card shadow="never" class="section-card">
+          <template #header>
+            <div class="card-header" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <el-icon><Histogram /></el-icon>
+                <span>执行轨迹</span>
+              </div>
+              <el-text v-if="trace?.has_trace" type="info" size="small">
+                {{ trace.total_steps }} 步 · 总耗时 {{ formatDuration(trace.duration_seconds) }}
+              </el-text>
+            </div>
+          </template>
+
+          <div v-loading="traceLoading">
+            <el-table
+              v-if="trace?.has_trace"
+              :data="trace.steps"
+              size="small"
+              border
+              max-height="420"
+            >
+              <el-table-column type="expand">
+                <template #default="{ row }">
+                  <div class="trace-channels">
+                    <span class="trace-channels-label">本步变更字段：</span>
+                    <el-tag
+                      v-for="ch in row.updated_channels"
+                      :key="ch"
+                      size="small"
+                      type="info"
+                      style="margin: 2px 6px 2px 0"
+                    >
+                      {{ ch }}
+                    </el-tag>
+                    <el-text v-if="!row.updated_channels?.length" type="info" size="small">无</el-text>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="步骤" width="80">
+                <template #default="{ row }">
+                  {{ row.step >= 0 ? row.step : '准备' }}
+                </template>
+              </el-table-column>
+              <el-table-column label="执行节点" min-width="220">
+                <template #default="{ row }">
+                  <template v-if="row.nodes?.length">
+                    <el-tag
+                      v-for="node in row.nodes"
+                      :key="node"
+                      size="small"
+                      style="margin: 2px 6px 2px 0"
+                    >
+                      {{ nodeLabel(node) }}
+                    </el-tag>
+                  </template>
+                  <el-text v-else type="info" size="small">{{ row.source === 'input' ? '初始状态' : '-' }}</el-text>
+                </template>
+              </el-table-column>
+              <el-table-column label="时间" width="110">
+                <template #default="{ row }">
+                  {{ formatClock(row.timestamp) }}
+                </template>
+              </el-table-column>
+              <el-table-column label="耗时" width="110">
+                <template #default="{ row }">
+                  {{ formatDuration(row.elapsed_seconds) }}
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-empty
+              v-else-if="!traceLoading"
+              description="该任务没有断点轨迹（旧版本执行或 checkpointer 未启用）"
+              :image-size="60"
+            />
+          </div>
+        </el-card>
+
         <TaskGrowthPanel
           class="section-card"
           :task-id="taskDetail.task_id"
@@ -222,8 +300,8 @@
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { InfoFilled, Clock, Setting, DataAnalysis, Warning, Document } from '@element-plus/icons-vue'
-import { TaskType, TaskTypeNames, TaskStatusNames, TaskStatusColors, type TaskDetail } from '@/api/unifiedTasks'
+import { InfoFilled, Clock, Setting, DataAnalysis, Warning, Document, Histogram } from '@element-plus/icons-vue'
+import { TaskType, TaskTypeNames, TaskStatusNames, TaskStatusColors, getTaskTrace, type TaskDetail, type TaskTrace } from '@/api/unifiedTasks'
 import type { TaskGrowthContextPayload } from '@/api/workflowGrowth'
 import TaskGrowthPanel from '@/components/growth/TaskGrowthPanel.vue'
 import { convertAnalystIdsToNames } from '@/constants/analysts'
@@ -246,6 +324,70 @@ const visible = computed({
 const loading = ref(false)
 const router = useRouter()
 const growthContext = ref<TaskGrowthContextPayload | null>(null)
+
+// 执行轨迹
+const trace = ref<TaskTrace | null>(null)
+const traceLoading = ref(false)
+
+// 节点名 → 中文展示（未知节点回退原始名）
+const NODE_LABELS: Record<string, string> = {
+  parallel_analysts: '并行分析师调度',
+  fundamentals_analyst_v2: '基本面分析师',
+  market_analyst_v2: '技术面分析师',
+  news_analyst_v2: '新闻分析师',
+  social_analyst_v2: '情绪分析师',
+  index_analyst_v2: '指数分析师',
+  sector_analyst_v2: '行业分析师',
+  merge_analysts: '汇总分析师报告',
+  debate: '多空辩论',
+  debate_parallel_opening: '多空辩论（并行开场）',
+  research_manager_v2: '研究经理决策',
+  risk_debate: '风险辩论',
+  risky_analyst_v2: '激进风险分析师',
+  safe_analyst_v2: '保守风险分析师',
+  neutral_analyst_v2: '中性风险分析师',
+  risk_manager_v2: '风控经理裁决',
+  trader_v2: '交易员投资计划'
+}
+
+const nodeLabel = (node: string): string => {
+  if (NODE_LABELS[node]) return NODE_LABELS[node]
+  if (node.startsWith('msg_clear_')) {
+    return `清理上下文：${node.replace('msg_clear_', '').replace(/_v2$/, '')}`
+  }
+  return node
+}
+
+const formatClock = (time?: string | null): string => {
+  if (!time) return '-'
+  const date = new Date(time)
+  return date.toLocaleTimeString('zh-CN', { hour12: false })
+}
+
+const formatDuration = (seconds?: number | null): string => {
+  if (seconds === null || seconds === undefined) return '-'
+  if (seconds < 1) return '<1s'
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  return `${m}m${s}s`
+}
+
+const loadTrace = async (taskId?: string) => {
+  trace.value = null
+  if (!taskId) return
+  traceLoading.value = true
+  try {
+    const res = await getTaskTrace(taskId)
+    trace.value = ((res as any)?.data?.data || (res as any)?.data || null) as TaskTrace | null
+  } catch (error) {
+    console.warn('[TaskDetailDialog] 加载执行轨迹失败:', error)
+    trace.value = null
+  } finally {
+    traceLoading.value = false
+  }
+}
+
 const growthSummary = computed(() => {
   const direct = growthContext.value?.summary
   const fromTask = props.taskDetail?.growth_context
@@ -424,6 +566,16 @@ const formatTime = (time: string) => {
 }
 
 watch(
+  () => [props.modelValue, props.taskId, props.taskDetail?.task_id],
+  ([visible]) => {
+    if (visible) {
+      loadTrace(props.taskId || props.taskDetail?.task_id)
+    }
+  },
+  { immediate: true }
+)
+
+watch(
   () => [props.modelValue, props.taskDetail?.growth_context, props.taskDetail?.result?.growth_context],
   ([visible]) => {
     if (visible) {
@@ -438,6 +590,17 @@ watch(
 </script>
 
 <style scoped lang="scss">
+  .trace-channels {
+    padding: 8px 16px;
+    line-height: 1.8;
+  }
+
+  .trace-channels-label {
+    color: #6b7280;
+    font-size: 13px;
+    margin-right: 6px;
+  }
+
   .growth-item {
     border: 1px solid #e5e7eb;
     border-radius: 10px;

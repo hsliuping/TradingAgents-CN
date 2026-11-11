@@ -109,22 +109,21 @@ class TraderAgent(BaseAgent):
             
             # 2. 收集所有相关报告
             all_reports = self._collect_all_reports(state)
-            
-            # 3. 从记忆系统获取历史交易记录（如果有）
-            historical_trades = self._get_historical_trades(ticker) if self.memory else None
-            
-            # 4. 构建提示词
+
+            # 3. 构建提示词（M5.4：per-agent 向量记忆历史交易读注入已退位，
+            # 上期结论对比基线由 core/agents/base.py 注入，见结论快照机制；
+            # 记忆写入链路保留）
             system_prompt = self._build_system_prompt(state=state)
             user_prompt = self._build_user_prompt(
-                ticker, 
-                analysis_date, 
-                investment_plan, 
+                ticker,
+                analysis_date,
+                investment_plan,
                 all_reports,
-                historical_trades,
+                None,
                 state
             )
             
-            # 5. 调用LLM生成交易分析计划
+            # 4. 调用LLM生成交易分析计划
             system_prompt = self._apply_global_trading_advice_guard(system_prompt)
             messages = [
                 SystemMessage(content=system_prompt),
@@ -157,11 +156,11 @@ class TraderAgent(BaseAgent):
             else:
                 raise ValueError("LLM not initialized")
 
-            # 6. 保存到记忆系统（如果有）
+            # 5. 保存到记忆系统（如果有）
             if self.memory:
                 self._save_to_memory(ticker, trading_plan)
 
-            # 7. 输出到state（只返回新增的字段，避免并发冲突）
+            # 6. 输出到state（只返回新增的字段，避免并发冲突）
             logger.info(f"✅ [TraderAgent] {self.agent_id} 执行成功，输出字段: {self.output_field}")
             return {
                 self.output_field: trading_plan
@@ -208,45 +207,6 @@ class TraderAgent(BaseAgent):
             reports["sentiment_report"] = state["social_report"]
 
         return reports
-
-    def _get_historical_trades(self, ticker: str) -> Optional[List[Dict[str, Any]]]:
-        """
-        从记忆系统获取历史交易记录
-
-        Args:
-            ticker: 股票代码
-
-        Returns:
-            历史交易记录列表
-        """
-        if not self.memory:
-            return None
-
-        try:
-            query = f"股票代码: {ticker}\n交易分析计划\n历史交易经验"
-
-            if not hasattr(self.memory, 'search_memories'):
-                logger.warning("记忆实例不支持 search_memories，已跳过历史交易召回: %s", type(self.memory).__name__)
-                return None
-
-            memories = self.memory.search_memories(
-                query=query,
-                n_results=3,
-                filter_metadata={"ticker": ticker} if ticker else None,
-            )
-            return [
-                {
-                    "content": item.get("content", ""),
-                    "metadata": item.get("metadata", {}),
-                    "similarity": item.get("similarity", 0.0),
-                }
-                for item in (memories or [])
-            ]
-
-            return None
-        except Exception as e:
-            logger.warning(f"获取历史交易记录失败: {e}")
-            return None
 
     def _save_to_memory(self, ticker: str, trading_plan: Dict[str, Any]) -> None:
         """

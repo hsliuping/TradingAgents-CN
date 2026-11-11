@@ -4,9 +4,12 @@ Tushare配置管理
 专门处理Tushare相关的环境变量配置，兼容Python 3.13+
 """
 
+import logging
 import os
 from typing import Dict, Any, Optional
 from .env_utils import parse_bool_env, parse_str_env, get_env_info, validate_required_env_vars
+
+logger = logging.getLogger(__name__)
 
 
 class TushareConfig:
@@ -39,11 +42,16 @@ class TushareConfig:
     
     def _debug_config(self):
         """输出调试配置信息"""
-        print(f"🔍 Tushare配置调试信息:")
-        print(f"   TUSHARE_TOKEN: {'已设置' if self.token else '未设置'} ({len(self.token)}字符)")
-        print(f"   TUSHARE_ENABLED: {self.enabled} (原始值: {os.getenv('TUSHARE_ENABLED', 'None')})")
-        print(f"   DEFAULT_CHINA_DATA_SOURCE: {self.default_source}")
-        print(f"   ENABLE_DATA_CACHE: {self.cache_enabled}")
+        logger.debug(
+            "🔍 Tushare配置调试信息: TUSHARE_TOKEN=%s (%d字符), TUSHARE_ENABLED=%s (原始值: %s), "
+            "DEFAULT_CHINA_DATA_SOURCE=%s, ENABLE_DATA_CACHE=%s",
+            "已设置" if self.token else "未设置",
+            len(self.token),
+            self.enabled,
+            os.getenv("TUSHARE_ENABLED", "None"),
+            self.default_source,
+            self.cache_enabled,
+        )
     
     def is_valid(self) -> bool:
         """检查配置是否有效"""

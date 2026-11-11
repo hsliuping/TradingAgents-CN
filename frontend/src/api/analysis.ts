@@ -40,6 +40,7 @@ export interface SingleAnalysisRequest {
     engine?: AnalysisEngineType
     workflow_id?: string
     enable_trace?: boolean
+    force_refresh?: boolean  // 跳过分析缓存强制真跑（跑完覆盖缓存索引）
   }
 }
 
@@ -137,6 +138,11 @@ export const analysisApi = {
   precheck(symbol?: string): Promise<ApiResponse<any>> {
     const params = symbol ? { symbol } : {}
     return request.get('/api/analysis/precheck', { params })
+  },
+
+  // 五档分析画像摘要（档位选择器差异说明数据源，M4.1）
+  getDepthProfiles(): Promise<ApiResponse<any>> {
+    return request.get('/api/analysis/depth-profiles')
   },
 
   // 获取任务状态

@@ -65,7 +65,7 @@ def _load_returns(symbol: str, lookback_days: int) -> Optional[np.ndarray]:
 
 
 def _load_benchmark_returns(lookback_days: int = 252) -> Optional[np.ndarray]:
-    """从本地 DB 获取基准指数（沪深300）收益率，失败时用 AKShare 兜底。"""
+    """从本地 DB 获取基准指数（沪深300）收益率，失败时经 DataFacade 能力兜底。"""
     import pandas as pd
     end = _today()
     start = _days_ago(lookback_days * 2 + 50)
@@ -78,11 +78,19 @@ def _load_benchmark_returns(lookback_days: int = 252) -> Optional[np.ndarray]:
         df = df.dropna(subset=["close"]).sort_values("trade_date")
         df["return"] = df["close"].pct_change()
         return df["return"].dropna().values
-    # DB 无数据，用 AKShare 兜底
+    # DB 无数据，经 DataFacade 指数日线能力兜底
     try:
-        import akshare as ak
-        df = ak.stock_zh_index_daily(symbol="sh000300")
-        df = df.sort_values("date")
+        from tradingagents.dataflows.capability import query_capability_sync
+
+        df = query_capability_sync(
+            "index_daily",
+            ts_code="000300.SH",
+            start_date=start.replace("-", ""),
+            end_date=end.replace("-", ""),
+        )
+        if df is None or df.empty:
+            return None
+        df = df.sort_values("trade_date")  # 能力降序返回，重排为正序
         df["close"] = pd.to_numeric(df["close"], errors="coerce")
         df["return"] = df["close"].pct_change()
         df = df.dropna(subset=["return"]).tail(lookback_days)

@@ -32,6 +32,29 @@ logger = logging.getLogger(__name__)
 # 可通过 run_agentic(codegen_timeout=...) 按次覆盖（前端失败后可调大重试）
 CODEGEN_LLM_TIMEOUT_SECONDS = 480
 
+# codegen prompt 转储日志保留期（天），过期自动清理（日志治理 §5.5）
+CODEGEN_PROMPT_LOG_RETENTION_DAYS = 30
+
+
+def cleanup_codegen_prompt_logs(log_dir: Path, keep_days: int = CODEGEN_PROMPT_LOG_RETENTION_DAYS) -> int:
+    """清理过期的 codegen prompt 转储日志，返回删除文件数（保留 keep_days 天）"""
+    import time
+
+    removed = 0
+    try:
+        cutoff = time.time() - keep_days * 86400
+        for path in log_dir.glob("*.log"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed += 1
+            except OSError:
+                continue
+    except OSError:
+        return removed
+    return removed
+
+
 # ==================== 内置工具模板映射 ====================
 
 # category → 参考文件路径（相对于项目根目录）
@@ -308,6 +331,7 @@ class CodeGenerator:
             from datetime import datetime
             log_dir = Path("logs/codegen_prompts")
             log_dir.mkdir(parents=True, exist_ok=True)
+            cleanup_codegen_prompt_logs(log_dir)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_tool_id = re.sub(r"[^\w\-]", "_", spec.tool_id or "unknown")

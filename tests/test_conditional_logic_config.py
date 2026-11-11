@@ -48,7 +48,7 @@ class TestConditionalLogicConfig:
         config = DEFAULT_CONFIG.copy()
         config["max_debate_rounds"] = 3
         config["max_risk_discuss_rounds"] = 3
-        config["research_depth"] = "全面"
+        config["research_depth"] = "深度"
         
         graph = TradingAgentsGraph(
             selected_analysts=["market"],

@@ -1,9 +1,12 @@
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
+import logging
 import os
 import sys
 import warnings
+
+logger = logging.getLogger(__name__)
 
 # Legacy env var aliases (deprecated): map API_HOST/PORT/DEBUG -> HOST/PORT/DEBUG
 _LEGACY_ENV_ALIASES = {
@@ -103,6 +106,11 @@ class Settings(BaseSettings):
     # 速率限制
     RATE_LIMIT_ENABLED: bool = Field(default=True)
     DEFAULT_RATE_LIMIT: int = Field(default=100)  # 每分钟请求数
+
+    # 执行模式（研究/执行双模式提示词，设计文档 docs/05-design/v4.0/execution-advice-mode-design.md）
+    # 机器级开关：默认关闭（发行态）。开启后 agent 加载本地 execution 模板并旁路指令清洗；
+    # 库中无 execution 模板时自动回落研究模式，发行版此开关无效。
+    EXECUTION_ADVICE_MODE: bool = Field(default=False)
 
     # 日志配置
     LOG_LEVEL: str = Field(default="INFO")
@@ -403,6 +411,12 @@ class Settings(BaseSettings):
     NEWS_SYNC_HOURS_BACK: int = Field(default=24)
     NEWS_SYNC_MAX_PER_SOURCE: int = Field(default=50)
 
+    # ===== 公告数据同步配置（公告独立生命周期：与新闻分开排期/刷新节奏）=====
+    ANNOUNCEMENT_SYNC_ENABLED: bool = Field(default=True)
+    ANNOUNCEMENT_SYNC_CRON: str = Field(default="30 */2 * * *")  # 与新闻错开半小时
+    ANNOUNCEMENT_SYNC_HOURS_BACK: int = Field(default=24)
+    ANNOUNCEMENT_SYNC_MAX_PER_SOURCE: int = Field(default=50)
+
     # ===== 股票关注列表定时分析配置 =====
     WATCHLIST_ANALYSIS_ENABLED: bool = Field(default=False, description="启用股票关注列表定时分析")
     WATCHLIST_ANALYSIS_CRON: str = Field(default="0 8 * * 1-5", description="定时分析CRON表达式，默认工作日早8点")
@@ -448,17 +462,15 @@ class Settings(BaseSettings):
     def _check_secrets(self) -> "Settings":
         if not self.DEBUG:
             if self.JWT_SECRET in self._DEFAULT_SECRETS:
-                print(
+                logger.error(
                     "\n!!! FATAL: JWT_SECRET is still the default value. "
-                    "Set a strong random secret in .env before running in production.\n",
-                    file=sys.stderr,
+                    "Set a strong random secret in .env before running in production.\n"
                 )
                 sys.exit(1)
             if self.CSRF_SECRET in self._DEFAULT_SECRETS:
-                print(
+                logger.error(
                     "\n!!! FATAL: CSRF_SECRET is still the default value. "
-                    "Set a strong random secret in .env before running in production.\n",
-                    file=sys.stderr,
+                    "Set a strong random secret in .env before running in production.\n"
                 )
                 sys.exit(1)
         else:
@@ -469,10 +481,9 @@ class Settings(BaseSettings):
                     stacklevel=2,
                 )
         if "*" in self.ALLOWED_ORIGINS and not self.DEBUG:
-            print(
+            logger.error(
                 "\n!!! FATAL: ALLOWED_ORIGINS contains '*' in production. "
-                "Specify explicit origins in .env.\n",
-                file=sys.stderr,
+                "Specify explicit origins in .env.\n"
             )
             sys.exit(1)
         return self

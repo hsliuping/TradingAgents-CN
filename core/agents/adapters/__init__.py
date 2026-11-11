@@ -46,6 +46,9 @@ from .risky_analyst_v2 import RiskyAnalystV2
 from .safe_analyst_v2 import SafeAnalystV2
 from .neutral_analyst_v2 import NeutralAnalystV2
 from .risk_self_debate_v2 import RiskSelfDebateV2
+from .research_self_debate_v2 import ResearchSelfDebateV2
+from .risk_profile_v2 import RiskProfileV2
+from .scenario_simulator_v2 import ScenarioSimulatorV2
 from .chip_distribution_analyst_v2 import ChipDistributionAnalystV2
 
 # 复盘相关智能体 (v1 & v2)

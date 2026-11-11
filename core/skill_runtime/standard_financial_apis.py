@@ -13,6 +13,8 @@ import re
 from statistics import mean, median, pstdev
 from typing import Any, Dict, List, Optional, Tuple
 
+import pandas as pd
+
 logger = logging.getLogger(__name__)
 
 from .data_access import (
@@ -28,7 +30,6 @@ from .data_access import (
 )
 from .project_access import get_external_historical_data, get_external_valuation_data
 from .sync_wrappers import normalize_tabular_result, run_async_in_sync
-from .catalog import SUPPORTED_EXTERNAL_SOURCES, list_configured_external_sources
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -1097,6 +1098,28 @@ def get_cashflow_quality_trend(symbol: str, years: int = 10, source: Optional[st
     }
 
 
+def _annual_valuation_lows(valid_points: List[Dict[str, Any]], current_value: Optional[float]) -> List[Dict[str, Any]]:
+    """按年取估值低点（周期底对比原料），按低点值升序。
+
+    每年取窗口内最低读数及其日期；current_vs_low_pct = 当前值相对该年低点的溢价百分比。
+    只用真实读数，不插值（宁缺勿造）；日期缺失的样本跳过。
+    """
+    by_year: Dict[str, Dict[str, Any]] = {}
+    for point in valid_points:
+        date_text = str(point.get("date") or "")
+        year = date_text[:4]
+        if not year.isdigit():
+            continue
+        candidate = by_year.get(year)
+        if candidate is None or point["value"] < candidate["value"]:
+            by_year[year] = {"year": int(year), "date": date_text, "value": point["value"]}
+    lows = sorted(by_year.values(), key=lambda item: (item["value"], item["date"]))
+    for low in lows:
+        if current_value and low["value"]:
+            low["current_vs_low_pct"] = round((current_value / low["value"] - 1) * 100, 1)
+    return lows
+
+
 def get_historical_valuation_percentile(
     symbol: str,
     metrics: Optional[List[str]] = None,
@@ -1119,8 +1142,13 @@ def get_historical_valuation_percentile(
             window: 时间窗口 — start(起始日期), end(截止日期), lookback_years(回溯年数)
             data_source: 数据来源名称
             metrics: 各指标分位结果 {metric_name: {status, field, current_value,
-                     current_date, median, average, min, max, percentile, sample_count}}
+                     current_date, median, average, min, max, percentile, sample_count,
+                     annual_lows, current_vs_min_pct}}
                      （status 可能值: "success" | "insufficient_samples" | "no_data" | "unsupported_metric"）
+                     annual_lows: 年度估值低点对照（周期底对比原料），按值升序——
+                         [{year, date, value, current_vs_low_pct}, ...]
+                         current_vs_low_pct = 当前值相对该年度低点的溢价百分比
+                     current_vs_min_pct: 当前值相对窗口内最低点的溢价百分比
             warnings: 警告信息列表
     """
     normalized_symbol = _normalize_symbol(symbol)
@@ -1171,6 +1199,7 @@ def get_historical_valuation_percentile(
         current = valid_points[0]
         values = [point["value"] for point in valid_points]
         percentile = _percentile_rank(values, current["value"])
+        annual_lows = _annual_valuation_lows(valid_points, current["value"])
         metric_results[requested_metric] = {
             "status": "success" if len(valid_points) >= 60 else "insufficient_samples",
             "field": field,
@@ -1182,6 +1211,8 @@ def get_historical_valuation_percentile(
             "max": max(values),
             "percentile": percentile,
             "sample_count": len(valid_points),
+            "annual_lows": annual_lows,
+            "current_vs_min_pct": annual_lows[0].get("current_vs_low_pct") if annual_lows else None,
         }
         if len(valid_points) < 60:
             warnings.append(f"{requested_metric} 有效样本不足 60 个，分位数参考价值有限。")
@@ -2463,6 +2494,339 @@ def get_shareholder_return_metrics(
     }
 
 
+def get_moat_metrics(symbol: str, years: int = 10, allow_remote_fetch: bool = False) -> Dict[str, Any]:
+    """返回护城河结构化原料（数据聚合版，不含护城河评级）。
+
+    聚合资本回报、利润率、现金流含金量、财务结构、成长质量、股东回报六个维度的
+    年度序列统计，供分析师结合行业与商业模式自行定性判断竞争优势；
+    本函数只做数据聚合与统计，不输出任何评级、评分或结论。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        years: 请求的年报年数（默认 10，子接口会截断到 [1, 15]）
+        allow_remote_fetch: 分红明细本地缺失时是否现场拉取 Tushare
+            （口径同 get_shareholder_return_metrics；交互式场景必须传 False）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 访问这些 key）——
+            status: 状态: "success"（至少一个维度有数据）| "no_data"
+            symbol: 标准化后的 6 位股票代码
+            years_used: 资本回报主序列的实际年数
+            note: 方法说明（仅聚合统计，不做护城河评级）
+            dimensions: 维度聚合 dict，各维度含 status/summary/latest/years_used ——
+                capital_efficiency: 盈利能力·资本回报 — summary（roe/roa/roic/
+                      asset_turnover/equity_multiplier 各统计块）, latest（最近年报值）
+                pricing_power: 利润率水平与稳定性 — summary（gross_margin/
+                      netprofit_margin/operating_margin/expense_ratio 各统计块）, latest
+                cashflow_quality: 盈利含金量 — summary（ocf_to_net_profit/
+                      fcf_to_net_profit/ocf_margin/fcf_margin 各统计块）, latest
+                financial_structure: 财务结构 — summary（debt_to_assets/
+                      debt_to_equity/ocf_to_total_liab 各统计块）, latest
+                growth: 成长质量 — cagr（revenue/net_profit/operating_cashflow/
+                      free_cashflow）, quality_flags（正增长年份占比等）
+                shareholder_return: 股东回报 — metrics（股息率/分红连续性等）
+            dimension_status: 各维度 status 速查 dict
+            warnings: 警告信息列表（聚合各维度告警 + 无数据维度提示）
+    """
+    normalized_symbol = _normalize_symbol(symbol)
+    dimensions: Dict[str, Any] = {}
+    dimension_status: Dict[str, str] = {}
+    warnings: List[str] = []
+
+    def _collect(key: str, label: str, func) -> Any:
+        try:
+            result = func()
+        except Exception as exc:  # 单维度失败不阻断其余维度
+            logger.warning(f"[get_moat_metrics] {label} 维度聚合失败: {exc}")
+            dimension_status[key] = "no_data"
+            warnings.append(f"{label}维度计算失败，已跳过。")
+            return None
+        dimensions[key] = result
+        dimension_status[key] = result.get("status", "no_data")
+        return result
+
+    def _trend_block(result: Dict[str, Any], stats_key: str, latest_keys: List[str]) -> Dict[str, Any]:
+        """从带 trend/summary 的子接口结果中提取统计块与最近年报值。"""
+        trend = result.get("trend") or []
+        latest = {key: (trend[0] or {}).get(key) for key in latest_keys} if trend else {}
+        return {
+            "status": result.get("status"),
+            "years_used": result.get("years_used"),
+            "summary": result.get(stats_key) or {},
+            "latest": latest,
+        }
+
+    capital = _collect("capital_efficiency", "资本回报", lambda: get_capital_efficiency_trend(normalized_symbol, years=years))
+    if capital:
+        dimensions["capital_efficiency"] = _trend_block(
+            capital, "summary", ["roe", "roa", "roic", "asset_turnover", "equity_multiplier"]
+        )
+    margin = _collect("pricing_power", "利润率", lambda: get_margin_stability_metrics(normalized_symbol, years=years))
+    if margin:
+        dimensions["pricing_power"] = _trend_block(
+            margin, "metrics", ["gross_margin", "netprofit_margin", "operating_margin", "expense_ratio"]
+        )
+    cashflow = _collect("cashflow_quality", "现金流含金量", lambda: get_cashflow_quality_trend(normalized_symbol, years=years))
+    if cashflow:
+        dimensions["cashflow_quality"] = _trend_block(
+            cashflow, "summary", ["ocf_to_net_profit", "fcf_to_net_profit", "ocf_margin", "fcf_margin"]
+        )
+    solvency = _collect("financial_structure", "财务结构", lambda: get_debt_solvency_trend(normalized_symbol, years=years))
+    if solvency:
+        dimensions["financial_structure"] = _trend_block(
+            solvency, "summary", ["debt_to_assets", "debt_to_equity", "ocf_to_total_liab"]
+        )
+    growth = _collect("growth", "成长质量", lambda: get_growth_quality_metrics(normalized_symbol, years=years))
+    if growth:
+        dimensions["growth"] = {
+            "status": growth.get("status"),
+            "years_used": growth.get("years_used"),
+            "cagr": growth.get("cagr") or {},
+            "quality_flags": growth.get("quality_flags") or {},
+        }
+    shareholder = _collect(
+        "shareholder_return", "股东回报",
+        lambda: get_shareholder_return_metrics(normalized_symbol, years=max(5, min(int(years or 10), 10)), allow_remote_fetch=allow_remote_fetch),
+    )
+    if shareholder:
+        dimensions["shareholder_return"] = {
+            "status": shareholder.get("status"),
+            "years_used": shareholder.get("coverage", {}).get("annual_count"),
+            "metrics": shareholder.get("metrics") or {},
+        }
+
+    def _has_data(key: str) -> bool:
+        block = dimensions.get(key) or {}
+        summary = block.get("summary") or {}
+        for stats in summary.values():
+            if isinstance(stats, dict) and (stats.get("count") or 0) > 0:
+                return True
+        return bool(block.get("cagr") or block.get("quality_flags") or block.get("metrics"))
+
+    has_any_data = any(
+        status == "success" and _has_data(key)
+        for key, status in dimension_status.items()
+    )
+    for key, status in dimension_status.items():
+        if status != "success":
+            warnings.append(f"{key} 维度无数据。")
+
+    return {
+        "status": "success" if has_any_data else "no_data",
+        "symbol": normalized_symbol,
+        "years_used": (dimensions.get("capital_efficiency") or {}).get("years_used"),
+        "note": "护城河结构化原料：仅聚合财务序列统计（均值/中位数/极值/离散度），"
+                "不做护城河评级；定性判断由分析师结合行业与商业模式自行得出。",
+        "dimensions": dimensions,
+        "dimension_status": dimension_status,
+        "warnings": warnings,
+    }
+
+
+def _extract_per_share_fields(record: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+    """从标准财务记录中提取 EPS/BPS。
+
+    优先级：扁平顶层字段（新落库）→ financial_indicators 分项 → raw_data 落库原始指标（存量数据）。
+    """
+    indicators = record.get("financial_indicators") or {}
+    raw = (record.get("raw_data") or {}).get("financial_indicators") or {}
+    eps = _pick_number(record, "eps", "basic_eps")
+    if eps is None:
+        eps = _pick_number(indicators, "eps", "basic_eps")
+    if eps is None:
+        eps = _pick_number(raw, "eps", "basic_eps")
+    bps = _pick_number(record, "bps")
+    if bps is None:
+        bps = _pick_number(indicators, "bps")
+    if bps is None:
+        bps = _pick_number(raw, "bps")
+    return eps, bps
+
+
+def _resolve_share_count(record: Dict[str, Any], symbol: str) -> Tuple[Optional[float], str]:
+    """解析总股本（单位：股）。
+
+    优先年报 balance_sheet.total_share（单位：股），兜底 stock_basic_info.total_share（单位：万股）。
+    """
+    balance = record.get("balance_sheet") or {}
+    total_share = _pick_number(balance, "total_share")
+    if total_share is not None and total_share > 0:
+        return total_share, "balance_sheet.total_share"
+    basic = get_stock_basic_info(symbol) or {}
+    basic_share = _pick_number(basic, "total_share")
+    if basic_share is not None and basic_share > 0:
+        return basic_share * 10000, "stock_basic_info.total_share(万股换算)"
+    return None, ""
+
+
+def get_intrinsic_value_range(symbol: str, lookback_years: int = 10) -> Dict[str, Any]:
+    """返回简版内在价值区间（历史中枢回归法，非 DCF、不含增长假设）。
+
+    以近 N 年历史 PE/PB 中枢区间（min/median/max）乘最近年报 EPS/BPS 构造价格带，
+    并给出当前价在历史分位与价格带中的位置；仅供估值背景参考，不构成投资建议。
+
+    Args:
+        symbol: A 股股票代码（6 位数字或含交易所前后缀）
+        lookback_years: 估值历史回溯年数（默认 10，会被截断到 [1, 15]）
+
+    Returns:
+        dict: 字段说明（代码中使用 .get() 或 [] 访问这些 key）——
+            status: 状态: "success"（价格带与现价齐备）| "partial_or_no_data" | "no_data"
+            symbol: 标准化后的 6 位股票代码
+            name: 证券名称
+            current_price: 当前价格
+            per_share_basis: 每股基准 — eps_annual/eps_period/eps_source, bps_annual/
+                     bps_period/bps_source（口径为最近年报，非 TTM）
+            historical_center: 历史估值中枢 — lookback_years, pe_ttm/{median,
+                     average, min, max, percentile, sample_count, status}, pb/{...}
+            price_band: 价格带 — pe_channel/{conservative, neutral, optimistic,
+                     basis, center}, pb_channel/{...}, combined/{low, neutral, high}
+            position: 当前位置 — current_vs_combined(within_band/above_band/
+                     below_band), position_pct, pe_percentile, pb_percentile
+            method_note: 方法说明（历史中枢回归法口径声明）
+            warnings: 警告信息列表
+    """
+    normalized_symbol = _normalize_symbol(symbol)
+    warnings: List[str] = []
+    result: Dict[str, Any] = {
+        "status": "no_data",
+        "symbol": normalized_symbol,
+        "method_note": "历史中枢回归法：以近 N 年历史 PE/PB 中枢区间（min/median/max）乘最近年报 EPS/BPS 构造价格带；"
+                       "非 DCF、不含增长假设；EPS/BPS 为最近年报口径（非 TTM）；仅供估值背景参考，不构成投资建议。",
+    }
+
+    current_price = None
+    try:
+        snapshot = get_current_valuation_snapshot(normalized_symbol)
+        current_price = _pick_number(snapshot or {}, "current_price")
+        result["name"] = (snapshot or {}).get("name")
+        result["current_price"] = current_price
+    except Exception as exc:
+        logger.warning(f"[get_intrinsic_value_range] 当前估值快照获取失败: {exc}")
+        warnings.append("当前估值快照获取失败，现价相关位置信息缺失。")
+
+    percentile_result: Dict[str, Any] = {}
+    historical_center: Dict[str, Any] = {}
+    try:
+        percentile_result = get_historical_valuation_percentile(
+            normalized_symbol, metrics=["pe_ttm", "pb"], lookback_years=lookback_years
+        )
+        for metric_name in ("pe_ttm", "pb"):
+            stats = (percentile_result.get("metrics") or {}).get(metric_name) or {}
+            if not stats:
+                continue
+            historical_center[metric_name] = {
+                key: stats.get(key)
+                for key in ("status", "median", "average", "min", "max", "percentile", "sample_count")
+            }
+    except Exception as exc:
+        logger.warning(f"[get_intrinsic_value_range] 历史估值分位获取失败: {exc}")
+        warnings.append("历史估值分位获取失败，价格带无法构造。")
+    result["historical_center"] = {"lookback_years": max(1, min(int(lookback_years or 10), 15)), **historical_center}
+
+    per_share: Dict[str, Any] = {}
+    latest_annual: Dict[str, Any] = {}
+    try:
+        for record in get_stock_financial_periods(normalized_symbol, limit=40):
+            if record.get("report_type") == "annual":
+                latest_annual = record
+                break
+    except Exception as exc:
+        logger.warning(f"[get_intrinsic_value_range] 年报序列读取失败: {exc}")
+        warnings.append("年报序列读取失败，EPS/BPS 缺失。")
+
+    if latest_annual:
+        eps, bps = _extract_per_share_fields(latest_annual)
+        eps_source = bps_source = "fina_indicator(年报)"
+        share_count, share_source = _resolve_share_count(latest_annual, normalized_symbol)
+        if eps is None and share_count:
+            net_profit = _pick_number(latest_annual, "net_profit")
+            if net_profit is not None:
+                eps = net_profit / share_count
+                eps_source = f"计算值: 归母净利润/总股本({share_source})"
+        if bps is None and share_count:
+            equity = _pick_number(latest_annual, "total_equity")
+            if equity is not None:
+                bps = equity / share_count
+                bps_source = f"计算值: 归母净资产/总股本({share_source})"
+        period = latest_annual.get("report_period") or ""
+        per_share = {
+            "eps_annual": eps,
+            "eps_period": period,
+            "eps_source": eps_source if eps is not None else None,
+            "bps_annual": bps,
+            "bps_period": period,
+            "bps_source": bps_source if bps is not None else None,
+        }
+        if eps is None:
+            warnings.append("最近年报 EPS 缺失（且无法用净利润/总股本兜底），PE 通道价格带不可用。")
+        if bps is None:
+            warnings.append("最近年报 BPS 缺失（且无法用净资产/总股本兜底），PB 通道价格带不可用。")
+    else:
+        warnings.append("本地无年报财务数据，EPS/BPS 缺失。")
+    result["per_share_basis"] = per_share
+
+    def _build_channel(stats: Dict[str, Any], per_share_value: Optional[float], label: str, center: str) -> Optional[Dict[str, Any]]:
+        if per_share_value is None or per_share_value <= 0:
+            return None
+        if stats.get("status") not in ("success", "insufficient_samples"):
+            return None
+        low, mid, high = stats.get("min"), stats.get("median"), stats.get("max")
+        if None in (low, mid, high):
+            return None
+        if stats.get("status") == "insufficient_samples":
+            warnings.append(f"{label}历史样本不足 60 个，中枢区间参考价值有限。")
+        return {
+            "conservative": round(per_share_value * low, 2),
+            "neutral": round(per_share_value * mid, 2),
+            "optimistic": round(per_share_value * high, 2),
+            "basis": f"最近年报{label}乘数基准",
+            "center": center,
+        }
+
+    pe_channel = _build_channel(
+        historical_center.get("pe_ttm") or {}, per_share.get("eps_annual"), "EPS", "pe_ttm"
+    )
+    pb_channel = _build_channel(
+        historical_center.get("pb") or {}, per_share.get("bps_annual"), "BPS", "pb_mrq"
+    )
+    result["price_band"] = {"pe_channel": pe_channel, "pb_channel": pb_channel}
+    if pe_channel and pb_channel:
+        combined_low = min(pe_channel["conservative"], pb_channel["conservative"])
+        combined_high = max(pe_channel["optimistic"], pb_channel["optimistic"])
+        combined_neutral = round((pe_channel["neutral"] + pb_channel["neutral"]) / 2, 2)
+    elif pe_channel or pb_channel:
+        channel = pe_channel or pb_channel
+        combined_low, combined_neutral, combined_high = channel["conservative"], channel["neutral"], channel["optimistic"]
+        warnings.append("仅一条通道可用，综合价格带等于该通道区间。")
+    else:
+        combined_low = combined_neutral = combined_high = None
+    result["price_band"]["combined"] = (
+        {"low": combined_low, "neutral": combined_neutral, "high": combined_high}
+        if combined_low is not None else None
+    )
+
+    position: Dict[str, Any] = {}
+    if current_price is not None and combined_low is not None and combined_high > combined_low:
+        if current_price < combined_low:
+            position["current_vs_combined"] = "below_band"
+        elif current_price > combined_high:
+            position["current_vs_combined"] = "above_band"
+        else:
+            position["current_vs_combined"] = "within_band"
+            position["position_pct"] = round((current_price - combined_low) / (combined_high - combined_low), 4)
+    position["pe_percentile"] = historical_center.get("pe_ttm", {}).get("percentile")
+    position["pb_percentile"] = historical_center.get("pb", {}).get("percentile")
+    result["position"] = position
+
+    if combined_low is not None and current_price is not None:
+        result["status"] = "success"
+    elif combined_low is not None or current_price is not None or per_share:
+        result["status"] = "partial_or_no_data"
+    result["warnings"] = warnings
+    return result
+
+
 def get_portfolio_risk_profile(positions: List[Dict[str, Any]], start_date: Optional[str] = None, end_date: Optional[str] = None, limit: int = 300) -> Dict[str, Any]:
     """返回持仓组合风险画像。
 
@@ -2666,6 +3030,87 @@ def get_company_announcements(symbol: str, lookback_days: int = 365, limit: int 
     }
 
 
+def _get_pinned_capability_handle(capability_id: str, source: str):
+    """指定数据源的查询句柄：把 facade 降级顺序限制为单一源（保持 source 参数语义）"""
+    from tradingagents.dataflows.capability.facade import CapabilityHandle
+
+    class _PinnedCapabilityHandle(CapabilityHandle):
+        def _resolve_source_order(self, registered: List[str]) -> List[str]:
+            return [source]
+
+    return _PinnedCapabilityHandle(capability_id)
+
+
+def _clean_pledge_rows(df: "pd.DataFrame") -> List[Dict[str, Any]]:
+    """facade 标准化行转 dict，缺失值（NaN/NA）归一为 None，避免下游 pd.NA 真值歧义"""
+    rows: List[Dict[str, Any]] = []
+    for record in df.to_dict("records"):
+        clean: Dict[str, Any] = {}
+        for key, value in record.items():
+            if value is None:
+                clean[key] = None
+                continue
+            try:
+                if pd.isna(value):
+                    clean[key] = None
+                    continue
+            except (TypeError, ValueError):
+                pass
+            clean[key] = value
+        rows.append(clean)
+    return rows
+
+
+def _query_pledge_detail_rows(
+    preferred_source: Optional[str] = None,
+    **params: Any,
+) -> Tuple[List[Dict[str, Any]], Optional[str], Dict[str, str], Dict[str, str]]:
+    """经 DataFacade 查询 pledge_detail 能力，返回（标准事件行, 实际数据源, 逐源状态, 逐源错误）。
+
+    降级语义由 facade 承担：请求失败/None 降级到下一源，成功空数据不降级。
+    data_source_status 三态语义与迁移前兼容：
+    - success_with_data: 源返回数据（facade source 列标记实际来源）
+    - success_empty: 源成功但无数据（适配器经 DataFrame.attrs 标记回传）
+    - error: facade 尽试全部源仍无数据且无成功空标记（请求失败/源不可用）
+    """
+    from tradingagents.dataflows.capability.facade import get_data_facade
+    from tradingagents.dataflows.capability.registry import registry
+    from tradingagents.dataflows.capability.schemas.pledge_detail import SOURCE_STATUS_ATTR
+
+    source_call_status: Dict[str, str] = {}
+    source_call_errors: Dict[str, str] = {}
+
+    if preferred_source:
+        handle = _get_pinned_capability_handle("pledge_detail", preferred_source)
+    else:
+        handle = get_data_facade().get_capability("pledge_detail")
+
+    try:
+        df = run_async_in_sync(handle.query(**params))
+    except Exception as exc:
+        logger.error("查询 pledge_detail 能力失败: %s", exc)
+        failed = preferred_source or "pledge_detail"
+        source_call_status[failed] = "error"
+        source_call_errors[failed] = str(exc)
+        return [], None, source_call_status, source_call_errors
+
+    if df is not None and not df.empty:
+        data_source = str(df["source"].iloc[0])
+        source_call_status[data_source] = "success_with_data"
+        return _clean_pledge_rows(df), data_source, source_call_status, source_call_errors
+
+    # 空结果：区分"源成功但无数据"（适配器标记）与"全部源请求失败"
+    marker = dict(df.attrs.get(SOURCE_STATUS_ATTR) or {}) if df is not None else {}
+    if marker:
+        source_call_status.update(marker)
+    else:
+        tried = [preferred_source] if preferred_source else registry.get_sources("pledge_detail")
+        for source_id in tried:
+            source_call_status[source_id] = "error"
+            source_call_errors[source_id] = "请求失败、源不可用或无权限"
+    return [], None, source_call_status, source_call_errors
+
+
 def get_pledge_risk_profile(symbol: str, source: Optional[str] = None) -> Dict[str, Any]:
     """股权质押风险画像：获取质押比例、未解押规模、前几大股东质押情况、风险等级。
 
@@ -2689,60 +3134,12 @@ def get_pledge_risk_profile(symbol: str, source: Optional[str] = None) -> Dict[s
     """
     normalized_symbol = _normalize_symbol(symbol)
     ts_code = _to_ts_code(normalized_symbol)
-    rows = []
-    data_source = None
 
-    def _resolve_sources(preferred_source: Optional[str], market_category: str) -> List[str]:
-        if preferred_source:
-            return [preferred_source]
-        configured = list_configured_external_sources(market_category=market_category)
-        if configured:
-            return configured
-        return list(SUPPORTED_EXTERNAL_SOURCES.get(market_category, ()))
-
-    # 记录每个数据源的具体状态，用于区分"无质押"(业务正确) vs "数据源错误"
-    source_call_status: Dict[str, str] = {}  # source_id -> "success_empty" | "success_with_data" | "error"
-    source_call_errors: Dict[str, str] = {}
-
-    resolved_sources = _resolve_sources(source, "a_shares")
-    logger.info(f"🔬 [get_pledge_risk_profile] _resolve_sources 返回: {resolved_sources} (source={source!r}, symbol={normalized_symbol}) | PID={os.getpid()}")
-    for source_id in resolved_sources:
-        try:
-            if source_id == "tushare":
-                logger.info(f"🔬 [get_pledge_risk_profile] 尝试 tushare | PID={os.getpid()}")
-                from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-                from .sync_wrappers import run_async_in_sync
-
-                provider = get_tushare_provider()
-                df = run_async_in_sync(provider.get_pledge_detail(ts_code=ts_code))
-                if df is not None and not df.empty:
-                    rows = df.to_dict("records")
-                    data_source = "tushare"
-                    source_call_status[source_id] = "success_with_data"
-                    logger.info(f"🔬 [get_pledge_risk_profile] tushare ✅ 返回 {len(rows)} 行 | PID={os.getpid()}")
-                    break
-                else:
-                    # Tushare 调用成功但返回空 DataFrame —— 该股票可能真的无质押
-                    source_call_status[source_id] = "success_empty"
-                    logger.info(f"🔬 [get_pledge_risk_profile] tushare ⚠️ 返回空 (success_empty) | PID={os.getpid()}")
-            elif source_id == "akshare":
-                logger.info(f"🔬 [get_pledge_risk_profile] 尝试 akshare | PID={os.getpid()}")
-                from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
-                from .sync_wrappers import run_async_in_sync
-
-                provider = get_akshare_provider()
-                df = run_async_in_sync(provider.get_pledge_detail(symbol=normalized_symbol))
-                if df is not None and not df.empty:
-                    rows = df.to_dict("records")
-                    data_source = "akshare"
-                    source_call_status[source_id] = "success_with_data"
-                    break
-                else:
-                    source_call_status[source_id] = "success_empty"
-        except Exception as exc:
-            logger.error("🔬 [get_pledge_risk_profile] 数据源 %s 调用异常: %s | PID=%s", source_id, exc, os.getpid())
-            source_call_status[source_id] = "error"
-            source_call_errors[source_id] = str(exc)
+    # 取数经 DataFacade（pledge_detail 能力），失败降级/空数据不降级由 facade 承担
+    rows, data_source, source_call_status, source_call_errors = _query_pledge_detail_rows(
+        preferred_source=source,
+        ts_code=ts_code,
+    )
 
     # 最终汇总日志（无论什么级别都打出来，方便排查）
     logger.info(
@@ -2814,10 +3211,10 @@ def get_pledge_risk_profile(symbol: str, source: Optional[str] = None) -> Dict[s
     if rows:
         logger.info(f"🔍 [质押调试] 可用字段: {list(rows[0].keys())}")
         for i, row in enumerate(rows[:3]):
-            is_release_val = row.get("is_release")
+            is_release_val = row.get("is_released")
             pledge_amt = row.get("pledge_amount")
-            p_total_ratio = row.get("p_total_ratio")
-            logger.info(f"🔍 [质押调试] 记录#{i+1}: is_release={is_release_val!r}, pledge_amount={pledge_amt!r}, p_total_ratio={p_total_ratio!r}")
+            p_total_ratio = row.get("pledge_total_ratio")
+            logger.info(f"🔍 [质押调试] 记录#{i+1}: is_released={is_release_val!r}, pledge_amount={pledge_amt!r}, pledge_total_ratio={p_total_ratio!r}")
 
     total_pledge_ratio = 0.0
     outstanding_amount = 0.0
@@ -2825,11 +3222,11 @@ def get_pledge_risk_profile(symbol: str, source: Optional[str] = None) -> Dict[s
     recent_events = []
 
     for idx, row in enumerate(rows):
-        pledge_amt = _pick_number(row, "pledge_amount", "质押股份数量", "质押数量") or 0.0
-        ratio = _pick_number(row, "p_total_ratio", "占总股本比例", "占总股本比例(%)") or 0.0
-        holder = str(row.get("holder_name") or row.get("股东名称") or row.get("holder") or "未知")
-        is_released = str(row.get("is_release") or row.get("是否解押") or "").strip() in {"1", "是", "已解押", "True", "true"}
-        ann_date = str(row.get("ann_date") or row.get("公告日期") or "")
+        pledge_amt = _pick_number(row, "pledge_amount") or 0.0
+        ratio = _pick_number(row, "pledge_total_ratio") or 0.0
+        holder = str(row.get("holder_name") or "未知")
+        is_released = str(row.get("is_released") or "").strip() in {"1", "是", "已解押", "True", "true"}
+        ann_date = str(row.get("ann_date") or "")
 
         # 🔍 只打印前 5 条的调试日志
         if idx < 5:
@@ -2848,8 +3245,8 @@ def get_pledge_risk_profile(symbol: str, source: Optional[str] = None) -> Dict[s
                 "holder_name": holder,
                 "total_pledged": 0.0,
                 "outstanding": 0.0,
-                "holding_amount": _pick_number(row, "holding_amount", "持股总数", "持股数量") or 0.0,
-                "holding_ratio": _pick_number(row, "h_total_ratio", "持股占总股本比例") or 0.0,
+                "holding_amount": _pick_number(row, "holding_amount") or 0.0,
+                "holding_ratio": _pick_number(row, "holding_total_ratio") or 0.0,
                 "pledge_count": 0,
                 "release_count": 0,
             }
@@ -2866,9 +3263,9 @@ def get_pledge_risk_profile(symbol: str, source: Optional[str] = None) -> Dict[s
                 "holder_name": holder,
                 "pledge_amount": pledge_amt,
                 "is_release": is_released,
-                "start_date": _normalize_date(row.get("start_date") or row.get("质押开始日期") or ""),
-                "end_date": _normalize_date(row.get("end_date") or row.get("质押结束日期") or ""),
-                "pledgor": row.get("pledgor") or row.get("质押方") or "",
+                "start_date": _normalize_date(row.get("start_date") or ""),
+                "end_date": _normalize_date(row.get("end_date") or ""),
+                "pledgor": row.get("pledgor") or "",
             })
 
     top_pledgers = sorted(
@@ -2978,59 +3375,12 @@ def get_pledge_historical_series(
     """
     normalized_symbol = _normalize_symbol(symbol)
     ts_code = _to_ts_code(normalized_symbol)
-    rows = []
-    data_source = None
 
-    def _resolve_sources(preferred_source: Optional[str], market_category: str) -> List[str]:
-        if preferred_source:
-            return [preferred_source]
-        configured = list_configured_external_sources(market_category=market_category)
-        if configured:
-            return configured
-        return list(SUPPORTED_EXTERNAL_SOURCES.get(market_category, ()))
-
-    # 记录每个数据源的具体状态（与 get_pledge_risk_profile 保持一致）
-    source_call_status: Dict[str, str] = {}
-    source_call_errors: Dict[str, str] = {}
-
-    resolved_sources = _resolve_sources(source, "a_shares")
-    logger.info(f"🔬 [get_pledge_historical_series] _resolve_sources 返回: {resolved_sources} (source={source!r}, symbol={normalized_symbol}) | PID={os.getpid()}")
-    for source_id in resolved_sources:
-        try:
-            if source_id == "tushare":
-                logger.info(f"🔬 [get_pledge_historical_series] 尝试 tushare | PID={os.getpid()}")
-                from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-                from .sync_wrappers import run_async_in_sync
-
-                provider = get_tushare_provider()
-                df = run_async_in_sync(provider.get_pledge_detail(ts_code=ts_code))
-                if df is not None and not df.empty:
-                    rows = df.to_dict("records")
-                    data_source = "tushare"
-                    source_call_status[source_id] = "success_with_data"
-                    logger.info(f"🔬 [get_pledge_historical_series] tushare ✅ 返回 {len(rows)} 行 | PID={os.getpid()}")
-                    break
-                else:
-                    source_call_status[source_id] = "success_empty"
-                    logger.info(f"🔬 [get_pledge_historical_series] tushare ⚠️ 返回空 (success_empty) | PID={os.getpid()}")
-            elif source_id == "akshare":
-                logger.info(f"🔬 [get_pledge_historical_series] 尝试 akshare | PID={os.getpid()}")
-                from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
-                from .sync_wrappers import run_async_in_sync
-
-                provider = get_akshare_provider()
-                df = run_async_in_sync(provider.get_pledge_detail(symbol=normalized_symbol))
-                if df is not None and not df.empty:
-                    rows = df.to_dict("records")
-                    data_source = "akshare"
-                    source_call_status[source_id] = "success_with_data"
-                    break
-                else:
-                    source_call_status[source_id] = "success_empty"
-        except Exception as exc:
-            logger.error("🔬 [get_pledge_historical_series] 数据源 %s 调用异常: %s | PID=%s", source_id, exc, os.getpid())
-            source_call_status[source_id] = "error"
-            source_call_errors[source_id] = str(exc)
+    # 取数经 DataFacade（pledge_detail 能力），失败降级/空数据不降级由 facade 承担
+    rows, data_source, source_call_status, source_call_errors = _query_pledge_detail_rows(
+        preferred_source=source,
+        ts_code=ts_code,
+    )
 
     # 最终汇总日志（无论什么级别都打出来，方便排查）
     logger.info(
@@ -3120,11 +3470,11 @@ def get_pledge_historical_series(
 
     pledge_events = []
     for row in rows:
-        pledge_amt = _pick_number(row, "pledge_amount", "质押股份数量", "质押数量") or 0.0
-        ratio = _pick_number(row, "p_total_ratio", "占总股本比例", "占总股本比例(%)") or 0.0
-        s_date = _parse_date(row.get("start_date") or row.get("质押开始日期") or row.get("ann_date"))
-        e_date = _parse_date(row.get("end_date") or row.get("质押结束日期"))
-        is_released = str(row.get("is_release") or row.get("是否解押") or "").strip() in {"1", "是", "已解押", "True", "true"}
+        pledge_amt = _pick_number(row, "pledge_amount") or 0.0
+        ratio = _pick_number(row, "pledge_total_ratio") or 0.0
+        s_date = _parse_date(row.get("start_date") or row.get("ann_date"))
+        e_date = _parse_date(row.get("end_date"))
+        is_released = str(row.get("is_released") or "").strip() in {"1", "是", "已解押", "True", "true"}
 
         if is_released and e_date is None:
             e_date = _parse_date(row.get("ann_date"))
@@ -3134,7 +3484,7 @@ def get_pledge_historical_series(
             "ratio": ratio,
             "start_date": s_date,
             "end_date": e_date if is_released else None,
-            "holder": str(row.get("holder_name") or row.get("股东名称") or "未知"),
+            "holder": str(row.get("holder_name") or "未知"),
         })
 
     def _period_key(dt: datetime, ptype: str) -> str:

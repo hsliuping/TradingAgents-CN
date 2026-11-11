@@ -276,20 +276,12 @@
             <span>快速（1级）</span>
             <span class="text-gray-400 text-xs ml-2">任何模型都可以</span>
           </el-option>
-          <el-option value="基础" label="基础（2级）">
-            <span>基础（2级）</span>
-            <span class="text-gray-400 text-xs ml-2">基础级以上</span>
-          </el-option>
           <el-option value="标准" label="标准（3级）">
             <span>标准（3级）</span>
             <span class="text-gray-400 text-xs ml-2">标准级以上</span>
           </el-option>
-          <el-option value="深度" label="深度（4级）">
-            <span>深度（4级）</span>
-            <span class="text-gray-400 text-xs ml-2">高级以上，需推理能力</span>
-          </el-option>
-          <el-option value="全面" label="全面（5级）">
-            <span>全面（5级）</span>
+          <el-option value="深度" label="深度（5级）">
+            <span>深度（5级）</span>
             <span class="text-gray-400 text-xs ml-2">专业级以上，强推理能力</span>
           </el-option>
         </el-select>
@@ -402,7 +394,7 @@ const defaultFormData = {
   capability_level: 2,  // 默认标准级
   suitable_roles: ['both'],  // 默认两者都适合
   features: ['tool_calling'],  // 默认支持工具调用
-  recommended_depths: ['快速', '基础', '标准'],  // 默认推荐1-3级分析
+  recommended_depths: ['快速', '标准', '深度'],  // 默认推荐三档
   performance_metrics: {
     speed: 3,
     cost: 3,

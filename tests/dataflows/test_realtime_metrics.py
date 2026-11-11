@@ -32,49 +32,63 @@ def test_validate_pe_pb():
 
 def test_calculate_realtime_pe_pb_with_mock_data(monkeypatch):
     """测试实时PE/PB计算（使用mock数据）"""
-    # Mock MongoDB数据
+    # Mock MongoDB数据（对齐现役实现：market_quotes / stock_basic_info / stock_financial_data 三集合）
     class MockCollection:
-        def find_one(self, query):
+        def __init__(self, name):
+            self.name = name
+
+        def find(self, query, *args, **kwargs):
+            # 现役实现从 stock_basic_info 多源合并读取（find 返回记录列表）
+            return [
+                {
+                    "code": "000001",
+                    "pe_ttm": 20.0,        # 基于昨日收盘价的 TTM 市盈率
+                    "pe": 20.0,
+                    "pb": 5.0,
+                    "total_share": 100000,  # 10万万股 = 10亿股
+                }
+            ]
+
+        def find_one(self, query, *args, **kwargs):
             code = query.get("code")
-            if code == "000001":
-                if "market_quotes" in str(self):
-                    # 返回实时行情
-                    return {
-                        "code": "000001",
-                        "close": 10.5,
-                        "updated_at": "2025-10-14T10:30:00"
-                    }
-                else:
-                    # 返回基础信息
-                    return {
-                        "code": "000001",
-                        "total_share": 100000,  # 10万万股 = 10亿股
-                        "net_profit": 50000,    # 5万万元 = 5亿元
-                        "total_hldr_eqy_exc_min_int": 200000  # 20万万元 = 20亿元
-                    }
+            if code != "000001":
+                return None
+            if self.name == "market_quotes":
+                # 返回实时行情
+                return {
+                    "code": "000001",
+                    "close": 10.5,
+                    "pre_close": 10.0,
+                    "updated_at": "2025-10-14T10:30:00"
+                }
+            if self.name == "stock_financial_data":
+                # 返回财务数据（净资产，单位：元）
+                return {"code": "000001", "total_equity": 2_000_000_000}
             return None
-    
+
     class MockDB:
-        def __getitem__(self, name):
-            return MockCollection()
-    
+        def __getattr__(self, name):
+            return MockCollection(name)
+
     class MockClient:
         def __getitem__(self, name):
             return MockDB()
-    
+
     # 执行测试
     result = calculate_realtime_pe_pb("000001", MockClient())
-    
+
     # 验证结果
     assert result is not None
     assert result["price"] == 10.5
     assert result["is_realtime"] == True
-    assert result["source"] == "realtime_calculated"
-    
-    # 验证PE计算：市值 = 10.5 * 100000 = 1050000万元，PE = 1050000 / 50000 = 21
+    assert result["source"] == "realtime_calculated_from_market_quotes"
+
+    # 验证PE计算（现役算法：昨日市值反推 TTM 净利润，再按实时股价重算）
+    # 昨日市值 = 100000万股 × 10.0元 / 10000 = 100亿元；TTM净利润 = 100 / 20 = 5亿元
+    # 实时市值 = 10.5元 × 100000万股 / 10000 = 105亿元；PE = 105 / 5 = 21
     assert result["pe"] == 21.0
-    
-    # 验证PB计算：PB = 1050000 / 200000 = 5.25
+
+    # 验证PB计算：PB = 105亿元 / 20亿元净资产 = 5.25
     assert result["pb"] == 5.25
 
 
@@ -131,22 +145,24 @@ def test_get_pe_pb_with_fallback_to_static(monkeypatch):
     def mock_calculate(symbol, db_client):
         return None
     
-    # Mock静态数据获取
+    # Mock静态数据获取（现役实现从 stock_basic_info 多源合并读取，find 返回记录列表）
     class MockCollection:
-        def find_one(self, query):
-            return {
-                "code": "000001",
-                "pe": 20.0,
-                "pb": 3.0,
-                "pe_ttm": 21.0,
-                "pb_mrq": 3.1,
-                "updated_at": "2025-10-13T16:00:00"
-            }
-    
+        def find(self, query, *args, **kwargs):
+            return [
+                {
+                    "code": "000001",
+                    "pe": 20.0,
+                    "pb": 3.0,
+                    "pe_ttm": 21.0,
+                    "pb_mrq": 3.1,
+                    "updated_at": "2025-10-13T16:00:00"
+                }
+            ]
+
     class MockDB:
-        def __getitem__(self, name):
+        def __getattr__(self, name):
             return MockCollection()
-    
+
     class MockClient:
         def __getitem__(self, name):
             return MockDB()

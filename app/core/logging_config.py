@@ -55,17 +55,29 @@ class SimpleJsonFormatter(logging.Formatter):
 
 
 class ErrorLogNoiseFilter(logging.Filter):
-    """过滤 error.log 中的已知非致命第三方/可选能力噪声。"""
+    """过滤 error.log 中的已知非致命第三方/可选能力噪声。
 
-    _NOISY_PATTERNS = (
-        "predates v3 hybrid search",
-        "BM25 keyword scoring will be disabled",
-        "Multiple active PostHog clients detected",
-    )
+    黑名单已清空（日志治理 §5.5 源头治理）：历史 3 条第三方噪声
+    （mem0 混合检索提示 x2、PostHog 多客户端告警）改为对发出方 logger
+    定级降噪（见 _NOISE_SUPPRESS_LOGGERS，dictConfig loggers 段），
+    不再按消息文本打补丁。保留此类作为定点过滤扩展点。
+    """
+
+    _NOISY_PATTERNS: tuple = ()
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
         return not any(pattern in message for pattern in self._NOISY_PATTERNS)
+
+
+# 第三方噪声源头降噪（替代旧消息黑名单，日志治理 §5.5）：
+#   mem0.vector_stores.qdrant — "predates v3 hybrid search" / "BM25 keyword scoring will be disabled"
+#   posthog                   — "Multiple active PostHog clients detected"
+# 均为第三方库已知非致命提示，对发出方 logger 定级 ERROR 抑制
+_NOISE_SUPPRESS_LOGGERS: dict = {
+    "mem0.vector_stores.qdrant": "ERROR",
+    "posthog": "ERROR",
+}
 
 
 def _error_handler_filters() -> list[str]:
@@ -146,6 +158,11 @@ def setup_logging(log_level: str = "INFO"):
                 max_bytes = 10 * 1024 * 1024
             backup_count = int(file_handler_cfg.get("backup_count", 5))
 
+            # 轮转参数唯一化（日志治理 §5.3）：main/webapi/worker/error 共用
+            # [logging.handlers.file] 段的共享默认值，同一日志文件只有一个轮转口径
+            shared_max_bytes = _parse_size(file_handler_cfg.get("max_size", "10MB"))
+            shared_backup_count = int(file_handler_cfg.get("backup_count", 5))
+
             Path(file_dir).mkdir(parents=True, exist_ok=True)
 
             # 从TOML配置读取各个日志文件路径
@@ -163,8 +180,8 @@ def setup_logging(log_level: str = "INFO"):
             main_log = main_handler_cfg.get("filename", str(Path(file_dir) / "tradingagents.log"))
             main_enabled = main_handler_cfg.get("enabled", True)
             main_level = main_handler_cfg.get("level", "INFO")
-            main_max_bytes = _parse_size(main_handler_cfg.get("max_size", "100MB"))
-            main_backup_count = int(main_handler_cfg.get("backup_count", 5))
+            main_max_bytes = _parse_size(main_handler_cfg.get("max_size", shared_max_bytes))
+            main_backup_count = int(main_handler_cfg.get("backup_count", shared_backup_count))
 
             if verbose_setup:
                 print(f"🔍 [setup_logging] 主日志文件配置:")
@@ -178,8 +195,8 @@ def setup_logging(log_level: str = "INFO"):
             webapi_log = webapi_handler_cfg.get("filename", str(Path(file_dir) / "webapi.log"))
             webapi_enabled = webapi_handler_cfg.get("enabled", True)
             webapi_level = webapi_handler_cfg.get("level", "DEBUG")
-            webapi_max_bytes = _parse_size(webapi_handler_cfg.get("max_size", "100MB"))
-            webapi_backup_count = int(webapi_handler_cfg.get("backup_count", 5))
+            webapi_max_bytes = _parse_size(webapi_handler_cfg.get("max_size", shared_max_bytes))
+            webapi_backup_count = int(webapi_handler_cfg.get("backup_count", shared_backup_count))
 
             if verbose_setup:
                 print(f"🔍 [setup_logging] WebAPI日志文件: {webapi_log}, 启用: {webapi_enabled}")
@@ -188,8 +205,8 @@ def setup_logging(log_level: str = "INFO"):
             worker_log = worker_handler_cfg.get("filename", str(Path(file_dir) / "worker.log"))
             worker_enabled = worker_handler_cfg.get("enabled", True)
             worker_level = worker_handler_cfg.get("level", "DEBUG")
-            worker_max_bytes = _parse_size(worker_handler_cfg.get("max_size", "100MB"))
-            worker_backup_count = int(worker_handler_cfg.get("backup_count", 5))
+            worker_max_bytes = _parse_size(worker_handler_cfg.get("max_size", shared_max_bytes))
+            worker_backup_count = int(worker_handler_cfg.get("backup_count", shared_backup_count))
 
             if verbose_setup:
                 print(f"🔍 [setup_logging] Worker日志文件: {worker_log}, 启用: {worker_enabled}")
@@ -205,8 +222,8 @@ def setup_logging(log_level: str = "INFO"):
                 error_log = error_filename
             error_enabled = error_handler_cfg.get("enabled", True)
             error_level = error_handler_cfg.get("level", "WARNING")
-            error_max_bytes = _parse_size(error_handler_cfg.get("max_size", "100MB"))
-            error_backup_count = int(error_handler_cfg.get("backup_count", 5))
+            error_max_bytes = _parse_size(error_handler_cfg.get("max_size", shared_max_bytes))
+            error_backup_count = int(error_handler_cfg.get("backup_count", shared_backup_count))
 
             if verbose_setup:
                 print(f"🔍 [setup_logging] 错误日志文件配置:")
@@ -407,6 +424,13 @@ def setup_logging(log_level: str = "INFO"):
                         "handlers": worker_handlers,
                         "propagate": False
                     },
+                    # Worker 进程模块日志（getLogger(__name__) → app.worker.*）→ worker.log
+                    # 补齐 v2.0 设计承诺的 worker.log（logging-governance.md §5.5）
+                    "app.worker": {
+                        "level": "INFO",
+                        "handlers": worker_handlers,
+                        "propagate": False
+                    },
                     "uvicorn": {
                         "level": "INFO",
                         "handlers": webapi_handlers,
@@ -450,6 +474,8 @@ def setup_logging(log_level: str = "INFO"):
                         "handlers": main_handlers,
                         "propagate": False
                     },
+                    # 第三方噪声源头降噪（§5.5，替代 ErrorLogNoiseFilter 消息黑名单）
+                    **{name: {"level": level} for name, level in _NOISE_SUPPRESS_LOGGERS.items()},
                 },
                 "root": {"level": level, "handlers": main_handlers},
             }
@@ -554,6 +580,8 @@ def setup_logging(log_level: str = "INFO"):
         "loggers": {
             "webapi": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": True},
             "worker": {"level": "DEBUG", "handlers": ["console", "worker_file", "error_file"], "propagate": False},
+            # Worker 进程模块日志（getLogger(__name__) → app.worker.*）→ worker.log
+            "app.worker": {"level": "INFO", "handlers": ["console", "worker_file", "error_file"], "propagate": False},
             "uvicorn": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
             "fastapi": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
             "app": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
@@ -562,6 +590,8 @@ def setup_logging(log_level: str = "INFO"):
             "core.tools.external": {"level": "DEBUG", "handlers": ["console", "skill_file", "error_file"], "propagate": False},
             "fontTools": {"level": "WARNING", "handlers": ["console", "file", "error_file"], "propagate": False},
             "fontTools.subset": {"level": "WARNING", "handlers": ["console", "file", "error_file"], "propagate": False},
+            # 第三方噪声源头降噪（§5.5，替代 ErrorLogNoiseFilter 消息黑名单）
+            **{name: {"level": lvl} for name, lvl in _NOISE_SUPPRESS_LOGGERS.items()},
         },
         "root": {"level": log_level, "handlers": ["console"]},
     }

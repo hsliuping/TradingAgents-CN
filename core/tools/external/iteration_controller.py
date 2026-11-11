@@ -28,7 +28,7 @@ from core.llm import UnifiedLLMClient, Message
 from core.llm.tool_normalizer import ToolCallNormalizer
 
 from .business_verifier import BusinessVerifierRegistry
-from .code_generator import CODEGEN_LLM_TIMEOUT_SECONDS, CodeGenerator
+from .code_generator import CODEGEN_LLM_TIMEOUT_SECONDS, CodeGenerator, cleanup_codegen_prompt_logs
 from .output_evaluator import OutputEvaluator
 from .reconnaissance_controller import DefaultReconnaissanceController, ReconnaissanceController
 from .sandbox_runner import SandboxRunner
@@ -841,6 +841,7 @@ class IterationController:
             from datetime import datetime
             log_dir = Path("logs/codegen_prompts")
             log_dir.mkdir(parents=True, exist_ok=True)
+            cleanup_codegen_prompt_logs(log_dir)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_tool_id = re.sub(r"[^\w\-]", "_", spec.tool_id or "unknown")

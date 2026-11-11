@@ -392,7 +392,7 @@ class SchedulerService:
                 merged_kwargs = {**original_kwargs, **clean_kwargs}
                 # 修改任务的 kwargs（这样update_job_progress才能读取到正确的参数）
                 job.modify(kwargs=merged_kwargs)
-                logger.info(f"📝 任务 {job_id} 参数已更新: {clean_kwargs} -> 合并后: {merged_kwargs}")
+                logger.debug(f"📝 任务 {job_id} 参数已更新: {clean_kwargs} -> 合并后: {merged_kwargs}")
 
             # 🔥 先创建执行记录并保存kwargs，确保恢复时能读取到正确的参数
             # 这样即使任务立即执行，update_job_progress也能读取到正确的kwargs
@@ -417,7 +417,7 @@ class SchedulerService:
                         processed_items = existing_record.get("processed_items")
                         if processed_items is not None:
                             final_kwargs["_resume_from_index"] = processed_items
-                            logger.info(f"📊 恢复操作: 从执行记录读取 processed_items={processed_items}，已添加到kwargs")
+                            logger.debug(f"📊 恢复操作: 从执行记录读取 processed_items={processed_items}，已添加到kwargs")
                         else:
                             logger.warning(f"⚠️ 执行记录中没有 processed_items，将从0开始")
                         
@@ -455,7 +455,7 @@ class SchedulerService:
                         if related_update_result.modified_count > 0:
                             logger.info(f"✅ 同时清除了 {related_update_result.modified_count} 个相关执行记录的取消标记 "
                                       f"(job_id匹配: ^{job_id}(_|$))")
-                        logger.info(f"📝 已复用执行记录 {resume_execution_id} 并更新kwargs: {final_kwargs} (is_manual=True)")
+                        logger.debug(f"📝 已复用执行记录 {resume_execution_id} 并更新kwargs: {final_kwargs} (is_manual=True)")
                     else:
                         logger.warning(f"⚠️ 指定的执行记录 {resume_execution_id} 不存在，将创建新记录")
                         resume_execution_id = None  # 标记为None，后续创建新记录
@@ -520,7 +520,7 @@ class SchedulerService:
                             processed_items = existing_record.get("processed_items")
                             if processed_items is not None:
                                 final_kwargs["_resume_from_index"] = processed_items
-                                logger.info(f"📊 手动触发恢复挂起任务: 从执行记录读取 processed_items={processed_items}，已添加到kwargs")
+                                logger.debug(f"📊 手动触发恢复挂起任务: 从执行记录读取 processed_items={processed_items}，已添加到kwargs")
                             else:
                                 logger.warning(f"⚠️ 执行记录中没有 processed_items，将从0开始")
                             
@@ -593,7 +593,7 @@ class SchedulerService:
                                     }
                                 }
                             )
-                            logger.info(f"🔧 强制执行：已更新执行记录 {existing_record['_id']} 的kwargs: {final_kwargs}")
+                            logger.debug(f"🔧 强制执行：已更新执行记录 {existing_record['_id']} 的kwargs: {final_kwargs}")
                     else:
                         # 创建新的执行记录（任务刚开始）
                         # 🔥 手动触发时，设置 is_manual=True，并清除取消标记
@@ -609,7 +609,7 @@ class SchedulerService:
                         }
                         insert_result = await db.scheduler_executions.insert_one(execution_record)
                         current_execution_id = str(insert_result.inserted_id)
-                        logger.info(f"📝 已创建执行记录并保存kwargs: {final_kwargs} (is_manual=True)")
+                        logger.debug(f"📝 已创建执行记录并保存kwargs: {final_kwargs} (is_manual=True)")
                         
                         # 🔥 立即清除旧的Redis缓存，确保前端查询进度时不会读取到旧数据
                         try:
@@ -647,11 +647,11 @@ class SchedulerService:
                 
                 # 🔥 手动触发标记已经包含在 final_kwargs 中（通过 kwargs["_manual_trigger"] = True）
                 
-                logger.info(f"🔍 构建执行参数: merged_kwargs={merged_kwargs}, final_kwargs={final_kwargs}, clean_kwargs_for_execution={clean_kwargs_for_execution}")
+                logger.debug(f"🔍 构建执行参数: merged_kwargs={merged_kwargs}, final_kwargs={final_kwargs}, clean_kwargs_for_execution={clean_kwargs_for_execution}")
 
                 if current_execution_id:
                     clean_kwargs_for_execution["_trigger_execution_id"] = current_execution_id
-                    logger.info(f"🧷 当前手动触发执行记录ID: {current_execution_id}")
+                    logger.debug(f"🧷 当前手动触发执行记录ID: {current_execution_id}")
                 
                 # 获取任务函数和参数
                 func = job.func
@@ -1364,7 +1364,7 @@ class SchedulerService:
                         if progress_str:
                             import json
                             progress_data = json.loads(progress_str)
-                            logger.info(f"📊 从Redis读取到挂起任务的进度: {job_id}, 进度: {progress_data.get('progress', 0)}%, 已处理: {progress_data.get('processed_items', 0)}")
+                            logger.debug(f"📊 从Redis读取到挂起任务的进度: {job_id}, 进度: {progress_data.get('progress', 0)}%, 已处理: {progress_data.get('processed_items', 0)}")
                 except Exception as e:
                     logger.warning(f"⚠️ 从Redis读取进度失败: {e}")
                 
@@ -1396,7 +1396,7 @@ class SchedulerService:
                 
                 progress_info = progress_data.get("progress", task.get("progress", 0))
                 processed_info = progress_data.get("processed_items", task.get("processed_items", 0))
-                logger.info(f"⏸️ 检测到挂起任务: {task.get('job_name', task.get('job_id'))} (开始时间: {task.get('timestamp')}, 进度: {progress_info}%, 已处理: {processed_info})")
+                logger.debug(f"⏸️ 检测到挂起任务: {task.get('job_name', task.get('job_id'))} (开始时间: {task.get('timestamp')}, 进度: {progress_info}%, 已处理: {processed_info})")
 
             if suspended_tasks:
                 logger.info(f"✅ 已标记 {len(suspended_tasks)} 个挂起任务（服务重启导致）")
@@ -2004,7 +2004,7 @@ async def update_job_progress(
                                     }
                                 )
                                 cancel_requested = True
-                                logger.info(f"🔄 同步取消标记: 从 {original_job_id} 同步到 {execution_job_id} (时间差: {time_diff:.0f}秒)")
+                                logger.debug(f"🔄 同步取消标记: 从 {original_job_id} 同步到 {execution_job_id} (时间差: {time_diff:.0f}秒)")
                             else:
                                 logger.debug(f"🔍 原始job_id 的活动执行记录未设置取消标记，不同步取消状态")
             
@@ -2091,7 +2091,7 @@ async def update_job_progress(
                 # 🔥 即使数据未变化，也记录日志（用于调试）
                 logger.debug(f"📝 任务 {job_id} 进度更新：数据未变化（progress={progress}%, processed={processed_items}/{total_items}）")
             else:
-                logger.info(f"📝 任务 {job_id} 更新进度成功: {progress}%, 已处理: {processed_items}/{total_items}, execution_id={latest_execution['_id']}")
+                logger.debug(f"📝 任务 {job_id} 更新进度成功: {progress}%, 已处理: {processed_items}/{total_items}, execution_id={latest_execution['_id']}")
             
             # 从现有记录获取开始时间（确保不会重置）
             started_at = latest_execution.get("timestamp") or latest_execution.get("scheduled_time")
@@ -2207,7 +2207,7 @@ async def update_job_progress(
                                 # 尝试解析ISO格式字符串
                                 if isinstance(started_at_str, str):
                                     started_at = datetime.fromisoformat(started_at_str.replace('Z', '+00:00'))
-                                    logger.info(f"📝 任务 {job_id} 从Redis恢复开始时间: {started_at}")
+                                    logger.debug(f"📝 任务 {job_id} 从Redis恢复开始时间: {started_at}")
                                 else:
                                     started_at = started_at_str
                             except Exception as parse_error:
@@ -2219,7 +2219,7 @@ async def update_job_progress(
             # 如果还是没有，使用当前时间（兜底方案，仅用于新任务）
             if not started_at:
                 started_at = get_utc8_now()
-                logger.info(f"📝 任务 {job_id} 创建新执行记录，开始时间: {started_at}")
+                logger.debug(f"📝 任务 {job_id} 创建新执行记录，开始时间: {started_at}")
             
             # 确保started_at是字符串格式
             if hasattr(started_at, 'isoformat'):
@@ -2330,9 +2330,9 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
         ).limit(5))
         
         if all_recent_records:
-            logger.info(f"🔍 [调试] 找到 {len(all_recent_records)} 条最近{fallback_window_minutes}分钟内的记录:")
+            logger.debug(f"🔍 [调试] 找到 {len(all_recent_records)} 条最近{fallback_window_minutes}分钟内的记录:")
             for idx, rec in enumerate(all_recent_records):
-                logger.info(f"   [{idx+1}] _id={rec.get('_id')}, status={rec.get('status')}, timestamp={rec.get('timestamp')}, updated_at={rec.get('updated_at')}, progress={rec.get('progress')}")
+                logger.debug(f"   [{idx+1}] _id={rec.get('_id')}, status={rec.get('status')}, timestamp={rec.get('timestamp')}, updated_at={rec.get('updated_at')}, progress={rec.get('progress')}")
         else:
             logger.warning(f"🔍 [调试] 未找到任务 {job_id} 最近{fallback_window_minutes}分钟内的任何记录")
         
@@ -2353,7 +2353,7 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
                 sort=[("timestamp", -1)]
             )
             if execution:
-                logger.info(f"📝 找到最近的 suspended/running 记录（可能是恢复的任务）: {execution.get('_id')}, status={execution.get('status')}")
+                logger.debug(f"📝 找到最近的 suspended/running 记录（可能是恢复的任务）: {execution.get('_id')}, status={execution.get('status')}")
         
         # 🔥 如果还没有找到，尝试查找最近的 success 记录（可能是 update_job_progress 已将状态更新为 success）
         if not execution:
@@ -2366,7 +2366,7 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
                 sort=[("timestamp", -1)]
             )
             if execution:
-                logger.info(f"📝 找到最近的 success 记录（可能是 update_job_progress 已更新状态）: {execution.get('_id')}, 将更新为最终状态")
+                logger.debug(f"📝 找到最近的 success 记录（可能是 update_job_progress 已更新状态）: {execution.get('_id')}, 将更新为最终状态")
         
         # 🔥 最后的兜底方案：查找最近兜底窗口内的任何记录（按时间戳倒序，取最新的）
         if not execution:
@@ -2384,7 +2384,7 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
                 sort=[("timestamp", -1)]
             )
             if execution:
-                logger.info(f"📝 [兜底] 找到最近{fallback_window_minutes}分钟内的记录: {execution.get('_id')}, status={execution.get('status')}, timestamp={execution.get('timestamp')}")
+                logger.debug(f"📝 [兜底] 找到最近{fallback_window_minutes}分钟内的记录: {execution.get('_id')}, status={execution.get('status')}, timestamp={execution.get('timestamp')}")
 
         if not execution:
             logger.warning(f"⚠️ 未找到任务 {job_id} 的运行记录，无法标记为已完成")

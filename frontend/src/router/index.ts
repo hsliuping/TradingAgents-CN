@@ -9,7 +9,7 @@ import 'nprogress/nprogress.css'
 import { isJdyunMode } from '@/utils/config'
 // Pro 专属路由（v3.6.0 社区版开源分离 M1）：集中定义于 pro.routes.ts，
 // 社区版发布时整文件替换为空导出，本文件无需修改
-import { proWorkflowRoutes, proTradingSystemRoutes, proAnalysisChildren, proSettingsChildren, proLearningChildren } from './pro.routes'
+import { proWorkflowRoutes, proTradingSystemRoutes, proAnalysisChildren, proSettingsChildren, proLearningChildren, proPigCycleRoutes, proInsuranceRoutes, proBatteryRoutes, proAutoRoutes, proBankRoutes, proResearchRoutes } from './pro.routes'
 
 // 配置NProgress
 NProgress.configure({
@@ -650,6 +650,18 @@ const routes: RouteRecordRaw[] = [
   ...proWorkflowRoutes,
   // 交易计划（Pro，trading_plan_check 付费功能）→ pro.routes.ts
   ...proTradingSystemRoutes,
+  // 猪周期研究仪表盘（Pro 私有研究域模型）→ pro.routes.ts
+  ...proPigCycleRoutes,
+  // 保险行业工作台（Pro，ingest 采集 + 人工台账）→ pro.routes.ts
+  ...proInsuranceRoutes,
+  // 电池产业链工作台（Pro，battery_cycle 采集台账 + 锂价）→ pro.routes.ts
+  ...proBatteryRoutes,
+  // 汽车产业链工作台（Pro，乘联会需求 / 品牌销量 / 自算产能利用率，现取只读）→ pro.routes.ts
+  ...proAutoRoutes,
+  // 银行业工作台（Pro，央行贷款利率 / 东财横截面四字段 / 10Y + 银行指数 + LPR）→ pro.routes.ts
+  ...proBankRoutes,
+  // 研究工具页（Pro，研究台「更多」入口，不在侧边菜单）→ pro.routes.ts
+  ...proResearchRoutes,
 
   {
     path: '/:pathMatch(.*)*',

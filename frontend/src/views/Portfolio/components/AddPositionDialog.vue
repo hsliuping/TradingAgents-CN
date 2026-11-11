@@ -41,6 +41,15 @@
       <el-form-item label="买入日期" prop="buy_date" required>
         <el-date-picker v-model="form.buy_date" type="date" placeholder="必填，用于校验成本价" style="width: 100%" />
       </el-form-item>
+      <el-form-item label="仓位分层" prop="position_layer">
+        <el-select v-model="form.position_layer" clearable placeholder="可选：未分层" style="width: 100%">
+          <el-option label="底仓" value="底仓" />
+          <el-option label="波段仓" value="波段仓" />
+        </el-select>
+        <div style="font-size: 12px; color: #909399; margin-top: 4px;">
+          底仓跟基本面/周期位，波段仓跟交易信号；两层规则不互救，复盘归因时分开评估
+        </div>
+      </el-form-item>
       <el-form-item label="备注" prop="notes">
         <el-input v-model="form.notes" type="textarea" :rows="2" placeholder="可选" />
       </el-form-item>
@@ -103,7 +112,8 @@ const form = ref<PositionCreatePayload & { buy_date?: Date | string }>({
   quantity: 100,
   cost_price: 10,
   buy_date: undefined,
-  notes: ''
+  notes: '',
+  position_layer: ''
 })
 
 // 添加时买入日期必填（用于校验成本价），编辑时可选
@@ -223,7 +233,8 @@ watch(() => props.visible, (val) => {
       quantity: props.editData.quantity,
       cost_price: props.editData.cost_price,
       buy_date: props.editData.buy_date || undefined,
-      notes: props.editData.notes || ''
+      notes: props.editData.notes || '',
+      position_layer: props.editData.position_layer || ''
     }
     // 编辑模式下，重置自动获取记录
     lastFetchedCode.value = ''
@@ -236,7 +247,8 @@ watch(() => props.visible, (val) => {
       quantity: 100,
       cost_price: init?.cost_price ?? 10,
       buy_date: undefined,
-      notes: ''
+      notes: '',
+      position_layer: ''
     }
     // 如果有预填代码，记录为已自动获取，避免被 watch 清空
     if (init?.code) {
@@ -267,16 +279,18 @@ const handleSubmit = async () => {
       quantity: form.value.quantity,
       cost_price: form.value.cost_price,
       buy_date: form.value.buy_date ? formatLocalDate(form.value.buy_date) : undefined,
-      notes: form.value.notes || undefined
+      notes: form.value.notes || undefined,
+      position_layer: form.value.position_layer || undefined
     }
-    
+
     if (isEdit.value && props.editData) {
       await portfolioApi.updatePosition(props.editData.id, {
         name: payload.name,
         quantity: payload.quantity,
         cost_price: payload.cost_price,
         buy_date: payload.buy_date,
-        notes: payload.notes
+        notes: payload.notes,
+        position_layer: form.value.position_layer || '' // 空串=清除分层标注
       })
       ElMessage.success('更新成功')
     } else {

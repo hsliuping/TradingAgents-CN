@@ -77,7 +77,7 @@ def _write_sector_cache(cache_key: str, cache_type: str, df: pd.DataFrame):
         logger.debug(f"写入板块缓存失败: {e}")
 
 
-async def _get_ths_index_list_cached(provider, index_type: str) -> Optional[pd.DataFrame]:
+async def _get_ths_index_list_cached(index_type: str) -> Optional[pd.DataFrame]:
     """带 MongoDB 缓存的板块列表获取（缓存30天）"""
     cache_key = f"sector_list_{index_type}"
 
@@ -86,14 +86,14 @@ async def _get_ths_index_list_cached(provider, index_type: str) -> Optional[pd.D
     if cached is not None:
         return cached
 
-    # 2. 调 Tushare API
-    df = await provider.get_ths_index_list(index_type=index_type)
+    # 2. 经 DataFacade 查询（数据源不感知）
+    df = await _query_capability("ths_index", index_type=index_type)
     if df is not None and not df.empty:
         _write_sector_cache(cache_key, "sector_list", df)
     return df
 
 
-async def _get_ths_member_cached(provider, ts_code: str) -> Optional[pd.DataFrame]:
+async def _get_ths_member_cached(ts_code: str) -> Optional[pd.DataFrame]:
     """带 MongoDB 缓存的板块成分股获取（正向：板块→成分股，缓存30天）"""
     cache_key = f"sector_member_{ts_code}"
 
@@ -102,14 +102,14 @@ async def _get_ths_member_cached(provider, ts_code: str) -> Optional[pd.DataFram
     if cached is not None:
         return cached
 
-    # 2. 调 Tushare API
-    df = await provider.get_ths_member(ts_code=ts_code)
+    # 2. 经 DataFacade 查询（数据源不感知）
+    df = await _query_capability("ths_member", ts_code=ts_code)
     if df is not None and not df.empty:
         _write_sector_cache(cache_key, "sector_member", df)
     return df
 
 
-async def _get_ths_member_reverse_cached(provider, con_code: str) -> Optional[pd.DataFrame]:
+async def _get_ths_member_reverse_cached(con_code: str) -> Optional[pd.DataFrame]:
     """带 MongoDB 缓存的个股所属板块获取（反向：个股→所属板块，缓存30天）"""
     cache_key = f"stock_sectors_{con_code}"
 
@@ -118,17 +118,37 @@ async def _get_ths_member_reverse_cached(provider, con_code: str) -> Optional[pd
     if cached is not None:
         return cached
 
-    # 2. 调 Tushare API
-    df = await provider.get_ths_member(con_code=con_code)
+    # 2. 经 DataFacade 查询（数据源不感知）
+    df = await _query_capability("ths_member", con_code=con_code)
     if df is not None and not df.empty:
         _write_sector_cache(cache_key, "stock_sectors", df)
     return df
 
 
-def _get_tushare_provider():
-    """延迟导入获取 Tushare Provider"""
-    from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-    return get_tushare_provider()
+async def _query_capability(capability_id: str, **params):
+    """经 DataFacade 查询数据能力（工具不感知具体数据源，返回标准字段 + source/quality）"""
+    from tradingagents.dataflows.capability.facade import get_data_facade
+    return await get_data_facade().get_capability(capability_id).query(**params)
+
+
+def _normalize_ts_code(symbol: str) -> str:
+    """标准化为 ts_code 格式
+
+    本地拷贝自 TushareProvider._normalize_ts_code：代码规范化属纯函数而非数据能力，
+    按"小纯函数两包各留一份拷贝"的约定在此维护，避免工具层依赖具体 provider 实例。
+    """
+    if '.' in symbol:
+        return symbol  # 已经是ts_code格式
+    if symbol.isdigit() and len(symbol) == 6:
+        if symbol.startswith(('60', '68', '90', '50', '51', '52', '58', '56', '11')):
+            return f"{symbol}.SH"
+        elif symbol.startswith(('00', '30', '20', '15', '16', '12')):
+            return f"{symbol}.SZ"
+        elif symbol.startswith(('8', '4', '92')):
+            return f"{symbol}.BJ"
+        else:
+            return f"{symbol}.SZ"
+    return symbol
 
 
 def _clean_date_string(date_str: str) -> str:
@@ -136,6 +156,112 @@ def _clean_date_string(date_str: str) -> str:
     if not date_str:
         return date_str
     return date_str.split()[0] if ' ' in date_str else date_str
+
+
+# ============================================================
+# 细化行业（主分析板块）解析
+# ============================================================
+
+# 同花顺行业指数（type=I）成分数达到最细行业的该倍数时，视为宽口径背景
+_BROAD_INDUSTRY_RATIO = 3.0
+
+
+async def _resolve_industry_tiers(con_code: str) -> List[Dict[str, Any]]:
+    """解析个股所属的行业指数梯队（type=I），按成分股数量升序（越靠前越细化）。
+
+    ths_member 反查会返回个股命中的全部标签——既有沪深300/深股通等指数样本、
+    融资融券等交易属性标签，也有农林牧渔业这类宽口径一级行业。若直接按涨跌幅展示，
+    宽口径指数会顶替最细行业成为主分析口径（牧原股份 002714 曾用「农林牧渔业指数」
+    代替「生猪养殖」）。此处只取同花顺行业指数（type=I），按成分股数量升序排列，
+    成分股越少代表行业越细化、对个股越有代表性。
+    """
+    rev = await _get_ths_member_reverse_cached(con_code=con_code)
+    if rev is None or rev.empty:
+        return []
+
+    idx_df = await _get_ths_index_list_cached("I")
+    if idx_df is None or idx_df.empty:
+        return []
+
+    meta: Dict[str, Dict[str, Any]] = {}
+    for _, r in idx_df.iterrows():
+        try:
+            count = int(float(r.get("count")))
+        except (TypeError, ValueError):
+            continue
+        if count <= 0:
+            continue
+        code = str(r.get("ts_code"))
+        meta[code] = {"code": code, "name": str(r.get("name") or code), "count": count}
+
+    tiers: Dict[str, Dict[str, Any]] = {}
+    for code in rev.get("ts_code", []):
+        item = meta.get(str(code))
+        if not item:
+            continue
+        # 同名多代码去重（如畜牧业指数 700651/700768），保留成分数更小的
+        exist = tiers.get(item["name"])
+        if exist is None or item["count"] < exist["count"]:
+            tiers[item["name"]] = item
+
+    return sorted(tiers.values(), key=lambda x: x["count"])
+
+
+def _stock_name_by_ts_code(ts_code: str) -> str:
+    """从本地基础信息库取股票名称（失败回退代码本身）。"""
+    try:
+        from core.tools.external.local_data import get_stock_basic_info
+
+        info = get_stock_basic_info(str(ts_code).split(".")[0]) or {}
+        return info.get("name") or str(ts_code)
+    except Exception:
+        return str(ts_code)
+
+
+async def _load_peer_frame(ticker: str, trade_date_clean: str):
+    """构建同业样本：优先最细行业指数成分股，缺数据时回退 tushare 行业分类。
+
+    Returns:
+        (df, scope_label, broad_industry)；无法解析行业时返回 (None, None, None)
+    """
+    industry = None
+    ind_df = await _query_capability("stock_industry", ts_code=ticker)
+    if ind_df is not None and not ind_df.empty:
+        industry = ind_df.iloc[0].get("industry")
+
+    ts_code = _normalize_ts_code(ticker)
+    tiers = await _resolve_industry_tiers(ts_code)
+    if tiers and tiers[0]["count"] <= 100:
+        primary = tiers[0]
+        members = await _get_ths_member_cached(primary["code"])
+        codes: List[str] = []
+        if members is not None and not members.empty:
+            for _, r in members.iterrows():
+                raw = r.get("con_code")
+                if raw is None or str(raw) in ("nan", "None", "<NA>", ""):
+                    raw = r.get("code")
+                if raw is None or str(raw) in ("nan", "None", "<NA>", ""):
+                    continue
+                codes.append(_normalize_ts_code(str(raw)))
+        codes = list(dict.fromkeys(codes))
+        if len(codes) >= 5:
+            basic = await _query_capability("daily_basic", trade_date=trade_date_clean)
+            if basic is not None and not basic.empty:
+                sub = basic[basic["ts_code"].isin(codes)].copy()
+                if len(sub) >= 5:
+                    names = await asyncio.gather(
+                        *[asyncio.to_thread(_stock_name_by_ts_code, c) for c in sub["ts_code"]]
+                    )
+                    sub["name"] = list(names)
+                    scope = f"{primary['name']}（同花顺细分行业指数，成分 {len(codes)} 家）"
+                    return sub, scope, industry
+
+    if not industry:
+        return None, None, None
+    df = await _query_capability(
+        "sector_stocks_daily_basic", industry=industry, trade_date=trade_date_clean
+    )
+    return df, f"{industry}（tushare 行业分类，宽口径）", industry
 
 
 async def _get_latest_trade_date(trade_date: str) -> str:
@@ -150,7 +276,6 @@ async def _get_latest_trade_date(trade_date: str) -> str:
     Returns:
         最新可用的交易日期 (YYYYMMDD格式)
     """
-    provider = _get_tushare_provider()
     # 清理日期字符串，去掉可能的时间部分
     trade_date_clean = _clean_date_string(trade_date).replace('-', '')
 
@@ -160,12 +285,13 @@ async def _get_latest_trade_date(trade_date: str) -> str:
         start_date = end_date - timedelta(days=8)
         start_date_str = start_date.strftime('%Y%m%d')
 
-        # 一次性获取最近8天的上证指数数据
-        df = await provider.get_index_daily(
+        # 一次性获取最近8天的上证指数数据（经 DataFacade，数据源不感知；
+        # 已完结日期区间数据不变，走能力默认缓存语义安全）
+        df = await _query_capability(
+            "index_daily",
             ts_code='000001.SH',
             start_date=start_date_str,
             end_date=trade_date_clean,
-            use_cache=False  # 不使用缓存，确保获取最新数据
         )
 
         if df is not None and not df.empty:
@@ -197,8 +323,6 @@ async def get_stock_sector_info(ticker: str) -> Dict[str, Any]:
     Returns:
         包含行业和所属板块列表的字典
     """
-    provider = _get_tushare_provider()
-    
     result = {
         "ticker": ticker,
         "industry": None,
@@ -207,13 +331,14 @@ async def get_stock_sector_info(ticker: str) -> Dict[str, Any]:
     }
     
     try:
-        # 1. 获取行业分类
-        industry = await provider.get_stock_industry(ticker)
+        # 1. 获取行业分类（能力返回 Dict 包装的单行 DataFrame）
+        ind_df = await _query_capability("stock_industry", ts_code=ticker)
+        industry = ind_df.iloc[0]["industry"] if not ind_df.empty else None
         result["industry"] = industry
         
         # 2. 获取所属板块（同花顺概念/行业板块）— 带缓存
-        ts_code = provider._normalize_ts_code(ticker)
-        sectors_df = await _get_ths_member_reverse_cached(provider, con_code=ts_code)
+        ts_code = _normalize_ts_code(ticker)
+        sectors_df = await _get_ths_member_reverse_cached(con_code=ts_code)
 
         if sectors_df is not None and not sectors_df.empty:
             result["sectors"] = sectors_df.to_dict('records')
@@ -242,18 +367,19 @@ async def get_sector_performance(
     Returns:
         板块表现分析报告（字符串）
     """
-    provider = _get_tushare_provider()
-    
     try:
-        # 1. 获取股票所属行业
-        industry = await provider.get_stock_industry(ticker)
-        if not industry:
+        # 1. 行业口径：tushare 一级行业（宽口径）+ 同花顺行业指数梯队（细化优先）
+        ind_df = await _query_capability("stock_industry", ts_code=ticker)
+        industry = ind_df.iloc[0]["industry"] if not ind_df.empty else None
+        ts_code = _normalize_ts_code(ticker)
+        tiers = await _resolve_industry_tiers(ts_code)
+        primary = tiers[0] if tiers else None
+        if not industry and not primary:
             return f"⚠️ 无法获取股票 {ticker} 的行业信息"
-        
+
         # 2. 获取股票所属板块 — 带缓存
-        ts_code = provider._normalize_ts_code(ticker)
-        sectors_df = await _get_ths_member_reverse_cached(provider, con_code=ts_code)
-        
+        sectors_df = await _get_ths_member_reverse_cached(con_code=ts_code)
+
         # 3. 计算日期范围
         # 清理日期字符串，去掉可能的时间部分
         trade_date_clean = _clean_date_string(trade_date).replace('-', '')
@@ -261,45 +387,90 @@ async def get_sector_performance(
         start_date = end_date - timedelta(days=lookback_days + 10)  # 多取几天应对非交易日
         start_date_str = start_date.strftime('%Y%m%d')
         end_date_str = trade_date_clean
-        
+
         report_lines = [
             f"📊 板块表现分析报告",
             f"{'='*50}",
             f"🎯 目标股票: {ticker}",
-            f"🏭 所属行业: {industry}",
+            f"🏭 一级行业（tushare 宽口径）: {industry}",
+        ]
+        if primary:
+            report_lines.append(
+                f"⭐ 主分析板块（最细行业指数）: {primary['name']}（{primary['count']} 只成分股）"
+            )
+        else:
+            report_lines.append("⭐ 主分析板块: 未解析到同花顺行业指数，按 tushare 一级行业口径分析")
+        report_lines.extend([
             f"📅 分析日期: {trade_date}",
             f"📆 回看周期: {lookback_days} 交易日",
             "",
-        ]
+        ])
+
+        # 3.1 行业归属分层：由细到宽，过宽的指数只作背景
+        if tiers:
+            report_lines.append("【行业归属分层（由细到宽）】")
+            primary_count = primary["count"] if primary else 0
+            for t in tiers:
+                if primary and t["code"] == primary["code"]:
+                    tag = "  ★ 主分析板块"
+                elif primary_count and t["count"] >= primary_count * _BROAD_INDUSTRY_RATIO:
+                    tag = "  【宽口径，仅作背景】"
+                else:
+                    tag = ""
+                report_lines.append(f"  • {t['name']}（{t['count']} 只成分股）{tag}")
+            report_lines.append("")
         
-        # 4. 分析板块表现
+        # 4. 分析板块表现：最细行业优先，其余板块按涨跌幅补齐
         if sectors_df is not None and not sectors_df.empty:
-            # ths_member 反查仅含板块代码，构建代码→名称映射（N行业板块 + I行业指数）
+            # ths_member 反查仅含板块代码，构建代码→名称映射（N概念板块 + I行业指数）
             name_map = {}
             for idx_type in ["N", "I"]:
-                ldf = await _get_ths_index_list_cached(provider, idx_type)
+                ldf = await _get_ths_index_list_cached(idx_type)
                 if ldf is not None and not ldf.empty:
                     for _, r in ldf.iterrows():
                         name_map[r['ts_code']] = r['name']
 
+            # 选取顺序：最细行业 → 其余行业梯队 → 概念/主题等其余标签
+            ordered_codes: List[str] = []
+            seen_names = set()
+            for item in ([primary] if primary else []) + tiers:
+                if item["code"] not in ordered_codes:
+                    ordered_codes.append(item["code"])
+                    seen_names.add(item["name"])
+            for _, row in sectors_df.iterrows():
+                code = row.get('ts_code')
+                if not code or code in ordered_codes:
+                    continue
+                # 仅补充有名称的板块（地域/风格等无名称标签不参与行业分析）；
+                # 同名多代码的板块（如畜牧业指数 700651/700768）只保留梯队中的一条
+                name = name_map.get(code)
+                if not name:
+                    if name_map:
+                        continue
+                    name = code
+                if name in seen_names:
+                    continue
+                ordered_codes.append(code)
+                seen_names.add(name)
+            ordered_codes = ordered_codes[:10]
+
             sector_count = len(sectors_df)
-            report_lines.append(f"📌 所属板块数: {sector_count} 个")
+            report_lines.append(
+                f"📌 所属板块数: {sector_count} 个（按细化优先选取 {len(ordered_codes)} 个分析）"
+            )
             report_lines.append("")
-            report_lines.append("【板块涨跌幅排行】")
-            
+            report_lines.append("【板块涨跌幅排行（★ 为最细行业主分析板块）】")
+
             # 获取每个板块的行情数据
             sector_performance = []
-            for _, row in sectors_df.head(10).iterrows():  # 最多分析10个板块
-                sector_code = row.get('ts_code')
-                if not sector_code:
-                    continue
-                
-                daily_df = await provider.get_ths_daily(
+            for sector_code in ordered_codes:
+                daily_df = await _query_capability(
+                    "ths_daily",
                     ts_code=sector_code,
                     start_date=start_date_str,
-                    end_date=end_date_str
+                    end_date=end_date_str,
                 )
-                
+
                 if daily_df is not None and not daily_df.empty:
                     # 计算累计涨跌幅
                     daily_df = daily_df.sort_values('trade_date')
@@ -307,26 +478,36 @@ async def get_sector_performance(
                         first_close = daily_df.iloc[0]['close']
                         last_close = daily_df.iloc[-1]['close']
                         pct_change = ((last_close - first_close) / first_close) * 100
-                        
+
                         # 获取最新一日涨跌
                         today_pct = daily_df.iloc[-1].get('pct_change', 0)
-                        
+
                         sector_performance.append({
                             'code': sector_code,
-                            'name': name_map.get(sector_code) or row.get('name', sector_code),
+                            'name': name_map.get(sector_code) or sector_code,
                             'period_pct': round(pct_change, 2),
-                            'today_pct': round(today_pct, 2) if today_pct else 0
+                            'today_pct': round(today_pct, 2) if today_pct else 0,
+                            'is_primary': bool(primary and sector_code == primary['code']),
                         })
-            
-            # 按累计涨幅排序
-            sector_performance.sort(key=lambda x: x['period_pct'], reverse=True)
-            
+
+            # 主分析板块置顶，其余按累计涨幅排序
+            sector_performance.sort(
+                key=lambda x: (0 if x['is_primary'] else 1, -x['period_pct'])
+            )
+
             for i, sp in enumerate(sector_performance, 1):
                 trend = "📈" if sp['period_pct'] > 0 else "📉"
+                marker = "★ " if sp['is_primary'] else "  "
                 report_lines.append(
-                    f"  {i}. {sp['name']}: {trend} {sp['period_pct']:+.2f}% "
+                    f"  {marker}{i}. {sp['name']}: {trend} {sp['period_pct']:+.2f}% "
                     f"(今日: {sp['today_pct']:+.2f}%)"
                 )
+
+            report_lines.append("")
+            report_lines.append(
+                "💡 口径说明：主分析板块取同花顺行业指数中最细化层级（成分股最少），"
+                f"成分数为最细行业 {_BROAD_INDUSTRY_RATIO:.0f} 倍以上的宽口径指数仅作背景参考。"
+            )
         
         return "\n".join(report_lines)
 
@@ -351,8 +532,6 @@ async def get_sector_rotation(trade_date: str, top_n: int = 10,
     Returns:
         板块轮动分析报告
     """
-    provider = _get_tushare_provider()
-
     try:
         # 获取最新可用的交易日
         trade_date_clean = await _get_latest_trade_date(trade_date)
@@ -382,15 +561,15 @@ async def get_sector_rotation(trade_date: str, top_n: int = 10,
 
         # ── 拉取数据 ──
         if is_multi_day:
-            ind_df = await provider.get_moneyflow_ind_ths(
-                start_date=start_date_str, end_date=end_date_str)
-            cnt_df = await provider.get_moneyflow_cnt_ths(
-                start_date=start_date_str, end_date=end_date_str)
+            ind_df = await _query_capability(
+                "moneyflow_ind_ths", start_date=start_date_str, end_date=end_date_str)
+            cnt_df = await _query_capability(
+                "moneyflow_cnt_ths", start_date=start_date_str, end_date=end_date_str)
         else:
-            ind_df = await provider.get_moneyflow_ind_ths(
-                trade_date=trade_date_clean)
-            cnt_df = await provider.get_moneyflow_cnt_ths(
-                trade_date=trade_date_clean)
+            ind_df = await _query_capability(
+                "moneyflow_ind_ths", trade_date=trade_date_clean)
+            cnt_df = await _query_capability(
+                "moneyflow_cnt_ths", trade_date=trade_date_clean)
 
         # ── 1. 行业板块资金流向 ──
         if ind_df is not None and not ind_df.empty:
@@ -583,35 +762,28 @@ async def get_peer_comparison(
     Returns:
         同业对比分析报告
     """
-    provider = _get_tushare_provider()
-
     try:
-        # 1. 获取股票所属行业
-        industry = await provider.get_stock_industry(ticker)
-        if not industry:
-            return f"⚠️ 无法获取股票 {ticker} 的行业信息"
-
-        # 2. 获取最新可用的交易日
+        # 1. 获取最新可用的交易日
         trade_date_clean = await _get_latest_trade_date(trade_date)
         trade_date_formatted = f"{trade_date_clean[:4]}-{trade_date_clean[4:6]}-{trade_date_clean[6:8]}"
 
-        # 3. 获取同行业股票每日基础数据
-        industry_df = await provider.get_sector_stocks_daily_basic(
-            industry=industry,
-            trade_date=trade_date_clean
-        )
+        # 2. 构建同业样本：优先最细行业指数成分股，缺数据回退 tushare 一级行业
+        industry_df, scope_label, broad_industry = await _load_peer_frame(ticker, trade_date_clean)
+        if not scope_label:
+            return f"⚠️ 无法获取股票 {ticker} 的行业信息"
 
         report_lines = [
             f"📊 同业对比分析报告",
             f"{'='*50}",
             f"🎯 目标股票: {ticker}",
-            f"🏭 所属行业: {industry}",
-            f"📅 分析日期: {trade_date_formatted}",
-            "",
+            f"🏭 行业口径: {scope_label}",
         ]
+        if broad_industry and broad_industry not in scope_label:
+            report_lines.append(f"🏷️ tushare 一级行业（宽口径）: {broad_industry}")
+        report_lines.extend([f"📅 分析日期: {trade_date_formatted}", ""])
 
         if industry_df is None or industry_df.empty:
-            report_lines.append(f"⚠️ 暂无行业 {industry} 的对比数据")
+            report_lines.append(f"⚠️ 暂无「{scope_label}」的对比数据")
             return "\n".join(report_lines)
 
         # 3. 按市值排序，取TOP N
@@ -621,7 +793,7 @@ async def get_peer_comparison(
         report_lines.append("")
 
         # 4. 找到目标股票的数据
-        ts_code = provider._normalize_ts_code(ticker)
+        ts_code = _normalize_ts_code(ticker)
         target_row = industry_df[industry_df['ts_code'] == ts_code]
 
         if not target_row.empty:
@@ -723,26 +895,18 @@ async def get_industry_top_companies(
     Returns:
         同行业 TOP N 公司简表（代码、名称、市值、PE、PB）
     """
-    provider = _get_tushare_provider()
-
     try:
-        # 1. 获取股票所属行业
-        industry = await provider.get_stock_industry(ticker)
-        if not industry:
-            return f"⚠️ 无法获取股票 {ticker} 的行业信息"
-
-        # 2. 自动取最新交易日（用今天往前找）
+        # 1. 自动取最新交易日（用今天往前找）
         today_str = datetime.now().strftime('%Y-%m-%d')
         trade_date_clean = await _get_latest_trade_date(today_str)
 
-        # 3. 获取同行业股票每日基础数据
-        industry_df = await provider.get_sector_stocks_daily_basic(
-            industry=industry,
-            trade_date=trade_date_clean
-        )
+        # 2. 构建同业样本：优先最细行业指数成分股，缺数据回退 tushare 一级行业
+        industry_df, scope_label, _ = await _load_peer_frame(ticker, trade_date_clean)
+        if not scope_label:
+            return f"⚠️ 无法获取股票 {ticker} 的行业信息"
 
         if industry_df is None or industry_df.empty:
-            return f"⚠️ 暂无行业「{industry}」在 {trade_date_clean} 的数据"
+            return f"⚠️ 暂无「{scope_label}」在 {trade_date_clean} 的数据"
 
         # 4. 按市值排序
         industry_df = industry_df.sort_values('total_mv', ascending=False)
@@ -750,7 +914,7 @@ async def get_industry_top_companies(
         top_n_actual = min(top_n, total_count)
 
         # 5. 找目标股票的排名
-        ts_code = provider._normalize_ts_code(ticker)
+        ts_code = _normalize_ts_code(ticker)
         target_rank = 0
         target_row = industry_df[industry_df['ts_code'] == ts_code]
         if not target_row.empty:
@@ -760,7 +924,7 @@ async def get_industry_top_companies(
 
         # 6. 构建简表
         lines = [
-            f"🏭 {industry} — 同行业 TOP {top_n_actual} 公司",
+            f"🏭 {scope_label} — 同行业 TOP {top_n_actual} 公司",
             f"📅 数据日期: {trade_date_formatted} | 行业共 {total_count} 家",
             "",
             f"{'排名':>4}  {'代码':<12} {'名称':<8} {'市值(亿)':>10} {'PE':>8} {'PB':>8}",
@@ -961,12 +1125,12 @@ def _suggest_similar_sectors(df, keyword: str, top_n: int = 5) -> List[tuple]:
     return scored[:top_n]
 
 
-async def _sector_not_found_hint(provider, keyword: str) -> str:
+async def _sector_not_found_hint(keyword: str) -> str:
     """板块未命中时生成候选建议文本，帮助调用方（LLM）自我纠正板块名。"""
     # 1. 同义词重试提示
     synonym_names = []
     for idx_type in ["N", "I", "S"]:
-        df = await _get_ths_index_list_cached(provider, idx_type)
+        df = await _get_ths_index_list_cached(idx_type)
         if df is None or df.empty:
             continue
         for kw in _synonym_keywords(keyword)[1:]:
@@ -978,7 +1142,7 @@ async def _sector_not_found_hint(provider, keyword: str) -> str:
     # 2. 字符重叠候选
     if not synonym_names:
         for idx_type in ["N", "I", "S"]:
-            df = await _get_ths_index_list_cached(provider, idx_type)
+            df = await _get_ths_index_list_cached(idx_type)
             if df is not None and not df.empty:
                 synonym_names = [
                     f"{name} ({code})" for _o, code, name, _c in _suggest_similar_sectors(df, keyword)
@@ -1006,10 +1170,8 @@ async def search_sector(
     Returns:
         匹配的板块列表（含代码、名称、成分股数量）
     """
-    provider = _get_tushare_provider()
-
     try:
-        df = await _get_ths_index_list_cached(provider, sector_type)
+        df = await _get_ths_index_list_cached(sector_type)
         if df is None or df.empty:
             return f"⚠️ 暂无板块列表数据（类型={sector_type}）"
 
@@ -1021,7 +1183,7 @@ async def search_sector(
             for alt_type in ["I", "N", "S", "R"]:
                 if alt_type == sector_type:
                     continue
-                alt_df = await _get_ths_index_list_cached(provider, alt_type)
+                alt_df = await _get_ths_index_list_cached(alt_type)
                 if alt_df is not None and not alt_df.empty:
                     matched = alt_df[alt_df['name'].str.contains(keyword, case=False, na=False)]
                     if not matched.empty:
@@ -1034,7 +1196,7 @@ async def search_sector(
             all_types = ["N", "I", "S", "R"]
             for kw in _synonym_keywords(keyword)[1:]:
                 for t in all_types:
-                    df_t = df if t == sector_type else await _get_ths_index_list_cached(provider, t)
+                    df_t = df if t == sector_type else await _get_ths_index_list_cached(t)
                     if df_t is None or df_t.empty:
                         continue
                     hit = df_t[df_t['name'].str.contains(kw, case=False, na=False)]
@@ -1047,7 +1209,7 @@ async def search_sector(
                     break
 
         if matched.empty:
-            return await _sector_not_found_hint(provider, keyword)
+            return await _sector_not_found_hint(keyword)
 
         type_map = {"N": "行业", "S": "概念", "R": "地域", "I": "行业指数"}
         title_kw = f"\"{keyword}\"" if matched_kw == keyword else f"\"{keyword}\"（按同义词\"{matched_kw}\"匹配）"
@@ -1084,13 +1246,11 @@ async def get_sector_daily(
     Returns:
         板块指数行情报告
     """
-    provider = _get_tushare_provider()
-
     try:
         # 1. 搜索板块代码
-        sector_code = await _resolve_sector_code(provider, sector_name)
+        sector_code = await _resolve_sector_code(sector_name)
         if not sector_code:
-            return await _sector_not_found_hint(provider, sector_name)
+            return await _sector_not_found_hint(sector_name)
 
         sector_ts_code, sector_display_name = sector_code
 
@@ -1099,7 +1259,8 @@ async def get_sector_daily(
         end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 10)
 
-        daily_df = await provider.get_ths_daily(
+        daily_df = await _query_capability(
+            "ths_daily",
             ts_code=sector_ts_code,
             start_date=start_date.strftime('%Y%m%d'),
             end_date=trade_date_clean,
@@ -1166,18 +1327,16 @@ async def get_sector_constituents(
     Returns:
         板块成分股列表及市值/估值排名
     """
-    provider = _get_tushare_provider()
-
     try:
         # 1. 搜索板块代码
-        sector_code = await _resolve_sector_code(provider, sector_name)
+        sector_code = await _resolve_sector_code(sector_name)
         if not sector_code:
-            return await _sector_not_found_hint(provider, sector_name)
+            return await _sector_not_found_hint(sector_name)
 
         sector_ts_code, sector_display_name = sector_code
 
         # 2. 获取成分股 — 带缓存
-        members_df = await _get_ths_member_cached(provider, sector_ts_code)
+        members_df = await _get_ths_member_cached(sector_ts_code)
         if members_df is None or members_df.empty:
             return f"⚠️ 板块 {sector_display_name} 暂无成分股数据"
 
@@ -1190,17 +1349,9 @@ async def get_sector_constituents(
             "",
         ]
 
-        # 3. 获取成分股的每日基础数据（市值、PE、PB 等）
+        # 3. 获取成分股的每日基础数据（市值、PE、PB 等；facade 全失败返回空表）
         trade_date_clean = await _get_latest_trade_date(trade_date)
-        daily_df = None
-        try:
-            daily_df = await asyncio.to_thread(
-                provider.api.daily_basic,
-                trade_date=trade_date_clean,
-                fields='ts_code,close,pe_ttm,pb,total_mv,circ_mv,turnover_rate'
-            )
-        except Exception as e:
-            logger.warning(f"获取 daily_basic 失败: {e}")
+        daily_df = await _query_capability("daily_basic", trade_date=trade_date_clean)
 
         if daily_df is not None and not daily_df.empty:
             # 合并成分股与每日数据
@@ -1326,7 +1477,7 @@ async def analyze_sector_by_name(
 # ============================================================
 
 async def _resolve_sector_code(
-    provider, keyword: str
+    keyword: str
 ) -> Optional[tuple]:
     """
     根据关键词搜索板块，返回 (ts_code, name) 或 None。
@@ -1338,7 +1489,7 @@ async def _resolve_sector_code(
     candidates = _synonym_keywords(keyword)
     for kw in candidates:  # 原词优先，同义词兜底
         for idx_type in ["N", "I", "S", "R"]:
-            df = await _get_ths_index_list_cached(provider, idx_type)
+            df = await _get_ths_index_list_cached(idx_type)
             if df is None or df.empty:
                 continue
             matched = df[df['name'].str.contains(kw, case=False, na=False)]

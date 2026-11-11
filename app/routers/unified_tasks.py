@@ -4,10 +4,13 @@
 提供统一的任务查询接口，支持所有类型的分析任务
 """
 
+import asyncio
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 import logging
+
+from app.core.response import ok
 
 from app.models.analysis import AnalysisTaskType, AnalysisStatus
 from app.models.user import PyObjectId
@@ -225,12 +228,51 @@ async def cancel_task(
         raise HTTPException(status_code=500, detail=f"取消任务失败: {str(e)}")
 
 
+@router.post("/{task_id}/pause", summary="暂停任务")
+async def pause_task(
+    task_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """暂停任务（协作式：运行中的执行在当前分析步骤完成后暂停，可断点续跑）"""
+    try:
+        user_id = PyObjectId(user["id"])
+        service = get_task_analysis_service()
+
+        # 验证任务存在和权限
+        task = await service.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if task.user_id != user_id:
+            raise HTTPException(status_code=403, detail="无权访问此任务")
+
+        # 暂停任务
+        success = await service.pause_task(task_id)
+
+        if success:
+            return {
+                "success": True,
+                "message": "任务已暂停"
+            }
+        else:
+            return {
+                "success": False,
+                "message": "任务无法暂停（可能已完成或失败）"
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"暂停任务失败: {e}")
+        raise HTTPException(status_code=500, detail=f"暂停任务失败: {str(e)}")
+
+
 @router.post("/{task_id}/resume", summary="恢复挂起的任务")
 async def resume_task(
     task_id: str,
     user: dict = Depends(get_current_user)
 ):
-    """恢复挂起的任务，将任务重新加入队列"""
+    """恢复挂起/已取消的任务，将任务重新加入队列（有断点时从断点续跑）"""
     try:
         user_id = PyObjectId(user["id"])
         service = get_task_analysis_service()
@@ -244,8 +286,8 @@ async def resume_task(
             raise HTTPException(status_code=403, detail="无权访问此任务")
 
         # 检查任务状态
-        if task.status != AnalysisStatus.SUSPENDED:
-            raise HTTPException(status_code=400, detail=f"只能恢复挂起状态的任务，当前状态: {task.status}")
+        if task.status not in (AnalysisStatus.SUSPENDED, AnalysisStatus.CANCELLED):
+            raise HTTPException(status_code=400, detail=f"只能恢复挂起或已取消的任务，当前状态: {task.status}")
 
         # 恢复任务
         success = await service.resume_task(task_id)
@@ -266,6 +308,58 @@ async def resume_task(
     except Exception as e:
         logger.error(f"恢复任务失败: {e}")
         raise HTTPException(status_code=500, detail=f"恢复任务失败: {str(e)}")
+
+
+@router.get("/{task_id}/trace", summary="获取任务执行轨迹")
+async def get_task_trace(
+    task_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """获取任务执行轨迹（v4.0 T4 可观测性）
+
+    从 LangGraph checkpointer 的 MongoDB 快照还原每个 superstep 的节点、时间与耗时，
+    用于追溯「分析卡在哪、每步花了多久」。无断点记录时返回空轨迹。
+    """
+    try:
+        user_id = PyObjectId(user["id"])
+        service = get_task_analysis_service()
+
+        task = await service.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        if task.user_id != user_id:
+            raise HTTPException(status_code=403, detail="无权访问此任务")
+
+        from core.workflow.checkpointer import list_checkpoints
+
+        steps = await asyncio.to_thread(list_checkpoints, task_id)
+
+        started_at = steps[0]["timestamp"] if steps else None
+        ended_at = steps[-1]["timestamp"] if steps else None
+        duration = None
+        if len(steps) >= 2 and steps[0]["timestamp"] and steps[-1]["timestamp"]:
+            from datetime import datetime
+            duration = round(
+                (datetime.fromisoformat(steps[-1]["timestamp"])
+                 - datetime.fromisoformat(steps[0]["timestamp"])).total_seconds(),
+                2,
+            )
+
+        return ok({
+            "task_id": task_id,
+            "has_trace": bool(steps),
+            "total_steps": len(steps),
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_seconds": duration,
+            "steps": steps,
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取任务执行轨迹失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取任务执行轨迹失败: {str(e)}")
 
 
 # ==================== 通用研究任务专用查询 ====================

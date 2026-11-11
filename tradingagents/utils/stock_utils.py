@@ -51,8 +51,8 @@ class StockUtils:
         # 中国A股：纯6位数字，或带交易所后缀（000001.SZ、600519.SH、600519.SS 等）
         if re.match(r'^\d{6}$', ticker):
             return StockMarket.CHINA_A
-        # 兼容 Tushare/Yahoo 等格式：002594.SZ、000001.SZ、600519.SH、600519.SS、600519.XSHG、000001.XSHE
-        if re.match(r'^\d{6}\.(SZ|SH|SS|XSHE|XSHG)$', ticker):
+        # 兼容 Tushare/Yahoo 等格式：002594.SZ、000001.SZ、600519.SH、600519.SS、832566.BJ（北交所）、600519.XSHG、000001.XSHE
+        if re.match(r'^\d{6}\.(SZ|SH|SS|BJ|XSHE|XSHG)$', ticker):
             return StockMarket.CHINA_A
 
         # 港股：4-5位数字.HK 或 纯4-5位数字（支持0700.HK、09988.HK、00700、9988格式）

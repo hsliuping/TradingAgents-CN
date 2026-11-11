@@ -76,6 +76,12 @@
           </span>
         </template>
       </el-table-column>
+      <el-table-column label="卖出归因" width="110">
+        <template #default="{ row }">
+          <el-tag v-if="row.exit_tag" size="small" effect="plain" type="warning">{{ row.exit_tag }}</el-tag>
+          <span v-else class="sub-text">—</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="description" label="说明" min-width="120" show-overflow-tooltip />
       <el-table-column label="操作" width="120" fixed="right">
         <template #default="{ row }">

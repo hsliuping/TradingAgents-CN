@@ -506,6 +506,7 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                     find_latest_trade_date,
                     fetch_daily_basic_mv_map,
                     fetch_latest_roe_map,
+                    add_financial_metrics,
                 )
 
                 db = get_mongo_db()
@@ -564,21 +565,10 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                         full_symbol = ts_code
 
                         daily_metrics = {}
+                        in_daily_batch = False
                         if isinstance(ts_code, str) and ts_code in daily_data_map:
                             daily_metrics = daily_data_map[ts_code]
-
-                        total_mv_yi = None
-                        circ_mv_yi = None
-                        if "total_mv" in daily_metrics:
-                            try:
-                                total_mv_yi = float(daily_metrics["total_mv"]) / 10000.0
-                            except Exception:
-                                pass
-                        if "circ_mv" in daily_metrics:
-                            try:
-                                circ_mv_yi = float(daily_metrics["circ_mv"]) / 10000.0
-                            except Exception:
-                                pass
+                            in_daily_batch = True
 
                         doc = {
                             "code": code,
@@ -595,31 +585,23 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                             "full_symbol": full_symbol,
                         }
 
-                        if total_mv_yi is not None:
-                            doc["total_mv"] = total_mv_yi
-                        if circ_mv_yi is not None:
-                            doc["circ_mv"] = circ_mv_yi
-
-                        for field in ["pe", "pb", "ps", "pe_ttm", "pb_mrq", "ps_ttm"]:
-                            if field in daily_metrics:
-                                doc[field] = daily_metrics[field]
+                        # 上游对亏损股置空的 pe_ttm 等字段收集后 $unset，防止旧值残留
+                        stale_fields = []
+                        if in_daily_batch:
+                            add_financial_metrics(doc, daily_metrics, stale_fields)
 
                         if isinstance(ts_code, str) and ts_code in roe_map:
                             roe_val = roe_map[ts_code].get("roe")
                             if roe_val is not None:
                                 doc["roe"] = roe_val
 
-                        for field in ["turnover_rate", "volume_ratio"]:
-                            if field in daily_metrics:
-                                doc[field] = daily_metrics[field]
-
-                        for field in ["total_share", "float_share"]:
-                            if field in daily_metrics:
-                                doc[field] = daily_metrics[field]
+                        update_doc = {"$set": doc}
+                        if stale_fields:
+                            update_doc["$unset"] = {field: "" for field in stale_fields}
 
                         await db.stock_basic_info.update_one(
                             {"code": code, "source": "tushare"},
-                            {"$set": doc},
+                            update_doc,
                             upsert=True
                         )
 

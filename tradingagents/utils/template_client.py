@@ -85,6 +85,7 @@ class TemplateClient:
             ctx_pref = None
             ctx_workflow_id = None  # 🆕 从 context 中提取 workflow_id
             ctx_node_id = None      # 🆕 从 context 中提取 node_id
+            ctx_advice_mode = None  # 🆕 从 context 中提取 advice_mode（研究/执行双模式，设计文档 §4.2）
             is_debug_mode = False
             debug_template_id = None
 
@@ -94,6 +95,7 @@ class TemplateClient:
                     ctx_pref = context.get('preference_id')
                     ctx_workflow_id = context.get('workflow_id')  # 🆕
                     ctx_node_id = context.get('node_id')          # 🆕
+                    ctx_advice_mode = context.get('advice_mode')  # 🆕
                     is_debug_mode = context.get('is_debug_mode', False)
                     debug_template_id = context.get('debug_template_id') if is_debug_mode else None
                 else:
@@ -101,6 +103,7 @@ class TemplateClient:
                     ctx_pref = getattr(context, 'preference_id', None)
                     ctx_workflow_id = getattr(context, 'workflow_id', None)  # 🆕
                     ctx_node_id = getattr(context, 'node_id', None)          # 🆕
+                    ctx_advice_mode = getattr(context, 'advice_mode', None) # 🆕
                     is_debug_mode = getattr(context, 'is_debug_mode', False)
                     # 🔥 修复：无论 is_debug_mode 是否为 True，都应该提取 debug_template_id
                     debug_template_id = getattr(context, 'debug_template_id', None)
@@ -108,6 +111,10 @@ class TemplateClient:
             # 🆕 合并 workflow_id 和 node_id：参数优先，context 次之
             effective_workflow_id = workflow_id or ctx_workflow_id
             effective_node_id = node_id or ctx_node_id
+            # 🆕 提示词模式：research（默认）/ execution（本地执行模板）
+            effective_advice_mode = ctx_advice_mode or "research"
+            # 双向隔离：research 模式查询一律排除 execution 模板（本地私有模板永不泄漏进公用输出）
+            _exclude_execution = {"advice_mode": {"$ne": "execution"}}
 
             # 🔥 调试日志：记录 context 解析结果
             logger.info(f"🔍 [get_effective_template] Context 解析结果:")
@@ -192,6 +199,40 @@ class TemplateClient:
                     user_id = context.user_id if context.user_id else user_id
             preference_id = preference_id or "neutral"
 
+            # 🆕 执行模式优先通道：本地 execution 模板优先级仅次于调试模板，
+            #    高于流程/节点专属、用户配置与系统研究模板（设计文档 §4.2）。
+            #    查不到自动回落研究链路（发行版开关无效的保证）。
+            if effective_advice_mode == "execution":
+                _execution_pref_candidates = (
+                    [preference_id, "neutral"] if preference_id != "neutral" else ["neutral"]
+                )
+                for _exec_pref in _execution_pref_candidates:
+                    execution_query = {
+                        "agent_type": agent_type,
+                        "agent_name": agent_name,
+                        "preference_type": _exec_pref,
+                        "is_system": True,
+                        "status": "active",
+                        "advice_mode": "execution",
+                        "$or": [{"workflow_id": {"$exists": False}}, {"workflow_id": None}]
+                    }
+                    execution_template = self.templates_collection.find_one(execution_query)
+                    if execution_template:
+                        logger.info(
+                            f"✅ [执行模式] 获取本地执行模板: {agent_type}/{agent_name} "
+                            f"(preference={_exec_pref})"
+                        )
+                        content = execution_template.get("content") or {}
+                        content["source"] = "system_execution"
+                        content["template_id"] = str(execution_template.get("_id"))
+                        content["version"] = execution_template.get("version", 1)
+                        content["selected_preference"] = _exec_pref
+                        content["advice_mode"] = "execution"
+                        return content
+                logger.info(
+                    f"📝 [执行模式] 未找到本地执行模板，回落研究模板: {agent_type}/{agent_name}"
+                )
+
             # 🆕 优先级1.5：节点专属模板 / 流程专属模板
             # 查询策略：
             #   1) 有 node_id → 先精确匹配 workflow_id + node_id，再降级到 workflow_id（无 node_id）
@@ -204,6 +245,8 @@ class TemplateClient:
                         "agent_name": agent_name,
                         "workflow_id": effective_workflow_id,
                         "status": "active",
+                        # 执行模板只通过系统模板通道提供，流程/节点专属通道一律排除
+                        **_exclude_execution,
                         **extra_filter,
                     }
                     if preference_id:
@@ -287,10 +330,11 @@ class TemplateClient:
                             template_oid = None
                             logger.info(f"[diagnose] template_id_convert_failed raw={config.get('template_id')}")
 
-                        # 🔥 只使用已发布状态的模板
+                        # 🔥 只使用已发布状态的模板（执行模板不经用户配置通道）
                         template = self.templates_collection.find_one({
                             "_id": template_oid,
-                            "status": "active"
+                            "status": "active",
+                            **_exclude_execution,
                         }) if template_oid else None
 
                         if template:
@@ -323,6 +367,8 @@ class TemplateClient:
                 "preference_type": preference_id,
                 "is_system": True,
                 "status": "active",
+                # 双向隔离：研究查询排除 execution 模板
+                **_exclude_execution,
                 "$or": [{"workflow_id": {"$exists": False}}, {"workflow_id": None}]
             }
 
@@ -352,6 +398,8 @@ class TemplateClient:
                     "preference_type": "neutral",
                     "is_system": True,
                     "status": "active",
+                    # 双向隔离：neutral 降级查询同样排除 execution 模板
+                    **_exclude_execution,
                     "$or": [{"workflow_id": {"$exists": False}}, {"workflow_id": None}]
                 }
                 neutral_template = self.templates_collection.find_one(neutral_query)
@@ -375,6 +423,39 @@ class TemplateClient:
             traceback.print_exc()
             return None
     
+    def has_any_execution_template(self) -> bool:
+        """是否存在任意执行模板（服务层清洗旁路的全局判断）"""
+        try:
+            doc = self.templates_collection.find_one({
+                "is_system": True,
+                "status": "active",
+                "advice_mode": "execution",
+                "$or": [{"workflow_id": {"$exists": False}}, {"workflow_id": None}],
+            }, {"_id": 1})
+            return doc is not None
+        except Exception as e:
+            logger.warning(f"⚠️ 全局执行模板查询失败: {e}")
+            return False
+
+    def has_execution_template(self, agent_type: str, agent_name: str) -> bool:
+        """是否存在该 agent 的本地执行模板（advice_mode=execution 的系统模板）
+
+        用于 agent 层"无效开关"判断：发行版库中永无 execution 模板 → False。
+        """
+        try:
+            doc = self.templates_collection.find_one({
+                "agent_type": agent_type,
+                "agent_name": agent_name,
+                "is_system": True,
+                "status": "active",
+                "advice_mode": "execution",
+                "$or": [{"workflow_id": {"$exists": False}}, {"workflow_id": None}],
+            }, {"_id": 1})
+            return doc is not None
+        except Exception as e:
+            logger.warning(f"⚠️ 执行模板存在性查询失败: {e}")
+            return False
+
     def format_template(
         self,
         template_content: Dict[str, Any],

@@ -21,12 +21,14 @@ from pymongo import UpdateOne
 
 from app.core.database import get_mongo_db
 from app.core.config import settings
+from app.services.stock_basic_schema import normalize_stock_basic_doc
 
 from app.services.basics_sync import (
     fetch_stock_basic_df as _fetch_stock_basic_df_util,
     find_latest_trade_date as _find_latest_trade_date_util,
     fetch_daily_basic_mv_map as _fetch_daily_basic_mv_map_util,
     fetch_latest_roe_map as _fetch_latest_roe_map_util,
+    add_financial_metrics,
 )
 
 logger = logging.getLogger(__name__)
@@ -236,6 +238,7 @@ class BasicsSyncService:
 
             # Step 3: Upsert into MongoDB (batched bulk writes)
             ops: List[UpdateOne] = []
+            schema_errors = 0
             now_iso = datetime.utcnow().isoformat()
             for _, row in stock_df.iterrows():  # type: ignore
                 name = row.get("name") or ""
@@ -270,78 +273,58 @@ class BasicsSyncService:
 
                 # Extract daily financial metrics - use ts_code directly for matching
                 daily_metrics = {}
+                in_daily_batch = False
                 if isinstance(ts_code, str) and ts_code in daily_data_map:
                     daily_metrics = daily_data_map[ts_code]
-
-                # Process market cap (convert from 万元 to 亿元)
-                total_mv_yi = None
-                circ_mv_yi = None
-                if "total_mv" in daily_metrics:
-                    try:
-                        total_mv_yi = float(daily_metrics["total_mv"]) / 10000.0
-                    except Exception:
-                        pass
-                if "circ_mv" in daily_metrics:
-                    try:
-                        circ_mv_yi = float(daily_metrics["circ_mv"]) / 10000.0
-                    except Exception:
-                        pass
+                    in_daily_batch = True
 
                 # 生成 full_symbol（完整标准化代码）
                 full_symbol = self._generate_full_symbol(code)
 
-                doc = {
-                    "code": code,
-                    "symbol": code,  # 添加 symbol 字段（标准化字段）
-                    "name": name,
-                    "area": area,
-                    "industry": industry,
-                    "market": market,
-                    "list_date": list_date,
-                    "sse": sse,
-                    "sec": category,
-                    "source": "tushare",  # 🔥 数据源标识
-                    "updated_at": now_iso,
-                    "full_symbol": full_symbol,  # 添加完整标准化代码
-                }
+                try:
+                    # 对齐统一 Schema（normalize 补齐 data_source/sec 镜像等）
+                    doc = normalize_stock_basic_doc({
+                        "code": code,
+                        "symbol": code,  # 添加 symbol 字段（标准化字段）
+                        "name": name,
+                        "area": area,
+                        "industry": industry,
+                        "market": market,
+                        "list_date": list_date,
+                        "sse": sse,
+                        "category": category,
+                        "source": "tushare",  # 🔥 数据源标识
+                        "updated_at": now_iso,
+                        "full_symbol": full_symbol,  # 添加完整标准化代码
+                    })
+                except ValueError as e:
+                    logger.warning(f"⚠️ 跳过不合规基础信息记录: {e}")
+                    schema_errors += 1
+                    continue
 
-                # Add market cap fields
-                if total_mv_yi is not None:
-                    doc["total_mv"] = total_mv_yi
-                if circ_mv_yi is not None:
-                    doc["circ_mv"] = circ_mv_yi
+                # 日度指标（市值/估值/交易/股本/分红）；上游对亏损股置空的
+                # pe_ttm 等字段收集到 stale_fields 后 $unset，防止旧值残留
+                stale_fields: List[str] = []
+                if in_daily_batch:
+                    add_financial_metrics(doc, daily_metrics, stale_fields)
 
-                # Add financial ratios (🔥 新增 ps、ps_ttm 和股息率)
-                for field in ["pe", "pb", "ps", "pe_ttm", "pb_mrq", "ps_ttm"]:
-                    if field in daily_metrics:
-                        doc[field] = daily_metrics[field]
-                for source_field, target_field in {"dv_ratio": "dividend_yield", "dv_ttm": "dividend_yield_ttm"}.items():
-                    if source_field in daily_metrics:
-                        doc[target_field] = daily_metrics[source_field]
                 # ROE from fina_indicator snapshot
                 if isinstance(ts_code, str) and ts_code in roe_map:
                     roe_val = roe_map[ts_code].get("roe")
                     if roe_val is not None:
                         doc["roe"] = roe_val
 
-                # Add trading metrics
-                for field in ["turnover_rate", "volume_ratio"]:
-                    if field in daily_metrics:
-                        doc[field] = daily_metrics[field]
-
-                # 🔥 Add share capital fields (total_share, float_share)
-                for field in ["total_share", "float_share"]:
-                    if field in daily_metrics:
-                        doc[field] = daily_metrics[field]
-
+                update_doc: Dict[str, Any] = {"$set": doc}
+                if stale_fields:
+                    update_doc["$unset"] = {field: "" for field in stale_fields}
                 # 🔥 使用 (code, source) 联合查询条件
                 ops.append(
-                    UpdateOne({"code": code, "source": "tushare"}, {"$set": doc}, upsert=True)
+                    UpdateOne({"code": code, "source": "tushare"}, update_doc, upsert=True)
                 )
 
             inserted = 0
             updated = 0
-            errors = 0
+            errors = schema_errors
             # Execute in chunks to avoid oversized batches
             BATCH = 1000
             for i in range(0, len(ops), BATCH):

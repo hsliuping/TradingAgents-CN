@@ -89,6 +89,14 @@
             <el-button @click="openTagManager">
               标签管理
             </el-button>
+            <el-button
+              type="primary"
+              plain
+              @click="openImportDialog"
+            >
+              <el-icon><Picture /></el-icon>
+              从图片导入
+            </el-button>
             <el-button type="primary" @click="showAddDialog">
               <el-icon><Plus /></el-icon>
               添加
@@ -508,6 +516,9 @@
       </template>
     </el-dialog>
 
+    <!-- 从图片导入自选股（Pro 功能，社区版由发布管道替换为空壳） -->
+    <ImportFromImageDialog v-model="importDialogVisible" @imported="handleImported" />
+
   </div>
 </template>
 
@@ -522,7 +533,8 @@ import {
   Search,
   Refresh,
   Plus,
-  Download
+  Download,
+  Picture
 } from '@element-plus/icons-vue'
 import { favoritesApi } from '@/api/favorites'
 import { tagsApi } from '@/api/tags'
@@ -538,6 +550,8 @@ import { ApiClient } from '@/api/request'
 
 import type { FavoriteItem, FavoritesRealtimeSyncTaskStatus } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
+import { ensureFeatureAccess } from '@/utils/featureAccess'
+import ImportFromImageDialog from './components/ImportFromImageDialog.vue'
 
 
 // 颜色可选项（20种预设颜色）
@@ -552,6 +566,9 @@ const router = useRouter()
 const STOCK_SYNC_POLL_INTERVAL_MS = 2000
 const STOCK_SYNC_POLL_MAX_ATTEMPTS = 300
 let favoritesViewDisposed = false
+
+// 从图片导入自选股（Pro 功能，点击时走 ensureFeatureAccess 门控）
+const importDialogVisible = ref(false)
 
 // 响应式数据
 const loading = ref(false)
@@ -894,6 +911,20 @@ const deleteTag = async (row: any) => {
 const refreshData = () => {
   loadFavorites()
   loadUserTags()
+}
+
+// 从图片导入自选股：先走 Pro 门控，再打开弹窗
+const openImportDialog = async () => {
+  const allowed = await ensureFeatureAccess('favorites_image_import', router, {
+    message: '从图片导入自选股为高级学员专属，请前往授权管理完成认证。'
+  })
+  if (!allowed) return
+  importDialogVisible.value = true
+}
+
+// 导入成功后刷新列表
+const handleImported = () => {
+  loadFavorites()
 }
 
 const showAddDialog = () => {

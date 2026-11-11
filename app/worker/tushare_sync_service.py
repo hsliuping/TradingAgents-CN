@@ -111,13 +111,13 @@ class TushareSyncService:
                 return stats
             
             stats["total_processed"] = len(stock_list)
-            logger.info(f"📊 获取到 {len(stock_list)} 只股票信息")
+            logger.debug(f"📊 获取到 {len(stock_list)} 只股票信息")
 
             try:
                 from app.services.official_industry_service import upsert_industry_mapping_from_records
                 mapping_result = await upsert_industry_mapping_from_records(stock_list, provider="tushare_fallback")
                 if mapping_result.get("total", 0) > 0:
-                    logger.info(f"📊 系统行业映射集合已更新: {mapping_result['total']} 只股票")
+                    logger.debug(f"📊 系统行业映射集合已更新: {mapping_result['total']} 只股票")
             except Exception as mapping_error:
                 logger.warning(f"⚠️ 更新系统行业映射集合失败，继续执行基础信息同步: {mapping_error}")
 
@@ -302,7 +302,7 @@ class TushareSyncService:
                     f"💡 股票数量 ≤{USE_AKSHARE_THRESHOLD} 只，自动切换到 AKShare 接口"
                     f"（避免浪费 Tushare rt_k 配额，每小时只能调用2次）"
                 )
-                logger.info(f"🎯 使用 AKShare 同步 {len(symbols)} 只股票的实时行情: {symbols}")
+                logger.debug(f"🎯 使用 AKShare 同步 {len(symbols)} 只股票的实时行情: {symbols}")
 
                 # 调用 AKShare 服务
                 from app.worker.akshare_sync_service import get_akshare_sync_service
@@ -339,11 +339,11 @@ class TushareSyncService:
             else:
                 # 使用 Tushare 批量接口一次性获取全市场行情
                 if symbols:
-                    logger.info(f"📊 使用 Tushare 批量接口同步 {len(symbols)} 只股票的实时行情（从全市场数据中筛选）")
+                    logger.debug(f"📊 使用 Tushare 批量接口同步 {len(symbols)} 只股票的实时行情（从全市场数据中筛选）")
                 else:
-                    logger.info("📊 使用 Tushare 批量接口同步全市场实时行情...")
+                    logger.debug("📊 使用 Tushare 批量接口同步全市场实时行情...")
 
-                logger.info("📡 调用 rt_k 批量接口获取全市场实时行情...")
+                logger.debug("📡 调用 rt_k 批量接口获取全市场实时行情...")
                 quotes_map = await self.provider.get_realtime_quotes_batch()
 
                 if not quotes_map:
@@ -363,7 +363,7 @@ class TushareSyncService:
                         logger.warning(f"⚠️ 以下股票未在实时行情中找到: {missing_symbols}")
 
                     quotes_map = filtered_quotes_map
-                    logger.info(f"🔍 过滤后保留 {len(quotes_map)} 只指定股票的行情")
+                    logger.debug(f"🔍 过滤后保留 {len(quotes_map)} 只指定股票的行情")
 
             if not quotes_map:
                 logger.warning("⚠️ 未获取到任何实时行情数据")
@@ -669,7 +669,7 @@ class TushareSyncService:
                     try:
                         cursor = self.db.stock_basic_info.aggregate(pipeline)
                         symbols = [doc["code"] async for doc in cursor]
-                        logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重，已排除退市股票）")
+                        logger.debug(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重，已排除退市股票）")
                     except RuntimeError as loop_error:
                         # 🔥 如果发生事件循环相关错误，重新创建数据库连接
                         error_msg = str(loop_error).lower()
@@ -679,7 +679,7 @@ class TushareSyncService:
                             # 重试查询
                             cursor = self.db.stock_basic_info.aggregate(pipeline)
                             symbols = [doc["code"] async for doc in cursor]
-                            logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重，已排除退市股票，已重新创建连接）")
+                            logger.debug(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重，已排除退市股票，已重新创建连接）")
                         else:
                             raise
                 except Exception as e:
@@ -814,7 +814,7 @@ class TushareSyncService:
                 else:
                     global_start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
 
-            logger.info(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
+            logger.debug(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
 
             # 🔥 检查是否有挂起的执行记录，如果有则从上次的进度位置继续
             resume_from_index = 0
@@ -822,7 +822,7 @@ class TushareSyncService:
             # 🔥 方法1：优先从kwargs中读取恢复位置（恢复操作时传递的）
             if kwargs and "_resume_from_index" in kwargs:
                 resume_from_index = kwargs.get("_resume_from_index", 0)
-                logger.info(f"🔄 从kwargs中读取恢复位置: {resume_from_index}")
+                logger.debug(f"🔄 从kwargs中读取恢复位置: {resume_from_index}")
             
             # 🔥 方法2：如果没有从kwargs获取到，则查找执行记录（兼容旧逻辑）
             if resume_from_index == 0 and job_id:
@@ -835,15 +835,15 @@ class TushareSyncService:
                     
                     if suspended_execution:
                         processed_items = suspended_execution.get("processed_items")
-                        logger.info(f"📊 查找执行记录: execution_id={suspended_execution.get('_id')}, status={suspended_execution.get('status')}, processed_items={processed_items}, total_items={suspended_execution.get('total_items')}")
+                        logger.debug(f"📊 查找执行记录: execution_id={suspended_execution.get('_id')}, status={suspended_execution.get('status')}, processed_items={processed_items}, total_items={suspended_execution.get('total_items')}")
                         
                         if processed_items is not None and processed_items > 0:
                             resume_from_index = processed_items
-                            logger.info(f"🔄 从执行记录中读取恢复位置: {resume_from_index}（已处理 {processed_items}/{len(symbols)}）")
+                            logger.debug(f"🔄 从执行记录中读取恢复位置: {resume_from_index}（已处理 {processed_items}/{len(symbols)}）")
                         else:
                             logger.warning(f"⚠️ 执行记录中没有有效的 processed_items ({processed_items})，将从0开始执行")
                     else:
-                        logger.info(f"📊 未找到挂起或运行中的执行记录，将从0开始执行")
+                        logger.debug(f"📊 未找到挂起或运行中的执行记录，将从0开始执行")
                 except Exception as e:
                     logger.warning(f"⚠️ 检查挂起任务失败，从开始执行: {e}", exc_info=True)
             
@@ -920,7 +920,7 @@ class TushareSyncService:
                         try:
                             reconnect_success = await self.provider.connect()
                             if reconnect_success:
-                                logger.info(f"✅ {symbol}: Tushare重新连接成功")
+                                logger.debug(f"✅ {symbol}: Tushare重新连接成功")
                             else:
                                 logger.error(f"❌ {symbol}: Tushare重新连接失败，跳过该股票")
                                 stats["error_count"] += 1
@@ -986,7 +986,7 @@ class TushareSyncService:
 
                         # 计算单个股票耗时
                         stock_duration = (datetime.now() - stock_start_time).total_seconds()
-                        logger.info(
+                        logger.debug(
                             f"✅ {symbol}: 保存 {records_saved} 条{period_name}记录，"
                             f"总耗时 {stock_duration:.2f}秒 "
                             f"(API: {api_duration:.2f}秒, 保存: {save_duration:.2f}秒)"
@@ -1124,7 +1124,7 @@ class TushareSyncService:
 
                         # 输出速率限制器统计
                         limiter_stats = self.rate_limiter.get_stats()
-                        logger.info(f"   速率限制: {limiter_stats['current_calls']}/{limiter_stats['max_calls']}次, "
+                        logger.debug(f"   速率限制: {limiter_stats['current_calls']}/{limiter_stats['max_calls']}次, "
                                    f"等待次数: {limiter_stats['total_waits']}, "
                                    f"总等待时间: {limiter_stats['total_wait_time']:.1f}秒")
 
@@ -1215,10 +1215,10 @@ class TushareSyncService:
                         ]
                         
                         if not current_retryable:
-                            logger.info(f"✅ 第 {retry_round} 轮重试：没有可重试的错误了")
+                            logger.debug(f"✅ 第 {retry_round} 轮重试：没有可重试的错误了")
                             break
                         
-                        logger.info(f"🔄 第 {retry_round}/{max_auto_retries} 轮自动重试：{len(current_retryable)} 只股票")
+                        logger.debug(f"🔄 第 {retry_round}/{max_auto_retries} 轮自动重试：{len(current_retryable)} 只股票")
                         
                         # 调用重试方法（标记为自动重试，避免递归）
                         retry_result = await self.retry_failed_symbols(
@@ -1283,7 +1283,7 @@ class TushareSyncService:
                             or error.get("is_retryable", False)
                         ]
                         if not remaining_retryable:
-                            logger.info(f"✅ 所有可重试的错误已解决，停止自动重试")
+                            logger.debug(f"✅ 所有可重试的错误已解决，停止自动重试")
                             break
                     
                     # 记录自动重试统计
@@ -1609,10 +1609,10 @@ class TushareSyncService:
                 ]
                 cursor = self.db.stock_basic_info.aggregate(pipeline)
                 symbols = [doc["code"] async for doc in cursor]
-                logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重）")
+                logger.debug(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重）")
 
             stats["total_processed"] = len(symbols)
-            logger.info(f"📊 需要同步 {len(symbols)} 只股票财务数据")
+            logger.debug(f"📊 需要同步 {len(symbols)} 只股票财务数据")
 
             # 批量处理
             for i, symbol in enumerate(symbols):
@@ -1646,7 +1646,7 @@ class TushareSyncService:
                                    f"(成功: {stats['success_count']}, 错误: {stats['error_count']})")
                         # 输出速率限制器统计
                         limiter_stats = self.rate_limiter.get_stats()
-                        logger.info(f"   速率限制: {limiter_stats['current_calls']}/{limiter_stats['max_calls']}次")
+                        logger.debug(f"   速率限制: {limiter_stats['current_calls']}/{limiter_stats['max_calls']}次")
 
                         # 更新任务进度
                         if job_id:
@@ -1841,7 +1841,7 @@ class TushareSyncService:
                 return stats
 
             stats["total_processed"] = len(symbols)
-            logger.info(f"📊 需要同步 {len(symbols)} 只股票的新闻")
+            logger.debug(f"📊 需要同步 {len(symbols)} 只股票的新闻")
 
             # 2. 批量处理
             for i in range(0, len(symbols), self.batch_size):
@@ -2045,7 +2045,7 @@ class TushareSyncService:
             from pymongo import MongoClient
             from app.core.config import settings
 
-            logger.info(f"📊 [进度更新] 开始更新任务 {job_id} 进度: {progress}% - {message}")
+            logger.debug(f"📊 [进度更新] 开始更新任务 {job_id} 进度: {progress}% - {message}")
 
             # 使用同步 PyMongo 客户端（避免事件循环冲突）
             sync_client = MongoClient(settings.MONGO_URI)
@@ -2062,7 +2062,7 @@ class TushareSyncService:
                 sync_client.close()
                 return
 
-            logger.info(f"📊 [进度更新] 找到执行记录: _id={execution['_id']}, 当前进度={execution.get('progress', 0)}%")
+            logger.debug(f"📊 [进度更新] 找到执行记录: _id={execution['_id']}, 当前进度={execution.get('progress', 0)}%")
 
             # 检查是否收到取消请求
             if execution.get("cancel_requested"):
@@ -2081,10 +2081,10 @@ class TushareSyncService:
                 }
             )
 
-            logger.info(f"📊 [进度更新] 更新结果: matched={result.matched_count}, modified={result.modified_count}")
+            logger.debug(f"📊 [进度更新] 更新结果: matched={result.matched_count}, modified={result.modified_count}")
 
             sync_client.close()
-            logger.info(f"✅ 任务 {job_id} 进度更新成功: {progress}% - {message}")
+            logger.debug(f"✅ 任务 {job_id} 进度更新成功: {progress}% - {message}")
 
         except Exception as e:
             if "TaskCancelledException" in str(type(e).__name__):
@@ -2171,8 +2171,8 @@ class TushareSyncService:
         ]
         
         logger.info(f"🔄 开始重试失败的股票...")
-        logger.info(f"   可重试的错误: {len(retryable_errors)} 个")
-        logger.info(f"   无数据的错误（跳过）: {len(no_data_errors)} 个")
+        logger.debug(f"   可重试的错误: {len(retryable_errors)} 个")
+        logger.debug(f"   无数据的错误（跳过）: {len(no_data_errors)} 个")
         
         if not retryable_errors:
             logger.info("✅ 没有可重试的错误，所有失败都是无数据的情况")
@@ -2187,7 +2187,7 @@ class TushareSyncService:
         # 提取可重试的股票代码
         retry_symbols = [error["code"] for error in retryable_errors]
         
-        logger.info(f"📋 将重试以下 {len(retry_symbols)} 只股票: {', '.join(retry_symbols[:10])}{'...' if len(retry_symbols) > 10 else ''}")
+        logger.debug(f"📋 将重试以下 {len(retry_symbols)} 只股票: {', '.join(retry_symbols[:10])}{'...' if len(retry_symbols) > 10 else ''}")
         
         # 调用同步方法，只同步这些失败的股票
         retry_result = await self.sync_historical_data(
@@ -2497,7 +2497,7 @@ async def run_tushare_realtime_quotes_hourly(**kwargs):
                         logger.warning(f"⚠️ 更新任务状态时出错: {update_error}")
                     return result
                 
-                logger.info(f"📊 [Tushare实时行情每小时同步] 从 market_quotes 读取到 {len(quotes_list)} 条实时行情数据")
+                logger.debug(f"📊 [Tushare实时行情每小时同步] 从 market_quotes 读取到 {len(quotes_list)} 条实时行情数据")
                 
                 # 批量转换为历史数据格式并保存
                 saved_count = 0

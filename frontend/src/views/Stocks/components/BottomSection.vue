@@ -28,7 +28,7 @@
           <div class="snapshot-item"><span class="snapshot-label">行业</span><span class="snapshot-value">{{ basics.industry }}</span></div>
           <div class="snapshot-item"><span class="snapshot-label">板块</span><span class="snapshot-value">{{ basics.sector }}</span></div>
           <div class="snapshot-item"><span class="snapshot-label">总市值</span><span class="snapshot-value">{{ fmtAmount(basics.marketCap) }}</span></div>
-          <div class="snapshot-item"><span class="snapshot-label">PE(TTM)</span><span class="snapshot-value">{{ fmtNum(basics.pe) }}</span></div>
+          <div class="snapshot-item"><span class="snapshot-label">PE(TTM)</span><span class="snapshot-value" :class="{ 'snapshot-value-loss': isLossPe }">{{ fmtPe(basics.pe) }}</span></div>
           <div class="snapshot-item"><span class="snapshot-label">PB(市净率)</span><span class="snapshot-value">{{ fmtNum(basics.pb) }}</span></div>
           <div class="snapshot-item"><span class="snapshot-label">PS(TTM)</span><span class="snapshot-value">{{ fmtNum(basics.ps) }}</span></div>
           <div class="snapshot-item"><span class="snapshot-label">ROE</span><span class="snapshot-value">{{ fmtPercent(basics.roe) }}</span></div>
@@ -177,6 +177,16 @@ function fmtNum(v: any) {
   return Number.isFinite(n) ? n.toFixed(2) : '-'
 }
 
+// PE 专用：TTM 净利润为负时市盈率失去估值意义，按行业惯例显示"亏损"而非负数
+function fmtPe(v: any) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '-'
+  if (n < 0) return '亏损'
+  return n.toFixed(2)
+}
+
+const isLossPe = computed(() => Number.isFinite(Number(props.basics.pe)) && Number(props.basics.pe) < 0)
+
 function fmtPercent(v: any) {
   const n = Number(v)
   if (!Number.isFinite(n)) return '-'
@@ -292,6 +302,10 @@ function formatNewsTime(dateStr: string | null | undefined): string {
 .snapshot-value {
   font-weight: 600;
   color: #1e293b;
+}
+
+.snapshot-value-loss {
+  color: #ef4444;
 }
 
 .raw-section-summary {

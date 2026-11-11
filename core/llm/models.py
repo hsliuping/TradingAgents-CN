@@ -36,6 +36,9 @@ class Message(BaseModel):
     name: Optional[str] = None
     tool_calls: Optional[List["ToolCall"]] = None
     tool_call_id: Optional[str] = None
+    # 多模态：图片输入（URL 或 base64 data URI）。非空时 OpenAICompatAdapter
+    # 会把 content 组装成 text + image_url 的 content 列表（视觉模型读图）。 
+    images: Optional[List[str]] = None
     
     class Config:
         use_enum_values = True

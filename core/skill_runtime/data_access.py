@@ -134,6 +134,8 @@ def _flatten_financial_period_record(period_record: Dict[str, Any]) -> Dict[str,
         "c_cash_equ_beg_period": _extract_from_candidates(cashflow, "c_cash_equ_beg_period", "beg_bal_cash"),
         "roe": _extract_from_candidates(indicators, "roe", "roe_avg", "roe_waa"),
         "roa": _extract_from_candidates(indicators, "roa", "roa2"),
+        "eps": _extract_from_candidates(indicators, "eps", "basic_eps"),
+        "bps": _extract_from_candidates(indicators, "bps"),
         "gross_margin": _extract_from_candidates(indicators, "grossprofit_margin", "gross_margin"),
         "netprofit_margin": _extract_from_candidates(indicators, "netprofit_margin"),
         "debt_to_assets": _extract_from_candidates(indicators, "debt_to_assets"),
@@ -208,6 +210,8 @@ def expand_financial_document_to_periods(document: Optional[Dict[str, Any]]) -> 
             c_cash_equ_beg_period: 期初现金及等价物
             roe: 净资产收益率
             roa: 总资产收益率
+            eps: 基本每股收益（最近报告期，来自 financial_indicators）
+            bps: 每股净资产（最近报告期，来自 financial_indicators）
             gross_margin: 毛利率
             netprofit_margin: 净利率
             debt_to_assets: 资产负债率
@@ -349,7 +353,7 @@ def get_stock_basic_info(symbol: str, source: Optional[str] = None) -> Optional[
 
     Args:
         symbol: A 股股票代码（6 位数字或含交易所前后缀，会被 zfill 到 6 位）
-        source: 指定数据源（如 "tushare" / "akshare"），为 None 时按 _get_sources() 优先级依次尝试
+        source: 指定数据源（如 "tushare" / "akshare"），为 None 时查询全部源记录并做多源合并（非空字段互补）
 
     Returns:
         dict | None: 股票基础信息文档，无匹配时返回 None。字段（以 stock_basic_info 集合存储为准）——
@@ -376,14 +380,10 @@ def get_stock_basic_info(symbol: str, source: Optional[str] = None) -> Optional[
         query["source"] = source
         doc = col.find_one(query, {"_id": 0})
     else:
-        doc = None
-        for src in _get_sources():
-            q = {**query, "source": src}
-            doc = col.find_one(q, {"_id": 0})
-            if doc:
-                break
-        if not doc:
-            doc = col.find_one(query, {"_id": 0})
+        # 多源记录合并（非空字段互补）：单次查询替代逐源探测，避免逐源偏读导致字段缺失
+        from tradingagents.dataflows.stock_basic_schema import merge_stock_basic_records
+
+        doc = merge_stock_basic_records(list(col.find(query, {"_id": 0})))
     return doc
 
 
@@ -986,7 +986,8 @@ LOCAL_DATA_API_DOC = """
    - 现金流质量、利润含金量、自由现金流分析优先用这个函数
 
 14. get_historical_valuation_percentile(symbol, metrics=None, lookback_years=5, as_of_date=None) -> dict
-   - 结构化返回 pe_ttm / pb / ps_ttm / pcf_ttm 的历史分位、当前值、中位数、样本数和窗口
+   - 结构化返回 pe_ttm / pb / ps_ttm / pcf_ttm 的历史分位、当前值、中位数、样本数和窗口，
+     以及 annual_lows（年度估值低点对照，含当前值相对各年低点的溢价百分比，用于与前几轮周期底对比）
    - 替代 get_stock_fundamentals_unified 中隐藏的 3 年文本分位输出
 
 ⚠️ 注意：以上函数 4-5（get_market_quotes、get_latest_stock_price）和 8（get_stock_valuation_context）只能拿到当前 PE/PB 快照。

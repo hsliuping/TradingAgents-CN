@@ -25,7 +25,7 @@
           </div>
           
           <p class="page-description">
-            AI驱动的智能证券分析，多维度评估投资价值与风险
+            个股深度研究的主路径：输入标的发起 AI 多维度分析 · 主题/行业问题请用通用研究，说不清要点时问智能助手
           </p>
         </div>
       </div>
@@ -130,8 +130,8 @@
                     v-for="(depth, index) in depthOptions"
                     :key="index"
                     class="depth-option"
-                    :class="{ active: analysisForm.researchDepth === index + 1 }"
-                    @click="analysisForm.researchDepth = index + 1"
+                    :class="{ active: analysisForm.researchDepth === depthLevels[index] }"
+                    @click="analysisForm.researchDepth = depthLevels[index]"
                   >
                     <div class="depth-icon">{{ depth.icon }}</div>
                     <div class="depth-info">
@@ -139,6 +139,30 @@
                       <div class="depth-desc">{{ depth.description }}</div>
                       <div class="depth-time">{{ depth.time }}</div>
                     </div>
+                  </div>
+                </div>
+                <!-- M4.1 档位差异说明：环节清单/产出形态（数据源后端 profile 摘要，不硬编码） -->
+                <div v-if="selectedDepthProfile" class="depth-profile-detail">
+                  <div class="depth-profile-stages">
+                    <span class="depth-profile-label">执行环节</span>
+                    <el-tag
+                      v-for="stage in selectedDepthProfile.included_stages"
+                      :key="stage"
+                      size="small"
+                      type="success"
+                      effect="plain"
+                    >{{ stage }}</el-tag>
+                    <el-tag
+                      v-for="stage in selectedDepthProfile.skipped_stages"
+                      :key="`skip-${stage}`"
+                      size="small"
+                      type="info"
+                      effect="plain"
+                    >本档不含：{{ stage }}</el-tag>
+                  </div>
+                  <div class="depth-profile-spec">
+                    <span class="depth-profile-label">产出形态</span>
+                    {{ selectedDepthProfile.output_spec }}
                   </div>
                 </div>
               </div>
@@ -183,7 +207,7 @@
               <!-- 操作按钮 -->
               <div class="form-section">
                 <!-- 执行轨迹开关 -->
-                <div style="display: flex; justify-content: center; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
                   <el-tooltip
                     content="开启后，系统会记录每个 Agent 的完整执行过程（Prompt全文、LLM原始返回、校验结果），用于排查分析问题。数据量较大，平时不需要时建议关闭。"
                     placement="top"
@@ -191,6 +215,15 @@
                     <el-checkbox v-model="analysisForm.enableTrace" size="small">
                       <el-icon style="margin-right: 4px;"><View /></el-icon>
                       记录执行轨迹（排查问题时开启）
+                    </el-checkbox>
+                  </el-tooltip>
+                  <el-tooltip
+                    content="开启后，同一股票同档位在缓存有效期内（快速30分钟~深度24小时）直接复用以前的分析结果，不再重跑。关闭后本次强制重新分析，并用新结果覆盖缓存。测试新功能或排查问题时请关闭。"
+                    placement="top"
+                  >
+                    <el-checkbox v-model="analysisForm.useCache" size="small">
+                      <el-icon style="margin-right: 4px;"><FolderOpened /></el-icon>
+                      本次分析使用缓存（复用以前的结果）
                     </el-checkbox>
                   </el-tooltip>
                 </div>
@@ -221,6 +254,30 @@
                     <el-icon><Loading /></el-icon>
                     分析进行中...
                   </el-button>
+
+                  <div v-else-if="analysisStatus === 'paused' || analysisStatus === 'cancelled'" style="display: flex; gap: 12px;">
+                    <el-button
+                      type="primary"
+                      size="large"
+                      @click="continueAnalysis"
+                      class="submit-btn"
+                      style="width: 180px; height: 56px; font-size: 16px; font-weight: 700; border-radius: 16px;"
+                    >
+                      <el-icon><VideoPlay /></el-icon>
+                      继续分析
+                    </el-button>
+
+                    <el-button
+                      type="warning"
+                      size="large"
+                      @click="restartAnalysis"
+                      class="submit-btn"
+                      style="width: 180px; height: 56px; font-size: 16px; font-weight: 700; border-radius: 16px;"
+                    >
+                      <el-icon><Refresh /></el-icon>
+                      重新分析
+                    </el-button>
+                  </div>
 
                   <div v-else-if="analysisStatus === 'completed'" style="display: flex; gap: 12px;">
                     <el-button
@@ -261,16 +318,45 @@
               </div>
 
               <!-- 分析进度显示 -->
-              <div v-if="analysisStatus === 'running'" class="progress-section">
+              <div v-if="analysisStatus === 'running' || analysisStatus === 'paused' || analysisStatus === 'cancelled'" class="progress-section">
                 <el-card class="progress-card" shadow="hover">
                   <template #header>
                     <div class="progress-header">
                       <h4>
-                        <el-icon class="rotating-icon">
-                          <Loading />
+                        <el-icon :class="{ 'rotating-icon': analysisStatus === 'running' }">
+                          <Loading v-if="analysisStatus === 'running'" />
+                          <VideoPause v-else-if="analysisStatus === 'paused'" />
+                          <VideoPlay v-else />
                         </el-icon>
-                        分析进行中...
+                        {{ analysisStatus === 'running' ? '分析进行中...' : analysisStatus === 'paused' ? '分析已暂停' : '分析已停止' }}
                       </h4>
+                      <el-button
+                        v-if="analysisStatus === 'running'"
+                        type="warning"
+                        size="small"
+                        @click="pauseAnalysis"
+                      >
+                        <el-icon><VideoPause /></el-icon>
+                        暂停
+                      </el-button>
+                      <el-button
+                        v-if="analysisStatus === 'running' || analysisStatus === 'paused'"
+                        type="danger"
+                        size="small"
+                        @click="stopAnalysis"
+                      >
+                        <el-icon><Close /></el-icon>
+                        停止
+                      </el-button>
+                      <el-button
+                        v-if="analysisStatus === 'paused' || analysisStatus === 'cancelled'"
+                        type="primary"
+                        size="small"
+                        @click="continueAnalysis"
+                      >
+                        <el-icon><VideoPlay /></el-icon>
+                        继续分析
+                      </el-button>
                       <el-button
                         type="primary"
                         size="small"
@@ -839,9 +925,14 @@ import {
   ArrowDown,
   Plus,
   DocumentChecked,
+  FolderOpened,
   View,
+  VideoPause,
+  VideoPlay,
+  Close,
 } from '@element-plus/icons-vue'
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
+import { pauseTask, cancelTask, resumeTask } from '@/api/unifiedTasks'
 import { workflowApi, isSelectableAnalysisWorkflow, type WorkflowSummary } from '@/api/workflow'
 import { stocksApi, type FundamentalsResponse } from '@/api/stocks'
 import { stockSyncApi, type StockSyncTaskStatus, type SingleStockSyncResponse } from '@/api/stockSync'
@@ -884,6 +975,7 @@ interface AnalysisForm {
   language: 'zh-CN' | 'en-US'
   engine: AnalysisEngineType  // 分析引擎: 固定使用 v2.0 引擎
   enableTrace: boolean  // 执行轨迹开关：默认关闭，排查问题时可开启
+  useCache: boolean  // 本次分析使用缓存：TTL 内复用以前的分析结果，关闭则强制真跑并覆盖缓存
 }
 
 // 使用store
@@ -901,7 +993,7 @@ const syncPollingTimer = ref<any>(null)
 
 // 分析进度和结果相关状态
 const currentTaskId = ref('')
-const analysisStatus = ref('idle') // 'idle', 'running', 'completed', 'failed'
+const analysisStatus = ref('idle') // 'idle', 'running', 'paused', 'cancelled', 'completed', 'failed'
 const showResults = ref(false)
 const analysisResults = ref<any>(null)
 const analysisReportManifest = ref<Array<{ field: string; display_name: string; icon?: string; description?: string }>>([])
@@ -1023,7 +1115,8 @@ const analysisForm = reactive<AnalysisForm>({
   includeRisk: true,
   language: 'zh-CN',
   engine: 'v2',  // 固定使用 v2.0 引擎
-  enableTrace: false  // 执行轨迹：默认关闭，排查问题时可开启
+  enableTrace: false,  // 执行轨迹：默认关闭，排查问题时可开启
+  useCache: true  // 分析缓存：默认开启（TTL 内直接复用以前的结果）；测试/排查时关闭即强制真跑
 })
 
 // 监听市场类型变化，自动切换到对应类型的默认流程
@@ -1050,14 +1143,26 @@ watch(
 const stockCodeError = ref<string>('')
 const stockCodeHelp = ref<string>('')
 
-// 深度选项（5个级别，基于实际测试数据更新）
+// 深度选项（3个级别，2026-11-04 五档简化为三档：快速1/标准3/深度5）
+const depthLevels = [1, 3, 5]
 const depthOptions = [
-  { icon: '⚡', name: '1级 - 快速分析', description: '基础数据概览，快速决策', time: '2-5分钟' },
-  { icon: '📈', name: '2级 - 基础分析', description: '常规投资决策', time: '3-6分钟' },
-  { icon: '🎯', name: '3级 - 标准分析', description: '技术+基本面，推荐', time: '4-8分钟' },
-  { icon: '🔍', name: '4级 - 深度分析', description: '多轮辩论，深度研究', time: '6-11分钟' },
-  { icon: '🏆', name: '5级 - 全面分析', description: '最全面的分析报告', time: '8-16分钟' }
+  { icon: '⚡', name: '1级 - 快速分析', description: '初筛摸底，快速决策', time: '2-5分钟' },
+  { icon: '🎯', name: '3级 - 标准分析', description: '建立判断，常规研究，推荐', time: '4-8分钟' },
+  { icon: '🏆', name: '5级 - 深度分析', description: '选股研究，论题+证伪+触发', time: '8-16分钟' }
 ]
+
+// M4.1：档位差异说明（数据源为后端 /api/analysis/depth-profiles 的 profile 摘要，前端不硬编码档位差异）
+const depthProfiles = ref<Array<{
+  name: string
+  level: number
+  included_stages: string[]
+  skipped_stages: string[]
+  output_spec: string
+}>>([])
+
+const selectedDepthProfile = computed(() =>
+  depthProfiles.value.find(p => p.level === analysisForm.researchDepth)
+)
 
 // 禁用日期
 const disabledDate = (time: Date) => {
@@ -1621,7 +1726,8 @@ const submitAnalysis = async () => {
         deep_analysis_model: modelSettings.value.deepAnalysisModel,
         engine: 'v2',  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
         workflow_id: selectedWorkflowId.value,
-        enable_trace: analysisForm.enableTrace  // 执行轨迹开关
+        enable_trace: analysisForm.enableTrace,  // 执行轨迹开关
+        force_refresh: !analysisForm.useCache  // 关闭缓存开关时强制真跑（跑完覆盖缓存索引）
       }
     }
 
@@ -1791,6 +1897,33 @@ const startPollingTaskStatus = () => {
           showClose: true
         })
 
+      } else if (status.status === 'suspended') {
+        // 任务已暂停（协作式暂停已在当前步骤边界生效）
+        analysisStatus.value = 'paused'
+        updateProgressInfo(status)
+        progressInfo.value.message = '任务已暂停，可从断点继续分析'
+
+        if (pollingTimer.value) {
+          clearInterval(pollingTimer.value)
+          pollingTimer.value = null
+        }
+
+        console.log('⏸️ 任务已暂停')
+
+      } else if (status.status === 'cancelled') {
+        // 任务已停止
+        analysisStatus.value = 'cancelled'
+        updateProgressInfo(status)
+        progressInfo.value.currentStep = '分析已停止'
+        progressInfo.value.message = status.message || '任务已停止，可从断点继续分析'
+
+        if (pollingTimer.value) {
+          clearInterval(pollingTimer.value)
+          pollingTimer.value = null
+        }
+
+        console.log('🚫 任务已停止')
+
       } else if (status.status === 'pending' || status.status === 'running') {
         // 分析进行中，更新进度
         console.log('🔄 轮询中设置 analysisStatus 为 running')
@@ -1860,6 +1993,63 @@ const updateProgressInfo = (status: any) => {
 
   // 前端不进行估算，只展示后端返回的数据
   progressInfo.value.message = status.message || '分析正在进行中...'
+}
+
+// 暂停分析（协作式：当前分析步骤完成后暂停，断点保留可续跑）
+const pauseAnalysis = async () => {
+  if (!currentTaskId.value) return
+  try {
+    await pauseTask(currentTaskId.value)
+    ElMessage.info('暂停请求已提交，将在当前分析步骤完成后暂停（最长约几分钟）')
+    // 继续轮询，等待状态切换到 suspended
+  } catch (error: any) {
+    ElMessage.error(error?.message || '暂停失败')
+  }
+}
+
+// 停止分析（协作式：当前分析步骤完成后停止）
+const stopAnalysis = async () => {
+  if (!currentTaskId.value) return
+
+  try {
+    await ElMessageBox.confirm(
+      '确定停止当前分析吗？已完成的分析步骤会保留，之后可从断点继续。',
+      '停止分析',
+      { type: 'warning', confirmButtonText: '停止', cancelButtonText: '继续分析' }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await cancelTask(currentTaskId.value)
+    analysisStatus.value = 'cancelled'
+    progressInfo.value.currentStep = '分析已停止'
+    progressInfo.value.message = '任务已停止，可从断点继续分析'
+
+    if (pollingTimer.value) {
+      clearInterval(pollingTimer.value)
+      pollingTimer.value = null
+    }
+
+    ElMessage.success('停止请求已提交，当前步骤完成后停止')
+  } catch (error: any) {
+    ElMessage.error(error?.message || '停止失败')
+  }
+}
+
+// 从断点继续分析
+const continueAnalysis = async () => {
+  if (!currentTaskId.value) return
+  try {
+    await resumeTask(currentTaskId.value)
+    analysisStatus.value = 'running'
+    progressInfo.value.message = '正在从断点继续分析...'
+    startPollingTaskStatus()
+    ElMessage.success('已提交继续分析请求')
+  } catch (error: any) {
+    ElMessage.error(error?.message || '继续分析失败')
+  }
 }
 
 // 重新开始分析
@@ -2463,10 +2653,10 @@ const handleVisibilityChange = () => {
 // 监听页面可见性变化
 document.addEventListener('visibilitychange', handleVisibilityChange)
 
-// 获取深度描述
+// 获取深度描述（按 level 映射；三档：1快速/3标准/5深度）
 const getDepthDescription = (depth: number) => {
-  const descriptions = ['快速', '基础', '标准', '深度', '全面']
-  return descriptions[depth - 1] || '标准'
+  const descriptions: Record<number, string> = { 1: '快速', 3: '标准', 5: '深度' }
+  return descriptions[depth] || '标准'
 }
 
 // 获取进度条状态
@@ -2674,6 +2864,21 @@ const restoreTaskFromCache = async () => {
       console.log('🔄 任务仍在运行，恢复进度显示')
       return true
 
+    } else if (status.status === 'suspended' || status.status === 'cancelled') {
+      // 任务已暂停/停止，恢复控制按钮显示
+      currentTaskId.value = cached.taskId
+      analysisStatus.value = status.status === 'suspended' ? 'paused' : 'cancelled'
+      showResults.value = false
+      updateProgressInfo(status)
+
+      // 恢复分析参数
+      if (cached.taskData.parameters) {
+        Object.assign(analysisForm, cached.taskData.parameters)
+      }
+
+      console.log('⏸️ 任务已暂停/停止，恢复控制按钮')
+      return true
+
     } else if (status.status === 'failed') {
       // 任务失败
       analysisStatus.value = 'failed'
@@ -2744,10 +2949,8 @@ const isQuickAnalysisRole = (roles: string[] | undefined): boolean => {
 const checkModelSuitability = async () => {
   const depthNames: Record<number, string> = {
     1: '快速',
-    2: '基础',
     3: '标准',
-    4: '深度',
-    5: '全面'
+    5: '深度'
   }
   const depthName = depthNames[analysisForm.researchDepth] || '标准'
 
@@ -2772,11 +2975,9 @@ const checkModelSuitability = async () => {
 
       // 构建推荐说明
       const depthDescriptions: Record<number, string> = {
-        1: '快速浏览，获取基本信息',
-        2: '基础分析，了解主要指标',
-        3: '标准分析，全面评估股票',
-        4: '深度研究，挖掘投资机会',
-        5: '全面分析，专业投资决策'
+        1: '快速摸底，初筛决策',
+        3: '标准分析，建立判断',
+        5: '深度研究，选股立论'
       }
 
       const message = `${depthDescriptions[analysisForm.researchDepth] || '标准分析'}\n\n推荐模型配置：\n• 快速模型：${quickDisplayName}\n• 深度模型：${deepDisplayName}\n\n${reason}`
@@ -2792,10 +2993,8 @@ const checkModelSuitability = async () => {
       // 如果没有推荐数据，显示通用说明
       const generalDescriptions: Record<number, string> = {
         1: '快速分析：使用基础模型即可，注重速度和成本',
-        2: '基础分析：快速模型用基础级，深度模型用标准级',
         3: '标准分析：快速模型用基础级，深度模型用标准级以上',
-        4: '深度分析：快速模型用标准级，深度模型用高级以上，需要推理能力',
-        5: '全面分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
+        5: '深度分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
       }
 
       modelRecommendation.value = {
@@ -2809,10 +3008,8 @@ const checkModelSuitability = async () => {
     // 显示通用说明
     const generalDescriptions: Record<number, string> = {
       1: '快速分析：使用基础模型即可，注重速度和成本',
-      2: '基础分析：快速模型用基础级，深度模型用标准级',
       3: '标准分析：快速模型用基础级，深度模型用标准级以上',
-      4: '深度分析：快速模型用标准级，深度模型用高级以上，需要推理能力',
-      5: '全面分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
+      5: '深度分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
     }
 
     modelRecommendation.value = {
@@ -2850,6 +3047,16 @@ watch([() => modelSettings.value.quickAnalysisModel, () => modelSettings.value.d
 // 页面初始化
 onMounted(async () => {
   initializeModelSettings()
+
+  // M4.1：加载档位差异说明（失败不阻断表单，仅不展示差异面板）
+  analysisApi.getDepthProfiles().then((resp: any) => {
+    const data = resp?.data ?? resp
+    if (Array.isArray(data)) {
+      depthProfiles.value = data
+    }
+  }).catch((err: any) => {
+    console.warn('⚠️ 加载档位差异说明失败:', err)
+  })
 
   // 🆕 从用户偏好加载默认设置
   const authStore = useAuthStore()
@@ -3185,6 +3392,35 @@ onMounted(async () => {
               opacity: 0.7;
             }
           }
+        }
+      }
+
+      .depth-profile-detail {
+        margin-top: 12px;
+        padding: 12px 16px;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        background: #f8fafc;
+
+        .depth-profile-label {
+          font-weight: 600;
+          margin-right: 8px;
+          color: #475569;
+          font-size: 12px;
+        }
+
+        .depth-profile-stages {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 6px;
+          margin-bottom: 8px;
+        }
+
+        .depth-profile-spec {
+          font-size: 12px;
+          color: #475569;
+          line-height: 1.6;
         }
       }
 

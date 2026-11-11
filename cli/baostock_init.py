@@ -17,15 +17,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.worker.baostock_init_service import BaoStockInitService
 from app.worker.baostock_sync_service import BaoStockSyncService
 
-# 配置日志
+# 配置日志（共享初始化函数，日志治理 §5.3）
 os.makedirs(os.path.join('data', 'logs'), exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(os.path.join('data', 'logs', 'baostock_init.log'), encoding='utf-8')
-    ]
+from core.utils.logging_setup import setup_cli_logging
+setup_cli_logging(
+    "INFO",
+    fmt='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
+    log_file=os.path.join('data', 'logs', 'baostock_init.log'),
 )
 logger = logging.getLogger(__name__)
 

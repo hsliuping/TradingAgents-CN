@@ -14,11 +14,33 @@ from core.agents.analyst import AnalystAgent
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
 from core.agents.utils.data_source_mode import resolve_market_data_mode
+from core.tools.trade_date_policy import apply_stable_data_cutoff
 
 logger = logging.getLogger(__name__)
 
 # ==================== 缓存配置 ====================
 INDEX_REPORT_CACHE_TTL_HOURS = 1  # 大盘分析报告缓存有效期（小时）
+
+
+def _normalize_date_string(raw_date: str) -> str:
+    if not raw_date:
+        return raw_date
+
+    return str(raw_date).split()[0].split('T')[0]
+
+
+def _build_index_cache_identity(requested_date: str) -> tuple[str, str, str]:
+    """
+    构建大盘分析缓存身份三元组 (cache_symbol, requested_date, effective_date)
+
+    请求日期与稳定数据截止日期分离，避免当日盘中请求与收盘后稳定数据互相污染缓存。
+    """
+    normalized_requested_date = _normalize_date_string(requested_date)
+    effective_date = apply_stable_data_cutoff(normalized_requested_date)
+    requested_token = normalized_requested_date.replace('-', '')
+    effective_token = effective_date.replace('-', '')
+    cache_symbol = f"market_v2__req_{requested_token}__eff_{effective_token}"
+    return cache_symbol, normalized_requested_date, effective_date
 
 
 def _get_cache_manager():
@@ -31,12 +53,12 @@ def _get_cache_manager():
         return None
 
 
-def _get_cached_index_report(trade_date: str) -> Optional[str]:
+def _get_cached_index_report(requested_date: str) -> Optional[str]:
     """
     从缓存获取大盘分析报告
 
     Args:
-        trade_date: 交易日期
+        requested_date: 请求分析日期
 
     Returns:
         缓存的报告内容，如果没有命中则返回 None
@@ -46,20 +68,22 @@ def _get_cached_index_report(trade_date: str) -> Optional[str]:
         return None
 
     try:
-        # 大盘分析不依赖具体股票，使用 "market_v2" 作为 symbol 区分 v1.x
+        cache_symbol, cache_trade_date, effective_date = _build_index_cache_identity(requested_date)
         # 🔑 确保 max_age_hours 是整数
         max_age_hours = int(INDEX_REPORT_CACHE_TTL_HOURS) if INDEX_REPORT_CACHE_TTL_HOURS else 1
-        
+
         cache_key = cache.find_cached_analysis_report(
             report_type="index_report",
-            symbol="market_v2",
-            trade_date=trade_date,
+            symbol=cache_symbol,
+            trade_date=cache_trade_date,
             max_age_hours=max_age_hours
         )
         if cache_key:
             report = cache.load_analysis_report(cache_key)
             if report and len(report) > 100:
-                logger.info(f"📦 [大盘分析师v2] 命中缓存: @ {trade_date}")
+                logger.info(
+                    f"📦 [大盘分析师v2] 命中缓存: 请求日期={cache_trade_date}, 稳定口径={effective_date}"
+                )
                 return report
     except Exception as e:
         logger.warning(f"⚠️ 读取大盘分析缓存失败: {e}")
@@ -67,12 +91,12 @@ def _get_cached_index_report(trade_date: str) -> Optional[str]:
     return None
 
 
-def _save_index_report_to_cache(trade_date: str, report: str) -> bool:
+def _save_index_report_to_cache(requested_date: str, report: str) -> bool:
     """
     将大盘分析报告保存到缓存
 
     Args:
-        trade_date: 交易日期
+        requested_date: 请求分析日期
         report: 报告内容
 
     Returns:
@@ -83,23 +107,31 @@ def _save_index_report_to_cache(trade_date: str, report: str) -> bool:
         return False
 
     try:
+        cache_symbol, cache_trade_date, effective_date = _build_index_cache_identity(requested_date)
         # 🔍 调试日志：记录缓存参数
-        logger.debug(f"💾 [大盘分析师v2] 准备缓存: trade_date={trade_date}, "
-                     f"trade_date_type={type(trade_date).__name__}, report_len={len(report)}")
+        logger.debug(
+            f"💾 [大盘分析师v2] 准备缓存: requested_date={cache_trade_date}, "
+            f"effective_date={effective_date}, report_len={len(report)}"
+        )
 
         cache.save_analysis_report(
             report_type="index_report",
             report_data=report,
-            symbol="market_v2",
-            trade_date=trade_date
+            symbol=cache_symbol,
+            trade_date=cache_trade_date
         )
-        logger.info(f"💾 [大盘分析师v2] 报告已缓存: @ {trade_date} ({INDEX_REPORT_CACHE_TTL_HOURS}小时有效)")
+        logger.info(
+            f"💾 [大盘分析师v2] 报告已缓存: 请求日期={cache_trade_date}, "
+            f"稳定口径={effective_date} ({INDEX_REPORT_CACHE_TTL_HOURS}小时有效)"
+        )
         return True
     except Exception as e:
         # 🔍 增强错误日志：记录完整堆栈
         import traceback
-        logger.warning(f"⚠️ 保存大盘分析缓存失败: {e}\n参数: trade_date={trade_date}, "
-                       f"trade_date_type={type(trade_date).__name__}\n堆栈: {traceback.format_exc()}")
+        logger.warning(
+            f"⚠️ 保存大盘分析缓存失败: {e}\n参数: requested_date={requested_date}, "
+            f"requested_date_type={type(requested_date).__name__}\n堆栈: {traceback.format_exc()}"
+        )
         return False
 
 # 尝试导入股票工具
@@ -238,6 +270,13 @@ class IndexAnalystV2(AnalystAgent):
         else:
             # 可能是 "2026-01-14 00:00:00" 或 "2026-01-14T00:00:00"
             analysis_date = str(raw_date).split()[0].split('T')[0]
+
+        _, cache_trade_date, effective_cache_date = _build_index_cache_identity(analysis_date)
+        if effective_cache_date != cache_trade_date:
+            logger.info(
+                f"🗂️ [大盘分析师v2] 缓存口径已按稳定数据时点调整: "
+                f"requested={cache_trade_date}, effective={effective_cache_date}"
+            )
 
         # 🔥 检查是否为调试模式或跳过缓存
         is_debug_mode = False

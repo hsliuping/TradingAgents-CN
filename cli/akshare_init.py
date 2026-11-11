@@ -18,15 +18,13 @@ from app.core.database import init_database, get_mongo_db, close_database
 from app.worker.akshare_init_service import get_akshare_init_service
 from app.worker.akshare_sync_service import get_akshare_sync_service
 
-# 配置日志
+# 配置日志（共享初始化函数，日志治理 §5.3）
 os.makedirs(os.path.join('data', 'logs'), exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(os.path.join('data', 'logs', 'akshare_init.log'), encoding='utf-8')
-    ]
+from core.utils.logging_setup import setup_cli_logging
+setup_cli_logging(
+    "INFO",
+    fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    log_file=os.path.join('data', 'logs', 'akshare_init.log'),
 )
 logger = logging.getLogger(__name__)
 

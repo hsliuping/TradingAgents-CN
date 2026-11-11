@@ -3,7 +3,10 @@
     <div class="login-container">
       <div class="login-header">
         <img src="/favicon.ico" alt="TradingAgents-CN" class="logo" />
-        <h1 class="title">TradingAgents-CN 3.0</h1>
+        <h1 class="title">
+          {{ isJdyun ? 'TradingAgents-CN 京东云合作版' : 'TradingAgents-CN' }}
+          <span class="version-badge">{{ APP_CONFIG.version }}</span>
+        </h1>
         <p class="subtitle">多智能体股票分析学习平台</p>
       </div>
 
@@ -117,14 +120,17 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { renderMarkdown } from '@/utils/markdown'
+import { APP_CONFIG } from '@/config/app'
+import { isJdyunMode } from '@/utils/config'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const isJdyun = computed(() => isJdyunMode())
 
 const loginFormRef = ref()
 const loginLoading = ref(false)
@@ -280,6 +286,19 @@ const handleLogin = async () => {
     font-size: 32px;
     font-weight: 600;
     margin: 0 0 8px 0;
+
+    .version-badge {
+      display: inline-block;
+      background: rgba(255, 255, 255, 0.92);
+      color: #764ba2;
+      padding: 3px 12px;
+      border-radius: 16px;
+      font-size: 14px;
+      font-weight: 600;
+      margin-left: 12px;
+      vertical-align: middle;
+      font-family: Consolas, 'SF Mono', 'Courier New', monospace;
+    }
   }
 
   .subtitle {

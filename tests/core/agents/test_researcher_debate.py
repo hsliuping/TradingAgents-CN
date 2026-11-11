@@ -265,33 +265,11 @@ class TestBackwardCompatibility:
         assert "test_report" in result
         assert "investment_debate_state" not in result
 
-    def test_memory_context_in_single_mode(self):
-        """测试单次分析模式使用 Memory 上下文"""
+    def test_memory_read_injection_retired(self):
+        """M5.4：per-agent 向量记忆读注入已退位，不再提供召回方法"""
         agent = MockResearcherAgent()
 
-        # Mock Memory
-        agent.memory = Mock()
-        agent.memory.search_memories = Mock(return_value=[
-            {"content": "历史建议1", "similarity": 0.91},
-            {"content": "历史建议2", "similarity": 0.89},
-        ])
-
-        reports = {"market_report": "当前市场报告"}
-        context = agent._get_memory_context("AAPL", reports)
-
-        assert "【历史经验】" in context
-        assert "历史建议1" in context
-        assert "历史建议2" in context
-
-    def test_memory_context_no_memory(self):
-        """测试没有 Memory 系统"""
-        agent = MockResearcherAgent()
-        agent.memory = None
-
-        reports = {"market_report": "当前市场报告"}
-        context = agent._get_memory_context("AAPL", reports)
-
-        assert context == ""
+        assert not hasattr(agent, "_get_memory_context")
 
 
 if __name__ == "__main__":

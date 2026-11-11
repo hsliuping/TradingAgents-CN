@@ -190,20 +190,23 @@ class DataCompletenessChecker:
         """获取最新交易日"""
         try:
             if market == "CN":
-                # A股：使用 Tushare 查找最新交易日
-                from tradingagents.dataflows.providers.china.tushare import TushareProvider
-                import asyncio
-                
-                provider = TushareProvider()
-                if provider.is_available():
-                    loop = asyncio.get_event_loop()
-                    if loop.is_closed():
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                    
-                    latest_date = loop.run_until_complete(provider.find_latest_trade_date())
-                    if latest_date:
-                        return latest_date
+                # A股：走能力框架 trade_cal（tushare/akshare 双源降级，取区间内最新交易日）
+                try:
+                    from tradingagents.dataflows.capability import query_capability_sync
+
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                    start_date = (datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d')
+                    cal_df = query_capability_sync(
+                        "trade_cal", start_date=start_date, end_date=end_date
+                    )
+                    if cal_df is not None and not cal_df.empty:
+                        trade_days = cal_df[cal_df["is_open"] == 1]["cal_date"]
+                        if not trade_days.empty:
+                            latest = pd.Timestamp(trade_days.max())
+                            self.logger.info(f"✅ 找到最新交易日期: {latest.strftime('%Y-%m-%d')}")
+                            return latest.strftime('%Y-%m-%d')
+                except Exception as e:
+                    self.logger.warning(f"⚠️ 能力框架获取交易日历失败，使用回退方案: {e}")
             
             # 备用方案：假设最新交易日是今天或昨天（如果今天是周末则往前推）
             today = datetime.now()

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from app.core.config import get_settings
 from app.core.database import get_database
 from app.services.historical_data_service import get_historical_data_service
+from app.services.stock_basic_schema import normalize_stock_basic_doc
 from tradingagents.dataflows.providers.china.baostock import BaoStockProvider
 
 logger = logging.getLogger(__name__)
@@ -267,6 +268,9 @@ class BaoStockSyncService:
             # 🔥 确保 source 字段存在
             if "source" not in basic_info:
                 basic_info["source"] = "baostock"
+
+            # 🔥 写入前对齐统一 Schema（字段口径 + write_path 标记）
+            basic_info = normalize_stock_basic_doc(basic_info)
 
             # 🔥 使用 (code, source) 联合查询条件
             await collection.update_one(

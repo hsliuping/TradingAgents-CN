@@ -102,6 +102,17 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             config={"description": "收集所有分析师证据，进入多情景研究阶段"},
         ),
 
+        # === 阶段3 门控: 多空辩论段开关（M3 流程门控）===
+        # profile.nodes 不含「多空辩论」时整段跳过（含自我辩论/并行开局内部路由）
+        NodeDefinition(
+            id="gate_debate",
+            type=NodeType.CONDITION,
+            label="门控：多空辩论",
+            condition="not state.get('_skip_debate')",
+            position=Position(x=400, y=280),
+            config={"description": "M3 流程门控：多空辩论段开关（profile.nodes）"},
+        ),
+
         # === 阶段3: 多情景研究（核心创新点）===
         NodeDefinition(
             id="debate",
@@ -134,6 +145,18 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             config={"stance": "bearish", "focus": "构建偏审慎论证，识别脆弱点、反向证据与失效条件"},
         ),
 
+        # === 阶段3.5: 事前风险约束卡（确定性节点，无 LLM）===
+        # v4.0 流程五段闭环①：把风险信息从「事后否决」前移为「事前约束」，
+        # 计划生成（research_manager）与用户版计划（trader）注入此卡
+        NodeDefinition(
+            id="risk_profile_v2",
+            type=NodeType.RISK,
+            agent_id="risk_profile_v2",
+            label="风险画像分析师 v2.0 🛡️",
+            position=Position(x=400, y=440),
+            config={"description": "程序化生成事前风险约束卡（持仓口径/情景区间/约束条目）"},
+        ),
+
         # === 阶段4: 研究经理综合评估 ===
         NodeDefinition(
             id="research_manager_v2",
@@ -145,6 +168,39 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
                 "role": "综合多情景证据，形成平衡研究结论、关键分歧与观察重点",
                 "delegated_agent_ids": ["chip_distribution_analyst_v2"],
             },
+        ),
+
+        # === 阶段4.5 门控: 情景试算环节开关（M3 流程门控）===
+        NodeDefinition(
+            id="gate_scenario_sim",
+            type=NodeType.CONDITION,
+            label="门控：情景试算",
+            condition="not state.get('_skip_scenario_sim')",
+            position=Position(x=400, y=500),
+            config={"description": "M3 流程门控：情景试算环节开关（profile.nodes）"},
+        ),
+
+        # === 阶段4.5: 情景效果试算（确定性节点，无 LLM）===
+        # v4.0 流程五段闭环③：对计划做机械情景试算（空间/盈亏比/压力位），
+        # 供风险审查环节与用户版计划参考
+        NodeDefinition(
+            id="scenario_simulator_v2",
+            type=NodeType.RISK,
+            agent_id="scenario_simulator_v2",
+            label="情景效果试算师 v2.0 🧮",
+            position=Position(x=400, y=520),
+            config={"description": "对交易计划做机械情景试算（空间/盈亏比/压力位/区间重叠）"},
+        ),
+
+        # === 阶段5 门控: 风险会审段开关（M3 流程门控）===
+        # 快速档跳过 risk_debate 整段（自我辩论/三角路径共用入口前分流，A9-P1/P2 内部路由不动）
+        NodeDefinition(
+            id="gate_risk_review",
+            type=NodeType.CONDITION,
+            label="门控：风险会审",
+            condition="not state.get('_skip_risk_review')",
+            position=Position(x=400, y=540),
+            config={"description": "M3 流程门控：风险会审段开关（profile.nodes）"},
         ),
 
         # === 阶段5: 风险情景研究（3个风险分析师辩论）===
@@ -237,8 +293,23 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
         EdgeDefinition(id="e_m4", source="news_analyst_v2", target="merge_analysts"),
         EdgeDefinition(id="e_m5", source="social_analyst_v2", target="merge_analysts"),
 
-        # === 阶段3: 合并 -> 辩论节点 ===
-        EdgeDefinition(id="e_debate", source="merge_analysts", target="debate"),
+        # === 阶段3: 合并 -> 门控 -> 辩论节点（M3 条件分流）===
+        EdgeDefinition(id="e_debate", source="merge_analysts", target="gate_debate"),
+        EdgeDefinition(
+            id="e_gate_d_on",
+            source="gate_debate",
+            target="debate",
+            type=EdgeType.CONDITIONAL,
+            condition="true",
+        ),
+        # 跳过多空辩论段时直达风险画像卡（辩论下游第一站）
+        EdgeDefinition(
+            id="e_gate_d_off",
+            source="gate_debate",
+            target="risk_profile_v2",
+            type=EdgeType.CONDITIONAL,
+            condition="false",
+        ),
 
         # === 阶段3: 辩论节点 <-> 研究员（双向，表示多轮辩论）===
         EdgeDefinition(
@@ -270,11 +341,43 @@ V2_STOCK_ANALYSIS_WORKFLOW = WorkflowDefinition(
             animated=True,
         ),
 
-        # === 阶段4: 辩论结束 -> 研究经理 ===
-        EdgeDefinition(id="e_mgr", source="debate", target="research_manager_v2"),
+        # === 阶段3.5/4: 辩论结束 -> 事前风险约束卡 -> 研究经理 ===
+        EdgeDefinition(id="e_mgr", source="debate", target="risk_profile_v2"),
+        EdgeDefinition(id="e_rp", source="risk_profile_v2", target="research_manager_v2"),
 
-        # === 阶段5: 研究经理 -> 风险辩论 ===
-        EdgeDefinition(id="e_to_risk_debate", source="research_manager_v2", target="risk_debate"),
+        # === 阶段4.5/5: 研究经理 -> 门控 -> 情景试算 -> 门控 -> 风险辩论（M3 条件分流）===
+        EdgeDefinition(id="e_to_risk_debate", source="research_manager_v2", target="gate_scenario_sim"),
+        EdgeDefinition(
+            id="e_gate_s_on",
+            source="gate_scenario_sim",
+            target="scenario_simulator_v2",
+            type=EdgeType.CONDITIONAL,
+            condition="true",
+        ),
+        # 跳过情景试算时直达风险会审门（不与 A9-P1/P2 内部路由抢分支）
+        EdgeDefinition(
+            id="e_gate_s_off",
+            source="gate_scenario_sim",
+            target="gate_risk_review",
+            type=EdgeType.CONDITIONAL,
+            condition="false",
+        ),
+        EdgeDefinition(id="e_sim", source="scenario_simulator_v2", target="gate_risk_review"),
+        EdgeDefinition(
+            id="e_gate_r_on",
+            source="gate_risk_review",
+            target="risk_debate",
+            type=EdgeType.CONDITIONAL,
+            condition="true",
+        ),
+        # 跳过风险会审整段（risk_debate + 三分析师 + 风险评估师）时直达研究整合员
+        EdgeDefinition(
+            id="e_gate_r_off",
+            source="gate_risk_review",
+            target="trader_v2",
+            type=EdgeType.CONDITIONAL,
+            condition="false",
+        ),
 
         # === 阶段6: 风险辩论 <-> 三个风险分析师（多轮讨论）===
         EdgeDefinition(

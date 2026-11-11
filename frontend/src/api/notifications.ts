@@ -4,7 +4,7 @@ export interface NotificationItem {
   id: string
   title: string
   content?: string
-  type: 'analysis' | 'alert' | 'system'
+  type: 'analysis' | 'alert' | 'system' | 'pig_signal'
   status: 'unread' | 'read'
   created_at: string
   link?: string

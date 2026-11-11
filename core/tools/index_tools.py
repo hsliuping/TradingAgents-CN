@@ -67,6 +67,14 @@ def _get_margin_exchange_coverage(day_data: pd.DataFrame, trade_date: str) -> Di
         for exchange_id in day_data["exchange_id"].dropna().tolist()
         if str(exchange_id).strip()
     }
+    # akshare 全市场合计口径只有 TOTAL 一行，覆盖全部交易所
+    if "TOTAL" in present_exchange_set:
+        return {
+            "is_complete": True,
+            "present_exchanges": ["TOTAL（全市场合计口径）"],
+            "missing_exchanges": [],
+            "missing_exchange_column": False,
+        }
     present_exchanges = [
         exchange_id for exchange_id in required_exchanges if exchange_id in present_exchange_set
     ]
@@ -106,10 +114,10 @@ MAIN_INDICES = {
 }
 
 
-def _get_tushare_provider():
-    """延迟导入获取 Tushare Provider"""
-    from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-    return get_tushare_provider()
+async def _query_capability(capability_id: str, **params):
+    """经 DataFacade 查询数据能力（工具不感知具体数据源，返回标准字段 + source/quality）"""
+    from tradingagents.dataflows.capability.facade import get_data_facade
+    return await get_data_facade().get_capability(capability_id).query(**params)
 
 
 async def _get_latest_trade_date(trade_date: str) -> str:
@@ -124,7 +132,6 @@ async def _get_latest_trade_date(trade_date: str) -> str:
     Returns:
         最新可用的交易日期 (YYYYMMDD格式)
     """
-    provider = _get_tushare_provider()
     # 清理日期字符串，去掉可能的时间部分
     trade_date_clean = _clean_date_string(trade_date).replace('-', '')
     stable_trade_date = apply_stable_data_cutoff(trade_date_clean)
@@ -138,12 +145,13 @@ async def _get_latest_trade_date(trade_date: str) -> str:
         start_date = end_date - timedelta(days=8)
         start_date_str = start_date.strftime('%Y%m%d')
 
-        # 一次性获取最近8天的上证指数数据
-        df = await provider.get_index_daily(
+        # 一次性获取最近8天的上证指数数据（经 DataFacade，数据源不感知；
+        # 已完结日期区间数据不变，走能力默认缓存语义安全）
+        df = await _query_capability(
+            "index_daily",
             ts_code='000001.SH',
             start_date=start_date_str,
             end_date=trade_date_clean,
-            use_cache=False  # 不使用缓存，确保获取最新数据
         )
 
         if df is not None and not df.empty:
@@ -183,8 +191,6 @@ async def get_index_trend(
     Returns:
         指数走势分析报告
     """
-    provider = _get_tushare_provider()
-    
     try:
         actual_trade_date = await _get_latest_trade_date(trade_date)
         actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
@@ -217,7 +223,9 @@ async def get_index_trend(
             report_lines.insert(5, "")
         
         for index_code, index_name in MAIN_INDICES.items():
-            daily_df = await provider.get_index_daily(
+            # 经 DataFacade（降序返回），函数内自行升序排序后计算
+            daily_df = await _query_capability(
+                "index_daily",
                 ts_code=index_code,
                 start_date=start_date_str,
                 end_date=end_date_str
@@ -283,7 +291,6 @@ async def get_market_breadth(trade_date: str) -> str:
     Returns:
         市场宽度分析报告
     """
-    provider = _get_tushare_provider()
 
     try:
         # 获取最新可用的交易日
@@ -298,8 +305,8 @@ async def get_market_breadth(trade_date: str) -> str:
             "",
         ]
 
-        # 使用 daily_info API 获取市场整体统计
-        daily_info = await provider.get_daily_info(trade_date=trade_date_clean)
+        # 使用 daily_info 能力获取市场整体统计（经 DataFacade，单日快照）
+        daily_info = await _query_capability("daily_info", trade_date=trade_date_clean)
 
         if daily_info is not None and not daily_info.empty:
             # 提取上海和深圳市场的数据
@@ -339,8 +346,8 @@ async def get_market_breadth(trade_date: str) -> str:
                 avg_amount_per_stock = total_amount / total_count if total_count > 0 else 0
                 report_lines.append(f"  • 平均每家上市公司成交额: {avg_amount_per_stock:.2f} 亿元")
         else:
-            # 方案2: 使用 daily_basic API 获取市场整体数据
-            daily_basic = await provider.get_daily_basic(trade_date=trade_date_clean)
+            # 方案2: 使用 daily_basic 能力获取市场整体数据
+            daily_basic = await _query_capability("daily_basic", trade_date=trade_date_clean)
 
             if daily_basic is not None and not daily_basic.empty:
                 # 统计市值数据
@@ -372,7 +379,6 @@ async def get_market_environment(trade_date: str) -> str:
     Returns:
         市场环境评估报告
     """
-    provider = _get_tushare_provider()
 
     try:
         actual_trade_date = await _get_latest_trade_date(trade_date)
@@ -392,9 +398,10 @@ async def get_market_environment(trade_date: str) -> str:
             report_lines.append(f"说明: 输入日期 {trade_date} 无可用数据，已切换到最近交易日 {trade_date_display}")
             report_lines.append("")
 
-        # 获取主要指数快照
+        # 获取主要指数快照（经 DataFacade，单日快照）
         for index_code, index_name in list(MAIN_INDICES.items())[:3]:
-            basic_df = await provider.get_index_dailybasic(
+            basic_df = await _query_capability(
+                "index_dailybasic",
                 ts_code=index_code,
                 trade_date=trade_date_clean
             )
@@ -417,7 +424,8 @@ async def get_market_environment(trade_date: str) -> str:
         report_lines.append("【波动率】")
 
         # 获取上证指数近期数据计算波动率
-        daily_df = await provider.get_index_daily(
+        daily_df = await _query_capability(
+            "index_daily",
             ts_code='000001.SH',
             start_date=(datetime.strptime(trade_date_clean, '%Y%m%d') - timedelta(days=30)).strftime('%Y%m%d'),
             end_date=trade_date_clean
@@ -446,8 +454,6 @@ async def identify_market_cycle(trade_date: str) -> str:
     Returns:
         市场周期判断报告
     """
-    provider = _get_tushare_provider()
-
     try:
         actual_trade_date = await _get_latest_trade_date(trade_date)
         actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
@@ -455,7 +461,8 @@ async def identify_market_cycle(trade_date: str) -> str:
         start_date = end_date - timedelta(days=365)  # 一年数据
 
         # 获取上证指数数据
-        daily_df = await provider.get_index_daily(
+        daily_df = await _query_capability(
+            "index_daily",
             ts_code='000001.SH',
             start_date=start_date.strftime('%Y%m%d'),
             end_date=actual_trade_date
@@ -616,15 +623,14 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
     Returns:
         北向资金流向分析报告
     """
-    provider = _get_tushare_provider()
-
     try:
         actual_trade_date = await _get_latest_trade_date(trade_date)
         actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
         end_date = datetime.strptime(actual_trade_date, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 10)
 
-        df = await provider.get_hsgt_moneyflow(
+        df = await _query_capability(
+            "hsgt_moneyflow",
             start_date=start_date.strftime('%Y%m%d'),
             end_date=actual_trade_date
         )
@@ -648,10 +654,8 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
         # 按日期排序
         df = df.sort_values('trade_date', ascending=False)
 
-        # 🔑 确保数值列为数值类型（根据 Tushare 文档，这些字段应该是 float）
-        # 参考文档：https://tushare.pro/document/2?doc_id=47
-        # Tushare 返回的数据格式：hgt/sgt/north_money 都是 float 类型（百万元）
-        numeric_cols = ['hgt', 'sgt', 'ggt_ss', 'ggt_sz', 'north_money', 'south_money']
+        # 🔑 确保数值列为数值类型（能力标准字段，单位百万元）
+        numeric_cols = ['north_sh_flow', 'north_sz_flow', 'south_sh_flow', 'south_sz_flow', 'north_net_flow', 'south_net_flow']
         for col in numeric_cols:
             if col in df.columns:
                 # 先尝试直接转换为数值类型
@@ -681,11 +685,11 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
                     df[col] = df[col].apply(clean_numeric_value)
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
-        # 重新计算 north_money 和 south_money（确保使用清理后的数值）
-        if 'hgt' in df.columns and 'sgt' in df.columns:
-            df['north_money'] = df['hgt'].fillna(0) + df['sgt'].fillna(0)
-        if 'ggt_ss' in df.columns and 'ggt_sz' in df.columns:
-            df['south_money'] = df['ggt_ss'].fillna(0) + df['ggt_sz'].fillna(0)
+        # 重新计算北向/南向合计（确保使用清理后的数值）
+        if 'north_sh_flow' in df.columns and 'north_sz_flow' in df.columns:
+            df['north_net_flow'] = df['north_sh_flow'].fillna(0) + df['north_sz_flow'].fillna(0)
+        if 'south_sh_flow' in df.columns and 'south_sz_flow' in df.columns:
+            df['south_net_flow'] = df['south_sh_flow'].fillna(0) + df['south_sz_flow'].fillna(0)
 
         # 最新一天数据
         latest = df.iloc[0]
@@ -717,9 +721,9 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
                 return default
         
         # 🔑 使用 .iloc[0] 确保获取单个值，而不是 Series
-        hgt = safe_float(latest['hgt'] if 'hgt' in latest.index else 0)
-        sgt = safe_float(latest['sgt'] if 'sgt' in latest.index else 0)
-        north_money = safe_float(latest['north_money'] if 'north_money' in latest.index else 0)
+        hgt = safe_float(latest['north_sh_flow'] if 'north_sh_flow' in latest.index else 0)
+        sgt = safe_float(latest['north_sz_flow'] if 'north_sz_flow' in latest.index else 0)
+        north_money = safe_float(latest['north_net_flow'] if 'north_net_flow' in latest.index else 0)
 
         report_lines.append("【今日北向资金】")
         report_lines.append(f"  • 沪股通: {hgt/10000:.2f} 亿元")
@@ -730,13 +734,13 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
         # 近N日统计
         if len(df) >= 5:
             # 🔑 直接使用清理后的数值列（已经是 float 类型）
-            recent_5 = df.head(5)['north_money'].sum()
+            recent_5 = df.head(5)['north_net_flow'].sum()
             report_lines.append("")
             report_lines.append("【近期趋势】")
             report_lines.append(f"  • 近5日累计: {recent_5/10000:.2f} 亿元")
 
             if len(df) >= 10:
-                recent_10 = df.head(10)['north_money'].sum()
+                recent_10 = df.head(10)['north_net_flow'].sum()
                 report_lines.append(f"  • 近10日累计: {recent_10/10000:.2f} 亿元")
 
             # 连续流入/流出天数
@@ -744,7 +748,7 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
             direction = "流入" if north_money > 0 else "流出"
             for _, row in df.iterrows():
                 # 🔑 直接使用清理后的数值（已经是 float 类型）
-                row_north_money = float(row['north_money']) if pd.notna(row['north_money']) else 0.0
+                row_north_money = float(row['north_net_flow']) if pd.notna(row['north_net_flow']) else 0.0
                 if (direction == "流入" and row_north_money > 0) or \
                    (direction == "流出" and row_north_money < 0):
                     consecutive += 1
@@ -771,15 +775,14 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
     Returns:
         两融余额分析报告
     """
-    provider = _get_tushare_provider()
-
     try:
         actual_trade_date = await _get_latest_trade_date(trade_date)
         actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
         end_date = datetime.strptime(actual_trade_date, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 10)
 
-        df = await provider.get_margin_detail(
+        df = await _query_capability(
+            "margin",
             start_date=start_date.strftime('%Y%m%d'),
             end_date=actual_trade_date
         )
@@ -837,10 +840,13 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
             report_lines.append("  • 后续分析应明确标注数据缺失，不要将其外推为异常波动或杠杆变化")
             return "\n".join(report_lines)
 
-        # 汇总数据
-        rzye = latest_data['rzye'].sum() / 100000000  # 融资余额（亿元）
-        rqye = latest_data['rqye'].sum() / 100000000  # 融券余额（亿元）
-        rzrqye = latest_data['rzrqye'].sum() / 100000000 if 'rzrqye' in latest_data.columns else rzye + rqye
+        # 汇总数据（能力标准字段，单位元）
+        rzye = latest_data['margin_balance'].sum() / 100000000  # 融资余额（亿元）
+        rqye = latest_data['short_balance'].sum() / 100000000  # 融券余额（亿元）
+        if 'total_balance' in latest_data.columns and latest_data['total_balance'].notna().any():
+            rzrqye = latest_data['total_balance'].sum() / 100000000
+        else:
+            rzrqye = rzye + rqye
 
         report_lines.append("【今日两融余额】")
         report_lines.append(f"  • 融资余额: {rzye:.2f} 亿元")
@@ -854,7 +860,7 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
         if len(unique_dates) >= 2:
             prev_date = unique_dates[1]
             prev_data = df[df['trade_date'] == prev_date]
-            prev_rzye = prev_data['rzye'].sum() / 100000000
+            prev_rzye = prev_data['margin_balance'].sum() / 100000000
             change = rzye - prev_rzye
             if abs(change) > max(rzye * 0.15, 1500):
                 anomaly_messages.append("单日融资变化与当前余额相比波动过大")
@@ -866,7 +872,7 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
         # 近期趋势
         if len(unique_dates) >= 5:
             first_date_data = df[df['trade_date'] == unique_dates[-1]]
-            first_rzye = first_date_data['rzye'].sum() / 100000000
+            first_rzye = first_date_data['margin_balance'].sum() / 100000000
             total_change = rzye - first_rzye
             if abs(total_change) > max(rzye * 0.3, 3000):
                 anomaly_messages.append(f"近{len(unique_dates)}日融资变化与当前余额相比波动过大")
@@ -904,8 +910,6 @@ async def get_limit_stats(trade_date: str) -> str:
     Returns:
         涨跌停和涨跌家数分析报告
     """
-    provider = _get_tushare_provider()
-
     try:
         trade_date_clean = trade_date.replace('-', '')
 
@@ -921,50 +925,63 @@ async def get_limit_stats(trade_date: str) -> str:
             "",
         ]
 
-        # 获取涨跌家数统计
-        stats = await provider.get_daily_stats(actual_date)
+        # 获取涨跌家数统计（单条聚合 Dict 形状，门面包装为单行 DataFrame）
+        stats_df = await _query_capability("daily_stats", trade_date=actual_date)
+        stats = (
+            stats_df.iloc[0].to_dict()
+            if stats_df is not None and not stats_df.empty
+            else None
+        )
 
         if stats:
+            report_lines.append("")
             report_lines.append("【涨跌家数】")
             report_lines.append(f"  • 上涨: {stats['up_count']} 家 ({stats['up_ratio']:.1f}%)")
             report_lines.append(f"  • 下跌: {stats['down_count']} 家 ({stats['down_ratio']:.1f}%)")
             report_lines.append(f"  • 平盘: {stats['flat_count']} 家")
             report_lines.append(f"  • 涨跌比: {stats['up_count']}:{stats['down_count']}")
 
-            report_lines.append("")
-            report_lines.append("【涨跌幅分布】")
-            report_lines.append(f"  • 涨幅>5%: {stats['up_gt5']} 家")
-            report_lines.append(f"  • 涨幅3-5%: {stats['up_3_5']} 家")
-            report_lines.append(f"  • 跌幅>5%: {stats['down_gt5']} 家")
-            report_lines.append(f"  • 跌幅3-5%: {stats['down_3_5']} 家")
+            # 涨跌幅分布 4 桶为可选字段（akshare legu 快照源不提供，门面补 NaN），
+            # 缺省时整段跳过，避免 pd.NA 参与算术/布尔判断抛 TypeError
+            has_distribution = all(
+                pd.notna(stats.get(key))
+                for key in ("up_gt5", "up_3_5", "down_gt5", "down_3_5")
+            )
+            if has_distribution:
+                report_lines.append("")
+                report_lines.append("【涨跌幅分布】")
+                report_lines.append(f"  • 涨幅>5%: {stats['up_gt5']} 家")
+                report_lines.append(f"  • 涨幅3-5%: {stats['up_3_5']} 家")
+                report_lines.append(f"  • 跌幅>5%: {stats['down_gt5']} 家")
+                report_lines.append(f"  • 跌幅3-5%: {stats['down_3_5']} 家")
 
-            # 涨跌幅分布信号
-            profit_stocks = stats['up_gt5'] + stats['up_3_5']
-            loss_stocks = stats['down_gt5'] + stats['down_3_5']
-            if profit_stocks > loss_stocks * 2:
-                effect = "涨幅居前个股数量明显多于跌幅居前个股 💰"
-            elif profit_stocks > loss_stocks:
-                effect = "涨幅居前个股数量多于跌幅居前个股 📊"
-            elif loss_stocks > profit_stocks * 2:
-                effect = "跌幅居前个股数量明显多于涨幅居前个股 ⚠️"
-            else:
-                effect = "涨跌幅居前个股数量接近 📉"
-            report_lines.append(f"  • {effect}")
+                # 涨跌幅分布信号
+                profit_stocks = stats['up_gt5'] + stats['up_3_5']
+                loss_stocks = stats['down_gt5'] + stats['down_3_5']
+                if profit_stocks > loss_stocks * 2:
+                    effect = "涨幅居前个股数量明显多于跌幅居前个股 💰"
+                elif profit_stocks > loss_stocks:
+                    effect = "涨幅居前个股数量多于跌幅居前个股 📊"
+                elif loss_stocks > profit_stocks * 2:
+                    effect = "跌幅居前个股数量明显多于涨幅居前个股 ⚠️"
+                else:
+                    effect = "涨跌幅居前个股数量接近 📉"
+                report_lines.append(f"  • {effect}")
         else:
             report_lines.append("⚠️ 暂无涨跌家数数据")
 
         # 尝试获取涨跌停详情
-        limit_df = await provider.get_limit_list(actual_date)
+        limit_df = await _query_capability("limit_list", trade_date=actual_date)
         if limit_df is not None and not limit_df.empty:
-            limit_up_df = limit_df[limit_df['limit'] == 'U']
-            limit_down_df = limit_df[limit_df['limit'] == 'D']
+            limit_up_df = limit_df[limit_df['limit_type'] == 'U']
+            limit_down_df = limit_df[limit_df['limit_type'] == 'D']
             detail_lines = []
 
             if not limit_up_df.empty:
                 detail_lines.append(f"  • 涨停: {len(limit_up_df)} 家")
                 # 连板统计
-                if 'up_stat' in limit_up_df.columns:
-                    multi_board = limit_up_df[limit_up_df['up_stat'].str.contains('2|3|4|5|6|7|8|9', na=False)]
+                if 'limit_streak' in limit_up_df.columns:
+                    multi_board = limit_up_df[limit_up_df['limit_streak'].astype(str).str.contains('2|3|4|5|6|7|8|9', na=False)]
                     if len(multi_board) > 0:
                         detail_lines.append(f"  • 连板: {len(multi_board)} 家")
 
@@ -998,8 +1015,6 @@ async def get_index_technical(trade_date: str, lookback_days: int = 60) -> str:
     Returns:
         指数技术指标分析报告
     """
-    provider = _get_tushare_provider()
-
     try:
         actual_trade_date = await _get_latest_trade_date(trade_date)
         actual_trade_date_formatted = f"{actual_trade_date[:4]}-{actual_trade_date[4:6]}-{actual_trade_date[6:8]}"
@@ -1022,7 +1037,8 @@ async def get_index_technical(trade_date: str, lookback_days: int = 60) -> str:
         index_code = '000001.SH'
         index_name = '上证指数'
 
-        df = await provider.get_index_daily(
+        df = await _query_capability(
+            "index_daily",
             ts_code=index_code,
             start_date=start_date.strftime('%Y%m%d'),
             end_date=actual_trade_date

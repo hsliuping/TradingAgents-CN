@@ -8,6 +8,8 @@
 - 职责分离: 适配器只负责数据获取，同步服务负责数据存储
 """
 import asyncio
+import logging
+
 import aiohttp
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime, date
@@ -15,6 +17,8 @@ import pandas as pd
 
 import os
 from ..base_provider import BaseStockDataProvider
+
+logger = logging.getLogger(__name__)
 
 
 class ExampleSDKProvider(BaseStockDataProvider):
@@ -371,15 +375,15 @@ async def example_usage():
         if await provider.connect():
             # 获取股票基础信息
             basic_info = await provider.get_stock_basic_info("000001")
-            print(f"基础信息: {basic_info}")
+            logger.info(f"基础信息: {basic_info}")
             
             # 获取实时行情
             quotes = await provider.get_stock_quotes("000001")
-            print(f"实时行情: {quotes}")
+            logger.info(f"实时行情: {quotes}")
             
             # 获取历史数据
             history = await provider.get_historical_data("000001", "2024-01-01", "2024-01-31")
-            print(f"历史数据: {history.head() if history is not None else None}")
+            logger.info(f"历史数据: {history.head() if history is not None else None}")
             
     finally:
         await provider.disconnect()
@@ -387,7 +391,7 @@ async def example_usage():
     # 方式2: 使用上下文管理器
     async with ExampleSDKProvider(api_key="your_api_key") as provider:
         basic_info = await provider.get_stock_basic_info("000001")
-        print(f"基础信息: {basic_info}")
+        logger.info(f"基础信息: {basic_info}")
 
 
 if __name__ == "__main__":

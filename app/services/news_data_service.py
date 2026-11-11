@@ -4,15 +4,30 @@
 """
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timedelta
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 from pymongo import ReplaceOne
 from pymongo.errors import BulkWriteError
 from bson import ObjectId
 
 from app.core.database import get_database
+from app.utils.timezone import now_tz
 
 logger = logging.getLogger(__name__)
+
+
+# ===== 公告独立数据类型（与新闻同库、独立生命周期）=====
+# 公告在存储上仍是 news 集合里的 company_announcement 子类别（不改集合结构、不迁移存量数据），
+# 但读取入口、同步节奏、保留策略与普通新闻分开演进，后续拆集合无需改动调用方。
+ANNOUNCEMENT_CATEGORY = "company_announcement"
+
+DATA_TYPE_NEWS = "news"                  # 普通新闻（不含公告）
+DATA_TYPE_ANNOUNCEMENT = "announcement"  # 公司公告
+DATA_TYPE_ALL = "all"                    # 新闻+公告（兼容旧的全量行为）
+
+# 独立保留策略：公告属于正式披露文件，留存更久；新闻沿用原 90 天
+NEWS_RETENTION_DAYS = 90
+ANNOUNCEMENT_RETENTION_DAYS = 365
 
 
 def convert_objectid_to_str(data: Union[Dict, List[Dict]]) -> Union[Dict, List[Dict]]:
@@ -564,7 +579,27 @@ class NewsDataService:
         except Exception as e:
             self.logger.error(f"❌ 查询新闻数据失败: {e}", exc_info=True)
             return []
-    
+
+    async def query_announcements(self, params: NewsQueryParams) -> List[Dict[str, Any]]:
+        """
+        查询公司公告（公告独立读取入口）
+
+        只返回 category=company_announcement 的记录，其余语义与 query_news 一致。
+        params.category 会被强制覆盖，调用方传入的 category 不生效。
+
+        Args:
+            params: 查询参数（category 由本入口固定为公告类别）
+
+        Returns:
+            公告数据列表
+        """
+        announcement_params = replace(params, category=ANNOUNCEMENT_CATEGORY)
+        self.logger.info(
+            f"📋 [query_announcements] 公告独立查询: symbol={announcement_params.symbol}, "
+            f"limit={announcement_params.limit}"
+        )
+        return await self.query_news(announcement_params)
+
     async def get_latest_news(
         self,
         symbol: str = None,
@@ -698,30 +733,65 @@ class NewsDataService:
     
     async def delete_old_news(self, days_to_keep: int = 90) -> int:
         """
-        删除过期新闻
-        
+        删除过期新闻（兼容入口：新闻与公告一起清理，行为与历史版本一致）
+
         Args:
             days_to_keep: 保留天数
-            
+
+        Returns:
+            删除的记录数量
+        """
+        return await self.cleanup_expired(DATA_TYPE_ALL, days_to_keep)
+
+    async def cleanup_expired(
+        self,
+        data_type: str = DATA_TYPE_ALL,
+        days_to_keep: Optional[int] = None
+    ) -> int:
+        """
+        按数据类型清理过期数据（公告/新闻保留策略独立，可按类型单独执行）
+
+        Args:
+            data_type: 数据类型（news=普通新闻 / announcement=公司公告 / all=全部）
+            days_to_keep: 保留天数，为 None 时按类型的独立保留策略取默认值
+                         （新闻 90 天、公告 365 天）
+
         Returns:
             删除的记录数量
         """
         try:
+            if data_type not in (DATA_TYPE_NEWS, DATA_TYPE_ANNOUNCEMENT, DATA_TYPE_ALL):
+                raise ValueError(f"不支持的数据类型: {data_type}")
+
+            if days_to_keep is None:
+                days_to_keep = (
+                    ANNOUNCEMENT_RETENTION_DAYS
+                    if data_type == DATA_TYPE_ANNOUNCEMENT
+                    else NEWS_RETENTION_DAYS
+                )
+
             collection = self._get_collection()
-            
-            cutoff_date = datetime.utcnow() - timedelta(days=days_to_keep)
-            
-            result = await collection.delete_many({
-                "publish_time": {"$lt": cutoff_date}
-            })
-            
+
+            cutoff_date = now_tz() - timedelta(days=days_to_keep)
+
+            query: Dict[str, Any] = {"publish_time": {"$lt": cutoff_date}}
+            if data_type == DATA_TYPE_ANNOUNCEMENT:
+                query["category"] = ANNOUNCEMENT_CATEGORY
+            elif data_type == DATA_TYPE_NEWS:
+                query["category"] = {"$ne": ANNOUNCEMENT_CATEGORY}
+
+            result = await collection.delete_many(query)
+
             deleted_count = result.deleted_count
-            self.logger.info(f"🗑️ 删除过期新闻: {deleted_count}条记录")
-            
+            self.logger.info(
+                f"🗑️ 删除过期数据: data_type={data_type}, days_to_keep={days_to_keep}, "
+                f"deleted={deleted_count}条记录"
+            )
+
             return deleted_count
-            
+
         except Exception as e:
-            self.logger.error(f"❌ 删除过期新闻失败: {e}")
+            self.logger.error(f"❌ 删除过期数据失败: {e}")
             return 0
 
     async def search_news(

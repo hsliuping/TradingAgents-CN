@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from typing import Optional, Dict, Any
 from .cache import get_cache
+from .stock_basic_schema import merge_stock_basic_records
 from tradingagents.config.config_manager import config_manager
 
 from tradingagents.config.runtime_settings import get_float, get_timezone_name
@@ -2325,14 +2326,15 @@ def _add_financial_cache_methods():
             db = client.get_database('tradingagents')
             collection = db.stock_basic_info
 
-            # 查找股票基本信息
-            doc = collection.find_one({'code': symbol})
-            if doc:
+            # 查找股票基本信息（多源记录合并：name/industry/market 非空字段互补）
+            docs = list(collection.find({'code': symbol}))
+            merged = merge_stock_basic_records(docs)
+            if merged:
                 return {
                     'symbol': symbol,
-                    'name': doc.get('name', ''),
-                    'industry': doc.get('industry', ''),
-                    'market': doc.get('market', ''),
+                    'name': merged.get('name', ''),
+                    'industry': merged.get('industry', ''),
+                    'market': merged.get('market', ''),
                     'source': 'database_cache'
                 }
         except Exception as e:
@@ -2405,11 +2407,100 @@ def _add_financial_cache_methods():
         except Exception as e:
             logger.debug(f"📊 [财务缓存] 缓存{symbol}原始财务数据失败: {e}")
 
+    # 能力 capability → 本地缓存消费桶候选（按优先级，首个非空桶生效；与 _get_cached_raw_financial_data 的桶命名对齐）
+    _FINANCIAL_BUCKET_CANDIDATES = {
+        'financial_income': ('income_statement',),
+        'financial_balance': ('balance_sheet',),
+        'financial_cashflow': ('cash_flow', 'cashflow_statement'),
+        'financial_indicators': ('financial_indicators', 'main_indicators'),
+    }
+
+    def _get_financial_capability_df(self, capability: str, symbol: str, limit: Optional[int] = None):
+        """从本地财务缓存提取指定能力的按报告期 DataFrame（能力 financial_*，local 源）
+
+        语义（对齐 DataFacade 降级契约）：
+        - 缓存整包无数据 → 返回 None（触发门面降级到下一源）
+        - 所有消费桶全空 → 返回 None（对齐历史 any(payload.values()) 的降级语义）
+        - 该能力对应桶为空（其它桶有数据）→ 返回空 DataFrame（不降级，缺桶不补）
+        - 命中桶有数据 → 按 end_date 降序排序后截取前 limit 条
+        """
+        try:
+            payload = self._get_cached_raw_financial_data(symbol)
+        except Exception as e:
+            logger.debug(f"📊 [财务缓存] {capability} 读取{symbol}本地缓存失败: {e}")
+            return None
+
+        if not isinstance(payload, dict) or not payload:
+            return None
+
+        candidates = _FINANCIAL_BUCKET_CANDIDATES.get(capability, ())
+        consumed_keys = {key for keys in _FINANCIAL_BUCKET_CANDIDATES.values() for key in keys}
+        if not any(isinstance(payload.get(key), list) and payload.get(key) for key in consumed_keys):
+            return None
+
+        records = None
+        for key in candidates:
+            value = payload.get(key)
+            if isinstance(value, list) and value:
+                records = value
+                break
+
+        import pandas as pd
+        if records is None:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(records)
+        if 'end_date' in df.columns:
+            df = df.sort_values('end_date', ascending=False)
+        if limit is not None:
+            df = df.head(limit)
+        return df.reset_index(drop=True)
+
+    async def get_financial_income(self, symbol: str, limit: Optional[int] = None):
+        """获取个股利润表（按报告期，能力 financial_income，local 缓存源）"""
+        return self._get_financial_capability_df('financial_income', symbol, limit)
+
+    async def get_financial_balance(self, symbol: str, limit: Optional[int] = None):
+        """获取个股资产负债表（按报告期，能力 financial_balance，local 缓存源）"""
+        return self._get_financial_capability_df('financial_balance', symbol, limit)
+
+    async def get_financial_cashflow(self, symbol: str, limit: Optional[int] = None):
+        """获取个股现金流量表（按报告期，能力 financial_cashflow，local 缓存源）"""
+        return self._get_financial_capability_df('financial_cashflow', symbol, limit)
+
+    async def get_financial_indicators(self, symbol: str, limit: Optional[int] = None):
+        """获取个股财务指标（按报告期，能力 financial_indicators，local 缓存源）"""
+        return self._get_financial_capability_df('financial_indicators', symbol, limit)
+
+    from tradingagents.dataflows.capability.registry import register_capability  # noqa: E402
+
+    get_financial_income = register_capability(
+        "financial_income", "local", field_mapping={},
+        provider_factory=get_optimized_china_data_provider,
+    )(get_financial_income)
+    get_financial_balance = register_capability(
+        "financial_balance", "local", field_mapping={},
+        provider_factory=get_optimized_china_data_provider,
+    )(get_financial_balance)
+    get_financial_cashflow = register_capability(
+        "financial_cashflow", "local", field_mapping={},
+        provider_factory=get_optimized_china_data_provider,
+    )(get_financial_cashflow)
+    get_financial_indicators = register_capability(
+        "financial_indicators", "local", field_mapping={},
+        provider_factory=get_optimized_china_data_provider,
+    )(get_financial_indicators)
+
     # 将方法添加到类中
     OptimizedChinaDataProvider._get_cached_raw_financial_data = _get_cached_raw_financial_data
     OptimizedChinaDataProvider._get_cached_stock_info = _get_cached_stock_info
     OptimizedChinaDataProvider._restore_financial_data_format = _restore_financial_data_format
     OptimizedChinaDataProvider._cache_raw_financial_data = _cache_raw_financial_data
+    OptimizedChinaDataProvider._get_financial_capability_df = _get_financial_capability_df
+    OptimizedChinaDataProvider.get_financial_income = get_financial_income
+    OptimizedChinaDataProvider.get_financial_balance = get_financial_balance
+    OptimizedChinaDataProvider.get_financial_cashflow = get_financial_cashflow
+    OptimizedChinaDataProvider.get_financial_indicators = get_financial_indicators
 
 # 执行方法添加
 _add_financial_cache_methods()

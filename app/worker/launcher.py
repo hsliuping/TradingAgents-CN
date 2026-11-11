@@ -11,8 +11,11 @@ import sys
 import os
 import time
 import signal
+import logging
 from pathlib import Path
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -32,10 +35,11 @@ def write_log(message: str, level: str = "INFO"):
             f.write(f"{timestamp} - LAUNCHER - {level} - {message}\n")
             f.flush()
         
-        # 同时打印到控制台
-        print(f"[{timestamp}] [{level}] {message}")
+        # 同时输出到 logging
+        log_func = logger.warning if level.upper() == "WARNING" else logger.info
+        log_func(message)
     except Exception as e:
-        print(f"写入日志失败: {e}")
+        logger.error(f"写入日志失败: {e}")
 
 
 def write_exit_report(pid: int, returncode: int, runtime_seconds: float):
@@ -82,17 +86,23 @@ def write_exit_report(pid: int, returncode: int, runtime_seconds: float):
             f.write(f"{'='*60}\n\n")
             f.flush()
         
-        print(f"\n{'='*60}")
-        print(f"Worker 子进程退出报告")
-        print(f"{'='*60}")
-        print(f"子进程 PID: {pid}")
-        print(f"退出码: {returncode}")
-        print(f"退出原因: {exit_reason}")
-        print(f"运行时长: {runtime_str}")
-        print(f"{'='*60}\n")
-        
+        report = (
+            f"\n{'='*60}\n"
+            f"Worker 子进程退出报告\n"
+            f"{'='*60}\n"
+            f"子进程 PID: {pid}\n"
+            f"退出码: {returncode}\n"
+            f"退出原因: {exit_reason}\n"
+            f"运行时长: {runtime_str}\n"
+            f"{'='*60}\n"
+        )
+        if returncode == 0:
+            logger.info(report)
+        else:
+            logger.error(report)
+
     except Exception as e:
-        print(f"写入退出报告失败: {e}")
+        logger.error(f"写入退出报告失败: {e}")
 
 
 def main():
@@ -130,7 +140,7 @@ def main():
         while True:
             line = process.stdout.readline()
             if line:
-                print(line.rstrip())
+                logger.info(line.rstrip())
             
             # 检查子进程是否退出
             returncode = process.poll()

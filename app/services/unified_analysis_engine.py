@@ -18,6 +18,36 @@ from core.workflow.default_workflow_provider import get_default_workflow_provide
 
 logger = logging.getLogger(__name__)
 
+_ENV_API_KEY_MAP = {
+    "openai": "OPENAI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "dashscope": "DASHSCOPE_API_KEY",
+    "google": "GOOGLE_API_KEY",
+    "zhipu": "ZHIPU_API_KEY",
+    "siliconflow": "SILICONFLOW_API_KEY",
+}
+
+
+def _split_provider_qualified_model_name(model_name: Optional[str]) -> tuple:
+    """拆分前端 "provider::model_name" 格式，返回 (纯模型名, 小写 provider 前缀)。
+
+    前端 DeepModelSelector 用该格式区分同名模型，后端匹配数据库配置前必须拆掉前缀。
+    """
+    raw = str(model_name or "").strip()
+    if "::" not in raw:
+        return raw, ""
+    provider_hint, plain_name = raw.split("::", 1)
+    provider_hint = provider_hint.strip().lower()
+    plain_name = plain_name.strip()
+    if not provider_hint or not plain_name:
+        return raw, ""
+    return plain_name, provider_hint
+
+
+def _is_configured_api_key(value: Optional[str]) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and text != "your-api-key" and not text.startswith("sk-xxx")
+
 
 class UnifiedAnalysisEngine:
     """统一分析引擎
@@ -214,12 +244,11 @@ class UnifiedAnalysisEngine:
             return result
 
         except Exception as e:
-            # 🔥 优雅处理：检查是否是取消异常
-            from app.services.task_analysis_service import TaskCancelledException
+            # 🔥 优雅处理：取消/暂停/被新执行取代等控制信号，不记录为错误
+            from core.workflow.exceptions import WorkflowControlSignal
 
-            if isinstance(e, TaskCancelledException):
-                # 任务取消是正常操作，不记录为错误
-                self.logger.info(f"🚫 任务已取消: {task.task_id}")
+            if isinstance(e, WorkflowControlSignal):
+                self.logger.info(f"🚫 任务控制信号终止: {task.task_id} ({type(e).__name__})")
                 # 直接重新抛出，让上层处理
                 raise
 
@@ -267,14 +296,29 @@ class UnifiedAnalysisEngine:
 
         llm_configs = config_doc["llm_configs"]
 
-        # 查找匹配的模型配置
-        target_model = quick_model or deep_model
-        model_config = None
+        # 🔧 前端提交的模型名可能是 "provider::model_name"（DeepModelSelector 用于区分同名模型），
+        # 匹配数据库配置前必须先拆掉 provider 前缀，否则匹配失败会错误继承另一端的端点配置。
+        quick_model_name, quick_provider_hint = _split_provider_qualified_model_name(quick_model)
+        deep_model_name, deep_provider_hint = _split_provider_qualified_model_name(deep_model)
 
-        for cfg in llm_configs:
-            if cfg.get("model_name") == target_model and cfg.get("enabled", True):
-                model_config = cfg
-                break
+        def _find_model_config(model_name: Optional[str], provider_hint: str = "") -> Optional[dict]:
+            if not model_name:
+                return None
+            candidates = [
+                cfg for cfg in llm_configs
+                if cfg.get("model_name") == model_name and cfg.get("enabled", True)
+            ]
+            if provider_hint:
+                for cfg in candidates:
+                    if str(cfg.get("provider") or "").strip().lower() == provider_hint:
+                        return cfg
+            return candidates[0] if candidates else None
+
+        # 查找匹配的模型配置
+        target_model = quick_model_name or deep_model_name
+        model_config = _find_model_config(quick_model_name, quick_provider_hint) or _find_model_config(
+            deep_model_name, deep_provider_hint
+        )
 
         if not model_config:
             self.logger.warning(f"未找到模型配置: {target_model}")
@@ -303,74 +347,55 @@ class UnifiedAnalysisEngine:
         # 如果数据库没有 API Key，尝试从环境变量获取
         if not api_key:
             import os
-            env_key_map = {
-                "openai": "OPENAI_API_KEY",
-                "deepseek": "DEEPSEEK_API_KEY",
-                "dashscope": "DASHSCOPE_API_KEY",
-                "google": "GOOGLE_API_KEY",
-                "zhipu": "ZHIPU_API_KEY",
-                "siliconflow": "SILICONFLOW_API_KEY",
-            }
-            env_name = env_key_map.get(provider_name.lower())
+            env_name = _ENV_API_KEY_MAP.get(str(provider_name or "").lower())
             if env_name:
                 api_key = os.getenv(env_name)
 
         # 🔥 获取快速模型配置
-        quick_model_config = None
-        if quick_model:
-            for cfg in llm_configs:
-                if cfg.get("model_name") == quick_model and cfg.get("enabled", True):
-                    quick_model_config = cfg
-                    break
-        
-        # 🔥 获取深度模型配置
+        quick_model_config = _find_model_config(quick_model_name, quick_provider_hint)
+
+        # 🔥 获取深度模型配置（按拆分后的纯模型名 + provider 前缀匹配）
         deep_model_config = None
-        if deep_model and deep_model != quick_model:
-            for cfg in llm_configs:
-                if cfg.get("model_name") == deep_model and cfg.get("enabled", True):
-                    deep_model_config = cfg
-                    break
-        
-        # 如果深度模型配置不存在，使用快速模型配置
-        if not deep_model_config:
-            deep_model_config = quick_model_config or model_config
-        
-        # 获取深度模型的provider和api_key（如果不同）
+        if deep_model_name and deep_model_name != quick_model_name:
+            deep_model_config = _find_model_config(deep_model_name, deep_provider_hint)
+
+        # 获取深度模型的 provider / api_key / backend_url
         deep_provider_name = provider_name
         deep_api_key = api_key
         deep_backend_url = backend_url
-        
-        if deep_model_config and deep_model_config != quick_model_config:
-            deep_provider_name = deep_model_config.get("provider", provider_name)
-            # 🔥 确定深度模型的 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
-            deep_model_api_key = deep_model_config.get("api_key", "")
-            if deep_model_api_key and deep_model_api_key.strip() and deep_model_api_key != "your-api-key" and not deep_model_api_key.startswith("sk-xxx"):
-                deep_api_key = deep_model_api_key
-                self.logger.info(f"✅ [LLM配置] 深度模型使用模型配置的 API Key")
-            elif deep_provider_name != provider_name:
-                deep_provider_doc = await db.llm_providers.find_one({"name": deep_provider_name})
-                if deep_provider_doc:
-                    deep_provider_api_key = deep_provider_doc.get("api_key", "")
-                    if deep_provider_api_key and deep_provider_api_key.strip() and deep_provider_api_key != "your-api-key" and not deep_provider_api_key.startswith("sk-xxx"):
-                        deep_api_key = deep_provider_api_key
-                        self.logger.info(f"✅ [LLM配置] 深度模型使用厂家配置的 API Key")
-                    deep_backend_url = deep_model_config.get("api_base", "") or deep_provider_doc.get("default_base_url", "")
-            if not deep_api_key or deep_api_key.startswith("sk-xxx"):
-                        import os
-                        env_key_map = {
-                            "openai": "OPENAI_API_KEY",
-                            "deepseek": "DEEPSEEK_API_KEY",
-                            "dashscope": "DASHSCOPE_API_KEY",
-                            "google": "GOOGLE_API_KEY",
-                            "zhipu": "ZHIPU_API_KEY",
-                            "siliconflow": "SILICONFLOW_API_KEY",
-                        }
-                        env_name = env_key_map.get(deep_provider_name.lower())
-                        if env_name:
-                            deep_api_key = os.getenv(env_name) or deep_api_key
+
+        quick_provider_normalized = str(provider_name or "").strip().lower()
+        if deep_model_config:
+            deep_provider_name = deep_model_config.get("provider", provider_name) or provider_name
+        elif deep_provider_hint and deep_provider_hint != quick_provider_normalized:
+            # 库中没有该深度模型条目，但前端显式指定了 provider：按该 provider 解析，绝不继承快速模型端点
+            deep_provider_name = deep_provider_hint
+
+        if str(deep_provider_name or "").strip().lower() != quick_provider_normalized:
+            deep_provider_doc = await db.llm_providers.find_one({"name": deep_provider_name})
+            model_level_key = (deep_model_config or {}).get("api_key", "")
+            if _is_configured_api_key(model_level_key):
+                deep_api_key = model_level_key.strip()
+                self.logger.info("✅ [LLM配置] 深度模型使用模型配置的 API Key")
+            elif _is_configured_api_key((deep_provider_doc or {}).get("api_key")):
+                deep_api_key = deep_provider_doc["api_key"].strip()
+                self.logger.info("✅ [LLM配置] 深度模型使用厂家配置的 API Key")
             else:
-                deep_backend_url = deep_model_config.get("api_base", "") or backend_url
-        
+                import os
+                env_name = _ENV_API_KEY_MAP.get(str(deep_provider_name or "").lower())
+                deep_api_key = os.getenv(env_name) if env_name else None
+
+            deep_backend_url = (
+                (deep_model_config or {}).get("api_base", "")
+                or (deep_provider_doc or {}).get("default_base_url", "")
+            )
+            self.logger.info(
+                f"🔧 [LLM配置] 深度模型独立端点: provider={deep_provider_name}, "
+                f"url={deep_backend_url or 'None'}"
+            )
+        elif deep_model_config:
+            # 同一 provider：仅允许模型级 api_base 覆盖
+            deep_backend_url = deep_model_config.get("api_base", "") or backend_url
         result = {
             "llm_provider": provider_name,
             "quick_think_llm": quick_model or target_model,
@@ -389,7 +414,7 @@ class UnifiedAnalysisEngine:
         }
         
         # 如果深度模型和快速模型使用不同的provider，添加深度模型的provider信息
-        if deep_provider_name != provider_name:
+        if str(deep_provider_name or "").strip().lower() != quick_provider_normalized:
             result["deep_llm_provider"] = deep_provider_name
 
         self.logger.info(f"从数据库获取模型配置: provider={provider_name}, quick={quick_model}, deep={deep_model}")
@@ -496,6 +521,46 @@ class UnifiedAnalysisEngine:
         except Exception as e:
             self.logger.warning(f"⚠️ [事实记忆注入] 失败（不影响分析）: {e}")
 
+    async def _inject_prev_conclusion(
+        self, workflow_inputs: Dict[str, Any], user_id: Optional[str]
+    ) -> None:
+        """M5.2：查询上期结论快照并注入工作流输入（对比基线，失败不影响分析）。
+
+        快照来源：analysis_conclusion_snapshots（report_saver 落），按 user_id+ticker
+        取最新一期。快速档（memory_mode=off）不读不写。注入文本由
+        core/workflow/depth_profiles.build_prev_snapshot_block 组装，消费方见
+        core/agents/base.py 的上期结论注入白名单（研究/辩论/整合环节）。
+        """
+        try:
+            from core.workflow.depth_profiles import (
+                MEMORY_OFF,
+                build_prev_snapshot_block,
+                get_profile,
+            )
+
+            if get_profile(workflow_inputs.get("research_depth")).memory_mode == MEMORY_OFF:
+                return
+            ticker_val = str(workflow_inputs.get("ticker") or "").strip()
+            if not ticker_val:
+                return
+            from app.core.database import get_mongo_db
+            from app.utils.conclusion_snapshot import load_latest_conclusion_snapshot
+
+            db = get_mongo_db()
+            snapshot = await load_latest_conclusion_snapshot(db, user_id, ticker_val)
+            if not snapshot:
+                self.logger.info(
+                    "🕰️ [上期结论注入] ticker=%s 无上期快照（首期分析）", ticker_val
+                )
+                return
+            workflow_inputs["prev_conclusion_block"] = build_prev_snapshot_block(snapshot)
+            self.logger.info(
+                "🕰️ [上期结论注入] ticker=%s 已注入上期结论（run_id=%s, depth=%s）",
+                ticker_val, snapshot.get("run_id", ""), snapshot.get("depth", ""),
+            )
+        except Exception as e:
+            self.logger.warning(f"⚠️ [上期结论注入] 失败（不影响分析）: {e}")
+
     async def _execute_via_workflow(
         self,
         task: UnifiedAnalysisTask,
@@ -600,10 +665,29 @@ class UnifiedAnalysisEngine:
                     self.logger.debug(f"📋 参数映射: {key} → ticker = {val}")
                     break
 
+        # 🗂️ M6 短周期分析缓存命中：同用户 + 同股票 + 同档位 + 同数据基准日 +
+        # 同参数指纹且在 TTL 内 → 直接复用上次完整结果（不重跑 LLM，省下 20+ 分钟）。
+        # 命中不是新分析：不写结论快照、不计新分析次数、不出演化对照（M6.3）；
+        # 断点续跑与 debug 模式不参与缓存，force_refresh 跳过读、跑完覆盖索引（M6.2）。
+        cache_ctx = self._build_cache_context(task, workflow_inputs)
+        if self._should_read_cache(task, cache_ctx):
+            cached = await self._load_cache_hit(cache_ctx)
+            if cached:
+                self.logger.info(
+                    f"🗂️ 分析缓存命中: ticker={cache_ctx['ticker']}, depth={cache_ctx['depth']}, "
+                    f"数据基准日={cache_ctx['data_as_of']}, "
+                    f"生成于={cached.get('cache_meta', {}).get('generated_at')}"
+                )
+                payload = dict(cached.get("result") or {})
+                payload["is_cached"] = True
+                payload["cache_meta"] = cached.get("cache_meta") or {}
+                return payload
+
         # 🧠 外部事实记忆注入：查询该股票相关的未过期事实记忆（智能助手联网提取），
         # 写入 memory_facts_summary 供辩论环节（bull/bear）与风险评估环节（risk_manager）
         # 作为分析材料参考（消费方见 core/agents/base.py 的事实记忆注入白名单）。
         await self._inject_memory_facts(workflow_inputs)
+        await self._inject_prev_conclusion(workflow_inputs, str(task.user_id) if task.user_id else None)
 
         # 🆕 读取工作流的 input_config，根据字段定义补充缺失参数
         try:
@@ -631,6 +715,26 @@ class UnifiedAnalysisEngine:
         workflow_inputs.setdefault("research_depth", "标准")
         workflow_inputs.setdefault("lookback_days", 30)
         workflow_inputs.setdefault("max_debate_rounds", 3)
+
+        # 🏭 行业基础信息补全：v2 任务路径 task_params 不含 industry/company_name，
+        # 而行业画像注入（core/agents/base.py）依赖 state["industry"]。复用
+        # unified_analysis_service 的系统变量准备逻辑，只补缺不覆盖显式参数。
+        if workflow_inputs.get("ticker") and not workflow_inputs.get("industry"):
+            try:
+                from app.services.unified_analysis_service import UnifiedAnalysisService
+
+                sys_vars = UnifiedAnalysisService()._prepare_system_variables(
+                    str(workflow_inputs.get("ticker")),
+                    str(workflow_inputs.get("analysis_date")),
+                )
+                for _key, _val in sys_vars.items():
+                    workflow_inputs.setdefault(_key, _val)
+                self.logger.info(
+                    f"🏭 行业基础信息补全: industry={workflow_inputs.get('industry')}, "
+                    f"company_name={workflow_inputs.get('company_name')}"
+                )
+            except Exception as e:
+                self.logger.warning(f"⚠️ 行业基础信息补全失败: {e}")
 
         self.logger.info(f"📦 工作流输入参数: ticker={workflow_inputs.get('ticker')}, "
                         f"analysis_date={workflow_inputs.get('analysis_date')}, "
@@ -665,6 +769,11 @@ class UnifiedAnalysisEngine:
         if "selected_analysts" in workflow_inputs:
             legacy_config["selected_analysts"] = workflow_inputs["selected_analysts"]
             self.logger.info(f"🎯 选中的分析师: {workflow_inputs['selected_analysts']}")
+
+        # 🎚️ M2.3 模型分层：档位透传给 builder（缺失则 builder 回退 mixed，快速档仍会用深度模型）
+        _depth_value = workflow_inputs.get("research_depth")
+        if _depth_value is not None:
+            legacy_config["research_depth"] = _depth_value
 
         # 🧠 A1b: 深度档位 → 思考预算（传给 builder，与 DB 显式配置合并，仅火山方舟推理模型注入）
         try:
@@ -745,6 +854,9 @@ class UnifiedAnalysisEngine:
 
         # 🔑 执行轨迹单次开启：如果任务输入指定 enable_trace=true，临时全局开启
         # 注意：不能用线程本地变量，因为分析师在并行子线程执行，读不到主线程的标记
+        # 🆕 v4.0 T1：task_params.resume=True 表示从断点恢复执行（无有效断点时引擎内部回退全新执行）
+        resume_flag = bool(task.task_params.get("resume"))
+
         def _execute_with_trace_context():
             from app.core.config import settings
             old_value = settings.AGENT_EXECUTION_TRACE_ENABLED
@@ -757,6 +869,7 @@ class UnifiedAnalysisEngine:
                     legacy_config=legacy_config,
                     progress_callback=wrapped_progress_callback,
                     task_id=task.task_id,
+                    resume=resume_flag,
                 )
             finally:
                 settings.AGENT_EXECUTION_TRACE_ENABLED = old_value
@@ -768,7 +881,107 @@ class UnifiedAnalysisEngine:
             error_msg = result.get("error", "工作流执行失败")
             raise RuntimeError(error_msg)
 
-        return result.get("result", {})
+        final_result = result.get("result", {})
+
+        # 🗂️ M6.1 分析完成后写缓存索引（同键覆盖，TTL 按档位）：只在真正重跑后写，
+        # 命中路径在上面已提前返回，天然不会重复写索引/快照（M6.3）。
+        if cache_ctx and isinstance(final_result, dict):
+            await self._save_cache_entry(cache_ctx, final_result)
+
+        return final_result
+
+    @staticmethod
+    def _should_read_cache(task: UnifiedAnalysisTask, cache_ctx: Optional[Dict[str, Any]]) -> bool:
+        """M6.2：是否读缓存索引。force_refresh 跳过读（强制真跑），
+        但 cache_ctx 保留，跑完覆盖写索引——否则旧缓存 TTL 内无法被新结果替换。"""
+        if not cache_ctx:
+            return False
+        return not bool((task.task_params or {}).get("force_refresh"))
+
+    def _build_cache_context(
+        self, task: UnifiedAnalysisTask, workflow_inputs: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """M6.1：构造缓存键上下文；不合格（非缓存任务/匿名/续跑/debug）返回 None。
+        force_refresh 不在此拦（只跳过读，见 _should_read_cache）。"""
+        try:
+            from app.utils.analysis_cache import (
+                build_param_fingerprint,
+                is_cache_eligible,
+                normalize_data_as_of,
+            )
+            from core.workflow.depth_profiles import get_profile, normalize_depth
+
+            user_id_text = str(task.user_id) if task.user_id else ""
+            if not is_cache_eligible(task.task_type, task.task_params or {}, user_id_text):
+                return None
+
+            ticker_text = str(workflow_inputs.get("ticker") or "").strip().upper()
+            if not ticker_text:
+                return None
+
+            depth_value = normalize_depth(workflow_inputs.get("research_depth"))
+            profile = get_profile(depth_value)
+            data_as_of = (
+                normalize_data_as_of(workflow_inputs.get("analysis_date"))
+                or now_tz().strftime("%Y-%m-%d")
+            )
+            return {
+                "user_id": user_id_text,
+                "ticker": ticker_text,
+                "stock_name": str(workflow_inputs.get("company_name") or ""),
+                "depth": depth_value,
+                "data_as_of": data_as_of,
+                "param_fingerprint": build_param_fingerprint(workflow_inputs),
+                "ttl_min": int(profile.cache_ttl_min),
+                "run_id": str(task.task_id or ""),
+            }
+        except Exception as e:
+            self.logger.warning(f"⚠️ 构造分析缓存上下文失败（本次不使用缓存）: {e}")
+            return None
+
+    async def _load_cache_hit(self, cache_ctx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """M6.1：读缓存索引；任何异常按「未命中」处理，不让缓存拖垮分析主链路。"""
+        try:
+            from app.core.database import get_mongo_db
+            from app.utils.analysis_cache import find_cache_hit
+
+            return await find_cache_hit(
+                get_mongo_db(),
+                user_id=cache_ctx["user_id"],
+                ticker=cache_ctx["ticker"],
+                depth=cache_ctx["depth"],
+                data_as_of=cache_ctx["data_as_of"],
+                param_fingerprint=cache_ctx["param_fingerprint"],
+                ttl_min=cache_ctx["ttl_min"],
+            )
+        except Exception as e:
+            self.logger.warning(f"⚠️ 读取分析缓存失败（按未命中处理）: {e}")
+            return None
+
+    async def _save_cache_entry(self, cache_ctx: Dict[str, Any], final_result: Dict[str, Any]) -> None:
+        """M6.1：分析完成后写缓存索引；失败只告警，不影响返回结果。"""
+        try:
+            from app.core.database import get_mongo_db
+            from app.utils.analysis_cache import save_cache_entry
+
+            await save_cache_entry(
+                get_mongo_db(),
+                user_id=cache_ctx["user_id"],
+                ticker=cache_ctx["ticker"],
+                stock_name=cache_ctx.get("stock_name") or "",
+                depth=cache_ctx["depth"],
+                data_as_of=cache_ctx["data_as_of"],
+                param_fingerprint=cache_ctx["param_fingerprint"],
+                ttl_min=cache_ctx["ttl_min"],
+                run_id=cache_ctx.get("run_id") or "",
+                result=final_result,
+            )
+            self.logger.info(
+                f"🗂️ 分析缓存已写入: ticker={cache_ctx['ticker']}, depth={cache_ctx['depth']}, "
+                f"ttl={cache_ctx['ttl_min']}min"
+            )
+        except Exception as e:
+            self.logger.warning(f"⚠️ 写入分析缓存失败（不影响分析结果）: {e}")
 
     async def _execute_via_legacy(
         self,

@@ -18,7 +18,7 @@ def to_str_id(v: Any) -> str:
         return ""
 
 
-NotificationType = Literal['analysis', 'alert', 'system']
+NotificationType = Literal['analysis', 'alert', 'system', 'pig_signal']
 NotificationStatus = Literal['unread', 'read']
 
 

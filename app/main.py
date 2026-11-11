@@ -29,6 +29,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
+from app.core.response import ok
 from app.router_registry import register_routers
 from app.services.basics_sync_service import get_basics_sync_service
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
@@ -901,6 +902,41 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置（仅股票关注列表）: {settings.NEWS_SYNC_CRON}")
 
+        # 公告数据同步任务配置（公告独立生命周期：与新闻分开排期/刷新节奏）
+        logger.info("🔄 配置公告数据同步任务...")
+
+        from app.worker.news_data_sync_service import get_news_data_sync_service
+
+        async def run_announcement_sync():
+            """运行公告同步任务 - 公告独立生命周期入口（只同步公司公告）"""
+            try:
+                logger.info("📋 开始公告数据同步（独立生命周期）...")
+                sync_service = await get_news_data_sync_service()
+                result = await sync_service.sync_announcements(
+                    symbols=None,  # None 表示只同步股票关注列表
+                )
+                logger.info(
+                    f"✅ 公告同步完成: "
+                    f"处理{len(result['symbols'])}只股票关注列表, "
+                    f"成功{result['success_count']}只, "
+                    f"失败{result['error_count']}只, "
+                    f"公告{result['announcement_count']}条"
+                )
+            except Exception as e:
+                logger.error(f"❌ 公告同步失败: {e}", exc_info=True)
+
+        scheduler.add_job(
+            run_announcement_sync,
+            CronTrigger.from_crontab(settings.ANNOUNCEMENT_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="announcement_sync",
+            name="公告数据同步（独立生命周期）"
+        )
+        if not settings.ANNOUNCEMENT_SYNC_ENABLED:
+            scheduler.pause_job("announcement_sync")
+            logger.info(f"⏸️ 公告数据同步已添加但暂停: {settings.ANNOUNCEMENT_SYNC_CRON}")
+        else:
+            logger.info(f"📋 公告数据同步已配置（独立于新闻排期）: {settings.ANNOUNCEMENT_SYNC_CRON}")
+
         # ==================== 股票关注列表定时分析配置 ====================
         from app.worker.watchlist_analysis_task import run_watchlist_analysis
         scheduler.add_job(
@@ -934,6 +970,147 @@ async def lifespan(app: FastAPI):
             name="交易日历缓存刷新（每日18:30）"
         )
         logger.info("🗓️ 交易日历缓存刷新任务已配置（每日 18:30 执行）")
+
+        # 猪周期数据新鲜度巡检 + 观察哨到期提醒（Pro 专有，每日 08:30；
+        # 社区版 app.pro 被整包剔除，import 自动降级；提醒只计数不判定）
+        try:
+            from app.pro.workers.pig_cycle_data_governance import (
+                run_pig_cycle_freshness_check,
+                run_pig_cycle_watch_due_reminder,
+            )
+            scheduler.add_job(
+                run_pig_cycle_freshness_check,
+                CronTrigger(hour=8, minute=30, timezone=settings.TIMEZONE),
+                id="pig_cycle_data_freshness_check",
+                name="猪周期数据新鲜度巡检"
+            )
+            scheduler.add_job(
+                run_pig_cycle_watch_due_reminder,
+                CronTrigger(hour=8, minute=30, timezone=settings.TIMEZONE),
+                id="pig_cycle_watch_due_reminder",
+                name="猪周期观察哨到期提醒（只计数）"
+            )
+            logger.info("📅 猪周期巡检已配置: 每日 08:30（数据新鲜度 + 观察哨到期提醒）")
+        except ImportError:
+            logger.info("🐷 猪周期巡检未配置（社区版不含 Pro 域模型）")
+
+        # 猪周期关键信号主动推送（Pro 专有，每日 08:40；周线方向信号/保险丝/
+        # 能繁官方数据/猪价异动四类事件 diff 快照后推给关注猪企股的用户，
+        # 首次运行只建快照不推送）
+        try:
+            from app.pro.workers.pig_cycle_signal_watch import run_pig_cycle_signal_watch
+            scheduler.add_job(
+                run_pig_cycle_signal_watch,
+                CronTrigger(hour=8, minute=40, timezone=settings.TIMEZONE),
+                id="pig_cycle_signal_watch",
+                name="猪周期关键信号主动推送"
+            )
+            logger.info("📅 猪周期信号推送已配置: 每日 08:40")
+        except ImportError:
+            logger.info("🐷 猪周期信号推送未配置（社区版不含 Pro 域模型）")
+
+        # 失效条件对照提醒（Pro 专有，每日 08:45；能繁官方数据落地后，把相关标的
+        # 最近一次四要素快照的失效条件清单推给自选/持仓含猪企股的用户，只提醒不代判）
+        try:
+            from app.pro.workers.invalidation_check_watch import run_invalidation_check
+            scheduler.add_job(
+                run_invalidation_check,
+                CronTrigger(hour=8, minute=45, timezone=settings.TIMEZONE),
+                id="invalidation_check_watch",
+                name="失效条件对照提醒"
+            )
+            logger.info("📅 失效条件对照提醒已配置: 每日 08:45")
+        except ImportError:
+            logger.info("📋 失效条件对照提醒未配置（社区版不含 Pro 域模型）")
+
+        # 持仓视角每日研究结论（Pro 专有，每日 08:50；给牧原/温氏/新希望 +
+        # 全体用户持仓/自选标的生成"规则事实 + LLM 总结"的当日结论，
+        # 按股票×日期共享落库 daily_reviews，只在页面展示不推送）
+        try:
+            from app.pro.workers.pig_cycle_position_review import (
+                run_pig_cycle_position_review,
+            )
+            scheduler.add_job(
+                run_pig_cycle_position_review,
+                CronTrigger(hour=8, minute=50, timezone=settings.TIMEZONE),
+                id="pig_cycle_position_review",
+                name="猪周期每日持仓研究结论"
+            )
+            logger.info("📅 猪周期每日持仓研究结论已配置: 每日 08:50")
+        except ImportError:
+            logger.info("🐷 每日持仓研究结论未配置（社区版不含 Pro 域模型）")
+
+        # 猪周期模拟盘调度已停用（2026-10-17 产品评估：机械账本对用户无验证意义，
+        # 数据面板不更新时空转）。paper.py 代码保留作按需回放工具，
+        # 手动补跑接口 POST /api/pro/pig-cycle/paper/run 仍可用
+
+        # 猪周期微观结构采集（Pro 专有，交易日 15:10 收盘后；ms-5）。
+        # 子进程隔离运行 fetch_microstructure.py（依赖通达信 TdxW/tqcenter），
+        # 采集牧原 002714 L2 快照 upsert 到 pig_cycle 库 microstructure_daily，
+        # 仅展示不进规则；非交易日跳过，当日未跑可手动补采
+        try:
+            from app.pro.workers.pig_cycle_microstructure import (
+                run_pig_cycle_microstructure_daily,
+            )
+            scheduler.add_job(
+                run_pig_cycle_microstructure_daily,
+                CronTrigger(
+                    hour=15, minute=10, day_of_week="mon-fri",
+                    timezone=settings.TIMEZONE,
+                ),
+                id="pig_cycle_microstructure_daily",
+                name="猪周期微观结构每日采集（交易日15:10）",
+                max_instances=1,
+                coalesce=True,
+            )
+            logger.info("📅 猪周期微观结构采集已配置: 交易日 15:10 执行")
+        except ImportError:
+            logger.info("🐷 猪周期微观结构采集未配置（社区版不含 Pro 域模型）")
+
+        # 猪周期资金流向采集（Pro 专有，交易日 15:20；行为流替补源）。
+        # 进程内直连 Tushare moneyflow（交易所口径个股资金流向），
+        # 不依赖通达信客户端；upsert 到 pig_cycle 库 moneyflow_daily，
+        # 仅展示不进规则；非交易日跳过，通道失败域模型自行降级
+        try:
+            from app.pro.workers.pig_cycle_moneyflow import (
+                run_pig_cycle_moneyflow_daily,
+            )
+            scheduler.add_job(
+                run_pig_cycle_moneyflow_daily,
+                CronTrigger(
+                    hour=15, minute=20, day_of_week="mon-fri",
+                    timezone=settings.TIMEZONE,
+                ),
+                id="pig_cycle_moneyflow_daily",
+                name="猪周期资金流向每日采集（交易日15:20）",
+                max_instances=1,
+                coalesce=True,
+            )
+            logger.info("📅 猪周期资金流向采集已配置: 交易日 15:20 执行")
+        except ImportError:
+            logger.info("🐷 猪周期资金流向采集未配置（社区版不含 Pro 域模型）")
+
+        # 猪周期筹码分布重算（Pro 专有，交易日 15:30；筹码替补源）。
+        # 进程内 Tushare 日 K（daily/adj_factor/daily_basic）按换手率衰减模型
+        # 全史重算 CYQ，不依赖通达信客户端；upsert 到 pig_cycle 库
+        # cyq_daily（source=local 留痕），仅作参照不进仓位规则；
+        # 非交易日跳过，通道失败域模型自行降级
+        try:
+            from app.pro.workers.pig_cycle_cyq import run_pig_cycle_cyq_daily
+            scheduler.add_job(
+                run_pig_cycle_cyq_daily,
+                CronTrigger(
+                    hour=15, minute=30, day_of_week="mon-fri",
+                    timezone=settings.TIMEZONE,
+                ),
+                id="pig_cycle_cyq_daily",
+                name="猪周期筹码分布每日重算（交易日15:30）",
+                max_instances=1,
+                coalesce=True,
+            )
+            logger.info("📅 猪周期筹码分布重算已配置: 交易日 15:30 执行")
+        except ImportError:
+            logger.info("🐷 猪周期筹码分布重算未配置（社区版不含 Pro 域模型）")
 
         # v3.5.0 项4 / v3.6.0 项6：HITL 待确认操作过期清理（每 30 分钟执行一次）
         async def _expire_stale_hitl_operations():
@@ -996,6 +1173,20 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ 调度器启动失败: {e}", exc_info=True)
         raise  # 抛出异常，阻止应用启动
 
+    # 猪周期知识库种子播种（Pro 专有，一次性幂等；社区版 core.pro 被整包剔除，
+    # ImportError 自动降级；任何失败只警告不阻断启动）
+    try:
+        from core.pro.domain_models.pig_cycle.knowledge import ensure_seeded
+        result = await asyncio.to_thread(ensure_seeded)
+        logger.info(
+            f"📚 猪周期知识库已就绪: {result['total']} 张 "
+            f"(新增 {result['inserted']}/更新 {result['updated']}/未变 {result['unchanged']})"
+        )
+    except ImportError:
+        logger.info("📚 猪周期知识库未播种（社区版不含 Pro 域模型）")
+    except Exception as e:
+        logger.warning(f"⚠️ 猪周期知识库播种失败（不影响启动）: {e}")
+
     try:
         yield
     finally:
@@ -1009,16 +1200,6 @@ async def lifespan(app: FastAPI):
             logger.info("🛑 统一线程池同步服务已停止")
         except Exception as e:
             logger.warning(f"统一线程池同步服务关闭错误: {e}")
-
-        # 🔥 停止财务数据同步服务的线程池
-        try:
-            from app.worker.financial_data_sync_service import get_financial_sync_service
-            financial_sync_service = await get_financial_sync_service()
-            if financial_sync_service is not None:
-                financial_sync_service.shutdown(timeout=30.0)
-                logger.info("🛑 财务数据同步服务线程池已停止")
-        except Exception as e:
-            logger.warning(f"财务数据同步服务停止错误: {e}")
 
         # 🔥 停止线程池 Worker
         try:
@@ -1037,6 +1218,7 @@ async def lifespan(app: FastAPI):
                 logger.warning(f"Scheduler shutdown error: {e}")
 
         try:
+            from app.services.stop_gain_alert_service import stop_gain_alert_service
             stop_gain_alert_service.stop()
         except Exception as e:
             logger.warning(f"StopGainAlertService cleanup error: {e}")
@@ -1158,7 +1340,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.get("/api/test-log")
 async def test_log():
     """测试日志中间件是否工作"""
-    print("🧪 测试端点被调用 - 这条消息应该出现在控制台")
+    logging.getLogger("app.main").debug("🧪 测试端点被调用")
     return {"message": "测试成功", "timestamp": time.time()}
 
 
@@ -1181,7 +1363,7 @@ async def get_system_info():
 
     # 如果BUILD_INFO存在，使用其中的信息
     if build_info:
-        return {
+        return ok({
             "version": build_info.get("version", version),
             "full_version": build_info.get("full_version", version),
             "build_timestamp": build_info.get("build_timestamp"),
@@ -1189,10 +1371,10 @@ async def get_system_info():
             "build_unix": build_info.get("build_unix"),
             "git_commit": build_info.get("git_commit"),
             "build_type": build_info.get("build_type"),
-        }
+        })
 
     # 否则只返回主版本号
-    return {
+    return ok({
         "version": version,
         "full_version": version,
         "build_timestamp": None,
@@ -1200,13 +1382,12 @@ async def get_system_info():
         "build_unix": None,
         "git_commit": None,
         "build_type": None,
-    }
+    })
 
 
 @app.get("/")
 async def root():
     """根路径，返回API信息"""
-    print("🏠 根路径被访问")
     return {
         "name": "TradingAgents-CN API",
         "version": get_version(),

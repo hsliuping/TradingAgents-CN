@@ -59,26 +59,10 @@ def setup_cli_logging():
     CLI模式下的日志配置：移除控制台输出，保持界面清爽
     Configure logging for CLI mode: remove console output to keep interface clean
     """
-    import logging
-    from tradingagents.utils.logging_manager import get_logger_manager
+    from core.utils.logging_setup import setup_cli_logging as setup_shared_logging
 
-    logger_manager = get_logger_manager()
-
-    # 获取根日志器
-    root_logger = logging.getLogger()
-
-    # 移除所有控制台处理器，只保留文件日志
-    for handler in root_logger.handlers[:]:
-        if isinstance(handler, logging.StreamHandler) and hasattr(handler, 'stream'):
-            if handler.stream.name in ['<stderr>', '<stdout>']:
-                root_logger.removeHandler(handler)
-
-    # 同时移除tradingagents日志器的控制台处理器
-    tradingagents_logger = logging.getLogger('tradingagents')
-    for handler in tradingagents_logger.handlers[:]:
-        if isinstance(handler, logging.StreamHandler) and hasattr(handler, 'stream'):
-            if handler.stream.name in ['<stderr>', '<stdout>']:
-                tradingagents_logger.removeHandler(handler)
+    # 走共享初始化函数（日志治理 §5.3）：只落文件日志，不输出控制台
+    setup_shared_logging("INFO", console=False, log_file="logs/tradingagents.log")
 
     # 记录CLI启动日志（只写入文件）
     logger.debug("🚀 CLI模式启动，控制台日志已禁用，保持界面清爽")
@@ -1045,8 +1029,11 @@ def run_analysis():
 
     # Create config with selected research depth
     config = DEFAULT_CONFIG.copy()
-    config["max_debate_rounds"] = selections["research_depth"]
-    config["max_risk_discuss_rounds"] = selections["research_depth"]
+    from core.workflow.depth_profiles import get_profile
+
+    _depth_profile = get_profile(selections["research_depth"])
+    config["max_debate_rounds"] = _depth_profile.debate_rounds
+    config["max_risk_discuss_rounds"] = _depth_profile.risk_rounds
     config["quick_think_llm"] = selections["shallow_thinker"]
     config["deep_think_llm"] = selections["deep_thinker"]
     config["backend_url"] = selections["backend_url"]

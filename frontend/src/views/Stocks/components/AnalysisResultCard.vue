@@ -33,10 +33,25 @@
 
       <!-- 有结果 -->
       <div v-else class="analysis-detail">
-        <!-- 研究结论 -->
-        <div class="analysis-result-summary">
-          <div class="label">研究结论</div>
-          <div class="conclusion markdown-body" v-html="renderMarkdown(oneSentenceConclusion)"></div>
+        <!-- 研究结论 vs 我上次的判断（P4 报告与日志并置对照） -->
+        <div class="conclusion-row">
+          <div class="analysis-result-summary">
+            <div class="label">系统结论</div>
+            <div class="conclusion markdown-body" v-html="renderMarkdown(oneSentenceConclusion)"></div>
+          </div>
+
+          <div v-if="lastJudgment" class="my-judgment-summary">
+            <div class="label">
+              我上次的判断
+              <span class="judge-date">{{ formatAnalysisTime(lastJudgment.created_at) }}</span>
+            </div>
+            <div class="judge-tag-row">
+              <el-tag :type="journalJudgmentTagType(lastJudgment.judgment)" size="small" effect="plain">
+                {{ journalJudgmentLabel(lastJudgment.judgment) }}
+              </el-tag>
+            </div>
+            <div class="judge-basis">{{ lastJudgment.basis || '未填写依据' }}</div>
+          </div>
         </div>
 
         <!-- 分析元信息（合规：不展示信心度，仅保留研究性元数据） -->
@@ -126,6 +141,7 @@
 import { ref, computed } from 'vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { getReportName } from '@/utils/reportPresentation'
+import { journalJudgmentLabel, journalJudgmentTagType, type ResearchJournalEntry } from '@/pro/api/researchJournal'
 
 const props = defineProps<{
   analysisStatus: 'idle' | 'running' | 'completed' | 'failed'
@@ -136,6 +152,8 @@ const props = defineProps<{
   oneSentenceConclusion: string
   reportKeys: string[]
   historyCount?: number
+  /** 该股最新一条研究判断（P4 报告与日志并置；无日志时不显示对照卡） */
+  lastJudgment?: ResearchJournalEntry | null
 }>()
 
 defineEmits<{
@@ -344,12 +362,25 @@ function getSectionIcon(key: string): string {
   padding: 20px 0;
 }
 
+/* P4 并置对照：系统结论 + 我上次的判断 左右并排（窄屏单列） */
+.conclusion-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 1024px) {
+  .conclusion-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .analysis-result-summary {
   padding: 14px;
   background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
   border-radius: 8px;
   border-left: 3px solid #6b5ce7;
-  margin-bottom: 14px;
 }
 
 .analysis-result-summary .label {
@@ -364,6 +395,42 @@ function getSectionIcon(key: string): string {
 .analysis-result-summary .conclusion {
   font-size: 14px;
   color: #1e293b;
+  line-height: 1.7;
+}
+
+/* 我上次的判断：琥珀色系区分「个人记录」与「系统结论」 */
+.my-judgment-summary {
+  padding: 14px;
+  background: #fffbeb;
+  border-radius: 8px;
+  border-left: 3px solid #f59e0b;
+}
+
+.my-judgment-summary .label {
+  font-size: 11px;
+  color: #b45309;
+  font-weight: 700;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.my-judgment-summary .judge-date {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.my-judgment-summary .judge-tag-row {
+  margin-bottom: 6px;
+}
+
+.my-judgment-summary .judge-basis {
+  font-size: 13px;
+  color: #78350f;
   line-height: 1.7;
 }
 

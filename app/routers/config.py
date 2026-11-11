@@ -480,7 +480,7 @@ def _sanitize_datasource_configs(items):
 
         return result
     except Exception as e:
-        print(f"⚠️ 脱敏数据源配置失败: {e}")
+        logger.error(f"⚠️ 脱敏数据源配置失败: {e}")
         return items
 
 def _sanitize_database_configs(items):
@@ -860,7 +860,7 @@ async def fetch_provider_models(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"获取模型列表失败: {e}")
+        logger.error(f"获取模型列表失败: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(

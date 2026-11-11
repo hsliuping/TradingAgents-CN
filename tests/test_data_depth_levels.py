@@ -21,7 +21,7 @@ def test_data_depth_levels():
     
     # 测试不同级别
     levels = [1, 3, 5]
-    level_names = {1: "快速", 3: "标准", 5: "全面"}
+    level_names = {1: "快速", 3: "标准", 5: "深度"}
     
     results = {}
     

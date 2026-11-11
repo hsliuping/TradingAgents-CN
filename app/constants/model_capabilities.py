@@ -50,7 +50,7 @@ CAPABILITY_DESCRIPTIONS = {
 }
 
 
-# 分析深度要求的最低能力等级
+# 分析深度要求的最低能力等级（三档：快速1/标准3/深度5，2026-11-04 三档简化）
 ANALYSIS_DEPTH_REQUIREMENTS = {
     "快速": {
         "min_capability": 1,
@@ -58,13 +58,6 @@ ANALYSIS_DEPTH_REQUIREMENTS = {
         "deep_model_min": 1,
         "required_features": [ModelFeature.TOOL_CALLING],
         "description": "1级快速分析：任何模型都可以，优先选择快速响应的模型"
-    },
-    "基础": {
-        "min_capability": 1,
-        "quick_model_min": 1,
-        "deep_model_min": 2,
-        "required_features": [ModelFeature.TOOL_CALLING],
-        "description": "2级基础分析：快速模型可用基础级，深度模型建议标准级以上"
     },
     "标准": {
         "min_capability": 2,
@@ -74,18 +67,11 @@ ANALYSIS_DEPTH_REQUIREMENTS = {
         "description": "3级标准分析：快速模型可用基础级，深度模型需要标准级以上"
     },
     "深度": {
-        "min_capability": 3,
-        "quick_model_min": 2,
-        "deep_model_min": 3,
-        "required_features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING],
-        "description": "4级深度分析：快速模型需标准级，深度模型需高级以上，需要推理能力"
-    },
-    "全面": {
         "min_capability": 4,
         "quick_model_min": 2,
         "deep_model_min": 4,
         "required_features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING],
-        "description": "5级全面分析：快速模型需标准级，深度模型需专业级以上，强推理能力"
+        "description": "5级深度分析：快速模型需标准级，深度模型需专业级以上，强推理能力"
     }
 }
 
@@ -97,7 +83,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 1,
         "suitable_roles": [ModelRole.QUICK_ANALYSIS],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础"],
+        "recommended_depths": ["快速", "标准"],
         "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
         "description": "通义千问轻量版，快速响应，适合数据收集"
     },
@@ -105,7 +91,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 2,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT],
-        "recommended_depths": ["快速", "基础", "标准"],
+        "recommended_depths": ["快速", "标准"],
         "performance_metrics": {"speed": 4, "cost": 4, "quality": 4},
         "description": "通义千问标准版，平衡性能和成本"
     },
@@ -113,7 +99,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 4,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
-        "recommended_depths": ["标准", "深度", "全面"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 3, "cost": 2, "quality": 5},
         "description": "通义千问旗舰版，强大推理能力"
     },
@@ -121,7 +107,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 5,
         "suitable_roles": [ModelRole.DEEP_ANALYSIS],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
-        "recommended_depths": ["深度", "全面"],
+        "recommended_depths": ["深度"],
         "performance_metrics": {"speed": 2, "cost": 1, "quality": 5},
         "description": "通义千问长文本版，超长上下文"
     },
@@ -131,7 +117,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 1,
         "suitable_roles": [ModelRole.QUICK_ANALYSIS],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础"],
+        "recommended_depths": ["快速", "标准"],
         "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
         "description": "GPT-3.5 Turbo，快速且经济"
     },
@@ -139,7 +125,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 3,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING],
-        "recommended_depths": ["基础", "标准", "深度"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 3, "cost": 3, "quality": 4},
         "description": "GPT-4，强大的推理能力"
     },
@@ -147,7 +133,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 4,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.VISION],
-        "recommended_depths": ["标准", "深度", "全面"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 4, "cost": 2, "quality": 5},
         "description": "GPT-4 Turbo，更快更强"
     },
@@ -155,7 +141,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 2,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础", "标准"],
+        "recommended_depths": ["快速", "标准"],
         "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
         "description": "GPT-4o Mini，经济实惠"
     },
@@ -163,7 +149,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 4,
         "suitable_roles": [ModelRole.DEEP_ANALYSIS],
         "features": [ModelFeature.REASONING],
-        "recommended_depths": ["深度", "全面"],
+        "recommended_depths": ["深度"],
         "performance_metrics": {"speed": 2, "cost": 3, "quality": 5},
         "description": "O1 Mini，强推理模型"
     },
@@ -171,7 +157,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 5,
         "suitable_roles": [ModelRole.DEEP_ANALYSIS],
         "features": [ModelFeature.REASONING],
-        "recommended_depths": ["全面"],
+        "recommended_depths": ["深度"],
         "performance_metrics": {"speed": 1, "cost": 1, "quality": 5},
         "description": "O1，最强推理能力"
     },
@@ -179,7 +165,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 4,
         "suitable_roles": [ModelRole.DEEP_ANALYSIS],
         "features": [ModelFeature.REASONING],
-        "recommended_depths": ["深度", "全面"],
+        "recommended_depths": ["深度"],
         "performance_metrics": {"speed": 2, "cost": 3, "quality": 5},
         "description": "O4 Mini，新一代推理模型"
     },
@@ -189,7 +175,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 3,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["基础", "标准", "深度"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 4, "cost": 5, "quality": 4},
         "description": "DeepSeek Chat，性价比高"
     },
@@ -199,7 +185,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 2,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING],
-        "recommended_depths": ["快速", "基础", "标准"],
+        "recommended_depths": ["快速", "标准"],
         "performance_metrics": {"speed": 4, "cost": 4, "quality": 3},
         "description": "文心一言3.5，标准版本"
     },
@@ -207,7 +193,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 3,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING],
-        "recommended_depths": ["基础", "标准", "深度"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 3, "cost": 3, "quality": 4},
         "description": "文心一言4.0，高级版本"
     },
@@ -215,7 +201,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 4,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING, ModelFeature.FAST_RESPONSE],
-        "recommended_depths": ["标准", "深度", "全面"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 4, "cost": 2, "quality": 5},
         "description": "文心一言4.0 Turbo，旗舰版本"
     },
@@ -225,7 +211,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 1,
         "suitable_roles": [ModelRole.QUICK_ANALYSIS],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础"],
+        "recommended_depths": ["快速", "标准"],
         "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
         "description": "智谱GLM-3 Turbo，快速版本"
     },
@@ -233,7 +219,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 3,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING],
-        "recommended_depths": ["基础", "标准", "深度"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 3, "cost": 3, "quality": 4},
         "description": "智谱GLM-4，标准版本"
     },
@@ -241,7 +227,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 4,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
-        "recommended_depths": ["标准", "深度", "全面"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 3, "cost": 2, "quality": 5},
         "description": "智谱GLM-4 Plus，旗舰版本"
     },
@@ -251,7 +237,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 2,
         "suitable_roles": [ModelRole.QUICK_ANALYSIS],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE],
-        "recommended_depths": ["快速", "基础", "标准"],
+        "recommended_depths": ["快速", "标准"],
         "performance_metrics": {"speed": 5, "cost": 4, "quality": 3},
         "description": "Claude 3 Haiku，快速版本"
     },
@@ -259,7 +245,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 3,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.VISION],
-        "recommended_depths": ["基础", "标准", "深度"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 4, "cost": 3, "quality": 4},
         "description": "Claude 3 Sonnet，平衡版本"
     },
@@ -267,7 +253,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 4,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.VISION],
-        "recommended_depths": ["标准", "深度", "全面"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 3, "cost": 2, "quality": 5},
         "description": "Claude 3 Opus，旗舰版本"
     },
@@ -275,7 +261,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 5,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.VISION],
-        "recommended_depths": ["标准", "深度", "全面"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 4, "cost": 2, "quality": 5},
         "description": "Claude 3.5 Sonnet，最新旗舰"
     },
@@ -285,7 +271,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 3,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.REASONING],
-        "recommended_depths": ["基础", "标准", "深度"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 4, "cost": 4, "quality": 4},
         "description": "Gemini Pro，经典稳定版本"
     },
@@ -293,7 +279,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 4,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.VISION],
-        "recommended_depths": ["标准", "深度", "全面"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 4, "cost": 3, "quality": 5},
         "description": "Gemini 1.5 Pro，长上下文旗舰"
     },
@@ -301,7 +287,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 2,
         "suitable_roles": [ModelRole.QUICK_ANALYSIS],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础", "标准"],
+        "recommended_depths": ["快速", "标准"],
         "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
         "description": "Gemini 1.5 Flash，快速响应版本"
     },
@@ -309,7 +295,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 4,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING, ModelFeature.FAST_RESPONSE],
-        "recommended_depths": ["标准", "深度", "全面"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 5, "cost": 3, "quality": 5},
         "description": "Gemini 2.0 Flash，新一代快速旗舰"
     },
@@ -317,7 +303,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 2,
         "suitable_roles": [ModelRole.QUICK_ANALYSIS],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.FAST_RESPONSE, ModelFeature.COST_EFFECTIVE],
-        "recommended_depths": ["快速", "基础"],
+        "recommended_depths": ["快速", "标准"],
         "performance_metrics": {"speed": 5, "cost": 5, "quality": 3},
         "description": "Gemini 2.5 Flash Lite，轻量预览版"
     },
@@ -327,7 +313,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 2,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING],
-        "recommended_depths": ["快速", "基础", "标准"],
+        "recommended_depths": ["快速", "标准"],
         "performance_metrics": {"speed": 4, "cost": 4, "quality": 3},
         "description": "Moonshot V1 8K，标准版本"
     },
@@ -335,7 +321,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 3,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT],
-        "recommended_depths": ["基础", "标准", "深度"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 3, "cost": 3, "quality": 4},
         "description": "Moonshot V1 32K，长上下文版本"
     },
@@ -343,7 +329,7 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
         "capability_level": 4,
         "suitable_roles": [ModelRole.DEEP_ANALYSIS],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
-        "recommended_depths": ["标准", "深度", "全面"],
+        "recommended_depths": ["标准", "深度"],
         "performance_metrics": {"speed": 2, "cost": 2, "quality": 5},
         "description": "Moonshot V1 128K，超长上下文旗舰"
     },

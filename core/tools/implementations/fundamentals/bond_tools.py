@@ -16,63 +16,71 @@ logger = logging.getLogger(__name__)
 
 _TENORS = ["3月", "6月", "1年", "3年", "5年", "7年", "10年", "30年"]
 
+# 能力标准英文字段 ↔ 中文期限 映射（bond_china_yield 能力字段按期限升序命名）
+_TENOR_FIELD_MAP = dict(zip(_TENORS, [
+    "yield_3m", "yield_6m", "yield_1y", "yield_3y",
+    "yield_5y", "yield_7y", "yield_10y", "yield_30y",
+]))
+
 
 def _fetch_china_yield_curve() -> dict:
-    """通过 AKShare 获取中国国债收益率曲线最新数据。"""
+    """经 DataFacade 能力获取中国国债收益率曲线最新数据。"""
     try:
-        import akshare as ak
-        df = ak.bond_china_yield()
-        treasury = df[df["曲线名称"] == "中债国债收益率曲线"]
+        from tradingagents.dataflows.capability import query_capability_sync
+
+        df = query_capability_sync("bond_china_yield")
+        if df is None or df.empty:
+            return {"status": "no_data", "message": "未找到国债收益率曲线数据"}
+        treasury = df[df["curve_name"] == "中债国债收益率曲线"]
         if treasury.empty:
             return {"status": "no_data", "message": "未找到国债收益率曲线数据"}
-        treasury["日期"] = pd.to_datetime(treasury["日期"])
-        latest = treasury.loc[treasury["日期"].idxmax()]
+        latest = treasury.iloc[0]  # 能力按 trade_date 降序，首行即最新
         yields = {}
-        for col in _TENORS:
-            val = latest.get(col)
+        for tenor, field in _TENOR_FIELD_MAP.items():
+            val = latest.get(field)
             if val is not None and val == val:
-                yields[col] = round(float(val), 4)
+                yields[tenor] = round(float(val), 4)
             else:
-                yields[col] = None
+                yields[tenor] = None
         return {
             "status": "ok",
-            "date": str(latest["日期"].date()),
+            "date": str(latest.get("trade_date")),
             "yields": yields,
         }
     except Exception as e:
-        logger.warning("AKShare 国债收益率获取失败: %s", e)
+        logger.warning("国债收益率获取失败: %s", e)
         return {"status": "error", "message": str(e)}
 
 
 def _fetch_china_multi_curve() -> dict:
-    """通过 AKShare 获取多条收益率曲线（国债、AAA中短期票据、AAA银行普通债）。"""
+    """经 DataFacade 能力获取多条收益率曲线（国债、AAA中短期票据、AAA银行普通债）。"""
     try:
-        import akshare as ak
-        df = ak.bond_china_yield()
-        df["日期"] = pd.to_datetime(df["日期"])
+        from tradingagents.dataflows.capability import query_capability_sync
+
+        df = query_capability_sync("bond_china_yield")
+        if df is None or df.empty:
+            return {"status": "error", "message": "收益率曲线数据为空"}
         curves_found = {}
-        latest_dates = {}
         for curve_name in [
             "中债国债收益率曲线",
             "中债中短期票据收益率曲线(AAA)",
             "中债商业银行普通债收益率曲线(AAA)",
         ]:
-            subset = df[df["曲线名称"] == curve_name]
+            subset = df[df["curve_name"] == curve_name]
             if subset.empty:
                 curves_found[curve_name] = {"status": "no_data"}
                 continue
-            latest = subset.loc[subset["日期"].idxmax()]
-            latest_dates[curve_name] = str(latest["日期"].date())
+            latest = subset.iloc[0]  # 能力按 trade_date 降序，首行即最新
             yields = {}
-            for col in _TENORS:
-                val = latest.get(col)
+            for tenor, field in _TENOR_FIELD_MAP.items():
+                val = latest.get(field)
                 if val is not None and val == val:
-                    yields[col] = round(float(val), 4)
+                    yields[tenor] = round(float(val), 4)
                 else:
-                    yields[col] = None
+                    yields[tenor] = None
             curves_found[curve_name] = {
                 "status": "ok",
-                "date": str(latest["日期"].date()),
+                "date": str(latest.get("trade_date")),
                 "yields": yields,
             }
         # 整体最新日期
@@ -83,37 +91,39 @@ def _fetch_china_multi_curve() -> dict:
             "curves": curves_found,
         }
     except Exception as e:
-        logger.warning("AKShare 多曲线获取失败: %s", e)
+        logger.warning("多曲线获取失败: %s", e)
         return {"status": "error", "message": str(e)}
 
 
 def _fetch_zh_us_rate() -> dict:
-    """通过 AKShare 获取中美收益率对比最新数据。"""
+    """经 DataFacade 能力获取中美收益率对比最新数据（成功返回不含 status 键）。"""
     try:
-        import akshare as ak
-        df = ak.bond_zh_us_rate()
-        df["日期"] = pd.to_datetime(df["日期"])
-        latest = df.sort_values("日期").iloc[-1]
+        from tradingagents.dataflows.capability import query_capability_sync
+
+        df = query_capability_sync("bond_yield_cn_us")
+        if df is None or df.empty:
+            return {"status": "no_data", "message": "中美收益率数据为空"}
+        latest = df.iloc[0]  # 能力按 trade_date 降序，首行即最新
         result = {
-            "date": str(latest["日期"].date()),
+            "date": str(latest.get("trade_date")),
             "china": {},
             "us": {},
         }
-        cn_cols = {"中国国债收益率2年": "2年", "中国国债收益率5年": "5年",
-                    "中国国债收益率10年": "10年", "中国国债收益率30年": "30年"}
-        us_cols = {"美国国债收益率2年": "2年", "美国国债收益率5年": "5年",
-                    "美国国债收益率10年": "10年", "美国国债收益率30年": "30年"}
-        for raw, name in cn_cols.items():
-            v = latest.get(raw)
+        cn_fields = {"2年": "cn_yield_2y", "5年": "cn_yield_5y",
+                     "10年": "cn_yield_10y", "30年": "cn_yield_30y"}
+        us_fields = {"2年": "us_yield_2y", "5年": "us_yield_5y",
+                     "10年": "us_yield_10y", "30年": "us_yield_30y"}
+        for name, field in cn_fields.items():
+            v = latest.get(field)
             if v is not None and v == v:
                 result["china"][name] = round(float(v), 4)
-        for raw, name in us_cols.items():
-            v = latest.get(raw)
+        for name, field in us_fields.items():
+            v = latest.get(field)
             if v is not None and v == v:
                 result["us"][name] = round(float(v), 4)
         return result
     except Exception as e:
-        logger.warning("AKShare 中美收益率获取失败: %s", e)
+        logger.warning("中美收益率获取失败: %s", e)
         return {"status": "error", "message": str(e)}
 
 

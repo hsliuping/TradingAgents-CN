@@ -291,7 +291,7 @@ def _load_rank_list(month: str) -> List[Dict[str, Any]]:
     category="market",
     is_online=True,
     auto_register=True,
-    capability_tags=["auto_sales", "brand_sales", "monthly_sales", "auto_industry", "dongchedi"],
+    capability_tags=["auto_cycle", "auto_sales", "brand_sales", "monthly_sales", "auto_industry", "dongchedi"],
     tool_role_hint="specialized",
     output_shape="report",
     preferred_for=["汽车品牌月度销量查询", "品牌旗下车型销量对比", "整车厂商销量跟踪"],

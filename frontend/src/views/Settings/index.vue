@@ -193,10 +193,8 @@
             <el-form-item label="默认分析深度">
               <el-select v-model="analysisSettings.defaultDepth">
                 <el-option label="1级 - 快速分析" value="1" />
-                <el-option label="2级 - 基础分析" value="2" />
                 <el-option label="3级 - 标准分析（推荐）" value="3" />
-                <el-option label="4级 - 深度分析" value="4" />
-                <el-option label="5级 - 全面分析" value="5" />
+                <el-option label="5级 - 深度分析" value="5" />
               </el-select>
             </el-form-item>
 

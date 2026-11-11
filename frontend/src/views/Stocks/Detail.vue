@@ -27,80 +27,631 @@
       @go-api-guide="goToApiGuide"
     />
 
-    <!-- ════════ 2. 智能助手主入口（紧接顶部，突出显示） ════════ -->
-    <AssistantHero
-      :code="code"
-      :stock-name="stockName"
-      :has-analysis="assistantHasAnalysis"
-      :has-position="assistantHasPosition"
-      :has-review="assistantHasReview"
-      :has-fundamentals="assistantHasFundamentals"
-      :has-kline="assistantHasKline"
-      @ask="handleAssistantHeroAsk"
-    />
+    <!-- ════════ 档案式 Tab 导航（7 Tab） ════════ -->
+    <el-tabs v-model="activeDetailTab" class="stock-detail-tabs" type="border-card">
 
-    <!-- ════════ 3. 研究路径（sticky 导航） ════════ -->
-    <ResearchFlow
-      :steps="researchFlowSteps"
-      :active-key="activeFlowKey"
-      @step-click="handleFlowStepClick"
-    />
+      <!-- ===== 概览 ===== -->
+      <el-tab-pane label="概览" name="overview" lazy>
+        <AssistantHero
+          :code="code"
+          :stock-name="stockName"
+          :has-analysis="assistantHasAnalysis"
+          :has-position="assistantHasPosition"
+          :has-review="assistantHasReview"
+          :has-fundamentals="assistantHasFundamentals"
+          :has-kline="assistantHasKline"
+          @ask="handleAssistantHeroAsk"
+        />
 
-    <!-- ════════ 4. K线 + 核心指标 ════════ -->
-    <div class="main-grid" id="kline-section">
-      <KlineChart
-        :title="klineCardTitle"
-        :category="klineCategory"
-        :values="klineValues"
-        :volumes="klineVolumes"
-        :period="period"
-        :period-options="periodOptions"
-        :kline-source="klineSource"
-        :last-k-time="lastKTime"
-        :last-k-close="lastKClose"
-        @update-period="handlePeriodChange"
-      />
-      <CoreMetrics
-        :basics="basics"
-        :financial-snapshot="financialSnapshot"
-        :factor-warning-entries="detailFactorWarningEntries"
-        :factor-diagnostic-entries="detailFactorDiagnosticEntries"
-      />
-    </div>
+        <!-- 关键指标条 + 风险提示（同一行） -->
+        <OverviewTopStrip
+          :basics="basics"
+          :financial-snapshot="financialSnapshot"
+          :quote="quote"
+        >
+          <!-- 猪周期专属风险：保险丝 / 期货升水灯（行业世界模型驱动，仅覆盖猪周期龙头） -->
+          <template v-if="pigCovered" #industry-risks>
+            <div v-for="(r, i) in pigRiskItems" :key="'p' + i" class="pig-risk-item">
+              <span class="risk-dot" :class="'is-' + r.level"></span>
+              <div class="ri-body">{{ r.text }}</div>
+            </div>
+          </template>
+        </OverviewTopStrip>
 
-    <!-- ════════ 5. 单股分析结果 ════════ -->
-    <AnalysisResultCard
-      :analysis-status="analysisStatus"
-      :analysis-progress="analysisProgress"
-      :analysis-message="analysisMessage"
-      :last-analysis="lastAnalysis"
-      :last-task-info="lastTaskInfo"
-      :one-sentence-conclusion="oneSentenceConclusion"
-      :report-keys="reportKeys"
-      :history-count="analysisHistoryCount"
-      @analyze="onAnalyze"
-      @view-reports="showReportsDialog = true"
-      @open-report="openReport"
-      @view-history="goToAnalysisHistory"
-    />
+        <!-- K线 + 核心指标 -->
+        <div class="main-grid" id="kline-section">
+          <KlineChart
+            :title="klineCardTitle"
+            :category="klineCategory"
+            :values="klineValues"
+            :volumes="klineVolumes"
+            :period="period"
+            :period-options="periodOptions"
+            :kline-source="klineSource"
+            :last-k-time="lastKTime"
+            :last-k-close="lastKClose"
+            @update-period="handlePeriodChange"
+          />
+          <CoreMetrics
+            :basics="basics"
+            :financial-snapshot="financialSnapshot"
+            :factor-warning-entries="detailFactorWarningEntries"
+            :factor-diagnostic-entries="detailFactorDiagnosticEntries"
+          />
+        </div>
 
-    <!-- ════════ 6. 持仓分析 + 交易复盘（标签页切换） ════════ -->
-    <PositionReviewTabs
-      :position-summary="positionSummary"
-      :review-summary="reviewSummary"
-      :position-data="positionData"
-      :review-history="reviewHistory"
-      :position-history-count="positionHistoryCount"
-      @go-position-analysis="goToPositionAnalysis"
-      @go-trade-review="goToTradeReview"
-      @view-position-task-detail="viewPositionTaskDetail"
-      @view-review-task-detail="viewReviewTaskDetail"
-      @view-position-history="goToPositionHistory"
-      @view-review-history="goToReviewHistory"
-      @select-review-item="selectReviewItem"
-    />
+        <!-- 我的持仓 -->
+        <MyPositionCard
+          :real="positionData.real"
+          :is-etf="isEtf"
+          :quote-price="quote.price"
+          :position-summary="positionSummary"
+          :first-buy-date="positionData.real.buy_date"
+          :weight-pct="positionData.real.weight_pct"
+          @add-position="showAddPositionDialog"
+          @go-position-analysis="goToPositionAnalysis"
+          @go-trade-review="goToTradeReview"
+        />
 
-    <!-- ════════ 7. 智能助手对话区 ════════ -->
+        <!-- 最新单股分析结果 -->
+        <AnalysisResultCard
+          :analysis-status="analysisStatus"
+          :analysis-progress="analysisProgress"
+          :analysis-message="analysisMessage"
+          :last-analysis="lastAnalysis"
+          :last-task-info="lastTaskInfo"
+          :one-sentence-conclusion="oneSentenceConclusion"
+          :report-keys="reportKeys"
+          :history-count="analysisHistoryCount"
+          :last-judgment="lastJudgment"
+          @analyze="onAnalyze"
+          @view-reports="showReportsDialog = true"
+          @open-report="openReport"
+          @view-history="goToAnalysisHistory"
+        />
+      </el-tab-pane>
+
+      <!-- ===== 行业面板（可选模块：有行业世界模型才展示详细内容） ===== -->
+      <el-tab-pane label="行业面板" name="industry" lazy>
+        <IndustryPanel :stock-name="stockName" />
+      </el-tab-pane>
+
+      <!-- ===== 事实层：基本面 + 财务 + 新闻公告 ===== -->
+      <el-tab-pane label="事实层" name="facts" lazy>
+        <BottomSection
+          :is-etf="isEtf"
+          :basics="basics"
+          :financial-snapshot="financialSnapshot"
+          :etf-basics="etfBasics"
+          :financial-raw-sections="financialRawSections"
+          :news-items="newsItems"
+          :news-filter="newsFilter"
+          :news-loading="newsLoading"
+          :news-source="newsSource"
+          @news-filter-change="(v: string) => newsFilter = v"
+        />
+      </el-tab-pane>
+
+      <!-- ===== 概念关系（一期：行业世界模型派生 + 基础信息兜底） ===== -->
+      <el-tab-pane label="概念关系" name="concept" lazy>
+        <div class="concept-pane">
+          <el-card shadow="never" class="concept-card">
+            <template #header>
+              <div class="concept-card-header">
+                <span class="concept-card-title">所属概念与主题</span>
+                <span v-if="conceptSubText" class="concept-sub">{{ conceptSubText }}</span>
+              </div>
+            </template>
+            <template v-if="conceptTags.length">
+              <div class="concept-tags">
+                <el-tooltip
+                  v-for="t in conceptTags"
+                  :key="t.name"
+                  :content="`来源：${t.source} · 强度：${t.strength === 'strong' ? '强（多源确认）' : '弱（单源待复核）'}`"
+                  placement="top"
+                >
+                  <el-tag
+                    size="large"
+                    class="concept-tag"
+                    :type="t.strength === 'strong' ? 'primary' : 'info'"
+                    :effect="t.strength === 'strong' ? 'light' : 'plain'"
+                  >
+                    {{ t.strength === 'strong' ? '● ' : '○ ' }}{{ t.name }}
+                  </el-tag>
+                </el-tooltip>
+              </div>
+              <div class="concept-source-line">共 {{ conceptTags.length }} 项概念 · 强标记 = 多源确认 · 弱标记 = 单源待复核</div>
+            </template>
+            <el-empty v-else description="暂无概念数据：该股未接入行业世界模型，且基础信息中缺少行业分类">
+              <template #image><el-icon :size="48" color="#C0C4CC"><Share /></el-icon></template>
+            </el-empty>
+          </el-card>
+
+          <el-card v-if="conceptRelations.length" shadow="never" class="concept-card">
+            <template #header>
+              <div class="concept-card-header">
+                <span class="concept-card-title">关联对象</span>
+                <span class="concept-sub">点击卡片可跳转</span>
+              </div>
+            </template>
+            <el-row :gutter="12">
+              <el-col v-for="r in conceptRelations" :key="r.name" :xs="24" :sm="12" :md="8">
+                <el-card shadow="hover" class="relation-card" @click="r.go && r.go()">
+                  <div class="relation-head">
+                    <span class="relation-name">{{ r.name }}</span>
+                    <el-tag size="small" :type="r.tagType" effect="plain">{{ r.relation }}</el-tag>
+                  </div>
+                  <div v-if="r.code" class="relation-code">{{ r.code }}</div>
+                  <div class="relation-note">{{ r.note }}</div>
+                </el-card>
+              </el-col>
+            </el-row>
+            <div class="concept-source-line">共 {{ conceptRelations.length }} 项关联 · 关系类型来自行业世界模型</div>
+          </el-card>
+        </div>
+      </el-tab-pane>
+
+      <!-- ===== 我的研究：持仓分析 + 交易复盘 + 留痕 ===== -->
+      <el-tab-pane label="我的研究" name="mine" lazy>
+        <!-- 【置顶·今日待办】P0 重组：待验证假设 + 最新每日结论摘要，一键去复盘 -->
+        <el-card shadow="never" class="mine-tasks-card mine-todo-card">
+          <template #header>
+            <div class="mine-card-header">
+              <span class="mine-card-title">今日待办</span>
+              <span class="pig-plan-sub">假设待验证与最新结论 · 不构成投资建议</span>
+            </div>
+          </template>
+          <div class="mine-todo-rows">
+            <div class="mine-todo-row">
+              <span class="mine-todo-icon">⚡</span>
+              <span class="mine-todo-text">
+                <template v-if="openHypothesisCount > 0">
+                  <b>{{ openHypothesisCount }}</b> 条待验证假设等你复盘
+                </template>
+                <template v-else>暂无待验证假设</template>
+              </span>
+              <el-button
+                v-if="openHypothesisCount > 0"
+                size="small" type="primary" plain
+                @click="scrollToJournal"
+              >一键去复盘</el-button>
+            </div>
+            <div v-if="dailyReview" class="mine-todo-row">
+              <span class="mine-todo-icon">📋</span>
+              <span class="mine-todo-text">
+                {{ dailyReview.date }} 每日结论已生成（{{ dailyReviewCoverageLabel }}）
+                <span class="mine-todo-clip">{{ dailyReview.summary }}</span>
+              </span>
+              <el-button link type="primary" size="small" @click="scrollToDailyReview">看全文</el-button>
+            </div>
+          </div>
+        </el-card>
+
+        <!-- 【结论与计划】猪周期计划 + 最新每日结论 -->
+        <div class="mine-section-label">结论与计划</div>
+
+        <!-- 猪周期计划与规则提醒（行业世界模型 · 仅覆盖猪周期龙头） -->
+        <el-card v-if="pigCovered" shadow="never" class="mine-tasks-card pig-plan-card">
+          <template #header>
+            <div class="mine-card-header">
+              <span class="mine-card-title">猪周期计划与规则提醒</span>
+              <span class="pig-plan-sub">来自行业世界模型 · 档位非操作建议，最终由你决定</span>
+            </div>
+          </template>
+          <template v-if="pigPlan">
+            <div class="pig-plan-head">
+              <el-tag size="small" type="success" effect="light">进行中</el-tag>
+              <span class="pig-plan-grade">
+                当前定级 <b>{{ pigPlan.grade_snapshot?.grade || '—' }}</b>{{ pigPlan.grade_snapshot?.sub_tag ? ' · ' + pigPlan.grade_snapshot.sub_tag : '' }}
+              </span>
+              <span v-if="pigPlan.opened_at" class="pig-plan-date">开启于 {{ pigPlan.opened_at.slice(0, 10) }}</span>
+            </div>
+            <div class="pig-plan-rule">仓位规则参考：{{ pigPlan.grade_snapshot?.position_rule || '—' }}</div>
+            <template v-if="pigPlan.lights">
+              <div class="pig-plan-section">升级票（{{ pigPlan.lights.votes_yes }}/{{ pigPlan.lights.votes_available }}，需 {{ pigPlan.lights.votes_required }} 票）</div>
+              <div v-for="t in pigPlan.lights.tickets" :key="t.key" class="pig-plan-item">
+                <span class="pig-plan-dot" :class="'is-' + t.state"></span>
+                <span class="pig-plan-name">{{ t.name }}</span>
+                <span class="pig-plan-basis">{{ t.basis || (t.state === 'gap' ? '数据源暂缺，该票不计入' : '条件未满足') }}</span>
+              </div>
+              <el-alert v-if="pigPlan.lights.upgrade_ready" type="warning" :closable="false" show-icon class="pig-plan-ready">
+                <template #title>升级票已凑齐（{{ pigPlan.lights.votes_yes }}/{{ pigPlan.lights.votes_available }}）· 不自动操作，是否升级由你决定</template>
+              </el-alert>
+              <div class="pig-plan-section">看错信号</div>
+              <div class="pig-plan-item">
+                <span class="pig-plan-dot" :class="pigPlan.lights.falsifier?.triggered ? 'is-triggered' : 'is-off'"></span>
+                <span class="pig-plan-name">{{ pigPlan.lights.falsifier?.name || '看错信号（能繁回升）' }}</span>
+                <span class="pig-plan-basis">
+                  {{ pigPlan.lights.falsifier?.triggered ? '已触发，去化逻辑被推翻' : '未触发' }}
+                  <template v-if="pigPlan.lights.falsifier?.rule">（{{ pigPlan.lights.falsifier.rule }}）</template>
+                </span>
+              </div>
+            </template>
+            <div v-if="pigPlan.note" class="pig-plan-note">计划备注：{{ pigPlan.note }}</div>
+          </template>
+          <div v-else class="pig-plan-empty">
+            当前没有进行中的研究计划。可在「行业面板」按当前定级开启作战计划，开启后这里会显示定级快照、升级票与看错信号提醒。
+          </div>
+        </el-card>
+
+        <!-- 最新每日结论（持仓视角闭环：每日 08:50 生成，规则事实 + AI 总结，只看不推） -->
+        <el-card v-if="dailyReview" id="mine-daily-review-anchor" shadow="never" class="mine-tasks-card pig-plan-card">
+          <template #header>
+            <div class="mine-card-header">
+              <span class="mine-card-title">最新每日结论</span>
+              <el-tag
+                v-if="dailyReview.risk_badge === 'restructuring'"
+                size="small"
+                type="warning"
+                effect="plain"
+              >重整股 · 信号参考性弱</el-tag>
+              <el-tag
+                v-else-if="dailyReview.risk_badge === 'small_cap'"
+                size="small"
+                type="info"
+                effect="plain"
+              >小盘股 · 信号参考性弱</el-tag>
+              <span class="pig-plan-sub">
+                {{ dailyReview.date }} 生成 · {{ dailyReviewCoverageLabel }} · {{ dailyReview.llm_used ? 'AI 总结' : '规则模板' }}
+              </span>
+            </div>
+          </template>
+          <div class="daily-review-summary">{{ dailyReview.summary }}</div>
+          <div v-if="dailyReviewHasSignals" class="daily-review-fuses">
+            <el-tag
+              v-for="f in dailyReviewFuseRows"
+              :key="f.key"
+              size="small"
+              :type="f.tag"
+              effect="plain"
+            >{{ f.key }}保险丝：{{ f.label }}</el-tag>
+          </div>
+          <div v-if="dailyReview.coverage === 'signals_mv'" class="pig-plan-sub" style="margin-top: 6px">
+            成本锚点未覆盖，暂无隐含定价读数；周线/保险丝/头均市值分位正常提供。
+          </div>
+          <div v-if="dailyReview.coverage === 'signals_only'" class="pig-plan-sub" style="margin-top: 6px">
+            估值数据暂缺（市值/出栏锚点未覆盖），仅提供周线读数。
+          </div>
+          <div v-if="dailyReview.coverage === 'partial'" class="pig-plan-empty">
+            该标的不在猪周期信号覆盖清单（17 家 A 股猪企），结论只述事实，不给规则读数。
+          </div>
+        </el-card>
+
+        <!-- 【我的判断】研究日志 + 复盘对照（研究闭环 4.1/4.2） -->
+        <div id="mine-journal-anchor" class="mine-section-label">我的判断</div>
+        <ResearchJournalPanel
+          ref="journalPanelRef"
+          :stock-code="code"
+          :stock-name="stockName"
+          @review-summary="onJournalReviewSummary"
+        />
+
+        <!-- 【持仓与任务】低频内容默认折叠（P0 重组） -->
+        <el-collapse class="mine-collapse">
+          <el-collapse-item name="position" title="持仓与任务">
+            <PositionReviewTabs
+          :position-summary="positionSummary"
+          :review-summary="reviewSummary"
+          :position-data="positionData"
+          :review-history="reviewHistory"
+          :position-history-count="positionHistoryCount"
+          @go-position-analysis="goToPositionAnalysis"
+          @go-trade-review="goToTradeReview"
+          @view-position-task-detail="viewPositionTaskDetail"
+          @view-review-task-detail="viewReviewTaskDetail"
+          @view-position-history="goToPositionHistory"
+          @view-review-history="goToReviewHistory"
+          @select-review-item="selectReviewItem"
+        />
+
+        <!-- 该股相关研究任务与历史报告 -->
+        <el-card shadow="never" class="mine-tasks-card">
+          <template #header>
+            <div class="mine-card-header">
+              <span class="mine-card-title">研究任务与历史报告</span>
+              <el-button link type="primary" size="small" @click="goToAnalysisHistory">查看全部 →</el-button>
+            </div>
+          </template>
+          <div v-loading="stockTasksLoading">
+            <el-table :data="stockTasks" size="small" empty-text="还没有针对此股票的研究任务">
+              <el-table-column label="任务" min-width="260">
+                <template #default="{ row }">
+                  <el-link type="primary" :underline="false" @click="viewStockTask(row)">{{ stockTaskTitle(row) }}</el-link>
+                </template>
+              </el-table-column>
+              <el-table-column label="类型" width="120">
+                <template #default="{ row }">{{ stockTaskTypeText(row.task_type) }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="stockTaskStatusType(row.status)" effect="light">{{ stockTaskStatusText(row.status) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="完成时间" width="170">
+                <template #default="{ row }">{{ formatTaskTime(row.completed_at || row.created_at) }}</template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-card>
+          </el-collapse-item>
+        </el-collapse>
+      </el-tab-pane>
+
+      <!-- ===== 我的资料（收藏链接 + 文字笔记 + 上传文件） ===== -->
+      <el-tab-pane label="我的资料" name="materials" lazy>
+        <div class="materials-pane">
+          <div class="materials-toolbar">
+            <span class="materials-hint">收藏链接、文字笔记与上传文件（PDF/Word/Excel/TXT/MD/CSV/PPT/图片，≤20MB），仅本人可见</span>
+            <span class="materials-toolbar-btns">
+              <el-button size="small" :loading="uploading" :icon="Upload" @click="triggerMaterialUpload">
+                {{ uploading ? `上传中 ${uploadProgress}%` : '上传文件' }}
+              </el-button>
+              <el-button type="primary" size="small" @click="openMaterialDialog()">+ 新增资料</el-button>
+            </span>
+            <input ref="materialFileInput" type="file" class="materials-file-input" @change="onMaterialFileChosen" />
+          </div>
+          <!-- 分类/信源筛选（纯前端过滤） -->
+          <div v-if="stockMaterials.length" class="materials-filters">
+            <el-select v-model="materialCategoryFilter" size="small" class="materials-filter-select">
+              <el-option label="全部分类" value="all" />
+              <el-option v-for="c in MATERIAL_CATEGORY_OPTIONS" :key="c.value" :label="c.label" :value="c.value" />
+            </el-select>
+            <el-select v-model="materialTierFilter" size="small" class="materials-filter-select">
+              <el-option label="全部信源" value="all" />
+              <el-option v-for="t in MATERIAL_SOURCE_TIER_OPTIONS" :key="t.value" :label="t.label" :value="t.value" />
+            </el-select>
+            <span v-if="filteredStockMaterials.length !== stockMaterials.length" class="materials-filter-count">
+              {{ filteredStockMaterials.length }}/{{ stockMaterials.length }} 条
+            </span>
+          </div>
+          <div v-loading="materialsLoading">
+            <template v-if="filteredStockMaterials.length">
+              <el-card v-for="m in filteredStockMaterials" :key="m.id" shadow="never" class="material-item">
+                <div class="material-head">
+                  <el-tag size="small" :type="m.kind === 'url' ? 'primary' : m.kind === 'file' ? 'warning' : 'success'" effect="plain">
+                    {{ m.kind === 'url' ? '链接' : m.kind === 'file' ? '文件' : '笔记' }}
+                  </el-tag>
+                  <span class="material-title" :title="m.source_note || m.title">{{ m.title }}</span>
+                  <el-tag size="small" effect="plain" class="material-meta-tag">{{ materialCategoryLabel(m.category) }}</el-tag>
+                  <el-tag
+                    size="small"
+                    effect="light"
+                    class="material-meta-tag"
+                    :type="materialSourceTierTagType(m.source_tier)"
+                    :title="m.source_note ? `原始出处：${m.source_note}` : materialSourceTierLabel(m.source_tier)"
+                  >
+                    {{ materialSourceTierLabel(m.source_tier) }}
+                  </el-tag>
+                  <el-tag v-if="m.intel_card_id" size="small" type="success" effect="plain" class="material-meta-tag" title="已提炼知识卡进入猪周期知识库，AI 分析可引用">已提炼</el-tag>
+                  <span class="material-actions">
+                    <el-button v-if="m.kind === 'url'" link type="primary" size="small" @click="openMaterialLink(m.url)">打开</el-button>
+                    <el-button v-if="m.kind === 'file'" link type="primary" size="small" @click="previewMaterialText(m)">预览</el-button>
+                    <el-button v-if="m.kind !== 'url'" link type="primary" size="small" @click="openIntelCard(m)">知识卡</el-button>
+                    <el-button link type="primary" size="small" @click="openMaterialDialog(m)">编辑</el-button>
+                    <el-button link type="danger" size="small" @click="deleteMaterial(m)">删除</el-button>
+                  </span>
+                </div>
+                <a v-if="m.kind === 'url' && m.url" class="material-url" :href="m.url" target="_blank" rel="noopener">{{ materialHost(m) }} · {{ m.url }}</a>
+                <div v-if="m.kind === 'note' && m.content" class="material-content">{{ m.content }}</div>
+                <template v-if="m.kind === 'file'">
+                  <div class="material-file-meta">
+                    <span class="material-file-name">{{ m.filename }} · {{ formatFileSize(m.file_size) }}</span>
+                    <el-tag v-if="m.text_ok" size="small" type="success" effect="plain">已提取文本</el-tag>
+                    <el-tag v-else size="small" type="info" effect="plain">{{ m.text_message || '未提取文本' }}</el-tag>
+                  </div>
+                  <div v-if="m.extracted_text" class="material-excerpt" title="点击查看提取全文" @click="previewMaterialText(m)">{{ m.extracted_text }}</div>
+                </template>
+              </el-card>
+            </template>
+            <el-empty
+              v-else-if="!materialsLoading"
+              :description="stockMaterials.length ? '没有符合筛选条件的资料' : '还没有收藏资料，点击右上角「新增资料」开始'"
+            >
+              <template #image><el-icon :size="48" color="#C0C4CC"><FolderOpened /></el-icon></template>
+            </el-empty>
+          </div>
+
+          <!-- 文件提取文本预览对话框（拉全文 + 按【】标题分节展示 AI 解读） -->
+          <el-dialog v-model="materialPreviewVisible" :title="materialPreviewItem?.title || '文件预览'" width="640px" append-to-body>
+            <div v-loading="materialPreviewLoading" class="material-preview-body">
+              <template v-if="materialPreviewSections.length">
+                <div v-for="(sec, i) in materialPreviewSections" :key="i" class="material-preview-section">
+                  <div v-if="sec.title" class="material-preview-section-title">{{ sec.title }}</div>
+                  <div class="material-preview-section-body">{{ sec.body }}</div>
+                </div>
+              </template>
+              <div v-else class="material-preview-text">未提取到文本</div>
+              <div v-if="materialPreviewItem?.remark" class="material-preview-remark">备注：{{ materialPreviewItem.remark }}</div>
+              <div v-if="materialPreviewItem?.text_message" class="material-preview-meta">{{ materialPreviewItem.text_message }}</div>
+            </div>
+            <template #footer>
+              <el-button
+                v-if="materialPreviewItem && canReextractMaterial(materialPreviewItem)"
+                type="warning" plain :loading="materialReextracting"
+                @click="reextractPreviewMaterial"
+              >重新提取</el-button>
+              <el-button v-if="materialPreviewItem" type="primary" plain @click="openMaterialFile(materialPreviewItem)">下载原文件</el-button>
+              <el-button @click="materialPreviewVisible = false">关闭</el-button>
+            </template>
+          </el-dialog>
+
+          <!-- 知识卡对话框（资料经大模型提炼的用户情报卡，写入猪周期知识库，可重新提炼覆盖） -->
+          <el-dialog v-model="intelCardVisible" :title="intelCard?.title || '知识卡'" width="560px" append-to-body>
+            <div v-loading="intelCardLoading" class="intel-card-body">
+              <template v-if="intelCard">
+                <div class="intel-card-meta">
+                  <el-tag size="small" :type="materialSourceTierTagType(intelCard.body?.source_tier)" effect="light">
+                    {{ materialSourceTierLabel(intelCard.body?.source_tier) }}
+                  </el-tag>
+                  <span v-if="intelCard.stock_code" class="intel-card-meta-text">{{ intelCard.stock_code }}</span>
+                  <span v-if="intelCard.updated_at" class="intel-card-meta-text">{{ formatIntelTime(intelCard.updated_at) }}提炼</span>
+                </div>
+                <div class="intel-card-points">
+                  <div v-for="(p, i) in intelCard.body?.points || []" :key="i" class="intel-card-point">
+                    <span class="intel-card-point-no">{{ i + 1 }}</span>
+                    <span class="intel-card-point-text">{{ p }}</span>
+                  </div>
+                </div>
+                <div v-if="intelCard.body?.caveats" class="intel-card-caveats">
+                  <span class="intel-card-caveats-label">注意</span>
+                  <span>{{ intelCard.body.caveats }}</span>
+                </div>
+                <div v-if="intelCard.tag?.length" class="intel-card-tags">
+                  <el-tag v-for="t in intelCard.tag" :key="t" size="small" effect="plain" type="info">{{ t }}</el-tag>
+                </div>
+                <div v-if="intelCard.source_ref" class="intel-card-source" :title="intelCard.source_ref">溯源：{{ intelCard.source_ref }}</div>
+              </template>
+              <el-empty v-else-if="!intelCardLoading" description="尚未提炼知识卡，点击下方按钮开始" :image-size="80" />
+            </div>
+            <template #footer>
+              <el-button
+                v-if="intelCardMaterial && intelCardMaterial.kind !== 'url'"
+                type="primary" plain :loading="intelCardDistilling"
+                @click="distillIntelCard"
+              >{{ intelCard ? '重新提炼' : '提炼知识卡' }}</el-button>
+              <el-button @click="intelCardVisible = false">关闭</el-button>
+            </template>
+          </el-dialog>
+
+          <!-- 新增/编辑资料对话框 -->
+          <el-dialog v-model="materialDialogVisible" :title="editingMaterialId ? '编辑资料' : '新增资料'" width="520px" append-to-body>
+            <el-form label-width="70px">
+              <el-form-item label="类型">
+                <el-radio-group v-model="materialForm.kind" :disabled="!!editingMaterialId">
+                  <el-radio-button label="url">收藏链接</el-radio-button>
+                  <el-radio-button label="note">文字笔记</el-radio-button>
+                  <el-radio-button label="file" disabled>上传文件</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item label="标题">
+                <el-input v-model="materialForm.title" placeholder="给这条资料起个名字" maxlength="80" show-word-limit />
+              </el-form-item>
+              <el-form-item v-if="materialForm.kind === 'url'" label="链接">
+                <el-input v-model="materialForm.url" placeholder="https://..." />
+              </el-form-item>
+              <el-form-item v-else-if="materialForm.kind === 'note'" label="内容">
+                <el-input v-model="materialForm.content" type="textarea" :rows="5" placeholder="记录你的研究笔记…" maxlength="5000" show-word-limit />
+              </el-form-item>
+              <el-form-item v-else label=" ">
+                <span class="material-file-hint">文件类型仅支持修改标题；如需替换文件请删除后重新上传</span>
+              </el-form-item>
+              <el-form-item label="分类">
+                <el-select v-model="materialForm.category">
+                  <el-option v-for="c in MATERIAL_CATEGORY_OPTIONS" :key="c.value" :label="c.label" :value="c.value" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="信源等级">
+                <el-select v-model="materialForm.source_tier">
+                  <el-option
+                    v-for="t in MATERIAL_SOURCE_TIER_OPTIONS"
+                    :key="t.value"
+                    :label="t.label"
+                    :value="t.value"
+                  />
+                </el-select>
+                <span class="material-meta-tip">信源等级影响 AI 分析与世界模型的证据权重</span>
+              </el-form-item>
+              <el-form-item label="原始出处">
+                <el-input v-model="materialForm.source_note" placeholder="如：2025Q3 业绩会交流纪要（选填）" maxlength="120" />
+              </el-form-item>
+              <el-form-item label="备注">
+                <el-input
+                  v-model="materialForm.remark"
+                  type="textarea" :autosize="{ minRows: 2, maxRows: 4 }"
+                  placeholder="补充背景说明（选填），如资料背景、结论要点、使用注意事项等，供 AI 分析时参考"
+                  maxlength="500" show-word-limit
+                />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="materialDialogVisible = false">取消</el-button>
+              <el-button type="primary" :loading="materialSaving" @click="saveMaterial">保存</el-button>
+            </template>
+          </el-dialog>
+
+          <!-- 上传设置对话框（选文件后确认元信息，信源等级影响证据权重） -->
+          <el-dialog v-model="uploadSettingsVisible" title="上传设置" width="480px" append-to-body :close-on-click-modal="!uploading">
+            <div v-if="pendingUploadFile" class="material-upload-file">
+              {{ pendingUploadFile.name }} · {{ formatFileSize(pendingUploadFile.size) }}
+            </div>
+            <el-form label-width="70px">
+              <el-form-item label="标题">
+                <el-input v-model="uploadForm.title" placeholder="资料标题（默认文件名）" maxlength="80" show-word-limit />
+              </el-form-item>
+              <el-form-item label="分类">
+                <el-select v-model="uploadForm.category">
+                  <el-option v-for="c in MATERIAL_CATEGORY_OPTIONS" :key="c.value" :label="c.label" :value="c.value" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="信源等级">
+                <el-select v-model="uploadForm.source_tier">
+                  <el-option
+                    v-for="t in MATERIAL_SOURCE_TIER_OPTIONS"
+                    :key="t.value"
+                    :label="t.label"
+                    :value="t.value"
+                  />
+                </el-select>
+                <span class="material-meta-tip">调研纪要/内部数据请选「内部一手」，权重最高</span>
+              </el-form-item>
+              <el-form-item label="原始出处">
+                <el-input v-model="uploadForm.source_note" placeholder="如：某券商 9 月深度报告（选填）" maxlength="120" />
+              </el-form-item>
+              <el-form-item label="备注">
+                <el-input
+                  v-model="uploadForm.remark"
+                  type="textarea" :autosize="{ minRows: 2, maxRows: 4 }"
+                  placeholder="补充背景说明（选填），如资料背景、结论要点、使用注意事项等，供 AI 分析时参考"
+                  maxlength="500" show-word-limit
+                />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button :disabled="uploading" @click="uploadSettingsVisible = false">取消</el-button>
+              <el-button type="primary" :loading="uploading" @click="confirmMaterialUpload">
+                {{ uploading ? `上传中 ${uploadProgress}%` : '开始上传' }}
+              </el-button>
+            </template>
+          </el-dialog>
+        </div>
+      </el-tab-pane>
+
+      <!-- ===== 完整时间线（一期：前端聚合已有数据，非新建数据源） ===== -->
+      <el-tab-pane label="完整时间线" name="timeline" lazy>
+        <div class="timeline-pane">
+          <div class="timeline-toolbar">
+            <span class="timeline-meta">行情异动 · 新闻公告 · 研究任务 · 交易复盘 · 操作留痕</span>
+            <el-radio-group v-model="timelineRange" size="small">
+              <el-radio-button label="60d">近 60 天</el-radio-button>
+              <el-radio-button label="all">全部</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div v-loading="timelineMovesLoading">
+            <el-timeline v-if="timelineItems.length" class="stock-timeline">
+              <el-timeline-item
+                v-for="(it, i) in timelineItems"
+                :key="i"
+                :timestamp="it.time"
+                :type="it.kindType"
+                placement="top"
+              >
+                <div class="tl-item">
+                  <el-tag size="small" :type="it.kindType" effect="light" class="tl-kind">{{ it.kind }}</el-tag>
+                  <span class="tl-title" :class="{ 'is-link': !!it.url }" @click="it.url && openExternal(it.url)">{{ it.title }}</span>
+                </div>
+                <div v-if="it.detail" class="tl-detail">{{ it.detail }}</div>
+                <div v-if="it.source" class="tl-source">来源：{{ it.source }}</div>
+              </el-timeline-item>
+            </el-timeline>
+            <el-empty v-else description="暂无时间线记录（行情异动、新闻公告、研究任务、操作留痕）">
+              <template #image><el-icon :size="48" color="#C0C4CC"><Timer /></el-icon></template>
+            </el-empty>
+          </div>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+
+    <!-- ════════ 智能助手对话区（Tab 外常驻，任意 Tab 都可提问） ════════ -->
     <AssistantChat
       ref="assistantChatRef"
       v-model:messages="assistantMessages"
@@ -111,20 +662,6 @@
       :loading="assistantLoading"
       input-placeholder="输入问题，例如：结合分析和持仓，我下一步应该重点跟踪什么？"
       @ask="handleAssistantAsk"
-    />
-
-    <!-- ════════ 8. 基本面 + 新闻 ════════ -->
-    <BottomSection
-      :is-etf="isEtf"
-      :basics="basics"
-      :financial-snapshot="financialSnapshot"
-      :etf-basics="etfBasics"
-      :financial-raw-sections="financialRawSections"
-      :news-items="newsItems"
-      :news-filter="newsFilter"
-      :news-loading="newsLoading"
-      :news-source="newsSource"
-      @news-filter-change="(v: string) => newsFilter = v"
     />
 
     <!-- 回到顶部 -->
@@ -301,7 +838,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Loading, CircleCheck, Warning, Pointer } from '@element-plus/icons-vue'
+import { Loading, CircleCheck, Warning, Pointer, Share, FolderOpened, Timer, Upload } from '@element-plus/icons-vue'
 import { renderMarkdown } from '@/utils/markdown'
 import { stocksApi } from '@/api/stocks'
 import { assistantApi, type AssistantThreadItem } from '@/api/assistant'
@@ -312,6 +849,7 @@ import {
   type StockSyncTaskStatus,
 } from '@/api/stockSync'
 import { clearAllCache } from '@/api/cache'
+import { recordStockView } from '@/pro/utils/recentViews'
 import { use as echartsUse } from 'echarts/core'
 import { CandlestickChart } from 'echarts/charts'
 
@@ -328,15 +866,63 @@ import { getReportName } from '@/utils/reportPresentation'
 import { getTaskList, getTaskDetail, TaskType, TaskStatus } from '@/api/unifiedTasks'
 import { reviewApi } from '@/api/review'
 import { portfolioApi } from '@/api/portfolio'
+import {
+  fetchStockMaterials,
+  addStockMaterial,
+  updateStockMaterial,
+  deleteStockMaterial,
+  uploadStockMaterial,
+  fetchMaterialText,
+  reextractMaterialText,
+  distillMaterialIntel,
+  fetchMaterialIntelCard,
+  materialFileUrl,
+  MATERIAL_FILE_EXTENSIONS,
+  MAX_MATERIAL_FILE_SIZE,
+  MATERIAL_CATEGORY_OPTIONS,
+  MATERIAL_SOURCE_TIER_OPTIONS,
+  materialCategoryLabel,
+  materialSourceTierLabel,
+  materialSourceTierTagType,
+  type StockMaterial,
+  type IntelCard,
+  type MaterialKind,
+  type MaterialCategory,
+  type MaterialSourceTier
+} from '@/pro/api/stockMaterials'
+import {
+  fetchPigCycleState,
+  fetchPigCycleL0,
+  fetchTermWarnings,
+  fetchPigCyclePlanCurrent,
+  fetchDailyReviews,
+  type PigCycleState,
+  type PigCycleL0State,
+  type TermWarnings,
+  type PigCyclePlan,
+  type DailyReviewItem,
+} from '@/pro/api/pigCycle'
+import { fuseTriggered } from '@/pro/utils/pigCycleDisplay'
+import {
+  matchIndustryStock,
+  PIG_RELATED_STOCKS,
+  INSURANCE_RELATED_STOCKS,
+  BATTERY_RELATED_STOCKS,
+  AUTO_RELATED_STOCKS,
+} from '@/pro/config/industryRegistry'
 
 // 新版股票详情页子组件
 import StockOverview from './components/StockOverview.vue'
 import AssistantHero from './components/AssistantHero.vue'
-import ResearchFlow from './components/ResearchFlow.vue'
 import KlineChart from './components/KlineChart.vue'
 import CoreMetrics from './components/CoreMetrics.vue'
+import OverviewTopStrip from './components/OverviewTopStrip.vue'
+import MyPositionCard from './components/MyPositionCard.vue'
+import IndustryPanel from './components/IndustryPanel.vue'
 import AnalysisResultCard from './components/AnalysisResultCard.vue'
 import PositionReviewTabs from './components/PositionReviewTabs.vue'
+import ResearchJournalPanel from '@/pro/components/ResearchJournalPanel.vue'
+import { researchJournalApi, type ResearchJournalEntry } from '@/pro/api/researchJournal'
 import AssistantChat from './components/AssistantChat.vue'
 import BottomSection from './components/BottomSection.vue'
 import BackToTop from './components/BackToTop.vue'
@@ -387,6 +973,11 @@ watch(
 const code = computed(() => String(route.params.code || '').toUpperCase())
 const symbol = computed(() => code.value.split('.')[0])  // 提取6位代码
 const stockName = ref('')
+
+// 浏览足迹：进入个股页即记录（名称异步就绪后自动补全），供研究台「最近研究」按真实时间排序
+watch([symbol, stockName], ([sym, name]) => {
+  if (sym) recordStockView(sym, name || '')
+}, { immediate: true })
 const market = ref('')
 const isFav = ref(false)
 
@@ -798,15 +1389,22 @@ async function fetchFundamentals() {
     basics.sector = f.sector || basics.sector || '—'
     // 后端 total_mv 单位：亿元，这里转为元以便与金额格式化函数配合
     basics.marketCap = Number.isFinite(f.total_mv) ? Number(f.total_mv) * 1e8 : basics.marketCap
-    // 优先使用 pe_ttm，其次 pe
-    basics.pe = Number.isFinite(f.pe_ttm) ? Number(f.pe_ttm) : (Number.isFinite(f.pe) ? Number(f.pe) : basics.pe)
+    // 优先使用 pe_ttm，其次 pe；但 TTM 净利润为负（亏损期）时禁止回退静态 PE，
+    // 否则会出现"公司 TTM 已亏损、PE(TTM) 却显示正倍数"的矛盾
+    const ff: any = f
+    const npTtm = Number(ff.net_profit_ttm)
+    const ttmLoss = Number.isFinite(npTtm) && npTtm < 0
+    if (Number.isFinite(f.pe_ttm)) {
+      basics.pe = Number(f.pe_ttm)
+    } else if (!ttmLoss && Number.isFinite(f.pe)) {
+      basics.pe = Number(f.pe)
+    }
     // 🔥 新增：PB（市净率）
     basics.pb = Number.isFinite(f.pb) ? Number(f.pb) : basics.pb
     // 🔥 新增：PS（市销率）- 优先使用 ps_ttm，其次 ps
     basics.ps = Number.isFinite(f.ps_ttm) ? Number(f.ps_ttm) : (Number.isFinite(f.ps) ? Number(f.ps) : basics.ps)
     // ROE 和负债率
     basics.roe = Number.isFinite(f.roe) ? Number(f.roe) : basics.roe
-    const ff: any = f
     basics.debtRatio = Number.isFinite(ff.debt_ratio) ? Number(ff.debt_ratio) : basics.debtRatio
     basics.dividendYield = Number.isFinite(ff.dividend_yield) ? Number(ff.dividend_yield) : basics.dividendYield
     basics.currentRatio = Number.isFinite(ff.current_ratio) ? Number(ff.current_ratio) : basics.currentRatio
@@ -947,11 +1545,15 @@ onMounted(async () => {
     fetchNews(),
     checkFavorite(),
     fetchLatestAnalysis(),  // 获取最新的历史分析报告
+    fetchLastJudgment(),  // 获取该股最新研究判断（P4 报告与日志并置）
     fetchSyncStatus(),  // 获取同步状态
     fetchPositionAnalysisSummary(),  // 获取持仓分析摘要
     fetchTradeReviewSummary(),  // 获取交易复盘摘要
     fetchReviewHistory(),  // 获取复盘历史列表
-    fetchPositionData()  // 获取持仓数据
+    fetchPositionData(),  // 获取持仓数据
+    fetchStockTasks(),  // 获取该股相关研究任务
+    fetchMaterials(),  // 获取该股我的资料
+    fetchDailyReview(),  // 获取最新每日结论（持仓视角闭环）
   ])
   // 每30秒刷新一次报价
   timer = setInterval(fetchQuote, 30000)
@@ -968,7 +1570,7 @@ onUnmounted(() => {
 
 
 // K线占位相关
-const periodOptions = ['日K','周K','月K']
+const periodOptions = ['日K','周K','月K','3月','6月','1年','3年']
 const period = ref('日K')
 
 const klineSource = ref<string | undefined>(undefined)
@@ -977,7 +1579,16 @@ const klineCategory = ref<string[]>([])
 const klineValues = ref<number[][]>([])   // [open, close, low, high]
 const klineVolumes = ref<number[]>([])
 
+// 长周期范围 →（K线周期, 根数）：3月/6月/1年用日K，3年用周K；其余固定周期统一取 200 根
+const RANGE_KLINE: Record<string, { period: string; limit: number }> = {
+  '3月': { period: 'day', limit: 70 },
+  '6月': { period: 'day', limit: 140 },
+  '1年': { period: 'day', limit: 250 },
+  '3年': { period: 'week', limit: 160 },
+}
+
 function periodLabelToParam(p: string): string {
+  if (RANGE_KLINE[p]) return RANGE_KLINE[p].period
   if (p.includes('5')) return '5m'
   if (p.includes('15')) return '15m'
   if (p.includes('60')) return '60m'
@@ -994,8 +1605,10 @@ async function fetchKline() {
   await ensureAuthReady()
 
   try {
+    const range = RANGE_KLINE[period.value]
     const param = periodLabelToParam(period.value)
-    const res = await stocksApi.getKline(code.value, param as any, 200, 'none')
+    const limit = range?.limit ?? 200
+    const res = await stocksApi.getKline(code.value, param as any, limit, 'none')
     const d: any = (res as any)?.data || {}
     klineSource.value = d.source
     const items: any[] = Array.isArray(d.items) ? d.items : []
@@ -1409,6 +2022,8 @@ const positionData = reactive<{
     market_value: number
     unrealized_pnl: number
     unrealized_pnl_pct: number
+    buy_date: string | null
+    weight_pct: number | null
   }
   paper: {
     has: boolean
@@ -1421,7 +2036,7 @@ const positionData = reactive<{
   }
 }>({
   loading: false,
-  real: { has: false, quantity: 0, cost_price: 0, current_price: 0, market_value: 0, unrealized_pnl: 0, unrealized_pnl_pct: 0 },
+  real: { has: false, quantity: 0, cost_price: 0, current_price: 0, market_value: 0, unrealized_pnl: 0, unrealized_pnl_pct: 0, buy_date: null, weight_pct: null },
   paper: { has: false, quantity: 0, cost_price: 0, current_price: 0, market_value: 0, unrealized_pnl: 0, unrealized_pnl_pct: 0 }
 })
 
@@ -1439,14 +2054,19 @@ async function fetchPositionData() {
     const realPositions = realRes?.data?.items || []
     const realMatch = realPositions.find((p: any) => p.code === symbol.value || p.code === code.value)
     if (realMatch) {
+      // 仓位占比 = 本股市值 / 组合持仓总市值（同一 API 内自洽口径）
+      const totalMv = realPositions.reduce((s: number, p: any) => s + (Number(p.market_value) || 0), 0)
+      const mv = Number(realMatch.market_value) || 0
       positionData.real = {
         has: true,
         quantity: realMatch.quantity || 0,
         cost_price: realMatch.cost_price || 0,
         current_price: realMatch.current_price || 0,
-        market_value: realMatch.market_value || 0,
+        market_value: mv,
         unrealized_pnl: realMatch.unrealized_pnl || 0,
-        unrealized_pnl_pct: realMatch.unrealized_pnl_pct || 0
+        unrealized_pnl_pct: realMatch.unrealized_pnl_pct || 0,
+        buy_date: realMatch.buy_date || null,
+        weight_pct: totalMv > 0 ? (mv / totalMv) * 100 : null
       }
     }
 
@@ -1678,65 +2298,11 @@ function exportReport() {
 }
 
 // ============================================================================
-// 新版详情页：研究路径 / 智能助手 / 历史导航
+// 新版详情页：档案式 Tab / 智能助手 / 历史导航
 // ============================================================================
 
-// 研究路径步骤（根据已加载数据动态计算状态）
-const researchFlowSteps = computed<{ key: string; title: string; desc: string; status: 'done' | 'active' | 'pending' }[]>(() => {
-  return [
-    {
-      key: 'kline',
-      title: '行情走势',
-      desc: 'K线 + 核心指标',
-      status: klineValues.value.length > 0 ? 'done' : 'pending',
-    },
-    {
-      key: 'analysis',
-      title: '单股分析',
-      desc: 'AI 研究报告',
-      status: lastAnalysis.value ? 'done' : (analysisStatus.value === 'running' ? 'active' : 'pending'),
-    },
-    {
-      key: 'position-review',
-      title: '持仓与复盘',
-      desc: '持仓状态 + 交易回顾',
-      status: (positionSummary.has || reviewSummary.has) ? 'done' : 'pending',
-    },
-    {
-      key: 'fundamentals',
-      title: '基本面',
-      desc: '财务数据 + 新闻',
-      status: Number.isFinite(basics.pe) || Number.isFinite(financialSnapshot.revenue) ? 'done' : 'pending',
-    },
-    {
-      key: 'assistant',
-      title: '智能助手解读',
-      desc: '全景涵盖以上所有模块',
-      status: 'active',
-    },
-  ]
-})
-
-// 研究路径当前激活步骤（用于 ResearchFlow 高亮）
-const activeFlowKey = ref<string>('')
-
-function handleFlowStepClick(key: string) {
-  activeFlowKey.value = key
-  const idMap: Record<string, string> = {
-    kline: 'kline-section',
-    analysis: 'analysis-result-section',
-    'position-review': 'position-review-section',
-    fundamentals: 'bottom-section',
-    assistant: 'assistant-chat',
-  }
-  const targetId = idMap[key]
-  if (targetId) {
-    const el = document.getElementById(targetId)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
-  }
-}
+// 档案式 Tab：概览 / 行业面板 / 事实层 / 概念关系 / 我的研究 / 我的资料 / 完整时间线
+const activeDetailTab = ref<'overview' | 'industry' | 'facts' | 'concept' | 'mine' | 'materials' | 'timeline'>('overview')
 
 // 智能助手聊天状态
 const assistantMessages = ref<Array<{ role: 'user' | 'bot'; content: string }>>([])
@@ -2043,6 +2609,856 @@ function goToReviewHistory() {
   router.push({ path: '/tasks/unified', query: { type: 'trade_review', symbol: code.value } })
 }
 
+// 「我的研究」该股相关研究任务聚合（单股分析 + 持仓分析 + 交易复盘）
+const stockTasks = ref<any[]>([])
+const stockTasksLoading = ref(false)
+
+async function fetchStockTasks() {
+  stockTasksLoading.value = true
+  try {
+    const resp: any = await getTaskList({ limit: 100 })
+    const all = resp?.data?.tasks || resp?.tasks || []
+    stockTasks.value = all
+      .filter((t: any) => taskMatchesCurrentStock(t)
+        && [TaskType.STOCK_ANALYSIS, TaskType.POSITION_ANALYSIS, TaskType.TRADE_REVIEW].includes(t.task_type))
+      .sort((a: any, b: any) =>
+        new Date(b.completed_at || b.created_at).getTime() - new Date(a.completed_at || a.created_at).getTime())
+      .slice(0, 20)
+  } catch {
+    stockTasks.value = []
+  } finally {
+    stockTasksLoading.value = false
+  }
+}
+
+function stockTaskTitle(task: any): string {
+  return task?.title || task?.task_name
+    || `${stockTaskTypeText(task?.task_type)} · ${stockName.value || code.value}`
+}
+function stockTaskTypeText(t: string): string {
+  return ({
+    [TaskType.STOCK_ANALYSIS]: '单股分析',
+    [TaskType.POSITION_ANALYSIS]: '持仓分析',
+    [TaskType.TRADE_REVIEW]: '交易复盘',
+  } as Record<string, string>)[t] || t || '研究任务'
+}
+function stockTaskStatusText(s: string): string {
+  const map: Record<string, string> = {
+    [TaskStatus.COMPLETED]: '已完成',
+    [TaskStatus.PROCESSING]: '进行中',
+    [TaskStatus.PENDING]: '排队中',
+    [TaskStatus.FAILED]: '失败',
+    [TaskStatus.CANCELLED]: '已取消',
+    [TaskStatus.SUSPENDED]: '已挂起',
+  }
+  return map[s] || s || '-'
+}
+function stockTaskStatusType(s: string): any {
+  if (s === TaskStatus.COMPLETED) return 'success'
+  if (s === TaskStatus.PROCESSING || s === TaskStatus.PENDING) return 'primary'
+  if (s === TaskStatus.FAILED) return 'danger'
+  return 'info'
+}
+function formatTaskTime(v: string): string {
+  if (!v) return '—'
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return v
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+function viewStockTask(task: any) {
+  const typeQuery = ({
+    [TaskType.STOCK_ANALYSIS]: 'stock_analysis',
+    [TaskType.POSITION_ANALYSIS]: 'position_analysis',
+    [TaskType.TRADE_REVIEW]: 'trade_review',
+  } as Record<string, string>)[task?.task_type] || ''
+  router.push({ path: '/tasks/unified', query: { type: typeQuery, symbol: code.value } })
+}
+
+// 「我的资料」（收藏链接 + 文字笔记 + 上传文件，按用户+股票隔离）
+const stockMaterials = ref<StockMaterial[]>([])
+const materialsLoading = ref(false)
+const materialDialogVisible = ref(false)
+const materialSaving = ref(false)
+const editingMaterialId = ref<string | null>(null)
+const materialForm = reactive({
+  kind: 'url' as MaterialKind,
+  title: '',
+  url: '',
+  content: '',
+  category: 'other' as MaterialCategory,
+  source_tier: 'public_news' as MaterialSourceTier,
+  source_note: '',
+  remark: '',
+})
+// 列表筛选（纯前端过滤）
+const materialCategoryFilter = ref('all')
+const materialTierFilter = ref('all')
+const filteredStockMaterials = computed(() =>
+  stockMaterials.value.filter(m =>
+    (materialCategoryFilter.value === 'all' || (m.category || 'other') === materialCategoryFilter.value)
+    && (materialTierFilter.value === 'all' || (m.source_tier || 'public_news') === materialTierFilter.value)
+  )
+)
+
+/** 按 kind 给出元信息默认值（url→资讯/公开；note→其他/内部一手；file→其他/公开） */
+function defaultMaterialMeta(kind: MaterialKind): { category: MaterialCategory; source_tier: MaterialSourceTier } {
+  if (kind === 'url') return { category: 'news', source_tier: 'public_news' }
+  if (kind === 'note') return { category: 'other', source_tier: 'internal_firsthand' }
+  return { category: 'other', source_tier: 'public_news' }
+}
+
+async function fetchMaterials() {
+  materialsLoading.value = true
+  try {
+    const resp: any = await fetchStockMaterials(code.value)
+    stockMaterials.value = resp?.data?.items || []
+  } catch {
+    stockMaterials.value = []
+  } finally {
+    materialsLoading.value = false
+  }
+}
+
+function openMaterialDialog(m?: StockMaterial) {
+  editingMaterialId.value = m?.id || null
+  materialForm.kind = m?.kind || 'url'
+  materialForm.title = m?.title || ''
+  materialForm.url = m?.url || ''
+  materialForm.content = m?.content || ''
+  const defaults = defaultMaterialMeta(materialForm.kind)
+  materialForm.category = m?.category || defaults.category
+  materialForm.source_tier = m?.source_tier || defaults.source_tier
+  materialForm.source_note = m?.source_note || ''
+  materialForm.remark = m?.remark || ''
+  materialDialogVisible.value = true
+}
+
+async function saveMaterial() {
+  const title = materialForm.title.trim()
+  const url = materialForm.url.trim()
+  const content = materialForm.content.trim()
+  if (!title) { ElMessage.warning('请填写标题'); return }
+  if (materialForm.kind === 'url' && !url) { ElMessage.warning('请填写链接地址'); return }
+  if (materialForm.kind === 'note' && !content) { ElMessage.warning('请填写笔记内容'); return }
+  materialSaving.value = true
+  try {
+    const meta = {
+      category: materialForm.category,
+      source_tier: materialForm.source_tier,
+      source_note: materialForm.source_note.trim(),
+      remark: materialForm.remark.trim(),
+    }
+    if (editingMaterialId.value) {
+      await updateStockMaterial(
+        editingMaterialId.value,
+        materialForm.kind === 'file' ? { title, ...meta } : { title, url, content, ...meta }
+      )
+      ElMessage.success('资料已更新')
+    } else {
+      await addStockMaterial({
+        stock_code: code.value,
+        stock_name: stockName.value,
+        kind: materialForm.kind,
+        title,
+        url,
+        content,
+        ...meta,
+      })
+      ElMessage.success('资料已收藏')
+    }
+    materialDialogVisible.value = false
+    await fetchMaterials()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '保存失败')
+  } finally {
+    materialSaving.value = false
+  }
+}
+
+async function deleteMaterial(m: StockMaterial) {
+  try {
+    await ElMessageBox.confirm('确定删除这条资料吗？', '删除确认', { type: 'warning' })
+  } catch { return }
+  try {
+    await deleteStockMaterial(m.id)
+    ElMessage.success('已删除')
+    await fetchMaterials()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '删除失败')
+  }
+}
+
+function openMaterialLink(url?: string) {
+  if (url) window.open(url, '_blank', 'noopener')
+}
+
+// 「我的资料」文件上传（GridFS 存档 + 后端自动提取文本；选文件后先确认元信息再上传）
+const materialFileInput = ref<HTMLInputElement | null>(null)
+const uploading = ref(false)
+const uploadProgress = ref(0)
+// 上传设置弹窗（信源等级影响世界模型证据权重，上传前让用户确认）
+const uploadSettingsVisible = ref(false)
+const pendingUploadFile = ref<File | null>(null)
+const uploadForm = reactive({
+  title: '',
+  category: 'other' as MaterialCategory,
+  source_tier: 'public_news' as MaterialSourceTier,
+  source_note: '',
+  remark: '',
+})
+
+function triggerMaterialUpload() {
+  materialFileInput.value?.click()
+}
+
+function onMaterialFileChosen(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 允许重复选择同一文件
+  if (!file) return
+  const dot = file.name.lastIndexOf('.')
+  const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : ''
+  if (!MATERIAL_FILE_EXTENSIONS.includes(ext)) {
+    ElMessage.warning('不支持的文件格式，支持 PDF/Word/Excel/TXT/MD/CSV/PPT/图片')
+    return
+  }
+  if (file.size > MAX_MATERIAL_FILE_SIZE) {
+    ElMessage.warning('文件超过 20MB 上限')
+    return
+  }
+  pendingUploadFile.value = file
+  uploadForm.title = dot > 0 ? file.name.slice(0, dot) : file.name
+  const defaults = defaultMaterialMeta('file')
+  uploadForm.category = defaults.category
+  uploadForm.source_tier = defaults.source_tier
+  uploadForm.source_note = ''
+  uploadForm.remark = ''
+  uploadSettingsVisible.value = true
+}
+
+async function confirmMaterialUpload() {
+  const file = pendingUploadFile.value
+  if (!file) { uploadSettingsVisible.value = false; return }
+  uploading.value = true
+  uploadProgress.value = 0
+  try {
+    const resp: any = await uploadStockMaterial(code.value, file, {
+      stockName: stockName.value,
+      title: uploadForm.title.trim() || undefined,
+      category: uploadForm.category,
+      sourceTier: uploadForm.source_tier,
+      sourceNote: uploadForm.source_note.trim(),
+      remark: uploadForm.remark.trim() || undefined,
+      onProgress: (p) => { uploadProgress.value = p },
+    })
+    const saved = resp?.data
+    ElMessage.success(saved?.text_ok ? '上传成功，已提取文本供 AI 使用' : (saved?.text_message || '上传成功'))
+    uploadSettingsVisible.value = false
+    await fetchMaterials()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
+function openMaterialFile(m: StockMaterial) {
+  window.open(materialFileUrl(m.id), '_blank', 'noopener')
+}
+
+const materialPreviewVisible = ref(false)
+const materialPreviewItem = ref<StockMaterial | null>(null)
+const materialPreviewText = ref('')
+const materialPreviewLoading = ref(false)
+const materialReextracting = ref(false)
+
+// 按【】标题把全文拆节展示（如【提取文字】【图表解读】【内容要点】），无标题时整段显示
+// 兼容模型输出 "### 【提取文字】" 这类 markdown 标题前缀，避免残留 "###" 杂段
+const materialPreviewSections = computed(() => {
+  const text = materialPreviewText.value || ''
+  if (!text) return []
+  const matches = [...text.matchAll(/(?:^|\n)[ \t]*#{0,6}[ \t]*【([^【】]{1,20})】/g)]
+  if (!matches.length) return [{ title: '', body: text }]
+  const sections: Array<{ title: string; body: string }> = []
+  const head = text.slice(0, matches[0].index ?? 0).trim()
+  if (head) sections.push({ title: '', body: head })
+  matches.forEach((m, i) => {
+    const start = (m.index ?? 0) + m[0].length
+    const end = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length
+    const body = text.slice(start, end).trim()
+    if (body || !sections.length) sections.push({ title: m[1], body })
+  })
+  return sections
+})
+
+async function previewMaterialText(m: StockMaterial) {
+  materialPreviewItem.value = m
+  materialPreviewText.value = m.extracted_text || ''
+  materialPreviewVisible.value = true
+  if (m.kind !== 'file') return
+  // 列表只带 300 字预览，弹窗内拉取全文
+  materialPreviewLoading.value = true
+  try {
+    const resp: any = await fetchMaterialText(m.id)
+    const data = resp?.data
+    if (typeof data?.text === 'string' && data.text) {
+      materialPreviewText.value = data.text
+      materialPreviewItem.value = { ...m, text_ok: !!data.text_ok, text_message: data.text_message || m.text_message }
+    }
+  } catch {
+    // 拉取全文失败时回退列表预览文本
+  } finally {
+    materialPreviewLoading.value = false
+  }
+}
+
+// 可重新提取的文件格式（图片走视觉大模型三节解读，文档重跑文本提取）
+const MATERIAL_REEXTRACT_EXTS = new Set([
+  '.png', '.jpg', '.jpeg', '.webp',
+  '.pdf', '.docx', '.txt', '.md', '.csv', '.xlsx', '.xls', '.pptx'
+])
+
+function canReextractMaterial(m: StockMaterial): boolean {
+  return m.kind === 'file' && MATERIAL_REEXTRACT_EXTS.has((m.ext || '').toLowerCase())
+}
+
+async function reextractPreviewMaterial() {
+  const m = materialPreviewItem.value
+  if (!m || materialReextracting.value) return
+  materialReextracting.value = true
+  try {
+    const resp: any = await reextractMaterialText(m.id)
+    const saved = resp?.data
+    ElMessage.success(saved?.text_message || '重新提取完成')
+    // 同步列表条目与预览内容（reextract 接口返回全文，无需再拉）
+    const idx = stockMaterials.value.findIndex(x => x.id === m.id)
+    if (idx >= 0 && saved) stockMaterials.value[idx] = { ...stockMaterials.value[idx], ...saved }
+    if (saved) {
+      materialPreviewItem.value = { ...m, ...saved }
+      materialPreviewText.value = saved.extracted_text || ''
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '重新提取失败')
+  } finally {
+    materialReextracting.value = false
+  }
+}
+
+// ═══ 知识卡（资料经大模型提炼为用户情报卡，写入猪周期知识库，一资料一卡覆盖更新） ═══
+const intelCardVisible = ref(false)
+const intelCardLoading = ref(false)
+const intelCardDistilling = ref(false)
+const intelCard = ref<IntelCard | null>(null)
+const intelCardMaterial = ref<StockMaterial | null>(null)
+
+function formatIntelTime(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN', { hour12: false })
+}
+
+async function openIntelCard(m: StockMaterial) {
+  intelCardMaterial.value = m
+  intelCard.value = null
+  intelCardVisible.value = true
+  intelCardLoading.value = true
+  try {
+    const resp: any = await fetchMaterialIntelCard(m.id)
+    intelCard.value = resp?.data?.card ?? null
+  } catch (e: any) {
+    ElMessage.error(e?.message || '知识卡读取失败')
+    intelCardVisible.value = false
+  } finally {
+    intelCardLoading.value = false
+  }
+}
+
+async function distillIntelCard() {
+  const m = intelCardMaterial.value
+  if (!m || intelCardDistilling.value) return
+  intelCardDistilling.value = true
+  try {
+    const resp: any = await distillMaterialIntel(m.id)
+    const data = resp?.data
+    if (data?.card) intelCard.value = data.card
+    // 同步列表条目（distilled_at/intel_card_id → 已提炼标记）
+    if (data?.material) {
+      const idx = stockMaterials.value.findIndex(x => x.id === m.id)
+      if (idx >= 0) stockMaterials.value[idx] = { ...stockMaterials.value[idx], ...data.material }
+    }
+    ElMessage.success('已提炼为知识卡，AI 分析可引用')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '知识卡提炼失败')
+  } finally {
+    intelCardDistilling.value = false
+  }
+}
+
+function formatFileSize(size?: number): string {
+  if (!size && size !== 0) return ''
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+function materialHost(m: StockMaterial): string {
+  try { return new URL(m.url || '').hostname } catch { return '' }
+}
+
+// ═══ 猪周期专属风险（概览风险栏插槽 · 行业世界模型驱动，仅覆盖猪周期龙头） ═══
+// 清单模式：命中判定走行业注册表关联个股清单（原 PIG_COMPANY_KEYS 迁移至 industryRegistry）
+const pigStock = computed(() => matchIndustryStock(PIG_RELATED_STOCKS, stockName.value))
+const pigCovered = computed(() => !!pigStock.value)
+const pigState = ref<PigCycleState | null>(null)
+const pigL0 = ref<PigCycleL0State | null>(null)
+const pigTerm = ref<TermWarnings | null>(null)
+
+async function fetchPigRisks() {
+  if (!pigCovered.value) return
+  const [s, l, t] = await Promise.all([
+    fetchPigCycleState({}).catch(() => null),
+    fetchPigCycleL0({}).catch(() => null),
+    fetchTermWarnings().catch(() => null),
+  ])
+  pigState.value = (s as any)?.data ?? s ?? null
+  pigL0.value = (l as any)?.data ?? l ?? null
+  pigTerm.value = (t as any)?.data ?? t ?? null
+}
+
+interface PigRiskItem { level: 'red' | 'orange' | 'gray'; text: string }
+const pigRiskItems = computed<PigRiskItem[]>(() => {
+  const items: PigRiskItem[] = []
+  if (!pigCovered.value) return items
+  // 保险丝（L0 规则层：触发即红灯，note 为后端给出的解释，缺失时用语义兜底）
+  const f = pigL0.value?.fuses
+  if (f) {
+    const fuseDefs: Array<{ key: 'time' | 'space' | 'behavior' | 'falsify'; name: string; fallback: string }> = [
+      { key: 'time', name: '时间保险丝', fallback: '上涨时长触及历史极值区间' },
+      { key: 'space', name: '空间保险丝（估值分位）', fallback: '头均市值估值分位触及高位' },
+      { key: 'behavior', name: '行为保险丝（情绪过热）', fallback: '龙头个股的持仓盈利已大量兑现、上方套牢盘形成反弹阻力（行业级情绪读数，非本股读数）' },
+      { key: 'falsify', name: '看错信号（能繁回升）', fallback: '能繁母猪回升，去化逻辑被推翻' },
+    ]
+    for (const d of fuseDefs) {
+      const it = f[d.key]
+      if (it && fuseTriggered(it.status)) {
+        // 行为保险丝的读数取自龙头个股（牧原）的筹码分布/持仓盈亏，属【行业级】情绪信号。
+        // 个股页只给行业级结论，不复述龙头个股的成本价、股东人数等运营明细（完整 note 见猪周期工作台）。
+        const note = d.key === 'behavior' ? '' : String(it.note || '').trim()
+        items.push({ level: 'red', text: note ? `${d.name}已触发：${note}` : `${d.name}已触发：${d.fallback}。` })
+      }
+    }
+  }
+  // 期货升水警示灯（期限结构 live 才亮；degraded 诚实说明，不编造）
+  const term = pigTerm.value
+  if (term && term.status === 'live' && Array.isArray(term.warnings)) {
+    for (const w of term.warnings) {
+      items.push({
+        level: w.code === 'deep_contango_overpriced' ? 'red' : 'orange',
+        text: `${w.title} · ${w.detail}`,
+      })
+    }
+  } else if (term && term.status === 'degraded' && term.reason) {
+    items.push({ level: 'gray', text: `期货升水风险灯数据暂不可用（${term.reason}），该灯停用、不臆测。` })
+  }
+  // 猪粮比低于预警线（全行业亏损信号）
+  const hgr = pigState.value?.cost_profit?.hog_grain_ratio
+  if (hgr != null && Number(hgr) < 5) {
+    items.push({ level: 'orange', text: `猪粮比 ${Number(hgr).toFixed(2)}，低于 5:1 预警线，全行业亏损中，关注产能去化节奏。` })
+  }
+  return items
+})
+
+// 「我的研究」· 猪周期计划与规则提醒（作战计划 + 实时亮灯）
+const pigPlan = ref<PigCyclePlan | null>(null)
+
+async function fetchPigPlan() {
+  if (!pigCovered.value) return
+  try {
+    const resp: any = await fetchPigCyclePlanCurrent()
+    pigPlan.value = resp?.data?.plan ?? null
+  } catch {
+    pigPlan.value = null
+  }
+}
+
+// 「我的研究」· 最新每日结论（持仓视角闭环，股票×日期共享，每日 08:50 生成）
+const dailyReview = ref<DailyReviewItem | null>(null)
+
+async function fetchDailyReview() {
+  try {
+    const digits = code.value.replace(/\D/g, '').slice(-6)
+    if (!digits) return
+    const resp: any = await fetchDailyReviews({ code: digits, limit: 1 })
+    dailyReview.value = resp?.data?.reviews?.[0] ?? null
+  } catch {
+    dailyReview.value = null
+  }
+}
+
+// 「我的研究」P0 重组：置顶今日待办（待验证假设数 + 最新每日结论），一键去「我的判断」复盘
+const journalPanelRef = ref<InstanceType<typeof ResearchJournalPanel> | null>(null)
+const openHypothesisCount = ref(0)
+
+// P4 报告与日志并置：分析结果卡「系统结论」旁对照展示该股最新一条研究判断
+const lastJudgment = ref<ResearchJournalEntry | null>(null)
+
+async function fetchLastJudgment() {
+  try {
+    const resp: any = await researchJournalApi.list(symbol.value)
+    const items = resp?.items ?? resp?.data?.items ?? []
+    lastJudgment.value = items.length ? items[0] : null
+  } catch {
+    lastJudgment.value = null  // 日志加载失败不影响分析结果卡
+  }
+}
+
+function onJournalReviewSummary(payload: { openCount: number; openItems: unknown[] }) {
+  openHypothesisCount.value = payload.openCount
+  // 用户刚记录/编辑过日志（面板重载会重新 emit），同步刷新「我上次的判断」
+  fetchLastJudgment()
+}
+
+function scrollToJournal() {
+  const el = document.getElementById('mine-journal-anchor')
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function scrollToDailyReview() {
+  const el = document.getElementById('mine-daily-review-anchor')
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const DAILY_REVIEW_FUSE_TAG: Record<string, 'success' | 'warning' | 'danger' | 'info'> = {
+  safe: 'success', intact: 'success', waiting: 'info', armed: 'warning',
+  warning: 'warning', triggered: 'danger', broken: 'danger', alarm: 'danger',
+  'n/a': 'info'
+}
+const DAILY_REVIEW_FUSE_LABEL: Record<string, string> = {
+  safe: '安全', intact: '依据还成立', armed: '已上膛', warning: '警戒',
+  waiting: '拐点未现', pending_data: '数据待建', triggered: '已触发',
+  broken: '依据已破', alarm: '已到期', 'n/a': '不适用'
+}
+const DAILY_REVIEW_FUSE_KEY: Record<string, string> = {
+  time: '时间', space: '空间', behavior: '行为', falsify: '看错信号'
+}
+const dailyReviewHasSignals = computed(() => {
+  const c = dailyReview.value?.coverage
+  return c === 'full' || c === 'signals_mv' || c === 'signals_only'
+})
+const dailyReviewCoverageLabel = computed(() => {
+  switch (dailyReview.value?.coverage) {
+    case 'full': return '深度覆盖'
+    case 'signals_mv': return '信号+估值'
+    case 'signals_only': return '仅信号'
+    case 'partial': return '清单外'
+    default: return '覆盖度未知'
+  }
+})
+const dailyReviewFuseRows = computed(() =>
+  Object.entries(dailyReview.value?.facts?.fuses || {}).map(([key, status]) => ({
+    key: DAILY_REVIEW_FUSE_KEY[key] || key,
+    label: DAILY_REVIEW_FUSE_LABEL[status || ''] || status || '—',
+    tag: DAILY_REVIEW_FUSE_TAG[status || ''] || 'info'
+  })))
+
+// stockName 异步就绪后才 covered，watch 首次变 true 时拉取（immediate 处理已就绪场景）
+watch(pigCovered, (v) => {
+  if (!v) return
+  if (!pigL0.value) fetchPigRisks()
+  if (!pigPlan.value) fetchPigPlan()
+}, { immediate: true })
+
+// ═══ 概念关系（一期：行业世界模型派生 + 基础信息兜底，非新建数据源） ═══
+const falsifyTriggered = computed(() => {
+  const fz = (pigL0.value?.fuses as any)?.falsify
+  return fuseTriggered(fz?.status)
+})
+
+// 行业 universe 匹配（名称匹配，与行业面板 IndustryPanel 同款做法；清单统一在行业注册表维护）
+const insHit = computed(() => matchIndustryStock(INSURANCE_RELATED_STOCKS, stockName.value))
+const batHit = computed(() => matchIndustryStock(BATTERY_RELATED_STOCKS, stockName.value))
+const autoHit = computed(() => matchIndustryStock(AUTO_RELATED_STOCKS, stockName.value))
+
+const conceptSubText = computed(() => {
+  const parts: string[] = []
+  if (pigCovered.value) parts.push('猪周期研究体系')
+  if (insHit.value) parts.push('保险行业工作台')
+  if (batHit.value) parts.push('电池产业链工作台')
+  if (autoHit.value) parts.push('汽车产业链工作台')
+  return parts.length ? '来自行业世界模型 · ' + parts.join(' + ') : ''
+})
+
+interface ConceptTag { name: string; source: string; strength: 'strong' | 'weak' }
+const conceptTags = computed<ConceptTag[]>(() => {
+  if (pigCovered.value) {
+    const tags: ConceptTag[] = [
+      { name: '生猪养殖', source: '行业世界模型', strength: 'strong' },
+      { name: '猪周期', source: '行业世界模型 + 猪周期研究体系', strength: 'strong' },
+      { name: '头均市值估值', source: '猪周期 L0 规则层（估值分位保险丝）', strength: 'strong' },
+      { name: '能繁母猪去化', source: '猪周期 L0 规则层（产能锚）', strength: 'strong' },
+      { name: '饲料成本（玉米/豆粕）', source: '成本链拆解', strength: 'weak' },
+      { name: '猪肉消费', source: '消费端观察', strength: 'weak' },
+    ]
+    // 动态概念：看错信号触发时补充（与概览风险栏同一判断口径）
+    if (falsifyTriggered.value) {
+      tags.push({ name: '去化逻辑被推翻（当前）', source: '猪周期 L0 规则层 · 看错信号', strength: 'strong' })
+    }
+    return tags
+  }
+  // 保险：派生自保险行业工作台口径（利率象限 / NBV 矩阵 / 浮盈池 / 保费月度）
+  if (insHit.value) {
+    const tags: ConceptTag[] = [
+      { name: '保险', source: '行业归属（保险行业工作台）', strength: 'strong' },
+      { name: '利率敏感', source: '利率象限 · 10Y 60 日方向（±15bp）', strength: 'strong' },
+      { name: '负债景气（NBV）', source: 'NBV 矩阵 · 四家寿险同比均值', strength: 'strong' },
+      { name: '权益浮盈池', source: '沪深300 60 日 ±10% 代理', strength: 'weak' },
+      { name: '保费增长', source: '金融监管总局月度口径', strength: 'weak' },
+    ]
+    if (insHit.value.segment) tags.push({ name: insHit.value.segment, source: '本股板块（关联登记）', strength: 'strong' })
+    return tags
+  }
+  // 电池：派生自电池产业链工作台口径（锂价三档 / 出清带 / 装机榜）
+  if (batHit.value) {
+    const tags: ConceptTag[] = [
+      { name: '电池产业链', source: '行业归属（电池产业链工作台）', strength: 'strong' },
+      { name: '碳酸锂价格周期', source: '锂价三档 · A 过热 / B 出清带 / C 深亏', strength: 'strong' },
+      { name: '产能出清', source: '出清带分档（行业世界模型）', strength: 'strong' },
+      { name: '动力电池装机', source: '月度装机榜（工作台读数）', strength: 'strong' },
+    ]
+    if (batHit.value.segment) tags.push({ name: batHit.value.segment, source: '本股环节（产业链登记）', strength: 'strong' })
+    return tags
+  }
+  // 汽车：派生自汽车产业链工作台口径（乘联会渗透率 / 总量增速）
+  if (autoHit.value) {
+    const tags: ConceptTag[] = [
+      { name: '汽车产业链', source: '行业归属（汽车产业链工作台）', strength: 'strong' },
+      { name: 'NEV 渗透率', source: '乘联会狭义乘用车 · 月度', strength: 'strong' },
+      { name: '总量增速', source: '乘联会月度同比（工作台读数）', strength: 'strong' },
+    ]
+    if (autoHit.value.segment) tags.push({ name: autoHit.value.segment, source: '本股环节（产业链登记）', strength: 'strong' })
+    return tags
+  }
+  const ind = String((basics as any).industry || '').trim()
+  return ind && ind !== '-' ? [{ name: ind, source: '股票基础信息', strength: 'weak' }] : []
+})
+
+interface ConceptRelation { name: string; code?: string; relation: string; tagType: 'primary' | 'success' | 'warning' | 'info'; note: string; go?: () => void }
+// 通用同业关联：从行业 universe 清单派生同业对比卡片（排除本股，剩余成员逐个可跳转）
+function peerRelations(list: Array<{ code: string; name: string; role: string }>, hit: { name: string } | null): ConceptRelation[] {
+  const n = String(stockName.value || '').trim()
+  return list
+    .filter(s => s !== hit && !(n && n.includes(s.name)))
+    .map(s => ({
+      name: s.name,
+      code: s.code,
+      relation: '同业对比',
+      tagType: 'primary',
+      note: s.role,
+      go: () => router.push({ name: 'StockDetail', params: { code: s.code } }),
+    }))
+}
+const conceptRelations = computed<ConceptRelation[]>(() => {
+  if (pigCovered.value) {
+    // 同业对比（猪周期三龙头中的另两家，清单模式：从注册表清单派生，note 取登记角色）
+    const rels: ConceptRelation[] = [
+      ...peerRelations(PIG_RELATED_STOCKS, pigStock.value),
+    ]
+    rels.push({
+      name: '生猪期货（LH）',
+      relation: '价格锚定',
+      tagType: 'warning',
+      note: '远期合约升贴水反映市场对猪价的预期，期货升水过深是风险信号（见概览风险灯）。',
+      go: () => { activeDetailTab.value = 'industry' },
+    })
+    rels.push({
+      name: '能繁母猪存栏',
+      relation: '周期锚',
+      tagType: 'success',
+      note: '产能端核心数据，去化进度决定周期反转节奏（行业面板 · 猪周期系列数据）。',
+      go: () => { activeDetailTab.value = 'industry' },
+    })
+    return rels
+  }
+  // 保险：同业 NBV 矩阵 + 利率/权益双锚（派生自保险行业工作台口径）
+  if (insHit.value) {
+    return [
+      ...peerRelations(INSURANCE_RELATED_STOCKS, insHit.value),
+      {
+        name: '10Y 国债收益率',
+        relation: '利率锚',
+        tagType: 'warning',
+        note: '保险股核心定价锚：利率象限按 10Y 60 日方向 ±15bp 分档，利率趋势走弱压制投资端与估值（行业面板 · 利率象限读数）。',
+        go: () => { activeDetailTab.value = 'industry' },
+      },
+      {
+        name: '沪深300',
+        relation: '权益市场',
+        tagType: 'success',
+        note: '投资端权益浮盈代理：沪深300 60 日 ±10% 分档观察保险资金权益浮盈池（行业面板 · 浮盈读数）。',
+        go: () => { activeDetailTab.value = 'industry' },
+      },
+    ]
+  }
+  // 电池：产业链同业 + 锂价/装机双锚（派生自电池产业链工作台口径）
+  if (batHit.value) {
+    return [
+      ...peerRelations(BATTERY_RELATED_STOCKS, batHit.value),
+      {
+        name: '碳酸锂价格',
+        relation: '价格锚',
+        tagType: 'warning',
+        note: '产业链核心价格信号：锂价三档（A 过热 / B 出清带 / C 深亏）决定上下游盈利再分配（行业面板 · 锂价周期读数）。',
+        go: () => { activeDetailTab.value = 'industry' },
+      },
+      {
+        name: '动力电池装机',
+        relation: '需求锚',
+        tagType: 'success',
+        note: '月度装机榜份额反映电芯厂竞争格局，装机动能决定中游排产（行业面板 · 装机榜读数）。',
+        go: () => { activeDetailTab.value = 'industry' },
+      },
+    ]
+  }
+  // 汽车：同业 + 渗透率锚（派生自汽车产业链工作台口径）
+  if (autoHit.value) {
+    return [
+      ...peerRelations(AUTO_RELATED_STOCKS, autoHit.value),
+      {
+        name: 'NEV 渗透率',
+        relation: '需求锚',
+        tagType: 'success',
+        note: '乘联会狭义乘用车口径 · 月度：渗透率斜率决定电动化进度，总量增速决定行业蛋糕（行业面板 · 乘联会读数）。',
+        go: () => { activeDetailTab.value = 'industry' },
+      },
+    ]
+  }
+  return []
+})
+
+// ═══ 完整时间线（一期：前端聚合已有数据，非新建数据源） ═══
+const timelineRange = ref<'60d' | 'all'>('60d')
+const timelineMoves = ref<Array<{ time: string; pct: number; close: number; prev: number; volume: number }>>([])
+const timelineMovesLoading = ref(false)
+const timelineMovesLoaded = ref(false)
+
+async function fetchTimelineMoves() {
+  if (timelineMovesLoaded.value || timelineMovesLoading.value) return
+  timelineMovesLoading.value = true
+  try {
+    // 独立拉半年日K计算异动，与概览 K 线当前所选周期解耦
+    const res = await stocksApi.getKline(code.value, 'day', 120, 'none')
+    const d: any = (res as any)?.data || {}
+    const items: any[] = Array.isArray(d.items) ? d.items : []
+    const rows = items
+      .map((it: any) => ({
+        time: String(it.time || it.trade_time || it.trade_date || ''),
+        close: Number(it.close ?? NaN),
+        volume: Number(it.volume ?? it.vol ?? 0),
+      }))
+      .filter((r: any) => r.time && Number.isFinite(r.close))
+    // ETF 波动小，用 2% 阈值；个股 5%
+    const threshold = isEtf.value ? 2 : 5
+    const moves: typeof timelineMoves.value = []
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1].close
+      const pct = prev > 0 ? ((rows[i].close - prev) / prev) * 100 : 0
+      if (Math.abs(pct) >= threshold) moves.push({ ...rows[i], prev, pct })
+    }
+    timelineMoves.value = moves.slice(-40)
+    timelineMovesLoaded.value = true
+  } catch (e) {
+    console.warn('⚠️ 计算行情异动失败:', e)
+  } finally {
+    timelineMovesLoading.value = false
+  }
+}
+
+function timelineTs(v: unknown): number {
+  const t = new Date(String(v || '')).getTime()
+  return Number.isNaN(t) ? 0 : t
+}
+
+function formatTimelineVol(v: number): string {
+  if (!Number.isFinite(v) || v <= 0) return ''
+  if (v >= 1e8) return `${(v / 1e8).toFixed(2)}亿`
+  if (v >= 1e4) return `${(v / 1e4).toFixed(2)}万`
+  return String(v)
+}
+
+interface TimelineItem { time: string; ts: number; kind: string; kindType: 'primary' | 'success' | 'warning' | 'danger' | 'info'; title: string; detail: string; source: string; url?: string }
+
+const timelineItems = computed<TimelineItem[]>(() => {
+  const items: TimelineItem[] = []
+  // 1) 行情异动（|涨跌幅| ≥ 阈值的交易日）
+  for (const m of timelineMoves.value) {
+    const vol = formatTimelineVol(m.volume)
+    items.push({
+      time: m.time, ts: timelineTs(m.time), kind: '行情异动',
+      kindType: m.pct > 0 ? 'danger' : 'success',
+      title: `单日${m.pct > 0 ? '上涨' : '下跌'} ${Math.abs(m.pct).toFixed(2)}%`,
+      detail: `收盘 ${m.close.toFixed(2)}（前收 ${m.prev.toFixed(2)}）${vol ? ` · 成交量 ${vol}` : ''}`,
+      source: '行情数据',
+    })
+  }
+  // 2) 新闻公告
+  for (const n of newsItems.value) {
+    const isAnn = n.type === 'announcement'
+    items.push({
+      time: String(n.time || ''), ts: timelineTs(n.time),
+      kind: isAnn ? '公告' : '新闻', kindType: isAnn ? 'warning' : 'info',
+      title: n.title || '(无标题)', detail: '', source: n.source || '', url: n.url,
+    })
+  }
+  // 3) 研究任务
+  for (const t of stockTasks.value) {
+    const tm = t.completed_at || t.created_at || ''
+    items.push({
+      time: formatTaskTime(tm), ts: timelineTs(tm), kind: '研究任务', kindType: 'primary',
+      title: stockTaskTitle(t),
+      detail: `${stockTaskTypeText(t.task_type)} · ${stockTaskStatusText(t.status)}`,
+      source: '研究任务系统',
+    })
+  }
+  // 4) 交易复盘
+  for (const r of reviewHistory.items) {
+    const tm = r.completed_at || r.created_at || ''
+    const summary = String(r.summary || '').trim()
+    items.push({
+      time: formatTaskTime(tm), ts: timelineTs(tm), kind: '交易复盘', kindType: 'success',
+      title: summary ? summary.slice(0, 60) : '交易复盘完成',
+      detail: String(r.recommendation || '').trim(),
+      source: '复盘系统',
+    })
+  }
+  // 5) 操作留痕：首次买入
+  if (positionData.real.has && positionData.real.buy_date) {
+    const cost = Number(positionData.real.cost_price)
+    items.push({
+      time: String(positionData.real.buy_date), ts: timelineTs(positionData.real.buy_date),
+      kind: '操作留痕', kindType: 'warning',
+      title: '首次买入记录',
+      detail: Number.isFinite(cost) && cost > 0 ? `买入成本 ${cost.toFixed(2)}` : '',
+      source: '持仓记录',
+    })
+  }
+  const valid = items.filter(x => x.ts > 0).sort((a, b) => b.ts - a.ts)
+  if (timelineRange.value === '60d') {
+    const cutoff = Date.now() - 60 * 24 * 3600 * 1000
+    return valid.filter(x => x.ts >= cutoff)
+  }
+  return valid
+})
+
+// 时间线 Tab 激活时才计算行情异动（lazy 数据）
+watch(activeDetailTab, (tab) => {
+  if (tab === 'timeline') void fetchTimelineMoves()
+})
+
+function openExternal(url?: string) {
+  if (url) window.open(url, '_blank', 'noopener')
+}
+
 function goToApiGuide() {
   router.push({ name: 'StockDataApiGuide', query: { code: code.value } })
 }
@@ -2087,6 +3503,276 @@ function handlePeriodChange(p: string) {
   gap: 16px;
   margin-bottom: 16px;
   align-items: start;
+}
+
+/* 档案式 Tab 内容区 */
+.stock-detail-tabs {
+  margin-bottom: 16px;
+}
+.stock-detail-tabs :deep(.el-tabs__content) {
+  padding: 16px;
+}
+.mine-tasks-card {
+  margin-top: 16px;
+}
+.mine-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.mine-card-title {
+  font-weight: 700;
+  color: #1e293b;
+}
+
+/* 我的资料（收藏链接 + 文字笔记 + 上传文件） */
+.materials-pane {
+  min-height: 200px;
+}
+.materials-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.materials-toolbar-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.materials-file-input {
+  display: none;
+}
+.materials-hint {
+  font-size: 13px;
+  color: #64748b;
+}
+.materials-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.materials-filter-select {
+  width: 110px;
+}
+.materials-filter-count {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.material-meta-tag {
+  flex-shrink: 0;
+}
+.material-meta-tip {
+  margin-left: 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+.material-upload-file {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: #f1f5f9;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #475569;
+  word-break: break-all;
+}
+.material-item {
+  margin-bottom: 10px;
+  border-radius: 8px;
+}
+.material-item :deep(.el-card__body) {
+  padding: 12px 14px;
+}
+.material-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.material-title {
+  flex: 1;
+  font-weight: 600;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.material-actions {
+  flex-shrink: 0;
+}
+.intel-card-body {
+  min-height: 120px;
+}
+.intel-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.intel-card-meta-text {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.intel-card-points {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.intel-card-point {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.intel-card-point-no {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 3px;
+}
+.intel-card-caveats {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--el-color-warning-light-9);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--el-text-color-regular);
+}
+.intel-card-caveats-label {
+  font-weight: 600;
+  color: var(--el-color-warning);
+  margin-right: 6px;
+}
+.intel-card-tags {
+  margin-top: 12px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.intel-card-source {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.material-url {
+  display: block;
+  margin-top: 6px;
+  margin-left: 44px;
+  font-size: 12px;
+  color: #2563eb;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.material-url:hover {
+  text-decoration: underline;
+}
+.material-content {
+  margin-top: 6px;
+  margin-left: 44px;
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.material-excerpt {
+  margin-top: 6px;
+  margin-left: 44px;
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.material-excerpt:hover {
+  color: #3b82f6;
+}
+.material-preview-body {
+  max-height: 60vh;
+  overflow: auto;
+  min-height: 60px;
+}
+.material-preview-section {
+  margin-bottom: 16px;
+}
+.material-preview-section:last-child {
+  margin-bottom: 0;
+}
+.material-preview-section-title {
+  margin-bottom: 6px;
+  padding-left: 8px;
+  border-left: 3px solid #3b82f6;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.material-preview-section-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #475569;
+}
+.material-preview-remark {
+  margin-top: 12px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #64748b;
+}
+.material-preview-meta {
+  margin-top: 14px;
+  padding-top: 8px;
+  border-top: 1px dashed #e2e8f0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+.material-preview-text {
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #475569;
+}
+.material-file-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  margin-left: 44px;
+  font-size: 12px;
+  color: #64748b;
+}
+.material-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.material-file-hint {
+  font-size: 12px;
+  color: #64748b;
 }
 
 @media (max-width: 1024px) {
@@ -2845,5 +4531,337 @@ function handlePeriodChange(p: string) {
       }
     }
   }
+}
+
+/* 概览风险栏 · 猪周期专属风险（父组件传入插槽，子组件 scoped 样式不生效，需在本组件定义） */
+.pig-risk-item {
+  display: flex;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px dashed var(--el-border-color-lighter, #eef2f7);
+  align-items: flex-start;
+
+  &:first-child {
+    border-top: none;
+  }
+
+  .risk-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 5px;
+    flex: none;
+
+    &.is-red {
+      background: #f56c6c;
+      box-shadow: 0 0 0 3px rgba(245, 108, 108, .15);
+    }
+
+    &.is-orange {
+      background: #e6a23c;
+      box-shadow: 0 0 0 3px rgba(230, 162, 60, .15);
+    }
+
+    &.is-gray {
+      background: #909399;
+    }
+  }
+
+  .ri-body {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--el-text-color-regular, #606266);
+  }
+}
+
+/* 我的研究 P0 重组：分区标签 + 置顶待办 + 折叠区 */
+.mine-section-label {
+  margin: 14px 0 8px;
+  padding-left: 8px;
+  border-left: 3px solid var(--el-color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.mine-todo-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mine-todo-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mine-todo-icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+}
+.mine-todo-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  min-width: 0;
+}
+.mine-todo-text b {
+  color: var(--el-color-primary);
+}
+.mine-todo-clip {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mine-collapse {
+  margin-top: 14px;
+  border-top: none;
+}
+.mine-collapse :deep(.el-collapse-item__header) {
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.mine-collapse :deep(.el-collapse-item__content) {
+  padding-bottom: 8px;
+}
+
+/* 我的研究 · 猪周期计划与规则提醒 */
+.pig-plan-sub {
+  font-size: 11px;
+  color: var(--el-text-color-placeholder, #c0c4cc);
+}
+
+.pig-plan-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.pig-plan-grade {
+  font-size: 13px;
+  color: var(--el-text-color-primary, #1e293b);
+}
+
+.pig-plan-date {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #94a3b8);
+}
+
+.pig-plan-rule {
+  font-size: 13px;
+  color: var(--el-text-color-regular, #4b5563);
+  margin: 10px 0 0;
+}
+
+.pig-plan-section {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--el-text-color-secondary, #94a3b8);
+  margin: 14px 0 4px;
+}
+
+.pig-plan-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 5px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.pig-plan-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex: none;
+
+  &.is-on {
+    background: #67c23a;
+    box-shadow: 0 0 0 3px rgba(103, 194, 58, .15);
+  }
+
+  &.is-off {
+    background: #c0c4cc;
+  }
+
+  &.is-gap {
+    background: #e6a23c;
+    box-shadow: 0 0 0 3px rgba(230, 162, 60, .15);
+  }
+
+  &.is-triggered {
+    background: #f56c6c;
+    box-shadow: 0 0 0 3px rgba(245, 108, 108, .15);
+  }
+}
+
+.pig-plan-name {
+  font-weight: 500;
+  color: var(--el-text-color-primary, #1e293b);
+  flex: none;
+}
+
+.pig-plan-basis {
+  color: var(--el-text-color-secondary, #94a3b8);
+  font-size: 12px;
+}
+
+.pig-plan-ready {
+  margin-top: 10px;
+}
+
+.pig-plan-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--el-border-color-lighter, #eef2f7);
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #94a3b8);
+}
+
+.pig-plan-empty {
+  font-size: 13px;
+  color: var(--el-text-color-secondary, #94a3b8);
+  line-height: 1.8;
+  padding: 8px 0;
+}
+
+.daily-review-summary {
+  font-size: 13px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.daily-review-fuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ════════ 概念关系 Tab ════════ */
+.concept-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.concept-card-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.concept-card-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.concept-sub {
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #94a3b8);
+}
+
+.concept-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.concept-tag {
+  cursor: default;
+}
+
+.concept-source-line {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #94a3b8);
+}
+
+.relation-card {
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+
+.relation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.relation-name {
+  font-weight: 600;
+}
+
+.relation-code {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #94a3b8);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.relation-note {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--el-text-color-regular, #606266);
+}
+
+/* ════════ 完整时间线 Tab ════════ */
+.timeline-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.timeline-meta {
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #94a3b8);
+}
+
+.stock-timeline {
+  padding: 8px 4px 8px 8px;
+}
+
+.tl-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tl-kind {
+  flex-shrink: 0;
+}
+
+.tl-title {
+  font-weight: 500;
+}
+
+.tl-title.is-link {
+  cursor: pointer;
+  color: var(--el-color-primary, #409eff);
+}
+
+.tl-title.is-link:hover {
+  text-decoration: underline;
+}
+
+.tl-detail {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-regular, #606266);
+}
+
+.tl-source {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #94a3b8);
 }
 </style>

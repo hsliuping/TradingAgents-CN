@@ -139,23 +139,14 @@ class ResearcherAgent(BaseAgent):
             is_debate_mode = self._is_debate_mode(state)
 
             if is_debate_mode:
-                # 辩论模式：获取辩论上下文 + 向量缓存历史经验
-                debate_context = self._get_debate_context(state)
-                memory_context = self._get_memory_context(ticker, reports) if self.memory else None
-                
-                # 合并辩论上下文和向量缓存上下文
-                context_parts = []
-                if debate_context:
-                    context_parts.append(debate_context)
-                if memory_context:
-                    context_parts.append(f"\n【历史经验（向量缓存）】\n{memory_context}")
-                
-                historical_context = "\n".join(context_parts) if context_parts else None
-                logger.info(f"[辩论模式] {self.agent_id} 读取辩论历史 + 向量缓存")
+                # 辩论模式：获取辩论上下文（M5.4：per-agent 向量记忆读注入已退位，
+                # 上期结论对比基线由 core/agents/base.py 注入，见结论快照机制）
+                historical_context = self._get_debate_context(state) or None
+                logger.info(f"[辩论模式] {self.agent_id} 读取辩论历史")
             else:
-                # 单次分析模式：从记忆系统获取历史上下文
-                historical_context = self._get_memory_context(ticker, reports) if self.memory else None
-                logger.info(f"[单次分析模式] {self.agent_id} 使用向量缓存")
+                # 单次分析模式：不再读 per-agent 向量记忆（M5.4 退位，写入链路保留）
+                historical_context = None
+                logger.info(f"[单次分析模式] {self.agent_id} 无历史上下文注入")
 
             # v3.5.0 项1 闭环：检查质量门禁标记，低质量报告在 prompt 中提示
             # 让研究员感知哪些分析师报告质量存疑，从而降低结论权重
@@ -403,7 +394,8 @@ class ResearcherAgent(BaseAgent):
         把本次分析报告提炼为结构化教训（reasoning/improvement/summary/query），
         写入 ANALYSIS_INSIGHT scope，memory_kind=analysis_lesson。
 
-        下次同股票分析时，_get_memory_context 可优先召回结构化教训而非原文。
+        下次同股票分析时可沉淀为对比基线（M5.4：教训读注入已从分析提示词退位，
+        写入保留供记忆成长闭环审核）。
 
         降级策略：
         - LLM 超时/返回非 JSON → fallback 写入原文（reflection_success=False）
@@ -488,8 +480,8 @@ class ResearcherAgent(BaseAgent):
         提炼为结构化教训（reasoning/improvement/summary/query），写入
         AGENT_EXPERIENCE scope，memory_kind=debate_lesson。
 
-        下次同股票分析时，_get_memory_context 可召回多情景研究教训，
-        让多视角对比从"对抗"升级为"积累"。
+        多情景研究教训供记忆成长闭环沉淀与审核（M5.4：教训读注入已从
+        分析提示词退位，写入保留）。
 
         降级策略：
         - LLM 超时/返回非 JSON → fallback 写入研究历史摘要（reflection_success=False）
@@ -749,154 +741,6 @@ class ResearcherAgent(BaseAgent):
             context_parts.append(f"\n【对方历史观点】\n{opponent_history}")
 
         return "\n".join(context_parts) if context_parts else ""
-
-    def _get_memory_context(self, ticker: str, reports: Dict[str, Any]) -> str:
-        """
-        从 Memory 系统获取历史经验
-
-        Args:
-            ticker: 股票代码
-            reports: 当前报告
-
-        Returns:
-            历史经验字符串
-        """
-        if not self.memory:
-            return ""
-
-        try:
-            # 🔥 构建查询文本：使用关键信息而不是完整报告
-            # 向量检索的目的是找到相似的历史经验，应该使用关键信息作为查询
-            # 而不是把所有报告都合并（这样会导致查询文本过长，且不是好的查询方式）
-            
-            query_parts = []
-            
-            # 1. 股票基本信息（最重要的查询条件）
-            if ticker:
-                query_parts.append(f"股票代码: {ticker}")
-            
-            # 2. 从 reports 中提取关键信息（如果有）
-            # 注意：reports 可能包含字典或字符串，需要处理
-            company_name = None
-            industry = None
-            current_price = None
-            
-            for key, value in reports.items():
-                if not value:
-                    continue
-                
-                # 处理字典类型的值
-                if isinstance(value, dict):
-                    company_name = value.get("company_name") or value.get("name") or company_name
-                    industry = value.get("industry") or industry
-                    current_price = value.get("current_price") or current_price
-                elif isinstance(value, str):
-                    # 字符串类型的值，尝试提取关键信息
-                    if key in ["company_name", "name"]:
-                        company_name = value
-                    elif key == "industry":
-                        industry = value
-                    elif key == "current_price":
-                        try:
-                            current_price = float(value)
-                        except:
-                            pass
-            
-            if company_name:
-                query_parts.append(f"公司名称: {company_name}")
-            if industry:
-                query_parts.append(f"行业: {industry}")
-            if current_price:
-                query_parts.append(f"当前价格: {current_price}")
-            
-            # 3. 使用报告的摘要/关键部分（只取前 300 字符）
-            # 这样可以保留关键信息，但不会太长
-            MAX_SUMMARY_LENGTH = 300
-            for key, value in reports.items():
-                # 跳过已经处理过的字段和空值
-                if key in ["company_name", "name", "industry", "current_price", "ticker"] or not value:
-                    continue
-                
-                report_text = str(value)
-                # 只取前 N 个字符作为摘要
-                summary = report_text[:MAX_SUMMARY_LENGTH]
-                if len(report_text) > MAX_SUMMARY_LENGTH:
-                    summary += "..."
-                query_parts.append(f"{key}摘要: {summary}")
-            
-            # 构建查询文本
-            curr_situation = "\n".join(query_parts)
-            
-            # 🔥 限制查询文本总长度，确保不超过 Embedding API 限制
-            MAX_QUERY_LENGTH = 2000  # 使用关键信息，应该不会太长
-            if len(curr_situation) > MAX_QUERY_LENGTH:
-                logger.warning(f"⚠️ 查询文本过长 ({len(curr_situation):,} > {MAX_QUERY_LENGTH:,})，进行截断")
-                curr_situation = curr_situation[:MAX_QUERY_LENGTH] + "..."
-                logger.info(f"📝 截断后查询文本长度: {len(curr_situation):,} 字符")
-            
-            logger.debug(f"🔍 构建查询文本（使用关键信息）: {curr_situation[:500]}...")
-
-            # 🔧 检查是否启用记忆功能（一级分析深度不使用记忆）
-            # 🔥 self.config 是 AgentConfig (Pydantic BaseModel)，直接访问属性
-            memory_enabled = getattr(self.config, "memory_enabled", True)
-            if not memory_enabled:
-                logger.info(f"📭 记忆功能已禁用（快速分析模式）")
-                return ""
-
-            if not hasattr(self.memory, 'search_memories'):
-                logger.warning("记忆实例不支持 search_memories，已跳过召回: %s", type(self.memory).__name__)
-                return ""
-
-            past_memories = self.memory.search_memories(
-                query=curr_situation,
-                n_results=3,
-                filter_metadata={"ticker": ticker} if ticker else None
-            )
-
-            memory_str = ""
-            for i, mem in enumerate(past_memories, 1):
-                content = mem.get("content", "")
-                similarity = mem.get("similarity", 0.0)
-
-                # 只使用相似度 > 0.7 的记忆
-                if similarity > 0.7:
-                    memory_str += f"[相似度: {similarity:.2f}] {content}\n\n"
-
-            # v3.5.0 闭环 L2/L3：优先召回 mem0 中的反思教训
-            # 反思教训通过 reflection_helper.run_reflection 写入 mem0，
-            # 这里通过 recall_lessons_sync 召回并注入 prompt，形成完整闭环。
-            lessons_str = ""
-            try:
-                from core.agents.reflection_helper import recall_lessons_sync
-                db = self._get_db_handle()
-                if db is not None:
-                    user_id = self._get_user_id() or "default_user"
-                    lessons_str = recall_lessons_sync(
-                        db=db,
-                        user_id=user_id,
-                        query=curr_situation,
-                        agent_id=self.agent_id,
-                        limit=3,
-                        max_chars=1500,
-                    )
-                    if lessons_str:
-                        logger.info(f"🧠 从 mem0 召回反思教训（闭环 L2/L3）")
-            except Exception as lessons_exc:
-                logger.debug(f"[Researcher] 召回反思教训失败（不阻塞）: {lessons_exc}")
-
-            # 教训放在前面（优先参考），原文放在后面
-            if lessons_str and memory_str:
-                return f"\n{lessons_str}\n【历史经验】\n{memory_str}"
-            elif lessons_str:
-                return f"\n{lessons_str}"
-            elif memory_str:
-                logger.info(f"🧠 从记忆系统检索到 {len(past_memories)} 条相关经验")
-                return f"\n【历史经验】\n{memory_str}"
-
-        except Exception as e:
-            logger.warning(f"获取 Memory 上下文失败: {e}")
-
-        return ""
 
     def _update_debate_state(
         self,

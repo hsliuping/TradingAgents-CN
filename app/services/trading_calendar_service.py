@@ -1,8 +1,9 @@
 """
 交易日历服务
 
-在系统启动时从 Tushare/AkShare 查询 A 股最近实际交易日，
-并将结果缓存到 Redis，供 JIT 数据同步等模块精确判断数据新鲜度。
+在系统启动时通过数据能力框架（trade_cal 能力，tushare 主源 + akshare 备源）
+查询 A 股最近实际交易日，并将结果缓存到 Redis，
+供 JIT 数据同步等模块精确判断数据新鲜度。
 
 Redis Key: trading_calendar:last_trade_date
 缓存格式:
@@ -21,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -42,14 +43,6 @@ class TradingCalendarService:
         return datetime.now().strftime("%Y-%m-%d")
 
     @staticmethod
-    def _fmt(raw: str) -> str:
-        """统一格式化为 YYYY-MM-DD（兼容 YYYYMMDD 和 YYYY-MM-DD 两种输入）"""
-        raw = raw.strip()
-        if len(raw) == 8 and "-" not in raw:
-            return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
-        return raw
-
-    @staticmethod
     def _is_loop_mismatch_error(error: Exception) -> bool:
         error_text = str(error).lower()
         return "attached to a different loop" in error_text or "different loop" in error_text
@@ -64,74 +57,45 @@ class TradingCalendarService:
         }
 
     # ------------------------------------------------------------------ #
-    # 从外部 API 获取最后交易日                                            #
+    # 从交易日历能力获取最后交易日                                          #
     # ------------------------------------------------------------------ #
 
-    async def _fetch_from_tushare(self) -> Optional[str]:
-        """调用 tushare daily_basic 逐日回溯，找到最近的交易日（YYYY-MM-DD）"""
+    async def _fetch_via_capability(self) -> Optional[tuple[str, str]]:
+        """通过数据能力框架（trade_cal 能力）查询最近交易日
+
+        Returns: (last_trade_date: YYYY-MM-DD, source: str)，失败返回 None
+        """
         try:
-            from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-            import asyncio
-
-            provider = get_tushare_provider()
-            if not provider.is_available() or provider.api is None:
-                return None
-
-            today = datetime.now()
-            for delta in range(0, 10):
-                d = (today - timedelta(days=delta)).strftime("%Y%m%d")
-                try:
-                    df = await asyncio.to_thread(
-                        provider.api.daily_basic,
-                        trade_date=d,
-                        fields="ts_code",
-                        limit=1,
-                    )
-                    if df is not None and not df.empty:
-                        logger.info(f"📅 [TradingCalendar] Tushare 确认最新交易日: {d}")
-                        return self._fmt(d)
-                except Exception:
-                    continue
-        except Exception as e:
-            logger.warning(f"⚠️ [TradingCalendar] Tushare 查询失败: {e}")
-        return None
-
-    async def _fetch_from_akshare(self) -> Optional[str]:
-        """调用 akshare tool_trade_date_hist_sina 获取近期交易日历，取最近 ≤ 今天的交易日"""
-        try:
-            import akshare as ak
-            import asyncio
             import pandas as pd
 
-            df = await asyncio.to_thread(ak.tool_trade_date_hist_sina)
+            from tradingagents.dataflows.capability.facade import get_data_facade
+
+            today = datetime.now()
+            start = (today - timedelta(days=15)).strftime("%Y-%m-%d")
+            df = await get_data_facade().get_capability("trade_cal").query(start_date=start)
             if df is None or df.empty:
                 return None
 
-            # 列名可能是 trade_date 或第0列
-            col = df.columns[0]
-            dates = pd.to_datetime(df[col]).dt.date
-            today_d = date.today()
-            valid = sorted([d for d in dates if d <= today_d], reverse=True)
-            if valid:
-                result = valid[0].strftime("%Y-%m-%d")
-                logger.info(f"📅 [TradingCalendar] AkShare 确认最新交易日: {result}")
-                return result
+            open_df = df[df["is_open"] == 1]
+            if open_df.empty:
+                return None
+
+            result = pd.to_datetime(open_df["cal_date"]).max().strftime("%Y-%m-%d")
+            source = str(df["source"].iloc[0]) if "source" in df.columns else "trade_cal"
+            logger.info(f"📅 [TradingCalendar] 交易日历能力确认最新交易日: {result} (source={source})")
+            return result, source
         except Exception as e:
-            logger.warning(f"⚠️ [TradingCalendar] AkShare 查询失败: {e}")
-        return None
+            logger.warning(f"⚠️ [TradingCalendar] 交易日历能力查询失败: {e}")
+            return None
 
     async def _fetch_last_trade_date(self) -> tuple[str, str]:
         """
-        按优先级（tushare → akshare → 简单回溯）获取最近交易日。
+        按优先级（交易日历能力 → 简单回溯）获取最近交易日。
         Returns: (last_trade_date: YYYY-MM-DD, source: str)
         """
-        result = await self._fetch_from_tushare()
-        if result:
-            return result, "tushare"
-
-        result = await self._fetch_from_akshare()
-        if result:
-            return result, "akshare"
+        capability_result = await self._fetch_via_capability()
+        if capability_result:
+            return capability_result
 
         # 最后兜底：从今天往前找第一个周一~周五（不保证节假日准确）
         today = datetime.now()

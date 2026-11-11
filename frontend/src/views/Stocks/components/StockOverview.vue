@@ -77,9 +77,8 @@
       </div>
     </div>
 
-    <!-- 右侧：操作入口 -->
+    <!-- 右侧：操作入口（9 个按钮 3×3，与左侧卡片等高） -->
     <div class="action-entry">
-      <div class="action-placeholder"></div>
       <button class="action-btn action-btn-primary" @click="$emit('sync')" :disabled="syncLoading">
         <span class="icon">🔄</span>
         <span class="title">同步数据</span>
@@ -373,13 +372,9 @@ function formatSyncInterval(seconds: number): string {
 .action-entry {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, auto);
   gap: 10px;
   width: 520px;
-}
-
-.action-placeholder {
-  visibility: hidden;
-  pointer-events: none;
 }
 
 .action-btn {

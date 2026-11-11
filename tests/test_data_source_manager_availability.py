@@ -1,4 +1,4 @@
-from app.services.data_sources.manager import DataSourceManager
+from app.services.data_sources.manager import DataAdapterOrchestrator
 
 
 class _DummyAdapter:
@@ -22,7 +22,7 @@ class _DummyAdapter:
 
 
 def test_disabled_data_source_is_skipped_before_probe() -> None:
-    manager = DataSourceManager.__new__(DataSourceManager)
+    manager = DataAdapterOrchestrator.__new__(DataAdapterOrchestrator)
     qmt = _DummyAdapter("qmt", available=False)
     akshare = _DummyAdapter("akshare", available=True)
 

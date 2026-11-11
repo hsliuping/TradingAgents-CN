@@ -18,7 +18,7 @@ from core.tools.context import get_current_assistant_thread_id, get_current_im_c
 logger = logging.getLogger(__name__)
 
 # ── 深度映射 ──
-_DEPTH_MAP = {1: "快速", 2: "基础", 3: "标准", 4: "深度", 5: "全面"}
+_DEPTH_MAP = {1: "快速", 3: "标准", 5: "深度"}
 
 
 def _depth_label(depth: int) -> str:

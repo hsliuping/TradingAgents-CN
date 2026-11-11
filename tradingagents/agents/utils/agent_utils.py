@@ -191,7 +191,7 @@ class Toolkit:
             logger.error(f"❌ [DEBUG] 错误类型: {type(e).__name__}")
             logger.error(f"❌ [DEBUG] 错误信息: {str(e)}")
             logger.error(f"❌ [DEBUG] 详细堆栈:")
-            print(error_details)
+            logger.error(error_details)
             logger.error(f"❌ [DEBUG] ===== 异常处理结束 =====")
             return f"中国股票数据获取失败: {str(e)}。请检查网络连接或稍后重试。"
 
@@ -720,77 +720,17 @@ class Toolkit:
         research_depth = Toolkit._config.get('research_depth', '标准')
         logger.info(f"🔧 [分析级别] 当前分析级别: {research_depth}")
         
-        # 数字等级到中文等级的映射
-        numeric_to_chinese = {
-            1: "快速",
-            2: "基础", 
-            3: "标准",
-            4: "深度",
-            5: "全面"
-        }
-        
-        # 标准化研究深度：支持数字输入
-        if isinstance(research_depth, (int, float)):
-            research_depth = int(research_depth)
-            if research_depth in numeric_to_chinese:
-                chinese_depth = numeric_to_chinese[research_depth]
-                logger.info(f"🔢 [等级转换] 数字等级 {research_depth} → 中文等级 '{chinese_depth}'")
-                research_depth = chinese_depth
-            else:
-                logger.warning(f"⚠️ 无效的数字等级: {research_depth}，使用默认标准分析")
-                research_depth = "标准"
-        elif isinstance(research_depth, str):
-            # 如果是字符串形式的数字，转换为整数
-            if research_depth.isdigit():
-                numeric_level = int(research_depth)
-                if numeric_level in numeric_to_chinese:
-                    chinese_depth = numeric_to_chinese[numeric_level]
-                    logger.info(f"🔢 [等级转换] 字符串数字 '{research_depth}' → 中文等级 '{chinese_depth}'")
-                    research_depth = chinese_depth
-                else:
-                    logger.warning(f"⚠️ 无效的字符串数字等级: {research_depth}，使用默认标准分析")
-                    research_depth = "标准"
-            # 如果已经是中文等级，直接使用
-            elif research_depth in ["快速", "基础", "标准", "深度", "全面"]:
-                logger.info(f"📝 [等级确认] 使用中文等级: '{research_depth}'")
-            else:
-                logger.warning(f"⚠️ 未知的研究深度: {research_depth}，使用默认标准分析")
-                research_depth = "标准"
-        else:
-            logger.warning(f"⚠️ 无效的研究深度类型: {type(research_depth)}，使用默认标准分析")
-            research_depth = "标准"
-        
-        # 根据分析级别调整数据获取策略
-        # 🔧 修正映射关系：data_depth 应该与 research_depth 保持一致
-        if research_depth == "快速":
-            # 快速分析：获取基础数据，减少数据源调用
-            data_depth = "basic"
-            logger.info(f"🔧 [分析级别] 快速分析模式：获取基础数据")
-        elif research_depth == "基础":
-            # 基础分析：获取标准数据
-            data_depth = "standard"
-            logger.info(f"🔧 [分析级别] 基础分析模式：获取标准数据")
-        elif research_depth == "标准":
-            # 标准分析：获取标准数据（不是full！）
-            data_depth = "standard"
-            logger.info(f"🔧 [分析级别] 标准分析模式：获取标准数据")
-        elif research_depth == "深度":
-            # 深度分析：获取完整数据
-            data_depth = "full"
-            logger.info(f"🔧 [分析级别] 深度分析模式：获取完整数据")
-        elif research_depth == "全面":
-            # 全面分析：获取最全面的数据，包含所有可用数据源
-            data_depth = "comprehensive"
-            logger.info(f"🔧 [分析级别] 全面分析模式：获取最全面数据")
-        else:
-            # 默认使用标准分析
-            data_depth = "standard"
-            logger.info(f"🔧 [分析级别] 未知级别，使用标准分析模式")
+        # 档位画像（DEPTH_PROFILES 单一注册表，收编原 data_depth 映射）
+        from core.workflow.depth_profiles import get_profile, normalize_depth
+
+        research_depth = normalize_depth(research_depth)
+        data_depth = get_profile(research_depth).data_scope
+        logger.info(f"🔧 [分析级别] {research_depth} → 数据面 {data_depth}")
 
         # 添加详细的股票代码追踪日志
-        logger.info(f"🔍 [股票代码追踪] 统一基本面工具接收到的原始股票代码: '{ticker}' (类型: {type(ticker)})")
-        logger.info(f"🔍 [股票代码追踪] 股票代码长度: {len(str(ticker))}")
-        logger.info(f"🔍 [股票代码追踪] 股票代码字符: {list(str(ticker))}")
+        logger.debug(f"🔍 [股票代码追踪] 统一基本面工具接收到的原始股票代码: '{ticker}' (类型: {type(ticker)})")
+        logger.debug(f"🔍 [股票代码追踪] 股票代码长度: {len(str(ticker))}")
+        logger.debug(f"🔍 [股票代码追踪] 股票代码字符: {list(str(ticker))}")
 
         # 保存原始ticker用于对比
         original_ticker = ticker
@@ -805,7 +745,7 @@ class Toolkit:
             is_hk = market_info['is_hk']
             is_us = market_info['is_us']
 
-            logger.info(f"🔍 [股票代码追踪] StockUtils.get_market_info 返回的市场信息: {market_info}")
+            logger.debug(f"🔍 [股票代码追踪] StockUtils.get_market_info 返回的市场信息: {market_info}")
             logger.info(f"📊 [统一基本面工具] 股票类型: {market_info['market_name']}")
             logger.info(f"📊 [统一基本面工具] 货币: {market_info['currency_name']} ({market_info['currency_symbol']})")
 
@@ -855,7 +795,7 @@ class Toolkit:
             if is_china:
                 # 中国A股：基本面分析优化策略 - 只获取必要的当前价格和基本面数据
                 logger.info(f"🇨🇳 [统一基本面工具] 处理A股数据，数据深度: {data_depth}...")
-                logger.info(f"🔍 [股票代码追踪] 进入A股处理分支，ticker: '{ticker}'")
+                logger.debug(f"🔍 [股票代码追踪] 进入A股处理分支，ticker: '{ticker}'")
                 logger.info(f"💡 [优化策略] 基本面分析只获取当前价格和财务数据，不获取历史日线数据")
 
                 # 优化策略：基本面分析不需要大量历史日线数据
@@ -867,7 +807,7 @@ class Toolkit:
                     recent_start_date = (datetime.strptime(curr_date, '%Y-%m-%d') - timedelta(days=2)).strftime('%Y-%m-%d')
 
                     from tradingagents.dataflows.interface import get_china_stock_data_unified
-                    logger.info(f"🔍 [股票代码追踪] 调用 get_china_stock_data_unified（仅获取最新价格），传入参数: ticker='{ticker}', start_date='{recent_start_date}', end_date='{recent_end_date}'")
+                    logger.debug(f"🔍 [股票代码追踪] 调用 get_china_stock_data_unified（仅获取最新价格），传入参数: ticker='{ticker}', start_date='{recent_start_date}', end_date='{recent_end_date}'")
                     current_price_data = get_china_stock_data_unified(ticker, recent_start_date, recent_end_date)
 
                     # 🔍 调试：打印返回数据的前500字符
@@ -884,7 +824,7 @@ class Toolkit:
                     # 获取基本面财务数据（这是基本面分析的核心）
                     from tradingagents.dataflows.optimized_china_data import OptimizedChinaDataProvider
                     analyzer = OptimizedChinaDataProvider()
-                    logger.info(f"🔍 [股票代码追踪] 调用 OptimizedChinaDataProvider._generate_fundamentals_report，传入参数: ticker='{ticker}', analysis_modules='{analysis_modules}'")
+                    logger.debug(f"🔍 [股票代码追踪] 调用 OptimizedChinaDataProvider._generate_fundamentals_report，传入参数: ticker='{ticker}', analysis_modules='{analysis_modules}'")
 
                     # 传递分析模块参数到基本面分析方法
                     fundamentals_data = analyzer._generate_fundamentals_report(ticker, current_price_data, analysis_modules)
@@ -1203,7 +1143,7 @@ class Toolkit:
                 # 中国A股和港股：使用AKShare东方财富新闻和Google新闻（中文搜索）
                 logger.info(f"🇨🇳🇭🇰 [统一新闻工具] 处理中文新闻...")
 
-                # 1. 尝试获取AKShare东方财富新闻
+                # 1. 尝试获取东方财富新闻
                 try:
                     # 处理股票代码
                     clean_ticker = ticker.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
@@ -1211,22 +1151,17 @@ class Toolkit:
                     
                     logger.info(f"🇨🇳🇭🇰 [统一新闻工具] 尝试获取东方财富新闻: {clean_ticker}")
 
-                    # 通过 AKShare Provider 获取新闻
-                    from tradingagents.dataflows.providers.china.akshare import AKShareProvider
-
-                    provider = AKShareProvider()
-
-                    # 获取东方财富新闻
-                    news_df = provider.get_stock_news_sync(symbol=clean_ticker)
+                    # 通过能力框架获取东财新闻（tushare 优先，akshare 东财兜底）
+                    from tradingagents.dataflows.capability import query_capability_sync
+                    news_df = query_capability_sync("stock_news_cn", symbol=clean_ticker, limit=10)
 
                     if news_df is not None and not news_df.empty:
-                        # 格式化东方财富新闻
+                        # 格式化东财新闻（能力标准字段）
                         em_news_items = []
                         for _, row in news_df.iterrows():
-                            # AKShare 返回的字段名
-                            news_title = row.get('新闻标题', '') or row.get('标题', '')
-                            news_time = row.get('发布时间', '') or row.get('时间', '')
-                            news_url = row.get('新闻链接', '') or row.get('链接', '')
+                            news_title = row.get('title', '') or ''
+                            news_time = row.get('publish_time', '') or ''
+                            news_url = row.get('url', '') or ''
 
                             news_item = f"- **{news_title}** [{news_time}]({news_url})"
                             em_news_items.append(news_item)

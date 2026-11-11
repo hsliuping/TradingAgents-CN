@@ -75,48 +75,24 @@ def get_technical_indicators(
         
         # 4. 获取原始数据 (DataFrame)
         if is_china:
-            from tradingagents.dataflows.providers.china.tushare import TushareProvider
-            from tradingagents.dataflows.providers.china.akshare import AKShareProvider
-            import asyncio
-            
-            # Helper to run async code in sync tool
-            def run_async(coro):
-                try:
-                    return asyncio.run(coro)
-                except RuntimeError:
-                    # Loop already running, try to use it
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        import nest_asyncio
-                        nest_asyncio.apply()
-                        return asyncio.run(coro)
-                    return loop.run_until_complete(coro)
+            from tradingagents.dataflows.capability import query_capability_sync
 
-            # 优先尝试 Tushare
+            # A股日线经 DataFacade 能力查询（tushare/akshare 双源自动降级，
+            # 标准列 date/open/high/low/close/volume，前复权，date 升序）
             try:
-                provider = TushareProvider()
-                # TushareProvider needs async call
-                df = run_async(provider.get_historical_data(ticker, start_date, end_date))
-                
-                if df is not None and not df.empty:
-                    # Rename columns for stockstats
-                    # Tushare: ts_code, trade_date, open, high, low, close, pre_close, change, pct_chg, vol, amount
-                    df = df.rename(columns={
-                        'trade_date': 'date',
-                        'vol': 'volume'
-                    })
+                df = query_capability_sync(
+                    "stock_daily",
+                    symbol=ticker,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
             except Exception as e:
-                logger.warning(f"Tushare 获取数据失败: {e}")
-            
-            # 降级到 AKShare
-            if df is None or df.empty:
-                try:
-                    provider = AKShareProvider()
-                    # AKShareProvider needs async call
-                    df = run_async(provider.get_historical_data(ticker, start_date, end_date))
-                    # AKShareProvider.get_historical_data already standardizes columns
-                except Exception as e:
-                    logger.warning(f"AKShare 获取数据失败: {e}")
+                logger.warning(f"stock_daily 能力查询失败: {e}")
+                df = None
+
+            if df is not None and not df.empty:
+                # 去掉门面附加的来源/质量标记列后喂 stockstats
+                df = df.drop(columns=['source', 'quality'], errors='ignore')
 
         elif is_hk:
             from tradingagents.dataflows.providers.hk.improved_hk import ImprovedHKStockProvider
