@@ -247,7 +247,7 @@ class TushareSyncService:
                         code = stock_info.dict().get("code", "unknown")
                     else:
                         code = stock_info.get("code", "unknown")
-                except:
+                except Exception:
                     code = "unknown"
 
                 batch_stats["errors"].append({
@@ -1041,7 +1041,7 @@ class TushareSyncService:
                                         likely_reason = "该股票在此期间无交易数据（可能停牌、退市或数据源问题）"
                                         # 其他情况，可能是真正失败，也可能是无数据，保守判断为无数据
                                         is_no_data = True
-                            except:
+                            except Exception:
                                 likely_reason = "日期范围可能有问题"
                                 is_no_data = True  # 日期解析失败，可能是无数据
                         
@@ -1424,7 +1424,7 @@ class TushareSyncService:
                 return f"{symbol}.BJ"  # 北交所（8/4 旧号段，920 为 2025-10 起统一号段）
             else:
                 return f"{symbol}.SZ"  # 默认深交所
-        except:
+        except Exception:
             return f"{symbol}.SZ"
     
     def _get_list_date(self, symbol: str) -> str:
@@ -1461,10 +1461,10 @@ class TushareSyncService:
                             return list_date
                         else:
                             return list_date.strftime('%Y-%m-%d')
-            except:
+            except Exception:
                 pass
             return "未知"
-        except:
+        except Exception:
             return "未知"
     
     async def _check_stock_exists(self, symbol: str) -> bool:
@@ -1526,7 +1526,7 @@ class TushareSyncService:
                             return today_str
                         
                         return next_date_str
-                    except:
+                    except Exception:
                         # 如果日期格式不对，直接返回
                         return latest_date
                 else:
