@@ -635,6 +635,37 @@ Docker 部署适合进阶用户和服务器环境，提供环境隔离、一键�
 - 可用模型仅限京东云提供的 4 个：`GLM-5`、`GLM-5.1`、`GLM-5.2`、`DeepSeek-V4-Flash`，用户可在分析时切换。
 - 如遇 LLM 限速频繁，可适当调大 `JDYUN_STOCK_INTERVAL_SECONDS`（如 20 或 30 秒）。
 
+### 1.5 macOS 源码一键部署（社区版通用）
+
+#### 功能说明
+
+社区版提供 macOS 一键安装脚本，自动完成 Homebrew / Python 3.11 / Node.js / MongoDB / Redis 的安装与配置，构建前端并生成 `.env`，适合 macOS 用户快速上手。
+
+#### 操作步骤
+
+1. **克隆仓库**后，在仓库根目录执行：
+
+   ```bash
+   bash install-mac.sh
+   ```
+
+   脚本依次完成：安装 Homebrew（缺失时）→ 安装 Python 3.11 / Node.js / MongoDB / Redis → `brew services` 启动数据库（开机自启）→ 创建虚拟环境并安装后端依赖 → 生成 `.env`（JWT 密钥与初始密码随机生成，本地默认数据库无密码）→ 构建前端。
+
+2. **启动系统**：
+
+   ```bash
+   bash start.sh
+   ```
+
+   脚本会自检 MongoDB / Redis（未启动自动拉起），启动后端并自动打开浏览器 `http://localhost:8000`——后端直接伺服前端页面，无需前端 dev server。
+
+3. **首次登录**：账号 `admin`，初始密码见 `.env` 的 `ADMIN_DEFAULT_PASSWORD`（安装完成时也会打印在终端）。
+
+#### 注意事项
+
+- 一键脚本按**本地学习场景**默认配置：MongoDB / Redis 无密码。如需对外提供服务，请自行开启数据库认证并同步修改 `.env` 连接串。
+- 更新版本：`git pull` 后重装后端依赖并重新构建前端（`env/bin/python -m pip install -r requirements.txt && (cd frontend && npm install && npm run build)`）；日常启动只需 `bash start.sh`。
+
 ---
 
 ## 第二章 首次配置

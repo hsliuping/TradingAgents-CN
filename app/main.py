@@ -13,10 +13,10 @@ For commercial licensing, please contact: hsliup@163.com
 商业许可咨询，请联系：hsliup@163.com
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 import logging
@@ -1385,15 +1385,44 @@ async def get_system_info():
     })
 
 
+# =============================================================================
+# 前端静态资源伺服（单端口部署）
+# frontend/dist 存在时（npm run build 后）：后端直接伺服前端页面，无需 dev server；
+# 不存在时（开发模式 / 未构建前端）：保持原 API 信息响应，前端走 Vite dev server。
+# 静态路由注册在全部 API 路由之后，API 路由优先匹配不受影响。
+# =============================================================================
+_frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+
 @app.get("/")
 async def root():
-    """根路径，返回API信息"""
+    """根路径：已构建前端时返回前端页面，否则返回 API 信息"""
+    if (_frontend_dist / "index.html").is_file():
+        return FileResponse(_frontend_dist / "index.html")
     return {
         "name": "TradingAgents-CN API",
         "version": get_version(),
         "status": "running",
         "docs_url": "/docs" if settings.DEBUG else None
     }
+
+
+if _frontend_dist.is_dir():
+    logger.info(f"前端静态资源伺服已启用: {_frontend_dist}")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def frontend_spa_fallback(full_path: str):
+        """SPA 兜底路由：命中静态文件则返回文件，未命中回退 index.html（history 路由）
+
+        - /api/* 请求保持 404 JSON 语义，不回退页面
+        - resolve() + is_relative_to 防路径穿越
+        """
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = (_frontend_dist / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(_frontend_dist):
+            return FileResponse(candidate)
+        return FileResponse(_frontend_dist / "index.html")
 
 
 if __name__ == "__main__":

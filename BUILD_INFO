@@ -1,9 +1,0 @@
-﻿{
-    "build_type":  "portable",
-    "version":  "4.0.0-beta.1",
-    "build_timestamp":  "20261104-175625",
-    "build_date":  "2026-11-04T09:56:25Z",
-    "build_unix":  1793814986,
-    "git_commit":  "76cd91c04",
-    "full_version":  "4.0.0-beta.1-build20261104-175625"
-}
