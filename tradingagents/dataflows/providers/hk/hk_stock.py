@@ -17,9 +17,24 @@ import os
 import os
 
 from tradingagents.config.runtime_settings import get_float, get_int
+
+try:  # Wilder RSI（与 TA-Lib 一致，前 14 根K线为预热期，返回 NaN）
+    import fin_primitives as fp
+except ImportError:  # pragma: no cover - 未安装时回退到旧的滚动均值算法
+    fp = None
+
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('agents')
+
+
+def _wilder_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """Wilder RSI（fin-primitives）。预热期及缺失收盘价处为 NaN。"""
+    close = close.astype(float)
+    out = pd.Series(float("nan"), index=close.index)
+    mask = close.notna()
+    out.loc[mask] = fp.rsi(close[mask], period).to_numpy()
+    return out
 
 
 
@@ -322,12 +337,15 @@ class HKStockProvider:
             data['ma20'] = data['Close'].rolling(window=20, min_periods=1).mean()
             data['ma60'] = data['Close'].rolling(window=60, min_periods=1).mean()
 
-            # 计算RSI（相对强弱指标）
-            delta = data['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14, min_periods=1).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14, min_periods=1).mean()
-            rs = gain / (loss.replace(0, np.nan))
-            data['rsi'] = 100 - (100 / (1 + rs))
+            # 计算RSI（相对强弱指标，Wilder 平滑）
+            if fp is not None:
+                data['rsi'] = _wilder_rsi(data['Close'], 14)
+            else:
+                delta = data['Close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14, min_periods=1).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14, min_periods=1).mean()
+                rs = gain / (loss.replace(0, np.nan))
+                data['rsi'] = 100 - (100 / (1 + rs))
 
             # 计算MACD
             ema12 = data['Close'].ewm(span=12, adjust=False).mean()

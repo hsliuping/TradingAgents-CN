@@ -12,6 +12,7 @@ yfinance
 praw
 feedparser
 stockstats
+fin-primitives>=3.2.0  # Wilder RSI（港股/指数技术指标）
 eodhd
 langgraph
 chromadb
