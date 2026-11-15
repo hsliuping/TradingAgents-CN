@@ -12,12 +12,26 @@ from typing import Optional, Dict, Any, List
 
 import pandas as pd
 
+try:  # Wilder RSI（与 TA-Lib 一致）
+    import fin_primitives as fp
+except ImportError:  # pragma: no cover - 未安装时回退到旧的滚动均值算法
+    fp = None
+
 from core.tools.trade_date_policy import apply_stable_data_cutoff, build_stable_data_cutoff_note
 
 logger = logging.getLogger(__name__)
 
 MARGIN_CORE_EXCHANGES = ("SSE", "SZSE")
 MARGIN_BSE_AVAILABLE_SINCE = "20211115"
+
+
+def _wilder_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """Wilder RSI（fin-primitives）。预热期及缺失收盘价处为 NaN。"""
+    close = close.astype(float)
+    out = pd.Series(float("nan"), index=close.index)
+    mask = close.notna()
+    out.loc[mask] = fp.rsi(close[mask], period).to_numpy()
+    return out
 
 
 def _clean_date_string(date_str: str) -> str:
@@ -1044,12 +1058,15 @@ async def get_index_technical(trade_date: str, lookback_days: int = 60) -> str:
         dea = dif.ewm(span=9, adjust=False).mean()
         macd = (dif - dea) * 2
 
-        # RSI
-        delta = close.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
+        # RSI（Wilder 平滑）
+        if fp is not None:
+            rsi = _wilder_rsi(close, 14)
+        else:
+            delta = close.diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
 
         # KDJ
         low_min = df['low'].rolling(window=9).min()

@@ -48,6 +48,7 @@ dependencies = [
     "tushare>=1.4.21",
     "yfinance>=0.2.63",
     "stockstats>=0.6.5",
+    "fin-primitives>=3.2.0",  # Wilder RSI（港股/指数技术指标）
 
     # AI和LLM
     "chromadb>=1.0.12",
