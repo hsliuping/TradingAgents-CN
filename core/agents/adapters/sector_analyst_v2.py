@@ -217,9 +217,6 @@ class SectorAnalystV2(AnalystAgent):
         growth_source_type="analysis_report",
     )
 
-    # 行业快照由本类自行注入（用户提示词段），基类不再重复追加
-    _INJECTS_INDUSTRY_SNAPSHOT = True
-
     # 分析师类型
     analyst_type = "sector"
 
@@ -501,15 +498,11 @@ class SectorAnalystV2(AnalystAgent):
         )
         mode = state.get("_analysis_data_source", "tushare")
         prompt = self._apply_mode_prompt_suffix(prompt, mode, "user")
-
-        # 🆕 v4.0 P1：行业快照注入（数据注入而非提示词分叉）
-        # 未命中行业/快照缺失返回空串 —— 按现状分析、不报错、不提及缺失
-        snapshot_section = self._build_industry_snapshot_section(ticker, analysis_date)
-
+        
         if prompt:
             logger.info(f"✅ 从模板系统获取板块分析师 v2.0 用户提示词 (长度: {len(prompt)})")
             logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
-            return prompt + snapshot_section
+            return prompt
         
         # 降级：使用默认提示词（不再检查 tool_data，因为工具数据会通过 ToolMessage 传递）
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
@@ -535,7 +528,7 @@ class SectorAnalystV2(AnalystAgent):
     3. 主要支撑因素、主要风险与资料缺口
     4. 后续观察事项
 
-    禁止输出配置价值判断、对冲安排、仓位配置、买卖建议、目标价、价格区间或任何执行性指令。""" + snapshot_section
+    禁止输出配置价值判断、对冲安排、仓位配置、买卖建议、目标价、价格区间或任何执行性指令。"""
 
         return f"""## 分析任务
 
@@ -556,38 +549,7 @@ class SectorAnalystV2(AnalystAgent):
     3. 与个股研究相关的主要支撑因素、主要风险与资料缺口
     4. 后续观察事项
 
-    禁止输出配置价值判断、对冲安排、仓位配置、买卖建议、目标价、价格区间或任何执行性指令。""" + snapshot_section
-
-    def _build_industry_snapshot_section(self, ticker: str, analysis_date: str) -> str:
-        """构建行业台快照注入段落（v4.0 P1；空串 = 无快照，按现状分析）
-
-        降级铁律：社区版剔除 core/pro 后 ImportError → 空串；
-        行业台未接入/数据缺失 → 空串。绝不影响既有分析行为。
-        """
-        try:
-            from core.pro.industry_snapshot import (
-                format_snapshot_for_prompt,
-                get_industry_snapshot,
-            )
-
-            snapshot = get_industry_snapshot(ticker, analysis_date)
-            if not snapshot:
-                return ""
-            text = format_snapshot_for_prompt(snapshot)
-            if not text:
-                return ""
-            return (
-                "\n\n## 🏭 行业台快照\n\n"
-                + text
-                + "\n\n（通用指引：请用一段呈现上面的行业台读数并原样保留口径标注，"
-                "结合分析框架卡把该个股放进行业周期位置中评估；"
-                "快照没覆盖的行业数字仍需自行检索并标注来源。）"
-            )
-        except ImportError:
-            return ""
-        except Exception as e:
-            logger.warning(f"⚠️ [SectorAnalystV2] 行业快照获取失败，本次按无快照分析: {e}")
-            return ""
+    禁止输出配置价值判断、对冲安排、仓位配置、买卖建议、目标价、价格区间或任何执行性指令。"""
 
     def _get_tool_suggestions(self) -> str:
         """生成工具调用建议"""

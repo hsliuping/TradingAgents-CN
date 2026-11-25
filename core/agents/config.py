@@ -276,8 +276,8 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         icon="📊",
         color="#3498db",
         tags=["基本面", "财务分析"],
-        tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement", "get_finnhub_company_insider_sentiment", "get_finnhub_company_insider_transactions", "get_simfin_balance_sheet", "get_simfin_cashflow", "get_simfin_income_stmt", "get_china_stock_data", "get_china_fundamentals"],
-        default_tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement"],
+        tools=["get_stock_fundamentals_unified", "get_finnhub_company_insider_sentiment", "get_finnhub_company_insider_transactions", "get_simfin_balance_sheet", "get_simfin_cashflow", "get_simfin_income_stmt", "get_china_stock_data", "get_china_fundamentals"],
+        default_tools=["get_stock_fundamentals_unified"],
         max_tool_calls=3,
         # 🆕 工作流配置
         requires_tools=True,
@@ -741,8 +741,8 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         icon="📊",
         color="#3498db",
         tags=["基本面", "财务分析", "v2.0"],
-        tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement"],
-        default_tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement"],
+        tools=["get_stock_fundamentals_unified"],
+        default_tools=["get_stock_fundamentals_unified"],
         max_tool_calls=3,
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),

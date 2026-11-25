@@ -13,4 +13,3 @@ pyyaml
 pytest
 pytest-cov
 pytest-asyncio
-ruff

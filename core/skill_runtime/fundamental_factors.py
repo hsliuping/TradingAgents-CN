@@ -1152,25 +1152,6 @@ def get_value_factor_bundle(symbol: str, allow_remote_fetch: bool = True) -> Dic
     pe_ttm = _to_float(_pick_first(basic_info.get("pe_ttm"), basic_info.get("pe"), market_quotes.get("pe")))
     peg = _safe_divide(pe_ttm, net_profit_yoy) if net_profit_yoy and net_profit_yoy > 0 else None
 
-    # PE(TTM) 与已同步财报的 TTM 净利润做符号一致性校正：
-    # 亏损期部分上游会把 pe_ttm 置空（如 Tushare daily_basic），旧值还可能残留在库里，
-    # 导致"TTM 已亏损、PE(TTM) 却是正的旧倍数"。亏损期统一用
-    # 总市值(亿元)/TTM归母净利润(元) 本地重算（市值口径同 pb_mrq 估计），
-    # 缺市值则置空，由前端展示"亏损/无数据"。
-    pe_ttm_recomputed = False
-    np_ttm = _to_float(_extract_financial_field(context["latest_financial"], ("net_profit_ttm",)))
-    if np_ttm is not None and np_ttm < 0 and (pe_ttm is None or pe_ttm > 0):
-        mv_yi = _to_float(_pick_first(
-            market_quotes.get("total_mv"),
-            basic_info.get("total_mv"),
-            basic_info.get("market_cap"),
-        ))
-        if mv_yi is not None and mv_yi > 0:
-            pe_ttm = round(mv_yi * 100000000.0 / np_ttm, 2)
-            pe_ttm_recomputed = True
-        else:
-            pe_ttm = None
-
     pb_mrq = _to_float(_pick_first(basic_info.get("pb_mrq"), _estimate_pb_mrq(context)))
 
     raw_dividend_yield = _to_float(_pick_first(
@@ -1202,11 +1183,6 @@ def get_value_factor_bundle(symbol: str, allow_remote_fetch: bool = True) -> Dic
         "industry_pb_median": _to_float(industry_pb_stats.get("median")),
     }
     factor_warnings = _build_value_factor_warnings(context, factors, industry_pe_stats, industry_pb_stats)
-    if pe_ttm_recomputed:
-        payload = factor_warnings.setdefault("pe_ttm", {"warning_conditions": [], "warning_categories": []})
-        condition = "pe_ttm recomputed_from total_mv/net_profit_ttm (upstream blank_or_stale_in_loss_period)"
-        if condition not in payload["warning_conditions"]:
-            payload["warning_conditions"].append(condition)
 
     return {
         **_base_snapshot(context),
@@ -1220,7 +1196,6 @@ def get_value_factor_bundle(symbol: str, allow_remote_fetch: bool = True) -> Dic
         "calculation_notes": [
             "peg 使用 pe_ttm / net_profit_yoy，增长率按同季同比百分比口径计算。",
             "dividend_yield 使用已实施现金分红 / 当前价格口径，与股息率估值增强和当前估值快照保持一致；basic_info.daily_basic 股息率作为回退口径。",
-            "亏损期上游 pe_ttm 置空或残留旧值时，按 总市值/TTM归母净利润 本地重算（负值），保证与 TTM 利润符号一致。",
         ],
         "missing_factors": _find_missing(
             factors,

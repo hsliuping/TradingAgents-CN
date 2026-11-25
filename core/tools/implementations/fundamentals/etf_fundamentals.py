@@ -135,147 +135,157 @@ def _fetch_etf_from_local(code: str) -> Tuple[Optional[dict], list]:
 
 
 def _fetch_etf_data_akshare(symbol: str) -> Optional[dict]:
-    """经 DataFacade 能力获取 ETF 实时行情数据。"""
+    """从 AKShare 获取 ETF 实时行情数据。"""
     try:
-        from tradingagents.dataflows.capability import query_capability_sync
+        import akshare as ak
 
         code = _normalize_etf_symbol(symbol)
         full = _get_etf_full_symbol(symbol)
         if not full:
             return None
 
-        df = query_capability_sync("fund_etf_spot")
+        df = ak.fund_etf_spot_em()
         if df is None or df.empty:
             return None
 
-        df["fund_code"] = df["fund_code"].astype(str)
-        row = df[df["fund_code"] == code]
+        code_col = "代码" if "代码" in df.columns else "基金代码"
+        name_col = "名称" if "名称" in df.columns else "基金名称"
+        df["code_clean"] = df[code_col].astype(str).str.extract(r"(\d{6})", expand=False).fillna("")
+        row = df[df["code_clean"] == code]
         if row.empty:
             return None
 
         record = row.iloc[0]
         return {
-            "name": record.get("fund_name", ""),
+            "name": record.get(name_col, record.get("名称", "")),
             "code": code,
             "full_symbol": full,
-            "latest_price": record.get("latest_price"),
-            "change_pct": record.get("pct_change"),
-            "volume": record.get("volume"),
-            "amount": record.get("amount"),
-            "fund_scale": None,
-            "track_index": "",
-            "fund_type": record.get("fund_type", ""),
+            "latest_price": record.get("最新价", record.get("当前-单位净值", record.get("最新-单位净值"))),
+            "change_pct": record.get("涨跌幅", record.get("增长率")),
+            "volume": record.get("成交量"),
+            "amount": record.get("成交额"),
+            "fund_scale": record.get("规模"),
+            "track_index": record.get("跟踪指数", ""),
+            "fund_type": record.get("基金类型", ""),
         }
     except Exception as e:
-        logger.warning(f"ETF 数据获取失败: {e}")
+        logger.warning(f"AKShare ETF 数据获取失败: {e}")
         return None
 
 
 def _fetch_etf_valuation_akshare(symbol: str) -> Optional[dict]:
-    """经 DataFacade 能力获取 ETF 净值、折溢价和场内申赎状态。"""
+    """从 AKShare 获取 ETF 净值、折溢价和场内申赎状态。"""
     try:
-        from tradingagents.dataflows.capability import query_capability_sync
+        import akshare as ak
 
         code = _normalize_etf_symbol(symbol)
         if not code:
             return None
 
-        nav_df = query_capability_sync("fund_etf_nav_daily")
-        if nav_df is None or nav_df.empty:
+        valuation_df = ak.fund_etf_fund_daily_em()
+        if valuation_df is None or valuation_df.empty:
             return None
 
-        nav_df["fund_code"] = nav_df["fund_code"].astype(str)
-        row = nav_df[nav_df["fund_code"] == code]
+        code_col = "基金代码" if "基金代码" in valuation_df.columns else "代码"
+        valuation_df["code_clean"] = valuation_df[code_col].astype(str).str.extract(r"(\d{6})", expand=False).fillna("")
+        row = valuation_df[valuation_df["code_clean"] == code]
         if row.empty:
             return None
 
         record = row.iloc[0]
+        unit_nav_col = next((col for col in valuation_df.columns if str(col).endswith("单位净值")), None)
+        accum_nav_col = next((col for col in valuation_df.columns if str(col).endswith("累计净值")), None)
+
         result = {
-            "unit_nav": record.get("unit_nav"),
-            "accum_nav": record.get("accum_nav"),
-            "nav_change_value": record.get("nav_change_value"),
-            "nav_growth_rate": record.get("growth_rate"),
-            "market_price": record.get("market_price"),
-            "premium_discount_rate": record.get("discount_rate"),
-            "fund_type": record.get("fund_type"),
+            "unit_nav": record.get(unit_nav_col) if unit_nav_col else None,
+            "accum_nav": record.get(accum_nav_col) if accum_nav_col else None,
+            "nav_change_value": record.get("增长值"),
+            "nav_growth_rate": record.get("增长率"),
+            "market_price": record.get("市价"),
+            "premium_discount_rate": record.get("折价率"),
+            "fund_type": record.get("类型"),
         }
 
         try:
-            info_df = query_capability_sync(
-                "fund_etf_nav_info",
+            info_df = ak.fund_etf_fund_info_em(
                 fund=code,
                 start_date=(datetime.now() - timedelta(days=30)).strftime("%Y%m%d"),
                 end_date=datetime.now().strftime("%Y%m%d"),
             )
             if info_df is not None and not info_df.empty:
-                latest = info_df.iloc[0]  # 能力按 nav_date 降序，首行即最新
+                latest = info_df.iloc[0]
                 result.update(
                     {
-                        "latest_nav_date": latest.get("nav_date"),
-                        "purchase_status": latest.get("purchase_status"),
-                        "redemption_status": latest.get("redeem_status"),
-                        "unit_nav": _coalesce(result.get("unit_nav"), latest.get("unit_nav")),
-                        "accum_nav": _coalesce(result.get("accum_nav"), latest.get("accum_nav")),
-                        "nav_growth_rate": _coalesce(result.get("nav_growth_rate"), latest.get("daily_growth")),
+                        "latest_nav_date": latest.get("净值日期"),
+                        "purchase_status": latest.get("申购状态"),
+                        "redemption_status": latest.get("赎回状态"),
+                        "unit_nav": _coalesce(result.get("unit_nav"), latest.get("单位净值")),
+                        "accum_nav": _coalesce(result.get("accum_nav"), latest.get("累计净值")),
+                        "nav_growth_rate": _coalesce(result.get("nav_growth_rate"), latest.get("日增长率")),
                     }
                 )
         except Exception as exc:
-            logger.warning(f"ETF 申赎状态获取失败: {exc}")
+            logger.warning(f"AKShare ETF 申赎状态获取失败: {exc}")
 
         return result
     except Exception as e:
-        logger.warning(f"ETF 估值数据获取失败: {e}")
+        logger.warning(f"AKShare ETF 估值数据获取失败: {e}")
         return None
 
 
 def _fetch_etf_data_tushare(symbol: str) -> Optional[dict]:
-    """经 DataFacade 能力获取 Tushare ETF 数据（fund_etf_basic + fund_etf_hist 首行）。
-
-    fund_etf_basic 当前仅注册 tushare 源，经门面调度即命中 tushare；
-    amount/issue_amount 等单位换算由能力适配器完成（amount 元、fund_scale 份）。
-    """
+    """从 Tushare 获取 ETF 数据（fund_basic + 最新 fund_daily）。"""
     try:
-        from tradingagents.dataflows.capability import query_capability_sync
+        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+
+        provider = get_tushare_provider()
+        if not provider or not provider.api:
+            return None
 
         code = _normalize_etf_symbol(symbol)
-        if not code:
+        full = _get_etf_full_symbol(symbol)
+        if not full:
             return None
 
-        df_basic = query_capability_sync("fund_etf_basic", symbol=code)
+        df_basic = provider.api.fund_basic(market="E", status="L", ts_code=full)
         if df_basic is None or df_basic.empty:
             return None
-        record = df_basic.iloc[0]
 
-        # 最近交易日行情：7 天窗口覆盖周末/节假日（修复原 1 天窗口周一取不到周五数据的缺陷）
+        record = df_basic.iloc[0]
         end = datetime.now().strftime("%Y%m%d")
-        start = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
-        df_hist = query_capability_sync("fund_etf_hist", symbol=code, start_date=start, end_date=end)
+        start = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        df_daily = provider.api.fund_daily(ts_code=full, start_date=start, end_date=end)
         latest_price = None
         change_pct = None
         volume = None
         amount = None
-        if df_hist is not None and not df_hist.empty:
-            latest = df_hist.iloc[0]
+        if df_daily is not None and not df_daily.empty:
+            latest = df_daily.iloc[0]
             latest_price = latest.get("close")
-            change_pct = latest.get("pct_change")
-            volume = latest.get("volume")
+            change_pct = latest.get("pct_chg")
+            volume = latest.get("vol")
             amount = latest.get("amount")
+            if amount is not None:
+                try:
+                    amount = float(amount) * 1000
+                except (TypeError, ValueError):
+                    pass
 
         return {
             "name": record.get("name", ""),
             "code": code,
-            "full_symbol": _get_etf_full_symbol(symbol),
+            "full_symbol": full,
             "latest_price": latest_price,
             "change_pct": change_pct,
             "volume": volume,
             "amount": amount,
-            "fund_scale": record.get("fund_scale"),
-            "track_index": str(record.get("track_index", "") or ""),
+            "fund_scale": record.get("issue_amount"),
+            "track_index": str(record.get("benchmark", "") or ""),
             "management": record.get("management"),
             "custodian": record.get("custodian"),
             "fund_type": record.get("fund_type"),
-            "management_fee": record.get("management_fee"),
-            "custodian_fee": record.get("custodian_fee"),
+            "management_fee": record.get("m_fee"),
+            "custodian_fee": record.get("c_fee"),
             "found_date": record.get("found_date"),
             "list_date": record.get("list_date"),
             "issue_date": record.get("issue_date"),
@@ -283,30 +293,75 @@ def _fetch_etf_data_tushare(symbol: str) -> Optional[dict]:
             "invest_type": record.get("invest_type"),
             "status": record.get("status"),
             "min_amount": record.get("min_amount"),
-            "purchase_start_date": record.get("purchase_start_date"),
-            "redemption_start_date": record.get("redemption_start_date"),
+            "purchase_start_date": record.get("purc_startdate"),
+            "redemption_start_date": record.get("redm_startdate"),
         }
     except Exception as e:
         logger.warning(f"Tushare ETF 数据获取失败: {e}")
         return None
 
 
-def _fetch_etf_hist_via_facade(symbol: str, days: int = 30) -> list:
-    """经 DataFacade 能力获取 ETF 历史数据（源优先级由门面统一调度）。"""
+def _fetch_etf_hist_tushare(symbol: str, days: int = 30) -> list:
+    """从 Tushare 获取 ETF 历史数据。"""
     try:
-        from tradingagents.dataflows.capability import query_capability_sync
+        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+
+        provider = get_tushare_provider()
+        if not provider or not provider.api:
+            return []
+
+        code = _normalize_etf_symbol(symbol)
+        full = _get_etf_full_symbol(symbol)
+        if not full:
+            return []
+
+        end = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        df = provider.api.fund_daily(ts_code=full, start_date=start, end_date=end)
+        if df is None or df.empty:
+            return []
+
+        records = []
+        for _, record in df.iterrows():
+            trade_date = record.get("trade_date")
+            if trade_date:
+                trade_date = str(trade_date)
+                if len(trade_date) == 8:
+                    trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+            records.append(
+                {
+                    "日期": trade_date,
+                    "date": trade_date,
+                    "trade_date": trade_date,
+                    "收盘": record.get("close"),
+                    "close": record.get("close"),
+                    "涨跌幅": record.get("pct_chg"),
+                    "pct_chg": record.get("pct_chg"),
+                    "增长率": record.get("pct_chg"),
+                }
+            )
+        return records
+    except Exception as e:
+        logger.warning(f"Tushare ETF 历史数据获取失败: {e}")
+        return []
+
+
+def _fetch_etf_hist_akshare(symbol: str, days: int = 30) -> list:
+    """从 AKShare 获取 ETF 历史数据。"""
+    try:
+        import akshare as ak
 
         code = _normalize_etf_symbol(symbol)
         if not code:
             return []
         end = datetime.now().strftime("%Y%m%d")
         start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        df = query_capability_sync("fund_etf_hist", symbol=code, start_date=start, end_date=end)
+        df = ak.fund_etf_hist_em(symbol=code, period="daily", start_date=start, end_date=end)
         if df is None or df.empty:
             return []
         return df.to_dict("records")
     except Exception as e:
-        logger.warning(f"ETF 历史数据获取失败: {e}")
+        logger.warning(f"AKShare ETF 历史数据获取失败: {e}")
         return []
 
 
@@ -326,7 +381,7 @@ def _fetch_etf_online_bundle(symbol: str, source: str, include_hist: bool = True
     if normalized == "tushare":
         spot = _fetch_etf_data_tushare(symbol)
         if spot and include_hist:
-            hist = _fetch_etf_hist_via_facade(symbol, days=30)
+            hist = _fetch_etf_hist_tushare(symbol, days=30)
         return spot, hist
 
     if normalized == "akshare":
@@ -335,7 +390,7 @@ def _fetch_etf_online_bundle(symbol: str, source: str, include_hist: bool = True
         if not spot:
             return None, []
         if include_hist:
-            hist = _fetch_etf_hist_via_facade(symbol, days=30)
+            hist = _fetch_etf_hist_akshare(symbol, days=30)
         return spot, hist
 
     return None, []
@@ -513,7 +568,7 @@ def get_etf_fundamentals(
         for item in reversed(recent):
             date = item.get("日期", item.get("date", item.get("trade_date", "-")))
             close = item.get("收盘", item.get("close", "-"))
-            pct = item.get("涨跌幅", item.get("pct_chg", item.get("pct_change", item.get("增长率", "-"))))
+            pct = item.get("涨跌幅", item.get("pct_chg", item.get("增长率", "-")))
             lines.append(f"- {date}: 收盘 {close}, 涨跌幅 {pct}%")
         lines.append("")
     else:

@@ -576,7 +576,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         example="get_auto_brand_monthly_sales(brand='问界', month='202608')",
         related_tools=["get_sector_data", "get_stock_fundamentals_unified"],
         limitations="数据来自懂车帝公开榜单，覆盖乘用车车型零售销量；榜单仅收录有销量的车型，销量极低或未上市的车型可能缺失。",
-        capability_tags=["auto_cycle", "auto_sales", "brand_sales", "monthly_sales", "auto_industry", "dongchedi"],
+        capability_tags=["auto_sales", "brand_sales", "monthly_sales", "auto_industry", "dongchedi"],
         tool_role_hint="specialized",
         output_shape="report",
         preferred_for=["汽车品牌月度销量查询", "品牌旗下车型销量对比", "整车厂商销量跟踪"],

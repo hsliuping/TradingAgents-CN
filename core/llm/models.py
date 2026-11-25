@@ -18,6 +18,7 @@ class LLMProvider(str, Enum):
     ANTHROPIC = "anthropic"
     OLLAMA = "ollama"
     OPENROUTER = "openrouter"
+    MODELFLARE = "modelflare"  # Modelflare 聚合网关
 
 
 class MessageRole(str, Enum):
@@ -36,9 +37,6 @@ class Message(BaseModel):
     name: Optional[str] = None
     tool_calls: Optional[List["ToolCall"]] = None
     tool_call_id: Optional[str] = None
-    # 多模态：图片输入（URL 或 base64 data URI）。非空时 OpenAICompatAdapter
-    # 会把 content 组装成 text + image_url 的 content 列表（视觉模型读图）。 
-    images: Optional[List[str]] = None
     
     class Config:
         use_enum_values = True
@@ -138,10 +136,12 @@ class LLMConfig(BaseModel):
                 "api_key": os.getenv("ANTHROPIC_API_KEY"),
                 "model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
             },
+            LLMProvider.MODELFLARE: {
+                "api_key": os.getenv("MODELFLARE_API_KEY"),
+                "base_url": "https://modelflare.dev/v1",
+                "model": os.getenv("MODELFLARE_MODEL", "gpt-5.6-sol"),
+            },
         }
-        
-        if provider not in config_map:
-            raise ValueError(f"不支持的提供商: {provider}")
         
         config_data = config_map[provider]
         api_key = config_data.get("api_key")
@@ -155,6 +155,7 @@ class LLMConfig(BaseModel):
                 LLMProvider.ZHIPU: "ZHIPU_API_KEY",
                 LLMProvider.GOOGLE: "GOOGLE_API_KEY",
                 LLMProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
+                LLMProvider.MODELFLARE: "MODELFLARE_API_KEY",
             }
             expected_env_key = env_key_map.get(provider, "API_KEY")
             logger.warning(

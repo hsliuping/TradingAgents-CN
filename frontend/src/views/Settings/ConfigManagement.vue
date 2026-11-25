@@ -37,6 +37,11 @@
             </template>
             <!-- 非京东云模式：显示全部菜单 -->
             <template v-else>
+              <el-menu-item index="onboarding">
+                <el-icon><Guide /></el-icon>
+                <span>快速接入</span>
+                <el-tag size="small" type="success" class="menu-tag">推荐</el-tag>
+              </el-menu-item>
               <el-menu-item index="providers">
                 <el-icon><OfficeBuilding /></el-icon>
                 <span>厂家管理</span>
@@ -247,6 +252,11 @@
         <!-- 配置验证（京东云模式下隐藏） -->
         <div v-if="!isJdyunMode()" v-show="activeTab === 'validation'">
           <ConfigValidator />
+        </div>
+
+        <!-- 快速接入向导（issue #785：填 Key → 自动拉模型 → 直接选，替代三页面流程） -->
+        <div v-if="!isJdyunMode()" v-show="activeTab === 'onboarding'">
+          <LLMOnboarding />
         </div>
 
         <!-- 模型目录管理（京东云模式下隐藏） -->
@@ -1599,7 +1609,8 @@ import {
   OfficeBuilding,
   CircleCheck,
   Collection,
-  Connection
+  Connection,
+  Guide
 } from '@element-plus/icons-vue'
 
 import {
@@ -1616,6 +1627,7 @@ import {
 } from '@/api/config'
 import ConfigValidator from '@/components/ConfigValidator.vue'
 import LLMConfigDialog from './components/LLMConfigDialog.vue'
+import LLMOnboarding from './components/LLMOnboarding.vue'
 import ProviderDialog from './components/ProviderDialog.vue'
 import ModelCatalogManagement from './components/ModelCatalogManagement.vue'
 import DataSourceConfigDialog from './components/DataSourceConfigDialog.vue'
@@ -3135,6 +3147,29 @@ onMounted(async () => {
     await loadDataSourceConfigs()
     return
   }
+
+  // issue #785：首次用户默认落在「快速接入」，避免面对空的厂家/模型/配置三页面
+  // 而不知道从何下手；已有可用模型的用户仍默认落在厂家管理。
+  try {
+    const [cfgs, providers] = await Promise.all([
+      configApi.getLLMConfigs().catch(() => []),
+      configApi.getLLMProviders().catch(() => [])
+    ])
+    const validProviders = new Set(
+      (providers || [])
+        .filter(p => p.api_key && String(p.api_key).trim())
+        .map(p => p.name)
+    )
+    const hasUsableModel = (cfgs || []).some(
+      c => c.enabled && c.provider && validProviders.has(c.provider)
+    )
+    if (!hasUsableModel) {
+      activeTab.value = 'onboarding'
+    }
+  } catch {
+    // 判定失败时不影响默认行为
+  }
+
   // 先加载厂家信息，再加载其他数据
   await loadProviders()
   await loadProviderInfoMap()

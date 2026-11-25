@@ -9,8 +9,6 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 import uuid
 
-from core.workflow.depth_profiles import build_depth_profile_meta
-
 logger = logging.getLogger(__name__)
 
 
@@ -213,8 +211,6 @@ async def save_analysis_report(
         "summary": summary or "研究完成",
         "analysts": analysts or [],
         "research_depth": research_depth,
-        # M4.2：档位元数据（档位/环节清单含 skipped/执行形态/实际轮数），便于复盘与验收
-        "depth_profile": build_depth_profile_meta(research_depth),
 
         # 报告内容（使用清理后的 reports，避免重复数据）
         "reports": cleaned_reports,
@@ -250,39 +246,6 @@ async def save_analysis_report(
         logger.info(f"✅ 分析报告已保存到MongoDB: {analysis_id}, 共 {len(reports)} 个报告模块")
     else:
         logger.error("❌ MongoDB插入失败")
-
-    # M5.1 结论快照：非快速档（memory_mode != off）落快照，供下期分析作对比基线。
-    # 快速档不写；缓存命中路径不经过本函数，天然不写快照（M6.3 边界）。
-    try:
-        from core.workflow.depth_profiles import MEMORY_OFF, get_profile, normalize_depth
-
-        if get_profile(research_depth).memory_mode != MEMORY_OFF:
-            from app.utils.conclusion_snapshot import (
-                extract_conclusion_snapshot,
-                save_conclusion_snapshot,
-            )
-
-            snapshot = extract_conclusion_snapshot(
-                cleaned_reports,
-                decision=decision,
-                recommendation=recommendation,
-                confidence_score=confidence_score,
-                key_points=key_points,
-            )
-            snapshot_date = analysis_date or timestamp.strftime("%Y-%m-%d")
-            await save_conclusion_snapshot(
-                db,
-                user_id=user_id,
-                ticker=stock_symbol,
-                stock_name=stock_name,
-                snapshot=snapshot,
-                data_as_of=snapshot_date,
-                depth=normalize_depth(research_depth),
-                run_id=analysis_id,
-                analysis_date=snapshot_date,
-            )
-    except Exception as e:
-        logger.warning(f"⚠️ 结论快照写入失败（不影响报告保存）: {e}")
 
     return analysis_id
 

@@ -62,21 +62,7 @@ class ManagerAgent(BaseAgent):
     
     # 是否需要辩论
     enable_debate: bool = False
-
-    # 辩论状态字段（子类声明，如 investment_debate_state / risk_debate_state）
-    debate_state_field: Optional[str] = None
-
-    # 未声明时的兜底映射：按 manager_type 找对应辩论状态字段
-    _DEBATE_STATE_BY_MANAGER_TYPE = {
-        "research": "investment_debate_state",
-        "risk": "risk_debate_state",
-    }
-
-    # 辩论总结中单侧摘录上限（完整报告已作为 bull_report / *_opinion 单独提供）
-    _DEBATE_SIDE_EXCERPT_LIMIT = 600
-    # 辩论总结总长度上限，避免把整份报告再塞一遍撑爆上下文
-    _DEBATE_SUMMARY_LIMIT = 3000
-
+    
     def __init__(
         self,
         config: Optional[Dict[str, Any]] = None,
@@ -179,13 +165,15 @@ class ManagerAgent(BaseAgent):
                 raise ValueError("No inputs available for decision making")
             
             # 3. 如果启用辩论，进行辩论
-            # （M5.4：per-agent 向量记忆读注入已退位，上期结论对比基线由
-            # core/agents/base.py 注入，见结论快照机制；记忆写入链路保留）
             if self.enable_debate:
                 debate_summary = self._conduct_debate(inputs, state)
             else:
                 debate_summary = None
 
+            memory_context = self._get_memory_context(ticker, inputs)
+            if memory_context:
+                debate_summary = self._merge_memory_context(debate_summary, memory_context)
+            
             # 4. 构建提示词
             logger.info(f"🔍 [{self.agent_id}] 开始构建提示词...")
             # 🔑 传递 state 参数（子类可以从 state 中提取变量如 company_name, ticker 等）
@@ -229,8 +217,9 @@ class ManagerAgent(BaseAgent):
 
             if self._llm:
                 import time as _time
-                # R1：超时等可重试错误走基类 3 次指数退避，避免一次抖动直接判节点失败
-                response, _llm_duration_ms = self._invoke_llm_with_retry(messages)
+                _t0 = _time.time()
+                response = self._llm.invoke(messages)
+                _llm_duration_ms = int((_time.time() - _t0) * 1000)
 
                 # 🛡️ Q1: 空响应防线——推理模型偶发"瞬时异常"返回空 content（HTTP 成功但可见内容为 0）
                 # 记录 finish_reason/思考token 后退避重试 1 次；仍为空则走失败路径，禁止把空内容包装成成功
@@ -404,93 +393,64 @@ class ManagerAgent(BaseAgent):
             辩论总结
         """
         self.debate_history = []
-        debate_state = self._resolve_debate_state(state)
-
-        # 优先用自带交锋台账（research_self_debate_v2 / risk_self_debate_v2 产出）
-        summary = ""
-        ledger = debate_state.get("debate_ledger")
-        if isinstance(ledger, str) and ledger.strip():
-            summary = f"【交锋台账】\n{ledger.strip()}"
-        else:
-            summary = self._build_debate_text_from_state(debate_state, inputs)
-
-        if not summary:
-            logger.warning(f"⚠️ [{self.agent_id}] 未找到可用的辩论材料，debate_summary 为空")
-            return ""
-
-        if len(summary) > self._DEBATE_SUMMARY_LIMIT:
-            summary = summary[: self._DEBATE_SUMMARY_LIMIT].rstrip() + "\n…（辩论内容已按长度截断）"
-
+        
+        # 简化实现：直接总结各方观点
+        # 实际实现可以进行多轮辩论
+        debate_summary = "辩论总结：\n"
+        
+        for key, value in inputs.items():
+            if isinstance(value, dict) and "content" in value:
+                debate_summary += f"\n{key}: {value['content'][:200]}...\n"
+        
         self.debate_history.append({
             "round": 1,
-            "summary": summary
+            "summary": debate_summary
         })
-        logger.info(f"💬 [{self.agent_id}] 辩论总结已生成，长度: {len(summary)} 字符")
 
-        return summary
+        return debate_summary
 
-    def _resolve_debate_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """获取本管理者的辩论状态（显式声明优先，其次按 manager_type 兜底）。"""
-        field = self.debate_state_field or self._DEBATE_STATE_BY_MANAGER_TYPE.get(self.manager_type or "")
-        if not field:
-            return {}
-        debate_state = state.get(field)
-        return debate_state if isinstance(debate_state, dict) else {}
-
-    def _build_debate_text_from_state(
-        self,
-        debate_state: Dict[str, Any],
-        inputs: Dict[str, Any],
-    ) -> str:
-        """从辩论状态或输入材料构建辩论正文（只做摘录，不补造内容）。
-
-        历史问题：旧实现只遍历 inputs 中形如 {"content": ...} 的项，而
-        bull_report / bear_report 是纯字符串，导致 debate_summary 恒为
-        “辩论总结：\\n”，研究整合员据此在报告里自陈“辩论总结缺失”。
-        """
-        # 1) 按发言顺序的完整历史，最能体现观点演化
-        history = debate_state.get("history")
-        if isinstance(history, str) and history.strip():
-            return f"【辩论记录（按发言顺序，节选）】\n{self._tail_text(history, 2000)}"
-
-        # 2) 分侧历史（部分实现只写 bull_history / bear_history 等）
-        side_parts = []
-        for field in ("bull_history", "bear_history", "risky_history", "safe_history", "neutral_history"):
-            value = debate_state.get(field)
-            if isinstance(value, str) and value.strip():
-                side_parts.append(f"{field}: {self._head_text(value, self._DEBATE_SIDE_EXCERPT_LIMIT)}")
-        if side_parts:
-            return "【双方历史发言（节选）】\n" + "\n".join(side_parts)
-
-        # 3) 没有辩论状态：退回输入材料摘录（宁缺勿造，只截取原文）
-        input_parts = []
-        for key, value in inputs.items():
-            text = self._extract_input_text(value)
-            if not text:
+    def _build_memory_query(self, ticker: str, inputs: Dict[str, Any]) -> str:
+        query_parts = [f"股票代码: {ticker}", f"管理者类型: {self.manager_type or self.agent_id}", "历史管理决策"]
+        for key, value in list(inputs.items())[:4]:
+            if not value:
                 continue
-            input_parts.append(f"{key}: {self._head_text(text, self._DEBATE_SIDE_EXCERPT_LIMIT)}")
-        if input_parts:
-            return "【双方研究材料摘要（节选）】\n" + "\n".join(input_parts)
+            content = value.get("content") if isinstance(value, dict) else str(value)
+            query_parts.append(f"{key}: {str(content)[:200]}")
+        return "\n".join(query_parts)
+
+    def _get_memory_context(self, ticker: str, inputs: Dict[str, Any]) -> str:
+        if not self.memory:
+            return ""
+
+        try:
+            query = self._build_memory_query(ticker, inputs)
+
+            if not hasattr(self.memory, "search_memories"):
+                logger.warning("记忆实例不支持 search_memories，已跳过管理者历史召回: %s", type(self.memory).__name__)
+                return ""
+
+            memories = self.memory.search_memories(
+                query=query,
+                n_results=3,
+                filter_metadata={"ticker": ticker} if ticker else None,
+            )
+            formatted = []
+            for item in memories or []:
+                content = item.get("content", "")
+                similarity = item.get("similarity", 0.0)
+                if content:
+                    formatted.append(f"[相似度: {similarity:.2f}] {content}")
+            if formatted:
+                return "【历史管理经验】\n" + "\n\n".join(formatted)
+        except Exception as exc:
+            logger.warning(f"获取管理者历史记忆失败: {exc}")
 
         return ""
 
-    @staticmethod
-    def _extract_input_text(value: Any) -> str:
-        if isinstance(value, dict):
-            value = value.get("content")
-        if isinstance(value, str):
-            return value.strip()
-        return ""
-
-    @staticmethod
-    def _head_text(text: str, limit: int) -> str:
-        text = text.strip()
-        return text if len(text) <= limit else text[:limit].rstrip() + "…（已截断）"
-
-    @staticmethod
-    def _tail_text(text: str, limit: int) -> str:
-        text = text.strip()
-        return text if len(text) <= limit else "…（前文已截断）" + text[-limit:].lstrip()
+    def _merge_memory_context(self, debate_summary: Optional[str], memory_context: str) -> str:
+        if debate_summary:
+            return f"{debate_summary}\n\n{memory_context}"
+        return memory_context
 
     def _save_to_memory(self, ticker: str, decision: Any) -> None:
         if not self.memory:

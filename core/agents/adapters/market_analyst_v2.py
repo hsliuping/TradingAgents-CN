@@ -1,5 +1,4 @@
 from core.agents.analyst import AnalystAgent
-from tradingagents.agents.utils.compliance_prompting import SOURCE_ANNOTATION_REQUIREMENT
 from core.agents.base import GENERIC_REPORT_FALLBACK
 """
 市场分析师Agent v2.0
@@ -202,9 +201,6 @@ class MarketAnalystV2(AnalystAgent):
                 user_prompt = self._build_user_prompt(ticker, analysis_date, state)
 
             analysis_prompt = analysis_override or self._build_analysis_prompt(ticker)
-
-            # 🆕 v4.0 T2：数字必须带来源标注（6 个分析师统一纪律）
-            system_prompt += SOURCE_ANNOTATION_REQUIREMENT
 
             messages = [
                 SystemMessage(content=system_prompt),

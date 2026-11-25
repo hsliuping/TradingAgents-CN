@@ -4,11 +4,8 @@
 提供兼容Python 3.13+的强健环境变量解析功能
 """
 
-import logging
 import os
 from typing import Any, Union, Optional
-
-logger = logging.getLogger(__name__)
 
 
 def parse_bool_env(env_var: str, default: bool = False) -> bool:
@@ -63,7 +60,7 @@ def parse_bool_env(env_var: str, default: bool = False) -> bool:
         return False
     else:
         # 如果无法识别，记录警告并返回默认值
-        logger.warning(f"⚠️ 无法解析环境变量 {env_var}='{value}'，使用默认值 {default}")
+        print(f"⚠️ 无法解析环境变量 {env_var}='{value}'，使用默认值 {default}")
         return default
 
 
@@ -86,7 +83,7 @@ def parse_int_env(env_var: str, default: int = 0) -> int:
     try:
         return int(value.strip())
     except (ValueError, AttributeError):
-        logger.warning(f"⚠️ 无法解析环境变量 {env_var}='{value}' 为整数，使用默认值 {default}")
+        print(f"⚠️ 无法解析环境变量 {env_var}='{value}' 为整数，使用默认值 {default}")
         return default
 
 
@@ -109,7 +106,7 @@ def parse_float_env(env_var: str, default: float = 0.0) -> float:
     try:
         return float(value.strip())
     except (ValueError, AttributeError):
-        logger.warning(f"⚠️ 无法解析环境变量 {env_var}='{value}' 为浮点数，使用默认值 {default}")
+        print(f"⚠️ 无法解析环境变量 {env_var}='{value}' 为浮点数，使用默认值 {default}")
         return default
 
 
@@ -158,7 +155,7 @@ def parse_list_env(env_var: str, separator: str = ",", default: Optional[list] =
         # 过滤空字符串
         return [item for item in items if item]
     except AttributeError:
-        logger.warning(f"⚠️ 无法解析环境变量 {env_var}='{value}' 为列表，使用默认值 {default}")
+        print(f"⚠️ 无法解析环境变量 {env_var}='{value}' 为列表，使用默认值 {default}")
         return default
 
 

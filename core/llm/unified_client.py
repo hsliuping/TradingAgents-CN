@@ -67,6 +67,7 @@ class UnifiedLLMClient:
             LLMProvider.SILICONFLOW: OpenAICompatAdapter,
             LLMProvider.OLLAMA: OpenAICompatAdapter,
             LLMProvider.OPENROUTER: OpenAICompatAdapter,
+            LLMProvider.MODELFLARE: OpenAICompatAdapter,
         }
 
         if GOOGLE_AVAILABLE:

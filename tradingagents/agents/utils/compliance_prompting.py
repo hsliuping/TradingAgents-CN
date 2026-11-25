@@ -125,17 +125,3 @@ def build_research_only_closing(extra_items: Iterable[str] | None = None) -> str
     if extra_items:
         lines.extend(str(item) for item in extra_items if item)
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# 🆕 v4.0 第一波 T2：数字来源标注纪律（6 个分析师通用，无行业分叉）
-# 每个关键数字必须紧跟来源标注，杜绝无来源数字污染下游（bull/bear/trader/risk）。
-# 用法：system_prompt 组装完成后 `system_prompt += SOURCE_ANNOTATION_REQUIREMENT`
-# ---------------------------------------------------------------------------
-SOURCE_ANNOTATION_REQUIREMENT = (
-    "\n\n【数据纪律·来源标注】\n"
-    "报告中出现的每一个关键数字（价格、涨跌幅、估值、产量、销量、利率、市占率等）"
-    "都必须紧跟来源标注——数据来源、指标口径或统计截止时间任一即可，"
-    '例如："猪价 14.5 元/公斤（涌益日频，截至 2026-10-20）"。\n'
-    "来源不明或无法核实的数字不得写入报告；平台注入的行业读数已带口径标注，引用时原样保留。"
-)

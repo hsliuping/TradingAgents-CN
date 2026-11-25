@@ -1,6 +1,6 @@
 {
   "name": "tradingagents-cn-pro-frontend",
-  "version": "4.0.0-beta.1",
+  "version": "3.0.0",
   "description": "TradingAgents-CN Pro 现代化前端界面",
   "type": "module",
   "scripts": {

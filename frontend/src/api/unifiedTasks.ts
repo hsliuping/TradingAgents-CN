@@ -50,8 +50,7 @@ export interface TaskListItem {
   completed_at?: string
   execution_time: number
   error_message?: string
-  degraded_nodes?: Record<string, any>
-
+  
   // 任务参数（用于显示）
   symbol?: string
   code?: string
@@ -116,29 +115,6 @@ export interface TaskListParams {
   skip?: number
 }
 
-/**
- * 任务执行轨迹（v4.0 T4 可观测性）
- */
-export interface TaskTraceStep {
-  step: number
-  checkpoint_id?: string
-  timestamp?: string | null
-  elapsed_seconds?: number | null
-  source?: string
-  nodes: string[]
-  updated_channels: string[]
-}
-
-export interface TaskTrace {
-  task_id: string
-  has_trace: boolean
-  total_steps: number
-  started_at?: string | null
-  ended_at?: string | null
-  duration_seconds?: number | null
-  steps: TaskTraceStep[]
-}
-
 // ==================== API 方法 ====================
 
 /**
@@ -175,24 +151,10 @@ export function cancelTask(taskId: string) {
 }
 
 /**
- * 暂停任务（协作式：当前分析步骤完成后暂停，可断点续跑）
- */
-export function pauseTask(taskId: string) {
-  return ApiClient.post<{ success: boolean; message: string }>(`/api/v2/tasks/${taskId}/pause`)
-}
-
-/**
  * 恢复挂起的任务
  */
 export function resumeTask(taskId: string) {
   return ApiClient.post<{ success: boolean; message: string }>(`/api/v2/tasks/${taskId}/resume`)
-}
-
-/**
- * 获取任务执行轨迹
- */
-export function getTaskTrace(taskId: string) {
-  return ApiClient.get<TaskTrace>(`/api/v2/tasks/${taskId}/trace`)
 }
 
 /**

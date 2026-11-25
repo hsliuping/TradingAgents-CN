@@ -54,7 +54,7 @@ def get_stock_basic_info(symbol: str, source: Optional[str] = None) -> Optional[
 
     Args:
         symbol: 6 位股票代码，如 600519
-        source: 指定数据源（可选），不传则查询全部源记录并做多源合并（非空字段互补）
+        source: 指定数据源（可选），不传则按系统优先级查询
 
     Returns:
         股票基础信息字典，含 name、industry、total_mv、pe_ttm 等；无数据返回 None
@@ -67,10 +67,13 @@ def get_stock_basic_info(symbol: str, source: Optional[str] = None) -> Optional[
         query["source"] = source
         doc = col.find_one(query, {"_id": 0})
     else:
-        # 多源记录合并（非空字段互补）：单次查询替代逐源探测，避免逐源偏读导致字段缺失
-        from tradingagents.dataflows.stock_basic_schema import merge_stock_basic_records
-
-        doc = merge_stock_basic_records(list(col.find(query, {"_id": 0})))
+        for src in _get_sources():
+            q = {**query, "source": src}
+            doc = col.find_one(q, {"_id": 0})
+            if doc:
+                break
+        if not doc:
+            doc = col.find_one(query, {"_id": 0})
     return doc
 
 
@@ -202,46 +205,14 @@ def get_market_quotes(symbol: str) -> Optional[Dict[str, Any]]:
     return doc
 
 
-def get_latest_stock_price(
-    symbol: str, as_of_date: Optional[str] = None
-) -> Optional[float]:
+def get_latest_stock_price(symbol: str) -> Optional[float]:
     """
     获取股票最新可用价格。
 
     优先使用 market_quotes，其次回退到 stock_basic_info 中的 close/current_price/pre_close。
     若无正数价格则返回 None。
-
-    Args:
-        symbol: 6 位股票代码
-        as_of_date: 分析基准日（YYYY-MM-DD）。传入时按系统变量 current_price 的口径
-            取「不晚于该日的最近一个已完成交易日收盘价」；当日日线未落库时回退为
-            快照昨收。不传则维持原逻辑（最新快照价）。
     """
     symbol = str(symbol).strip().zfill(6)
-
-    if as_of_date:
-        db = _get_db()
-        daily = db[_COL_DAILY].find_one(
-            {
-                "$or": [{"symbol": symbol}, {"code": symbol}],
-                "trade_date": {"$lte": as_of_date},
-            },
-            {"_id": 0, "close": 1, "trade_date": 1},
-            sort=[("trade_date", -1)],
-        )
-        if daily and isinstance(daily.get("close"), (int, float)) and daily["close"] > 0:
-            return float(daily["close"])
-
-        quotes = get_market_quotes(symbol) or {}
-        quote_date = str(quotes.get("trade_date") or "")
-        pre_close = quotes.get("pre_close")
-        if (
-            quote_date
-            and quote_date >= as_of_date
-            and isinstance(pre_close, (int, float))
-            and pre_close > 0
-        ):
-            return float(pre_close)
 
     quotes = get_market_quotes(symbol) or {}
     for field in ("current_price", "close", "pre_close", "open"):

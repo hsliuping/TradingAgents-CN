@@ -23,7 +23,7 @@ class DataConsistencyResult:
 
 class DataConsistencyChecker:
     """No-op checker: always returns consistent and uses primary data.
-    This is a lightweight placeholder so that DataAdapterOrchestrator can import it
+    This is a lightweight placeholder so that DataSourceManager can import it
     without printing warnings when the full checker isn't provided.
     """
 

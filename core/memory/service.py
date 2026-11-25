@@ -98,22 +98,19 @@ class MemoryService:
                 return False
 
             try:
-                # 先构建并校验配置，再加载 mem0 SDK：LLM API Key 缺失时直接降级返回，
-                # 不触碰 mem0 模块与 provider 注册，健康检查也能给出明确的缺 key 诊断
+                from mem0 import AsyncMemory
                 from .config import build_mem0_config
+                from .mem0_mongodb_store import register_mem0_mongodb_provider
+
+                # 注册自定义 MongoDB 向量存储 provider（客户端 cosine）
+                # 替换 mem0 官方 MongoDB provider（依赖 Atlas $vectorSearch）
+                register_mem0_mongodb_provider()
 
                 resolved_config = config or build_mem0_config(self._db)
                 if not resolved_config.get("llm", {}).get("config", {}).get("api_key"):
                     self._init_error = "缺少 LLM API Key，mem0 记忆层不可用"
                     logger.warning("[MemoryService] %s", self._init_error)
                     return False
-
-                from mem0 import AsyncMemory
-                from .mem0_mongodb_store import register_mem0_mongodb_provider
-
-                # 注册自定义 MongoDB 向量存储 provider（客户端 cosine）
-                # 替换 mem0 官方 MongoDB provider（依赖 Atlas $vectorSearch）
-                register_mem0_mongodb_provider()
 
                 embedder_error = _validate_embedder_config(resolved_config)
                 if embedder_error:

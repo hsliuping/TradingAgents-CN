@@ -10,14 +10,12 @@ export interface ProMenuItem {
   label: string
   advanced?: boolean
   badge?: { text: string; type: 'primary' | 'success' | 'warning' | 'danger' | 'info' }
-  icon?: string
 }
 
 export interface ProMenuGroup {
   path: string
   label: string
   advanced?: boolean
-  icon?: string
   children: ProMenuItem[]
 }
 
@@ -45,6 +43,3 @@ export const proAnalysisSettingsItems: ProMenuItem[] = []
 
 /** 系统管理中的 Pro 项（社区版：空） */
 export const proAdminSettingsItems: ProMenuItem[] = []
-
-/** 通用 Pro 菜单分组（社区版：空） */
-export const proMenuGroups: ProMenuGroup[] = []

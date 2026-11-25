@@ -39,7 +39,6 @@ class NewsSyncRequest(BaseModel):
     data_sources: Optional[List[str]] = Field(None, description="数据源列表")
     hours_back: int = Field(24, description="回溯小时数")
     max_news_per_source: int = Field(50, description="每个数据源最大新闻数量")
-    data_type: Optional[str] = Field(None, description="数据类型：announcement=只同步公告 / news=只同步普通新闻 / 空=全量（兼容旧行为）")
 
 
 class NewsDataBatchRequest(BaseModel):
@@ -375,8 +374,7 @@ async def start_news_sync(
                 "symbol": request.symbol,
                 "data_sources": request.data_sources,
                 "hours_back": request.hours_back,
-                "max_news_per_source": request.max_news_per_source,
-                "data_type": request.data_type
+                "max_news_per_source": request.max_news_per_source
             },
             message=message
         )
@@ -443,48 +441,31 @@ async def sync_single_stock_news(
 
 @router.delete("/cleanup", response_model=dict)
 async def cleanup_old_news(
-    days_to_keep: Optional[int] = Query(None, description="保留天数，缺省按数据类型取独立保留策略（新闻90天/公告365天）"),
-    data_type: str = Query("all", description="数据类型：news=只清普通新闻 / announcement=只清公告 / all=全部（兼容旧行为）"),
+    days_to_keep: int = Query(90, description="保留天数"),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    清理过期数据（公告/新闻保留策略独立，可按类型单独执行）
-
+    清理过期新闻
+    
     Args:
-        days_to_keep: 保留天数，缺省按数据类型取独立保留策略
-        data_type: 数据类型（news / announcement / all）
-
+        days_to_keep: 保留天数
+        
     Returns:
         dict: 清理结果
     """
     try:
-        from app.services.news_data_service import (
-            DATA_TYPE_ANNOUNCEMENT,
-            ANNOUNCEMENT_RETENTION_DAYS,
-            NEWS_RETENTION_DAYS,
-        )
-
         service = await get_news_data_service()
-
-        # 未显式指定保留天数时，按类型的独立保留策略取默认值
-        if days_to_keep is None:
-            days_to_keep = (
-                ANNOUNCEMENT_RETENTION_DAYS
-                if data_type == DATA_TYPE_ANNOUNCEMENT
-                else NEWS_RETENTION_DAYS
-            )
-
-        # 按数据类型删除过期数据
-        deleted_count = await service.cleanup_expired(data_type, days_to_keep)
-
+        
+        # 删除过期新闻
+        deleted_count = await service.delete_old_news(days_to_keep)
+        
         return ok(data={
-                "data_type": data_type,
                 "days_to_keep": days_to_keep,
                 "deleted_count": deleted_count
             },
-            message=f"清理完成，删除 {deleted_count} 条过期数据（类型：{data_type}）"
+            message=f"清理完成，删除 {deleted_count} 条过期新闻"
         )
-
+        
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -521,8 +502,7 @@ async def _execute_stock_news_sync(sync_service, request: NewsSyncRequest):
             symbol=request.symbol,
             data_sources=request.data_sources,
             hours_back=request.hours_back,
-            max_news_per_source=request.max_news_per_source,
-            data_type=request.data_type
+            max_news_per_source=request.max_news_per_source
         )
     except Exception as e:
         logger.error(f"❌ 后台股票新闻同步失败: {e}")
@@ -534,8 +514,7 @@ async def _execute_market_news_sync(sync_service, request: NewsSyncRequest):
         await sync_service.sync_market_news(
             data_sources=request.data_sources,
             hours_back=request.hours_back,
-            max_news_per_source=request.max_news_per_source,
-            data_type=request.data_type
+            max_news_per_source=request.max_news_per_source
         )
     except Exception as e:
         logger.error(f"❌ 后台市场新闻同步失败: {e}")

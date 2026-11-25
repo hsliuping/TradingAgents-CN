@@ -10,8 +10,6 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import logging
 
-from .stock_basic_schema import merge_stock_basic_records, normalize_stock_basic_doc
-
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('agents')
@@ -110,24 +108,14 @@ class StockDataService:
             collection = db['stock_basic_info']
 
             if stock_code:
-                # 获取单个股票（多源记录合并：优先级最高 + 非空字段互补）
-                docs = list(collection.find({'code': stock_code}))
-                return merge_stock_basic_records(docs) if docs else None
+                # 获取单个股票
+                result = collection.find_one({'code': stock_code})
+                return result if result else None
             else:
-                # 获取所有股票（分组合并：每股取优先级最高代表，避免多源重复行）
-                results = list(collection.find({}))
-                if not results:
-                    return None
-                grouped: Dict[str, List[Dict[str, Any]]] = {}
-                for doc in results:
-                    code_key = str(doc.get('code') or '').strip()
-                    if code_key:
-                        grouped.setdefault(code_key, []).append(doc)
-                merged = [
-                    m for m in (merge_stock_basic_records(g) for g in grouped.values())
-                    if m
-                ]
-                return merged if merged else None
+                # 获取所有股票
+                cursor = collection.find({})
+                results = list(cursor)
+                return results if results else None
 
         except Exception as e:
             logger.error(f"MongoDB查询失败: {e}")
@@ -200,27 +188,27 @@ class StockDataService:
         
         try:
             collection = self.db_manager.mongodb_db['stock_basic_info']
-
-            # 🔥 写入前对齐统一 Schema（write_path=cache 标记），(code, source) 联合 upsert 避免覆盖其他源记录
-            items = data if isinstance(data, list) else [data]
-            valid_items = []
-            for item in items:
-                try:
-                    valid_items.append(normalize_stock_basic_doc(item, write_path="cache"))
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"⚠️ 跳过无效的基础信息缓存记录: {e}")
-
-            for item in valid_items:
+            
+            if isinstance(data, list):
+                # 批量插入
+                for item in data:
+                    collection.update_one(
+                        {'code': item['code']},
+                        {'$set': item},
+                        upsert=True
+                    )
+                logger.info(f"💾 已缓存{len(data)}条记录到MongoDB")
+            elif isinstance(data, dict):
+                # 单条插入
                 collection.update_one(
-                    {'code': item['code'], 'source': item['source']},
-                    {'$set': item},
+                    {'code': data['code']},
+                    {'$set': data},
                     upsert=True
                 )
-            if valid_items:
-                logger.info(f"💾 已缓存{len(valid_items)}条记录到MongoDB")
-
+                logger.info(f"💾 已缓存股票{data['code']}到MongoDB")
+            
             return True
-
+            
         except Exception as e:
             logger.error(f"缓存到MongoDB失败: {e}")
             return False

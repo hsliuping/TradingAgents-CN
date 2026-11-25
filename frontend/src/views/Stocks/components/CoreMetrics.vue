@@ -20,9 +20,9 @@
           <div class="metric-values">
             <div class="metric-value-item">
               <div class="metric-value-label">PE(TTM)</div>
-              <el-tooltip :content="peTooltip" placement="top" :show-after="300">
-                <div class="metric-value-number" :class="{ 'metric-value-loss': isLossPe }">
-                  {{ fmtPe(basics.pe) }}
+              <el-tooltip :content="fmtNum(basics.pe)" placement="top" :show-after="300">
+                <div class="metric-value-number">
+                  {{ fmtNum(basics.pe) }}
                   <el-tag v-if="basics.peIsRealtime" type="success" size="small" style="margin-left:4px">实时</el-tag>
                 </div>
               </el-tooltip>
@@ -225,23 +225,6 @@ function fmtNum(v: any) {
   return Number.isFinite(n) ? n.toFixed(2) : '-'
 }
 
-// PE 专用：TTM 净利润为负时市盈率失去估值意义，按行业惯例显示"亏损"而非负数
-function fmtPe(v: any) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '-'
-  if (n < 0) return '亏损'
-  return n.toFixed(2)
-}
-
-const isLossPe = computed(() => Number.isFinite(Number(props.basics.pe)) && Number(props.basics.pe) < 0)
-
-const peTooltip = computed(() => {
-  const n = Number(props.basics.pe)
-  if (!Number.isFinite(n)) return '暂无数据'
-  if (n < 0) return 'TTM 净利润为负，市盈率无参考意义'
-  return n.toFixed(2)
-})
-
 function fmtPercent(v: any) {
   const n = Number(v)
   if (!Number.isFinite(n)) return '-'
@@ -432,10 +415,6 @@ const healthBarColor = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.metric-value-loss {
-  color: #ef4444;
 }
 
 .metric-bar {

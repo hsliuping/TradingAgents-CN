@@ -1,4 +1,4 @@
-﻿<template>
+﻿﻿<template>
   <div class="general-analysis">
     <!-- 页面头部 -->
     <div class="page-header">
@@ -25,7 +25,7 @@
           </div>
 
           <p class="page-description">
-            适用：主题研究、行业比较、宏观问题等开放式课题 · 已有明确个股时建议用单股分析或从关注列表进入
+            基于通用流程的灵活研究工作台，支持自定义分析目标与参数
           </p>
         </div>
       </div>
@@ -934,12 +934,14 @@ const initFormValues = async () => {
   formValues.value = values
 }
 
-// 深度值转换（三档 1快速/3标准/5深度）
+// 深度值转换
 const convertDepthToText = (depth: number) => {
   switch (depth) {
     case 1: return '快速'
+    case 2: return '基础'
     case 3: return '标准'
-    case 5: return '深度'
+    case 4: return '深度'
+    case 5: return '全面'
     default: return '标准'
   }
 }

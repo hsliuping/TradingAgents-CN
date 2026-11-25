@@ -105,18 +105,10 @@
             {{ row.market || '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="140">
+        <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="getTaskStatusColor(row.status)">
               {{ getTaskStatusName(row.status) }}
-            </el-tag>
-            <el-tag
-              v-if="row.status === 'completed' && row.degraded_nodes && Object.keys(row.degraded_nodes).length > 0"
-              type="warning"
-              size="small"
-              style="margin-left: 4px"
-            >
-              部分降级
             </el-tag>
           </template>
         </el-table-column>

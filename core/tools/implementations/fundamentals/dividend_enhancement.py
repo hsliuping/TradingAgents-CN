@@ -70,18 +70,21 @@ def _json_response(payload: dict) -> str:
 
 
 def _fetch_akshare_dividend_yield(symbol: str) -> Optional[Dict[str, Any]]:
-    """经 DataFacade 能力（巨潮分红，akshare 源）兜底。"""
+    """尝试用 AKShare 东方财富分红数据兜底。"""
     try:
-        from tradingagents.dataflows.capability import query_capability_sync
-
-        df = query_capability_sync("stock_dividend_cninfo", symbol=symbol)
+        import akshare as ak
+        df = ak.stock_dividents_cninfo(symbol=symbol)
         if df is None or df.empty:
             return None
-        # 能力按日期降序返回已实施分红记录，取最近 5 条
+        # 只取已实施的记录
+        df = df[df["实施进度"] == "实施"]
+        if df.empty:
+            return None
+        df = df.sort_values("股权登记日", ascending=False)
         records = df.head(5).to_dict("records")
         return {"source": "akshare", "records": records}
     except Exception as exc:
-        logger.warning("分红能力兜底失败: %s", exc)
+        logger.warning("AKShare dividend fallback failed: %s", exc)
         return None
 
 

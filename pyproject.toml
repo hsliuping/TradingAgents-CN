@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tradingagents-cn-pro"
-version = "4.0.0-beta.1"
+version = "3.0.0"
 description = "TradingAgents-CN Pro - Multi-agent stock analysis system with advanced features"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -58,7 +58,6 @@ dependencies = [
     "langchain-google-genai>=2.1.12",  # 修复 client_options 未定义错误
     "langchain-openai>=0.3.23",
     "langgraph>=0.4.8",
-    "langgraph-checkpoint-mongodb>=2.0.0",  # v4.0 断点续跑：工作流 MongoDBSaver（thread_id=分析运行ID）
     "openai>=1.0.0,<2.0.0",
     "qdrant-client>=1.7.0",  # 向量数据库客户端
 
@@ -78,8 +77,6 @@ dependencies = [
     "markdown>=3.4.0",
     "pypandoc>=1.11",
     "python-docx>=0.8.11",  # Word文档处理，用于修复文本方向
-    "python-pptx>=1.0.0",  # PPT文档处理（个股资料上传文本提取）
-    "pypdf>=6.0.0",  # PDF文本提取（个股资料上传/猪周期研报解析）
     "pdfkit>=1.0.0",  # PDF生成工具，需要wkhtmltopdf（外部工具）
     "weasyprint>=62.0",  # PDF生成工具（纯Python，推荐，无需外部工具）
 
@@ -110,41 +107,3 @@ tradingagents = "main:main"
 [tool.setuptools.packages.find]
 include = ["tradingagents*"]
 exclude = ["tests*", "docs*", "scripts*", "data*", "logs*", "reports*", "results*", "eval_results*", "upstream_contribution*"]
-
-# ==================== 日志治理机器强制（docs/05-design/v4.0/logging-governance.md §5.1）====================
-# T20 = 禁止 print（日志统一 logging.getLogger(__name__)）；存量违规在 per-file-ignores 冻结，只减不增
-[tool.ruff]
-extend-exclude = [
-    "tests", "scripts", "examples", "utils", "docs", "data", "logs", "env",
-    "frontend", "migrations", "webroot", "results", "reports", "eval_results",
-    "research", "copyright_*", "deploy-all-in-one",
-]
-
-[tool.ruff.lint]
-select = ["T20"]
-
-[tool.ruff.lint.per-file-ignores]
-# —— CLI 终端输出例外（与 scripts/check_logging_violations.py CLI_OUTPUT_FILES 同步）——
-"main.py" = ["T20"]        # 交互式 CLI 入口（tradingagents 命令）
-"start_dev.py" = ["T20"]   # 开发环境启动脚本终端输出
-"cli/main.py" = ["T20"]
-"cli/utils.py" = ["T20"]
-"cli/akshare_init.py" = ["T20"]
-"cli/baostock_init.py" = ["T20"]
-"cli/tushare_init.py" = ["T20"]
-"core/pro/ingest/__main__.py" = ["T20"]
-"core/pro/ingest/industries/pig/maintain.py" = ["T20"]
-# —— 批次 2 登记的 CLI/终端预览输出（同上 CLI_OUTPUT_FILES）——
-"core/pro/domain_models/pig_cycle/compare.py" = ["T20"]
-"core/pro/domain_models/pig_cycle/constraint.py" = ["T20"]
-"core/pro/domain_models/pig_cycle/curve.py" = ["T20"]
-"core/pro/domain_models/pig_cycle/enterprise.py" = ["T20"]
-"core/pro/domain_models/pig_cycle/profile.py" = ["T20"]
-"core/pro/domain_models/pig_cycle/stress.py" = ["T20"]
-"core/pro/domain_models/pig_cycle/validate.py" = ["T20"]
-"core/pro/domain_models/pig_cycle/sync_profiles.py" = ["T20"]
-"app/scripts/init_providers.py" = ["T20"]
-"tradingagents/config/tushare_config.py" = ["T20"]
-# —— 启动自举 fallback 输出（与 FALLBACK_PRINT_FILES 同步：logging 未就绪，改 logger 会失效）——
-"app/__main__.py" = ["T20"]
-"app/core/logging_config.py" = ["T20"]

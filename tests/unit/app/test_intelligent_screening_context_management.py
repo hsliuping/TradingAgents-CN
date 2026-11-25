@@ -4,14 +4,6 @@ from types import SimpleNamespace
 
 
 def test_determine_phase_resets_to_confirmation_for_new_request_after_result():
-    """result 阶段后收到全新筛选请求应回到 confirmation 阶段。
-
-    对齐说明（存量测试治理）：71e02ff69 将 _determine_phase 改为基于 LLM
-    意图分类判断阶段（新增 intent 参数），仅当 intent_type == "new_request"
-    时才从 result 回到 confirmation，未传 intent 时 result 阶段默认留在
-    result。chat 生产路径恒传入意图分类结果，「帮我选几只高分红的股票」
-    按关键词分类即 new_request（命中 SCREENING_NEW_REQUEST_KEYWORDS）。
-    """
     from app.services.intelligent_screening_service import IntelligentScreeningService
 
     service = IntelligentScreeningService(db=object())
@@ -19,23 +11,12 @@ def test_determine_phase_resets_to_confirmation_for_new_request_after_result():
         {"role": "assistant", "phase": "result", "content": "上一轮已给出筛选结果"},
     ]
 
-    phase = service._determine_phase(
-        history,
-        "帮我选几只高分红的股票",
-        {"intent": "new_request", "confidence": 0.8},
-    )
+    phase = service._determine_phase(history, "帮我选几只高分红的股票")
 
     assert phase == "confirmation"
 
 
 def test_select_phase_history_drops_stale_history_for_fresh_confirmation():
-    """新筛选请求进入 confirmation 时应丢弃旧的 result 历史。
-
-    对齐说明：71e02ff69（智能筛选V1引入LLM意图分类）后，_select_phase_history
-    新增 intent 参数，仅当意图为 new_request 时才清空 confirmation 历史；
-    chat 实际调用会传入意图分类结果，「帮我选几只高分红的股票」按关键词
-    分类即 new_request（命中 SCREENING_NEW_REQUEST_KEYWORDS）。
-    """
     from app.services.intelligent_screening_service import IntelligentScreeningService
 
     service = IntelligentScreeningService(db=object())
@@ -46,12 +27,7 @@ def test_select_phase_history_drops_stale_history_for_fresh_confirmation():
         {"role": "assistant", "phase": "result", "content": "这是数据口径解释"},
     ]
 
-    selected = service._select_phase_history(
-        history,
-        "confirmation",
-        "帮我选几只高分红的股票",
-        {"intent": "new_request", "confidence": 0.8},
-    )
+    selected = service._select_phase_history(history, "confirmation", "帮我选几只高分红的股票")
 
     assert selected == []
 
@@ -77,13 +53,6 @@ def test_select_phase_history_keeps_latest_planning_only_for_result_execution():
 
 
 def test_select_phase_history_keeps_latest_result_when_user_references_current_stocks():
-    """引用当前结果的消息应保留完整近期历史（含最新 result）。
-
-    对齐说明：71e02ff69 引入意图分类后，follow_up 意图走「保留完整
-    recent_history」分支（含 planning 与最新 result）；「把这5只加入股票
-    关注列表」命中 SCREENING_RESULT_REFERENCE_KEYWORDS，chat 意图分类
-    即为 follow_up。
-    """
     from app.services.intelligent_screening_service import IntelligentScreeningService
 
     service = IntelligentScreeningService(db=object())
@@ -92,12 +61,7 @@ def test_select_phase_history_keeps_latest_result_when_user_references_current_s
         {"role": "assistant", "phase": "result", "content": "当前推荐的 5 只股票"},
     ]
 
-    selected = service._select_phase_history(
-        history,
-        "result",
-        "把这5只加入股票关注列表",
-        {"intent": "follow_up", "confidence": 0.8},
-    )
+    selected = service._select_phase_history(history, "result", "把这5只加入股票关注列表")
 
     assert selected == history
 

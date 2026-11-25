@@ -34,22 +34,16 @@ class TestAnalystRegistry:
         assert "index_analyst" in registry.list_all()
     
     def test_extension_analysts_registered(self):
-        """测试扩展分析师已注册
-
-        对齐说明：v3.0 起 _register_new_analysts 统一使用 _v2 后缀的
-        BUILTIN_AGENTS 元数据 id 注册扩展分析师实现（commit 1199c88df，
-        「不再使用 v1 DEPRECATED 的 agent_id」）；v1 id 的工作流装配由
-        setup.py 内置路径负责，故此处断言现役的 _v2 注册键。
-        """
+        """测试扩展分析师已注册"""
         # 触发模块加载（这会自动注册扩展分析师）
         from core.agents.adapters import SectorAnalystAgent, IndexAnalystAgent
         from core.agents.analyst_registry import get_analyst_registry
-
+        
         registry = get_analyst_registry()
-
-        # 检查扩展分析师是否已注册实现（_v2 注册键）
-        assert registry.is_registered("sector_analyst_v2")
-        assert registry.is_registered("index_analyst_v2")
+        
+        # 检查扩展分析师是否已注册实现
+        assert registry.is_registered("sector_analyst")
+        assert registry.is_registered("index_analyst")
     
     def test_get_analyst_metadata(self):
         """测试获取分析师元数据"""
@@ -145,23 +139,18 @@ class TestPluginArchitectureIntegration:
     """测试插件架构集成"""
     
     def test_extension_analyst_in_workflow(self):
-        """测试扩展分析师可被工作流加载
-
-        对齐说明：v3.0 起扩展分析师实现统一注册在 _v2 后缀 id 下
-        （commit 1199c88df），注册的实现类仍为 SectorAnalystAgent /
-        IndexAnalystAgent，此处按现役注册键断言。
-        """
+        """测试扩展分析师可被工作流加载"""
         # 触发模块加载
         from core.agents.adapters import SectorAnalystAgent, IndexAnalystAgent
         from core.agents.analyst_registry import get_analyst_registry
-
+        
         registry = get_analyst_registry()
-
-        # 获取板块分析师类（_v2 注册键）
-        sector_class = registry.get_analyst_class("sector_analyst_v2")
+        
+        # 获取板块分析师类
+        sector_class = registry.get_analyst_class("sector_analyst")
         assert sector_class is SectorAnalystAgent
-
-        # 获取大盘分析师类（_v2 注册键）
-        index_class = registry.get_analyst_class("index_analyst_v2")
+        
+        # 获取大盘分析师类
+        index_class = registry.get_analyst_class("index_analyst")
         assert index_class is IndexAnalystAgent
 

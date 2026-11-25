@@ -1,7 +1,6 @@
-# 依赖声明唯一来源：pyproject.toml 的 [project].dependencies
-# 本文件是安装包内嵌 Python 的实际安装清单（setup_embedded_python.ps1 按它 pip install）
-# 两份清单必须逐项一致：新增/删除运行时依赖时两处同时修改（规范见 CLAUDE.md「依赖管理口径」）
-# 开发环境推荐安装方式：pip install -e .  或  uv pip install -e .
+# 注意：此文件已弃用，请使用 pyproject.toml
+# 推荐安装方式：pip install -e .
+# 或使用 uv：uv pip install -e .
 
 typing-extensions
 openai>=1.0.0,<2.0.0
@@ -9,20 +8,17 @@ langchain-openai>=0.1.0
 langchain-experimental
 pandas
 xlrd>=2.0.2
-openpyxl>=3.1.0  # 估值测算 Excel 交付物（A10-D1）
 yfinance
 praw
 feedparser
 stockstats
 eodhd
 langgraph
-langgraph-checkpoint-mongodb  # v4.0 断点续跑：工作流 MongoDBSaver（thread_id=分析运行ID）
 chromadb
 qdrant-client>=1.7.0
 setuptools
 akshare>=1.18.59
 tushare
-pypdf>=4.0  # 巨潮资讯公告PDF解析（core/pro/ingest/sources/cninfo.py）
 baostock
 finnhub-python
 parsel
@@ -46,7 +42,6 @@ markdown>=3.4.0  # Markdown处理，用于报告生成
 mem0ai>=1.0.7  # mem0 统一记忆层 SDK
 pypandoc>=1.11  # 文档格式转换，用于导出报告功能
 python-docx>=0.8.11  # Word文档处理，用于修复文本方向
-python-pptx>=1.0.0  # PPT文档处理（个股资料上传文本提取）
 pdfkit>=1.0.0  # PDF生成工具，需要wkhtmltopdf（外部工具）
 weasyprint>=62.0  # PDF生成工具（纯Python，推荐，无需外部工具）
 python-dotenv>=1.0.0  # 环境变量管理，用于.env文件解析

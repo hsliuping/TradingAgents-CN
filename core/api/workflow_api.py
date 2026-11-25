@@ -28,14 +28,6 @@ from core.workflow.templates import (
     V2_STOCK_ANALYSIS_WORKFLOW,
     V2_ETF_ANALYSIS_WORKFLOW,
 )
-from core.workflow.depth_profiles import (
-    MODE_SELF_DEBATE,
-    build_gate_flags,
-    build_run_manifest,
-    get_profile,
-    normalize_depth,
-)
-from core.workflow.exceptions import WorkflowControlSignal
 from ..workflow.default_workflow_provider import get_default_workflow_provider
 
 logger = logging.getLogger(__name__)
@@ -261,8 +253,8 @@ def _build_stock_analysis_input_config(allow_etf: bool = False) -> Dict[str, Any
                 "default": "标准",
                 "description": "分析深度等级",
                 "placeholder": "",
-                "options": ["快速", "标准", "深度"],
-                "option_labels": ["快速 (2-4分钟)", "标准 (6-10分钟)", "深度 (15-25分钟)"],
+                "options": ["快速", "基础", "标准", "深度", "全面"],
+                "option_labels": ["快速 (2-4分钟)", "基础 (4-6分钟)", "标准 (6-10分钟)", "深度 (10-15分钟)", "全面 (15-25分钟)"],
                 "min": None, "max": None, "group": "基本参数", "order": 3,
             },
             {
@@ -751,7 +743,6 @@ class WorkflowAPI:
         legacy_config: Optional[Dict[str, Any]] = None,
         progress_callback: Optional[Callable] = None,
         task_id: Optional[str] = None,
-        resume: bool = False,
     ) -> Dict[str, Any]:
         """
         执行工作流
@@ -762,7 +753,6 @@ class WorkflowAPI:
             legacy_config: 遗留智能体配置（LLM、模型等）
             progress_callback: 进度回调函数
             task_id: 任务 ID（任务中心的 task_id，用于执行轨迹关联。不传则随机生成）
-            resume: 是否从断点恢复执行（v4.0 T1；无有效断点自动回退全新执行）
 
         Returns:
             执行结果
@@ -792,27 +782,15 @@ class WorkflowAPI:
 
             # 创建带配置的引擎（优先用传入的 task_id，用于执行轨迹关联）
             task_id = task_id or str(uuid.uuid4())
-            # 🆕 v4.0 T1：启用 MongoDB 断点续跑（thread_id=task_id；Mongo 不可用自动降级裸编译）
-            engine = WorkflowEngine(
-                legacy_config=legacy_config,
-                task_id=task_id,
-                enable_checkpointer=True,
-            )
+            engine = WorkflowEngine(legacy_config=legacy_config, task_id=task_id)
             engine.load(definition)
-            result = engine.execute(
-                prepared_inputs,
-                progress_callback=progress_callback,
-                resume=resume,
-            )
+            result = engine.execute(prepared_inputs, progress_callback=progress_callback)
 
             return {
                 "success": True,
                 "result": result,
                 "execution": engine.last_execution.model_dump() if engine.last_execution else None,
             }
-        except WorkflowControlSignal:
-            # 控制信号（取消/暂停/被新执行取代）向上传播，不得转成失败结果
-            raise
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -880,14 +858,11 @@ class WorkflowAPI:
                 try:
                     db = get_mongo_db_sync()  # 使用同步版本
 
-                    # 优先从 stock_basic_info 获取（多源记录合并后取名称/行业，非空字段互补）
-                    from tradingagents.dataflows.stock_basic_schema import merge_stock_basic_records
-
-                    basic_docs = list(db.stock_basic_info.find(
+                    # 优先从 stock_basic_info 获取
+                    stock_info = db.stock_basic_info.find_one(
                         {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
-                        {"_id": 0, "name": 1, "industry": 1, "source": 1}
-                    ))
-                    stock_info = merge_stock_basic_records(basic_docs)
+                        {"_id": 0, "name": 1, "industry": 1}
+                    )
 
                     if stock_info:
                         company_name = stock_info.get("name", stock_code)
@@ -947,17 +922,6 @@ class WorkflowAPI:
 
             system_vars["current_price"] = current_price
             system_vars["current_price_context_date"] = current_price_context_date
-            # 与 app 链路（unified_analysis_service）统一价格口径变量，模板可跨入口复用
-            system_vars["current_price_date"] = current_price_context_date
-            system_vars["current_price_source"] = (
-                "最近已完成交易日收盘价" if current_price_context_date else ""
-            )
-            price_note = current_price
-            if current_price_context_date:
-                price_note += (
-                    f"（{current_price_context_date} 收盘，口径：最近已完成交易日收盘价）"
-                )
-            system_vars["current_price_note"] = price_note
 
             # 3. 市场信息
             market_name = "A股" if is_china else "港股" if market_info.get('is_hk') else "美股"
@@ -1021,23 +985,22 @@ class WorkflowAPI:
         """
         prepared = dict(inputs)
 
-        # 档位画像（DEPTH_PROFILES 单一注册表，收编原 depth_mapping）
-        # 轮数语义：debate_rounds/risk_rounds 仅 multi_agent 回退路径生效
-        research_depth = normalize_depth(prepared.get("research_depth"))
-        prepared["research_depth"] = research_depth
-        profile = get_profile(research_depth)
+        # 从输入中解析辩论轮数
+        depth_mapping = {
+            "快速": {"debate": 1, "risk": 1},
+            "基础": {"debate": 1, "risk": 1},
+            "标准": {"debate": 1, "risk": 2},
+            "深度": {"debate": 2, "risk": 2},
+            "全面": {"debate": 3, "risk": 3},
+        }
+        research_depth = prepared.get("research_depth", "标准")
+        depth_config = depth_mapping.get(research_depth, depth_mapping["标准"])
 
         # 将辩论配置注入到输入中
-        prepared["_max_debate_rounds"] = profile.debate_rounds
-        prepared["_max_risk_rounds"] = profile.risk_rounds
+        prepared["_max_debate_rounds"] = depth_config["debate"]
+        prepared["_max_risk_rounds"] = depth_config["risk"]
 
-        # M3 流程门控：按 profile.nodes 计算跳环节旗标（v2 模板 CONDITION 节点
-        # 简式表达式只读旗标，环节归属判断收敛在 profile）+ 环节运行清单
-        # （被跳过节点置 skipped 态留痕，report_saver/前端时间线可读）
-        prepared.update(build_gate_flags(profile))
-        prepared["depth_run_manifest"] = build_run_manifest(profile)
-
-        # A9-P1: 风险自我辩论开关（单节点替代风险三角多轮辩论，标准/深度/全面档）
+        # A9-P1: 风险自我辩论开关（单节点替代风险三角多轮辩论，仅深度/全面档）
         # 优先级：环境变量 RISK_SELF_DEBATE（on/off，一键回退）> 输入显式覆盖 > 档位默认
         _self_debate_mode = str(os.environ.get("RISK_SELF_DEBATE", "auto")).strip().lower()
         if _self_debate_mode in ("on", "1", "true"):
@@ -1048,9 +1011,8 @@ class WorkflowAPI:
             # 允许调用方按任务显式覆盖（truthy 判定）
             prepared["_risk_self_debate"] = bool(prepared.get("risk_self_debate"))
         else:
-            # 档位默认：risk_mode=self_debate 的档位（标准/深度/全面）启用，
-            # 快速/基础档走原风险三角路径
-            prepared["_risk_self_debate"] = profile.risk_mode == MODE_SELF_DEBATE
+            # 默认：仅深度/全面档启用，其余档位走原风险三角路径
+            prepared["_risk_self_debate"] = research_depth in ("深度", "全面")
         logger.info(
             f"[A9-P1] 风险自我辩论开关: {prepared['_risk_self_debate']} "
             f"(mode={_self_debate_mode}, depth={research_depth})"
@@ -1069,32 +1031,12 @@ class WorkflowAPI:
             # 允许调用方按任务显式覆盖（truthy 判定）
             prepared["_parallel_opening"] = bool(prepared.get("parallel_opening"))
         else:
-            # 档位默认：全档启用（并行开局只是把第一轮串行接力改为并行，
-            # 辩论语义不变——各自基于同一份分析师材料独立出初始简报）
-            prepared["_parallel_opening"] = profile.parallel_opening
+            # 默认全档位启用：并行开局只是把第一轮串行接力改为并行，
+            # 辩论语义不变（各自基于同一份分析师材料独立出初始简报）
+            prepared["_parallel_opening"] = True
         logger.info(
             f"[A3] 投资辩论并行开局开关: {prepared['_parallel_opening']} "
             f"(mode={_parallel_opening_mode})"
-        )
-
-        # P2: 研究自我辩论开关（单节点内完成乐观/审慎多轮辩论，标准/深度/全面档）
-        # 优先级：环境变量 RESEARCH_SELF_DEBATE（on/off，一键回退）> 输入显式覆盖 > 档位默认
-        # 成本关系：原路径 轮数×2 次调用，自我辩论固定 1 次深度调用，成本不增反降
-        _research_self_debate_mode = str(
-            os.environ.get("RESEARCH_SELF_DEBATE", "auto")
-        ).strip().lower()
-        if _research_self_debate_mode in ("on", "1", "true"):
-            prepared["_research_self_debate"] = True
-        elif _research_self_debate_mode in ("off", "0", "false"):
-            prepared["_research_self_debate"] = False
-        elif "research_self_debate" in prepared:
-            prepared["_research_self_debate"] = bool(prepared.get("research_self_debate"))
-        else:
-            # 档位默认：debate_mode=self_debate 的档位（标准/深度/全面）启用
-            prepared["_research_self_debate"] = profile.debate_mode == MODE_SELF_DEBATE
-        logger.info(
-            f"[P2] 研究自我辩论开关: {prepared['_research_self_debate']} "
-            f"(mode={_research_self_debate_mode}, depth={research_depth})"
         )
 
         # 映射字段名以兼容原有智能体
@@ -1144,7 +1086,7 @@ class WorkflowAPI:
         for field in ["bull_report", "bear_report", "investment_plan", "trader_investment_plan"]:
             prepared.setdefault(field, "")
 
-        logger.info(f"[工作流执行] 分析深度: {research_depth}, 辩论轮数: {profile.debate_rounds}, 风险轮数: {profile.risk_rounds}")
+        logger.info(f"[工作流执行] 分析深度: {research_depth}, 辩论轮数: {depth_config['debate']}, 风险轮数: {depth_config['risk']}")
 
         # 🆕 准备系统变量（公司名称、行业、当前价格等）
         ticker = prepared.get("ticker")

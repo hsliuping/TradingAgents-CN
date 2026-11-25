@@ -181,7 +181,7 @@ class ModelCapabilityService:
                             "capability_level": config_dict.get('capability_level', 2),
                             "suitable_roles": roles_enum,
                             "features": features_enum,
-                            "recommended_depths": config_dict.get('recommended_depths', ["快速", "标准", "深度"]),
+                            "recommended_depths": config_dict.get('recommended_depths', ["快速", "基础", "标准"]),
                             "performance_metrics": config_dict.get('performance_metrics', None)
                         }
 
@@ -212,7 +212,7 @@ class ModelCapabilityService:
             "capability_level": 2,
             "suitable_roles": [ModelRole.BOTH],
             "features": [ModelFeature.TOOL_CALLING],
-            "recommended_depths": ["快速", "标准", "深度"],
+            "recommended_depths": ["快速", "基础", "标准"],
             "performance_metrics": {"speed": 3, "cost": 3, "quality": 3}
         }
     

@@ -14,8 +14,6 @@ from datetime import datetime
 import pandas as pd
 import logging
 
-from app.services.stock_basic_schema import merge_stock_basic_records
-
 _logger = logging.getLogger('dataflows')
 
 try:
@@ -53,9 +51,7 @@ def get_basics_from_cache(stock_code: Optional[str] = None) -> Optional[Dict[str
             except Exception:
                 pass
             # 同时查询 symbol 和 code 字段，确保兼容新旧数据格式
-            # 同 code 多 source 记录按优先级 + 非空字段互补合并
-            docs = list(coll.find({"$or": [{"symbol": code6}, {"code": code6}]}))
-            doc = merge_stock_basic_records(docs)
+            doc = coll.find_one({"$or": [{"symbol": code6}, {"code": code6}]})
             if not doc:
                 try:
                     _logger.debug(f"[app_cache] 基础信息未命中 | db={db_name} coll={BASICS_COLLECTION} code={code6}，尝试 etf_basic_info")

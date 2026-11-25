@@ -10,7 +10,6 @@ import dayjs from 'dayjs'
 import 'dayjs/locale/zh-cn'
 
 import App from './App.vue'
-import { APP_CONFIG } from '@/config/app'
 import router from './router'
 import { setupGlobalComponents } from './components'
 import { setupDeliverableDownloadInterceptor } from './utils/deliverableDownload'
@@ -142,8 +141,7 @@ const initApp = async () => {
       console.log('📱 离线模式：应用将在没有后端连接的情况下启动')
     }
   } finally {
-    // 无论认证状态如何，都挂载应用；先等路由就绪，避免首屏异步路由组件解析前挂载导致告警/闪烁
-    await router.isReady()
+    // 无论认证状态如何，都挂载应用
     app.mount('#app')
     console.log('🚀 应用已挂载')
   }
@@ -154,7 +152,7 @@ initApp()
 
 // 开发环境下的调试信息
 if (import.meta.env.DEV) {
-  console.log(`🚀 TradingAgents-CN v${APP_CONFIG.version} 前端应用已启动`)
+  console.log('🚀 TradingAgents-CN v3.0.0 前端应用已启动')
   console.log('📊 当前环境:', import.meta.env.MODE)
   console.log('🔗 API地址:', import.meta.env.VITE_API_BASE_URL || '/api')
 }

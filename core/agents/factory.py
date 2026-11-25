@@ -344,7 +344,7 @@ class AgentFactory:
                 )
             except ValueError as e:
                 # 记录警告但继续创建其他智能体
-                logger.warning(f"警告: {e}")
+                print(f"警告: {e}")
         
         return agents
     

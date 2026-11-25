@@ -112,7 +112,6 @@ def generate_valuation_excel_tool(
     symbol: Annotated[str, "A 股股票代码，6 位数字，如 601127"],
     context_notes: Annotated[str, "可选：当前分析中的研究结论/盈利预期摘要，作为测算假设的参考依据"] = "",
     forecast_years: Annotated[int, "预测年数，1-3，默认 2"] = 2,
-    analysis_date: Annotated[str, "可选：分析基准日期 YYYY-MM-DD，默认今天；基准价按该日取最近收盘价"] = "",
 ) -> str:
     """生成估值测算 Excel 表格（盈利推演 + 估值情景）。
 
@@ -120,7 +119,6 @@ def generate_valuation_excel_tool(
         symbol: A 股股票代码，6 位数字
         context_notes: 可选研究结论摘要
         forecast_years: 预测年数（1-3）
-        analysis_date: 分析基准日（YYYY-MM-DD），决定基准价取数日期
 
     Returns:
         Markdown 文本（结果摘要 + 下载链接，或明确失败说明）
@@ -129,12 +127,7 @@ def generate_valuation_excel_tool(
     try:
         # 1. 数据自动装配（缺失即明确报错，不估算补位）
         try:
-            bundle = build_valuation_bundle(
-                symbol,
-                context_notes=context_notes,
-                forecast_years=forecast_years,
-                analysis_date=analysis_date or None,
-            )
+            bundle = build_valuation_bundle(symbol, context_notes=context_notes, forecast_years=forecast_years)
         except ValuationDataError as exc:
             return _format_failure("必需数据未同步", str(exc))
 
@@ -190,8 +183,7 @@ def generate_valuation_excel_tool(
 
         return (
             f"### 估值测算表已生成 ✅\n\n"
-            f"**{bundle['stock_name']}（{bundle['ticker']}）** · 基准价 {bundle['current_price']:.2f} 元"
-            f"（{bundle['analysis_date']} 基准）"
+            f"**{bundle['stock_name']}（{bundle['ticker']}）** · 现价 {bundle['current_price']:.2f} 元"
             f" · 总股本 {bundle['share_count']:.2f} 亿股 · 生成耗时 {elapsed:.0f} 秒\n\n"
             f"**估值情景（EPS 基准 → 目标价）**\n\n"
             f"| 情景 | 方法 | EPS（元） | 目标价（元） |\n"

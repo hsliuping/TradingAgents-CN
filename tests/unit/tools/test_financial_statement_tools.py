@@ -134,35 +134,38 @@ class TestFinancialStatementTools:
         assert "PEG: 当前工具未提供稳定的日频 PEG 历史序列" in result
 
     def test_load_recent_financial_data_prefers_db_cache(self, monkeypatch):
-        """local 源命中本地财务缓存 -> data_source=local；经 FakeFacade 模拟能力查询"""
-        payload = _mock_financial_payload()
-        frames = {}
-        for capability, key in fundamentals_tools._PAYLOAD_KEYS.items():
-            df = pd.DataFrame(payload[key])
-            df["source"] = "local"
-            df["quality"] = "ok"
-            frames[capability] = df
+        db_payload = _mock_financial_payload()
 
-        class FakeHandle:
-            def __init__(self, frame):
-                self._frame = frame
+        class FakeOptimizedProvider:
+            def _get_cached_raw_financial_data(self, ticker):
+                assert ticker == "000001"
+                return db_payload
 
-            async def query(self, **params):
-                return self._frame
+        class ForbiddenTushareProvider:
+            def get_financial_data(self, *args, **kwargs):
+                raise AssertionError("命中数据库后不应调用 Tushare")
 
-        class FakeFacade:
-            def get_capability(self, capability_id):
-                return FakeHandle(frames[capability_id])
+        class ForbiddenAKShareProvider:
+            def get_financial_data(self, *args, **kwargs):
+                raise AssertionError("命中数据库后不应调用 AKShare")
 
         monkeypatch.setattr(
-            "tradingagents.dataflows.capability.facade.get_data_facade",
-            lambda: FakeFacade(),
+            "tradingagents.dataflows.optimized_china_data.OptimizedChinaDataProvider",
+            FakeOptimizedProvider,
+        )
+        monkeypatch.setattr(
+            "tradingagents.dataflows.providers.china.tushare.TushareProvider",
+            ForbiddenTushareProvider,
+        )
+        monkeypatch.setattr(
+            "tradingagents.dataflows.providers.china.akshare.AKShareProvider",
+            ForbiddenAKShareProvider,
         )
 
         result = fundamentals_tools._load_recent_financial_data("000001.SZ", limit=4)
 
         assert result["ticker"] == "000001"
-        assert result["data_source"] == "local"
+        assert result["data_source"] == "optimized_cache"
         assert result["income_statement"]
         assert result["cash_flow"]
 

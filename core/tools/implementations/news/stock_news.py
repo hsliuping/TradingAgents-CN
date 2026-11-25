@@ -8,11 +8,12 @@
 2. 外部 API（AKShare、Google News、Finnhub）
 """
 
+import concurrent.futures
 import hashlib
 import logging
 import unicodedata
 from datetime import datetime, time, timedelta
-from typing import Annotated, Any, Dict, List, Optional, Tuple
+from typing import Annotated, Any, Callable, Dict, List, Optional, Tuple
 
 from langchain_core.tools import tool
 
@@ -22,6 +23,13 @@ logger = logging.getLogger(__name__)
 
 
 A_SHARE_NEWS_LOOKBACK_DAYS = 7
+TUSHARE_LIVE_SOURCES = [
+    "sina",
+    "eastmoney",
+    "10jqka",
+    "cls",
+    "wallstreetcn",
+]
 
 SOURCE_DISPLAY_NAMES = {
     "local": "本地数据",
@@ -453,6 +461,26 @@ def _text_starts_with_any_alias(text: Optional[str], aliases: List[str]) -> bool
     return False
 
 
+def _is_relevant_a_share_news(news_item: Dict[str, Any], symbol: str, company_name: Optional[str]) -> bool:
+    """判断新闻是否与目标 A 股公司相关。"""
+    symbol_clean = symbol.zfill(6)
+    text_parts = [
+        _collapse_whitespace(news_item.get("title")),
+        _collapse_whitespace(news_item.get("content")),
+        _collapse_whitespace(news_item.get("summary")),
+        " ".join(_coerce_keywords(news_item.get("keywords"))),
+    ]
+    text_blob = " ".join(part for part in text_parts if part)
+
+    if not text_blob:
+        return False
+
+    if symbol_clean in text_blob or symbol in text_blob:
+        return True
+
+    return bool(_find_matching_aliases(text_blob, _get_company_aliases(company_name)))
+
+
 def _filter_news_by_date_range(
     news_list: List[Dict[str, Any]],
     start_date: datetime,
@@ -704,7 +732,7 @@ def _format_news_item(news_item: Dict[str, Any]) -> str:
     """格式化单条新闻为结构化 Markdown。"""
     title = _collapse_whitespace(news_item.get("title")) or "无标题"
     url = _collapse_whitespace(news_item.get("url"))
-    source = _collapse_whitespace(news_item.get("media_source")) or _collapse_whitespace(news_item.get("source")) or _get_source_display_name(
+    source = _collapse_whitespace(news_item.get("source")) or _get_source_display_name(
         _collapse_whitespace(news_item.get("data_source"))
     )
     summary = _summarize_news_item(news_item)
@@ -827,44 +855,167 @@ def _query_news_from_database(
         }
 
 
-def _fetch_cn_news_via_facade(
+def _run_async_in_thread(coroutine_factory: Callable[[], Any], timeout: float = 30.0) -> Any:
+    """在独立线程中执行异步协程，避免事件循环冲突。"""
+
+    def _runner() -> Any:
+        import asyncio
+
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coroutine_factory())
+        finally:
+            loop.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_runner)
+        return future.result(timeout=timeout)
+
+
+def _fetch_tushare_news_live(
+    symbol: str,
+    company_name: Optional[str],
+    start_date: datetime,
+    end_date: datetime,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """从 Tushare 直接拉取指定时间窗口的多源实时新闻。"""
+    logger.info(
+        f"📰 [统一新闻工具] 尝试 Tushare 实时新闻: symbol={symbol}, "
+        f"company_name={company_name or '-'}, window={start_date.strftime('%Y-%m-%d')}~{end_date.strftime('%Y-%m-%d')}"
+    )
+
+    try:
+        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+
+        provider = get_tushare_provider()
+    except Exception as exc:
+        logger.warning(f"⚠️ [统一新闻工具] 初始化 Tushare provider 失败: {exc}")
+        return []
+
+    if not provider or not provider.is_available() or provider.api is None:
+        logger.info("⚠️ [统一新闻工具] Tushare provider 不可用，跳过付费增强链路")
+        return []
+
+    start_date_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
+    end_date_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
+    fetch_limit = max(limit * 4, 40)
+    collected_news: List[Dict[str, Any]] = []
+
+    for source_code in TUSHARE_LIVE_SOURCES:
+        try:
+            logger.debug(f"📰 [统一新闻工具] Tushare 尝试新闻源: {source_code}")
+            news_df = provider.api.news(
+                src=source_code,
+                start_date=start_date_str,
+                end_date=end_date_str,
+            )
+        except Exception as exc:
+            error_text = str(exc).lower()
+            if any(keyword in error_text for keyword in ["权限", "permission", "unauthorized", "access denied", "积分", "point"]):
+                logger.warning(f"⚠️ [统一新闻工具] Tushare 新闻权限不可用，跳过付费增强链路: {exc}")
+                return []
+            logger.debug(f"⚠️ [统一新闻工具] Tushare 新闻源 {source_code} 拉取失败: {exc}")
+            continue
+
+        if news_df is None or news_df.empty:
+            logger.info(f"📰 [统一新闻工具] Tushare 新闻源 {source_code} 未返回数据")
+            continue
+
+        raw_row_count = 0
+        try:
+            raw_row_count = int(len(news_df))
+        except Exception:
+            raw_row_count = 0
+
+        process_limit = max(fetch_limit, raw_row_count) if raw_row_count else fetch_limit
+        if raw_row_count > fetch_limit * 2:
+            logger.info(
+                f"📰 [统一新闻工具] Tushare 新闻源 {source_code} 原始返回 {raw_row_count} 条，"
+                f"按全量扫描避免公司相关新闻落在截断范围之外"
+            )
+
+        processed_news = provider._process_tushare_news(  # type: ignore[attr-defined]
+            news_df,
+            source_code,
+            symbol=None,
+            limit=process_limit,
+        )
+        relevant_news = [
+            news
+            for news in processed_news
+            if _is_relevant_a_share_news(news, symbol, company_name)
+        ]
+
+        if relevant_news:
+            collected_news.extend(relevant_news)
+            logger.info(
+                f"📰 [统一新闻工具] Tushare 新闻源 {source_code} 命中 {len(relevant_news)} 条相关候选"
+            )
+        else:
+            logger.info(
+                f"📰 [统一新闻工具] Tushare 新闻源 {source_code} 有原始数据，但未命中目标公司相关候选"
+            )
+
+        if len(_deduplicate_news_items(collected_news)) >= limit * 2:
+            break
+
+    if not collected_news:
+        logger.info("📰 [统一新闻工具] Tushare 实时链路未获取到可用候选")
+        return []
+
+    filtered_news = _filter_news_by_date_range(_deduplicate_news_items(collected_news), start_date, end_date)
+    final_news = _sort_news_by_time(filtered_news)[:limit]
+    logger.info(f"📰 [统一新闻工具] Tushare 实时链路最终返回 {len(final_news)} 条新闻")
+    return final_news
+
+
+def _fetch_akshare_news_live(
     symbol: str,
     start_date: datetime,
     end_date: datetime,
     limit: int = 20,
 ) -> List[Dict[str, Any]]:
-    """经 DataFacade 能力 stock_news_cn 拉取结构化新闻，并严格按分析日期窗口过滤。"""
+    """从 AKShare 拉取结构化新闻，并严格按分析日期窗口过滤。"""
     logger.info(
-        f"📰 [统一新闻工具] 尝试能力链路新闻: symbol={symbol}, "
+        f"📰 [统一新闻工具] 尝试 AKShare 实时新闻: symbol={symbol}, "
         f"window={start_date.strftime('%Y-%m-%d')}~{end_date.strftime('%Y-%m-%d')}"
     )
 
     try:
-        from tradingagents.dataflows.capability import query_capability_sync
+        from tradingagents.dataflows.providers.china.akshare import AKShareProvider
 
-        # 免费回退链路经 DataFacade 能力查询（tushare 权限不足自动降级
-        # akshare；标准列 title/content/publish_time/media_source，
-        # publish_time 降序）
-        fetch_limit = max(limit * 5, 50)
-        news_df = query_capability_sync(
-            "stock_news_cn",
-            symbol=symbol,
-            limit=fetch_limit,
-        )
+        provider = AKShareProvider()
     except Exception as exc:
-        logger.warning(f"⚠️ [统一新闻工具] 新闻能力查询失败: {exc}")
+        logger.warning(f"⚠️ [统一新闻工具] 初始化 AKShare provider 失败: {exc}")
         return []
 
-    if news_df is None or news_df.empty:
-        logger.info("📰 [统一新闻工具] 新闻能力查询无可用候选")
+    if not provider.is_available():
+        logger.info("⚠️ [统一新闻工具] AKShare provider 不可用，跳过免费回退链路")
         return []
 
-    # 去掉门面附加的来源/质量标记列后转回结构化条目，后续窗口过滤/去重逻辑不变
-    news_list = news_df.drop(columns=['source', 'quality'], errors='ignore').to_dict('records')
+    fetch_limit = max(limit * 5, 50)
+
+    async def _get_news() -> Any:
+        return await provider.get_stock_news(symbol=symbol, limit=fetch_limit)
+
+    try:
+        news_list = _run_async_in_thread(_get_news, timeout=30.0) or []
+    except concurrent.futures.TimeoutError:
+        logger.warning("⚠️ [统一新闻工具] AKShare 新闻获取超时，跳过免费回退链路")
+        return []
+    except Exception as exc:
+        logger.warning(f"⚠️ [统一新闻工具] AKShare 新闻获取失败: {exc}")
+        return []
+
+    if not isinstance(news_list, list):
+        logger.info("📰 [统一新闻工具] AKShare 实时链路返回了非列表结果，视为无效")
+        return []
 
     filtered_news = _filter_news_by_date_range(news_list, start_date, end_date)
     final_news = _sort_news_by_time(_deduplicate_news_items(filtered_news))[:limit]
-    logger.info(f"📰 [统一新闻工具] 能力链路最终返回 {len(final_news)} 条新闻")
+    logger.info(f"📰 [统一新闻工具] AKShare 实时链路最终返回 {len(final_news)} 条新闻")
     return final_news
 
 
@@ -1302,7 +1453,7 @@ def _build_a_share_news_bundle(ticker: str, curr_date: str, limit: int = 20) -> 
             logger.info(f"📰 [统一新闻工具] 跳过非实时分析源: {live_source}")
             continue
 
-        live_news = _fetch_cn_news_via_facade(
+        live_news = _fetch_akshare_news_live(
             symbol=clean_ticker,
             start_date=start_date,
             end_date=end_date,
@@ -1695,7 +1846,7 @@ def get_stock_news_unified(
                         logger.info(f"📰 [统一新闻工具] 跳过非实时分析源: {live_source}")
                         continue
 
-                    live_news = _fetch_cn_news_via_facade(
+                    live_news = _fetch_akshare_news_live(
                         symbol=clean_ticker,
                         start_date=start_date,
                         end_date=end_date,
@@ -1830,61 +1981,5 @@ def get_stock_news_unified(
     except Exception as e:
         error_msg = f"统一新闻工具执行失败: {str(e)}"
         logger.error(f"❌ [统一新闻工具] {error_msg}")
-        return error_msg
-
-
-def get_stock_announcements_unified(
-    ticker: str,
-    curr_date: str,
-    limit: int = 10,
-) -> str:
-    """
-    统一公司公告工具（轻量入口）：只查询 company_announcement 类别的公司公告
-
-    与 get_stock_news_unified 相互独立：本入口只返回公告，不混入普通新闻，
-    现有新闻工具行为不受影响。
-
-    Args:
-        ticker: 股票代码（A股）
-        curr_date: 当前日期（格式：YYYY-MM-DD）
-        limit: 返回数量限制
-
-    Returns:
-        str: 公司公告列表（Markdown）
-    """
-    logger.info(f"📋 [统一公告工具] 查询公告: {ticker}")
-
-    try:
-        clean_ticker = _normalize_a_share_symbol(ticker)
-        curr_date_clean = _normalize_analysis_date(curr_date)
-        start_date, end_date, start_date_str, end_date_str = _build_a_share_news_window(curr_date_clean)
-
-        db_result = _query_news_from_database(
-            symbol=clean_ticker,
-            start_date=start_date,
-            end_date=end_date,
-            limit=limit,
-        )
-
-        announcements = [
-            item for item in (db_result.get("news") or [])
-            if _collapse_whitespace(item.get("category")) == "company_announcement"
-        ][:limit]
-
-        if not announcements:
-            return (
-                f"## {clean_ticker} 公司公告\n"
-                f"分析日期窗口（{start_date_str} 至 {end_date_str}）内未获取到公司公告。"
-            )
-
-        return _format_news_section(
-            announcements,
-            f"{clean_ticker} 公司公告",
-            f"公告独立入口：仅 company_announcement 类别，时间窗口 {start_date_str} 至 {end_date_str}",
-        )
-
-    except Exception as e:
-        error_msg = f"统一公告工具执行失败: {str(e)}"
-        logger.error(f"❌ [统一公告工具] {error_msg}")
         return error_msg
 

@@ -192,7 +192,7 @@ class TestParallelOpeningSwitch:
         assert prepared["_parallel_opening"] is False
 
     def test_all_depths_default_on(self, monkeypatch):
-        for depth in ("快速", "标准", "深度"):
+        for depth in ("快速", "基础", "标准", "深度", "全面"):
             prepared = self._prepare(
                 {"research_depth": depth}, monkeypatch=monkeypatch
             )

@@ -557,13 +557,13 @@ const handleCurrentChange = (page: number) => {
   fetchReports()
 }
 
-// 获取分析深度描述（历史报告兼容：三档后新报告只有 1/3/5，旧报告可能为 2/4）
+// 获取分析深度描述
 const getResearchDepthDescription = (depth: number) => {
   const descMap: Record<number, string> = {
     1: '快速分析 - 基础技术面和基本面分析',
-    2: '标准分析 - 包含技术面、基本面和市场情绪分析（已停用档位）',
+    2: '标准分析 - 包含技术面、基本面和市场情绪分析',
     3: '深度分析 - 全面的多维度分析，包含详细的行业和竞争分析',
-    4: '专家级分析 - 最全面的分析，包含所有维度和深度研究（已停用档位）',
+    4: '专家级分析 - 最全面的分析，包含所有维度和深度研究',
     5: '顶级分析 - 最高级别的分析深度，包含所有可能的分析维度'
   }
   return descMap[depth] || `分析深度: ${depth}`

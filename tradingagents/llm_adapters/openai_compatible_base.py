@@ -568,6 +568,40 @@ class ChatVolcengineCodingOpenAI(OpenAICompatibleBase):
         )
 
 
+class ChatModelflareOpenAI(OpenAICompatibleBase):
+    """Modelflare 聚合网关 OpenAI兼容适配器
+
+    一把 Key 调用 GPT、Claude、Gemini、DeepSeek 等多厂模型。
+    """
+
+    def __init__(
+        self,
+        model: str = "gpt-5.6-sol",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        if base_url is None:
+            env_base_url = os.getenv("MODELFLARE_BASE_URL")
+            if env_base_url and not env_base_url.startswith('your_'):
+                base_url = env_base_url
+            else:
+                base_url = "https://modelflare.dev/v1"
+
+        super().__init__(
+            provider_name="modelflare",
+            model=model,
+            api_key_env_var="MODELFLARE_API_KEY",
+            base_url=base_url,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+
+
 # 支持的OpenAI兼容模型配置
 OPENAI_COMPATIBLE_PROVIDERS = {
     "deepseek": {
@@ -630,6 +664,15 @@ OPENAI_COMPATIBLE_PROVIDERS = {
         "models": {
             "doubao-seed-2.0-code": {"context_length": 128000, "supports_function_calling": True},
             "doubao-seed-1.6-code": {"context_length": 128000, "supports_function_calling": True},
+        }
+    },
+    "modelflare": {
+        "adapter_class": ChatModelflareOpenAI,
+        "base_url": "https://modelflare.dev/v1",
+        "api_key_env": "MODELFLARE_API_KEY",
+        "models": {
+            "gpt-5.6-sol": {"context_length": 128000, "supports_function_calling": True},
+            "claude-fable-5-2": {"context_length": 128000, "supports_function_calling": True},
         }
     },
     "custom_openai": {

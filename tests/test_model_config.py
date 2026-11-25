@@ -76,7 +76,7 @@ async def test_add_llm_config():
         "capability_level": 3,
         "suitable_roles": ["both"],
         "features": ["tool_calling", "reasoning"],
-        "recommended_depths": ["标准", "深度"],
+        "recommended_depths": ["基础", "标准", "深度"],
         "performance_metrics": {
             "speed": 4,
             "cost": 3,

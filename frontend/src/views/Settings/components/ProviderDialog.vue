@@ -450,6 +450,17 @@ const presetProviders = [
     register_guide: '请先安装并启动 LocalAI 服务，然后配置 API 地址'
   },
   {
+    name: 'modelflare',
+    display_name: 'Modelflare',
+    description: 'Modelflare 聚合网关，一把 Key 调用 GPT、Claude、Gemini、DeepSeek 等多厂模型',
+    website: 'https://modelflare.dev',
+    api_doc_url: 'https://docs.modelflare.dev/zh/quickstart/',
+    default_base_url: 'https://modelflare.dev/v1',
+    supported_features: ['chat', 'completion', 'function_calling', 'streaming'],
+    register_url: 'https://modelflare.dev',
+    register_guide: '如果您还没有 Modelflare 账号，请先注册并获取 API Key：'
+  },
+  {
     name: 'openai_compatible',
     display_name: 'OpenAI 兼容 (通用)',
     description: '通用的 OpenAI 兼容 API 服务，适用于任何兼容 OpenAI API 格式的服务提供商',

@@ -59,7 +59,6 @@ from app.routers import embedded_nanobot as embedded_nanobot_router
 from app.routers import paper as paper_router
 from app.routers import portfolio as portfolio_router
 from app.routers import review as review_router
-from app.routers import recent_views as recent_views_router
 from app.routers import intelligent_assistant as intelligent_assistant_router
 from app.routers import intelligent_screening as intelligent_screening_router
 from app.routers import memory as memory_router
@@ -123,7 +122,6 @@ COMMUNITY_ROUTERS = [
     (paper_router.router, "paper", {"prefix": "/api", "tags": ["paper"]}),
     (portfolio_router.router, "portfolio", {"prefix": "/api", "tags": ["portfolio"]}),
     (review_router.router, "review", {"prefix": "/api", "tags": ["review"]}),
-    (recent_views_router.router, "recent_views", {"prefix": "/api", "tags": ["recent-views"]}),
     (intelligent_assistant_router.router, "intelligent_assistant", {"tags": ["assistant"]}),
     (memory_router.router, "memory", {"tags": ["memory"]}),
     (workflow_growth_router.router, "workflow_growth", {"tags": ["workflow-growth"]}),
@@ -152,11 +150,7 @@ COMMUNITY_ROUTERS = [
 # 此处 try-import 自动降级为空列表，router_registry 零行级改动。
 try:
     from app.pro.pro_routers import PRO_ROUTERS
-except ImportError as e:  # 社区版：app/pro_routers.py 已被发布管道整体剔除
-    if "app.pro.pro_routers" not in str(e):
-        logger.warning(
-            f"⚠️ Pro 路由导入失败，已降级为社区版路由（所有 /api/pro/* 将返回 404）：{e}"
-        )
+except ImportError:  # 社区版：app/pro_routers.py 已被发布管道整体剔除
     PRO_ROUTERS = []
 
 

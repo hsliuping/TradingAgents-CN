@@ -13,8 +13,6 @@ from pydantic import BaseModel, Field, ValidationError
 from ..manager import ManagerAgent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
-from .flow_context import append_flow_context, safe_extract, all_degraded
-from core.agents.base import GENERIC_REPORT_FALLBACK
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +22,6 @@ logger = logging.getLogger(__name__)
 # 从源头消除格式不一致（参考桥水 Pat 的"规格驱动"思路，与 risk_manager_v2 同构）。
 # 合规要求：analysis_view 只能取值 "乐观"/"审慎"/"中性"，
 # 禁止使用"看涨/看跌/买入/卖出"等交易指令或市场观点术语。
-
-
-class KeyHypothesis(BaseModel):
-    """关键假设（v4.0 P1：分析完成后自动写入研究日志，open 状态跟踪验证）"""
-    hypothesis: str
-    signals: str = ""
-    invalidation: str = ""
 
 
 class ResearchManagerOutput(BaseModel):
@@ -46,14 +37,6 @@ class ResearchManagerOutput(BaseModel):
     invalidation_conditions: List[str] = Field(default_factory=list)
     watch_items: List[str] = Field(default_factory=list)
     risk_warning: str = ""
-    # 🆕 v4.0 P1：结构化关键假设（1-5 条，宁缺勿造，可为空数组）
-    key_hypotheses: List[KeyHypothesis] = Field(default_factory=list)
-    # 🆕 v4.0 方法论进产品（必填，机器校验）：
-    # 三层因素定位（交易层/景气层/价值层）+ 获利三条路归属（成长/预期差/情绪）
-    driver_layer: Literal["交易层", "景气层", "价值层", "混合"]
-    driver_layer_basis: str
-    profit_path: Literal["成长", "预期差", "情绪", "不确定"]
-    profit_path_basis: str
 
 
 # 研究整合员输出格式契约。
@@ -72,14 +55,7 @@ RESEARCH_MANAGER_SCHEMA_PROMPT = """【输出格式契约·必须严格遵守】
   "uncertainties": ["关键不确定性1", "关键不确定性2"],
   "invalidation_conditions": ["判断下修或失效前提1", "判断下修或失效前提2"],
   "watch_items": ["后续观察事项1", "后续观察事项2", "后续观察事项3"],
-  "risk_warning": "100字以内的关键风险提示或主要反证",
-  "key_hypotheses": [
-    {"hypothesis": "一句话可证伪的判断", "signals": "可观察的验证信号", "invalidation": "推翻该假设的具体情形"}
-  ],
-  "driver_layer": "交易层" | "景气层" | "价值层" | "混合",
-  "driver_layer_basis": "定位依据：为什么是这一层，引用上游材料中的具体读数或事实",
-  "profit_path": "成长" | "预期差" | "情绪" | "不确定",
-  "profit_path_basis": "一句话说明本判断赚的是哪条路的钱及其依据；判断不清时取「不确定」并把原因写入 uncertainties"
+  "risk_warning": "100字以内的关键风险提示或主要反证"
 }
 
 【合规性约束·必须遵守】
@@ -95,72 +71,8 @@ RESEARCH_MANAGER_SCHEMA_PROMPT = """【输出格式契约·必须严格遵守】
 - confidence: 0-1 之间的浮点数（不要写 0-100）
 - risk_score: 0-1 之间的浮点数（不要写 0-100）
 - core_evidence / uncertainties / invalidation_conditions / watch_items: 字符串数组，尽量提供 2-5 条
-- key_hypotheses: 1-5 条对象数组，只列对结论影响最大的假设；hypothesis 必须可观测、可证伪，
-  signals 写清楚用什么指标或事件验证，invalidation 写清楚什么情形会推翻它；
-  证据不足时输出空数组 []，不得编造验证信号
-- driver_layer: 本轮价格的主要驱动层。交易层=资金/筹码/情绪/量价（日-周尺度）；
-  景气层=行业供需/业绩趋势/预期兑现（月-季尺度）；价值层=商业模式/竞争格局/复利能力（年-数年尺度）；
-  证据横跨多层且难分主次时用「混合」。driver_layer_basis 必须引用上游材料中的具体读数或事实
-- profit_path: 本判断对应的获利来源。成长=赚企业利润增长与分红的钱；预期差=赚认知领先于市场预期的钱；
-  情绪=赚情绪与筹码超调回归的钱；判断不出占优路径时如实填「不确定」，不得硬选，
-  并把原因写入 uncertainties（能力圈纪律：设不出验证路径的问题不参与判断）
 - reasoning 应显式体现：乐观情景最强依据、审慎情景最强依据、双方共识、关键分歧根源，以及为何当前判断偏向某侧或保持中性
 - 所有字段都必须服务于研究判断，不能出现交易执行语言
-
-输出必须是合法 JSON，不要在 JSON 前后添加任何文字或代码块标记。
-
-"""
-
-
-# ==================== 执行模式 schema（设计文档 §6.1） ====================
-# 仅当开关开 + 本地执行模板存在时启用；在研究结论基础上增加关键观察价位（双向锚点）。
-
-class ObservationLevels(BaseModel):
-    """关键观察价位（执行模式扩展：支撑/压力/证伪价，供下游执行层引用）"""
-    support_1: Optional[str] = None
-    resistance_1: Optional[str] = None
-    invalidation_price: Optional[str] = None
-
-
-class ExecutionResearchManagerOutput(ResearchManagerOutput):
-    """执行版研究结论 schema：研究字段不变 + observation_levels 观察价位"""
-    observation_levels: ObservationLevels = Field(default_factory=ObservationLevels)
-
-
-RESEARCH_MANAGER_EXECUTION_SCHEMA_PROMPT = """【输出格式契约·执行模式·必须严格遵守】
-你的输出必须是一个 JSON 对象，包含以下字段。只输出 JSON，不要包裹在 markdown 代码块中，不要有任何额外文字。
-
-{
-  "analysis_view": "乐观" | "审慎" | "中性",
-  "confidence": 0.0-1.0 之间的浮点数,
-  "risk_score": 0.0-1.0 之间的浮点数,
-  "summary": "50-120字的结论摘要",
-  "reasoning": "200-500字证据权衡说明",
-  "core_evidence": ["核心依据1", "核心依据2"],
-  "uncertainties": ["关键不确定性1"],
-  "invalidation_conditions": ["判断失效前提1"],
-  "watch_items": ["后续观察事项1"],
-  "risk_warning": "100字以内的关键风险提示",
-  "key_hypotheses": [
-    {"hypothesis": "一句话可证伪的判断", "signals": "可观察的验证信号", "invalidation": "推翻该假设的具体情形"}
-  ],
-  "driver_layer": "交易层" | "景气层" | "价值层" | "混合",
-  "driver_layer_basis": "定位依据：为什么是这一层，引用上游材料中的具体读数或事实",
-  "profit_path": "成长" | "预期差" | "情绪" | "不确定",
-  "profit_path_basis": "一句话说明本判断赚的是哪条路的钱及其依据；判断不清时取「不确定」并把原因写入 uncertainties",
-  "observation_levels": {
-    "support_1": "第一支撑位（具体价格，基于报告数据）",
-    "resistance_1": "第一压力位（具体价格，基于报告数据）",
-    "invalidation_price": "判断证伪价位（跌破/突破该价则研究结论需重估）"
-  }
-}
-
-【执行模式约束·必须遵守】
-1. analysis_view 仍只能取值 "乐观" / "审慎" / "中性"（研究倾向），操作决策由下游执行层给出。
-2. observation_levels 的价位必须严格基于报告中的真实数据（K线/均线/前高前低），不得编造。
-3. 禁止承诺收益或保证盈利，必须提示风险。
-4. 所有结论必须严格基于提供的报告内容，不得补造信息。
-5. 本输出为执行模式输出，仅供使用者个人决策参考，不构成任何投资建议。
 
 输出必须是合法 JSON，不要在 JSON 前后添加任何文字或代码块标记。
 
@@ -257,9 +169,6 @@ class ResearchManagerV2(ManagerAgent):
     # 是否启用辩论
     enable_debate = True
 
-    # 辩论状态字段（基类 _conduct_debate 从这里读取真实辩论记录）
-    debate_state_field = "investment_debate_state"
-
     def _run_delegated_research_agents(self, state: Dict[str, Any]) -> Dict[str, Any]:
         node_config = state.get("node_config") or {}
         delegated_agent_ids = node_config.get("delegated_agent_ids") or []
@@ -307,16 +216,6 @@ class ResearchManagerV2(ManagerAgent):
         ticker = state.get("ticker", "未知")
         bull_report = state.get("bull_report", "")
         bear_report = state.get("bear_report", "")
-
-        # 🛑 R3：多空报告都降级 → 跳过 LLM，直接返回占位（不烧算力、不产出不可信结论）
-        if all_degraded(state, ["bull_report", "bear_report"]):
-            logger.warning("⚠️ [ResearchManagerV2] bull_report 与 bear_report 均降级，跳过投资计划生成")
-            return {
-                self.output_field: GENERIC_REPORT_FALLBACK,
-                "_node_errors": {
-                    "research_manager_v2": "上游多空报告均降级，投资计划未生成"
-                },
-            }
 
         logger.info(f"📊 股票代码: {ticker}")
         logger.info(f"📈 积极证据报告类型: {type(bull_report)}, 长度: {len(str(bull_report))} 字符")
@@ -509,15 +408,8 @@ class ResearchManagerV2(ManagerAgent):
             return None, f"JSON 顶层不是对象，实际类型: {type(json_obj).__name__}"
 
         # pydantic schema 校验（含合规术语枚举约束、数值范围约束）
-        # 🆕 执行模式路由（A3）：开关开 + 本地执行模板存在 → 用执行版 schema（含观察价位）
-        from core.agents.advice_mode import use_execution_output
-        _schema_cls = (
-            ExecutionResearchManagerOutput
-            if use_execution_output("managers_v2", "research_manager_v2")
-            else ResearchManagerOutput
-        )
         try:
-            validated = _schema_cls(**json_obj)
+            validated = ResearchManagerOutput(**json_obj)
             return validated.model_dump(), None
         except ValidationError as e:
             return None, f"Schema 校验失败: {e}"
@@ -570,14 +462,8 @@ class ResearchManagerV2(ManagerAgent):
             # 🔥 按硬约束"system prompt 必须将格式要求放在最前面"，
             # 将 schema 契约前置到 prompt 最前面，确保 LLM 优先看到格式与合规约束，
             # 不依赖数据库迁移即可立即生效。
-            # 🆕 执行模式路由（A3）：开关开 + 本地执行模板存在 → 前置执行版契约（含观察价位）
-            from core.agents.advice_mode import use_execution_output
-            if use_execution_output("managers_v2", "research_manager_v2"):
-                prompt = RESEARCH_MANAGER_EXECUTION_SCHEMA_PROMPT + prompt
-                logger.info(f"🟢 [advice_mode] 执行模式：研究结论执行契约已前置 (长度: {len(prompt)})")
-            else:
-                prompt = RESEARCH_MANAGER_SCHEMA_PROMPT + prompt
-                logger.info(f"📝 系统提示词长度: {len(prompt)} 字符（含 schema 契约）")
+            prompt = RESEARCH_MANAGER_SCHEMA_PROMPT + prompt
+            logger.info(f"📝 系统提示词长度: {len(prompt)} 字符（含 schema 契约）")
             logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
 
             # 检查是否包含新的研究简报结构指导
@@ -600,8 +486,7 @@ class ResearchManagerV2(ManagerAgent):
     1. 先用双方最强的成立逻辑理解乐观与审慎两类论证，再形成当前研究判断。
     2. 说明双方共识、关键分歧及分歧根源，而不是只给一个结果标签。
     3. 点明支持判断的核心依据、关键不确定性、判断可能失效的条件与后续观察重点。
-    4. 先定位本轮价格主要由哪层驱动（交易层=资金/筹码/情绪；景气层=行业供需/业绩趋势/预期兑现；价值层=商业模式/竞争格局/复利能力），证据权重按层分配；再说明本判断赚的是成长/预期差/情绪哪条路的钱，判断不清时如实标注为不确定。
-    5. 输出面向下游整合与风险审阅的平衡研究结论，帮助后续节点理解“为什么这样看”以及“接下来观察什么”。
+    4. 输出面向下游整合与风险审阅的平衡研究结论，帮助后续节点理解“为什么这样看”以及“接下来观察什么”。
 
     **分析原则**:
     - 应先按双方最强论点等权审阅，再根据证据质量决定当前倾向，不预设结论。
@@ -685,9 +570,15 @@ class ResearchManagerV2(ManagerAgent):
         current_price = state.get("current_price", "未知")
         logger.info(f"💰 当前价格: {current_price} (来源: state)")
 
-        # 🆕 提取报告内容（降级占位返回"无"，不混入推理）
-        bull_report_content = safe_extract(inputs.get("bull_report"), default="无")
-        bear_report_content = safe_extract(inputs.get("bear_report"), default="无")
+        # 🆕 提取报告内容（如果是字典，取 content 字段）
+        def extract_content(report):
+            """从报告中提取纯文本内容"""
+            if isinstance(report, dict):
+                return report.get('content', str(report))
+            return str(report) if report else "无"
+
+        bull_report_content = extract_content(inputs.get("bull_report"))
+        bear_report_content = extract_content(inputs.get("bear_report"))
 
         logger.info(f"📈 积极证据报告内容长度: {len(bull_report_content)} 字符")
         logger.info(f"📉 谨慎证据报告内容长度: {len(bear_report_content)} 字符")
@@ -739,7 +630,7 @@ class ResearchManagerV2(ManagerAgent):
         )
         if prompt:
             logger.info(f"✅ 从模板系统获取研究整合员用户提示词 (长度: {len(prompt)})")
-            return append_flow_context(prompt, state, include_profile=True, include_simulation=False)
+            return prompt
         
         market_name = state.get("market_name", "")
         currency_name = state.get("currency_name", "")
@@ -817,7 +708,7 @@ class ResearchManagerV2(ManagerAgent):
         else:
             logger.warning("⚠️ 用户提示词不包含【可用资源】与【任务重点】指导")
 
-        return append_flow_context(prompt, state, include_profile=True, include_simulation=False)
+        return prompt
     
     def _get_required_inputs(self) -> List[str]:
         """

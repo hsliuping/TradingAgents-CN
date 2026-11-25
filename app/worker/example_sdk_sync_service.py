@@ -342,8 +342,7 @@ async def run_incremental_sync():
 
 async def main():
     """主函数 - 用于测试"""
-    from core.utils.logging_setup import setup_cli_logging
-    setup_cli_logging("INFO")
+    logging.basicConfig(level=logging.INFO)
     
     sync_service = ExampleSDKSyncService()
     

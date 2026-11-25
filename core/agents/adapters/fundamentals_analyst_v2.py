@@ -14,7 +14,6 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from ..base import BaseAgent
 from ..config import AgentConfig, AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
-from tradingagents.agents.utils.compliance_prompting import SOURCE_ANNOTATION_REQUIREMENT
 
 # 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
 
@@ -57,8 +56,8 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         description="分析公司财务数据、盈利能力、成长性和基本面指标，涵盖护城河/竞争优势评估和管理层质量分析",
         category=AgentCategory.ANALYST,
         license_tier=LicenseTier.FREE,
-        default_tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement", "get_peer_comparison", "get_moat_metrics_tool", "get_intrinsic_value_range_tool"],
-        max_tool_calls=6,
+        default_tools=["get_stock_fundamentals_unified", "get_financial_statements", "get_cash_flow_statement", "get_peer_comparison"],
+        max_tool_calls=4,
         version="2.0.0",
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
@@ -159,8 +158,6 @@ class FundamentalsAnalystAgentV2(BaseAgent):
                 user_prompt = self._build_user_prompt(ticker, trade_date, state)
 
             system_prompt = self._apply_global_trading_advice_guard(system_prompt)
-            # 🆕 v4.0 T2：数字必须带来源标注（6 个分析师统一纪律）
-            system_prompt += SOURCE_ANNOTATION_REQUIREMENT
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
@@ -288,11 +285,10 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         return """你是一位专业客观的股票基本面分析师，负责为研究流程提供可复核的财务与经营证据，并进行平衡的财务分析。
 
     你的任务是：
-    1. 使用工具获取公司的整体基本面、最近季度财报明细、现金流信息、护城河六维度结构化原料、历史中枢内在价值区间以及必要的同行估值对比
-    2. 将护城河六维度原料组织成显式的「护城河评估」小节，按资本回报、利润率稳定性、现金流含金量、财务结构、成长质量、股东回报逐项呈现工具数据与方向性结论
-    3. 结合行业特征分析财务健康度、盈利能力、经营弹性、经营质量与现金流匹配度
-    4. 评估估值所处背景，说明市场定价反映的预期以及这些因素对整体研究结论的支持或削弱作用
-    5. 平衡分析机会因素与风险因素，说明结论成立的关键前提并给出简短总结
+    1. 使用工具获取公司的整体基本面、最近季度财报明细、现金流信息以及必要的同行估值对比
+    2. 结合行业特征分析财务健康度、盈利能力、经营弹性、经营质量与现金流匹配度
+    3. 评估估值所处背景，说明市场定价反映的预期以及这些因素对整体研究结论的支持或削弱作用
+    4. 平衡分析机会因素与风险因素，说明结论成立的关键前提并给出简短总结
 
     要求：
     - 必须基于真实数据进行分析，不得使用模型自身记忆、常识补全或未在工具结果中出现的数据做判断
@@ -309,7 +305,7 @@ class FundamentalsAnalystAgentV2(BaseAgent):
     - 如需讨论估值，只能围绕工具明确提供的历史估值分位、历史区间或同行相对估值展开；不得把当前股价、当前总市值写进公司概况、核心观察或总结
     - 估值背景尽量拆成绝对估值、相对估值、历史分位和市场已计入预期四层，不要只写“高估/低估”
     - 说明估值溢价或折价时，优先解释其更可能对应盈利持续性、现金回收能力、竞争格局或景气位置
-    - 允许引用营收增速、毛利率、净利率、ROE、ROA、经营现金流、PE、PB、PEG 等真实数值说明事实，但不得改写成合理价位、目标价、安全边际或介入区间；唯一例外：工具返回的历史中枢内在价值区间（价格带）必须在估值背景部分如实呈现区间数值、样本窗口与方法说明（历史中枢回归法，非 DCF、不含增长假设），并标注「统计口径的估值背景参考，不构成目标价或操作建议」
+    - 允许引用营收增速、毛利率、净利率、ROE、ROA、经营现金流、PE、PB、PEG 等真实数值说明事实，但不得改写成合理价位、目标价、安全边际或介入区间
     - 可以写：“2025Q4 的营业收入和归母净利润属于全年累计口径，若要观察单季度变化，需要结合 Q3 累计值进一步推导。”
     - 可以写：“当前 ROE 为报告期指标快照，不宜直接解释为单季度 ROE。”
     - 可以写：“应结合行业特征选择适用指标；若某类传统周转或流动性指标不适用于当前行业，不必机械列为缺口。”
@@ -419,8 +415,6 @@ class FundamentalsAnalystAgentV2(BaseAgent):
     - 先调用 get_stock_fundamentals_unified 获取整体基本面背景、历史估值区间和口径说明，不要把其中可能出现的实时快照字段写入正文
     - 再调用 get_financial_statements 获取最近季度三表和盈利质量细节
     - 再调用 get_cash_flow_statement 获取现金流与利润匹配情况
-    - 如需竞争优势评估的结构化原料，可调用 get_moat_metrics_tool 一次性获取资本回报、利润率稳定性、现金流含金量、财务结构、成长质量、股东回报六个维度的统计汇总
-    - 如需估值背景补充，可调用 get_intrinsic_value_range_tool 获取基于历史 PE/PB 中枢与最近年报 EPS/BPS 的价格区间；该区间是历史统计参考背景，不是合理价格判断，不得写入结论或当作操作建议
     - 对 A 股，如需补充同业估值定位，可调用 get_peer_comparison(ticker='{ticker}', trade_date='{trade_date}', top_n=10)
 
     重点覆盖：
@@ -462,12 +456,11 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 
     1. 核心观察
     2. 公司概况与当前经营特征
-    3. 护城河评估：按资本回报、利润率稳定性、现金流含金量、财务结构、成长质量、股东回报六个维度逐项呈现
-    4. 结合行业特征分析财务健康度、盈利能力、经营质量与现金流匹配度
-    5. 估值背景、历史区间与同行比较所反映的市场预期
-    6. 机会与风险的平衡评估
-    7. 对整体研究结论的支持或削弱作用
-    8. 总结
+    3. 结合行业特征分析财务健康度、盈利能力、经营质量与现金流匹配度
+    4. 估值背景、历史区间与同行比较所反映的市场预期
+    5. 机会与风险的平衡评估
+    6. 对整体研究结论的支持或削弱作用
+    7. 总结
 
     如果某项数据缺失，请直接写“工具结果未提供”或“该维度仍待验证”，不要自行补全。
     基本面研究默认只使用历史财务、历史估值区间和已披露经营数据；即使工具结果出现当前股价、涨跌幅、成交量、当前总市值等日频快照，也不要把这些字段写入正文或作为结论依据。
@@ -476,14 +469,12 @@ class FundamentalsAnalystAgentV2(BaseAgent):
     如果工具明确提示“当前尚无当日收盘后日频数据”或“已按前一可用交易日口径执行”，必须在“核心观察”第一条或“估值背景”开头先写明：当前尚无分析日对应的稳定收盘后日频数据，因此本次历史估值分位与同行估值按前一可用交易日口径分析；不能只改日期不解释原因。
     请根据行业特征和工具可得数据选择最有解释力的指标，不要求机械覆盖所有通用财务指标；若某类指标对当前行业不适用，不要把其缺失直接写成风险或数据缺口。
     如果工具已明确给出“单季度推导”字段，优先使用这些字段描述季度变化；不要把“原始报告期累计/快照”字段误写成单季度变化。
-    若调用了 get_moat_metrics_tool，必须把六维度原料组织成显式的「护城河评估」小节：按资本回报、利润率稳定性、现金流含金量、财务结构、成长质量、股东回报逐项呈现工具数据与方向性结论，维度名称须体现在小节标题或段落引导句中；某维度数据缺失时如实标注，不得整块省略。
     如存在仍待验证事项，可在相关段落顺带一句说明，不必单列章节。
     估值背景尽量拆成绝对估值、相对估值、历史分位和市场已计入预期。
     如需讨论估值，只能围绕历史估值分位、历史区间或同行相对估值展开，不要写当前股价、当前总市值或其他实时快照字段。
-    若工具返回了历史中枢内在价值区间（价格带），必须在「估值背景」中如实呈现区间数值、样本窗口与方法说明（历史中枢回归法，非 DCF、不含增长假设），并注明这是统计口径的估值背景参考，不构成目标价或操作建议。
-    允许引用真实数值做事实说明，也允许按上述统计口径呈现工具返回的历史中枢价格带；但不要把数值自行组织成合理价位、目标价、安全边际结论、景气拐点布局或交易触发条件。
+    允许引用真实数值做事实说明，但不要把数值写成合理价位、目标价、价格区间、安全边际、景气拐点布局或交易触发条件。
 
-    不要输出自行推算的价格区间、目标价、仓位或执行建议；工具返回的历史中枢价格带按上述统计口径呈现即可。
+    不要输出价格区间、目标价、仓位或执行建议。
     不得添加任何署名、作者、分析师、日期或声明信息。"""
 
     def _get_market_characteristics(self, ticker: str) -> Dict[str, Any]:

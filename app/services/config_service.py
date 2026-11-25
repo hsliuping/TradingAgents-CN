@@ -198,7 +198,7 @@ class ConfigService:
             categories.sort(key=lambda x: x.sort_order)
             return categories
         except Exception as e:
-            logger.error(f"❌ 获取市场分类失败: {e}")
+            print(f"❌ 获取市场分类失败: {e}")
             return []
 
     async def _create_default_market_categories(self) -> List[MarketCategory]:
@@ -269,7 +269,7 @@ class ConfigService:
             await categories_collection.insert_one(category.model_dump())
             return True
         except Exception as e:
-            logger.error(f"❌ 添加市场分类失败: {e}")
+            print(f"❌ 添加市场分类失败: {e}")
             return False
 
     async def update_market_category(self, category_id: str, updates: Dict[str, Any]) -> bool:
@@ -285,7 +285,7 @@ class ConfigService:
             )
             return result.modified_count > 0
         except Exception as e:
-            logger.error(f"❌ 更新市场分类失败: {e}")
+            print(f"❌ 更新市场分类失败: {e}")
             return False
 
     async def delete_market_category(self, category_id: str) -> bool:
@@ -305,7 +305,7 @@ class ConfigService:
             result = await categories_collection.delete_one({"id": category_id})
             return result.deleted_count > 0
         except Exception as e:
-            logger.error(f"❌ 删除市场分类失败: {e}")
+            print(f"❌ 删除市场分类失败: {e}")
             return False
 
     # ==================== 数据源分组管理 ====================
@@ -319,7 +319,7 @@ class ConfigService:
             groupings_data = await groupings_collection.find({}).to_list(length=None)
             return [DataSourceGrouping(**data) for data in groupings_data]
         except Exception as e:
-            logger.error(f"❌ 获取数据源分组关系失败: {e}")
+            print(f"❌ 获取数据源分组关系失败: {e}")
             return []
 
     async def add_datasource_to_category(self, grouping: DataSourceGrouping) -> bool:
@@ -339,7 +339,7 @@ class ConfigService:
             await groupings_collection.insert_one(grouping.model_dump())
             return True
         except Exception as e:
-            logger.error(f"❌ 添加数据源到分类失败: {e}")
+            print(f"❌ 添加数据源到分类失败: {e}")
             return False
 
     async def remove_datasource_from_category(self, data_source_name: str, category_id: str) -> bool:
@@ -354,7 +354,7 @@ class ConfigService:
             })
             return result.deleted_count > 0
         except Exception as e:
-            logger.error(f"❌ 从分类中移除数据源失败: {e}")
+            print(f"❌ 从分类中移除数据源失败: {e}")
             return False
 
     async def update_datasource_grouping(self, data_source_name: str, category_id: str, updates: Dict[str, Any]) -> bool:
@@ -472,7 +472,7 @@ class ConfigService:
                     if ds_name in priority_map:
                         ds_config["priority"] = priority_map[ds_name]
                         updated = True
-                        logger.info(f"📊 [优先级同步] 更新数据源 {ds_name} 的优先级为 {priority_map[ds_name]}")
+                        print(f"📊 [优先级同步] 更新数据源 {ds_name} 的优先级为 {priority_map[ds_name]}")
 
                 # 如果有更新，保存回数据库
                 if updated:
@@ -486,15 +486,15 @@ class ConfigService:
                             }
                         }
                     )
-                    logger.info(f"✅ [优先级同步] 已同步更新 system_configs 集合，新版本: {config_data.get('version', 0) + 1}")
+                    print(f"✅ [优先级同步] 已同步更新 system_configs 集合，新版本: {config_data.get('version', 0) + 1}")
                 else:
-                    logger.warning(f"⚠️ [优先级同步] 没有找到需要更新的数据源配置")
+                    print(f"⚠️ [优先级同步] 没有找到需要更新的数据源配置")
             else:
-                logger.warning(f"⚠️ [优先级同步] 未找到激活的系统配置")
+                print(f"⚠️ [优先级同步] 未找到激活的系统配置")
 
             return True
         except Exception as e:
-            logger.error(f"❌ 更新分类数据源排序失败: {e}")
+            print(f"❌ 更新分类数据源排序失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -512,26 +512,26 @@ class ConfigService:
             )
 
             if config_data:
-                logger.info(f"📊 从数据库获取配置，版本: {config_data.get('version', 0)}, LLM配置数量: {len(config_data.get('llm_configs', []))}")
+                print(f"📊 从数据库获取配置，版本: {config_data.get('version', 0)}, LLM配置数量: {len(config_data.get('llm_configs', []))}")
                 config = SystemConfig(**config_data)
                 self._ensure_llm_config_ids(config.llm_configs)
                 return config
 
             # 如果没有配置，创建默认配置
-            logger.warning("⚠️ 数据库中没有配置，创建默认配置")
+            print("⚠️ 数据库中没有配置，创建默认配置")
             return await self._create_default_config()
 
         except Exception as e:
-            logger.error(f"❌ 从数据库获取配置失败: {e}")
+            print(f"❌ 从数据库获取配置失败: {e}")
 
             # 作为最后的回退，尝试从统一配置管理器获取
             try:
                 unified_system_config = await unified_config.get_unified_system_config()
                 if unified_system_config:
-                    logger.info("🔄 回退到统一配置管理器")
+                    print("🔄 回退到统一配置管理器")
                     return unified_system_config
             except Exception as e2:
-                logger.error(f"从统一配置获取也失败: {e2}")
+                print(f"从统一配置获取也失败: {e2}")
 
             return None
     
@@ -675,7 +675,7 @@ class ConfigService:
     async def save_system_config(self, config: SystemConfig) -> bool:
         """保存系统配置到数据库"""
         try:
-            logger.info(f"💾 开始保存配置，LLM配置数量: {len(config.llm_configs)}")
+            print(f"💾 开始保存配置，LLM配置数量: {len(config.llm_configs)}")
             self._ensure_llm_config_ids(config.llm_configs)
 
             # 保存到数据库
@@ -691,7 +691,7 @@ class ConfigService:
                 {"is_active": True},
                 {"$set": {"is_active": False}}
             )
-            logger.info(f"📝 禁用旧配置数量: {update_result.modified_count}")
+            print(f"📝 禁用旧配置数量: {update_result.modified_count}")
 
             # 插入新配置 - 移除_id字段让MongoDB自动生成新的
             config_dict = config.model_dump(by_alias=True)
@@ -700,34 +700,34 @@ class ConfigService:
 
             # 打印即将保存的 system_settings
             system_settings = config_dict.get('system_settings', {})
-            logger.info(f"📝 即将保存的 system_settings 包含 {len(system_settings)} 项")
+            print(f"📝 即将保存的 system_settings 包含 {len(system_settings)} 项")
             if 'quick_analysis_model' in system_settings:
-                logger.info(f"  ✓ 包含 quick_analysis_model: {system_settings['quick_analysis_model']}")
+                print(f"  ✓ 包含 quick_analysis_model: {system_settings['quick_analysis_model']}")
             else:
-                logger.warning(f"  ⚠️  不包含 quick_analysis_model")
+                print(f"  ⚠️  不包含 quick_analysis_model")
             if 'deep_analysis_model' in system_settings:
-                logger.info(f"  ✓ 包含 deep_analysis_model: {system_settings['deep_analysis_model']}")
+                print(f"  ✓ 包含 deep_analysis_model: {system_settings['deep_analysis_model']}")
             else:
-                logger.warning(f"  ⚠️  不包含 deep_analysis_model")
+                print(f"  ⚠️  不包含 deep_analysis_model")
 
             insert_result = await config_collection.insert_one(config_dict)
-            logger.info(f"📝 新配置ID: {insert_result.inserted_id}")
+            print(f"📝 新配置ID: {insert_result.inserted_id}")
 
             # 验证保存结果
             saved_config = await config_collection.find_one({"_id": insert_result.inserted_id})
             if saved_config:
-                logger.info(f"✅ 配置保存成功，验证LLM配置数量: {len(saved_config.get('llm_configs', []))}")
+                print(f"✅ 配置保存成功，验证LLM配置数量: {len(saved_config.get('llm_configs', []))}")
 
                 # 暂时跳过统一配置同步，避免冲突
                 # unified_config.sync_to_legacy_format(config)
 
                 return True
             else:
-                logger.error("❌ 配置保存验证失败")
+                print("❌ 配置保存验证失败")
                 return False
 
         except Exception as e:
-            logger.error(f"❌ 保存配置失败: {e}")
+            print(f"❌ 保存配置失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -735,20 +735,20 @@ class ConfigService:
     async def delete_llm_config(self, provider: str, model_name: str) -> bool:
         """删除大模型配置"""
         try:
-            logger.info(f"🗑️ 删除大模型配置 - provider: {provider}, model_name: {model_name}")
+            print(f"🗑️ 删除大模型配置 - provider: {provider}, model_name: {model_name}")
 
             config = await self.get_system_config()
             if not config:
-                logger.error("❌ 系统配置为空")
+                print("❌ 系统配置为空")
                 return False
 
-            logger.info(f"📊 当前大模型配置数量: {len(config.llm_configs)}")
+            print(f"📊 当前大模型配置数量: {len(config.llm_configs)}")
 
             # 打印所有现有配置
             for i, llm in enumerate(config.llm_configs):
                 # 🔥 修复：provider 是字符串，不是枚举
                 provider_str = llm.provider if isinstance(llm.provider, str) else llm.provider.value
-                logger.info(f"   {i+1}. provider: {provider_str}, model_name: {llm.model_name}")
+                print(f"   {i+1}. provider: {provider_str}, model_name: {llm.model_name}")
 
             # 查找并删除指定的LLM配置
             original_count = len(config.llm_configs)
@@ -763,20 +763,20 @@ class ConfigService:
             ]
 
             new_count = len(config.llm_configs)
-            logger.info(f"🔄 删除后配置数量: {new_count} (原来: {original_count})")
+            print(f"🔄 删除后配置数量: {new_count} (原来: {original_count})")
 
             if new_count == original_count:
-                logger.error(f"❌ 没有找到匹配的配置: {provider}/{model_name}")
+                print(f"❌ 没有找到匹配的配置: {provider}/{model_name}")
                 return False  # 没有找到要删除的配置
 
             # 保存更新后的配置
             save_result = await self.save_system_config(config)
-            logger.info(f"💾 保存结果: {save_result}")
+            print(f"💾 保存结果: {save_result}")
 
             return save_result
 
         except Exception as e:
-            logger.error(f"❌ 删除LLM配置失败: {e}")
+            print(f"❌ 删除LLM配置失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -800,7 +800,7 @@ class ConfigService:
             return await self.save_system_config(config)
 
         except Exception as e:
-            logger.error(f"设置默认LLM失败: {e}")
+            print(f"设置默认LLM失败: {e}")
             return False
 
     async def set_default_data_source(self, data_source_name: str) -> bool:
@@ -822,7 +822,7 @@ class ConfigService:
             return await self.save_system_config(config)
 
         except Exception as e:
-            logger.error(f"设置默认数据源失败: {e}")
+            print(f"设置默认数据源失败: {e}")
             return False
 
     async def update_system_settings(self, settings: Dict[str, Any]) -> bool:
@@ -840,25 +840,25 @@ class ConfigService:
             )
 
             # 打印更新前的系统设置
-            logger.info(f"📝 更新前 system_settings 包含 {len(config.system_settings)} 项")
+            print(f"📝 更新前 system_settings 包含 {len(config.system_settings)} 项")
             if 'quick_analysis_model' in config.system_settings:
-                logger.info(f"  ✓ 更新前包含 quick_analysis_model: {config.system_settings['quick_analysis_model']}")
+                print(f"  ✓ 更新前包含 quick_analysis_model: {config.system_settings['quick_analysis_model']}")
             else:
-                logger.warning(f"  ⚠️  更新前不包含 quick_analysis_model")
+                print(f"  ⚠️  更新前不包含 quick_analysis_model")
 
             # 更新系统设置
             config.system_settings.update(settings)
 
             # 打印更新后的系统设置
-            logger.info(f"📝 更新后 system_settings 包含 {len(config.system_settings)} 项")
+            print(f"📝 更新后 system_settings 包含 {len(config.system_settings)} 项")
             if 'quick_analysis_model' in config.system_settings:
-                logger.info(f"  ✓ 更新后包含 quick_analysis_model: {config.system_settings['quick_analysis_model']}")
+                print(f"  ✓ 更新后包含 quick_analysis_model: {config.system_settings['quick_analysis_model']}")
             else:
-                logger.warning(f"  ⚠️  更新后不包含 quick_analysis_model")
+                print(f"  ⚠️  更新后不包含 quick_analysis_model")
             if 'deep_analysis_model' in config.system_settings:
-                logger.info(f"  ✓ 更新后包含 deep_analysis_model: {config.system_settings['deep_analysis_model']}")
+                print(f"  ✓ 更新后包含 deep_analysis_model: {config.system_settings['deep_analysis_model']}")
             else:
-                logger.warning(f"  ⚠️  更新后不包含 deep_analysis_model")
+                print(f"  ⚠️  更新后不包含 deep_analysis_model")
 
             result = await self.save_system_config(config)
 
@@ -867,9 +867,9 @@ class ConfigService:
                 try:
                     from app.core.unified_config import unified_config
                     unified_config.sync_to_legacy_format(config)
-                    logger.info(f"✅ 系统设置已同步到文件系统")
+                    print(f"✅ 系统设置已同步到文件系统")
                 except Exception as e:
-                    logger.error(f"⚠️  同步系统设置到文件系统失败: {e}")
+                    print(f"⚠️  同步系统设置到文件系统失败: {e}")
 
                 # 同步代理配置到环境变量（需要重启才完全生效，但先设置环境变量）
                 import os
@@ -880,15 +880,15 @@ class ConfigService:
                         value = settings[key] or ""
                         if value:
                             os.environ[env_key] = value
-                            logger.info(f"✅ 已设置环境变量 {env_key}")
+                            print(f"✅ 已设置环境变量 {env_key}")
                         elif env_key in os.environ:
                             del os.environ[env_key]
-                            logger.info(f"✅ 已删除环境变量 {env_key}")
+                            print(f"✅ 已删除环境变量 {env_key}")
 
             return result
 
         except Exception as e:
-            logger.error(f"更新系统设置失败: {e}")
+            print(f"更新系统设置失败: {e}")
             return False
 
     async def get_system_settings(self) -> Dict[str, Any]:
@@ -899,7 +899,7 @@ class ConfigService:
                 return {}
             return config.system_settings
         except Exception as e:
-            logger.error(f"获取系统设置失败: {e}")
+            print(f"获取系统设置失败: {e}")
             return {}
 
     async def export_config(self) -> Dict[str, Any]:
@@ -951,7 +951,7 @@ class ConfigService:
             return export_data
 
         except Exception as e:
-            logger.error(f"导出配置失败: {e}")
+            print(f"导出配置失败: {e}")
             return {}
 
     async def import_config(self, config_data: Dict[str, Any]) -> bool:
@@ -1002,7 +1002,7 @@ class ConfigService:
             return await self.save_system_config(new_config)
 
         except Exception as e:
-            logger.error(f"导入配置失败: {e}")
+            print(f"导入配置失败: {e}")
             return False
 
     def _validate_config_data(self, config_data: Dict[str, Any]) -> bool:
@@ -1011,13 +1011,13 @@ class ConfigService:
             required_fields = ["llm_configs", "data_source_configs", "database_configs", "system_settings"]
             for field in required_fields:
                 if field not in config_data:
-                    logger.info(f"配置数据缺少必需字段: {field}")
+                    print(f"配置数据缺少必需字段: {field}")
                     return False
 
             return True
 
         except Exception as e:
-            logger.error(f"验证配置数据失败: {e}")
+            print(f"验证配置数据失败: {e}")
             return False
 
     async def migrate_legacy_config(self) -> bool:
@@ -1031,7 +1031,7 @@ class ConfigService:
             return await migrator.migrate_all_configs()
 
         except Exception as e:
-            logger.error(f"迁移传统配置失败: {e}")
+            print(f"迁移传统配置失败: {e}")
             return False
     
     async def update_llm_config(self, llm_config: LLMConfig) -> bool:
@@ -1077,20 +1077,15 @@ class ConfigService:
 
             return await self.save_system_config(config)
         except Exception as e:
-            logger.error(f"更新LLM配置失败: {e}")
+            print(f"更新LLM配置失败: {e}")
             return False
 
-    async def batch_import_llm_configs(self, selected_providers: List[str] = None) -> Dict[str, Any]:
+    async def batch_import_llm_configs(self, selected_providers: Optional[List[str]] = None, selected_models: Optional[List[str]] = None) -> Dict[str, Any]:
         """一键导入：从模型目录 + 厂家配置批量创建大模型配置
 
         Args:
             selected_providers: 指定导入的厂家列表，为空则导入所有已配置API密钥的厂家
-
-        逻辑：
-        1. 获取所有已启用且有 API Key 的厂家（可按 selected_providers 过滤）
-        2. 获取这些厂家的模型目录
-        3. 对目录中每个模型，如果大模型配置中不存在则创建
-        4. 从 DEFAULT_MODEL_CAPABILITIES 获取能力分级等元数据
+            selected_models: 指定导入的模型名称列表（裸 model.name），为空则导入目录下所有模型
         """
         from app.constants.model_capabilities import DEFAULT_MODEL_CAPABILITIES
 
@@ -1144,6 +1139,10 @@ class ConfigService:
                     if model.is_deprecated:
                         continue
 
+                    # 按勾选的模型名筛选（裸 model.name，精确匹配）
+                    if selected_models and model.name not in selected_models:
+                        continue
+
                     config_key = f"{provider_name}/{model.name}"
                     if config_key in existing_keys:
                         skipped += 1
@@ -1172,10 +1171,15 @@ class ConfigService:
                             input_price_per_1k=model.input_price_per_1k,
                             output_price_per_1k=model.output_price_per_1k,
                             currency=model.currency or "CNY",
-                            capability_level=cap.get("capability_level", 5),
+                            # 未收录进 DEFAULT_MODEL_CAPABILITIES 的模型，按"标准"能力给默认值。
+                            # 历史实现给 capability_level=5（旗舰），会让未识别模型被误推为旗舰，
+                            # 甚至被推荐到深度决策位——此处与 ModelCapabilityService 的兜底值对齐。
+                            capability_level=cap.get("capability_level", 2),
                             suitable_roles=[r.value if hasattr(r, "value") else str(r) for r in cap.get("suitable_roles", ["both"])] or ["both"],
                             features=[f.value if hasattr(f, "value") else str(f) for f in cap.get("features", ["tool_calling", "long_context", "reasoning"])] or ["tool_calling", "long_context", "reasoning"],
-                            recommended_depths=cap.get("recommended_depths", ["快速", "标准", "深度"]) or ["快速", "标准", "深度"],
+                            # 本分支（v3.x）为五档体系（快速/基础/标准/深度/全面），回退值须覆盖五档；
+                            # 仅作展示口径，不参与模型选择过滤
+                            recommended_depths=cap.get("recommended_depths", ["快速", "基础", "标准", "深度", "全面"]) or ["快速", "基础", "标准", "深度", "全面"],
                             performance_metrics=cap.get("performance_metrics"),
                         )
 
@@ -1222,6 +1226,228 @@ class ConfigService:
                 "skipped": 0,
                 "errors": [str(e)],
             }
+
+    async def onboard_llm_provider(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """一键接入：填 Key → 拉模型 → 勾选导入 → 设为默认（issue #785）
+
+        把原本分散在「厂家管理」「模型目录」「大模型配置」「系统设置」四个页面的
+        操作合并成一次请求。步骤：
+          1. upsert 厂家（保存 Key + base_url）
+          2. 调用厂家 API 拉取模型列表
+          3. 写入模型目录
+          4. 按勾选结果批量创建大模型配置
+          5. 设置默认快速 / 深度分析模型
+
+        Args:
+            payload: {
+                name, display_name, description, api_key, base_url,
+                embedding_model, test_model, api_secret, is_aggregator,
+                models: [裸模型名列表]（为空则拉取后全部导入）,
+                quick_analysis_model: 默认快速分析模型名（可选）,
+                deep_analysis_model: 默认深度分析模型名（可选）,
+            }
+
+        Returns:
+            每步的结果明细 + 最终可用的模型配置列表，供前端渲染成功页
+        """
+        from app.models.config import LLMProvider, ModelCatalog, ModelInfo
+        from app.utils.api_key_utils import is_valid_api_key
+        import re
+
+        name = (payload.get("name") or "").strip()
+        display_name = (payload.get("display_name") or "").strip() or name
+        requested_key = (payload.get("api_key") or "").strip()
+        base_url = (payload.get("base_url") or "").strip().rstrip("/")
+        selected_models = payload.get("models") or None
+
+        steps = []
+
+        if not name or not re.fullmatch(r"[a-z0-9_-]+", name):
+            return {"success": False, "message": f"厂家标识不合法：{name or '(空)'}", "steps": steps}
+
+        db = await self._get_db()
+        existing = await db.llm_providers.find_one({"name": name})
+
+        # API Key 解析：优先用本次提交的；本次没给则复用已保存的真实密钥。
+        # 这里直接从数据库取，拿到的是真值——后端 GET 接口对 api_key 脱敏，
+        # 前端也正因为如此而不会回读预填，避免把脱敏串当新 Key 提交。
+        api_key = requested_key or (existing or {}).get("api_key") or ""
+        reused_key = not requested_key and bool(api_key)
+
+        if not api_key or not is_valid_api_key(api_key):
+            msg = "API Key 无效" if api_key else (
+                "缺少 API Key" if not reused_key else "该厂家尚未保存可用 API Key"
+            )
+            return {"success": False, "message": msg, "steps": steps}
+        if not base_url:
+            return {"success": False, "message": "缺少 API 基础地址 (base_url)", "steps": steps}
+
+        provider = LLMProvider(
+            name=name,
+            display_name=display_name,
+            description=payload.get("description") or "",
+            default_base_url=base_url,
+            api_key=api_key,
+            api_secret=payload.get("api_secret") or None,
+            embedding_model=payload.get("embedding_model") or None,
+            test_model=payload.get("test_model") or None,
+            is_active=True,
+            supported_features=payload.get("supported_features") or ["chat"],
+            is_aggregator=bool(payload.get("is_aggregator", False)),
+            extra_config={"has_api_key": True, "source": "onboarding"},
+        )
+
+        # ---------- 步骤 1：保存厂家 ----------
+        try:
+            if existing:
+                upd = provider.model_dump(by_alias=True, exclude={"_id", "id", "created_at"})
+                ok = await self.update_llm_provider(str(existing["_id"]), upd)
+                steps.append({
+                    "step": "provider", "status": "updated" if ok else "failed",
+                    "message": f"已更新厂家「{display_name}」" if ok else "厂家更新失败",
+                    "id": str(existing["_id"]),
+                })
+            else:
+                pid = await self.add_llm_provider(provider)
+                steps.append({
+                    "step": "provider", "status": "created",
+                    "message": f"已创建厂家「{display_name}」", "id": pid,
+                })
+            if steps[-1]["status"] == "failed":
+                return {"success": False, "message": "厂家保存失败", "steps": steps}
+        except Exception as e:
+            steps.append({"step": "provider", "status": "failed", "message": f"厂家保存失败：{e}"})
+            logger.error("❌ [onboarding] 厂家保存失败", exc_info=True)
+            return {"success": False, "message": f"厂家保存失败：{e}", "steps": steps}
+
+        # ---------- 步骤 2：拉取模型列表 ----------
+        fetch = await self.fetch_provider_models(
+            name, None, api_key_override=api_key, base_url_override=base_url
+        )
+        if not fetch.get("success"):
+            steps.append({
+                "step": "fetch", "status": "failed",
+                "message": fetch.get("message", "拉取模型列表失败"),
+            })
+            return {
+                "success": False,
+                "message": f"拉取模型列表失败：{fetch.get('message')}",
+                "steps": steps,
+            }
+
+        models = fetch.get("models") or []
+        model_names = [m.get("name") or m.get("id") for m in models if m.get("name") or m.get("id")]
+        if not model_names:
+            steps.append({"step": "fetch", "status": "failed", "message": "厂家 API 返回 0 个模型"})
+            return {"success": False, "message": "厂家 API 未返回任何模型", "steps": steps}
+
+        # 只导入勾选的模型（前端勾选结果）
+        if selected_models:
+            picked = [n for n in model_names if n in selected_models]
+        else:
+            picked = list(model_names)
+        if not picked:
+            return {
+                "success": False,
+                "message": "未选择任何模型",
+                "steps": steps + [{"step": "fetch", "status": "done", "message": f"共拉取 {len(model_names)} 个模型"}],
+            }
+
+        steps.append({
+            "step": "fetch", "status": "done",
+            "message": f"拉取到 {len(model_names)} 个模型，已勾选 {len(picked)} 个",
+            "models": [
+                {"name": m.get("name"), "display_name": m.get("name"), "id": m.get("id")}
+                for m in models if (m.get("name") or m.get("id")) in picked
+            ],
+        })
+
+        # ---------- 步骤 3：写入模型目录 ----------
+        cat_models = []
+        for m in models:
+            mid = m.get("id", "")
+            if not mid or mid not in picked:
+                continue
+            cat_models.append(ModelInfo(
+                name=mid,
+                display_name=m.get("name") or mid,
+                description=m.get("description") or "",
+                context_length=m.get("context_length"),
+                input_price_per_1k=m.get("input_price_per_1k"),
+                output_price_per_1k=m.get("output_price_per_1k"),
+                currency=payload.get("currency") or "CNY",
+            ))
+        if cat_models:
+            cat_ok = await self.save_model_catalog(ModelCatalog(
+                provider=name, provider_name=display_name, models=cat_models,
+            ))
+            steps.append({
+                "step": "catalog", "status": "saved" if cat_ok else "failed",
+                "message": f"已保存 {len(cat_models)} 个模型到模型目录" if cat_ok else "模型目录保存失败",
+            })
+        else:
+            steps.append({"step": "catalog", "status": "skipped", "message": "无模型可写入目录"})
+
+        # ---------- 步骤 4：批量创建大模型配置 ----------
+        try:
+            imp = await self.batch_import_llm_configs(
+                selected_providers=[name], selected_models=picked,
+            )
+            steps.append({
+                "step": "import", "status": "done" if imp.get("success") else "failed",
+                "message": imp.get("message", "批量导入完成"),
+                "imported": imp.get("imported", 0),
+                "skipped": imp.get("skipped", 0),
+                "errors": imp.get("errors", []),
+            })
+        except Exception as e:
+            steps.append({"step": "import", "status": "failed", "message": f"批量导入失败：{e}"})
+            logger.error("❌ [onboarding] 批量导入失败", exc_info=True)
+
+        # ---------- 步骤 5：设置默认模型 ----------
+        settings: Dict[str, Any] = {}
+        quick = payload.get("quick_analysis_model")
+        deep = payload.get("deep_analysis_model")
+        if quick and quick in picked:
+            settings["quick_analysis_model"] = quick
+        if deep and deep in picked:
+            settings["deep_analysis_model"] = deep
+        if settings:
+            try:
+                ok = await self.update_system_settings(settings)
+                steps.append({
+                    "step": "defaults", "status": "saved" if ok else "failed",
+                    "message": "默认模型已更新：" + "、".join(f"{k}={v}" for k, v in settings.items()),
+                })
+            except Exception as e:
+                steps.append({"step": "defaults", "status": "failed", "message": f"默认模型保存失败：{e}"})
+
+        # ---------- 汇总 ----------
+        config = await self.get_system_config()
+        enabled = [c for c in (config.llm_configs if config else []) if c.enabled and c.provider == name]
+
+        imported = next((s for s in steps if s["step"] == "import"), {})
+        hard_failed = any(s["status"] == "failed" for s in steps if s["step"] in ("provider", "fetch"))
+        # 「已存在」不算失败：重跑向导（或配置已部分就绪）时，模型目录和配置可能都在，
+        # 只要本次成功落库或目标模型已就绪，都视为成功。
+        imported_n = imported.get("imported", 0)
+        skipped_n = imported.get("skipped", 0)
+        success = (not hard_failed) and (imported_n > 0 or skipped_n > 0)
+
+        message = f"接入完成：{display_name} 新增 {imported_n} 个模型"
+        if skipped_n:
+            message += f"，{skipped_n} 个已存在"
+
+        return {
+            "success": success,
+            "message": message,
+            "steps": steps,
+            "provider": {"name": name, "display_name": display_name},
+            "imported": imported.get("imported", 0),
+            "skipped": imported.get("skipped", 0),
+            "model_count": len(enabled),
+            "models": [c.model_dump() for c in enabled],
+        }
 
     async def test_llm_config(self, llm_config: LLMConfig) -> Dict[str, Any]:
         """测试大模型配置 - 真实调用API进行验证"""
@@ -3073,7 +3299,7 @@ class ConfigService:
 
             return catalogs
         except Exception as e:
-            logger.error(f"获取模型目录失败: {e}")
+            print(f"获取模型目录失败: {e}")
             return []
 
     async def get_provider_models(self, provider: str) -> Optional[ModelCatalog]:
@@ -3087,7 +3313,7 @@ class ConfigService:
                 return ModelCatalog(**doc)
             return None
         except Exception as e:
-            logger.error(f"获取厂家模型目录失败: {e}")
+            print(f"获取厂家模型目录失败: {e}")
             return None
 
     async def save_model_catalog(self, catalog: ModelCatalog) -> bool:
@@ -3107,7 +3333,7 @@ class ConfigService:
 
             return result.acknowledged
         except Exception as e:
-            logger.error(f"保存模型目录失败: {e}")
+            print(f"保存模型目录失败: {e}")
             return False
 
     async def delete_model_catalog(self, provider: str, cleanup_configs: bool = True) -> bool:
@@ -3168,7 +3394,7 @@ class ConfigService:
             # 检查是否已有数据
             count = await catalog_collection.count_documents({})
             if count > 0:
-                logger.info("模型目录已存在，跳过初始化")
+                print("模型目录已存在，跳过初始化")
                 return True
 
             # 创建默认目录
@@ -3178,10 +3404,10 @@ class ConfigService:
                 catalog = ModelCatalog(**catalog_data)
                 await self.save_model_catalog(catalog)
 
-            logger.info(f"✅ 初始化了 {len(default_catalogs)} 个厂家的模型目录")
+            print(f"✅ 初始化了 {len(default_catalogs)} 个厂家的模型目录")
             return True
         except Exception as e:
-            logger.error(f"初始化模型目录失败: {e}")
+            print(f"初始化模型目录失败: {e}")
             return False
 
     def _get_default_model_catalog(self) -> List[Dict[str, Any]]:
@@ -3487,7 +3713,7 @@ class ConfigService:
 
             # 如果数据库中没有数据，初始化默认目录
             if not catalogs:
-                logger.info("📦 模型目录为空，初始化默认目录...")
+                print("📦 模型目录为空，初始化默认目录...")
                 await self.init_default_model_catalog()
                 catalogs = await self.get_model_catalog()
 
@@ -3513,7 +3739,7 @@ class ConfigService:
 
             return result
         except Exception as e:
-            logger.error(f"获取模型列表失败: {e}")
+            print(f"获取模型列表失败: {e}")
             # 失败时返回默认数据
             return self._get_default_model_catalog()
 
@@ -3537,7 +3763,7 @@ class ConfigService:
             config.default_llm = model_name
             return await self.save_system_config(config)
         except Exception as e:
-            logger.error(f"设置默认LLM失败: {e}")
+            print(f"设置默认LLM失败: {e}")
             return False
 
     async def set_default_data_source(self, source_name: str) -> bool:
@@ -3559,7 +3785,7 @@ class ConfigService:
             config.default_data_source = source_name
             return await self.save_system_config(config)
         except Exception as e:
-            logger.error(f"设置默认数据源失败: {e}")
+            print(f"设置默认数据源失败: {e}")
             return False
 
     # ========== 大模型厂家管理 ==========
@@ -4151,7 +4377,8 @@ class ConfigService:
             "302ai": "AI302_API_KEY",
             "oneapi": "ONEAPI_API_KEY",
             "newapi": "NEWAPI_API_KEY",
-            "custom_aggregator": "CUSTOM_AGGREGATOR_API_KEY"
+            "custom_aggregator": "CUSTOM_AGGREGATOR_API_KEY",
+            "modelflare": "MODELFLARE_API_KEY"
         }
 
         env_var = env_key_mapping.get(provider_name)
@@ -4185,7 +4412,7 @@ class ConfigService:
             result = await providers_collection.insert_one(provider_data)
             return str(result.inserted_id)
         except Exception as e:
-            logger.error(f"添加厂家失败: {e}")
+            print(f"添加厂家失败: {e}")
             raise
 
     async def update_llm_provider(self, provider_id: str, update_data: Dict[str, Any]) -> bool:
@@ -4223,7 +4450,7 @@ class ConfigService:
             # 如果记录存在但值相同，modified_count 为 0，但这不应该返回 404
             return result.matched_count > 0
         except Exception as e:
-            logger.error(f"更新厂家失败: {e}")
+            print(f"更新厂家失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -4231,37 +4458,37 @@ class ConfigService:
     async def delete_llm_provider(self, provider_id: str) -> bool:
         """删除大模型厂家"""
         try:
-            logger.info(f"🗑️ 删除厂家 - provider_id: {provider_id}")
-            logger.info(f"🔍 ObjectId类型: {type(ObjectId(provider_id))}")
+            print(f"🗑️ 删除厂家 - provider_id: {provider_id}")
+            print(f"🔍 ObjectId类型: {type(ObjectId(provider_id))}")
 
             db = await self._get_db()
             providers_collection = db.llm_providers
-            logger.info(f"📊 数据库: {db.name}, 集合: {providers_collection.name}")
+            print(f"📊 数据库: {db.name}, 集合: {providers_collection.name}")
 
             # 先列出所有厂家的ID，看看格式
             all_providers = await providers_collection.find({}, {"_id": 1, "display_name": 1}).to_list(length=None)
-            logger.info(f"📋 数据库中所有厂家ID:")
+            print(f"📋 数据库中所有厂家ID:")
             for p in all_providers:
-                logger.debug(f"   - {p['_id']} ({type(p['_id'])}) - {p.get('display_name')}")
+                print(f"   - {p['_id']} ({type(p['_id'])}) - {p.get('display_name')}")
                 if str(p['_id']) == provider_id:
-                    logger.debug(f"   ✅ 找到匹配的ID!")
+                    print(f"   ✅ 找到匹配的ID!")
 
             # 尝试不同的查找方式
-            logger.info(f"🔍 尝试用ObjectId查找...")
+            print(f"🔍 尝试用ObjectId查找...")
             existing1 = await providers_collection.find_one({"_id": ObjectId(provider_id)})
 
-            logger.info(f"🔍 尝试用字符串查找...")
+            print(f"🔍 尝试用字符串查找...")
             existing2 = await providers_collection.find_one({"_id": provider_id})
 
-            logger.info(f"🔍 ObjectId查找结果: {existing1 is not None}")
-            logger.info(f"🔍 字符串查找结果: {existing2 is not None}")
+            print(f"🔍 ObjectId查找结果: {existing1 is not None}")
+            print(f"🔍 字符串查找结果: {existing2 is not None}")
 
             existing = existing1 or existing2
             if not existing:
-                logger.error(f"❌ 两种方式都找不到厂家: {provider_id}")
+                print(f"❌ 两种方式都找不到厂家: {provider_id}")
                 return False
 
-            logger.info(f"✅ 找到厂家: {existing.get('display_name')}")
+            print(f"✅ 找到厂家: {existing.get('display_name')}")
 
             # 使用找到的方式进行删除
             if existing1:
@@ -4271,11 +4498,11 @@ class ConfigService:
 
             success = result.deleted_count > 0
 
-            logger.info(f"🗑️ 删除结果: {success}, deleted_count: {result.deleted_count}")
+            print(f"🗑️ 删除结果: {success}, deleted_count: {result.deleted_count}")
             return success
 
         except Exception as e:
-            logger.error(f"❌ 删除厂家失败: {e}")
+            print(f"❌ 删除厂家失败: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -4309,7 +4536,7 @@ class ConfigService:
 
             return result.matched_count > 0
         except Exception as e:
-            logger.error(f"切换厂家状态失败: {e}")
+            print(f"切换厂家状态失败: {e}")
             return False
 
     async def init_aggregator_providers(self) -> Dict[str, Any]:
@@ -4349,10 +4576,10 @@ class ConfigService:
                             {"$set": update_data}
                         )
                         updated_count += 1
-                        logger.info(f"✅ 更新聚合渠道 {config['display_name']} 的 API Key")
+                        print(f"✅ 更新聚合渠道 {config['display_name']} 的 API Key")
                     else:
                         skipped_count += 1
-                        logger.info(f"⏭️ 聚合渠道 {config['display_name']} 已存在，跳过")
+                        print(f"⏭️ 聚合渠道 {config['display_name']} 已存在，跳过")
                     continue
 
                 # 创建聚合渠道厂家配置
@@ -4387,9 +4614,9 @@ class ConfigService:
                 added_count += 1
 
                 if api_key:
-                    logger.info(f"✅ 添加聚合渠道: {config['display_name']} (已从环境变量获取 API Key)")
+                    print(f"✅ 添加聚合渠道: {config['display_name']} (已从环境变量获取 API Key)")
                 else:
-                    logger.info(f"✅ 添加聚合渠道: {config['display_name']} (需手动配置 API Key)")
+                    print(f"✅ 添加聚合渠道: {config['display_name']} (需手动配置 API Key)")
 
             message_parts = []
             if added_count > 0:
@@ -4408,7 +4635,7 @@ class ConfigService:
             }
 
         except Exception as e:
-            logger.error(f"❌ 初始化聚合渠道失败: {e}")
+            print(f"❌ 初始化聚合渠道失败: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -4462,6 +4689,15 @@ class ConfigService:
                     "api_doc_url": "https://platform.deepseek.com/api-docs",
                     "default_base_url": "https://api.deepseek.com",
                     "supported_features": ["chat", "completion", "function_calling", "streaming"]
+                },
+                {
+                    "name": "modelflare",
+                    "display_name": "Modelflare",
+                    "description": "Modelflare聚合网关，一把Key调用GPT、Claude、Gemini、DeepSeek等多厂模型",
+                    "website": "https://modelflare.dev",
+                    "api_doc_url": "https://docs.modelflare.dev/zh/quickstart/",
+                    "default_base_url": "https://modelflare.dev/v1",
+                    "supported_features": ["chat", "completion", "function_calling", "streaming"]
                 }
             ]
 
@@ -4490,10 +4726,10 @@ class ConfigService:
                             {"$set": update_data}
                         )
                         updated_count += 1
-                        logger.info(f"✅ 更新厂家 {provider_config['display_name']} 的API密钥")
+                        print(f"✅ 更新厂家 {provider_config['display_name']} 的API密钥")
                     else:
                         skipped_count += 1
-                        logger.info(f"⏭️ 跳过厂家 {provider_config['display_name']} (已有配置)")
+                        print(f"⏭️ 跳过厂家 {provider_config['display_name']} (已有配置)")
                     continue
 
                 # 创建新厂家配置
@@ -4508,7 +4744,7 @@ class ConfigService:
 
                 await providers_collection.insert_one(provider_data)
                 migrated_count += 1
-                logger.info(f"✅ 创建厂家 {provider_config['display_name']}")
+                print(f"✅ 创建厂家 {provider_config['display_name']}")
 
             total_changes = migrated_count + updated_count
             message_parts = []
@@ -4533,7 +4769,7 @@ class ConfigService:
             }
 
         except Exception as e:
-            logger.error(f"环境变量迁移失败: {e}")
+            print(f"环境变量迁移失败: {e}")
             return {
                 "success": False,
                 "error": str(e),
@@ -4543,7 +4779,7 @@ class ConfigService:
     async def test_provider_api(self, provider_id: str) -> dict:
         """测试厂家API密钥"""
         try:
-            logger.info(f"🔍 测试厂家API - provider_id: {provider_id}")
+            print(f"🔍 测试厂家API - provider_id: {provider_id}")
 
             db = await self._get_db()
             providers_collection = db.llm_providers
@@ -4561,6 +4797,10 @@ class ConfigService:
             if not provider_data:
                 provider_data = await providers_collection.find_one({"_id": provider_id})
 
+            # 前端可能传的是厂家 name 而非 _id，按 name 兜底查找。
+            if not provider_data and provider_id:
+                provider_data = await providers_collection.find_one({"name": provider_id})
+
             if not provider_data:
                 return {
                     "success": False,
@@ -4577,14 +4817,14 @@ class ConfigService:
                 env_api_key = self._get_env_api_key(provider_name)
                 if env_api_key:
                     api_key = env_api_key
-                    logger.info(f"✅ 数据库配置无效，从环境变量读取到 {display_name} 的 API Key")
+                    print(f"✅ 数据库配置无效，从环境变量读取到 {display_name} 的 API Key")
                 else:
                     return {
                         "success": False,
                         "message": f"{display_name} 未配置有效的API密钥（数据库和环境变量中都未找到）"
                     }
             else:
-                logger.info(f"✅ 使用数据库配置的 {display_name} API密钥")
+                print(f"✅ 使用数据库配置的 {display_name} API密钥")
 
             # 根据厂家类型调用相应的测试函数
             test_result = await self._test_provider_connection(provider_name, api_key, display_name)
@@ -4592,7 +4832,7 @@ class ConfigService:
             return test_result
 
         except Exception as e:
-            logger.error(f"测试厂家API失败: {e}")
+            print(f"测试厂家API失败: {e}")
             return {
                 "success": False,
                 "message": f"测试失败: {str(e)}"
@@ -4814,28 +5054,28 @@ class ConfigService:
 
             response = requests.post(url, json=data, headers=headers, timeout=15)
 
-            logger.info(f"📥 [Google AI 测试] 响应状态码: {response.status_code}")
+            print(f"📥 [Google AI 测试] 响应状态码: {response.status_code}")
 
             if response.status_code == 200:
                 # 打印完整的响应内容用于调试
-                logger.info(f"📥 [Google AI 测试] 响应内容（前1000字符）: {response.text[:1000]}")
+                print(f"📥 [Google AI 测试] 响应内容（前1000字符）: {response.text[:1000]}")
 
                 result = response.json()
-                logger.info(f"📥 [Google AI 测试] 解析后的 JSON 结构:")
-                logger.info(f"   - 顶层键: {list(result.keys())}")
-                logger.info(f"   - 是否包含 'candidates': {'candidates' in result}")
+                print(f"📥 [Google AI 测试] 解析后的 JSON 结构:")
+                print(f"   - 顶层键: {list(result.keys())}")
+                print(f"   - 是否包含 'candidates': {'candidates' in result}")
                 if "candidates" in result:
-                    logger.info(f"   - candidates 长度: {len(result['candidates'])}")
+                    print(f"   - candidates 长度: {len(result['candidates'])}")
                     if len(result['candidates']) > 0:
-                        logger.info(f"   - candidates[0] 的键: {list(result['candidates'][0].keys())}")
+                        print(f"   - candidates[0] 的键: {list(result['candidates'][0].keys())}")
 
                 if "candidates" in result and len(result["candidates"]) > 0:
                     candidate = result["candidates"][0]
-                    logger.info(f"📥 [Google AI 测试] candidate 结构: {candidate}")
+                    print(f"📥 [Google AI 测试] candidate 结构: {candidate}")
 
                     # 检查 finishReason
                     finish_reason = candidate.get("finishReason", "")
-                    logger.info(f"📥 [Google AI 测试] finishReason: {finish_reason}")
+                    print(f"📥 [Google AI 测试] finishReason: {finish_reason}")
 
                     if "content" in candidate:
                         content = candidate["content"]
@@ -4843,7 +5083,7 @@ class ConfigService:
                         # 检查是否有 parts
                         if "parts" in content and len(content["parts"]) > 0:
                             text = content["parts"][0].get("text", "")
-                            logger.info(f"📥 [Google AI 测试] 提取的文本: {text}")
+                            print(f"📥 [Google AI 测试] 提取的文本: {text}")
 
                             if text and len(text.strip()) > 0:
                                 return {
@@ -4851,15 +5091,15 @@ class ConfigService:
                                     "message": f"{display_name} API连接测试成功"
                                 }
                             else:
-                                logger.error(f"❌ [Google AI 测试] 文本为空")
+                                print(f"❌ [Google AI 测试] 文本为空")
                                 return {
                                     "success": False,
                                     "message": f"{display_name} API响应内容为空"
                                 }
                         else:
                             # content 中没有 parts，可能是因为 MAX_TOKENS 或其他原因
-                            logger.error(f"❌ [Google AI 测试] content 中没有 parts")
-                            logger.info(f"   content 的键: {list(content.keys())}")
+                            print(f"❌ [Google AI 测试] content 中没有 parts")
+                            print(f"   content 的键: {list(content.keys())}")
 
                             if finish_reason == "MAX_TOKENS":
                                 return {
@@ -4872,20 +5112,20 @@ class ConfigService:
                                     "message": f"{display_name} API响应格式异常（缺少 parts，finishReason: {finish_reason}）"
                                 }
                     else:
-                        logger.error(f"❌ [Google AI 测试] candidate 中缺少 'content'")
-                        logger.info(f"   candidate 的键: {list(candidate.keys())}")
+                        print(f"❌ [Google AI 测试] candidate 中缺少 'content'")
+                        print(f"   candidate 的键: {list(candidate.keys())}")
                         return {
                             "success": False,
                             "message": f"{display_name} API响应格式异常（缺少 content）"
                         }
                 else:
-                    logger.error(f"❌ [Google AI 测试] 缺少 candidates 或 candidates 为空")
+                    print(f"❌ [Google AI 测试] 缺少 candidates 或 candidates 为空")
                     return {
                         "success": False,
                         "message": f"{display_name} API无有效候选响应"
                     }
             elif response.status_code == 400:
-                logger.error(f"❌ [Google AI 测试] 400 错误，响应内容: {response.text[:500]}")
+                print(f"❌ [Google AI 测试] 400 错误，响应内容: {response.text[:500]}")
                 try:
                     error_detail = response.json()
                     error_msg = error_detail.get("error", {}).get("message", "未知错误")
@@ -4899,19 +5139,19 @@ class ConfigService:
                         "message": f"{display_name} API请求格式错误"
                     }
             elif response.status_code == 403:
-                logger.error(f"❌ [Google AI 测试] 403 错误，响应内容: {response.text[:500]}")
+                print(f"❌ [Google AI 测试] 403 错误，响应内容: {response.text[:500]}")
                 return {
                     "success": False,
                     "message": f"{display_name} 认证或权限异常，请检查账号、API Key 和模型访问权限"
                 }
             elif response.status_code == 402:
-                logger.error(f"❌ [Google AI 测试] 402 错误，响应内容: {response.text[:500]}")
+                print(f"❌ [Google AI 测试] 402 错误，响应内容: {response.text[:500]}")
                 return {
                     "success": False,
                     "message": f"{display_name} 账号额度不足，请检查余额、套餐或模型付费权限"
                 }
             elif response.status_code == 503:
-                logger.error(f"❌ [Google AI 测试] 503 错误，响应内容: {response.text[:500]}")
+                print(f"❌ [Google AI 测试] 503 错误，响应内容: {response.text[:500]}")
                 try:
                     error_detail = response.json()
                     error_code = error_detail.get("code", "")
@@ -4933,7 +5173,7 @@ class ConfigService:
                         "message": f"{display_name} 服务暂时不可用 (HTTP 503)"
                     }
             else:
-                logger.error(f"❌ [Google AI 测试] {response.status_code} 错误，响应内容: {response.text[:500]}")
+                print(f"❌ [Google AI 测试] {response.status_code} 错误，响应内容: {response.text[:500]}")
                 return {
                     "success": False,
                     "message": f"{display_name} API测试失败: HTTP {response.status_code}"
@@ -5427,16 +5667,25 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    async def fetch_provider_models(self, provider_id: str, filters: Optional[Dict[str, Any]] = None) -> dict:
+    async def fetch_provider_models(
+        self,
+        provider_id: str,
+        filters: Optional[Dict[str, Any]] = None,
+        api_key_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+    ) -> dict:
         """从厂家 API 获取模型列表
 
         Args:
             provider_id: 厂家 ID
             filters: 可选的筛选参数（前端拉取后在客户端筛选，服务端仅做兼容接收）
+            api_key_override: 直接使用指定的 API Key（用于向导流程：厂家还没落库，
+                但用户刚填了 Key）。传入时跳过数据库 / 环境变量查找。
+            base_url_override: 直接使用指定的 base_url（同上）。
         """
         try:
             filters = filters or {}
-            logger.info(f"🔍 获取厂家模型列表 - provider_id: {provider_id}, filters: {filters}")
+            print(f"🔍 获取厂家模型列表 - provider_id: {provider_id}, filters: {filters}")
 
             db = await self._get_db()
             providers_collection = db.llm_providers
@@ -5452,13 +5701,31 @@ class ConfigService:
             if not provider_data:
                 provider_data = await providers_collection.find_one({"_id": provider_id})
 
-            if not provider_data:
-                return {
-                    "success": False,
-                    "message": f"厂家不存在 (ID: {provider_id})"
-                }
+            # 前端可能传的是厂家 name（如 "sensenova"）而非 _id，按 name 兜底查找。
+            if not provider_data and provider_id:
+                provider_data = await providers_collection.find_one({"name": provider_id})
 
-            provider_name = provider_data.get("name")
+            # 支持覆盖参数：向导流程下厂家可能尚未落库（provider_id 传占位符），
+            # 或用户刚填了新的 Key / base_url 还没保存。此时用覆盖值直连 API。
+            if api_key_override is None and base_url_override is None:
+                if not provider_data:
+                    return {
+                        "success": False,
+                        "message": f"厂家不存在 (ID: {provider_id})"
+                    }
+            else:
+                # 覆盖模式：用覆盖值构造最小厂家视图，缺省字段从数据库补齐
+                provider_data = dict(provider_data or {})
+                if base_url_override is not None:
+                    provider_data["default_base_url"] = base_url_override
+                if api_key_override is not None:
+                    provider_data["api_key"] = api_key_override
+                provider_data.setdefault("name", provider_id)
+                provider_data.setdefault("display_name", provider_data["name"])
+
+            # name 兜底：覆盖模式下 provider_data 可能由占位符 provider_id 构造；
+            # 数据库记录也可能缺 name 字段。缺省回落到 provider_id，避免下游拿到 None。
+            provider_name = provider_data.get("name") or provider_id
             api_key = provider_data.get("api_key")
             base_url = provider_data.get("default_base_url")
             display_name = provider_data.get("display_name", provider_name)
@@ -5478,7 +5745,7 @@ class ConfigService:
                     {"id": "minimax-m2.7", "name": "MiniMax-M2.7"},
                     {"id": "kimi-k2.6", "name": "Kimi-K2.6"},
                 ]
-                logger.info(f"✅ [火山方舟编程] 直接返回 {len(coding_plan_models)} 个预设模型")
+                print(f"✅ [火山方舟编程] 直接返回 {len(coding_plan_models)} 个预设模型")
                 return {
                     "success": True,
                     "models": coding_plan_models,
@@ -5491,12 +5758,12 @@ class ConfigService:
                 env_api_key = self._get_env_api_key(provider_name)
                 if env_api_key:
                     api_key = env_api_key
-                    logger.info(f"✅ 数据库配置无效，从环境变量读取到 {display_name} 的 API Key")
+                    print(f"✅ 数据库配置无效，从环境变量读取到 {display_name} 的 API Key")
                 else:
                     # 某些聚合平台（如 OpenRouter）的 /models 端点不需要 API Key
-                    logger.warning(f"⚠️ {display_name} 未配置有效的API密钥，尝试无认证访问")
+                    print(f"⚠️ {display_name} 未配置有效的API密钥，尝试无认证访问")
             else:
-                logger.info(f"✅ 使用数据库配置的 {display_name} API密钥")
+                print(f"✅ 使用数据库配置的 {display_name} API密钥")
 
             if not base_url:
                 return {
@@ -5507,13 +5774,13 @@ class ConfigService:
             # 调用 OpenAI 兼容的 /v1/models 端点
             import asyncio
             result = await asyncio.get_event_loop().run_in_executor(
-                None, self._fetch_models_from_api, api_key, base_url, display_name, provider_name
+                None, self._fetch_models_from_api, str(api_key or ""), str(base_url), str(display_name), str(provider_name)
             )
 
             return result
 
         except Exception as e:
-            logger.error(f"获取模型列表失败: {e}")
+            print(f"获取模型列表失败: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -5544,39 +5811,39 @@ class ConfigService:
             headers = {}
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
-                logger.info(f"🔍 请求 URL: {url} (with API Key)")
+                print(f"🔍 请求 URL: {url} (with API Key)")
             else:
-                logger.info(f"🔍 请求 URL: {url} (without API Key)")
+                print(f"🔍 请求 URL: {url} (without API Key)")
 
             response = requests.get(url, headers=headers, timeout=15)
 
-            logger.info(f"📊 响应状态码: {response.status_code}")
-            logger.info(f"📊 响应内容: {response.text[:500]}...")
+            print(f"📊 响应状态码: {response.status_code}")
+            print(f"📊 响应内容: {response.text[:500]}...")
 
             if response.status_code == 200:
                 result = response.json()
-                logger.info(f"📊 响应 JSON 结构: {list(result.keys())}")
+                print(f"📊 响应 JSON 结构: {list(result.keys())}")
 
                 if "data" in result and isinstance(result["data"], list):
                     all_models = result["data"]
-                    logger.info(f"📊 API 返回 {len(all_models)} 个模型")
+                    print(f"📊 API 返回 {len(all_models)} 个模型")
 
                     # 打印前几个模型的完整结构（用于调试价格字段）
                     if all_models:
-                        logger.info(f"🔍 第一个模型的完整结构:")
+                        print(f"🔍 第一个模型的完整结构:")
                         import json
-                        logger.info(json.dumps(all_models[0], indent=2, ensure_ascii=False))
+                        print(json.dumps(all_models[0], indent=2, ensure_ascii=False))
 
                     # 打印所有 Anthropic 模型（用于调试）
                     anthropic_models = [m for m in all_models if "anthropic" in m.get("id", "").lower()]
                     if anthropic_models:
-                        logger.info(f"🔍 Anthropic 模型列表 ({len(anthropic_models)} 个):")
+                        print(f"🔍 Anthropic 模型列表 ({len(anthropic_models)} 个):")
                         for m in anthropic_models[:20]:  # 只打印前 20 个
-                            logger.debug(f"   - {m.get('id')}")
+                            print(f"   - {m.get('id')}")
 
                     # 过滤：只保留主流大厂的常用模型
                     filtered_models = self._filter_popular_models(all_models, provider_name)
-                    logger.info(f"✅ 过滤后保留 {len(filtered_models)} 个常用模型")
+                    print(f"✅ 过滤后保留 {len(filtered_models)} 个常用模型")
 
                     # 转换模型格式，包含价格信息
                     formatted_models = self._format_models_with_pricing(filtered_models)
@@ -5587,7 +5854,7 @@ class ConfigService:
                         "message": f"成功获取 {len(formatted_models)} 个常用模型（已过滤）"
                     }
                 else:
-                    logger.error(f"❌ 响应格式异常，期望 'data' 字段为列表")
+                    print(f"❌ 响应格式异常，期望 'data' 字段为列表")
                     return {
                         "success": False,
                         "message": f"{display_name} API 响应格式异常（缺少 data 字段或格式不正确）"
@@ -5611,20 +5878,20 @@ class ConfigService:
                 try:
                     error_detail = response.json()
                     error_msg = error_detail.get("error", {}).get("message", f"HTTP {response.status_code}")
-                    logger.error(f"❌ API 错误: {error_msg}")
+                    print(f"❌ API 错误: {error_msg}")
                     return {
                         "success": False,
                         "message": f"{display_name} API请求失败: {error_msg}"
                     }
                 except:
-                    logger.error(f"❌ HTTP 错误: {response.status_code}")
+                    print(f"❌ HTTP 错误: {response.status_code}")
                     return {
                         "success": False,
                         "message": f"{display_name} API请求失败: HTTP {response.status_code}, 响应: {response.text[:200]}"
                     }
 
         except Exception as e:
-            logger.error(f"❌ 异常: {e}")
+            print(f"❌ 异常: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -5707,90 +5974,64 @@ class ConfigService:
 
             # 打印价格信息（用于调试）
             if input_price_per_1k or output_price_per_1k:
-                logger.debug(f"💰 {model_id}: 输入=${input_price_per_1k:.6f}/1K, 输出=${output_price_per_1k:.6f}/1K")
+                print(f"💰 {model_id}: 输入=${input_price_per_1k:.6f}/1K, 输出=${output_price_per_1k:.6f}/1K")
 
         return formatted
 
     def _filter_popular_models(self, models: list, provider_name: str = None) -> list:
-        """过滤模型列表，只保留主流大厂的常用模型"""
+        """过滤模型列表，剔除过时/预览版本，其余一律保留
+
+        历史实现只保留 OpenAI / Anthropic / Google 三大厂及 doubao/ep 前缀，
+        导致国产与聚合渠道模型（deepseek / qwen / glm / kimi / sensenova 等）
+        在 fetch-models 阶段被静默全部丢弃——用户看到的不是"配完不显示"，
+        而是"压根拉不出来"（issue #785）。现改为：只剔除明确过时/预览的版本，
+        不再做厂商白名单。
+        """
         import re
 
+        # 入参防御：调用方可能传 None（fetch 失败 / 厂商无模型），不能抛 TypeError
+        if not models:
+            return []
+
         # 火山方舟编程：不过滤，返回所有模型（API 已按套餐权限返回对应的模型）
-        # 火山方舟（非编程）：不过滤，返回所有模型
+        # 火山方舟（非编程）：同上
         if provider_name in ("volcengine_coding", "volcengine"):
-            logger.info(f"✅ [{provider_name}] 返回全部 {len(models)} 个模型（不过滤）")
+            print(f"✅ [{provider_name}] 返回全部 {len(models)} 个模型（不过滤）")
             return models
 
-        # 只保留三大厂：OpenAI、Anthropic、Google
-        popular_providers = [
-            "openai",      # OpenAI
-            "anthropic",   # Anthropic
-            "google",      # Google
-        ]
+        # 统一的「分隔符 + 关键词」模式：避免裸子串误伤（如 flash 是 DeepSeek
+        # 稳定线名，pretrained 与 preview 无关）。三个分支：
+        #   1. 标签在最开头        —— free-basic、instruct-v3
+        #   2. 标签前有 -_:. 分隔  —— kimi-k2-preview、glm-4.5-online
+        #   3. 标签跟在 / 后       —— Ollama 写法 deepseek-v3/free、/free
+        exclude_pattern = re.compile(
+            r'(?:^'                                    # 分支1：字符串开头
+            r'|[-_:]\s*'                               # 分支2：- _ : . 分隔符
+            r'|/\s*)'                                  # 分支3：路径分隔符
+            r'(preview|experimental|alpha|beta|nitro|rc'
+            r'|online|extended|instruct|free)\b'
+        )
 
-        # 常见模型名称前缀（用于识别不带厂商前缀的模型）
-        model_prefixes = {
-            "gpt-": "openai",           # gpt-3.5-turbo, gpt-4, gpt-4o
-            "o1-": "openai",            # o1-preview, o1-mini
-            "claude-": "anthropic",     # claude-3-opus, claude-3-sonnet
-            "gemini-": "google",        # gemini-pro, gemini-1.5-pro
-            "gemini": "google",         # gemini (不带连字符)
-            "doubao-": "volcengine",    # 火山方舟豆包模型
-            "ep-": "volcengine",        # 火山方舟推理接入点 (Endpoint)
-        }
-
-        # 排除的关键词
-        exclude_keywords = [
-            "preview",
-            "experimental",
-            "alpha",
-            "beta",
-            "free",
-            "extended",
-            "nitro",
-            ":free",
-            ":extended",
-            "online",  # 排除带在线搜索的版本
-            "instruct",  # 排除 instruct 版本
-        ]
-
-        # 日期格式正则表达式（匹配 2024-05-13 这种格式）
-        date_pattern = re.compile(r'\d{4}-\d{2}-\d{2}')
+        # 带日期的版本快照（gpt-4o-2024-05-13 / deepseek-v3-20250110）
+        # 这类版本通常会被 API 侧的无前缀别名（gpt-4o、deepseek-v3）取代
+        date_pattern = re.compile(r'-\d{4}-\d{2}-\d{2}|\d{8}$')
 
         filtered = []
         for model in models:
-            model_id = model.get("id", "").lower()
-            model_name = model.get("name", "").lower()
+            model_id = model.get("id", "")
+            model_name = model.get("name", model_id)
 
-            # 检查是否属于三大厂
-            # 方式1：模型ID中包含厂商名称（如 openai/gpt-4）
-            is_popular_provider = any(provider in model_id for provider in popular_providers)
+            id_lower = model_id.lower()
+            name_lower = model_name.lower()
 
-            # 方式2：模型ID以常见前缀开头（如 gpt-4, claude-3-sonnet）
-            if not is_popular_provider:
-                for prefix, provider in model_prefixes.items():
-                    if model_id.startswith(prefix):
-                        is_popular_provider = True
-                        logger.debug(f"🔍 识别模型前缀: {model_id} -> {provider}")
-                        break
-
-            if not is_popular_provider:
+            if exclude_pattern.search(id_lower) or exclude_pattern.search(name_lower):
+                print(f"⏭️ 跳过预览/实验/功能变体版本: {model_id}")
                 continue
 
-            # 检查是否包含日期（排除带日期的旧版本）
-            if date_pattern.search(model_id):
-                logger.debug(f"⏭️ 跳过带日期的旧版本: {model_id}")
+            if date_pattern.search(id_lower):
+                print(f"⏭️ 跳过日期快照版本: {model_id}")
                 continue
 
-            # 检查是否包含排除关键词
-            has_exclude_keyword = any(keyword in model_id or keyword in model_name for keyword in exclude_keywords)
-
-            if has_exclude_keyword:
-                logger.debug(f"⏭️ 跳过排除关键词: {model_id}")
-                continue
-
-            # 保留该模型
-            logger.debug(f"✅ 保留模型: {model_id}")
             filtered.append(model)
 
         return filtered
@@ -5856,6 +6097,10 @@ class ConfigService:
                     # 智谱AI使用 glm-4 模型进行测试
                     final_test_model = "glm-4.5-flash"
                     logger.info(f"🔍 智谱AI使用测试模型: {final_test_model}")
+                elif provider_name == "modelflare":
+                    # Modelflare聚合网关使用官方示例模型进行测试
+                    final_test_model = "gpt-5.6-sol"
+                    logger.info(f"🔍 Modelflare使用测试模型: {final_test_model}")
                 else:
                     logger.info(f"🔍 使用默认测试模型: {final_test_model}")
 

@@ -252,10 +252,15 @@ async def analyze_user_watchlist_batch(
 
     task_service = get_task_analysis_service()
 
-    # 档位归一（DEPTH_PROFILES 单一注册表，收编原数值映射）
-    from core.workflow.depth_profiles import normalize_depth
-
-    research_depth = normalize_depth(analysis_depth)
+    # 将数字深度转换为中文描述
+    depth_mapping = {
+        1: "快速",
+        2: "基础",
+        3: "标准",
+        4: "深度",
+        5: "全面"
+    }
+    research_depth = depth_mapping.get(analysis_depth, "标准")
 
     task_ids = []
     task_mapping = []
@@ -358,7 +363,7 @@ async def analyze_user_watchlist_batch(
                     "batch_id": batch_id,
                     "engine": "v2",  # v2 引擎
                     "analysis_date": analysis_date,
-                    "research_depth": research_depth,
+                    "research_depth": depth_mapping.get(analysis_depth, "标准"),
                     "quick_analysis_model": quick_analysis_model,
                     "deep_analysis_model": deep_analysis_model
                 }

@@ -16,17 +16,11 @@ class TestTushareSyncService:
     def sync_service(self):
         """创建TushareSyncService实例"""
         with patch('app.worker.tushare_sync_service.get_mongo_db') as mock_get_db, \
-             patch('app.worker.tushare_sync_service.get_stock_data_service') as mock_get_service, \
-             patch('app.worker.tushare_sync_service.get_historical_data_service', new_callable=AsyncMock), \
-             patch('app.worker.tushare_sync_service.get_news_data_service', new_callable=AsyncMock), \
-             patch('app.worker.tushare_sync_service.bind_loop_safe_mongo_db') as mock_bind_db:
+             patch('app.worker.tushare_sync_service.get_stock_data_service') as mock_get_service:
 
             # 模拟数据库和服务
-            mock_db = Mock()
-            mock_get_db.return_value = mock_db
+            mock_get_db.return_value = Mock()
             mock_get_service.return_value = Mock()
-            # 现役实现：sync_historical_data 开头会重新绑定数据库连接，返回同一个 mock_db
-            mock_bind_db.return_value = mock_db
 
             service = TushareSyncService()
 
@@ -34,9 +28,7 @@ class TestTushareSyncService:
             service.provider = Mock()
             service.provider.is_available.return_value = True
 
-            # 使用 yield 保持 patch 在整个测试期间生效
-            # （get_sync_status 等方法会在调用时重新获取数据库连接）
-            yield service
+            return service
     
     @pytest.fixture
     def mock_stock_list(self):
@@ -152,18 +144,23 @@ class TestTushareSyncService:
     @pytest.mark.asyncio
     async def test_sync_realtime_quotes_success(self, sync_service):
         """测试同步实时行情成功"""
-        # 现役实现：交易时间检查 + rt_k 批量接口获取全市场行情（Dict[symbol, quote_data]）
-        sync_service._is_trading_time = Mock(return_value=True)
-        sync_service.provider.get_realtime_quotes_batch = AsyncMock(return_value={
-            "000001": {"code": "000001", "close": 12.60, "data_source": "tushare"},
-            "000002": {"code": "000002", "close": 8.50, "data_source": "tushare"}
+        # 模拟数据库查询
+        mock_cursor = AsyncMock()
+        mock_cursor.__aiter__.return_value = [
+            {"code": "000001"},
+            {"code": "000002"}
+        ]
+        sync_service.db.stock_basic_info.find.return_value = mock_cursor
+        
+        # 模拟批量处理
+        sync_service._process_quotes_batch = AsyncMock(return_value={
+            "success_count": 2,
+            "error_count": 0,
+            "errors": []
         })
-
-        # 模拟保存行情
-        sync_service.stock_service.update_market_quotes = AsyncMock(return_value=True)
-
+        
         result = await sync_service.sync_realtime_quotes()
-
+        
         assert result["total_processed"] == 2
         assert result["success_count"] == 2
         assert result["error_count"] == 0
@@ -213,13 +210,13 @@ class TestTushareSyncService:
     @pytest.mark.asyncio
     async def test_sync_historical_data_success(self, sync_service):
         """测试同步历史数据成功"""
-        # 现役实现：使用 aggregate 聚合查询去重获取股票列表
+        # 模拟数据库查询
         mock_cursor = AsyncMock()
         mock_cursor.__aiter__.return_value = [
             {"code": "000001"},
             {"code": "000002"}
         ]
-        sync_service.db.stock_basic_info.aggregate.return_value = mock_cursor
+        sync_service.db.stock_basic_info.find.return_value = mock_cursor
         
         # 模拟获取历史数据
         import pandas as pd
@@ -232,8 +229,7 @@ class TestTushareSyncService:
         sync_service._save_historical_data = AsyncMock(return_value=1)
         sync_service._get_last_sync_date = AsyncMock(return_value='2024-11-01')
         
-        # 显式指定 end_date，避开"18:00 前增量同步当天数据"的时间窗口跳过逻辑
-        result = await sync_service.sync_historical_data(incremental=True, end_date='2024-12-01')
+        result = await sync_service.sync_historical_data(incremental=True)
         
         assert result["total_processed"] == 2
         assert result["success_count"] == 2
@@ -243,13 +239,13 @@ class TestTushareSyncService:
     @pytest.mark.asyncio
     async def test_sync_financial_data_success(self, sync_service):
         """测试同步财务数据成功"""
-        # 现役实现：使用 aggregate 聚合查询去重获取股票列表
+        # 模拟数据库查询
         mock_cursor = AsyncMock()
         mock_cursor.__aiter__.return_value = [
             {"code": "000001"},
             {"code": "000002"}
         ]
-        sync_service.db.stock_basic_info.aggregate.return_value = mock_cursor
+        sync_service.db.stock_basic_info.find.return_value = mock_cursor
         
         # 模拟获取财务数据
         mock_financial_data = {

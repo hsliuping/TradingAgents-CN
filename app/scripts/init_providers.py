@@ -136,6 +136,17 @@ async def init_providers():
             "embedding_model": "doubao-embedding-vision-251215",
             "is_active": True,
             "supported_features": ["chat", "completion", "function_calling", "streaming"]
+        },
+        {
+            "name": "modelflare",
+            "display_name": "Modelflare",
+            "description": "Modelflare聚合网关，一把Key调用GPT、Claude、Gemini、DeepSeek等多厂模型",
+            "website": "https://modelflare.dev",
+            "api_doc_url": "https://docs.modelflare.dev/zh/quickstart/",
+            "default_base_url": "https://modelflare.dev/v1",
+            "test_model": "gpt-5.6-sol",
+            "is_active": True,
+            "supported_features": ["chat", "completion", "function_calling", "streaming"]
         }
     ]
     

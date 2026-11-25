@@ -9,7 +9,7 @@ from pymongo import UpdateOne
 
 from app.core.config import settings
 from app.core.database import get_mongo_db
-from app.services.data_sources.manager import DataAdapterOrchestrator
+from app.services.data_sources.manager import DataSourceManager
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +48,13 @@ class QuotesIngestionService:
         self._rotation_sources = ["tushare", "akshare_eastmoney", "akshare_sina"]
         self._rotation_index = 0  # 当前轮换索引
 
-        # 缓存适配器编排器实例（懒加载，整个服务生命周期复用，避免每次重建）
-        self._dsm: Optional[DataAdapterOrchestrator] = None
+        # 缓存 DataSourceManager 实例（懒加载，整个服务生命周期复用，避免每次重建）
+        self._dsm: Optional[DataSourceManager] = None
 
-    def _get_dsm(self) -> DataAdapterOrchestrator:
-        """返回缓存的适配器编排器实例（懒加载）"""
+    def _get_dsm(self) -> DataSourceManager:
+        """返回缓存的 DataSourceManager 实例（懒加载）"""
         if self._dsm is None:
-            self._dsm = DataAdapterOrchestrator()
+            self._dsm = DataSourceManager()
         return self._dsm
 
     @staticmethod
@@ -270,14 +270,14 @@ class QuotesIngestionService:
 
     async def _find_latest_trade_date_async(
         self,
-        manager: DataAdapterOrchestrator,
+        manager: DataSourceManager,
         preferred_sources: Optional[List[str]] = None,
     ) -> Optional[str]:
         return await asyncio.to_thread(manager.find_latest_trade_date_with_fallback, preferred_sources)
 
     async def _get_realtime_quotes_with_fallback_async(
         self,
-        manager: DataAdapterOrchestrator,
+        manager: DataSourceManager,
     ) -> Tuple[Optional[Dict], Optional[str]]:
         return await asyncio.to_thread(manager.get_realtime_quotes_with_fallback)
 

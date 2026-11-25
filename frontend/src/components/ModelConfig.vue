@@ -227,8 +227,10 @@ const checkModelSuitability = async () => {
   if (typeof props.analysisDepth === 'number') {
     const depthNames: Record<number, string> = {
       1: '快速',
+      2: '基础',
       3: '标准',
-      5: '深度'
+      4: '深度',
+      5: '全面'
     }
     depthName = depthNames[props.analysisDepth] || '标准'
   } else {
@@ -264,11 +266,13 @@ const checkModelSuitability = async () => {
       // 获取推荐理由
       const reason = responseData.reason || ''
 
-      // 构建推荐说明（三档 1快速/3标准/5深度）
+      // 构建推荐说明
       const depthDescriptions: Record<string, string> = {
-        '快速': '快速摸底，初筛决策',
-        '标准': '标准分析，建立判断',
-        '深度': '深度研究，选股立论'
+        '快速': '快速浏览，获取基本信息',
+        '基础': '基础分析，了解主要指标',
+        '标准': '标准分析，全面评估股票',
+        '深度': '深度研究，挖掘投资机会',
+        '全面': '全面分析，形成系统研究结论'
       }
 
       const message = `${depthDescriptions[depthName] || '标准分析'}\n\n推荐模型配置：\n• 快速模型：${quickDisplayName}\n• 深度模型：${deepDisplayName}\n\n${reason}`
@@ -284,8 +288,10 @@ const checkModelSuitability = async () => {
       // 如果没有推荐数据，显示通用说明
       const generalDescriptions: Record<string, string> = {
         '快速': '快速分析：使用基础模型即可，注重速度和成本',
+        '基础': '基础分析：快速模型用基础级，深度模型用标准级',
         '标准': '标准分析：快速模型用基础级，深度模型用标准级以上',
-        '深度': '深度分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
+        '深度': '深度分析：快速模型用标准级，深度模型用高级以上，需要推理能力',
+        '全面': '全面分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
       }
 
       modelRecommendation.value = {

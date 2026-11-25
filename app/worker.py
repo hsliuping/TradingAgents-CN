@@ -81,7 +81,7 @@ async def process_task(task_id: str) -> None:
 
         # Extract analysis parameters with defaults
         analysts = params.get("analysts", ["Bull Analyst", "Bear Analyst", "Research Manager"])
-        research_depth = params.get("research_depth", 3)
+        research_depth = params.get("research_depth", 2)
         llm_provider = params.get("llm_provider", "dashscope")
         llm_model = params.get("llm_model", "qwen-plus")
         market_type = params.get("market_type", "美股")

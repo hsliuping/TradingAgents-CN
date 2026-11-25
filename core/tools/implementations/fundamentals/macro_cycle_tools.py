@@ -46,50 +46,56 @@ def _safe_float(value: Any) -> Optional[float]:
 
 
 def _fetch_zh_us_rate() -> dict:
-    """经 DataFacade 能力获取中美收益率对比最新数据（含近 3 个月历史）。"""
+    """通过 AKShare 获取中美收益率对比最新数据。"""
     try:
-        from tradingagents.dataflows.capability import query_capability_sync
+        import akshare as ak
 
-        df = query_capability_sync("bond_yield_cn_us")
-        if df is None or df.empty:
-            return {"status": "no_data", "message": "中美收益率数据为空"}
-        latest = df.iloc[0]  # 能力按 trade_date 降序，首行即最新
-        latest_date = pd.to_datetime(latest.get("trade_date"))
+        df = ak.bond_zh_us_rate()
+        df["日期"] = pd.to_datetime(df["日期"])
+        latest = df.sort_values("日期").iloc[-1]
         result: dict = {
-            "date": str(latest.get("trade_date")),
+            "date": str(latest["日期"].date()),
             "china": {},
             "us": {},
             "spread_cn": {},
             "history": [],
         }
-        cn_fields = {"2年": "cn_yield_2y", "5年": "cn_yield_5y",
-                     "10年": "cn_yield_10y", "30年": "cn_yield_30y"}
-        us_fields = {"2年": "us_yield_2y", "5年": "us_yield_5y",
-                     "10年": "us_yield_10y", "30年": "us_yield_30y"}
-        for name, field in cn_fields.items():
-            v = latest.get(field)
+        cn_cols = {
+            "中国国债收益率2年": "2年",
+            "中国国债收益率5年": "5年",
+            "中国国债收益率10年": "10年",
+            "中国国债收益率30年": "30年",
+        }
+        us_cols = {
+            "美国国债收益率2年": "2年",
+            "美国国债收益率5年": "5年",
+            "美国国债收益率10年": "10年",
+            "美国国债收益率30年": "30年",
+        }
+        for raw, name in cn_cols.items():
+            v = latest.get(raw)
             if v is not None and v == v:
                 result["china"][name] = round(float(v), 4)
-        for name, field in us_fields.items():
-            v = latest.get(field)
+        for raw, name in us_cols.items():
+            v = latest.get(raw)
             if v is not None and v == v:
                 result["us"][name] = round(float(v), 4)
-        spread = latest.get("cn_10y_2y_spread")
+        spread = latest.get("中国国债收益率10年-2年")
         if spread is not None and spread == spread:
             result["spread_cn"]["10Y-2Y"] = round(float(spread), 4)
 
-        # 取近 3 个月的历史记录用于趋势计算（能力降序返回，重排为正序）
-        three_months_ago = latest_date - pd.DateOffset(months=3)
-        hist = df[pd.to_datetime(df["trade_date"]) >= three_months_ago].sort_values("trade_date")
+        # 取近 3 个月的历史记录用于趋势计算
+        three_months_ago = latest["日期"] - pd.DateOffset(months=3)
+        hist = df[df["日期"] >= three_months_ago].sort_values("日期")
         hist_records = []
         for _, row in hist.iterrows():
-            rec = {"date": str(row["trade_date"])}
-            for name, field in cn_fields.items():
-                v = row.get(field)
+            rec = {"date": str(row["日期"].date())}
+            for raw, name in cn_cols.items():
+                v = row.get(raw)
                 if v is not None and v == v:
                     rec[f"china_{name}"] = round(float(v), 4)
-            for name, field in us_fields.items():
-                v = row.get(field)
+            for raw, name in us_cols.items():
+                v = row.get(raw)
                 if v is not None and v == v:
                     rec[f"us_{name}"] = round(float(v), 4)
             hist_records.append(rec)
@@ -97,40 +103,37 @@ def _fetch_zh_us_rate() -> dict:
 
         return result
     except Exception as e:
-        logger.warning("中美收益率获取失败: %s", e)
+        logger.warning("AKShare 中美收益率获取失败: %s", e)
         return {"status": "error", "message": str(e)}
 
 
 def _fetch_csi300_daily(days: int = 90) -> dict:
-    """经 DataFacade 能力获取沪深 300 日线数据。"""
+    """通过 AKShare 获取沪深 300 日线数据。"""
     try:
-        from tradingagents.dataflows.capability import query_capability_sync
+        import akshare as ak
 
-        end = datetime.date.today()
-        start = end - datetime.timedelta(days=days)
-        df = query_capability_sync(
-            "index_daily",
-            ts_code="000300.SH",
-            start_date=start.strftime("%Y%m%d"),
-            end_date=end.strftime("%Y%m%d"),
-        )
-        if df is None or df.empty:
+        df = ak.stock_zh_index_daily("sh000300")
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date")
+        # 取最近 N 天
+        cutoff = df["date"].max() - pd.Timedelta(days=days)
+        df = df[df["date"] >= cutoff].copy()
+        if df.empty:
             return {"status": "no_data", "message": "沪深300数据为空"}
-        df = df.sort_values("trade_date")  # 能力降序返回，重排为正序
         records = []
         for _, row in df.iterrows():
             records.append({
-                "date": pd.to_datetime(row["trade_date"]).strftime("%Y-%m-%d"),
+                "date": str(row["date"].date()),
                 "close": round(float(row["close"]), 2),
             })
         return {
             "status": "ok",
-            "latest_date": records[-1]["date"],
+            "latest_date": str(df["date"].max().date()),
             "latest_close": round(float(df["close"].iloc[-1]), 2),
             "records": records,
         }
     except Exception as e:
-        logger.warning("沪深300获取失败: %s", e)
+        logger.warning("AKShare 沪深300获取失败: %s", e)
         return {"status": "error", "message": str(e)}
 
 
@@ -785,15 +788,20 @@ def get_sector_rotation_signals() -> str:
         # 2. 尝试获取实时周期信号（非阻塞，失败不影响行业数据）
         cycle_info = None
         try:
-            rate_data = _fetch_zh_us_rate()
-            china_10y = _safe_float(rate_data.get("china", {}).get("10年"))
+            import akshare as ak
 
-            # 沪深300近3个月收益率（90 个自然日窗口，覆盖约 3 个月交易日）
-            csi300 = _fetch_csi300_daily(days=90)
-            records = csi300.get("records", [])
-            if len(records) >= 2:
-                latest_close = float(records[-1]["close"])
-                three_m_ago = float(records[0]["close"])
+            rate_df = ak.bond_zh_us_rate()
+            rate_df["日期"] = pd.to_datetime(rate_df["日期"])
+            latest_rate = rate_df.sort_values("日期").iloc[-1]
+            china_10y = _safe_float(latest_rate.get("中国国债收益率10年"))
+
+            # 沪深300近3个月收益率
+            idx_df = ak.stock_zh_index_daily("sh000300")
+            idx_df["date"] = pd.to_datetime(idx_df["date"])
+            idx_df = idx_df.sort_values("date")
+            if len(idx_df) >= 2:
+                latest_close = float(idx_df["close"].iloc[-1])
+                three_m_ago = float(idx_df["close"].iloc[0])
                 mkt_return = round((latest_close - three_m_ago) / three_m_ago * 100, 2)
             else:
                 mkt_return = None

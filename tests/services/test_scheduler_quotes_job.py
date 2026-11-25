@@ -25,15 +25,10 @@ def test_scheduler_adds_quotes_job(monkeypatch):
     class _FakeScheduler:
         def __init__(self):
             self.jobs = []
-            self.paused_ids = []
 
         def add_job(self, func, trigger, *args, **kwargs):
             # record and keep a handle to the callable and trigger
             self.jobs.append({"func": func, "trigger": trigger, "args": args, "kwargs": kwargs})
-
-        def pause_job(self, job_id, *args, **kwargs):
-            # 现役 lifespan 会对被禁用的定时任务调用 pause_job
-            self.paused_ids.append(job_id)
 
         def start(self):
             # no-op in tests
@@ -74,12 +69,6 @@ def test_scheduler_adds_quotes_job(monkeypatch):
     monkeypatch.setattr(main_mod, "QuotesIngestionService", _FakeQuotesIngestion, raising=True)
     monkeypatch.setattr(main_mod.asyncio, "create_task", _fake_asyncio_create_task, raising=True)
 
-    # lifespan shutdown 段会对真身单例执行 user_service.close()（关闭共享 pymongo client），
-    # 该关闭会泄漏到同进程后续测试（test_config_summary 查库失败 → 401）；测试隔离起见屏蔽之
-    from app.services.user_service import UserService
-
-    monkeypatch.setattr(UserService, "close", lambda self, log=True: None, raising=True)
-
     # Directly drive the lifespan to avoid importing full router stack
     import asyncio as _asyncio
 
@@ -101,15 +90,9 @@ def test_scheduler_adds_quotes_job(monkeypatch):
     # Ensure ensure_indexes called during startup
     assert state.ensure_indexes_called is True
 
-    # Simulate scheduler tick: 现役实现直接注册协程函数（AsyncIOScheduler 会 await 它）
+    # Simulate scheduler tick by invoking the stored func
     job_func = job["func"]
-    coro = job_func()
-    assert inspect.iscoroutine(coro)
-    coro.close()  # 不真正执行，避免未 await 警告
+    job_func()  # should call asyncio.create_task(...) with our fake
 
-    # quotes 任务注册后保持 active（不应出现在 pause_job 名单中）
-    assert job["kwargs"].get("id") not in fake_scheduler.paused_ids
-
-    # startup 期间的后台任务经 asyncio.create_task 派发
     assert state.create_task_called is True
 

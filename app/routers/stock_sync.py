@@ -47,6 +47,27 @@ def _serialize_task_doc(task_doc: Optional[Dict[str, Any]]) -> Optional[Dict[str
     return serialized
 
 
+def _build_single_historical_sync_result(hist_result: Dict[str, Any]) -> Dict[str, Any]:
+    """保留历史同步的真实失败原因，避免前端只能显示未知错误。"""
+    records = hist_result.get("total_records", hist_result.get("historical_records", 0))
+    if hist_result.get("success_count", 0) > 0:
+        return {"success": True, "records": records, "message": f"同步了 {records} 条历史记录"}
+
+    reasons = []
+    for item in hist_result.get("errors") or []:
+        reason = (item.get("error") or item.get("message")) if isinstance(item, dict) else item
+        if reason and str(reason).strip():
+            reasons.append(str(reason).strip())
+    error = (
+        "；".join(dict.fromkeys(reasons))
+        or hist_result.get("error")
+        or hist_result.get("skip_reason")
+        or hist_result.get("message")
+        or "历史数据同步失败，未获取到可用历史数据"
+    )
+    return {"success": False, "records": records, "error": str(error)}
+
+
 def _get_single_task_message(symbol: str, result: Dict[str, Any]) -> str:
     if result.get("overall_success"):
         return f"股票 {symbol} 数据同步成功"
@@ -424,17 +445,11 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                         incremental=False
                     )
 
-                result["historical_sync"] = {
-                    "success": hist_result.get("success_count", 0) > 0,
-                    "records": hist_result.get("total_records", hist_result.get("historical_records", 0)),
-                    "message": (
-                        f"同步了 {hist_result.get('total_records', hist_result.get('historical_records', 0))} 条历史记录"
-                    )
-                }
-                logger.info(
-                    f"✅ {request.symbol} 历史数据同步完成: "
-                    f"{hist_result.get('total_records', hist_result.get('historical_records', 0))} 条记录"
-                )
+                result["historical_sync"] = _build_single_historical_sync_result(hist_result)
+                if result["historical_sync"]["success"]:
+                    logger.info(f"✅ {request.symbol} 历史数据同步完成: {result['historical_sync']['records']} 条记录")
+                else:
+                    logger.warning(f"⚠️ {request.symbol} 历史数据同步失败: {result['historical_sync']['error']}")
 
                 if hist_result.get("success_count", 0) > 0:
                     try:
@@ -506,7 +521,6 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                     find_latest_trade_date,
                     fetch_daily_basic_mv_map,
                     fetch_latest_roe_map,
-                    add_financial_metrics,
                 )
 
                 db = get_mongo_db()
@@ -565,10 +579,21 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                         full_symbol = ts_code
 
                         daily_metrics = {}
-                        in_daily_batch = False
                         if isinstance(ts_code, str) and ts_code in daily_data_map:
                             daily_metrics = daily_data_map[ts_code]
-                            in_daily_batch = True
+
+                        total_mv_yi = None
+                        circ_mv_yi = None
+                        if "total_mv" in daily_metrics:
+                            try:
+                                total_mv_yi = float(daily_metrics["total_mv"]) / 10000.0
+                            except Exception:
+                                pass
+                        if "circ_mv" in daily_metrics:
+                            try:
+                                circ_mv_yi = float(daily_metrics["circ_mv"]) / 10000.0
+                            except Exception:
+                                pass
 
                         doc = {
                             "code": code,
@@ -585,23 +610,31 @@ async def run_single_stock_sync(request: SingleStockSyncRequest) -> dict:
                             "full_symbol": full_symbol,
                         }
 
-                        # 上游对亏损股置空的 pe_ttm 等字段收集后 $unset，防止旧值残留
-                        stale_fields = []
-                        if in_daily_batch:
-                            add_financial_metrics(doc, daily_metrics, stale_fields)
+                        if total_mv_yi is not None:
+                            doc["total_mv"] = total_mv_yi
+                        if circ_mv_yi is not None:
+                            doc["circ_mv"] = circ_mv_yi
+
+                        for field in ["pe", "pb", "ps", "pe_ttm", "pb_mrq", "ps_ttm"]:
+                            if field in daily_metrics:
+                                doc[field] = daily_metrics[field]
 
                         if isinstance(ts_code, str) and ts_code in roe_map:
                             roe_val = roe_map[ts_code].get("roe")
                             if roe_val is not None:
                                 doc["roe"] = roe_val
 
-                        update_doc = {"$set": doc}
-                        if stale_fields:
-                            update_doc["$unset"] = {field: "" for field in stale_fields}
+                        for field in ["turnover_rate", "volume_ratio"]:
+                            if field in daily_metrics:
+                                doc[field] = daily_metrics[field]
+
+                        for field in ["total_share", "float_share"]:
+                            if field in daily_metrics:
+                                doc[field] = daily_metrics[field]
 
                         await db.stock_basic_info.update_one(
                             {"code": code, "source": "tushare"},
-                            update_doc,
+                            {"$set": doc},
                             upsert=True
                         )
 

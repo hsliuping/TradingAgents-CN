@@ -1,10 +1,7 @@
 <template>
   <div class="dashboard">
-    <!-- 研究台落地页（研究闭环 P1），接续上次研究 -->
-    <ResearchDesk />
-
-    <!-- 欢迎区域（紧凑展示） -->
-    <div class="welcome-section is-compact">
+    <!-- 欢迎区域 -->
+    <div class="welcome-section">
       <div class="welcome-content">
         <h1 class="welcome-title">
           欢迎使用 TradingAgents-CN
@@ -291,7 +288,6 @@ import { ensureReportExportAccess } from '@/utils/featureAccess'
 import { request, ApiClient } from '@/api/request'
 import { isJdyunMode as checkJdyunMode } from '@/utils/config'
 import { Star, Plus } from '@element-plus/icons-vue'
-import ResearchDesk from '@/pro/components/ResearchDesk.vue'
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -626,16 +622,6 @@ onMounted(async () => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-
-    /* 研究员模式下欢迎区紧凑化，研究台为主 */
-    &.is-compact {
-      padding: 18px 24px;
-      margin-bottom: 16px;
-
-      .welcome-content .welcome-title {
-        font-size: 22px;
-      }
-    }
 
     .welcome-content {
       .welcome-title {

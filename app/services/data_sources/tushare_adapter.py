@@ -33,9 +33,7 @@ class TushareAdapter(DataSourceAdapter):
         return "tushare"
 
     def _get_default_priority(self) -> int:
-        # P2 数据源收敛：默认优先级唯一定义在 A（tradingagents/dataflows/data_source_manager.py）
-        from tradingagents.dataflows.data_source_manager import get_default_source_priority
-        return get_default_source_priority("tushare")  # 数字越大优先级越高
+        return 3  # highest priority (数字越大优先级越高)  # highest priority
 
     def get_token_source(self) -> Optional[str]:
         """获取 Token 来源"""

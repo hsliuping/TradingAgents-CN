@@ -16,10 +16,45 @@ import os
 
 import os
 
+import numpy as np
+import pandas as pd
+
 from tradingagents.config.runtime_settings import get_float, get_int
+
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('agents')
+
+
+def _wilder_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    """Wilder (1978) RSI：首个均值取前 period 个涨跌幅的简单平均，其后递推平滑
+    （与 TA-Lib 口径一致）。预热期及缺失收盘价处为 NaN。
+
+    自包含实现，不依赖第三方库；缺失值按剔除后的紧凑序列计算涨跌幅。
+    与 core/tools/index_tools.py 各留一份拷贝（包自包含约定）。
+    """
+    close = close.astype(float)
+    out = pd.Series(float("nan"), index=close.index)
+    mask = close.notna()
+    vals = close[mask].to_numpy()
+    if len(vals) <= period:
+        return out
+    deltas = np.diff(vals)
+    gains = np.clip(deltas, 0.0, None)
+    losses = np.clip(-deltas, 0.0, None)
+    avg_gain = float(gains[:period].mean())
+    avg_loss = float(losses[:period].mean())
+    rsis = [float("nan")] * period
+    denom = avg_gain + avg_loss
+    # 首个 RSI（索引 period）直接由初始 SMA 计算，此后每步先递推再输出
+    rsis.append(float("nan") if denom == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss))
+    for g, l in zip(gains[period:], losses[period:]):
+        avg_gain = (avg_gain * (period - 1) + g) / period
+        avg_loss = (avg_loss * (period - 1) + l) / period
+        denom = avg_gain + avg_loss
+        rsis.append(float("nan") if denom == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss))
+    out.loc[mask] = rsis
+    return out
 
 
 
@@ -322,12 +357,8 @@ class HKStockProvider:
             data['ma20'] = data['Close'].rolling(window=20, min_periods=1).mean()
             data['ma60'] = data['Close'].rolling(window=60, min_periods=1).mean()
 
-            # 计算RSI（相对强弱指标）
-            delta = data['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14, min_periods=1).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14, min_periods=1).mean()
-            rs = gain / (loss.replace(0, np.nan))
-            data['rsi'] = 100 - (100 / (1 + rs))
+            # 计算RSI（相对强弱指标，Wilder 平滑）
+            data['rsi'] = _wilder_rsi(data['Close'], 14)
 
             # 计算MACD
             ema12 = data['Close'].ewm(span=12, adjust=False).mean()

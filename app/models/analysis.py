@@ -79,11 +79,6 @@ class AnalysisParameters(BaseModel):
         default=False,
         description="是否记录本次分析的执行轨迹（Prompt全文、LLM原始返回、校验结果）。默认关闭，排查问题时可开启。"
     )
-    # 短周期分析缓存强制刷新（M6.2）：True 时跳过缓存直接重跑并覆盖缓存索引
-    force_refresh: bool = Field(
-        default=False,
-        description="是否强制刷新（跳过短周期分析缓存直接重跑）"
-    )
 
 
 class AnalysisResult(BaseModel):

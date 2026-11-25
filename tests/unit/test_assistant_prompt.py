@@ -4,21 +4,18 @@
 覆盖：
 - 分层结构完整性（核心身份/领域边界/数据纪律/合规/工具指引）
 - 动态注入机制不受重组影响（日期/IM/记忆指引/主题/usage_helper 分流）
-- 字数锚定验收（S8 缩减验收已达成，基线上移至 S9 后实际值，现锚定不回弹）
+- 字数缩减验收（基线 8317 字符，验收线 ≤5822 即 ≥30% 缩减，防膨胀回弹）
 - 关键行为锚点存在（与 A 类防线、§5.1 回归测试集对应）
 """
 import re
 
 from app.services.intelligent_assistant_service import _get_system_prompt
 
-# S8 缩减验收当时已达成（d8ce06110 分层重组实测 -33.3%，基线 8317 → ≤7000）；
-# 其后 S9+ 迭代有意往 prompt 新增功能区块（助理身份投资教练、猪周期世界模型
-# 推演方法论、保险/电池/汽车行业数据、A股财报披露时间等），基线随之上移。
-# 2026-10-25 实测静态规则文本 10522 字符：基线上移至该实际值，本测试现锚定
-# 「不回弹」——后续再加内容须同步上调基线并注明出处，禁止无意识膨胀。
-_BASELINE_CHARS = 10522
-# 验收线 = 当前基线（不再对 8317 旧基线要求 30% 缩减，改为锚定不回弹）
-_MAX_CHARS = 10522
+# 阶段 4 重写前的静态规则文本基线（2026-09-13 实测）
+_BASELINE_CHARS = 8317
+# 验收线：字数缩减 ≥30%（2026-09-15 上调至 6050：新增表格 Excel 导出工具说明、
+# 数据纪律第 14/15 条——导出透传与"复用对话已有结果"防重复拉数规则）
+_MAX_CHARS = 6050
 
 
 class TestSystemPromptS8:
@@ -35,7 +32,6 @@ class TestSystemPromptS8:
             "【先确认再执行】",
             "【数据概念区分（必须严格区分）】",
             "【工具与数据获取】",
-            "【猪周期世界模型（领域专用，优先级高于 web_search）】",
             "【长期记忆管理】",
         ):
             assert block in prompt, f"缺少分层区块：{block}"
@@ -74,7 +70,7 @@ class TestSystemPromptS8:
         assert "【数据纪律（核心，逐条强制）】" not in prompt
 
     def test_size_reduction_acceptance(self):
-        """S8 缩减验收已达成；基线上移至 S9 后实际值（10522），本测试现锚定不回弹"""
+        """验收：静态规则文本较基线缩减 ≥30%（防膨胀回弹）"""
         prompt = _get_system_prompt()
         assert len(prompt) <= _MAX_CHARS, (
             f"prompt 长度 {len(prompt)} 超过验收线 {_MAX_CHARS}"
@@ -116,11 +112,6 @@ class TestSystemPromptS8:
             "严禁为\"给点参考\"推荐不符合条件的股票",  # 筛选空结果
             "watchlist_groups 只是分组/组织方式",  # 三概念区分
             "user_favorites",
-            "必须先调用猪周期证据工具",  # 猪周期问题路由协议（防绕开世界模型）
-            "按历史时点自动切版本",  # 世界模型政策参数 point-in-time 说明
-            "不得用搜索结果覆盖工具数字",  # 工具数字优先于 web_search
-            "禁止以\"官方数据未出\"为由拒答",  # 推演方法论：推定类问题必须分情景推论
-            "get_pig_sow_floor_inference",  # 下限情景推演工具指引
         )
         for a in anchors:
             assert a in prompt, f"缺少合规/工具锚点：{a}"

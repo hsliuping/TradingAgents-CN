@@ -51,13 +51,37 @@ def update_worker_state(**kwargs):
 
 
 def setup_logging():
-    """设置日志配置 - 走权威配置 app/core/logging_config.py（日志治理 §5.3）
+    """设置日志配置 - 确保日志在任何情况下都能写入文件"""
+    # 确保日志目录存在
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
 
-    worker 模块日志（logging.getLogger(__name__) → app.worker.*）由 app.worker logger
-    落盘到 logs/worker.log；崩溃兜底记录仍走 write_startup_log/write_exit_log。
-    """
-    from app.core.logging_config import setup_logging as setup_app_logging
-    setup_app_logging("INFO")
+    log_file = log_dir / "worker.log"
+
+    # 创建文件处理器，使用追加模式
+    file_handler = logging.FileHandler(str(log_file), encoding='utf-8', mode='a')
+    file_handler.setLevel(logging.DEBUG)  # 文件记录所有级别
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    ))
+
+    # 创建控制台处理器（可能因编码问题失败，但不影响文件日志）
+    try:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        ))
+    except Exception:
+        console_handler = None
+
+    # 配置根日志器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.handlers.clear()
+    root_logger.addHandler(file_handler)
+    if console_handler:
+        root_logger.addHandler(console_handler)
 
     # 强制刷新输出（忽略编码错误）
     try:

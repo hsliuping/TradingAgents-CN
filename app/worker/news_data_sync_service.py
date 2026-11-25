@@ -8,14 +8,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 
-from app.services.news_data_service import (
-    get_news_data_service,
-    ANNOUNCEMENT_CATEGORY,
-    DATA_TYPE_ALL,
-    DATA_TYPE_ANNOUNCEMENT,
-    DATA_TYPE_NEWS,
-)
-from app.core.config import settings
+from app.services.news_data_service import get_news_data_service
 from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
 from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
 from tradingagents.dataflows.news.realtime_news import RealtimeNewsAggregator
@@ -98,8 +91,7 @@ class NewsDataSyncService:
         symbol: str,
         data_sources: List[str] = None,
         hours_back: int = 24,
-        max_news_per_source: int = 50,
-        data_type: Optional[str] = None
+        max_news_per_source: int = 50
     ) -> NewsSyncStats:
         """
         同步单只股票的新闻数据
@@ -109,8 +101,6 @@ class NewsDataSyncService:
             data_sources: 数据源列表，默认使用所有可用源
             hours_back: 回溯小时数
             max_news_per_source: 每个数据源最大新闻数量
-            data_type: 数据类型过滤（announcement=只同步公告 / news=只同步普通新闻），
-                      为 None 时全量同步（兼容旧行为）
             
         Returns:
             同步统计信息
@@ -167,15 +157,6 @@ class NewsDataSyncService:
             else:
                 self.logger.warning("⚠️ 没有可用的数据源进行新闻同步")
             
-            # 按数据类型过滤（公告/新闻独立生命周期；data_type=None 全量，兼容旧行为）
-            if data_type is not None:
-                typed_news = self._filter_news_by_data_type(all_news, data_type)
-                self.logger.info(
-                    f"🏷️ 按数据类型过滤: data_type={data_type}, "
-                    f"{len(all_news)}条 -> {len(typed_news)}条"
-                )
-                all_news = typed_news
-
             # 保存新闻数据
             if all_news:
                 stats.total_processed = len(all_news)
@@ -455,8 +436,7 @@ class NewsDataSyncService:
         self,
         data_sources: List[str] = None,
         hours_back: int = 24,
-        max_news_per_source: int = 100,
-        data_type: Optional[str] = None
+        max_news_per_source: int = 100
     ) -> NewsSyncStats:
         """
         同步市场新闻
@@ -465,8 +445,6 @@ class NewsDataSyncService:
             data_sources: 数据源列表
             hours_back: 回溯小时数
             max_news_per_source: 每个数据源最大新闻数量
-            data_type: 数据类型过滤（announcement=只同步公告 / news=只同步普通新闻），
-                      为 None 时全量同步（兼容旧行为）
             
         Returns:
             同步统计信息
@@ -504,15 +482,6 @@ class NewsDataSyncService:
                 except Exception as e:
                     self.logger.error(f"❌ 市场新闻获取失败: {e}")
             
-            # 按数据类型过滤（公告/新闻独立生命周期；data_type=None 全量，兼容旧行为）
-            if data_type is not None:
-                typed_news = self._filter_news_by_data_type(all_news, data_type)
-                self.logger.info(
-                    f"🏷️ 按数据类型过滤: data_type={data_type}, "
-                    f"{len(all_news)}条 -> {len(typed_news)}条"
-                )
-                all_news = typed_news
-
             # 保存新闻数据
             if all_news:
                 stats.total_processed = len(all_news)
@@ -537,176 +506,6 @@ class NewsDataSyncService:
             self.logger.error(f"❌ 同步市场新闻失败: {e}")
             stats.end_time = datetime.utcnow()
             return stats
-
-    @staticmethod
-    def _filter_news_by_data_type(
-        news_list: List[Dict[str, Any]],
-        data_type: Optional[str]
-    ) -> List[Dict[str, Any]]:
-        """
-        按数据类型过滤新闻列表（公告/新闻独立生命周期）
-
-        Args:
-            news_list: 待过滤的新闻列表
-            data_type: announcement=只保留公告 / news=只保留普通新闻 /
-                      None 或 all=不过滤（兼容旧行为）
-
-        Returns:
-            过滤后的新闻列表
-        """
-        if data_type is None or data_type == DATA_TYPE_ALL:
-            return list(news_list)
-        if data_type == DATA_TYPE_ANNOUNCEMENT:
-            return [n for n in news_list if n.get("category") == ANNOUNCEMENT_CATEGORY]
-        if data_type == DATA_TYPE_NEWS:
-            return [n for n in news_list if n.get("category") != ANNOUNCEMENT_CATEGORY]
-        raise ValueError(f"不支持的数据类型: {data_type}")
-
-    # ==================== 公告独立同步入口（独立生命周期）====================
-
-    async def sync_stock_announcements(
-        self,
-        symbol: str,
-        data_sources: List[str] = None,
-        hours_back: Optional[int] = None,
-        max_news_per_source: Optional[int] = None
-    ) -> NewsSyncStats:
-        """
-        公告独立同步入口：只同步单只股票的公司公告（可独立于新闻单独调用）
-
-        刷新节奏使用公告独立配置（ANNOUNCEMENT_SYNC_*），与新闻（NEWS_SYNC_*）分开。
-
-        Args:
-            symbol: 股票代码
-            data_sources: 数据源列表，默认使用所有可用源
-            hours_back: 回溯小时数，默认取 ANNOUNCEMENT_SYNC_HOURS_BACK
-            max_news_per_source: 每个数据源最大数量，默认取 ANNOUNCEMENT_SYNC_MAX_PER_SOURCE
-
-        Returns:
-            同步统计信息
-        """
-        return await self.sync_stock_news(
-            symbol=symbol,
-            data_sources=data_sources,
-            hours_back=hours_back if hours_back is not None else settings.ANNOUNCEMENT_SYNC_HOURS_BACK,
-            max_news_per_source=(
-                max_news_per_source if max_news_per_source is not None
-                else settings.ANNOUNCEMENT_SYNC_MAX_PER_SOURCE
-            ),
-            data_type=DATA_TYPE_ANNOUNCEMENT,
-        )
-
-    async def sync_market_announcements(
-        self,
-        data_sources: List[str] = None,
-        hours_back: Optional[int] = None,
-        max_news_per_source: Optional[int] = None
-    ) -> NewsSyncStats:
-        """
-        公告独立同步入口：只同步市场级公告（可独立于新闻单独调用）
-
-        Returns:
-            同步统计信息
-        """
-        return await self.sync_market_news(
-            data_sources=data_sources,
-            hours_back=hours_back if hours_back is not None else settings.ANNOUNCEMENT_SYNC_HOURS_BACK,
-            max_news_per_source=(
-                max_news_per_source if max_news_per_source is not None
-                else settings.ANNOUNCEMENT_SYNC_MAX_PER_SOURCE
-            ),
-            data_type=DATA_TYPE_ANNOUNCEMENT,
-        )
-
-    async def sync_announcements(
-        self,
-        symbols: Optional[List[str]] = None,
-        hours_back: Optional[int] = None,
-        max_news_per_source: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        公告批量同步入口（公告独立生命周期的定时排期入口）
-
-        Args:
-            symbols: 股票代码列表，为 None 时只同步股票关注列表
-            hours_back: 回溯小时数，默认取 ANNOUNCEMENT_SYNC_HOURS_BACK
-            max_news_per_source: 每个数据源最大数量，默认取 ANNOUNCEMENT_SYNC_MAX_PER_SOURCE
-
-        Returns:
-            批量同步统计信息
-        """
-        summary: Dict[str, Any] = {
-            "data_type": DATA_TYPE_ANNOUNCEMENT,
-            "total_processed": 0,
-            "success_count": 0,
-            "error_count": 0,
-            "announcement_count": 0,
-            "symbols": [],
-        }
-
-        if symbols is None:
-            symbols = await self._get_favorite_symbols()
-        if not symbols:
-            self.logger.warning("⚠️ 没有需要同步公告的股票")
-            return summary
-
-        summary["symbols"] = list(symbols)
-        self.logger.info(f"📋 开始公告独立同步: {len(symbols)} 只股票")
-
-        for symbol in symbols:
-            try:
-                stats = await self.sync_stock_announcements(
-                    symbol=symbol,
-                    hours_back=hours_back,
-                    max_news_per_source=max_news_per_source,
-                )
-                summary["total_processed"] += stats.total_processed
-                summary["announcement_count"] += stats.successful_saves
-                if stats.failed_saves:
-                    summary["error_count"] += 1
-                else:
-                    summary["success_count"] += 1
-            except Exception as e:
-                self.logger.error(f"❌ 公告同步失败 {symbol}: {e}")
-                summary["error_count"] += 1
-
-        self.logger.info(
-            f"✅ 公告批量同步完成: {summary['success_count']}只成功, "
-            f"{summary['error_count']}只失败, 共{summary['announcement_count']}条公告"
-        )
-        return summary
-
-    async def _get_favorite_symbols(self) -> List[str]:
-        """获取股票关注列表代码列表（公告批量同步的默认范围）"""
-        try:
-            news_service = await self._get_news_service()
-            db = news_service.db
-
-            valid_user_ids = set()
-            async for user in db.users.find({}, {"_id": 1}):
-                user_id = user.get("_id")
-                if user_id is not None:
-                    valid_user_ids.add(str(user_id))
-
-            favorite_codes = set()
-            cursor = db.user_favorites.find(
-                {"favorites": {"$exists": True, "$ne": []}},
-                {"user_id": 1, "favorites.stock_code": 1, "_id": 0}
-            )
-            async for doc in cursor:
-                user_id = str(doc.get("user_id") or "")
-                if not user_id or user_id not in valid_user_ids:
-                    continue
-                for fav in doc.get("favorites", []):
-                    code = str(fav.get("stock_code") or "").strip()
-                    if code:
-                        favorite_codes.add(code)
-
-            return sorted(favorite_codes)
-
-        except Exception as e:
-            self.logger.error(f"❌ 获取股票关注列表失败: {e}")
-            return []
 
 
 # 全局服务实例

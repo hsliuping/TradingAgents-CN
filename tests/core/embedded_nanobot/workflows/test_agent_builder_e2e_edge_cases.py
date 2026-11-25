@@ -523,11 +523,7 @@ class TestAbnormalUserReplyRecognition:
             assert state["clarification_needed"] is True
 
     def test_new_agent_intent_during_existing_session(self):
-        """在现有 Agent 会话说「新建一个舆情分析Agent」→ new_agent → 留在当前 wait 节点。
-
-        对齐现役路由（agent_builder_conditions.py）：new_agent 不再自动 end，
-        留在当前 wait 节点提示手动创建。
-        """
+        """在现有 Agent 会话中说「新建一个舆情分析Agent」→ new_agent → end。"""
         state = new_state("我要新建一个舆情分析Agent")
         state["current_node"] = "wait_evaluation"
         state["spec_name"] = "财报风险识别助手"
@@ -535,7 +531,9 @@ class TestAbnormalUserReplyRecognition:
         state["user_intent"] = "new_agent"
         state["intent_confidence"] = 0.95
         result = route_after_classify(state)
-        assert result == "wait_evaluation"
+        assert result == "end"
+        assert "新建 Agent" in state.get("final_response", "")
+        assert "财报风险识别助手" in state.get("final_response", "")
 
     def test_cancel_mid_flow_ends_gracefully(self):
         """任何阶段说「取消」→ 结束。"""

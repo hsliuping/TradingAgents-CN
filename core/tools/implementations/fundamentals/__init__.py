@@ -38,7 +38,6 @@ from .management_assessment import (
     get_equity_incentive,
     get_management_penalties,
 )
-from .margin_tools import get_margin_balance
 
 __all__ = [
     'get_stock_fundamentals_unified',
@@ -67,6 +66,5 @@ __all__ = [
     'get_disclosure_rating',
     'get_equity_incentive',
     'get_management_penalties',
-    'get_margin_balance',
 ]
 

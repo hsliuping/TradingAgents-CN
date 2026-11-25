@@ -69,8 +69,24 @@ class _Registry:
         return None
 
 
-def test_manager_agent_execute_writes_memory_without_read_injection():
-    """M5.4：执行链路保留记忆写入，但不再读 per-agent 向量记忆注入提示词。"""
+def test_manager_agent_reads_history_from_mem0_style_memory():
+    memory = _Mem0StyleMemory()
+    agent = _TestManagerAgent(memory=memory)
+
+    history = agent._get_memory_context("300750", {"bull_report": "bull", "bear_report": "bear"})
+
+    assert "历史管理经验" in history
+    assert "历史管理判断 A" in history
+    assert memory.search_calls == [
+        {
+            "query": "股票代码: 300750\n管理者类型: research\n历史管理决策\nbull_report: bull\nbear_report: bear",
+            "n_results": 3,
+            "filter_metadata": {"ticker": "300750"},
+        }
+    ]
+
+
+def test_manager_agent_execute_reads_and_writes_memory():
     memory = _Mem0StyleMemory()
     agent = _TestManagerAgent(memory=memory, llm=_DummyLLM())
 
@@ -87,8 +103,6 @@ def test_manager_agent_execute_writes_memory_without_read_injection():
     assert len(memory.add_calls) == 1
     assert memory.add_calls[0]["metadata"]["ticker"] == "300750"
     assert memory.add_calls[0]["metadata"]["memory_kind"] == "manager_decision"
-    # M5.4 退位：执行链路不得触发向量记忆读取
-    assert memory.search_calls == []
 
 
 def test_agent_factory_passes_memory_to_manager_agents():

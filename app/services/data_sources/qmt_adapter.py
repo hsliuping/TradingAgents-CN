@@ -8,9 +8,6 @@ QMT (迅投 QMT 交易终端) 数据源适配器
     2. 获取行情数据不需要登录券商账户
     3. 持仓/资产查询需要券商账户已在 QMT 交易终端中登录（本适配器不提供下单能力）
 新闻不支持，统一使用 AKShare 数据源。
-
-通道职责（P5）：QMT 保持 xtquant SDK 直连（性能优于 MCP），不强行 MCP 化；
-通达信双通道中 tqcenter HTTP 负责行情实时数据，tdx-mcp 负责股票信息/基本面查询。
 """
 from typing import Optional, Dict, List, Any, Tuple
 import logging
@@ -184,11 +181,7 @@ class QMTAdapter(DataSourceAdapter):
         return "qmt"
 
     def _get_default_priority(self) -> int:
-        # P2 数据源收敛：默认优先级唯一定义在 A（tradingagents/dataflows/data_source_manager.py）。
-        # QMT 是 B 专属 SDK 数据源，A 不感知；此处与 AKShare 同级，
-        # 排序插入规则见 DataAdapterOrchestrator.QMT_INSERT_AFTER（紧随 akshare）。
-        from tradingagents.dataflows.data_source_manager import get_default_source_priority
-        return get_default_source_priority("akshare")  # 与 AKShare 同级，数字越大优先级越高
+        return 2  # 与 AKShare 同级，数字越大优先级越高
 
     def _safe_float(self, value) -> Optional[float]:
         try:
@@ -1095,7 +1088,7 @@ class QMTAdapter(DataSourceAdapter):
             return None
 
     def get_news(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True) -> Optional[List[Dict]]:
-        """QMT 不支持新闻，返回 None，由 DataAdapterOrchestrator 回退到 AKShare"""
+        """QMT 不支持新闻，返回 None，由 DataSourceManager 回退到 AKShare"""
         logger.debug("QMT: 不支持新闻，请使用 AKShare")
         return None
 

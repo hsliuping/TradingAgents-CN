@@ -15,9 +15,6 @@ logger = get_logger('agents')
 # 导入配置
 from tradingagents.config.runtime_settings import use_app_cache_enabled
 
-# 股票基础信息多源合并（统一 Schema 模块，dataflows 包内直接引用实现层）
-from ..stock_basic_schema import merge_stock_basic_records
-
 class MongoDBCacheAdapter:
     """MongoDB 缓存适配器（从 app 的 MongoDB 读取同步数据）"""
     
@@ -48,7 +45,7 @@ class MongoDBCacheAdapter:
             self.use_app_cache = False
     
     def get_stock_basic_info(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """获取股票基础信息（同 code 多 source 记录按优先级 + 非空字段互补合并）"""
+        """获取股票基础信息（按数据源优先级查询）"""
         if not self.use_app_cache or self.db is None:
             return None
 
@@ -56,15 +53,26 @@ class MongoDBCacheAdapter:
             code6 = str(symbol).zfill(6)
             collection = self.db.stock_basic_info
 
-            # 🔥 同 code 多 source 记录：按优先级 + 非空字段互补合并（含无 source 的旧数据）
-            docs = list(collection.find({"code": code6}, {"_id": 0}))
-            doc = merge_stock_basic_records(docs)
-            if doc:
-                logger.debug(f"✅ 从MongoDB获取基础信息（多源合并）: {symbol}")
-                return doc
+            # 🔥 获取数据源优先级
+            source_priority = self._get_data_source_priority(symbol)
 
-            logger.debug(f"📊 MongoDB中未找到基础信息: {symbol}")
-            return None
+            # 🔥 按优先级查询
+            doc = None
+            for src in source_priority:
+                doc = collection.find_one({"code": code6, "source": src}, {"_id": 0})
+                if doc:
+                    logger.debug(f"✅ 从MongoDB获取基础信息: {symbol}, 数据源: {src}")
+                    return doc
+
+            # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
+            if not doc:
+                doc = collection.find_one({"code": code6}, {"_id": 0})
+                if doc:
+                    logger.debug(f"✅ 从MongoDB获取基础信息（旧数据）: {symbol}")
+                    return doc
+                else:
+                    logger.debug(f"📊 MongoDB中未找到基础信息: {symbol}")
+                    return None
 
         except Exception as e:
             logger.warning(f"⚠️ 获取基础信息失败: {e}")
@@ -145,12 +153,9 @@ class MongoDBCacheAdapter:
         except Exception as e:
             logger.error(f"❌ 获取数据源优先级失败: {e}", exc_info=True)
 
-        # 默认顺序：从唯一定义处 DEFAULT_SOURCE_PRIORITY 推导（local > tushare > akshare > baostock）
-        from ..data_source_manager import DEFAULT_SOURCE_PRIORITY
-
-        default_order = sorted(DEFAULT_SOURCE_PRIORITY, key=DEFAULT_SOURCE_PRIORITY.get, reverse=True)
-        logger.info(f"📊 [数据源优先级] 使用默认顺序: {default_order}")
-        return default_order
+        # 默认顺序：Tushare > AKShare > BaoStock
+        logger.info(f"📊 [数据源优先级] 使用默认顺序: ['tushare', 'akshare', 'baostock']")
+        return ['tushare', 'akshare', 'baostock']
 
     def get_historical_data(self, symbol: str, start_date: str = None, end_date: str = None,
                           period: str = "daily") -> Optional[pd.DataFrame]:

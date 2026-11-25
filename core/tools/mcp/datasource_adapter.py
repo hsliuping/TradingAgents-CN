@@ -45,7 +45,7 @@ class MCPDatasourceAdapter:
         解析 raw_result，应用字段映射，写入 MongoDB。
 
         Args:
-            raw_result:   MCP 工具返回的原始字符串
+            raw_result:   MCP call_tool 返回的原始字符串
             tool_name:    工具名称（仅用于日志）
             data_mapping: 来自 mcp_server_configs.data_mappings 中对应 tool_name 的条目
             server_name:  MCP 服务器名称（写入 data_source 标识）
@@ -64,21 +64,10 @@ class MCPDatasourceAdapter:
             self.persist_unstructured(raw_result, tool_name, server_name)
             return MCP_DOCUMENTS_COLLECTION
 
-        # 区分"请求成功但无数据"与"响应无法解析"（P5 失败/空数据语义）：
-        # 空响应/空记录 → 空数据，正常跳过；解析失败 → 打标告警，不算空数据
-        if not (raw_result or "").strip():
-            logger.info(f"[MCP Adapter] {tool_name} 请求成功但无数据（空响应），跳过持久化")
-            return target_collection
-
-        records, parsed_ok = self._parse_result(raw_result)
+        # 解析 JSON 数据
+        records = self._parse_result(raw_result)
         if not records:
-            if parsed_ok:
-                logger.info(f"[MCP Adapter] {tool_name} 请求成功但无数据（空记录），跳过持久化")
-            else:
-                logger.warning(
-                    f"[MCP Adapter][PARSE_ERROR] {tool_name} 响应无法解析为记录"
-                    f"（非空但非结构化数据，不按空数据处理）: {str(raw_result)[:200]}"
-                )
+            logger.info(f"[MCP Adapter] {tool_name} 返回空数据，跳过持久化")
             return target_collection
 
         # 应用字段映射和单位转换（支持 field_mapping_list 数组格式，实现一源多目标）
@@ -141,26 +130,21 @@ class MCPDatasourceAdapter:
     # 内部工具
     # ------------------------------------------------------------------
 
-    def _parse_result(self, raw_result: str) -> tuple:
-        """尝试将 raw_result 解析为记录列表。
-
-        Returns:
-            (records, parsed_ok): records 为解析出的记录；parsed_ok 表示响应
-            是否为可解析的 JSON 结构（False = 解析失败，区别于"成功但空"）。
-        """
+    def _parse_result(self, raw_result: str) -> List[Dict]:
+        """尝试将 raw_result 解析为记录列表"""
         try:
             data = json.loads(raw_result)
             if isinstance(data, list):
-                return data, True
+                return data
             if isinstance(data, dict):
                 # 常见结构：{"data": [...]} 或 {"records": [...]} 或直接是单条记录
                 for key in ("data", "records", "result", "rows"):
                     if isinstance(data.get(key), list):
-                        return data[key], True
-                return [data], True  # 单条记录
-            return [], True
+                        return data[key]
+                return [data]  # 单条记录
         except (json.JSONDecodeError, TypeError):
-            return [], False
+            pass
+        return []
 
     def _map_record(
         self,

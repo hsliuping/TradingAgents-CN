@@ -23,7 +23,6 @@ OpenHarness/
 .env.db
 .env.mongodb*
 .env.jdyun
-.env.docker.*
 frontend/.env*
 
 # 前端依赖与构建产物
@@ -106,10 +105,6 @@ hk_stock_cache.json
 /src/
 /backend/
 /vendors/
-# 行业数据快照（打包时由 export_pig_cycle_snapshot.py 生成，不入库）
-install/pig_cycle_snapshot/
-# 数据库导出配置转储（体积大且含环境配置，不入库）
-install/database_export_config_*.json
 
 # AI 工具目录（.trae/skills 项目 skill 需入库，其余忽略）
 .trae/*
@@ -148,8 +143,6 @@ scripts/windows-installer/nsis/*.exe
 scripts/windows-installer/nsis/*.zip
 
 # 本地脚本与临时调试文件
-# TDX 本地回测草稿（含输出 PNG/CSV，非交付物；正式指标库在 tdx_indicators/）
-/_tdx_test/
 test_*_conversion.py
 test_*_reports.py
 test_*_function.py
@@ -184,9 +177,6 @@ nanobot_sessions/
 
 # SearXNG wheel 构建产物（deploy-all-in-one/build.sh 生成）
 deploy-all-in-one/wheels/
-
-# 执行模式私有提示词（内容不发行，仅存本地；见 docs/05-design/v4.0/execution-advice-mode-design.md）
-/local/
 
 nul
 node_modules

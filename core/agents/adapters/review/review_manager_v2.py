@@ -10,7 +10,6 @@ from typing import Dict, Any, List
 from ...manager import ManagerAgent
 from ...config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ...registry import register_agent
-from ..flow_context import safe_extract
 
 logger = logging.getLogger(__name__)
 
@@ -205,10 +204,12 @@ class ReviewManagerV2(ManagerAgent):
         emotion = state.get("emotion_analysis", "无情绪分析")
         attribution = state.get("attribution_analysis", "无归因分析")
 
-        # 🔧 提取内容（降级占位返回空串，不混入推理）
+        # 🔧 从字典中提取 content 字段（ResearcherAgent 返回的是字典）
         def extract_content(data):
             """从分析结果中提取内容"""
-            return safe_extract(data)
+            if isinstance(data, dict):
+                return data.get('content', str(data))
+            return str(data)
 
         # 截断长文本（避免 token 过多）
         timing_text = extract_content(timing)[:1500]

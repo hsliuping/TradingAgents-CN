@@ -16,8 +16,6 @@ import logging
 
 from ..base_provider import BaseStockDataProvider
 from tradingagents.config.providers_config import get_provider_config
-# 数据能力声明（只加声明，不改实现）
-from tradingagents.dataflows.capability.registry import register_capability
 
 # 尝试导入tushare
 try:
@@ -343,7 +341,7 @@ class TushareProvider(BaseStockDataProvider):
                     'pre_close': row.get('pre_close'),
                     'change': row.get('change'),  # 涨跌额
                     'pct_chg': row.get('pct_chg'),  # 涨跌幅
-                    'vol': row.get('vol'),  # 成交量（手）—— standardize_quotes 按 'vol' 读取并做手→股换算
+                    'volume': row.get('vol'),  # 成交量（手）
                     'amount': row.get('amount'),  # 成交额（千元）
                 }
 
@@ -617,7 +615,6 @@ class TushareProvider(BaseStockDataProvider):
     
     # ==================== 扩展接口 ====================
     
-    @register_capability("daily_basic", "tushare", field_mapping={})
     async def get_daily_basic(self, trade_date: str) -> Optional[pd.DataFrame]:
         """获取每日基础财务数据"""
         if not self.is_available():
@@ -628,7 +625,7 @@ class TushareProvider(BaseStockDataProvider):
             df = await asyncio.to_thread(
                 self.api.daily_basic,
                 trade_date=date_str,
-                fields='ts_code,total_mv,circ_mv,pe,pb,close,turnover_rate,volume_ratio,pe_ttm,pb_mrq'
+                fields='ts_code,total_mv,circ_mv,pe,pb,turnover_rate,volume_ratio,pe_ttm,pb_mrq'
             )
             
             if df is not None and not df.empty:
@@ -716,39 +713,6 @@ class TushareProvider(BaseStockDataProvider):
             
         except Exception as e:
             self.logger.error(f"❌ 查找最新交易日期失败: {e}")
-            return None
-
-    @register_capability("trade_cal", "tushare", field_mapping={})
-    async def get_trade_cal_capability(
-        self, start_date: str, end_date: Optional[str] = None
-    ) -> Optional[pd.DataFrame]:
-        """获取交易日历（能力 trade_cal，tushare trade_cal 接口）
-
-        契约：请求失败/不可用返回 None（门面降级），成功但无数据返回空
-        DataFrame（不降级）。返回区间内全部日历日（含休市日 is_open=0）。
-        """
-        if not self.is_available():
-            return None
-        try:
-            end = (end_date or datetime.now().strftime("%Y-%m-%d")).replace("-", "")
-            start = start_date.replace("-", "")
-            df = await asyncio.to_thread(
-                self.api.trade_cal,
-                exchange="SSE",
-                start_date=start,
-                end_date=end,
-            )
-            if df is None:
-                # pro 接口返回 None 视为请求失败（如 token 无效），交门面降级
-                return None
-            if df.empty:
-                return pd.DataFrame()
-            df["cal_date"] = pd.to_datetime(df["cal_date"], format="%Y%m%d")
-            df["is_open"] = pd.to_numeric(df["is_open"], errors="coerce").astype("Int64")
-            df["exchange"] = "SSE"
-            return df.sort_values("cal_date")
-        except Exception as e:
-            self.logger.error(f"❌ 获取交易日历失败: {e}")
             return None
     
     async def get_financial_data(self, symbol: str, report_type: str = "quarterly",
@@ -867,221 +831,6 @@ class TushareProvider(BaseStockDataProvider):
 
         except Exception as e:
             self.logger.error(f"❌ 获取Tushare财务数据失败 symbol={symbol}: {e}")
-            return None
-
-    async def _fetch_statement_period(self, symbol: str, api_method, capability: str,
-                                      limit: Optional[int] = None) -> Optional[pd.DataFrame]:
-        """按报告期拉取单张财务报表的公共路径（能力 financial_*）
-
-        契约：请求失败/不可用返回 None（门面降级），成功但无数据返回空 DataFrame（不降级）。
-        """
-        if not self.is_available():
-            return None
-        try:
-            ts_code = self._normalize_ts_code(symbol)
-            query_params = {'ts_code': ts_code}
-            if limit is not None:
-                query_params['limit'] = limit
-            df = await asyncio.to_thread(api_method, **query_params)
-            if df is None or df.empty:
-                return pd.DataFrame()
-            self.logger.debug(f"✅ {ts_code} {capability} 数据获取成功: {len(df)} 条记录")
-            return df
-        except Exception as e:
-            self.logger.error(f"❌ 获取{capability}数据失败 symbol={symbol}: {e}")
-            return None
-
-    @register_capability("financial_income", "tushare", field_mapping={})
-    async def get_financial_income(self, symbol: str, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
-        """获取个股利润表（按报告期，能力 financial_income，标准名=tushare 原生字段名）"""
-        return await self._fetch_statement_period(symbol, self.api.income, "利润表", limit)
-
-    @register_capability("financial_balance", "tushare", field_mapping={})
-    async def get_financial_balance(self, symbol: str, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
-        """获取个股资产负债表（按报告期，能力 financial_balance，标准名=tushare 原生字段名）"""
-        return await self._fetch_statement_period(symbol, self.api.balancesheet, "资产负债表", limit)
-
-    @register_capability(
-        "financial_cashflow", "tushare",
-        field_mapping={
-            # 历史实现存在 'n_cashflow_fin_act' 误写，防御性映射兜底（tushare 原生为 n_cash_flows_fnc_act）
-            "n_cashflow_fin_act": "n_cash_flows_fnc_act",
-        },
-    )
-    async def get_financial_cashflow(self, symbol: str, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
-        """获取个股现金流量表（按报告期，能力 financial_cashflow，标准名=tushare 原生字段名）"""
-        return await self._fetch_statement_period(symbol, self.api.cashflow, "现金流量表", limit)
-
-    @register_capability("financial_indicators", "tushare", field_mapping={})
-    async def get_financial_indicators(self, symbol: str, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
-        """获取个股财务指标（按报告期，能力 financial_indicators，标准名=tushare 原生字段名）"""
-        return await self._fetch_statement_period(symbol, self.api.fina_indicator, "财务指标", limit)
-
-    @register_capability("stock_daily_basic", "tushare", field_mapping={})
-    async def get_stock_daily_basic(
-        self, symbol: str, start_date: Optional[str] = None, end_date: Optional[str] = None
-    ) -> Optional[pd.DataFrame]:
-        """获取个股每日估值基础指标区间序列（能力 stock_daily_basic，标准名=tushare 原生字段名）"""
-        if not self.is_available():
-            return None
-        try:
-            ts_code = self._normalize_ts_code(symbol)
-            query_params: Dict[str, Any] = {
-                'ts_code': ts_code,
-                'fields': 'ts_code,trade_date,pe,pe_ttm,pb,ps_ttm',
-            }
-            if start_date:
-                query_params['start_date'] = start_date
-            if end_date:
-                query_params['end_date'] = end_date
-            df = await asyncio.to_thread(self.api.daily_basic, **query_params)
-            if df is None or df.empty:
-                return pd.DataFrame()
-            df = df.sort_values('trade_date', ascending=False)
-            self.logger.debug(f"✅ {ts_code} 个股每日指标数据获取成功: {len(df)} 条记录")
-            return df
-        except Exception as e:
-            self.logger.error(f"❌ 获取个股每日指标数据失败 symbol={symbol}: {e}")
-            return None
-
-    @register_capability("stock_dividend", "tushare", field_mapping={})
-    async def get_stock_dividend(self, symbol: str, limit: Optional[int] = None) -> Optional[pd.DataFrame]:
-        """获取个股分红送股事件记录（能力 stock_dividend，标准名=tushare 原生字段名）"""
-        if not self.is_available():
-            return None
-        try:
-            ts_code = self._normalize_ts_code(symbol)
-            df = await asyncio.to_thread(
-                self.api.dividend,
-                ts_code=ts_code,
-                fields='ts_code,end_date,ann_date,div_proc,stk_div,stk_bo_rate,stk_co_rate,'
-                       'cash_div,cash_div_tax,record_date,ex_date,pay_date',
-            )
-            if df is None or df.empty:
-                return pd.DataFrame()
-            df = df.sort_values('end_date', ascending=False)
-            if limit is not None:
-                df = df.head(limit)
-            self.logger.debug(f"✅ {ts_code} 分红送股数据获取成功: {len(df)} 条记录")
-            return df
-        except Exception as e:
-            self.logger.error(f"❌ 获取分红送股数据失败 symbol={symbol}: {e}")
-            return None
-
-    @register_capability("stock_daily", "tushare", field_mapping={})
-    async def get_stock_daily(
-        self, symbol: str, start_date: str, end_date: Optional[str] = None
-    ) -> Optional[pd.DataFrame]:
-        """获取个股日线行情（能力 stock_daily，委托高层 get_historical_data 保留
-        pro_bar 前复权/ETF 分派语义；标准名=高层方法输出命名 date/volume）"""
-        if not self.is_available():
-            return None
-        try:
-            df = await self.get_historical_data(symbol, start_date, end_date)
-        except Exception as e:
-            self.logger.error(f"❌ 获取个股日线行情失败 symbol={symbol}: {e}")
-            return None
-        if df is None:
-            return None
-        if df.empty:
-            return pd.DataFrame()
-        # 高层方法把 date 设为索引，能力契约要求 date 为普通列
-        return df.reset_index()
-
-    @register_capability("stock_news_cn", "tushare", field_mapping={"source": "media_source"})
-    async def get_stock_news_capability(
-        self, symbol: str, limit: int = 10, hours_back: int = 24
-    ) -> Optional[pd.DataFrame]:
-        """获取个股新闻（能力 stock_news_cn，委托高层 get_stock_news 保留
-        多源轮询/权限检测语义；无权限返回 None 经门面降级到下一源）"""
-        if not self.is_available():
-            return None
-        try:
-            news = await self.get_stock_news(symbol=symbol, limit=limit, hours_back=hours_back)
-        except Exception as e:
-            self.logger.error(f"❌ 获取个股新闻失败 symbol={symbol}: {e}")
-            return None
-        if news is None:
-            return None
-        return pd.DataFrame(news) if news else pd.DataFrame()
-
-    @register_capability(
-        "fund_etf_hist", "tushare",
-        field_mapping={
-            "vol": "volume",
-            "pct_chg": "pct_change",
-        },
-    )
-    async def get_fund_etf_hist_capability(
-        self, symbol: str, start_date: Optional[str] = None, end_date: Optional[str] = None
-    ) -> Optional[pd.DataFrame]:
-        """获取 ETF 基金日线行情区间序列（能力 fund_etf_hist，tushare fund_daily）
-
-        契约：请求失败/不可用返回 None（门面降级），成功但无数据返回空 DataFrame（不降级）。
-        口径：amount 千元→元；trade_date 归一为 YYYY-MM-DD 文本；按日期降序（最新在前）。
-        """
-        if not self.is_available():
-            return None
-        try:
-            clean = str(symbol or "").strip()
-            if not clean:
-                return pd.DataFrame()
-            ts_code = self._normalize_ts_code(clean)
-            end = (end_date or datetime.now().strftime("%Y%m%d")).replace("-", "")
-            start = (start_date or (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")).replace("-", "")
-            df = await asyncio.to_thread(
-                self.api.fund_daily, ts_code=ts_code, start_date=start, end_date=end
-            )
-            if df is None or df.empty:
-                return pd.DataFrame()
-            trade_dates = df["trade_date"].astype(str).str.replace("-", "", regex=False)
-            df["trade_date"] = pd.to_datetime(trade_dates, format="%Y%m%d").dt.strftime("%Y-%m-%d")
-            if "amount" in df.columns:
-                df["amount"] = pd.to_numeric(df["amount"], errors="coerce") * 1000
-            df = df.sort_values("trade_date", ascending=False)
-            self.logger.debug(f"✅ {ts_code} ETF 日线数据获取成功: {len(df)} 条记录")
-            return df
-        except Exception as e:
-            self.logger.error(f"❌ 获取 ETF 日线数据失败 symbol={symbol}: {e}")
-            return None
-
-    @register_capability(
-        "fund_etf_basic", "tushare",
-        field_mapping={
-            "benchmark": "track_index",
-            "m_fee": "management_fee",
-            "c_fee": "custodian_fee",
-            "purc_startdate": "purchase_start_date",
-            "redm_startdate": "redemption_start_date",
-            "issue_amount": "fund_scale",
-        },
-    )
-    async def get_fund_etf_basic_capability(self, symbol: str) -> Optional[pd.DataFrame]:
-        """获取 ETF 基金静态档案（能力 fund_etf_basic，tushare fund_basic，单基金）
-
-        契约：请求失败/不可用返回 None（门面降级），成功但无数据返回空 DataFrame（不降级）。
-        口径：费率为百分数值；min_amount 万元（tushare 原生）；issue_amount 万份→份（×10000）；
-        日期保持 tushare 原生 YYYYMMDD 文本（消费方自行归一展示）。
-        """
-        if not self.is_available():
-            return None
-        try:
-            clean = str(symbol or "").strip()
-            if not clean:
-                return pd.DataFrame()
-            ts_code = self._normalize_ts_code(clean)
-            df = await asyncio.to_thread(
-                self.api.fund_basic, market="E", status="L", ts_code=ts_code
-            )
-            if df is None or df.empty:
-                return pd.DataFrame()
-            # schema 要求 fund_code 为 6 位代码（ts_code 去后缀注入）
-            df["fund_code"] = clean
-            if "issue_amount" in df.columns:
-                df["issue_amount"] = pd.to_numeric(df["issue_amount"], errors="coerce") * 10000
-            return df
-        except Exception as e:
-            self.logger.error(f"❌ 获取 ETF 基金档案失败 symbol={symbol}: {e}")
             return None
 
     async def get_dividend_data(self, symbol: str, limit: int = 10) -> Optional[List[Dict[str, Any]]]:
@@ -2042,7 +1791,6 @@ class TushareProvider(BaseStockDataProvider):
 
     # ==================== 板块/行业数据接口 ====================
 
-    @register_capability("ths_index", "tushare", field_mapping={})
     async def get_ths_index_list(self, index_type: str = "N") -> Optional[pd.DataFrame]:
         """
         获取同花顺板块列表
@@ -2073,7 +1821,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取同花顺板块列表失败: {e}")
             return None
 
-    @register_capability("ths_daily", "tushare", field_mapping={})
     async def get_ths_daily(self, ts_code: str, start_date: str = None,
                            end_date: str = None) -> Optional[pd.DataFrame]:
         """
@@ -2110,7 +1857,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取板块日线数据失败: {e}")
             return None
 
-    @register_capability("ths_member", "tushare", field_mapping={})
     async def get_ths_member(self, ts_code: str = None,
                             con_code: str = None) -> Optional[pd.DataFrame]:
         """
@@ -2200,7 +1946,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取个股资金流向失败: {e}")
             return None
 
-    @register_capability("moneyflow_ind_ths", "tushare", field_mapping={})
     async def get_moneyflow_ind_ths(self, trade_date: str = None,
                                     ts_code: str = None,
                                     start_date: str = None,
@@ -2252,7 +1997,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取行业板块资金流向失败: {e}")
             return None
 
-    @register_capability("moneyflow_cnt_ths", "tushare", field_mapping={})
     async def get_moneyflow_cnt_ths(self, trade_date: str = None,
                                     ts_code: str = None,
                                     start_date: str = None,
@@ -2337,40 +2081,78 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取概念板块资金流向失败: {e}")
             return None
 
-    def get_stock_industry_sync(self, ts_code: str) -> Optional[Dict]:
+    async def get_moneyflow_ind_ths(self, trade_date: str = None,
+                                   ts_code: str = None) -> Optional[pd.DataFrame]:
         """
-        同步获取股票所属行业（从 stock_basic 提取）
+        获取同花顺行业资金流向
 
         Args:
-            ts_code: 股票代码（6 位代码或 TS 格式，实现内规范化）
+            trade_date: 交易日期 YYYYMMDD
+            ts_code: 行业代码
 
         Returns:
-            Dict 单条形状 {"ts_code": ..., "industry": ...}（能力模式 C：
-            门面包装为单行 DataFrame 后标准化），未找到返回 None
+            DataFrame，包含行业资金流向数据
+            - industry: 行业名称
+            - pct_change: 行业指数涨跌幅
+            - company_num: 成分股数量
+            - net_buy_amount: 流入资金（亿元）
+            - net_sell_amount: 流出资金（亿元）
+            - net_amount: 净额（亿元）
         """
         if not self.is_available():
             return None
 
         try:
-            code = self._normalize_ts_code(ts_code)
+            params = {}
+            if trade_date:
+                params['trade_date'] = trade_date.replace('-', '')
+            if ts_code:
+                params['ts_code'] = ts_code
+
+            df = await asyncio.to_thread(
+                self.api.moneyflow_ind_ths,
+                **params
+            )
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取行业资金流向数据: {len(df)} 条")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取行业资金流向失败: {e}")
+            return None
+
+    def get_stock_industry_sync(self, ticker: str) -> Optional[str]:
+        """
+        同步获取股票所属行业（从 stock_basic 提取）
+
+        Args:
+            ticker: 股票代码（如 000001 或 000001.SZ）
+
+        Returns:
+            行业名称，如 "银行"
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            ts_code = self._normalize_ts_code(ticker)
             df = self.api.stock_basic(
-                ts_code=code,
+                ts_code=ts_code,
                 fields='ts_code,name,industry'
             )
             if df is not None and not df.empty:
                 industry = df.iloc[0].get('industry')
                 if industry:
-                    self.logger.info(f"✅ 股票 {ts_code} 所属行业: {industry}")
-                    return {"ts_code": code, "industry": str(industry)}
+                    self.logger.info(f"✅ 股票 {ticker} 所属行业: {industry}")
+                    return str(industry)
             return None
         except Exception as e:
             self.logger.error(f"❌ 获取股票行业失败: {e}")
             return None
 
-    @register_capability("stock_industry", "tushare", field_mapping={})
-    async def get_stock_industry(self, ts_code: str) -> Optional[Dict]:
-        """异步获取股票所属行业（Dict 单条形状，走能力模式 C）"""
-        return await asyncio.to_thread(self.get_stock_industry_sync, ts_code)
+    async def get_stock_industry(self, ticker: str) -> Optional[str]:
+        """异步获取股票所属行业"""
+        return await asyncio.to_thread(self.get_stock_industry_sync, ticker)
 
     async def get_industry_stocks(self, industry: str) -> Optional[pd.DataFrame]:
         """
@@ -2410,7 +2192,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取行业股票列表失败: {e}")
             return None
 
-    @register_capability("sector_stocks_daily_basic", "tushare", field_mapping={})
     async def get_sector_stocks_daily_basic(self, industry: str,
                                             trade_date: str) -> Optional[pd.DataFrame]:
         """
@@ -2495,7 +2276,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取指数基本信息失败: {e}")
             return None
 
-    @register_capability("index_daily", "tushare", field_mapping={})
     async def get_index_daily(
         self,
         ts_code: str,
@@ -2571,7 +2351,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取指数日线失败: {e}")
             return None
 
-    @register_capability("index_dailybasic", "tushare", field_mapping={})
     async def get_index_dailybasic(
         self,
         ts_code: str = None,
@@ -2644,7 +2423,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取指数每日指标失败: {e}")
             return None
 
-    @register_capability("daily_info", "tushare", field_mapping={})
     async def get_daily_info(
         self,
         trade_date: str,
@@ -2748,18 +2526,6 @@ class TushareProvider(BaseStockDataProvider):
 
     # ==================== 大盘分析相关接口 ====================
 
-    @register_capability(
-        "hsgt_moneyflow", "tushare",
-        field_mapping={
-            "trade_date": "trade_date",
-            "hgt": "north_sh_flow",        # 沪股通净流入（百万元）
-            "sgt": "north_sz_flow",        # 深股通净流入（百万元）
-            "ggt_ss": "south_sh_flow",     # 港股通（沪）净流入（百万元）
-            "ggt_sz": "south_sz_flow",     # 港股通（深）净流入（百万元）
-            "north_money": "north_net_flow",  # 北向合计（同源派生）
-            "south_money": "south_net_flow",  # 南向合计（同源派生）
-        },
-    )
     async def get_hsgt_moneyflow(
         self,
         trade_date: str = None,
@@ -2814,19 +2580,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取沪深港通资金流向失败: {e}")
             return None
 
-    @register_capability(
-        "margin", "tushare",
-        field_mapping={
-            "trade_date": "trade_date",
-            "exchange_id": "exchange_id",
-            "rzye": "margin_balance",       # 融资余额（元）
-            "rzmre": "margin_buy_amount",   # 融资买入额（元）
-            "rzche": "margin_repay_amount", # 融资偿还额（元）
-            "rqye": "short_balance",        # 融券余额（元）
-            "rqmcl": "short_sell_volume",   # 融券卖出量（股）
-            "rzrqye": "total_balance",      # 融资融券余额（元）
-        },
-    )
     async def get_margin_detail(
         self,
         trade_date: str = None,
@@ -2882,19 +2635,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取融资融券数据失败: {e}")
             return None
 
-    @register_capability(
-        "limit_list", "tushare",
-        field_mapping={
-            "trade_date": "trade_date",
-            "ts_code": "ts_code",
-            "name": "stock_name",
-            "limit": "limit_type",       # U涨停 / D跌停 / Z炸板
-            "pct_chg": "pct_chg",
-            "close": "close_price",
-            "open_times": "open_times",
-            "up_stat": "limit_streak",   # 连板统计
-        },
-    )
     async def get_limit_list(
         self,
         trade_date: str,
@@ -2942,15 +2682,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取涨跌停统计失败: {e}")
             return None
 
-    @register_capability(
-        "stk_limit", "tushare",
-        field_mapping={
-            "trade_date": "trade_date",
-            "ts_code": "ts_code",
-            "up_limit": "up_limit_price",
-            "down_limit": "down_limit_price",
-        },
-    )
     async def get_stk_limit(
         self,
         trade_date: str
@@ -2982,7 +2713,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取涨跌停价格失败: {e}")
             return None
 
-    @register_capability("daily_stats", "tushare", field_mapping={})
     async def get_daily_stats(
         self,
         trade_date: str
@@ -3046,25 +2776,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取每日市场统计失败: {e}")
             return None
 
-    @register_capability(
-        "pledge_detail", "tushare",
-        field_mapping={
-            "ts_code": "ts_code",
-            "ann_date": "ann_date",
-            "holder_name": "holder_name",
-            "pledge_amount": "pledge_amount",
-            "start_date": "start_date",
-            "end_date": "end_date",
-            "is_release": "is_released",
-            "release_date": "release_date",
-            "pledgor": "pledgor",
-            "holding_amount": "holding_amount",
-            "pledged_amount": "pledged_amount",
-            "p_total_ratio": "pledge_total_ratio",
-            "h_total_ratio": "holding_total_ratio",
-            "is_buyback": "is_buyback",
-        },
-    )
     async def get_pledge_detail(
         self,
         ts_code: str = None,
@@ -3127,18 +2838,6 @@ class TushareProvider(BaseStockDataProvider):
             return None
 
 
-    @register_capability(
-        "audit_opinion", "tushare",
-        field_mapping={
-            "ts_code": "ts_code",
-            "ann_date": "ann_date",
-            "end_date": "report_period_end",
-            "audit_result": "audit_result",
-            "audit_fees": "audit_fees",
-            "audit_sign": "audit_signer",
-            "audit_company": "audit_firm",
-        },
-    )
     async def get_audit_opinion(
         self,
         ts_code: str = None,
@@ -3197,14 +2896,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取审计意见失败: {e}")
             return None
 
-    @register_capability(
-        "disclosure_rating", "tushare",
-        field_mapping={
-            "ts_code": "ts_code",
-            "end_date": "report_period_end",
-            "disclosure_result": "disclosure_result",
-        },
-    )
     async def get_disclosure_rating(
         self,
         ts_code: str = None,
@@ -3247,19 +2938,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取信息披露评级失败: {e}")
             return None
 
-    @register_capability(
-        "equity_incentive", "tushare",
-        field_mapping={
-            "ts_code": "ts_code",
-            "ann_date": "ann_date",
-            "inc_plan": "incentive_plan",
-            "grant_num": "grant_volume",          # 万股
-            "grant_price": "grant_price",
-            "inc_duration": "incentive_years",
-            "inc_perf": "performance_condition",
-            "stockholder_rt": "total_share_ratio",  # %
-        },
-    )
     async def get_equity_incentive(
         self,
         ts_code: str = None,
@@ -3315,18 +2993,6 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取股权激励失败: {e}")
             return None
 
-    @register_capability(
-        "management_penalties", "tushare",
-        field_mapping={
-            "ts_code": "ts_code",
-            "ann_date": "ann_date",
-            "punish_type": "penalty_type",
-            "punish_object": "penalty_target",
-            "punish_amount": "penalty_amount",   # 万元
-            "violat_type": "violation_type",
-            "violate_content": "violation_content",
-        },
-    )
     async def get_management_penalties(
         self,
         ts_code: str = None,

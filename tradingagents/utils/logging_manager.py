@@ -1,38 +1,97 @@
 #!/usr/bin/env python3
 """
-统一日志管理器（已降级为无副作用便捷封装，见 docs/05-design/v4.0/logging-governance.md §5.3）
-
-权威日志配置：
-- app 进程：app/core/logging_config.py 的 dictConfig
-- CLI / 独立进程入口：core/utils/logging_setup.py 的共享初始化函数
-
-历史问题：本模块曾自配 handler 并 clear root logger 全部 handler，与 app 侧 dictConfig
-互相覆盖、最终形态取决于 import 顺序。治理后本模块**不再自配任何 handler、不再触碰
-root handlers**，仅保留 get_logger() 便捷函数、配置读取（供诊断展示）与 log_* 事件方法。
-存量 import 不动，行为收敛到权威配置。
+统一日志管理器
+提供项目级别的日志配置和管理功能
 """
 
 import logging
+import logging.handlers
 import os
+import sys
+import platform
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
-
+from typing import Dict, Any, Optional, Union
+import json
 import toml
+
+# 🔥 在所有平台上使用 concurrent-log-handler 支持多进程安全写入
+# Windows: 解决文件锁定问题
+# Linux/Mac: 支持多进程（后端 + Worker）同时写入同一日志文件
+try:
+    from concurrent_log_handler import ConcurrentRotatingFileHandler
+    _USE_CONCURRENT_HANDLER = True
+except ImportError:
+    _USE_CONCURRENT_HANDLER = False
+    _IS_WINDOWS = platform.system() == "Windows"
+    if _IS_WINDOWS:
+        logging.warning("concurrent-log-handler 未安装，在 Windows 上可能遇到日志轮转问题")
+    else:
+        logging.warning("concurrent-log-handler 未安装，多进程写入日志文件可能不安全（后端和 Worker 同时写入）")
 
 # 注意：这里不能导入自己，会造成循环导入
 # 在日志系统初始化前，使用标准库自举日志器，避免未定义引用
 _bootstrap_logger = logging.getLogger("tradingagents.logging_manager")
 
 
-class TradingAgentsLogger:
-    """TradingAgents 日志管理器（无副作用：不配置 handler）"""
+class ColoredFormatter(logging.Formatter):
+    """彩色日志格式化器"""
+    
+    # ANSI颜色代码
+    COLORS = {
+        'DEBUG': '\033[36m',    # 青色
+        'INFO': '\033[32m',     # 绿色
+        'WARNING': '\033[33m',  # 黄色
+        'ERROR': '\033[31m',    # 红色
+        'CRITICAL': '\033[35m', # 紫色
+        'RESET': '\033[0m'      # 重置
+    }
+    
+    def format(self, record):
+        # 添加颜色
+        if hasattr(record, 'levelname') and record.levelname in self.COLORS:
+            record.levelname = f"{self.COLORS[record.levelname]}{record.levelname}{self.COLORS['RESET']}"
+        
+        return super().format(record)
 
+
+class StructuredFormatter(logging.Formatter):
+    """结构化日志格式化器（JSON格式）"""
+    
+    def format(self, record):
+        log_entry = {
+            'timestamp': datetime.fromtimestamp(record.created).isoformat(),
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+            'module': record.module,
+            'function': record.funcName,
+            'line': record.lineno
+        }
+        
+        # 添加额外字段
+        if hasattr(record, 'session_id'):
+            log_entry['session_id'] = record.session_id
+        if hasattr(record, 'analysis_type'):
+            log_entry['analysis_type'] = record.analysis_type
+        if hasattr(record, 'stock_symbol'):
+            log_entry['stock_symbol'] = record.stock_symbol
+        if hasattr(record, 'cost'):
+            log_entry['cost'] = record.cost
+        if hasattr(record, 'tokens'):
+            log_entry['tokens'] = record.tokens
+            
+        return json.dumps(log_entry, ensure_ascii=False)
+
+
+class TradingAgentsLogger:
+    """TradingAgents统一日志管理器"""
+    
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or self._load_default_config()
         self.loggers: Dict[str, logging.Logger] = {}
         self._setup_logging()
-
+    
     def _load_default_config(self) -> Dict[str, Any]:
         """加载默认日志配置"""
         # 尝试从配置文件加载
@@ -138,36 +197,168 @@ class TradingAgentsLogger:
             'security': logging_config.get('security', {}),
             'business': logging_config.get('business', {})
         }
-
+    
     def _setup_logging(self):
-        """降级为无副作用初始化（日志治理 §5.3）
-
-        只确保日志目录存在、按配置设置第三方 logger 级别；
-        ❌ 不再自配 handler、❌ 不再 clear root handlers（那是权威配置的职责）。
-        """
-        handlers_cfg = self.config.get('handlers', {})
-        file_cfg = handlers_cfg.get('file', {})
-        if file_cfg.get('enabled', False):
-            log_dir = Path(file_cfg.get('directory', './logs'))
+        """设置日志系统"""
+        # 创建日志目录
+        if self.config['handlers']['file']['enabled']:
+            log_dir = Path(self.config['handlers']['file']['directory'])
             log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 设置根日志级别
+        root_logger = logging.getLogger()
+        root_logger.setLevel(getattr(logging, self.config['level']))
+        
+        # 清除现有处理器
+        root_logger.handlers.clear()
+        
+        # 添加处理器
+        self._add_console_handler(root_logger)
 
-        # 配置特定日志器（仅级别，不涉及 handler）
+        if not self.config['docker']['enabled'] or not self.config['docker']['stdout_only']:
+            self._add_file_handler(root_logger)
+            self._add_error_handler(root_logger)  # 🔧 添加错误日志处理器
+            if self.config['handlers']['structured']['enabled']:
+                self._add_structured_handler(root_logger)
+        
+        # 配置特定日志器
         self._configure_specific_loggers()
+    
+    def _add_console_handler(self, logger: logging.Logger):
+        """添加控制台处理器"""
+        if not self.config['handlers']['console']['enabled']:
+            return
+            
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_level = getattr(logging, self.config['handlers']['console']['level'])
+        console_handler.setLevel(console_level)
+        
+        # 选择格式化器
+        if self.config['handlers']['console']['colored'] and sys.stdout.isatty():
+            formatter = ColoredFormatter(self.config['format']['console'])
+        else:
+            formatter = logging.Formatter(self.config['format']['console'])
+        
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    
+    def _add_file_handler(self, logger: logging.Logger):
+        """添加文件处理器"""
+        if not self.config['handlers']['file']['enabled']:
+            return
 
+        log_dir = Path(self.config['handlers']['file']['directory'])
+        log_file = log_dir / 'tradingagents.log'
+
+        # 使用RotatingFileHandler进行日志轮转
+        max_size = self._parse_size(self.config['handlers']['file']['max_size'])
+        backup_count = self.config['handlers']['file']['backup_count']
+
+        # 🔥 在 Windows 上使用 ConcurrentRotatingFileHandler 避免文件占用问题
+        if _USE_CONCURRENT_HANDLER:
+            file_handler = ConcurrentRotatingFileHandler(
+                log_file,
+                maxBytes=max_size,
+                backupCount=backup_count,
+                encoding='utf-8'
+            )
+        else:
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_file,
+                maxBytes=max_size,
+                backupCount=backup_count,
+                encoding='utf-8'
+            )
+
+        file_level = getattr(logging, self.config['handlers']['file']['level'])
+        file_handler.setLevel(file_level)
+
+        formatter = logging.Formatter(self.config['format']['file'])
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+    def _add_error_handler(self, logger: logging.Logger):
+        """添加错误日志处理器（只记录WARNING及以上级别）"""
+        # 检查错误处理器是否启用
+        error_config = self.config['handlers'].get('error', {})
+        if not error_config.get('enabled', True):
+            return
+
+        log_dir = Path(error_config.get('directory', self.config['handlers']['file']['directory']))
+        error_log_file = log_dir / error_config.get('filename', 'error.log')
+
+        # 使用RotatingFileHandler进行日志轮转
+        max_size = self._parse_size(error_config.get('max_size', '10MB'))
+        backup_count = error_config.get('backup_count', 5)
+
+        # 🔥 在 Windows 上使用 ConcurrentRotatingFileHandler 避免文件占用问题
+        if _USE_CONCURRENT_HANDLER:
+            error_handler = ConcurrentRotatingFileHandler(
+                error_log_file,
+                maxBytes=max_size,
+                backupCount=backup_count,
+                encoding='utf-8'
+            )
+        else:
+            error_handler = logging.handlers.RotatingFileHandler(
+                error_log_file,
+                maxBytes=max_size,
+                backupCount=backup_count,
+                encoding='utf-8'
+            )
+
+        # 🔧 只记录WARNING及以上级别（WARNING, ERROR, CRITICAL）
+        error_level = getattr(logging, error_config.get('level', 'WARNING'))
+        error_handler.setLevel(error_level)
+
+        formatter = logging.Formatter(self.config['format']['file'])
+        error_handler.setFormatter(formatter)
+        logger.addHandler(error_handler)
+    
+    def _add_structured_handler(self, logger: logging.Logger):
+        """添加结构化日志处理器"""
+        log_dir = Path(self.config['handlers']['structured']['directory'])
+        log_file = log_dir / 'tradingagents_structured.log'
+        
+        structured_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=self._parse_size('10MB'),
+            backupCount=3,
+            encoding='utf-8'
+        )
+        
+        structured_level = getattr(logging, self.config['handlers']['structured']['level'])
+        structured_handler.setLevel(structured_level)
+        
+        formatter = StructuredFormatter()
+        structured_handler.setFormatter(formatter)
+        logger.addHandler(structured_handler)
+    
     def _configure_specific_loggers(self):
-        """配置特定的日志器（仅 setLevel）"""
-        for logger_name, logger_config in self.config.get('loggers', {}).items():
-            level_name = logger_config.get('level') if isinstance(logger_config, dict) else None
-            if not level_name:
-                continue
-            logging.getLogger(logger_name).setLevel(getattr(logging, level_name, logging.INFO))
-
+        """配置特定的日志器"""
+        for logger_name, logger_config in self.config['loggers'].items():
+            logger = logging.getLogger(logger_name)
+            level = getattr(logging, logger_config['level'])
+            logger.setLevel(level)
+    
+    def _parse_size(self, size_str: str) -> int:
+        """解析大小字符串（如'10MB'）为字节数"""
+        size_str = size_str.upper()
+        if size_str.endswith('KB'):
+            return int(size_str[:-2]) * 1024
+        elif size_str.endswith('MB'):
+            return int(size_str[:-2]) * 1024 * 1024
+        elif size_str.endswith('GB'):
+            return int(size_str[:-2]) * 1024 * 1024 * 1024
+        else:
+            return int(size_str)
+    
     def get_logger(self, name: str) -> logging.Logger:
         """获取指定名称的日志器"""
         if name not in self.loggers:
             self.loggers[name] = logging.getLogger(name)
         return self.loggers[name]
-
+    
     def log_analysis_start(self, logger: logging.Logger, stock_symbol: str, analysis_type: str, session_id: str):
         """记录分析开始"""
         logger.info(
@@ -249,8 +440,8 @@ class TradingAgentsLogger:
             },
             exc_info=True
         )
-
-    def log_token_usage(self, logger: logging.Logger, provider: str, model: str,
+    
+    def log_token_usage(self, logger: logging.Logger, provider: str, model: str, 
                        input_tokens: int, output_tokens: int, cost: float, session_id: str):
         """记录Token使用"""
         logger.info(
@@ -284,7 +475,7 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def setup_logging(config: Optional[Dict[str, Any]] = None):
-    """设置项目日志系统（便捷函数，降级后不配置 handler，见类文档）"""
+    """设置项目日志系统（便捷函数）"""
     global _logger_manager
     _logger_manager = TradingAgentsLogger(config)
     return _logger_manager

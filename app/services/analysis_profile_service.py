@@ -554,39 +554,18 @@ class AnalysisProfileService:
         return result
 
     @staticmethod
-    def build_industry_prompt_block(industry: str, ticker: str = "") -> str:
+    def build_industry_prompt_block(industry: str) -> str:
         """
         同步获取行业分析配置，格式化为可直接追加到 Prompt 的文本块。
 
-        ticker 传入时优先按权威细分标签（股票池派生，如 生猪养殖/动力电池）
-        精准 1:1 匹配画像，未命中再回退 industry 精确匹配。
-
         返回空字符串表示该行业无配置或查询失败。
         """
-        lookup_keys: list = []
-        if ticker:
-            try:
-                from app.pro.services.portfolio_industry_service import resolve_subindustry_tag
-                tag = resolve_subindustry_tag(ticker, fallback="")
-                if tag and tag != industry:
-                    lookup_keys.append(tag)
-            except Exception as e:
-                logger.warning(f"⚠️ 细分行业标签解析失败，回退行业标签: {e}")
-        if industry:
-            lookup_keys.append(industry)
-
         try:
             from app.core.database import get_mongo_db_sync
             db = get_mongo_db_sync()
-            profile = None
-            matched = ""
-            for key in lookup_keys:
-                profile = db[INDUSTRY_COLLECTION].find_one(
-                    {"industry": key, "is_active": True}
-                )
-                if profile:
-                    matched = key
-                    break
+            profile = db[INDUSTRY_COLLECTION].find_one(
+                {"industry": industry, "is_active": True}
+            )
             if not profile:
                 return ""
 
@@ -614,7 +593,7 @@ class AnalysisProfileService:
                 blocks.append(f"\n### 关键跟踪指标\n{', '.join(key_metrics)}")
 
             result = "\n".join(blocks)
-            logger.info(f"🏭 [行业Prompt注入] {matched}: {len(dimensions)} 维度, 长度={len(result)}")
+            logger.info(f"🏭 [行业Prompt注入] {industry}: {len(dimensions)} 维度, 长度={len(result)}")
             return result
         except Exception as e:
             logger.warning(f"⚠️ 构建行业Prompt块失败: {e}")

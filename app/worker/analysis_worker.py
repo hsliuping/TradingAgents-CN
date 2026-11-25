@@ -1169,9 +1169,11 @@ class AnalysisWorker:
 
 async def main():
     """主函数"""
-    # 设置日志（走权威配置 app/core/logging_config.py，日志治理 §5.3）
-    from app.core.logging_config import setup_logging
-    setup_logging("INFO")
+    # 设置日志
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 
     # 创建并启动Worker
     worker = AnalysisWorker()

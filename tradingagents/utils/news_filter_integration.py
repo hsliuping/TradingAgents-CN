@@ -201,7 +201,7 @@ def apply_news_filtering_patches():
 
 if __name__ == "__main__":
     # 测试集成功能
-    logger.info("=== 测试新闻过滤集成 ===")
+    print("=== 测试新闻过滤集成 ===")
     
     # 应用补丁
     enhanced_news_function = apply_news_filtering_patches()
@@ -214,5 +214,5 @@ if __name__ == "__main__":
         min_score=30
     )
     
-    logger.info(f"测试结果长度: {len(test_result)} 字符")
-    logger.info(f"测试结果预览: {test_result[:200]}...")
+    print(f"测试结果长度: {len(test_result)} 字符")
+    print(f"测试结果预览: {test_result[:200]}...")

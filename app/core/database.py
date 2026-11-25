@@ -6,7 +6,7 @@
 import logging
 import asyncio
 from typing import Callable, Optional, Tuple, Dict
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase, AsyncIOMotorGridFSBucket
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase
 from pymongo import MongoClient
 from pymongo.database import Database
 from redis.asyncio import Redis, ConnectionPool
@@ -755,15 +755,6 @@ def get_mongo_db() -> AsyncIOMotorDatabase:
     if _mongo_db_proxy is None:
         _mongo_db_proxy = _LoopSafeMongoDatabaseProxy()
     return _mongo_db_proxy
-
-
-def get_gridfs_bucket() -> AsyncIOMotorGridFSBucket:
-    """获取 GridFS 存储桶。
-
-    GridFSBucket 构造函数要求真实 MotorDatabase（不接受 loop-safe 代理），
-    此处统一解包当前 loop 绑定的真实库，保持与其他入口一致的 loop-safe 语义。
-    """
-    return AsyncIOMotorGridFSBucket(_get_bound_mongo_db())
 
 
 def bind_loop_safe_mongo_db(target: object, attr_name: str = "db") -> AsyncIOMotorDatabase:

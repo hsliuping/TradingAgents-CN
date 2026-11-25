@@ -12,7 +12,6 @@ from ...manager import ManagerAgent
 from ...config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ...registry import register_agent
 from app.utils.compliance import sanitize_position_text_block, sanitize_text_block
-from ..flow_context import safe_extract
 
 logger = logging.getLogger(__name__)
 
@@ -168,18 +167,12 @@ class ActionAdvisorV2(ManagerAgent):
         )
         if prompt:
             logger.info(f"✅ 从模板系统获取持仓分析观点师提示词 (长度: {len(prompt)})")
-            # 🆕 执行模式（设计文档 §5.2 A5）：本地执行模板存在时跳过 legacy 术语检测
-            # （止损/目标价等在执行模板中为合法内容）
-            from core.agents.advice_mode import use_execution_output
-            _use_execution = use_execution_output("position_analysis_v2", "pa_advisor_v2")
-            if _use_execution:
-                logger.info("🟢 [advice_mode] 执行模式：持仓处置输出走执行口径")
             # 检查模板是否仍残留执行性语义
             if "confidence" in prompt.lower():
                 logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含confidence字段要求")
             else:
                 logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含confidence字段要求！")
-            if not _use_execution and _contains_legacy_execution_prompt_terms(prompt):
+            if _contains_legacy_execution_prompt_terms(prompt):
                 logger.warning("⚠️ [ActionAdvisorV2] 提示词中仍包含执行性术语，请检查模板内容")
             if "observation_factors" in prompt.lower() or "观察事项" in prompt:
                 logger.info("📊 [ActionAdvisorV2] ✅ 提示词中包含观察事项字段要求")
@@ -452,10 +445,16 @@ class ActionAdvisorV2(ManagerAgent):
         
         logger.info(f"🔧 [持仓研究观察员] 从 context 获取 preference_id: {preference_id}")
         
-        # 提取各维度分析（降级占位返回默认值，不混入推理）
+        # 提取各维度分析（处理可能是字典的情况）
         def extract_content(value, default: str = "无分析"):
-            """提取分析内容，降级占位返回 default"""
-            return safe_extract(value, default=default)
+            """提取分析内容，支持字典和字符串格式"""
+            if isinstance(value, dict):
+                # 如果是字典，优先提取content字段，否则提取error字段，最后转为字符串
+                return value.get("content", value.get("error", str(value)))
+            elif isinstance(value, str):
+                return value
+            else:
+                return str(value) if value else default
         
         technical_raw = state.get("technical_analysis", "无技术面分析")
         fundamental_raw = state.get("fundamental_analysis", "无基本面分析")

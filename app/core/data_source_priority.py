@@ -169,9 +169,9 @@ async def get_available_data_sources_async(market_category: str = "a_shares") ->
     enabled_sources = await get_enabled_data_sources_async(market_category)
 
     try:
-        from app.services.data_sources.manager import DataAdapterOrchestrator
+        from app.services.data_sources.manager import DataSourceManager
 
-        manager = DataAdapterOrchestrator()
+        manager = DataSourceManager()
         available_adapters = manager.get_available_adapters()
         available_names = {_normalize_source_name(adapter.name) for adapter in available_adapters}
         available_sources = [source for source in enabled_sources if source in available_names]
@@ -195,9 +195,9 @@ def get_available_data_sources_sync(market_category: str = "a_shares") -> List[s
     enabled_sources = get_enabled_data_sources_sync(market_category)
 
     try:
-        from app.services.data_sources.manager import DataAdapterOrchestrator
+        from app.services.data_sources.manager import DataSourceManager
 
-        manager = DataAdapterOrchestrator()
+        manager = DataSourceManager()
         available_adapters = manager.get_available_adapters()
         available_names = {_normalize_source_name(adapter.name) for adapter in available_adapters}
         available_sources = [source for source in enabled_sources if source in available_names]

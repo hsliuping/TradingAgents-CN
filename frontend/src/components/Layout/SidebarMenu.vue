@@ -21,22 +21,6 @@
       <template #title>学习中心</template>
     </el-menu-item>
 
-    <!-- ===== P2 侧边栏研究分组：我的股票（自选/持仓） ===== -->
-    <div v-show="!appStore.sidebarCollapsed" class="menu-group-title">我的股票</div>
-
-    <el-menu-item index="/favorites">
-      <el-icon><Star /></el-icon>
-      <template #title>股票关注列表</template>
-    </el-menu-item>
-
-    <el-menu-item index="/portfolio">
-      <el-icon><PieChart /></el-icon>
-      <template #title>持仓研究</template>
-    </el-menu-item>
-
-    <!-- ===== P2 侧边栏研究分组：深度研究（个股/批量/通用/助手/报告） ===== -->
-    <div v-show="!appStore.sidebarCollapsed" class="menu-group-title">深度研究</div>
-
     <el-menu-item index="/analysis/single">
       <el-icon><TrendCharts /></el-icon>
       <template #title>单股研究</template>
@@ -66,46 +50,30 @@
       <template #title>AI 记忆</template>
     </el-menu-item>
 
+    <!-- Skill 中心（v3.6.0 起免费开放） -->
+    <el-menu-item index="/skills">
+      <el-icon><MagicStick /></el-icon>
+      <template #title>Skill 中心</template>
+    </el-menu-item>
+
     <el-menu-item index="/reports">
       <el-icon><Document /></el-icon>
       <template #title>研究报告</template>
     </el-menu-item>
 
-    <!-- ===== P2 侧边栏研究分组：周期与复盘（猪周期/交易计划/模拟交易/复盘） ===== -->
-    <div v-show="!appStore.sidebarCollapsed" class="menu-group-title">周期与复盘</div>
-
-    <!-- Pro 通用菜单分组（社区版发布时 navigation.pro.ts 整文件替换为空配置，自动隐藏） -->
-    <el-sub-menu v-for="group in proMenuGroups" :key="group.path" :index="group.path">
+    <!-- Pro：分析流子菜单（社区版发布时自动隐藏，见 navigation.pro.ts） -->
+    <el-sub-menu :index="proWorkflowMenu.path">
       <template #title>
-        <el-icon v-if="group.icon"><component :is="group.icon" /></el-icon>
-        <span>{{ group.label }}</span>
-        <el-tag v-if="group.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        <el-icon><SetUp /></el-icon>
+        <span>{{ proWorkflowMenu.label }}</span>
+        <el-tag v-if="proWorkflowMenu.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </template>
-      <el-menu-item v-for="child in group.children" :key="child.path" :index="child.path">
+      <el-menu-item v-for="child in proWorkflowMenu.children" :key="child.path" :index="child.path">
         {{ child.label }}
         <el-tag v-if="child.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         <el-tag v-else-if="child.badge" :type="child.badge.type" size="small" style="margin-left: 4px; transform: scale(0.85);">{{ child.badge.text }}</el-tag>
       </el-menu-item>
     </el-sub-menu>
-
-    <!-- Pro：交易计划（社区版发布时自动隐藏，见 navigation.pro.ts） -->
-    <el-menu-item v-for="item in proTradingSystemMenuItems" :key="item.path" :index="item.path">
-      <el-icon><Tickets /></el-icon>
-      <template #title>
-        {{ item.label }}
-        <el-tag v-if="item.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-      </template>
-    </el-menu-item>
-
-    <el-menu-item index="/paper">
-      <el-icon><CreditCard /></el-icon>
-      <template #title>模拟交易</template>
-    </el-menu-item>
-
-    <el-menu-item index="/review">
-      <el-icon><DocumentChecked /></el-icon>
-      <template #title>操作复盘</template>
-    </el-menu-item>
 
     <el-menu-item index="/tasks/unified">
       <el-icon><List /></el-icon>
@@ -115,6 +83,35 @@
     <el-menu-item index="/screening">
       <el-icon><Search /></el-icon>
       <template #title>股票筛选</template>
+    </el-menu-item>
+
+    <el-menu-item index="/favorites">
+      <el-icon><Star /></el-icon>
+      <template #title>股票关注列表</template>
+    </el-menu-item>
+
+    <el-menu-item index="/paper">
+      <el-icon><CreditCard /></el-icon>
+      <template #title>模拟交易</template>
+    </el-menu-item>
+
+    <el-menu-item index="/portfolio">
+      <el-icon><PieChart /></el-icon>
+      <template #title>持仓研究</template>
+    </el-menu-item>
+
+    <el-menu-item index="/review">
+      <el-icon><DocumentChecked /></el-icon>
+      <template #title>操作复盘</template>
+    </el-menu-item>
+
+    <!-- Pro：交易计划（社区版发布时自动隐藏，见 navigation.pro.ts） -->
+    <el-menu-item v-for="item in proTradingSystemMenuItems" :key="item.path" :index="item.path">
+      <el-icon><Tickets /></el-icon>
+      <template #title>
+        {{ item.label }}
+        <el-tag v-if="item.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </template>
     </el-menu-item>
 
     <el-sub-menu index="/settings">
@@ -189,19 +186,6 @@
         <el-menu-item index="/settings/usage">使用统计</el-menu-item>
         <el-menu-item index="/settings/update">系统更新</el-menu-item>
       </el-sub-menu>
-
-      <!-- 开发工具（工程入口归拢：Skill 中心免费；分析流为 Pro，社区版自动隐藏） -->
-      <el-sub-menu index="/settings-devtools">
-        <template #title>开发工具</template>
-        <el-menu-item index="/skills">
-          Skill 中心
-        </el-menu-item>
-        <el-menu-item v-for="child in proWorkflowMenu.children" :key="child.path" :index="child.path">
-          {{ child.label }}
-          <el-tag v-if="child.advanced" type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
-          <el-tag v-else-if="child.badge" :type="child.badge.type" size="small" style="margin-left: 4px; transform: scale(0.85);">{{ child.badge.text }}</el-tag>
-        </el-menu-item>
-      </el-sub-menu>
     </el-sub-menu>
 
     <el-menu-item index="/about">
@@ -222,7 +206,6 @@ import {
   proTopLevelItems,
   proTradingSystemMenuItems,
   proWorkflowMenu,
-  proMenuGroups,
   proPersonalSettingsItems,
   proLicenseMenuItem,
   proAnalysisSettingsItems,
@@ -237,6 +220,7 @@ import {
   Search,
   Star,
   List,
+  SetUp,
   Setting,
   InfoFilled,
   CreditCard,
@@ -246,6 +230,7 @@ import {
   Tickets,
   ChatDotRound,
   Coin,
+  MagicStick,
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -282,16 +267,5 @@ const activeMenu = computed(() => {
     background-color: var(--el-color-primary-light-9);
     color: var(--el-color-primary);
   }
-}
-
-// P2 研究分组标题：小号灰字分隔（折叠模式由 v-show 隐藏）
-.menu-group-title {
-  padding: 14px 20px 4px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  color: var(--el-text-color-secondary, #909399);
-  white-space: nowrap;
-  user-select: none;
 }
 </style>

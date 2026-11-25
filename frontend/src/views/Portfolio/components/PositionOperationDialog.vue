@@ -24,19 +24,6 @@
         <el-form-item label="日期">
           <el-date-picker v-model="form.date" type="date" />
         </el-form-item>
-        <el-form-item v-if="form.operation_type === 'reduce'" label="卖出归因">
-          <el-select v-model="form.exit_tag" clearable placeholder="可选：现在花 5 秒，省复盘时半天" style="width: 100%">
-            <el-option label="波动高抛（等回接）" value="波动高抛" />
-            <el-option label="逻辑变化（清仓不回）" value="逻辑变化" />
-            <el-option label="止损纪律" value="止损纪律" />
-            <el-option label="止盈达标" value="止盈达标" />
-            <el-option label="资金需求" value="资金需求" />
-            <el-option label="调仓换股" value="调仓换股" />
-          </el-select>
-          <div style="font-size: 12px; color: #909399; margin-top: 4px;">
-            「波动到高抛区」等回接，「逻辑变了」清仓不回——不写标签，数周后复盘归因必错
-          </div>
-        </el-form-item>
       </template>
 
       <!-- 分红 -->
@@ -119,8 +106,7 @@ const form = ref({
   ratio: '',
   new_cost_price: 0,
   date: new Date(),
-  notes: '',
-  exit_tag: '' as string
+  notes: ''
 })
 
 // 重置表单
@@ -146,8 +132,7 @@ watch(() => visible.value, (val) => {
       ratio: '',
       new_cost_price: props.position?.cost_price || 0,
       date: new Date(),
-      notes: '',
-      exit_tag: ''
+      notes: ''
     }
   }
 })
@@ -171,8 +156,7 @@ const handleSubmit = async () => {
       code,
       market,
       notes: form.value.notes || undefined,
-      operation_date: form.value.date ? new Date(form.value.date).toISOString() : undefined,
-      exit_tag: form.value.exit_tag || undefined
+      operation_date: form.value.date ? new Date(form.value.date).toISOString() : undefined
     }
 
     // 根据操作类型添加不同的参数

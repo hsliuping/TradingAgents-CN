@@ -126,7 +126,7 @@ def create_market_analyst(llm, toolkit):
 
         # 统一使用 get_stock_market_data_unified 工具
         # 该工具内部会自动识别股票类型（A股/港股/美股）并调用相应的数据源
-        logger.debug(f"📊 [市场分析师] 使用统一市场数据工具，自动识别股票类型")
+        logger.info(f"📊 [市场分析师] 使用统一市场数据工具，自动识别股票类型")
         tools = [toolkit.get_stock_market_data_unified]
 
         # 安全地获取工具名称用于调试
@@ -138,8 +138,8 @@ def create_market_analyst(llm, toolkit):
                 tool_names_debug.append(tool.__name__)
             else:
                 tool_names_debug.append(str(tool))
-        logger.debug(f"📊 [市场分析师] 绑定的工具: {tool_names_debug}")
-        logger.debug(f"📊 [市场分析师] 目标市场: {market_info['market_name']}")
+        logger.info(f"📊 [市场分析师] 绑定的工具: {tool_names_debug}")
+        logger.info(f"📊 [市场分析师] 目标市场: {market_info['market_name']}")
 
         # 🆕 使用模板系统获取提示词
         try:
@@ -212,19 +212,19 @@ def create_market_analyst(llm, toolkit):
         )
 
         # 添加详细日志
-        logger.debug(f"📊 [市场分析师] LLM类型: {llm.__class__.__name__}")
-        logger.debug(f"📊 [市场分析师] LLM模型: {getattr(llm, 'model_name', 'unknown')}")
-        logger.debug(f"📊 [市场分析师] 消息历史数量: {len(state['messages'])}")
-        logger.debug(f"📊 [市场分析师] 公司名称: {company_name}")
-        logger.debug(f"📊 [市场分析师] 股票代码: {ticker}")
+        logger.info(f"📊 [市场分析师] LLM类型: {llm.__class__.__name__}")
+        logger.info(f"📊 [市场分析师] LLM模型: {getattr(llm, 'model_name', 'unknown')}")
+        logger.info(f"📊 [市场分析师] 消息历史数量: {len(state['messages'])}")
+        logger.info(f"📊 [市场分析师] 公司名称: {company_name}")
+        logger.info(f"📊 [市场分析师] 股票代码: {ticker}")
 
         # 打印提示词模板信息
-        logger.debug("📊 [市场分析师] ========== 提示词模板信息 ==========")
-        logger.debug(f"📊 [市场分析师] 模板变量已设置: company_name={company_name}, ticker={ticker}, market={market_info['market_name']}")
-        logger.debug("📊 [市场分析师] ==========================================")
+        logger.info("📊 [市场分析师] ========== 提示词模板信息 ==========")
+        logger.info(f"📊 [市场分析师] 模板变量已设置: company_name={company_name}, ticker={ticker}, market={market_info['market_name']}")
+        logger.info("📊 [市场分析师] ==========================================")
 
         # 打印实际传递给LLM的消息
-        logger.debug(f"📊 [市场分析师] ========== 传递给LLM的消息 ==========")
+        logger.info(f"📊 [市场分析师] ========== 传递给LLM的消息 ==========")
         for i, msg in enumerate(state["messages"]):
             msg_type = type(msg).__name__
             # 🔥 修复：更安全地提取消息内容
@@ -235,8 +235,8 @@ def create_market_analyst(llm, toolkit):
                 msg_content = f"[元组消息] 类型={msg[0]}, 内容={str(msg[1])[:500]}"
             else:
                 msg_content = str(msg)[:500]
-            logger.debug(f"📊 [市场分析师] 消息[{i}] 类型={msg_type}, 内容={msg_content}")
-        logger.debug(f"📊 [市场分析师] ========== 消息列表结束 ==========")
+            logger.info(f"📊 [市场分析师] 消息[{i}] 类型={msg_type}, 内容={msg_content}")
+        logger.info(f"📊 [市场分析师] ========== 消息列表结束 ==========")
 
         chain = prompt | llm.bind_tools(tools)
 
@@ -252,15 +252,15 @@ def create_market_analyst(llm, toolkit):
 
         # 打印LLM响应
         logger.info(f"📊 [市场分析师] ========== LLM响应开始 ==========")
-        logger.debug(f"📊 [市场分析师] 响应类型: {type(result).__name__}")
-        logger.debug(f"📊 [市场分析师] 响应内容: {str(result.content)[:1000]}...")
+        logger.info(f"📊 [市场分析师] 响应类型: {type(result).__name__}")
+        logger.info(f"📊 [市场分析师] 响应内容: {str(result.content)[:1000]}...")
         if hasattr(result, 'tool_calls') and result.tool_calls:
-            logger.debug(f"📊 [市场分析师] 工具调用: {result.tool_calls}")
-        logger.debug(f"📊 [市场分析师] ========== LLM响应结束 ==========")
+            logger.info(f"📊 [市场分析师] 工具调用: {result.tool_calls}")
+        logger.info(f"📊 [市场分析师] ========== LLM响应结束 ==========")
 
         # 使用统一的Google工具调用处理器
         if GoogleToolCallHandler.is_google_model(llm):
-            logger.debug(f"📊 [市场分析师] 检测到Google模型，使用统一工具调用处理器")
+            logger.info(f"📊 [市场分析师] 检测到Google模型，使用统一工具调用处理器")
             
             # 创建分析提示词
             analysis_prompt_template = GoogleToolCallHandler.create_analysis_prompt(
@@ -288,24 +288,24 @@ def create_market_analyst(llm, toolkit):
             }
         else:
             # 非Google模型的处理逻辑
-            logger.debug(f"📊 [市场分析师] 非Google模型 ({llm.__class__.__name__})，使用标准处理逻辑")
-            logger.debug(f"📊 [市场分析师] 检查LLM返回结果...")
-            logger.debug(f"📊 [市场分析师] - 是否有tool_calls: {hasattr(result, 'tool_calls')}")
+            logger.info(f"📊 [市场分析师] 非Google模型 ({llm.__class__.__name__})，使用标准处理逻辑")
+            logger.info(f"📊 [市场分析师] 检查LLM返回结果...")
+            logger.info(f"📊 [市场分析师] - 是否有tool_calls: {hasattr(result, 'tool_calls')}")
             if hasattr(result, 'tool_calls'):
-                logger.debug(f"📊 [市场分析师] - tool_calls数量: {len(result.tool_calls)}")
+                logger.info(f"📊 [市场分析师] - tool_calls数量: {len(result.tool_calls)}")
                 if result.tool_calls:
                     for i, tc in enumerate(result.tool_calls):
-                        logger.debug(f"📊 [市场分析师] - tool_call[{i}]: {tc.get('name', 'unknown')}")
+                        logger.info(f"📊 [市场分析师] - tool_call[{i}]: {tc.get('name', 'unknown')}")
 
             # 处理市场分析报告
             if len(result.tool_calls) == 0:
                 # 没有工具调用，直接使用LLM的回复
                 report = result.content
-                logger.debug(f"📊 [市场分析师] ✅ 直接回复（无工具调用），长度: {len(report)}")
+                logger.info(f"📊 [市场分析师] ✅ 直接回复（无工具调用），长度: {len(report)}")
                 logger.debug(f"📊 [DEBUG] 直接回复内容预览: {report[:200]}...")
             else:
                 # 有工具调用，执行工具并生成完整分析报告
-                logger.debug(f"📊 [市场分析师] 🔧 检测到工具调用: {[call.get('name', 'unknown') for call in result.tool_calls]}")
+                logger.info(f"📊 [市场分析师] 🔧 检测到工具调用: {[call.get('name', 'unknown') for call in result.tool_calls]}")
 
                 try:
                     # 执行工具调用

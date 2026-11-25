@@ -4,7 +4,7 @@
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from enum import Enum
 from bson import ObjectId
 from .user import PyObjectId
@@ -52,27 +52,6 @@ class PositionChangeType(str, Enum):
     ADJUST = "adjust"         # 调整（修改成本价等）
 
 
-# 仓位分层合法值（双轨减损侧标注：底仓跟基本面/周期位，波段仓跟信号；两层规则不互救）
-POSITION_LAYERS = ("底仓", "波段仓")
-
-
-# 卖出归因标签（双轨减损侧事中留痕：「波动到高抛区」等回接，「逻辑变了」清仓不回；
-# 不写标签数周后复盘归因必错——为 attribution_analyst 提供结构化原料）
-EXIT_TAGS = ("波动高抛", "逻辑变化", "止损纪律", "止盈达标", "资金需求", "调仓换股")
-
-
-def _normalize_position_layer(v: Optional[str], *, allow_clear: bool = False) -> Optional[str]:
-    """仓位分层归一化：空串视为未分层；allow_clear=True 时空串返回 ""（更新语义=清除标注）。"""
-    if v is None:
-        return None
-    v = str(v).strip()
-    if not v:
-        return "" if allow_clear else None
-    if v not in POSITION_LAYERS:
-        raise ValueError(f"仓位分层只支持 {'/'.join(POSITION_LAYERS)}，或留空表示未分层")
-    return v
-
-
 # ==================== 持仓变动记录模型 ====================
 
 class PositionChange(BaseModel):
@@ -103,7 +82,6 @@ class PositionChange(BaseModel):
     # 如果是卖出/减仓，记录卖出价格和盈亏
     trade_price: Optional[float] = None        # 交易价格
     realized_profit: Optional[float] = None    # 已实现盈亏
-    exit_tag: Optional[str] = None             # 卖出归因标签（见 EXIT_TAGS，仅卖出/减仓时填写）
 
     description: Optional[str] = None          # 说明/备注
     trade_time: Optional[datetime] = None      # 交易时间（实际交易发生的时间，由用户手工录入）
@@ -145,7 +123,6 @@ class PositionChangeResponse(BaseModel):
     cash_change: float
     trade_price: Optional[float] = None
     realized_profit: Optional[float] = None
-    exit_tag: Optional[str] = None
     description: Optional[str] = None
     trade_time: Optional[datetime] = None  # 交易时间（实际交易发生的时间）
     created_at: datetime  # 记录创建时间
@@ -290,7 +267,6 @@ class RealPosition(BaseModel):
     original_avg_cost: Optional[float] = None  # 原始买入均价（减仓不变，用于投资评估）
     original_cost_price: Optional[float] = None  # 原始成本价（不复权的实际成交价）
     price_adjust_type: Optional[str] = None     # 价格复权标注：None=前复权（默认），"none"=原始未复权
-    position_layer: Optional[str] = None        # 仓位分层：底仓/波段仓（None=未分层，见 POSITION_LAYERS）
     buy_date: Optional[datetime] = None    # 买入日期
     industry: Optional[str] = None         # 所属行业
     notes: Optional[str] = None            # 备注
@@ -314,7 +290,6 @@ class PositionSnapshot(BaseModel):
     original_avg_cost: Optional[float] = None  # 原始买入均价（可选）
     original_cost_price: Optional[float] = None  # 原始成本价（不复权的实际成交价）
     price_adjust_type: Optional[str] = None     # 价格复权标注
-    position_layer: Optional[str] = None        # 仓位分层：底仓/波段仓（None=未分层）
     current_price: Optional[float] = None
     market_value: Optional[float] = None
     unrealized_pnl: Optional[float] = None
@@ -445,12 +420,6 @@ class PositionCreate(BaseModel):
     cost_price: float = Field(..., gt=0, description="成本价")
     buy_date: Optional[datetime] = Field(None, description="买入日期")
     notes: Optional[str] = Field(None, description="备注")
-    position_layer: Optional[str] = Field(None, description="仓位分层：底仓/波段仓，留空为未分层")
-
-    @field_validator("position_layer")
-    @classmethod
-    def _check_layer(cls, v):
-        return _normalize_position_layer(v)
 
 
 class PositionUpdate(BaseModel):
@@ -460,12 +429,6 @@ class PositionUpdate(BaseModel):
     cost_price: Optional[float] = Field(None, gt=0)
     buy_date: Optional[datetime] = None
     notes: Optional[str] = None
-    position_layer: Optional[str] = None  # 传 "" 清除分层标注
-
-    @field_validator("position_layer")
-    @classmethod
-    def _check_layer(cls, v):
-        return _normalize_position_layer(v, allow_clear=True)
 
 
 class PositionOperationType(str, Enum):
@@ -492,23 +455,9 @@ class PositionOperationRequest(BaseModel):
     ratio: Optional[str] = Field(None, description="比例，如 2:1")
     # 调整成本价参数
     new_cost_price: Optional[float] = Field(None, gt=0, description="新成本价")
-    # 卖出/减仓参数：卖出归因标签（事中留痕，「波动高抛」等回接，「逻辑变化」清仓不回）
-    exit_tag: Optional[str] = Field(None, description="卖出归因标签（仅卖出/减仓时填写）")
     # 通用参数
     operation_date: Optional[datetime] = Field(None, description="操作日期")
     notes: Optional[str] = Field(None, description="备注")
-
-    @field_validator("exit_tag")
-    @classmethod
-    def _check_exit_tag(cls, v):
-        if v is None:
-            return None
-        v = str(v).strip()
-        if not v:
-            return None
-        if v not in EXIT_TAGS:
-            raise ValueError(f"卖出归因标签只支持 {'/'.join(EXIT_TAGS)}")
-        return v
 
 
 class PositionImport(BaseModel):
@@ -540,7 +489,6 @@ class PositionResponse(BaseModel):
     original_avg_cost: Optional[float] = None  # 原始买入均价（减仓不变，用于投资评估）
     original_cost_price: Optional[float] = None  # 原始成本价（不复权的实际成交价）
     price_adjust_type: Optional[str] = None     # 价格复权标注：None=前复权，"none"=原始未复权
-    position_layer: Optional[str] = None        # 仓位分层：底仓/波段仓（None=未分层）
     current_price: Optional[float] = None
     market_value: Optional[float] = None
     unrealized_pnl: Optional[float] = None

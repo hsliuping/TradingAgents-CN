@@ -22,9 +22,7 @@ class BaoStockAdapter(DataSourceAdapter):
         return "baostock"
 
     def _get_default_priority(self) -> int:
-        # P2 数据源收敛：默认优先级唯一定义在 A（tradingagents/dataflows/data_source_manager.py）
-        from tradingagents.dataflows.data_source_manager import get_default_source_priority
-        return get_default_source_priority("baostock")  # 最低优先级（数字越大优先级越高）
+        return 1  # lowest priority (数字越大优先级越高)
 
     def is_available(self) -> bool:
         try:

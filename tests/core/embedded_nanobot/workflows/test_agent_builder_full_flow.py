@@ -208,14 +208,15 @@ class TestRouteAfterClassify:
     # ── new_agent ──
 
     def test_new_agent_intent(self):
-        """用户想新建 Agent → 留在当前 wait 节点（提示手动创建，不自动结束）。"""
+        """用户想新建 Agent → end + 引导。"""
         state = new_state("我要新建一个舆情分析Agent")
         state["current_node"] = "wait_evaluation"
         state["spec_name"] = "财报风险识别"
         state["user_intent"] = "new_agent"
         state["intent_confidence"] = 0.95
         result = route_after_classify(state)
-        assert result == "wait_evaluation"
+        assert result == "end"
+        assert "新建 Agent" in state.get("final_response", "")
 
     # ── wait_test_request ──
 
@@ -249,13 +250,13 @@ class TestRouteAfterClassify:
         assert route_after_classify(state) == "evaluate_or_publish"
 
     def test_eval_retry_goes_to_test(self):
-        """用户要求重测且已解析出标的 → 直接进 real_data_test。"""
+        """用户要求重测 → wait_test_request。"""
         state = new_state("换宁德时代再测一次")
         state["current_node"] = "wait_evaluation"
         state["user_intent"] = "retry"
         state["intent_confidence"] = 0.9
         state["test_symbol"] = "300750"
-        assert route_after_classify(state) == "real_data_test"
+        assert route_after_classify(state) == "wait_test_request"
 
     def test_eval_revise_goes_to_requirement(self):
         """用户要修改 → requirement_intake。"""
@@ -362,13 +363,10 @@ class TestIntentClassification:
 
     def test_will_stay_on_wait_node(self):
         """预判是否停留。"""
-        # retry 无标的 → 停留（转 wait_test_request 等待用户提供标的）
+        # retry 推动流程
         state = new_state("重测")
         state["current_node"] = "wait_evaluation"
         state["user_intent"] = "retry"
-        assert _will_stay_on_wait_node(state) is True
-        # retry 已解析出标的 → 推进（直接真数据测试）
-        state["test_symbol"] = "300750"
         assert _will_stay_on_wait_node(state) is False
         # explore_more 停留
         state["user_intent"] = "explore_more"
@@ -581,7 +579,7 @@ class TestFullWorkflowSimulation:
     # ── 第 4 轮：评估后重测 ──
 
     def test_round4_retry_different_symbol(self):
-        """第 4 轮：发布后要求换股票重测。已解析出标的 → 直接真数据测试。"""
+        """第 4 轮：发布后要求换股票重测。"""
         state = self._make_agent_builder_state(
             turn=4,
             user_message="换宁德时代再测一次",
@@ -599,7 +597,7 @@ class TestFullWorkflowSimulation:
         state["intent_confidence"] = 0.92
         state["test_symbol"] = "300750"
         result = route_after_classify(state)
-        assert result == "real_data_test"
+        assert result == "wait_test_request"
 
     def test_round4_revise_add_dimension(self):
         """第 4 轮：评估后添加分析维度。"""
@@ -659,8 +657,8 @@ class TestFullWorkflowSimulation:
         state["user_intent"] = "new_agent"
         state["intent_confidence"] = 0.96
         result = route_after_classify(state)
-        # new_agent 不再自动 end：留在当前 wait 节点，提示手动创建
-        assert result == "wait_evaluation"
+        assert result == "end"
+        assert "新建 Agent" in state.get("final_response", "") or "创建" in state.get("final_response", "")
 
     # ── 第 7 轮：异常恢复 ──
 
@@ -740,7 +738,7 @@ class TestCompleteFlowSnapshot:
       4. 用户选方案 → generate_candidate_agent → build_or_ready → wait_test_request
       5. 用户给代码 → real_data_test → wait_evaluation
       6. 用户确认发布 → evaluate_or_publish → wait_evaluation (已发布)
-      7. 用户要求重测（未解析出标的）→ classify_intent (retry) → wait_test_request
+      7. 用户要求重测另一股票 → classify_intent (retry) → wait_test_request
       8. 用户给新代码 → real_data_test → wait_evaluation
     """
 
@@ -847,11 +845,11 @@ class TestCompleteFlowSnapshot:
         # ── 第 7 轮：重测另一股票 ──
         target, state = self._simulate_turn(
             state, "换宁德时代再测一次", "retry", 0.92,
-            test_symbol="",  # 显式清空旧标的：retry 未解析出新标的
+            test_symbol="300750",
         )
         assert target == "wait_test_request"
-        # retry 未解析出标的 → 路由到 wait_test_request 等待用户提供标的；
-        # simulate_turn 不会真的执行节点，手动切 current_node 为 wait_test_request
+        # retry 路由到了 wait_test_request，但 simulate_turn 不会真的执行节点，
+        # 所以需要手动切 current_node 为 wait_test_request
         state["current_node"] = "wait_test_request"
         state["stage"] = "testing"
         state["awaiting_user"] = True

@@ -13,7 +13,6 @@ from datetime import datetime
 from ..analyst import AnalystAgent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
-from ..adapters.flow_context import safe_extract
 
 logger = logging.getLogger(__name__)
 
@@ -281,8 +280,23 @@ class ReportGeneratorV2(AnalystAgent):
         Returns:
             提取的文本内容
         """
-        # 降级占位返回空串，不混入报告
-        return safe_extract(value)
+        if isinstance(value, str):
+            return value
+
+        if isinstance(value, dict):
+            # 尝试从字典中提取文本字段
+            for key in ("content", "markdown", "text", "message", "report", "summary"):
+                text = value.get(key)
+                if isinstance(text, str) and text.strip():
+                    return text
+
+            # 如果是结构化数据，转换为JSON
+            try:
+                return json.dumps(value, ensure_ascii=False, indent=2)
+            except:
+                return str(value)
+
+        return str(value) if value else ""
 
     def _parse_response(self, response: str, state: Dict[str, Any]) -> Dict[str, Any]:
         """

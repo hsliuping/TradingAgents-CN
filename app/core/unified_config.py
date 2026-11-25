@@ -4,7 +4,6 @@
 """
 
 import json
-import logging
 import os
 import time
 from pathlib import Path
@@ -18,14 +17,8 @@ from app.models.config import (
     ModelProvider, DataSourceType, DatabaseType
 )
 
-logger = logging.getLogger(__name__)
-
 
 # 🆕 .env 中数据源开关覆盖映射：env_key -> DataSourceType value
-# .. deprecated:: P2 数据源收敛
-#     实际的 .env 强制禁用判定已收敛到
-#     tradingagents.dataflows.data_source_manager.resolve_env_forced_enabled（唯一事实源），
-#     本映射表仅保留供旧代码参考，不再参与判定。
 _ENV_OVERRIDE_MAP = {
     "ENABLE_BAOSTOCK": "baostock",
     "ENABLE_TUSHARE": "tushare",
@@ -35,34 +28,25 @@ _ENV_OVERRIDE_MAP = {
 def _apply_env_overrides(data_sources: List) -> None:
     """
     将 .env 中的 ENABLE_* 开关应用到数据源配置。
-
-    .. deprecated:: P2 数据源收敛
-        .env 强制禁用判定已收敛到
-        ``tradingagents.dataflows.data_source_manager.resolve_env_forced_enabled``（唯一事实源），
-        本函数保留为兼容壳。语义：仅 .env 显式 False 强制禁用数据源；
-        显式 True（含配置默认值）不再覆盖数据库中的 enabled=False（修复旧版覆盖 bug）。
+    .env 设置优先级高于数据库缓存配置。
     """
-    logger = logging.getLogger(__name__)
     try:
         from app.core.config import settings as runtime_settings
-        from tradingagents.dataflows.data_source_manager import resolve_env_forced_enabled
 
-        env_forced = resolve_env_forced_enabled(
-            get_env=lambda key: getattr(runtime_settings, key, None)
-        )
-        for ds in data_sources:
-            ds_type = getattr(ds, "type", None)
-            ds_key = str(getattr(ds_type, "value", ds_type) or "").strip().lower()
-            if env_forced.get(ds_key) is False:
-                old_enabled = ds.enabled
-                ds.enabled = False
-                if old_enabled != ds.enabled:
-                    logger.info(
-                        ".env 强制禁用数据源: %s enabled=%s (原=%s)",
-                        ds.name, ds.enabled, old_enabled,
-                    )
+        for env_key, ds_type in _ENV_OVERRIDE_MAP.items():
+            env_val = getattr(runtime_settings, env_key, None)
+            if env_val is None:
+                continue  # .env 中未设置该 key，不覆盖
+
+            for ds in data_sources:
+                if ds.type == ds_type:
+                    old_enabled = ds.enabled
+                    ds.enabled = bool(env_val)
+                    if old_enabled != ds.enabled:
+                        print(f"🔧 [unified_config] .env 覆盖: {ds.name} enabled={ds.enabled} (原={old_enabled})")
+                    break
     except Exception as e:
-        logger.warning(".env 覆盖检查失败: %s", e)
+        print(f"⚠️ [unified_config] .env 覆盖检查失败: {e}")
 
 
 @dataclass
@@ -126,7 +110,7 @@ class UnifiedConfigManager:
         except FileNotFoundError:
             return {}
         except json.JSONDecodeError as e:
-            logger.error(f"配置文件格式错误 {file_path}: {e}")
+            print(f"配置文件格式错误 {file_path}: {e}")
             return {}
     
     def _save_json_file(self, file_path: Path, data: Dict[str, Any], cache_key: str = None):
@@ -170,7 +154,7 @@ class UnifiedConfigManager:
                 )
                 llm_configs.append(llm_config)
             except Exception as e:
-                logger.error(f"转换模型配置失败: {model}, 错误: {e}")
+                print(f"转换模型配置失败: {model}, 错误: {e}")
                 continue
 
         return llm_configs
@@ -208,7 +192,7 @@ class UnifiedConfigManager:
             return True
             
         except Exception as e:
-            logger.error(f"保存LLM配置失败: {e}")
+            print(f"保存LLM配置失败: {e}")
             return False
     
     # ==================== 系统设置管理 ====================
@@ -220,60 +204,60 @@ class UnifiedConfigManager:
     def save_system_settings(self, settings: Dict[str, Any]) -> bool:
         """保存系统设置（保留现有字段，添加新字段映射）"""
         try:
-            logger.info(f"📝 [unified_config] save_system_settings 被调用")
-            logger.info(f"📝 [unified_config] 接收到的 settings 包含 {len(settings)} 项")
+            print(f"📝 [unified_config] save_system_settings 被调用")
+            print(f"📝 [unified_config] 接收到的 settings 包含 {len(settings)} 项")
 
             # 检查关键字段
             if "quick_analysis_model" in settings:
-                logger.info(f"  ✓ [unified_config] 包含 quick_analysis_model: {settings['quick_analysis_model']}")
+                print(f"  ✓ [unified_config] 包含 quick_analysis_model: {settings['quick_analysis_model']}")
             else:
-                logger.warning(f"  ⚠️  [unified_config] 不包含 quick_analysis_model")
+                print(f"  ⚠️  [unified_config] 不包含 quick_analysis_model")
 
             if "deep_analysis_model" in settings:
-                logger.info(f"  ✓ [unified_config] 包含 deep_analysis_model: {settings['deep_analysis_model']}")
+                print(f"  ✓ [unified_config] 包含 deep_analysis_model: {settings['deep_analysis_model']}")
             else:
-                logger.warning(f"  ⚠️  [unified_config] 不包含 deep_analysis_model")
+                print(f"  ⚠️  [unified_config] 不包含 deep_analysis_model")
 
             # 读取现有配置
-            logger.info(f"📖 [unified_config] 读取现有配置文件: {self.paths.settings_json}")
+            print(f"📖 [unified_config] 读取现有配置文件: {self.paths.settings_json}")
             current_settings = self.get_system_settings()
-            logger.info(f"📖 [unified_config] 现有配置包含 {len(current_settings)} 项")
+            print(f"📖 [unified_config] 现有配置包含 {len(current_settings)} 项")
 
             # 合并配置（新配置覆盖旧配置）
             merged_settings = current_settings.copy()
             merged_settings.update(settings)
-            logger.info(f"🔀 [unified_config] 合并后配置包含 {len(merged_settings)} 项")
+            print(f"🔀 [unified_config] 合并后配置包含 {len(merged_settings)} 项")
 
             # 添加字段名映射（新字段名 -> 旧字段名）
             if "quick_analysis_model" in settings:
                 merged_settings["quick_think_llm"] = settings["quick_analysis_model"]
-                logger.info(f"  ✓ [unified_config] 映射 quick_analysis_model -> quick_think_llm: {settings['quick_analysis_model']}")
+                print(f"  ✓ [unified_config] 映射 quick_analysis_model -> quick_think_llm: {settings['quick_analysis_model']}")
 
             if "deep_analysis_model" in settings:
                 merged_settings["deep_think_llm"] = settings["deep_analysis_model"]
-                logger.info(f"  ✓ [unified_config] 映射 deep_analysis_model -> deep_think_llm: {settings['deep_analysis_model']}")
+                print(f"  ✓ [unified_config] 映射 deep_analysis_model -> deep_think_llm: {settings['deep_analysis_model']}")
 
             # 打印最终要保存的配置
-            logger.info(f"💾 [unified_config] 即将保存到文件:")
+            print(f"💾 [unified_config] 即将保存到文件:")
             if "quick_think_llm" in merged_settings:
-                logger.info(f"  ✓ quick_think_llm: {merged_settings['quick_think_llm']}")
+                print(f"  ✓ quick_think_llm: {merged_settings['quick_think_llm']}")
             if "deep_think_llm" in merged_settings:
-                logger.info(f"  ✓ deep_think_llm: {merged_settings['deep_think_llm']}")
+                print(f"  ✓ deep_think_llm: {merged_settings['deep_think_llm']}")
             if "quick_analysis_model" in merged_settings:
-                logger.info(f"  ✓ quick_analysis_model: {merged_settings['quick_analysis_model']}")
+                print(f"  ✓ quick_analysis_model: {merged_settings['quick_analysis_model']}")
             if "deep_analysis_model" in merged_settings:
-                logger.info(f"  ✓ deep_analysis_model: {merged_settings['deep_analysis_model']}")
+                print(f"  ✓ deep_analysis_model: {merged_settings['deep_analysis_model']}")
 
             # 保存合并后的配置
-            logger.info(f"💾 [unified_config] 保存到文件: {self.paths.settings_json}")
+            print(f"💾 [unified_config] 保存到文件: {self.paths.settings_json}")
             self._save_json_file(self.paths.settings_json, merged_settings, "settings")
-            logger.info(f"✅ [unified_config] 配置保存成功")
+            print(f"✅ [unified_config] 配置保存成功")
 
             return True
         except Exception as e:
-            logger.error(f"❌ [unified_config] 保存系统设置失败: {e}")
+            print(f"❌ [unified_config] 保存系统设置失败: {e}")
             import traceback
-            logger.error(traceback.format_exc())
+            print(traceback.format_exc())
             return False
     
     def get_default_model(self) -> str:
@@ -312,7 +296,7 @@ class UnifiedConfigManager:
     def get_data_source_configs(self) -> List[DataSourceConfig]:
         """获取数据源配置 - 优先从数据库读取，回退到硬编码（同步版本）
 
-        使用类级别 5 分钟 TTL 缓存，避免每次适配器编排器初始化都查 MongoDB。
+        使用类级别 5 分钟 TTL 缓存，避免每次 DataSourceManager 初始化都查 MongoDB。
         """
         now = time.monotonic()
         if (UnifiedConfigManager._ds_config_cache is not None and
@@ -334,7 +318,7 @@ class UnifiedConfigManager:
             if config_data and config_data.get('data_source_configs'):
                 # 从数据库读取到配置
                 data_source_configs = config_data.get('data_source_configs', [])
-                logger.info(f"✅ [unified_config] 从数据库读取到 {len(data_source_configs)} 个数据源配置")
+                print(f"✅ [unified_config] 从数据库读取到 {len(data_source_configs)} 个数据源配置")
 
                 # 转换为 DataSourceConfig 对象
                 result = []
@@ -342,7 +326,7 @@ class UnifiedConfigManager:
                     try:
                         result.append(DataSourceConfig(**ds_config))
                     except Exception as e:
-                        logger.error(f"⚠️ [unified_config] 解析数据源配置失败: {e}, 配置: {ds_config}")
+                        print(f"⚠️ [unified_config] 解析数据源配置失败: {e}, 配置: {ds_config}")
                         continue
 
                 # 按优先级排序（数字越大优先级越高）
@@ -355,9 +339,9 @@ class UnifiedConfigManager:
                 UnifiedConfigManager._ds_config_cache_time = now
                 return result
             else:
-                logger.warning("⚠️ [unified_config] 数据库中没有数据源配置，使用硬编码配置")
+                print("⚠️ [unified_config] 数据库中没有数据源配置，使用硬编码配置")
         except Exception as e:
-            logger.error(f"⚠️ [unified_config] 从数据库读取数据源配置失败: {e}，使用硬编码配置")
+            print(f"⚠️ [unified_config] 从数据库读取数据源配置失败: {e}，使用硬编码配置")
 
         # 🔥 回退到硬编码配置（兼容性）
         settings = self.get_system_settings()
@@ -458,7 +442,7 @@ class UnifiedConfigManager:
             if config_data and config_data.get('data_source_configs'):
                 # 从数据库读取到配置
                 data_source_configs = config_data.get('data_source_configs', [])
-                logger.info(f"✅ [unified_config] 从数据库读取到 {len(data_source_configs)} 个数据源配置")
+                print(f"✅ [unified_config] 从数据库读取到 {len(data_source_configs)} 个数据源配置")
 
                 # 转换为 DataSourceConfig 对象
                 result = []
@@ -466,7 +450,7 @@ class UnifiedConfigManager:
                     try:
                         result.append(DataSourceConfig(**ds_config))
                     except Exception as e:
-                        logger.error(f"⚠️ [unified_config] 解析数据源配置失败: {e}, 配置: {ds_config}")
+                        print(f"⚠️ [unified_config] 解析数据源配置失败: {e}, 配置: {ds_config}")
                         continue
 
                 # 按优先级排序（数字越大优先级越高）
@@ -477,9 +461,9 @@ class UnifiedConfigManager:
 
                 return result
             else:
-                logger.warning("⚠️ [unified_config] 数据库中没有数据源配置，使用硬编码配置")
+                print("⚠️ [unified_config] 数据库中没有数据源配置，使用硬编码配置")
         except Exception as e:
-            logger.error(f"⚠️ [unified_config] 从数据库读取数据源配置失败: {e}，使用硬编码配置")
+            print(f"⚠️ [unified_config] 从数据库读取数据源配置失败: {e}，使用硬编码配置")
 
         # 🔥 回退到硬编码配置（兼容性）
         settings = self.get_system_settings()
@@ -622,7 +606,7 @@ class UnifiedConfigManager:
             )
             return config
         except Exception as e:
-            logger.error(f"获取统一配置失败: {e}")
+            print(f"获取统一配置失败: {e}")
             # 返回默认配置
             return SystemConfig(
                 config_name="默认配置",
@@ -662,7 +646,7 @@ class UnifiedConfigManager:
 
             return True
         except Exception as e:
-            logger.error(f"同步配置到传统格式失败: {e}")
+            print(f"同步配置到传统格式失败: {e}")
             return False
 
 

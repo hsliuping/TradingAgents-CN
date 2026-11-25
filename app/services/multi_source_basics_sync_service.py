@@ -21,7 +21,6 @@ from pymongo import UpdateOne
 
 from app.core.database import get_mongo_db
 from app.services.basics_sync import add_financial_metrics as _add_financial_metrics_util
-from app.services.stock_basic_schema import normalize_stock_basic_doc
 
 
 logger = logging.getLogger(__name__)
@@ -325,9 +324,9 @@ class MultiSourceBasicsSyncService:
             )
 
             # Step 1: 获取数据源管理器
-            from app.services.data_sources.manager import DataAdapterOrchestrator
+            from app.services.data_sources.manager import DataSourceManager
             step_start = time.perf_counter()
-            manager = DataAdapterOrchestrator()
+            manager = DataSourceManager()
             available_adapters = manager.get_available_adapters()
 
             if not available_adapters:
@@ -365,7 +364,6 @@ class MultiSourceBasicsSyncService:
 
             daily_data_map = {}
             daily_source = ""
-            daily_columns = set()
             if latest_trade_date:
                 step_start = time.perf_counter()
                 daily_df, daily_source = await asyncio.to_thread(
@@ -376,11 +374,7 @@ class MultiSourceBasicsSyncService:
                         ts_code = row.get("ts_code")
                         if ts_code:
                             daily_data_map[ts_code] = row.to_dict()
-                    # 实际返回的列：用于判断某字段是"上游显式置空"还是"该源不提供"
-                    daily_columns = set(daily_df.columns)
                     stats.data_sources_used.append(f"daily_data:{daily_source}")
-                else:
-                    daily_columns = set()
                 logger.info(
                     "📈 [多数据源基础信息同步] daily_basic source=%s, records=%s, elapsed=%.2fs",
                     daily_source or "-",
@@ -450,10 +444,8 @@ class MultiSourceBasicsSyncService:
 
                     # 获取财务数据
                     daily_metrics = {}
-                    in_daily_batch = False
                     if isinstance(ts_code, str) and ts_code in daily_data_map:
                         daily_metrics = daily_data_map[ts_code]
-                        in_daily_batch = True
 
                     # 生成 full_symbol（确保不为空）
                     full_symbol = ts_code if ts_code else self._generate_full_symbol(code)
@@ -467,8 +459,8 @@ class MultiSourceBasicsSyncService:
                         continue
                     data_source = source_used
 
-                    # 构建文档（统一 Schema：normalize 补齐 data_source/sec 镜像等）
-                    doc = normalize_stock_basic_doc({
+                    # 构建文档
+                    doc = {
                         "code": code,
                         "symbol": code,  # 添加 symbol 字段（标准化字段）
                         "name": name,
@@ -481,22 +473,16 @@ class MultiSourceBasicsSyncService:
                         "category": category,
                         "source": data_source,  # 🔥 使用实际数据源
                         "updated_at": datetime.now(),
-                    })
+                    }
 
                     if mapped_industry:
                         doc["industry_source"] = INDUSTRY_SOURCE_SYSTEM
 
-                    # 添加财务指标；上游显式置空的字段收集后 $unset，防止亏损股旧估值残留
-                    stale_fields: list = []
-                    if in_daily_batch:
-                        self._add_financial_metrics(doc, daily_metrics, stale_fields, daily_columns)
-
-                    update_doc = {"$set": doc}
-                    if stale_fields:
-                        update_doc["$unset"] = {field: "" for field in stale_fields}
+                    # 添加财务指标
+                    self._add_financial_metrics(doc, daily_metrics)
 
                     # 🔥 使用 (code, source) 联合查询条件
-                    ops.append(UpdateOne({"code": code, "source": data_source}, update_doc, upsert=True))
+                    ops.append(UpdateOne({"code": code, "source": data_source}, {"$set": doc}, upsert=True))
 
                 except Exception as e:
                     logger.error(f"Error processing stock {row.get('ts_code', 'unknown')}: {e}")
@@ -566,17 +552,9 @@ class MultiSourceBasicsSyncService:
 
 
 
-    def _add_financial_metrics(
-        self,
-        doc: Dict,
-        daily_metrics: Dict,
-        stale_fields=None,
-        available_fields=None,
-    ) -> None:
+    def _add_financial_metrics(self, doc: Dict, daily_metrics: Dict) -> None:
         """委托到 basics_sync.processing.add_financial_metrics"""
-        return _add_financial_metrics_util(
-            doc, daily_metrics, stale_fields=stale_fields, available_fields=available_fields
-        )
+        return _add_financial_metrics_util(doc, daily_metrics)
 
     def _generate_full_symbol(self, code: str) -> str:
         """

@@ -15,8 +15,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from .base import BaseAgent
 from .config import AgentMetadata, AgentCategory
 
-from tradingagents.agents.utils.compliance_prompting import SOURCE_ANNOTATION_REQUIREMENT
-
 logger = logging.getLogger(__name__)
 
 
@@ -162,8 +160,6 @@ class AnalystAgent(BaseAgent):
 
             # 3. 调用LLM分析（使用工具调用）
             system_prompt = self._apply_global_trading_advice_guard(system_prompt)
-            # 🆕 v4.0 T2：数字来源标注纪律（走父类 execute 的分析师：大盘/板块/社媒等）
-            system_prompt += SOURCE_ANNOTATION_REQUIREMENT
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)

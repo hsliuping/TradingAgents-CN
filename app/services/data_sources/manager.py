@@ -1,14 +1,5 @@
 """
-Multi-source adapter orchestrator: coordinates multiple adapters with priority and optional consistency checks
-
-P2 收敛（docs/05-design/v4.0/data-architecture-problems-and-optimization.md 第三节）：
-数据源"优先级顺序 + 启用/可用性判定"的规则已收敛到
-tradingagents/dataflows/data_source_manager.py（体系 A，唯一事实源），本体系（体系 B）只做委托调用；
-QMT 等 app 层专属 SDK 数据源保留在本体系，其排序规则（插入位置）在本模块定义。
-
-阶段 5 收敛（同名类消歧）：全仓 `DataSourceManager` 唯一指向体系 A；
-本类按真实职责更名为 DataAdapterOrchestrator（多源适配器编排器：持有适配器、
-fallback 循环、QMT 插入规则、一致性检查），不承载第二套数据源管理规则。
+Data source manager that orchestrates multiple adapters with priority and optional consistency checks
 """
 from typing import List, Optional, Tuple, Dict
 import logging
@@ -26,31 +17,13 @@ from .qmt_adapter import QMTAdapter
 logger = logging.getLogger(__name__)
 
 
-def _read_runtime_setting(key: str):
-    """读取 app 层运行时设置（.env 由 pydantic settings 加载），供数据源强制开关判定取值"""
-    try:
-        from app.core.config import settings as runtime_settings
-
-        return getattr(runtime_settings, key, None)
-    except Exception:
-        return None
-
-
-class DataAdapterOrchestrator:
+class DataSourceManager:
     """
-    多源适配器编排器
-    - 持有多个适配器，基于优先级排序
+    数据源管理器
+    - 管理多个适配器，基于优先级排序
     - 提供 fallback 获取能力
     - 可选：一致性检查（若依赖存在）
-
-    优先级顺序/启用判定规则见 tradingagents.dataflows.data_source_manager（体系 A，唯一事实源），
-    本类只做委托；QMT 是本体系专属的 SDK 数据源，其排序规则（插入位置）见 QMT_INSERT_AFTER。
-    （原类名 DataSourceManager 已让渡给体系 A，避免两套同名类的二义性。）
     """
-
-    # QMT 是本体系专属的 SDK 数据源（体系 A 不感知），其排序规则在此定义为插入位置：
-    # 默认与 AKShare 同级、紧随其后；配置中显式声明 qmt 的优先级时以配置位置为准。
-    QMT_INSERT_AFTER = "akshare"
 
     def __init__(self):
         self._configured_enabled_map: Dict[str, bool] = {}
@@ -76,88 +49,78 @@ class DataAdapterOrchestrator:
             self.consistency_checker = None
 
     def _load_priority_from_unified_config(self):
-        """加载数据源优先级与启用配置（委托体系 A 的唯一实现）。
-
-        .. deprecated::
-            此前在此维护的"配置解析 → 优先级映射 → 排序"逻辑与体系 A
-            （tradingagents/dataflows/data_source_manager.py）重复，已收敛为委托
-            resolve_data_source_priority_order / resolve_enabled_source_map。
-            本方法仅保留委托调用与 QMT（本体系专属数据源）的插入规则；
-            新增/调整数据源优先级规则请只修改体系 A，禁止在此再维护一份。
-        """
+        """使用统一配置模块加载数据源优先级"""
         try:
             from app.core.unified_config import UnifiedConfigManager
 
             config = UnifiedConfigManager()
             data_source_configs = config.get_data_source_configs()
+
+            # 创建名称到优先级的映射
+            priority_map = {}
+            for ds_config in data_source_configs:
+                data_source_name = ds_config.type.lower()
+                priority = ds_config.priority
+                enabled = ds_config.enabled
+
+                self._configured_enabled_map[data_source_name] = bool(enabled)
+
+                if enabled:
+                    priority_map[data_source_name] = priority
+
+            # 🔥 强制 .env 开关覆盖（.env 优先级最高，无视数据库缓存）
+            self._apply_dotenv_overrides()
+
+            # 更新各个 Adapter 的优先级
+            for adapter in self.adapters:
+                if adapter.name in priority_map:
+                    adapter._priority = priority_map[adapter.name]
+                else:
+                    adapter._priority = adapter._get_default_priority()
+
         except Exception as e:
-            logger.warning(f"⚠️ 从统一配置加载数据源配置失败: {e}，使用默认优先级")
-            data_source_configs = []
-
-        try:
-            from tradingagents.dataflows.data_source_manager import (
-                resolve_data_source_priority_order,
-                resolve_enabled_source_map,
-                resolve_env_forced_enabled,
-            )
-
-            # 委托体系 A：启用判定（含 .env 强制禁用）+ 优先级顺序
-            env_forced = resolve_env_forced_enabled(get_env=_read_runtime_setting)
-            self._configured_enabled_map = resolve_enabled_source_map(data_source_configs, env_forced=env_forced)
-            order = resolve_data_source_priority_order(data_source_configs, enabled_map=self._configured_enabled_map)
-            order = self._insert_qmt_source(order)
-        except Exception as e:
-            logger.warning(f"⚠️ 委托体系 A 解析数据源优先级失败: {e}，使用默认优先级")
-            self._configured_enabled_map = {}
-            order = []
-
-        # 将收敛后的顺序映射为适配器优先级数值（数字越大优先级越高），保证与顺序一致
-        total = len(order)
-        rank_map = {name: (total - idx) * 10 for idx, name in enumerate(order)}
-        for adapter in self.adapters:
-            if adapter.name in rank_map:
-                adapter._priority = rank_map[adapter.name]
-            else:
+            logger.warning(f"⚠️ 从统一配置加载优先级失败: {e}，使用默认优先级")
+            import traceback
+            logger.warning(f"堆栈跟踪:\n{traceback.format_exc()}")
+            # 使用默认优先级
+            for adapter in self.adapters:
                 adapter._priority = adapter._get_default_priority()
 
-        self.adapters.sort(key=lambda x: x.priority, reverse=True)
-
-    def _insert_qmt_source(self, order: List[str]) -> List[str]:
-        """按本体系的业务约定放置 QMT 数据源（体系 A 不感知 QMT，插入位置只在此定义）。
-
-        规则：
-        - 配置中显式声明了 qmt 的优先级位置：以配置为准（已在 order 中，不调整）
-        - 配置中禁用 qmt：不插入
-        - 其余情况：插入到 QMT_INSERT_AFTER（akshare，与 AKShare 同级）之后；akshare 不在序列时置于末尾
-        """
-        if "qmt" in order or not self._configured_enabled_map.get("qmt", True):
-            return order
-
-        order = list(order)
-        insert_after = self.QMT_INSERT_AFTER
-        if insert_after in order:
-            order.insert(order.index(insert_after) + 1, "qmt")
-        else:
-            order.append("qmt")
-        return order
-
     def _apply_dotenv_overrides(self):
-        """⚠️ deprecated：.env 强制开关的判定逻辑已收敛到
-        tradingagents.dataflows.data_source_manager.resolve_env_forced_enabled（唯一事实源）。
+        """强制应用 .env 中的数据源开关（最高优先级）
 
-        本方法仅保留为兼容入口（结果幂等），禁止在此再新增开关规则。
+        通过 Pydantic BaseSettings 读取 .env 中显式设置的值。
+        多个 key 按优先级排列，第一个被显式设置的值生效。
         """
         try:
-            from tradingagents.dataflows.data_source_manager import resolve_env_forced_enabled
+            from app.core.config import settings as runtime_settings
 
-            forced = resolve_env_forced_enabled(get_env=_read_runtime_setting)
-            for name, forced_value in forced.items():
-                if forced_value is False:
-                    old_val = self._configured_enabled_map.get(name)
-                    self._configured_enabled_map[name] = False
-                    logger.info(f"🔧 [DataAdapterOrchestrator] .env 禁用: {name} enabled=False (原={old_val})")
+            # 按优先级排列：用户实际在 .env 中设置的 key 放前面
+            env_overrides = {
+                "baostock": ["BAOSTOCK_UNIFIED_ENABLED", "ENABLE_BAOSTOCK"],
+                "tushare": ["ENABLE_TUSHARE"],
+            }
+
+            for adapter_name, env_keys in env_overrides.items():
+                effective_key = None
+                env_val = None
+
+                for key in env_keys:
+                    val = getattr(runtime_settings, key, None)
+
+                    # 只有当值为 False（禁用）时才覆盖。
+                    # True 可能是 Pydantic 默认值，不要用默认 True 去覆盖数据库的 False。
+                    if val is False:
+                        env_val = False
+                        effective_key = key
+                        break
+
+                if effective_key:
+                    old_val = self._configured_enabled_map.get(adapter_name)
+                    self._configured_enabled_map[adapter_name] = env_val
+                    logger.info(f"🔧 [DataSourceManager] .env 禁用 ({effective_key}): {adapter_name} enabled=False (原={old_val})")
         except Exception as e:
-            logger.warning(f"⚠️ [DataAdapterOrchestrator] .env 覆盖失败: {e}")
+            logger.warning(f"⚠️ [DataSourceManager] .env 覆盖失败: {e}")
 
     def get_available_adapters(self) -> List[DataSourceAdapter]:
         available: List[DataSourceAdapter] = []

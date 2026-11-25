@@ -244,19 +244,35 @@ def get_stock_sentiment_unified(
                 else:
                     logger.info(f"📰 [统一情绪工具] 未找到用户上传的社媒数据（数据库查询返回0条或查询失败），使用备用数据源（新闻）...")
                 try:
-                    # 经 DataFacade 能力查询新闻进行情绪分析
-                    #（tushare 权限不足自动降级 akshare；标准列 title）
-                    from tradingagents.dataflows.capability import query_capability_sync
-
-                    news_df = query_capability_sync(
-                        "stock_news_cn",
-                        symbol=clean_ticker,
-                        limit=10,
-                    )
-
+                    # 尝试使用 AKShareProvider 获取新闻进行情绪分析
+                    from tradingagents.dataflows.providers.china.akshare import AKShareProvider
+                    ak_provider = AKShareProvider()
+                    
+                    # 清理代码后缀
+                    clean_ticker = ticker
+                    for suffix in ['.SH', '.SZ', '.SS', '.HK', '.XSHE', '.XSHG']:
+                        clean_ticker = clean_ticker.replace(suffix, '')
+                    
+                    # 获取新闻 (优先使用 _get_stock_news_direct 如果公开接口不可用)
+                    if hasattr(ak_provider, 'get_stock_news_sync'):
+                        news_df = ak_provider.get_stock_news_sync(symbol=clean_ticker)
+                    else:
+                        news_df = ak_provider._get_stock_news_direct(symbol=clean_ticker)
+                    
                     if news_df is not None and not news_df.empty:
-                        # 简单分析（标准列 title，无需列名兼容）
-                        news_titles = news_df['title'].dropna().astype(str).tolist()
+                        # 简单分析
+                        news_titles = []
+                        # 兼容不同的列名
+                        col_map = {'新闻标题': 'title', '标题': 'title', 'title': 'title'}
+                        
+                        for col in news_df.columns:
+                            if col in col_map:
+                                news_titles = news_df[col].tolist()
+                                break
+                        
+                        if not news_titles and not news_df.empty:
+                             # 如果没找到标题列，尝试第一列
+                             news_titles = news_df.iloc[:, 0].astype(str).tolist()
 
                         # 关键词统计
                         pos_words = ['上涨', '利好', '增长', '突破', '买入', '增持', '大涨', '新高', '预增']

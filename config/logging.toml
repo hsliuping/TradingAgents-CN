@@ -22,46 +22,19 @@ enabled = true
 colored = true  # 是否启用彩色输出
 level = "INFO"
 
-# 文件处理器（共享默认参数：directory / 轮转口径的唯一来源；
-# main/webapi/worker/error 未显式指定 max_size/backup_count 时回退到这里的值，
-# 同一日志文件只有一套轮转参数——日志治理 §5.3 两套键名解释器合一，
-# handler 配置只有 app/core/logging_config.py 一个解释方）
+# 文件处理器
 [logging.handlers.file]
 enabled = true
 level = "DEBUG"
-max_size = "100MB"
+max_size = "10MB"
 backup_count = 5
 directory = "./logs"
-
-# 主日志文件（tradingagents.log，v2.0 设计承诺的配置节，日志治理 §5.3 补齐）
-[logging.handlers.main]
-enabled = true
-level = "INFO"
-max_size = "100MB"
-backup_count = 5
-filename = "./logs/tradingagents.log"
-
-# WebAPI 日志文件
-[logging.handlers.webapi]
-enabled = true
-level = "DEBUG"
-max_size = "100MB"
-backup_count = 5
-filename = "./logs/webapi.log"
-
-# Worker 日志文件（app.worker.* 模块日志落此文件，日志治理 §5.5 补齐 worker.log）
-[logging.handlers.worker]
-enabled = true
-level = "DEBUG"
-max_size = "100MB"
-backup_count = 5
-filename = "./logs/worker.log"
 
 # 错误日志处理器（只记录WARNING及以上级别）
 [logging.handlers.error]
 enabled = true
 level = "WARNING"  # 只记录WARNING, ERROR, CRITICAL
-max_size = "100MB"
+max_size = "10MB"
 backup_count = 5
 directory = "./logs"
 filename = "error.log"

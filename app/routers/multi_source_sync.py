@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.services.multi_source_basics_sync_service import get_multi_source_sync_service
-from app.services.data_sources.manager import DataAdapterOrchestrator
+from app.services.data_sources.manager import DataSourceManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ DATA_SOURCE_STATUS_TIMEOUT_SECONDS = 8
 router = APIRouter(prefix="/api/sync/multi-source", tags=["Multi-Source Sync"])
 
 
-async def _get_available_adapters_async(manager: DataAdapterOrchestrator):
+async def _get_available_adapters_async(manager: DataSourceManager):
     return await asyncio.wait_for(
         asyncio.to_thread(manager.get_available_adapters),
         timeout=DATA_SOURCE_STATUS_TIMEOUT_SECONDS,
@@ -50,7 +50,7 @@ class DataSourceStatus(BaseModel):
 async def get_data_sources_status():
     """获取所有数据源的状态"""
     try:
-        manager = DataAdapterOrchestrator()
+        manager = DataSourceManager()
         available_adapters = await _get_available_adapters_async(manager)
         all_adapters = manager.adapters
 
@@ -98,7 +98,7 @@ async def get_data_sources_status():
 async def get_current_data_source():
     """获取当前正在使用的数据源（优先级最高且可用的）"""
     try:
-        manager = DataAdapterOrchestrator()
+        manager = DataSourceManager()
         available_adapters = await _get_available_adapters_async(manager)
 
         if not available_adapters:
@@ -293,7 +293,7 @@ async def test_data_sources(request: TestSourceRequest = TestSourceRequest()):
     - 快速返回结果
     """
     try:
-        manager = DataAdapterOrchestrator()
+        manager = DataSourceManager()
         all_adapters = manager.adapters
 
         # 从请求体中获取数据源名称
@@ -355,7 +355,7 @@ async def test_data_sources(request: TestSourceRequest = TestSourceRequest()):
 async def get_sync_recommendations():
     """获取数据源使用建议"""
     try:
-        manager = DataAdapterOrchestrator()
+        manager = DataSourceManager()
         available_adapters = await _get_available_adapters_async(manager)
         
         recommendations = {
@@ -476,7 +476,7 @@ async def clear_sync_cache():
 
         # 2. 清空数据源缓存（如果有的话）
         try:
-            manager = DataAdapterOrchestrator()
+            manager = DataSourceManager()
             # 这里可以添加数据源特定的缓存清理逻辑
             # 目前数据源适配器没有持久化缓存，所以跳过
         except Exception as e:

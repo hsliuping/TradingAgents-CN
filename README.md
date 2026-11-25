@@ -12,7 +12,7 @@
 
 ## 核心功能
 
-- **单股研究**：多智能体辩论式分析（三档深度：快速 / 标准 / 深度），研究简报含方法论板块（驱动层与获利路径 / 护城河六维度 / 估值历史分位），多情景观点呈现
+- **单股研究**：多智能体辩论式分析（5 级深度），多情景观点呈现
 - **通用研究**：自然语言提问，研究任意市场主题
 - **股票筛选**：自然语言 + 条件筛选，从 6000+ 只股票中发现标的
 - **选股助手**：按研究需求描述匹配候选股票池
@@ -21,7 +21,6 @@
 - **Skill 中心**：创建和管理自定义数据获取技能
 - **学习中心**：免费系统课程（发现阶段 5 课）+ 8 篇学习指南
 - **模拟交易**：纸面交易与复盘
-- **持仓研究与操作复盘**：持仓定期复查、5 类复盘 Agent 归因、卖出归因标签与复盘对账
 
 ## 版本演进
 
@@ -31,7 +30,6 @@
 | v2.0 | 分析融入研究闭环 | 统一分析引擎 + 可视化工作流，新增持仓分析、操作复盘与阶段性复盘 |
 | v2.1 | 研究辅助合规化 | 报告表达、提示词模板、界面文案全面对齐"研究辅助"定位；新模型接入与稳定性提升 |
 | v3.0 | 从分析工具到 AI 助手 | 统一 AI 助手入口、自然语言选股、Agent 自主规划分析、Skill 能力扩展；架构升级为 FastAPI + Vue 3 + MongoDB/Redis |
-| v4.0 | 研究生产判断，机制防止大亏 | 个股研究引入三档深度与报告方法论板块（驱动层与获利路径 / 护城河 / 估值分位）；减损机制上线（仓位分层、卖出归因标签、复盘对账）；行业研究工作台为 Pro 功能 |
 
 ## 社区版与 Pro 版的差异
 
@@ -41,9 +39,6 @@
 | 学习中心（免费课程） / 模拟交易 / Skill 中心 | ✅ | ✅ |
 | Agent 工作坊（创建、发布、管理自定义 Agent） | — | ✅ |
 | 交易系统（策略创建 / 优化 / 模板调试） | — | ✅ |
-| 交易计划（仓位分层 / 失效条件） | — | ✅ |
-| 行业研究工作台（猪 / 保险 / 电池 / 汽车 / 银行 5 台，含研究日志、资料库、数据治理页） | — | ✅ |
-| 失效条件巡检与披露日历 | — | ✅ |
 | 定时分析 / 批量分析 | — | ✅ |
 | 专业报告导出（Word / PDF 多格式） | — | ✅ |
 | 高级课程（进阶 8 阶段） | — | ✅ |
@@ -58,17 +53,6 @@ Pro 版面向有更高阶研究工作流需求的用户，获取方式见项目�
 - Python 3.11
 - Node.js 18+
 - MongoDB 7.0+（推荐 8.0）与 Redis 6+（推荐 7）—— 需自行安装，见下方「安装 MongoDB / Redis」
-
-### macOS 一键安装（可选）
-
-macOS 用户可跳过手动安装，在仓库根目录直接执行：
-
-```bash
-bash install-mac.sh    # 自动装齐 Homebrew / Python 3.11 / Node.js / MongoDB / Redis 并构建前端
-bash start.sh          # 启动，浏览器自动打开 http://localhost:8000
-```
-
-其他系统按下方步骤手动安装。
 
 ### 安装 MongoDB / Redis
 
@@ -119,8 +103,6 @@ npm install
 npm run dev                     # 默认 http://localhost:3000
 ```
 
-> **单端口部署**：已构建前端（`npm run build`，或用上面的 install-mac.sh 一键安装）时，后端会直接伺服前端页面——启动后端后访问 `http://localhost:8000` 即可，无需再开前端 dev server。仅开发调试前端时才需要第 6 步。
-
 ### 首次登录
 
 后端首次启动时会自动完成初始化（无需手动执行任何导入脚本）：
@@ -136,14 +118,9 @@ npm run dev                     # 默认 http://localhost:3000
 
 ## 文档
 
-- 用户手册：[docs/02-user-guide/user-manual-v3.0.md](docs/02-user-guide/user-manual-v3.0.md)（社区版当前功能手册）
+- 用户手册：[docs/02-user-guide/user-manual-v3.0.md](docs/02-user-guide/user-manual-v3.0.md)
 - 学习指南：[docs/02-user-guide/](docs/02-user-guide/)（learning-01 ~ 08）
 - 免费课程：[docs/07-courses/v3.0/phase-01-discover/](docs/07-courses/v3.0/phase-01-discover/)
-- 历史教程（v1.x 时代，部分内容已过时，仅供入门参考）：
-  - [快速入门视频（Bilibili）](https://www.bilibili.com/video/BV1i2CeBwEP7/)
-  - [使用指南（微信公众号）](https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw)
-  - [源码安装手册（微信公众号）](https://mp.weixin.qq.com/s/cqUGf-sAzcBV19gdI4sYfA)
-  - [源码安装视频（Bilibili）](https://www.bilibili.com/video/BV1FxCtBHEte/)
 
 ## 数据来源
 
@@ -174,19 +151,6 @@ npm run dev                     # 默认 http://localhost:3000
 
 提交流程、分配框架与贡献者协议（CLA）详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-## 官方渠道
-
-| 渠道 | 信息 |
-|------|------|
-| GitHub Issues | [提交问题与建议](https://github.com/hsliuping/TradingAgents-CN/issues) |
-| 项目 QQ 群 | **1091917201**（主渠道：下载、答疑、版本发布通知） |
-| 微信公众号 | **TradingAgents-CN**（搜索关注，推送项目进展与新版本说明） |
-| 邮箱 | hsliup@163.com |
-
-<img src="assets/wexin.png" alt="微信公众号二维码" width="200"/>
-
-**防伪声明**：本项目官方渠道仅有上述 GitHub 仓库与联系方式，未授权任何组织或个人进行商业使用；如发现第三方网站（如 tradingagents-ai.com）声称提供本项目产品或服务，请勿轻信，并通过上述渠道向我们反馈。
-
 ## 免责声明
 
 - 本系统仅支持 A 股市场研究，输出为 AI 生成的研究参考，不构成投资建议
@@ -208,13 +172,3 @@ npm run dev                     # 默认 http://localhost:3000
 - 所有通过 PR 参与共建的贡献者
 
 完整致谢（含授权说明与数据源致谢）见 [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)。
-
----
-
-<div align="center">
-
-**如果这个项目对您有帮助，欢迎 Star ⭐ 支持**
-
-[⭐ Star](https://github.com/hsliuping/TradingAgents-CN) · [🍴 Fork](https://github.com/hsliuping/TradingAgents-CN/fork) · [⚠️ 提交 Issue](https://github.com/hsliuping/TradingAgents-CN/issues)
-
-</div>

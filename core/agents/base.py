@@ -6,7 +6,6 @@ v2.0 新增：标准化工具调用循环处理
 """
 
 import logging
-import re
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable
@@ -95,7 +94,6 @@ class BaseAgent(ABC):
         self._langchain_tools: List[BaseTool] = []  # 新版 LangChain 工具列表
         self._prompt_template: Optional[str] = None
         self._execution_recorder = None  # 🔑 执行轨迹 recorder（由 start_execution_trace 自动绑定）
-        self._tool_budget: Optional[int] = None  # M2.2 档位工具预算（提示词组装时按 profile 写入）
 
         # v2.0: 动态加载工具
         if tool_ids is not None:
@@ -390,15 +388,8 @@ class BaseAgent(ABC):
 
         子类可覆盖此方法实现更严格的防护逻辑。
         默认实现追加一段合规提示，确保输出使用合规术语。
-
-        执行模式旁路（设计文档 §5.2 A5）：仅当该 agent 实际加载了本地执行模板
-        （_template_advice_mode == "execution"）时跳过；开关开但无执行模板
-        （发行版）时守卫照常生效，保证无效开关语义。
         """
         if not system_prompt:
-            return system_prompt
-        if getattr(self, "_template_advice_mode", "research") == "execution":
-            logger.info("🟢 [advice_mode] 执行模式：跳过全局交易建议合规防护")
             return system_prompt
         guard = (
             "\n\n【合规防护·必须遵守】\n"
@@ -499,43 +490,14 @@ class BaseAgent(ABC):
             except Exception:
                 pass
 
-        # 调用 LLM（R1：与 invoke_with_tools 一致的 3 次指数退避重试）
-        response, _duration_ms = self._invoke_llm_with_retry(messages)
+        # 调用 LLM
+        _start = time.time()
+        response = self._llm.invoke(messages)
+        _duration_ms = int((time.time() - _start) * 1000)
 
         # 记录 LLM 响应
         self._record_llm_response_to_trace(response, llm_duration_ms=_duration_ms)
         return response
-
-    def _invoke_llm_with_retry(self, messages: list) -> tuple[Any, int]:
-        """调用 self._llm.invoke(messages)，失败按 R1 标准做 3 次指数退避重试。
-
-        返回 (response, 耗时毫秒)；不写执行轨迹，供自行管理轨迹的 Agent
-        （如 ManagerAgent）复用同一套重试语义。
-        """
-        max_retries = getattr(self.config, 'max_retries', 3)
-        retry_count = 0
-        _start = time.time()
-
-        while True:
-            try:
-                if retry_count > 0:
-                    wait_time = min(2 ** retry_count, 10)
-                    logger.info(f"⏳ [{self.agent_id}] 等待 {wait_time}s 后重试 LLM（第 {retry_count}/{max_retries} 次）")
-                    time.sleep(wait_time)
-
-                response = self._llm.invoke(messages)
-                return response, int((time.time() - _start) * 1000)
-            except Exception as e:
-                error_msg = str(e)
-                is_retryable = is_retryable_llm_error(error_msg)
-
-                if is_retryable and retry_count < max_retries:
-                    retry_count += 1
-                    logger.warning(f"⚠️ [{self.agent_id}] LLM 调用失败（可重试）: {error_msg[:200]}")
-                    continue
-
-                logger.error(f"❌ [{self.agent_id}] LLM 调用失败（已重试 {retry_count} 次）: {error_msg[:200]}")
-                raise
 
     def register_tool(
         self,
@@ -676,7 +638,7 @@ class BaseAgent(ABC):
         """记录日志"""
         # TODO: 集成统一日志系统
         prefix = f"[{self.get_metadata().name}]"
-        logger.info(f"{prefix} {message}")
+        print(f"{prefix} {message}")
     
     @property
     def agent_id(self) -> str:
@@ -705,21 +667,11 @@ class BaseAgent(ABC):
 
     # ========== v2.0: 标准化工具调用循环处理 ==========
 
-    def _resolve_tool_budget(self, max_iterations: Optional[int]) -> int:
-        """M2.2 工具预算解析：显式参数 > 档位 profile.tool_budget > 默认上限。
-
-        _tool_budget 由 _get_prompt_from_template 注入档位契约块时按 profile 写入；
-        无档位上下文（旧链路/自定义流）保持默认上限，行为不变。
-        """
-        if max_iterations is not None:
-            return max_iterations
-        return self._tool_budget or DEFAULT_MAX_TOOL_ITERATIONS
-
     def invoke_with_tools(
         self,
         messages: List,
         analysis_prompt: Optional[str] = None,
-        max_iterations: Optional[int] = None
+        max_iterations: int = DEFAULT_MAX_TOOL_ITERATIONS
     ) -> str:
         """
         v2.0: 标准化的工具调用循环处理（自包含模式）
@@ -737,17 +689,13 @@ class BaseAgent(ABC):
         Args:
             messages: 消息列表（包含 SystemMessage 和 HumanMessage）
             analysis_prompt: 工具执行后的分析提示词（可选）
-            max_iterations: 最大工具调用迭代次数（防止死循环）；缺省按档位工具预算
-                （profile.tool_budget，M2.2），无档位上下文时用默认上限
+            max_iterations: 最大工具调用迭代次数（防止死循环）
 
         Returns:
             str: 最终的分析报告内容
         """
         if not self._llm:
             raise ValueError("LLM 未配置，无法执行工具调用")
-
-        # M2.2 工具预算：未显式指定时按档位 tool_budget 控制工具循环上限
-        max_iterations = self._resolve_tool_budget(max_iterations)
 
         current_messages = list(messages)
         # 🆕 重置工具调用摘要收集器（每次 invoke_with_tools 独立统计）
@@ -1325,7 +1273,7 @@ class BaseAgent(ABC):
 
         for tool_call in tool_calls:
             tool_name = tool_call.get('name')
-            tool_args = self._normalize_tool_call_args(tool_call.get('args', {}))
+            tool_args = tool_call.get('args', {})
             tool_id = tool_call.get('id')
 
             logger.info(f"🔧 [{self.agent_id}] 执行工具: {tool_name}")
@@ -1511,38 +1459,6 @@ class BaseAgent(ABC):
 
         return tool_messages
 
-    @staticmethod
-    def _normalize_tool_call_args(tool_args: Any) -> Dict[str, Any]:
-        if not isinstance(tool_args, dict):
-            return {}
-
-        nested_kwargs = tool_args.get("kwargs")
-        if isinstance(nested_kwargs, dict):
-            normalized = {**nested_kwargs}
-            for key, value in tool_args.items():
-                if key != "kwargs":
-                    normalized[key] = value
-        else:
-            normalized = dict(tool_args)
-
-        for key in ("ticker", "symbol"):
-            if key in normalized and normalized[key]:
-                normalized[key] = BaseAgent._normalize_ticker_for_engine(str(normalized[key]))
-
-        return normalized
-
-    @staticmethod
-    def _normalize_ticker_for_engine(ticker: str) -> str:
-        if not ticker or not isinstance(ticker, str):
-            return ticker
-
-        symbol = ticker.strip().upper()
-        if re.match(r'^\d{6}\.(SZ|SH|SS|XSHE|XSHG)$', symbol):
-            return symbol.split('.')[0]
-        if re.match(r'^\d{4,5}\.HK$', symbol):
-            return symbol.split('.')[0]
-        return ticker
-
     def _get_prompt_from_template(
         self,
         agent_type: str,
@@ -1599,9 +1515,6 @@ class BaseAgent(ABC):
                 base_vars = [
                     "current_price", "industry", "market_name",
                     "currency_name", "currency_symbol", "current_date", "start_date",
-                    # 价格口径标注：分析基准价日期/来源、盘中快照（避免不同 agent 混用价格口径）
-                    "current_price_date", "current_price_source", "current_price_note",
-                    "current_price_intraday", "current_price_intraday_date",
                 ]
                 for var in base_vars:
                     if var in state and var not in variables:
@@ -1666,15 +1579,7 @@ class BaseAgent(ABC):
                 f"preference_id={preference_id}, user_id={user_id}, "
                 f"variables数量={len(variables)}"
             )
-
-            # 执行模式注入：模板加载按 advice_mode 双向隔离（设计文档 §4.2）
-            # context 走通道传递，不改 template_client 签名；注入失败缺省 research
-            try:
-                from core.agents.advice_mode import context_with_advice_mode
-                context = context_with_advice_mode(context)
-            except Exception as e:
-                logger.debug(f"[advice_mode] context 注入失败，按研究模式处理: {e}")
-
+            
             # 调用模板系统
             prompt = get_prompt_func(
                 agent_type=agent_type,
@@ -1686,16 +1591,6 @@ class BaseAgent(ABC):
                 context=context
             )
 
-            # 🆕 模板模式留痕：供 _apply_global_trading_advice_guard 等下游拦截点
-            # 判断本 agent 是否实际加载执行模板（无效开关保证，设计文档 §5.2 A5）
-            try:
-                from core.agents.advice_mode import use_execution_output
-                self._template_advice_mode = (
-                    "execution" if use_execution_output(agent_type, agent_name) else "research"
-                )
-            except Exception:
-                self._template_advice_mode = "research"
-
             if prompt:
                 logger.info(
                     f"✅ 从模板系统获取 {agent_name} {prompt_type} 提示词 "
@@ -1706,45 +1601,15 @@ class BaseAgent(ABC):
                 logger.info(f"🔍 [_get_prompt_from_template] 提示词预览: {prompt_preview}")
 
                 # 🏭 行业上下文注入：根据股票所属行业，追加行业分析维度到提示词
-                # 传 ticker 供权威细分标签 1:1 精准匹配画像（生猪养殖/动力电池等），
-                # 未命中回退 industry 标签精确匹配
                 if state and state.get("industry") and state.get("industry") != "未知":
                     try:
                         from app.services.analysis_profile_service import AnalysisProfileService
-                        industry_block = AnalysisProfileService.build_industry_prompt_block(
-                            state["industry"], state.get("ticker") or state.get("company_of_interest") or ""
-                        )
+                        industry_block = AnalysisProfileService.build_industry_prompt_block(state["industry"])
                         if industry_block:
                             prompt = prompt + industry_block
                             logger.info(f"🏭 [行业注入] {agent_name}: 已追加 {state['industry']} 行业分析维度")
                     except Exception as e:
                         logger.warning(f"⚠️ [行业注入] 失败: {e}")
-
-                # 🏭 行业快照数据注入（2026-11-02）：行业维度块只给了「该跟踪哪些
-                # 指标」的清单，若不附带读数，分析师只能逐项声明「暂无读数/信息缺口」
-                # （筹码分析报告七章即此成因）。这里把行业台真实读数（含口径标注）
-                # 一并注入：仅分析师阶段、仅 system 提示词注入一次（避免与 user 重复）；
-                # sector_analyst 已在自身用户提示词注入，用类属性标记跳过。
-                if (
-                    prompt_type == "system"
-                    and state
-                    and not getattr(self, "_INJECTS_INDUSTRY_SNAPSHOT", False)
-                    and getattr(getattr(self, "metadata", None), "workflow_stage", "") == "analyst"
-                ):
-                    try:
-                        from core.pro.industry_snapshot import build_snapshot_prompt_section
-
-                        snapshot_section = build_snapshot_prompt_section(
-                            state.get("ticker") or state.get("company_of_interest") or "",
-                            state.get("analysis_date") or state.get("trade_date"),
-                        )
-                        if snapshot_section:
-                            prompt = prompt + snapshot_section
-                            logger.info(f"🏭 [行业快照注入] {agent_name}: 已注入行业台真实读数")
-                    except ImportError:
-                        logger.debug("core.pro.industry_snapshot 不可用（社区版），跳过行业快照注入")
-                    except Exception as e:
-                        logger.warning(f"⚠️ [行业快照注入] 失败: {e}")
 
                 # 📚 知识型 Skill 注入：将绑定到当前 Agent 的 knowledge Skill 内容追加到提示词
                 try:
@@ -1767,45 +1632,6 @@ class BaseAgent(ABC):
                     if isinstance(memory_block, str) and memory_block.strip():
                         prompt = prompt + "\n\n" + memory_block
                         logger.info(f"🧠 [事实记忆注入] {agent_name}: 已追加外部事实记忆参考")
-
-                # 🎚️ 档位契约块注入（M2.1）：五档产出规范/口径纪律/环节声明/角色段，
-                # 文案单点维护在 core/workflow/depth_profiles.py，与行业维度块、
-                # 知识 Skill 块并列追加。仅当 state 带 research_depth（五档分析链路）
-                # 时注入；旧链路/自定义流无档位上下文，保持原样。
-                try:
-                    research_depth = state.get("research_depth") if state else None
-                    if research_depth is not None:
-                        from core.workflow.depth_profiles import build_contract_block, get_profile
-                        depth_profile = get_profile(research_depth)
-                        prompt = prompt + build_contract_block(depth_profile, agent_name)
-                        logger.info(
-                            f"🎚️ [档位契约] {agent_name}: 已追加 {depth_profile.name} 档分析契约"
-                        )
-                        # M2.2 工具预算：invoke_with_tools 缺省上限改按档位 tool_budget
-                        self._tool_budget = depth_profile.tool_budget
-                    else:
-                        self._tool_budget = None
-                except Exception as e:
-                    logger.warning(f"⚠️ [档位契约] 注入失败: {e}")
-
-                # 🕰️ 上期结论块注入（M5.2）：分析启动时由 UnifiedAnalysisEngine 查上期
-                # 结论快照写入 state["prev_conclusion_block"]，这里对研究/辩论/整合环节
-                # 追加为「对比基线」（用途是对比与增量聚焦，不让 agent 照抄上期结论），
-                # 白名单单点维护在 core/workflow/depth_profiles.PREV_SNAPSHOT_AGENTS。
-                try:
-                    from core.workflow.depth_profiles import PREV_SNAPSHOT_AGENTS
-
-                    if (
-                        prompt_type == "user"
-                        and agent_name in PREV_SNAPSHOT_AGENTS
-                        and state
-                    ):
-                        prev_block = state.get("prev_conclusion_block")
-                        if isinstance(prev_block, str) and prev_block.strip():
-                            prompt = prompt + "\n\n" + prev_block
-                            logger.info(f"🕰️ [上期结论注入] {agent_name}: 已追加上期结论对比基线")
-                except Exception as e:
-                    logger.warning(f"⚠️ [上期结论注入] 失败: {e}")
 
                 return prompt
             else:

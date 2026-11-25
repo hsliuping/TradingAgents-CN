@@ -23,8 +23,6 @@ export interface PositionItem {
   original_cost_price?: number | null
   /** 价格复权标注：null/undefined=前复权（默认），"none"=原始未复权 */
   price_adjust_type?: string | null
-  /** 仓位分层：底仓/波段仓（null=未分层，两层规则不互救） */
-  position_layer?: string | null
   current_price?: number
   market_value?: number
   unrealized_pnl?: number
@@ -62,8 +60,6 @@ export interface PositionCreatePayload {
   cost_price: number
   buy_date?: string
   notes?: string
-  /** 仓位分层：底仓/波段仓，留空为未分层 */
-  position_layer?: string | null
 }
 
 /** QMT 持仓覆盖同步请求 */
@@ -116,8 +112,6 @@ export interface PositionUpdatePayload {
   cost_price?: number
   buy_date?: string
   notes?: string
-  /** 仓位分层：底仓/波段仓；传空串清除标注 */
-  position_layer?: string | null
 }
 
 /** 行业分布 */
@@ -556,8 +550,6 @@ export interface PositionOperationPayload {
   new_cost_price?: number
   operation_date?: string
   notes?: string
-  /** 卖出归因标签（仅卖出/减仓时填写：波动高抛/逻辑变化/止损纪律/止盈达标/资金需求/调仓换股） */
-  exit_tag?: string | null
 }
 
 /** 持仓操作结果 */
@@ -648,8 +640,6 @@ export interface PositionChange {
   cash_change: number
   trade_price?: number
   realized_profit?: number
-  /** 卖出归因标签（仅卖出/减仓记录有值） */
-  exit_tag?: string | null
   description?: string
   trade_time?: string  // 交易时间（实际交易发生的时间，由用户手工录入）
   created_at: string   // 记录创建时间

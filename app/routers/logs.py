@@ -210,8 +210,8 @@ async def delete_log_file(
         logger.warning(f"🗑️ 用户 {current_user['username']} 删除日志文件: {filename}")
         
         service = get_log_export_service()
-        file_path = service.log_dir / filename
-        
+        file_path = service._resolve_and_validate(filename)
+
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="日志文件不存在")
         

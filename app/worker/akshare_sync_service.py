@@ -11,7 +11,6 @@ import pymongo
 from app.core.database import bind_loop_safe_mongo_db, get_mongo_db
 from app.services.historical_data_service import get_historical_data_service
 from app.services.news_data_service import get_news_data_service
-from app.services.stock_basic_schema import normalize_stock_basic_doc
 from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
 
 logger = logging.getLogger(__name__)
@@ -269,20 +268,6 @@ class AKShareSyncService:
                     # 🔥 确保 symbol 字段存在
                     if "symbol" not in basic_data:
                         basic_data["symbol"] = code6
-
-                    # 对齐统一 Schema（source/data_source 语义统一，code/symbol 规范化）
-                    try:
-                        basic_data["code"] = code6
-                        basic_data["source"] = "akshare"
-                        basic_data = normalize_stock_basic_doc(basic_data)
-                    except ValueError as e:
-                        batch_stats["error_count"] += 1
-                        batch_stats["errors"].append({
-                            "code": code,
-                            "error": f"基础信息不符合 Schema: {str(e)}",
-                            "context": "normalize_stock_basic_info"
-                        })
-                        continue
 
                     # 更新到数据库（使用 code + source 联合查询）
                     try:

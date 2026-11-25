@@ -203,64 +203,14 @@ _DEEP_AGENTS = {
     "risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2",
     # A9-P1: 风险自我辩论节点使用深度 LLM（单次调用承载三视角辩论）
     "risk_self_debate_v2",
-    # P2: 研究自我辩论节点使用深度 LLM（单次调用承载双视角多轮辩论）
-    "research_self_debate_v2",
     "index_analyst_v2", "sector_analyst_v2",
     "research_manager", "risk_manager",
-    # M2.3: 旧链路遗留裁决角色（原遗留适配器内联 deep 名单，收编为单一映射）
-    "risky_analyst", "safe_analyst", "neutral_analyst",
 }
 
-# 🎚️ M2.3 模型分层：profile.model_tier 值域（角色级细分即 _DEEP_AGENTS 映射）
-MODEL_TIER_QUICK = "quick"   # 全档快速模型（快速档追求速度）
-MODEL_TIER_MIXED = "mixed"   # 按角色映射：_DEEP_AGENTS 用 deep，其余 quick（现状行为）
-MODEL_TIER_DEEP = "deep"     # 全档深度模型（全面档追求质量）
 
-
-def resolve_model_tier(research_depth: Any) -> str:
-    """M2.3：research_depth → profile.model_tier；无档位上下文回退 mixed（保持原行为）。"""
-    if research_depth is None:
-        return MODEL_TIER_MIXED
-    from .depth_profiles import get_profile
-    return get_profile(research_depth).model_tier
-
-
-def _select_llm_type_for_agent(agent_id: str, model_tier: str = MODEL_TIER_MIXED) -> str:
-    """M2.3 模型分层：按档位 model_tier 决定该角色用 quick/deep 模型。
-
-    - quick 档：全部角色快速模型
-    - deep 档：全部角色深度模型
-    - mixed 档（默认/无档位上下文）：按角色映射 _DEEP_AGENTS，行为与分层前一致
-    """
+def _select_llm_type_for_agent(agent_id: str) -> str:
     normalized_agent_id = str(agent_id or "").strip()
-    if model_tier == MODEL_TIER_QUICK:
-        return "quick"
-    if model_tier == MODEL_TIER_DEEP:
-        return "deep"
     return "deep" if normalized_agent_id in _DEEP_AGENTS else "quick"
-
-
-# 管理者/裁决类节点超时下限（秒）
-# 这些节点要综合多份分析师报告与辩论历史，输出动辄数千字；非流式请求按整次
-# 总时长计时，DB 模型默认 timeout（常见 180s）在推理模型长思考时会被撞穿
-# （research_manager_v2 实测超时 → schema 校验失败 → 终裁默认回落）。
-# 仅在节点/执行配置未显式指定 timeout 时应用，显式配置始终优先。
-_AGENT_TIMEOUT_FLOORS = {
-    "research_manager_v2": {"quick": 360, "deep": 600},
-    "risk_manager_v2": {"quick": 360, "deep": 600},
-    "research_self_debate_v2": {"quick": 360, "deep": 600},
-    "risk_self_debate_v2": {"quick": 360, "deep": 600},
-}
-
-
-def _resolve_agent_timeout(agent_id: str, llm_type: str, configured: Optional[int]) -> Optional[int]:
-    """管理者类节点超时下限：未显式配置时补足生成时间，显式配置优先。"""
-    if configured is not None:
-        return configured
-    floors = _AGENT_TIMEOUT_FLOORS.get(str(agent_id or "").strip())
-    if not floors:
-        return None
-    return floors.get(llm_type)
 
 
 class LegacyDependencyProvider:
@@ -308,7 +258,6 @@ class LegacyDependencyProvider:
         temperature: Optional[float] = None,
         timeout: Optional[int] = None,
         max_tokens: Optional[int] = None,
-        reasoning_effort: Optional[str] = None,
     ):
         """
         获取 LLM 实例
@@ -318,26 +267,18 @@ class LegacyDependencyProvider:
             temperature: 可选，如果指定则创建新的 LLM 实例（用于 Agent 特定的温度配置）
             timeout: 可选，覆盖默认超时时间
             max_tokens: 可选，覆盖默认最大输出长度
-            reasoning_effort: 可选，节点级思考预算覆盖（none/minimal/.../max）
         """
         # 只要存在任一 Agent 级 LLM 覆盖，就创建独立实例
-        if (
-            temperature is not None
-            or timeout is not None
-            or max_tokens is not None
-            or reasoning_effort
-        ):
+        if temperature is not None or timeout is not None or max_tokens is not None:
             logger.info(
                 f"[依赖提供者] 创建自定义 LLM: type={llm_type}, "
-                f"temperature={temperature}, timeout={timeout}, max_tokens={max_tokens}, "
-                f"reasoning_effort={reasoning_effort}"
+                f"temperature={temperature}, timeout={timeout}, max_tokens={max_tokens}"
             )
             return self._create_custom_llm(
                 llm_type,
                 temperature=temperature,
                 timeout=timeout,
                 max_tokens=max_tokens,
-                reasoning_effort=reasoning_effort,
             )
         
         # 🔥 每次调用时都检查配置是否变化，如果变化则重新创建 LLM 实例
@@ -400,10 +341,6 @@ class LegacyDependencyProvider:
                 if not deep_model:
                     deep_model = db_default.get("deep_think_llm", "qwen-plus")
                 logger.info(f"[依赖提供者] 使用数据库默认配置补充: quick_model={quick_model}, deep_model={deep_model}")
-
-        # 🎚️ M2.3 缺省回退：用户未配 quick/deep 双模型时全档回退同一模型（模型分层不生效）
-        if quick_model == deep_model:
-            logger.info(f"💡 [模型分层] 用户未配置 quick/deep 双模型，全档回退同一模型: {quick_model}")
 
         # 根据模型名称从数据库获取完整配置（provider, url, api_key）
         # 复用 simple_analysis_service 中已有的统一查询函数
@@ -509,7 +446,6 @@ class LegacyDependencyProvider:
         temperature: Optional[float] = None,
         timeout: Optional[int] = None,
         max_tokens: Optional[int] = None,
-        reasoning_effort: Optional[str] = None,
     ):
         """
         创建带 Agent 级覆盖参数的 LLM 实例。
@@ -519,7 +455,6 @@ class LegacyDependencyProvider:
             temperature: 温度参数
             timeout: 超时参数
             max_tokens: 最大输出长度
-            reasoning_effort: 节点级思考预算覆盖（优先级最高）
 
         Returns:
             LLM 实例
@@ -562,20 +497,12 @@ class LegacyDependencyProvider:
             else self._config.get(f"{llm_type}_timeout") or db_cfg.get("timeout", 60 if llm_type == "quick" else 120)
         )
 
-        # 🧠 A1b: reasoning_effort 合并（节点/Agent 显式 > DB 显式 > 档位默认；quick 降两档）
-        # 节点级覆盖来自 _create_agent_node（工作流节点/Agent 配置或角色默认表）
+        # 🧠 A1b: reasoning_effort 合并（DB 显式配置 > 档位默认；仅火山方舟注入；quick 降两档）
         from tradingagents.graph.trading_graph import _lower_reasoning_effort
-        resolved_effort = reasoning_effort or db_cfg.get("reasoning_effort")
+        resolved_effort = db_cfg.get("reasoning_effort")
         _depth_effort = self._config.get("depth_reasoning_effort")
-        _provider_key = str(provider or "").lower()
-        if _depth_effort and not resolved_effort and _provider_key in ("volcengine", "volcengine_coding"):
+        if _depth_effort and not resolved_effort and str(provider or "").lower() == "volcengine":
             resolved_effort = _lower_reasoning_effort(_depth_effort) if llm_type == "quick" else _depth_effort
-        # 仅火山方舟推理模型支持 reasoning_effort，其它厂家注入会被拒（400）
-        if resolved_effort and _provider_key not in ("volcengine", "volcengine_coding"):
-            logger.info(
-                f"[依赖提供者] provider={provider} 不支持 reasoning_effort，忽略节点思考预算 {resolved_effort}"
-            )
-            resolved_effort = None
 
         logger.info(
             f"[依赖提供者] 创建自定义 LLM: type={llm_type}, model={model}, "
@@ -1029,16 +956,6 @@ class WorkflowBuilder:
         self.default_config = default_config or AgentConfig()
         self.llm_override = llm_override
 
-        # 🎚️ M2.3 模型分层：从 legacy_config 的 research_depth 解析档位 model_tier
-        # （quick=全快速 / mixed=按角色映射 / deep=全深度；无档位上下文回退 mixed）
-        _research_depth = (legacy_config or {}).get("research_depth")
-        self._model_tier = resolve_model_tier(_research_depth)
-        if _research_depth is not None:
-            logger.info(
-                f"🎚️ [模型分层] research_depth={_research_depth} → model_tier={self._model_tier}"
-                "（quick=全快速/mixed=按角色/deep=全深度）"
-            )
-
         # BindingManager 用于动态工具绑定
         self.binding_manager = binding_manager or BindingManager()
 
@@ -1119,7 +1036,6 @@ class WorkflowBuilder:
         self,
         definition: WorkflowDefinition,
         state_schema: Optional[type] = None,
-        checkpointer: Optional[Any] = None,
     ):
         """
         构建 LangGraph 图
@@ -1127,8 +1043,6 @@ class WorkflowBuilder:
         Args:
             definition: 工作流定义
             state_schema: 状态模式 (默认使用通用字典)
-            checkpointer: 可选的 LangGraph checkpointer（v4.0 断点续跑；
-                None 时裸编译，行为与历史版本一致）
 
         Returns:
             编译后的 LangGraph
@@ -1260,39 +1174,14 @@ class WorkflowBuilder:
                     f"[图构建] ⚠️ 并行开局节点创建失败，回退原串行路径: {e}"
                 )
 
-        # P2: 为投资辩论（非风险）添加隐藏的研究自我辩论单节点
-        # 仅当运行时 state["_research_self_debate"]=True（深度/全面档且开关开启）时被路由到，
-        # 单节点内完成双视角多轮对抗，替代多 agent 轮循；默认走原并行开局 → 轮循路径。
-        research_self_debate_nodes: Set[str] = set()
-        for debate_id, debate_config in debate_configs.items():
-            if "risk" in debate_id.lower():
-                continue  # 风险辩论由 A9-P1 自我辩论节点接管
-            if len(debate_config["participants"]) < 2:
-                continue  # 单参与者无需双方辩论
-            rsd_node_id = f"{debate_id}_self_debate"
-            try:
-                graph.add_node(
-                    rsd_node_id,
-                    self._create_research_self_debate_node_func(debate_id),
-                )
-                research_self_debate_nodes.add(rsd_node_id)
-                logger.info(f"[图构建] ✅ 添加研究自我辩论节点: {rsd_node_id} (P2)")
-            except Exception as e:
-                logger.warning(
-                    f"[图构建] ⚠️ 研究自我辩论节点创建失败，回退原辩论路径: {e}"
-                )
-
         # 添加边（使用过滤后的定义）
         self._add_edges(
             graph, filtered_definition, debate_configs, analyst_nodes_info,
             risk_self_debate_nodes=risk_self_debate_nodes,
             parallel_opening_nodes=parallel_opening_nodes,
-            research_self_debate_nodes=research_self_debate_nodes,
         )
 
-        # 编译（v4.0 T1：checkpointer 存在时挂载，支持断点续跑）
-        if checkpointer is not None:
-            return graph.compile(checkpointer=checkpointer)
+        # 编译
         return graph.compile()
 
     def _filter_analyst_nodes(self, definition: WorkflowDefinition) -> WorkflowDefinition:
@@ -1593,7 +1482,7 @@ class WorkflowBuilder:
         from typing_extensions import TypedDict
         from langgraph.graph import MessagesState
         import operator
-        from core.state.reducers import keep_non_empty, keep_latest_bool, merge_dict, keep_latest_list
+        from core.state.reducers import keep_non_empty, merge_dict, keep_latest_list
 
         class WorkflowState(MessagesState):
             # 基本信息
@@ -1606,12 +1495,6 @@ class WorkflowBuilder:
             company_name: Annotated[str, keep_non_empty]
             industry: Annotated[str, keep_non_empty]
             current_price: Annotated[str, keep_non_empty]
-            # 价格口径标注：分析基准价日期/来源、盘中快照（避免不同 agent 混用价格口径）
-            current_price_date: Annotated[str, keep_non_empty]
-            current_price_source: Annotated[str, keep_non_empty]
-            current_price_note: Annotated[str, keep_non_empty]
-            current_price_intraday: Annotated[str, keep_non_empty]
-            current_price_intraday_date: Annotated[str, keep_non_empty]
             market_name: Annotated[str, keep_non_empty]
             currency_name: Annotated[str, keep_non_empty]
             currency_symbol: Annotated[str, keep_non_empty]
@@ -1660,11 +1543,6 @@ class WorkflowBuilder:
             investment_debate_state: Annotated[dict, merge_dict]
             risk_debate_state: Annotated[dict, merge_dict]
 
-            # v4.0 流程五段闭环：事前风险约束卡（risk_profile_v2 产出，确定性节点）
-            risk_profile_card: Annotated[dict, merge_dict]
-            # v4.0 流程五段闭环：情景效果试算（scenario_simulator_v2 产出，确定性节点）
-            scenario_simulation: Annotated[dict, merge_dict]
-
             # 辩论计数 - 注意使用 operator.add 来处理并发更新
             _debate_debate_count: Annotated[int, operator.add]
             _debate_risk_debate_count: Annotated[int, operator.add]
@@ -1674,9 +1552,9 @@ class WorkflowBuilder:
             _max_risk_rounds: Annotated[int, keep_non_empty]
 
             # A9-P1: 风险自我辩论开关（True=深度/全面档走单节点自我辩论路径，
-            # False/缺省=走原风险三角多 agent 辩论路径）。布尔字段必须取最新值，
-            # keep_non_empty 会把 False 当空值丢弃（开关一旦 True 无法关闭）。
-            _risk_self_debate: Annotated[bool, keep_latest_bool]
+            # False/缺省=走原风险三角多 agent 辩论路径）。keep_non_empty 保证
+            # 一旦注入 True 不会被并行节点的空返回覆盖。
+            _risk_self_debate: Annotated[bool, keep_non_empty]
 
             # 分析师独立消息历史（避免并行执行时消息混乱）
             # 注意：这些字段用于工具调用循环，每个分析师使用自己的消息历史
@@ -1712,21 +1590,13 @@ class WorkflowBuilder:
 
             # 🆕 调试和上下文相关字段
             context: Annotated[Any, keep_non_empty]  # AgentContext 对象
-            skip_cache: Annotated[bool, keep_latest_bool]  # 是否跳过缓存
+            skip_cache: Annotated[bool, keep_non_empty]  # 是否跳过缓存
             prompt_overrides: Annotated[dict, merge_dict]  # 提示词覆盖
 
             # 🆕 外部事实记忆注入（智能助手联网提取的事实，带采集日期与来源）
             # 由 UnifiedAnalysisEngine 在启动时按 ticker 查询写入，仅辩论环节
             # （bull/bear）与风险评估环节（risk_manager）消费，其他环节不受影响
             memory_facts_summary: Annotated[str, keep_non_empty]
-
-            # 🕰️ M5.2 上期结论块（结论快照对比基线）：由 UnifiedAnalysisEngine 启动时
-            # 查上期快照写入，core/agents/base.py 注入研究/辩论/整合环节（白名单见
-            # core/workflow/depth_profiles.PREV_SNAPSHOT_AGENTS），其他环节不受影响
-            prev_conclusion_block: Annotated[str, keep_non_empty]
-
-            # R3：降级节点错误记录（merge_dict 合并，避免后节点覆盖前节点的降级记录）
-            _node_errors: Annotated[dict, merge_dict]
 
         # 🔥 动态注入工坊 Agent 的 output_field 到 State schema
         # LangGraph 的 StateGraph 只会保留 schema 中声明的字段，未声明的字段会被丢弃
@@ -1835,43 +1705,25 @@ class WorkflowBuilder:
                 logger.warning(f"[智能体创建] ⚠️ 未找到任何工具绑定: {agent_id}")
 
             # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
-            # 🎚️ M2.3 模型分层：按档位 model_tier 调整（quick 全快 / deep 全深 / mixed 按角色）
-            llm_type = _select_llm_type_for_agent(agent_id, self._model_tier)
+            llm_type = _select_llm_type_for_agent(agent_id)
             agent_temperature = node_config_clean.get("temperature", execution_config_clean.get("temperature"))
-            agent_timeout = _resolve_agent_timeout(
-                agent_id,
-                llm_type,
-                node_config_clean.get("timeout", execution_config_clean.get("timeout")),
-            )
+            agent_timeout = node_config_clean.get("timeout", execution_config_clean.get("timeout"))
             agent_max_tokens = node_config_clean.get("max_tokens", execution_config_clean.get("max_tokens"))
-            # 🧠 节点级思考预算：节点/Agent 显式配置优先，否则按角色默认表
-            agent_reasoning_effort = (
-                node_config_clean.get("reasoning_effort")
-                or execution_config_clean.get("reasoning_effort")
-            )
-            if not agent_reasoning_effort:
-                from core.workflow.depth_profiles import resolve_agent_reasoning_effort
-                agent_reasoning_effort = resolve_agent_reasoning_effort(agent_id)
 
             if self.llm_override:
                 llm = self.llm_override
-            elif any(
-                value is not None
-                for value in (agent_temperature, agent_timeout, agent_max_tokens, agent_reasoning_effort)
-            ):
+            elif any(value is not None for value in (agent_temperature, agent_timeout, agent_max_tokens)):
                 llm = self._legacy_provider.get_llm(
                     llm_type,
                     temperature=agent_temperature,
                     timeout=agent_timeout,
                     max_tokens=agent_max_tokens,
-                    reasoning_effort=agent_reasoning_effort,
                 )
             else:
                 llm = self._legacy_provider.get_llm(llm_type)
             logger.debug(
                 f"[智能体创建] LLM: type={llm_type}, temp={agent_temperature}, "
-                f"timeout={agent_timeout}, max_tokens={agent_max_tokens}, "
-                f"reasoning_effort={agent_reasoning_effort}"
+                f"timeout={agent_timeout}, max_tokens={agent_max_tokens}"
             )
 
             agent_memory = None
@@ -2477,10 +2329,15 @@ class WorkflowBuilder:
             factory_func = getattr(module, func_name)
 
             # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
-            # 🎚️ M2.3 收编：复用 _select_llm_type_for_agent 角色映射 + 档位 model_tier
-            # （管理者=整合/裁决、风险分析师=裁决用深度模型；quick/deep 档可整体升降级）
-            llm_type = _select_llm_type_for_agent(agent_id, self._model_tier)
-            if llm_type == "deep":
+            # 使用深度模型的 Agent：
+            # 1. 管理者（research_manager, risk_manager）- 需要综合大量信息做决策
+            # 2. 风险分析师（risky/safe/neutral_analyst）- 需要处理大量分析报告
+            llm_type = "quick"  # 默认使用快速模型
+            if agent_id in [
+                "research_manager", "risk_manager",  # 管理者
+                "risky_analyst", "safe_analyst", "neutral_analyst"  # 旧版风险分析师
+            ]:
+                llm_type = "deep"  # 使用深度模型
                 logger.info(f"[遗留适配器] 🔧 {agent_id} 使用深度分析模型 (deep_think_llm)")
             else:
                 logger.info(f"[遗留适配器] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")
@@ -2488,11 +2345,7 @@ class WorkflowBuilder:
             # 🔥 获取 Agent 配置的 temperature（如果存在）
             # 注意：遗留适配器创建的 Agent 可能没有从数据库加载配置
             # 这里暂时使用默认 LLM，后续可以考虑改进
-            from core.workflow.depth_profiles import resolve_agent_reasoning_effort
-            llm = self._legacy_provider.get_llm(
-                llm_type,
-                reasoning_effort=resolve_agent_reasoning_effort(agent_id),
-            )
+            llm = self._legacy_provider.get_llm(llm_type)
 
             # 根据依赖类型获取第二个参数
             if dep_type == "toolkit":
@@ -2751,24 +2604,6 @@ class WorkflowBuilder:
         )
         return self._create_agent_node(node)
 
-    def _create_research_self_debate_node_func(self, debate_id: str) -> Callable:
-        """P2: 创建研究自我辩论节点函数（单节点替代双研究员多轮辩论）。
-
-        与 A9-P1 风险自我辩论同一模式：构造合成 NodeDefinition 复用
-        _create_agent_node 的完整创建链，agent 实现为
-        core/agents/adapters/research_self_debate_v2.py。
-        """
-        node = NodeDefinition(
-            id=f"{debate_id}_self_debate",
-            type=NodeType.DEBATE,
-            agent_id="research_self_debate_v2",
-            label="研究双视角自我辩论",
-            config={
-                "description": "单节点内完成乐观/审慎双视角多轮质证并输出两份定稿（P2 深度档路径）",
-            },
-        )
-        return self._create_agent_node(node)
-
     def _create_manager_with_debate_reflection(
         self,
         node: NodeDefinition,
@@ -2822,7 +2657,6 @@ class WorkflowBuilder:
         analyst_nodes_info: Optional[Dict[str, str]] = None,
         risk_self_debate_nodes: Optional[Set[str]] = None,
         parallel_opening_nodes: Optional[Set[str]] = None,
-        research_self_debate_nodes: Optional[Set[str]] = None,
     ) -> None:
         """
         添加边到图
@@ -2855,53 +2689,6 @@ class WorkflowBuilder:
             strategy = str(config.get("strategy") or config.get("merge_strategy") or "wait_all").strip().lower()
             return strategy in {"", "wait_all", "wait-all", "all"}
 
-        def wire_parallel_opening_exit(
-            po_node_id: str,
-            debate_config: Dict[str, Any],
-            participants: List[str],
-        ) -> None:
-            """A3: 并行开局节点出口接线（A3 分支与 P2 分支共用，防止重复代码）。
-
-            并行开局 → 条件路由（复用轮循语义）：
-            count >= rounds × 参与者数 → next_node（如风险约束卡/研究经理）
-            否则 → participants[count % N] 继续对抗辩论（原参与者条件边接管后续）
-            """
-            _po_max_rounds = int(debate_config["rounds"]) if debate_config["rounds"] else 1
-            _po_debate_key = debate_config["debate_key"]
-            _po_next_node = debate_config["next_node"]
-            _po_num_participants = len(participants)
-            _po_participants = list(participants)
-
-            def opening_exit_router(
-                state,
-                _debate_key=_po_debate_key,
-                _max_rounds=_po_max_rounds,
-                _next_node=_po_next_node,
-                _num_participants=_po_num_participants,
-                _participants=_po_participants,
-            ):
-                count = state.get(_debate_key, 0)
-                dynamic_rounds = state.get("_max_debate_rounds", _max_rounds)
-                max_count = dynamic_rounds * _num_participants
-                if count >= max_count:
-                    logger.info(
-                        f"[A3] 并行开局路由: count={count} >= {max_count} "
-                        f"-> {_next_node or 'END'} (辩论结束)"
-                    )
-                    return _next_node if _next_node else END
-                target = _participants[count % _num_participants]
-                logger.info(
-                    f"[A3] 并行开局路由: count={count} -> {target} (继续辩论)"
-                )
-                return target
-
-            _po_exit_targets = list(participants)
-            if _po_next_node and _po_next_node not in _po_exit_targets:
-                _po_exit_targets.append(_po_next_node)
-            graph.add_conditional_edges(
-                po_node_id, opening_exit_router, _po_exit_targets
-            )
-
         if debate_configs is None:
             debate_configs = self._identify_debate_configs(definition)
 
@@ -2913,9 +2700,6 @@ class WorkflowBuilder:
 
         if parallel_opening_nodes is None:
             parallel_opening_nodes = set()
-
-        if research_self_debate_nodes is None:
-            research_self_debate_nodes = set()
 
         # 收集所有辩论参与者
         all_participants: Set[str] = set()
@@ -2957,171 +2741,98 @@ class WorkflowBuilder:
                 added_edges.add((debate_id, participants[0]))
                 added_edges.add((debate_id, self_debate_node_id))
 
-                # 自我辩论节点出口条件路由：
-                # _risk_self_debate_failed=True（机械校验两次未过）→ 回退 participants[0]，
-                # 走原风险三角路径；否则 → 辩论后的下一节点（如 risk_manager）
+                # 自我辩论节点 → 辩论后的下一节点（如 risk_manager）
                 next_node = config["next_node"]
-                next_node_def = definition.get_node(next_node) if next_node else None
-                is_merge_barrier = bool(
-                    next_node_def
-                    and next_node_def.type == NodeType.MERGE
-                    and merge_waits_all(next_node_def)
-                )
-                if is_merge_barrier:
-                    # 合并屏障场景：保持 barrier 边（wait_all 语义），不做条件回退
-                    add_merge_predecessor(next_node, self_debate_node_id)
+                if next_node:
+                    next_node_def = definition.get_node(next_node)
+                    if (
+                        next_node_def
+                        and next_node_def.type == NodeType.MERGE
+                        and merge_waits_all(next_node_def)
+                    ):
+                        add_merge_predecessor(next_node, self_debate_node_id)
+                    else:
+                        graph.add_edge(self_debate_node_id, next_node)
                     added_edges.add((self_debate_node_id, next_node))
                 else:
-                    risk_success_target = next_node or END
-
-                    def risk_self_exit_router(
-                        state,
-                        _first_participant=participants[0],
-                        _success=risk_success_target,
-                        _self_debate_node=self_debate_node_id,
-                    ):
-                        if state.get("_risk_self_debate_failed"):
-                            logger.warning(
-                                f"[A9-P1] 风险自我辩论校验失败，回退原风险三角路径: "
-                                f"{_self_debate_node} -> {_first_participant}"
-                            )
-                            return _first_participant
-                        return _success
-
-                    graph.add_conditional_edges(
-                        self_debate_node_id,
-                        risk_self_exit_router,
-                        [risk_success_target, participants[0]],
-                    )
-                    added_edges.add((self_debate_node_id, risk_success_target))
+                    graph.add_edge(self_debate_node_id, END)
                 logger.info(
                     f"[A9-P1] 风险辩论入口条件路由: {debate_id} -> "
                     f"[{participants[0]}(原路径), {self_debate_node_id}(自我辩论)]"
                 )
             else:
-                # P2: 投资辩论入口优先判断研究自我辩论
-                # state["_research_self_debate"]=True → 单节点双视角多轮辩论（深度/全面档）
-                rsd_node_id = f"{debate_id}_self_debate"
-                if rsd_node_id in research_self_debate_nodes:
-                    # A3 并行开局与 P2 自我辩论共存：入口三路路由
-                    # 深度/全面 → 自我辩论节点；其余档位且 _parallel_opening → 并行开局；
-                    # 都不满足 → 原串行路径（第一个参与者）
-                    po_node_id = f"{debate_id}_parallel_opening"
-                    _p2_has_po = po_node_id in parallel_opening_nodes
-
-                    def research_self_router(
+                # A3: 投资辩论入口条件路由
+                # state["_parallel_opening"]=True → 并行开局节点（第一轮并行出简报）
+                # 否则 → 原串行路径（辩论节点 → 第一个参与者）
+                po_node_id = f"{debate_id}_parallel_opening"
+                if po_node_id in parallel_opening_nodes:
+                    def opening_entry_router(
                         state,
                         _first_participant=participants[0],
-                        _rsd_node=rsd_node_id,
-                        _po_node=po_node_id if _p2_has_po else None,
+                        _po_node=po_node_id,
                         _debate_id=debate_id,
                     ):
-                        if state.get("_research_self_debate"):
-                            logger.info(
-                                f"[P2] 研究自我辩论已启用: {_debate_id} -> {_rsd_node}"
-                            )
-                            return _rsd_node
-                        if _po_node and state.get("_parallel_opening"):
+                        if state.get("_parallel_opening"):
                             logger.info(
                                 f"[A3] 投资辩论并行开局已启用: {_debate_id} -> {_po_node}"
                             )
                             return _po_node
                         return _first_participant
 
-                    _p2_entry_targets = [participants[0], rsd_node_id]
-                    if _p2_has_po:
-                        _p2_entry_targets.append(po_node_id)
                     graph.add_conditional_edges(
                         debate_id,
-                        research_self_router,
-                        _p2_entry_targets,
+                        opening_entry_router,
+                        [participants[0], po_node_id],
                     )
                     added_edges.add((debate_id, participants[0]))
-                    added_edges.add((debate_id, rsd_node_id))
-                    if _p2_has_po:
-                        added_edges.add((debate_id, po_node_id))
-                        # 并行开局出口（与 A3 分支共用接线，修复 P2 挂载后
-                        # 并行开局节点被孤儿化、低档位静默退回串行的问题）
-                        wire_parallel_opening_exit(po_node_id, config, participants)
+                    added_edges.add((debate_id, po_node_id))
 
-                    # 自我辩论节点出口条件路由：
-                    # _self_debate_failed=True（机械校验两次未过）→ 回退 participants[0]，
-                    # 走原双研究员轮循路径；否则 → 辩论后的下一节点（如 research_manager_v2）
-                    next_node = config["next_node"]
-                    next_node_def = definition.get_node(next_node) if next_node else None
-                    is_merge_barrier = bool(
-                        next_node_def
-                        and next_node_def.type == NodeType.MERGE
-                        and merge_waits_all(next_node_def)
-                    )
-                    if is_merge_barrier:
-                        # 合并屏障场景：保持 barrier 边（wait_all 语义），不做条件回退
-                        add_merge_predecessor(next_node, rsd_node_id)
-                        added_edges.add((rsd_node_id, next_node))
-                    else:
-                        rsd_success_target = next_node or END
+                    # 并行开局 → 条件路由（复用轮循语义）：
+                    # count >= rounds × 参与者数 → next_node（如 research_manager）
+                    # 否则 → participants[count % N] 继续对抗辩论（原参与者条件边接管后续）
+                    _po_max_rounds = int(config["rounds"]) if config["rounds"] else 1
+                    _po_debate_key = config["debate_key"]
+                    _po_next_node = config["next_node"]
+                    _po_num_participants = len(participants)
+                    _po_participants = list(participants)
 
-                        def rsd_exit_router(
-                            state,
-                            _first_participant=participants[0],
-                            _success=rsd_success_target,
-                            _rsd_node=rsd_node_id,
-                        ):
-                            if state.get("_self_debate_failed"):
-                                logger.warning(
-                                    f"[P2] 研究自我辩论校验失败，回退原辩论路径: "
-                                    f"{_rsd_node} -> {_first_participant}"
-                                )
-                                return _first_participant
-                            return _success
-
-                        graph.add_conditional_edges(
-                            rsd_node_id,
-                            rsd_exit_router,
-                            [rsd_success_target, participants[0]],
+                    def opening_exit_router(
+                        state,
+                        _debate_key=_po_debate_key,
+                        _max_rounds=_po_max_rounds,
+                        _next_node=_po_next_node,
+                        _num_participants=_po_num_participants,
+                        _participants=_po_participants,
+                    ):
+                        count = state.get(_debate_key, 0)
+                        dynamic_rounds = state.get("_max_debate_rounds", _max_rounds)
+                        max_count = dynamic_rounds * _num_participants
+                        if count >= max_count:
+                            logger.info(
+                                f"[A3] 并行开局路由: count={count} >= {max_count} "
+                                f"-> {_next_node or 'END'} (辩论结束)"
+                            )
+                            return _next_node if _next_node else END
+                        target = _participants[count % _num_participants]
+                        logger.info(
+                            f"[A3] 并行开局路由: count={count} -> {target} (继续辩论)"
                         )
-                        added_edges.add((rsd_node_id, rsd_success_target))
+                        return target
+
+                    _po_exit_targets = list(participants)
+                    if _po_next_node and _po_next_node not in _po_exit_targets:
+                        _po_exit_targets.append(_po_next_node)
+                    graph.add_conditional_edges(
+                        po_node_id, opening_exit_router, _po_exit_targets
+                    )
                     logger.info(
-                        f"[P2] 投资辩论入口条件路由: {debate_id} -> "
-                        f"[{participants[0]}(原路径), {rsd_node_id}(研究自我辩论)]"
+                        f"[A3] 投资辩论入口条件路由: {debate_id} -> "
+                        f"[{participants[0]}(原路径), {po_node_id}(并行开局)]"
                     )
                 else:
-                    # A3: 投资辩论入口条件路由
-                    # state["_parallel_opening"]=True → 并行开局节点（第一轮并行出简报）
-                    # 否则 → 原串行路径（辩论节点 → 第一个参与者）
-                    po_node_id = f"{debate_id}_parallel_opening"
-                    if po_node_id in parallel_opening_nodes:
-                        def opening_entry_router(
-                            state,
-                            _first_participant=participants[0],
-                            _po_node=po_node_id,
-                            _debate_id=debate_id,
-                        ):
-                            if state.get("_parallel_opening"):
-                                logger.info(
-                                    f"[A3] 投资辩论并行开局已启用: {_debate_id} -> {_po_node}"
-                                )
-                                return _po_node
-                            return _first_participant
-
-                        graph.add_conditional_edges(
-                            debate_id,
-                            opening_entry_router,
-                            [participants[0], po_node_id],
-                        )
-                        added_edges.add((debate_id, participants[0]))
-                        added_edges.add((debate_id, po_node_id))
-
-                        # 并行开局出口（共用接线函数）
-                        wire_parallel_opening_exit(po_node_id, config, participants)
-                        logger.info(
-                            f"[A3] 投资辩论入口条件路由: {debate_id} -> "
-                            f"[{participants[0]}(原路径), {po_node_id}(并行开局)]"
-                        )
-                    else:
-                        # 辩论节点 → 第一个参与者（原路径）
-                        graph.add_edge(debate_id, participants[0])
-                        added_edges.add((debate_id, participants[0]))
+                    # 辩论节点 → 第一个参与者（原路径）
+                    graph.add_edge(debate_id, participants[0])
+                    added_edges.add((debate_id, participants[0]))
 
             # 为每个参与者添加条件边（原逻辑保留，自我辩论路径不会经过）
             for i, participant in enumerate(participants):
@@ -3200,10 +2911,6 @@ class WorkflowBuilder:
                 graph.add_edge(edge.source, END)
             elif edge.type == EdgeType.CONDITIONAL:
                 self._add_conditional_edge(graph, edge, definition)
-                # 条件路由一次性汇总同源全部出边（route 遍历 get_edges_from），
-                # 后续同源条件边跳过，避免重复挂载条件路由（M3 门控节点多条件出边）
-                for e in definition.get_edges_from(edge.source):
-                    added_edges.add((e.source, e.target))
             elif target_node.type == NodeType.MERGE and merge_waits_all(target_node):
                 add_merge_predecessor(edge.target, edge.source)
             else:

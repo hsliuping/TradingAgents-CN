@@ -1,11 +1,6 @@
 from types import SimpleNamespace
 
-from core.workflow.builder import (
-    MODEL_TIER_MIXED,
-    LegacyDependencyProvider,
-    WorkflowBuilder,
-    _select_llm_type_for_agent,
-)
+from core.workflow.builder import LegacyDependencyProvider, WorkflowBuilder, _select_llm_type_for_agent
 
 
 def test_index_and_sector_v2_agents_use_deep_llm() -> None:
@@ -85,8 +80,6 @@ def test_workflow_builder_passes_agent_llm_overrides(monkeypatch) -> None:
     builder.llm_override = None
     builder._agents = {}
     builder._workflow_id = "wf-test"
-    # M2.3 模型分层：__new__ 快捷构造绕过 __init__，需补档位 tier（mixed=原行为）
-    builder._model_tier = MODEL_TIER_MIXED
     builder._has_agent_config_in_db = lambda agent_id: False
     builder._ensure_workflow_surface_access = lambda agent_id, db_agent_config=None: None
     builder._resolve_agent_output_field = lambda *args, **kwargs: None

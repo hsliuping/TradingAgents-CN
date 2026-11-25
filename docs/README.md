@@ -22,16 +22,12 @@
 
 ### 完整使用手册
 
-- [v4.0 操作手册（4.0.0-beta.1）](./02-user-guide/user-manual-v4.0.md) ⭐ 当前版本：三档深度 / 方法论板块 / 五行业工作台为核心章
-- [v3.0 完整使用手册（标准版）](./02-user-guide/user-manual-v3.0.md)（前代版本）
+- [v3.0 完整使用手册（标准版）](./02-user-guide/user-manual-v3.0.md)
 - [v3.0 京东云合作版使用手册](./02-user-guide/jdyun-user-manual-v3.0.md) ⭐ 京东云版用户专用
 
 ### 新用户入门
-0. [v4.0 系统介绍（产品宣传）](./01-product/v4.0-system-introduction.md) ⭐ 盈亏双轨产品论点、三档研究漏斗、价值层三件、减损侧六机制、行业工作台矩阵
-   - [v3.0 系统介绍（技术文档版）](./01-product/v3.0-system-introduction.md)
+0. [v3.0 系统介绍（技术文档版）](./01-product/v3.0-system-introduction.md)
    - [v3.0 系统介绍（公众号传播版）](./01-product/v3.0-system-introduction-for-wechat.md)
-   - [专业版（Expert Edition）产品定位](./01-product/expert-edition-positioning.md) ⭐ 四层产品矩阵（社区/Pro/专业/京东云）、专业版功能边界与授权决策、传播计划绑 roadmap 波次
-   - [Pro 版 vs 专业版对比页](./01-product/comparison/pro-vs-expert.md) 面向存量用户的升级转化，功能口径以专业版定位文档为唯一依据
 1. [快速开始](./02-user-guide/getting-started/quick-start.md)
 2. [安装指南](./02-user-guide/getting-started/installation.md)
 3. [Docker 安装使用指南](./02-user-guide/getting-started/docker-installation-guide.md)
@@ -45,13 +41,6 @@
 - [持仓分析](./02-user-guide/features/portfolio-analysis.md)
 - [定时分析](./02-user-guide/features/scheduled-analysis.md)
 - [报告导出](./02-user-guide/features/report-export.md)
-- **行业研究工作台 · 怎么看**（每个行业看什么 / 口径 / 验证逻辑）
-  - [总索引与统一约定](./02-user-guide/industry-workbenches/README.md)
-  - [猪周期怎么看](./02-user-guide/industry-workbenches/pig-cycle.md)
-  - [保险怎么看](./02-user-guide/industry-workbenches/insurance.md)
-  - [电池怎么看](./02-user-guide/industry-workbenches/battery.md)
-  - [汽车怎么看](./02-user-guide/industry-workbenches/auto.md)
-  - [银行怎么看](./02-user-guide/industry-workbenches/bank.md)
 
 ### 进阶功能
 - [Agent 工坊](./02-user-guide/advanced/prompt-management.md)
@@ -65,7 +54,6 @@
 - [API 文档](./03-development/api/)
 - [开发流程](./03-development/workflow/development-workflow.md)
 - [分支策略](./03-development/workflow/branch-guide.md)
-- [Git 分支状态与关系](./03-development/workflow/git-branch-status.md) ⭐ 活跃分支关系图、v4.0 双线交替策略（升级线/行业内容线）、合流去向与归档清单
 - [京东云对接指南](./03-development/guides/jdyun-integration-guide.md) ⭐ 京东云工程师专用
 
 ### 运维部署
@@ -82,23 +70,9 @@
   - [估值测算 Excel 交付物设计（声明式交付物）](./05-design/v3.0/valuation-excel-deliverable-design.md)
   - [智能助手质量架构重构设计（A11）](./05-design/v3.0/assistant-quality-architecture-refactor.md) ⭐ 统一质量出口/证据集/路径注册表，终结"发现一个修一个"模式
 - **[v4.0（下一版本）](./05-design/v4.0/)** - 下一版本规划
-  - [v4.0 总设计：从分析工具到行业研究系统](./05-design/v4.0/v4.0-master-plan.md) ⭐ 纲领文档：产品+技术差距总表（P1-P6/T1-T6）、分析流程 9 点优化、LangGraph 能力启用、三波落地路径
-  - [v4.0 主线进度追踪（执行台账）](./05-design/v4.0/v4.0-progress-tracker.md) 各任务完成状态、commit 证据与剩余缺口的唯一事实源；每完成一项工作必须同步更新
   - [现状与远期目标映射（基准文档）](./05-design/v4.0/current-state-and-vision-mapping.md) ⭐ 三层架构定位、代码现状盘点、目标修订记录（R1-R8）与四泳道统一路线图
-  - [数据口径管理规范](./05-design/v4.0/data-conventions.md) ⭐ 猪周期信源分层（官方/人工参考/推算/日频）、使用场景与校验规则的唯一权威
-  - [行业研究工作台功能基线（PRD）](./05-design/v4.0/industry-workbench-baseline.md) ⭐ 五层功能模型与 P0 验收清单：新行业工作台（数据页签/治理页/我的研究/我的资料）上线必查，终结"建完才发现缺研究功能"
-  - [行业工作台统一框架与跨系统集成规范](./05-design/v4.0/industry-workbench-integration-spec.md) ⭐ P0 七项之外的 6 类跨系统集成（智能助手工具/个股摘要卡/工作台互引/持仓复盘/持仓分析/治理页）：新行业上线完整交付边界 + S0-S6 接入流程与检查清单
-  - [行业工作台全行业覆盖排期](./05-design/v4.0/industry-roadmap.md) 两周一行业、一年 26 slot 的全行业排期：20 个新行业分四波次（新能源/地产基建/科技消费/金融）、观察池与 M0/P0 双门禁
-  - [行业工作台传导关系登记设计](./05-design/v4.0/transmission-registry.md) 政策冲击跨行业传导结构化：传导边（方向/变量/时滞）登记 + 政策事件映射 + 链路自动展开，与 P0-6 互引兼容的叠加层
-  - [五档分析画像体系重构设计](./05-design/v4.0/analysis-depth-profiles-refactor.md) ⭐ DEPTH_PROFILES 单一注册表：档位结构性差异（流程环节/产出规范/工具预算/模型/数据面），终结"选哪档报告都一样"；2026-11-04 已简化为三档（快速1/标准3/深度5）
-  - [五档分析画像体系重构实施设计](./05-design/v4.0/analysis-depth-profiles-implementation.md) 文件级改点与任务拆解：收编四处 depth_mapping + 三个流程开关（自我辩论/并行开局），产出规范注入/工具预算/模型分层/流程门控 M1-M4（已实施，档位矩阵按三档理解）
-  - [执行模式（研究/执行双模式提示词）设计](./05-design/v4.0/execution-advice-mode-design.md) ⭐ 代码发行、内容不发行：三流程 agent 提示词双轨（advice_mode 维度）+ 机器级开关 + 拦截体系开关化（agent 层 A1-A5/服务层 S1-S7）+ 回落保证
-  - [双轨产品架构：获利侧与减损侧](./05-design/v4.0/profit-loss-dual-track-architecture.md) ⭐ 系统建设参考：获利侧生产判断/减损侧消费判断的双轨组织原则、生命周期×流程×Agent 编队分层对应、数据工具层与覆盖度盘点、三大缺口（快照只产不消/观察哨接入/复盘归因）与立项三问
-  - [v4.0-beta.1 测试用例清单与功能点地图](./05-design/v4.0/test-case-checklist.md) 干净环境复测执行清单：功能点地图（12 模块）+ A-E 五组用例（安装环境/核心分析/行业工作台/传导登记/非功能）+ 通过标准与留痕
-  - [v4.0 用户手册改版方案](./05-design/v4.0/user-guide-plan.md) 手册现状盘点与功能差距矩阵：主手册就地升级策略、章节级改点清单、写作口径基线、P0/P1/P2 分期
 - **[v5.0（远期愿景）](./05-design/v5.0/)** - 远期愿景
 - [前沿探索](./05-design/research/) - 不绑定版本的前沿研究
-  - [保险行业研究方案（A股保险股）](./05-design/research/insurance/insurance-research-plan.md) - 保险域研究启动方案：商业模式/数据体系/监控框架映射/四周研究路径（独立于猪周期）
 
 ## 版本号管理规范
 

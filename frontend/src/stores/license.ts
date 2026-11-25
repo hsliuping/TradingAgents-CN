@@ -45,7 +45,6 @@ export const PRO_FEATURES = [
   'workflow_tools',
   'workflow_agents',
   'prompt_templates',
-  'favorites_image_import',
 ] as const
 
 export type ProFeature = typeof PRO_FEATURES[number]

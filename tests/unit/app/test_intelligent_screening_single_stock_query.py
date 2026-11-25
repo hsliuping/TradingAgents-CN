@@ -1,17 +1,7 @@
 import asyncio
-from types import SimpleNamespace
 
 
 def test_single_stock_high_dividend_query_short_circuits_screening_flow(monkeypatch):
-    """单股属性判断应短路三阶段筛选流程，直接返回单股核验结果。
-
-    对齐说明（存量测试治理）：71e02ff69 引入 LLM 意图分类后，chat 在进入
-    单股短路分支之前会先调用 _classify_intent——其内部先经 _ensure_client
-    获取 client，再通过 _llm_client.achat 做意图分类。因此旧断言"完全不
-    需要 LLM client"已过期：改为注入恒返回 True 的桩 _ensure_client，以及
-    返回 single_stock_query 意图 JSON 的假意图分类 client；单股短路分支
-    本身的行为断言全部保持不变。
-    """
     from app.services.intelligent_screening_service import IntelligentScreeningService
 
     service = IntelligentScreeningService(db=object())
@@ -41,22 +31,13 @@ def test_single_stock_high_dividend_query_short_circuits_screening_flow(monkeypa
         saved["stocks"] = stocks
         saved["phase"] = phase
 
-    class _FakeIntentLLMClient:
-        async def achat(self, messages, **kwargs):
-            return SimpleNamespace(content=(
-                '{"intent": "single_stock_query", "adjustment_target": null, '
-                '"adjustment_direction": null, "explicit_parameters": null, '
-                '"confidence": 0.9}'
-            ))
-
-    async def fake_ensure_client():
-        return True
+    async def fail_ensure_client():
+        raise AssertionError("single-stock direct query should not require LLM client")
 
     monkeypatch.setattr(service, "_get_context_messages", fake_get_context_messages)
     monkeypatch.setattr(service, "_fetch_single_stock_item", fake_fetch_single_stock_item)
     monkeypatch.setattr(service, "_save_message", fake_save_message)
-    monkeypatch.setattr(service, "_ensure_client", fake_ensure_client)
-    service._llm_client = _FakeIntentLLMClient()
+    monkeypatch.setattr(service, "_ensure_client", fail_ensure_client)
 
     result = asyncio.run(service.chat("user-1", "茅台是高分红股票吗"))
 

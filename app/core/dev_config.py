@@ -111,13 +111,12 @@ class DevConfig:
     @classmethod
     def setup_logging(cls, debug: bool = True):
         """设置简化的日志配置"""
-        # 统一的日志格式（共享初始化函数，日志治理 §5.3）
-        from core.utils.logging_setup import setup_cli_logging
-        setup_cli_logging(
-            "INFO",
-            fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        # 设置统一的日志格式
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S',
-            force=True,  # 强制重新配置，覆盖之前的设置
+            force=True  # 强制重新配置，覆盖之前的设置
         )
 
         if debug:

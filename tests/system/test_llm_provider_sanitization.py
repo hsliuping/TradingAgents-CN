@@ -11,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.routers import config as config_router  # noqa: E402
-from app.routers.auth_db import get_current_user  # noqa: E402
+from app.routers.auth import get_current_user  # noqa: E402
 from app.models.user import User  # noqa: E402
 from app.services.config_service import config_service  # noqa: E402
 
@@ -50,9 +50,7 @@ def test_add_llm_provider_sanitizes_api_key(monkeypatch, test_app: TestClient):
         "is_active": True,
         "supported_features": [],
         "default_base_url": None,
-        # 截断形态的 key（编辑框回显值）必须被跳过，不得写入厂家配置；
-        # 完整 key 由用户显式填写并有意保存（见 a8ff25f12 统一 API Key 配置管理）
-        "api_key": "sk-99054...",
+        "api_key": "SHOULD_BE_STRIPPED",
         "api_secret": None,
         "extra_config": {}
     }
@@ -61,8 +59,8 @@ def test_add_llm_provider_sanitizes_api_key(monkeypatch, test_app: TestClient):
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data.get("success") is True
-    # Ensure the truncated api_key was skipped and not passed to the service
-    assert captured.get("api_key") is None
+    # Ensure api_key passed to service was sanitized to empty string
+    assert captured.get("api_key") == ""
 
 
 def test_update_llm_provider_sanitizes_api_key(monkeypatch, test_app: TestClient):
@@ -85,8 +83,7 @@ def test_update_llm_provider_sanitizes_api_key(monkeypatch, test_app: TestClient
         "is_active": True,
         "supported_features": [],
         "default_base_url": None,
-        # 截断形态的 key（编辑框回显值）必须被跳过，不得覆盖已有配置
-        "api_key": "sk-99054...",
+        "api_key": "SHOULD_BE_STRIPPED",
         "api_secret": None,
         "extra_config": {"k": "v"}
     }
@@ -96,6 +93,6 @@ def test_update_llm_provider_sanitizes_api_key(monkeypatch, test_app: TestClient
     data = resp.json()
     assert data.get("success") is True
     assert captured.get("provider_id") == "abc123"
-    # Ensure the truncated api_key was skipped (field removed from update_data)
-    assert captured.get("api_key") is None
+    # Ensure api_key in update_data was sanitized to empty string
+    assert captured.get("api_key") == ""
 

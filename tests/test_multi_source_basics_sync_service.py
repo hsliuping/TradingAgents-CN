@@ -42,7 +42,7 @@ def test_run_full_sync_uses_system_industry_mapping_for_batch_docs():
     fake_db.__getitem__.return_value = status_collection
 
     with patch("app.services.multi_source_basics_sync_service.get_mongo_db", return_value=fake_db), \
-         patch("app.services.data_sources.manager.DataAdapterOrchestrator", return_value=_FakeManager()), \
+         patch("app.services.data_sources.manager.DataSourceManager", return_value=_FakeManager()), \
          patch("app.services.official_industry_service.fetch_industry_mapping", new=AsyncMock(return_value={"300750": "电气设备"})):
         result = asyncio.run(service.run_full_sync(preferred_sources=["akshare"]))
 

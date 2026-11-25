@@ -33,6 +33,12 @@
   - 影响：修复了系统启动时的关键错误，提升了日志系统的稳定性和可靠性
   - 贡献时间：2025年8月
 
+- **[@kjlintong](https://github.com/kjlintong)**
+  - 贡献内容：一键接入大模型服务向导（前端引导页 + 后端配置接口 + 启动脚本）
+  - 技术细节：填入API Key → 自动拉取模型列表 → 选择默认模型，全流程前后端联动
+  - 影响：大幅降低用户接入LLM的门槛，实现「填Key即用」
+  - 贡献时间：2026年11月 ([PR #813](https://github.com/hsliuping/TradingAgents-CN/pull/813))
+
 ### 🐛 Bug修复与系统优化
 
 - **[@YifanHere](https://github.com/YifanHere)**
@@ -55,6 +61,41 @@
       - 提升新闻分析功能在 GLM 模型下的可用性与稳定性
       - 贡献时间：2025年11月
 
+- **[@springlin2012](https://github.com/springlin2012)**
+  - **主要贡献**：
+    - 🐛 AKShare 东财数据源限流自动回退 ([PR #819](https://github.com/hsliuping/TradingAgents-CN/pull/819))
+      - 东财接口被限流时自动切换新浪/腾讯备用数据源
+      - 失败原因透传给用户端，便于排查
+      - 贡献时间：2026年11月
+
+- **[@baishanyue](https://github.com/baishanyue)**
+  - **主要贡献**：
+    - 🔧 数据源同步健壮性修复 ([PR #822](https://github.com/hsliuping/TradingAgents-CN/pull/822))
+      - 裸 `except` 改为 `except Exception`，避免吞掉 KeyboardInterrupt/SystemExit 等系统信号
+      - 贡献时间：2026年11月
+
+- **[@guoximin66](https://github.com/guoximin66)**
+  - **主要贡献**：
+    - 🔧 `.env.example` 配置样例清理 ([PR #816](https://github.com/hsliuping/TradingAgents-CN/pull/816))
+      - 修复失效文档链接、去除重复配置项、修复编码损坏字符
+      - 贡献时间：2026年11月
+
+### 📐 算法修正与数据质量
+
+- **[@Mattbusel](https://github.com/Mattbusel)**
+  - 贡献内容：港股/指数 RSI 算法修正为 Wilder 平滑法
+  - 技术细节：内联 30 行 Wilder RSI 算法，移除单作者维护包 fin-primitives 依赖，精度对齐 1e-9
+  - 影响：使技术指标与通达信/同花顺等主流行情软件一致，提升分析可信度
+  - 贡献时间：2026年11月 ([PR #823](https://github.com/hsliuping/TradingAgents-CN/pull/823))
+
+### 🛡️ 安全贡献
+
+- **[@andesyteoss](https://github.com/andesyteoss)**
+  - 贡献内容：负责任地报告日志读取/导出/删除接口的路径穿越漏洞（CWE-22）
+  - 技术细节：`../`、`..\`、空字节等穿越载荷可绕过原弱校验读写任意文件
+  - 影响：已修复（`_resolve_and_validate` 路径校验 + 三处端点接入），消除任意文件读写风险
+  - 贡献时间：2026年11月 ([PR #775](https://github.com/hsliuping/TradingAgents-CN/pull/775))
+
 ## 🎯 贡献统计
 
 ### 按贡献类型统计
@@ -63,10 +104,12 @@
 | 贡献类型      | 贡献者数量 | 主要贡献                        |
 | ------------- | ---------- | ------------------------------- |
 | 🐳 容器化部署 | 1          | Docker配置、部署优化            |
-| 📄 功能开发   | 1          | 报告导出系统                    |
+| 📄 功能开发   | 2          | 报告导出系统、一键接入大模型向导(#813) |
 | 🤖 AI模型集成 | 3          | 硅基流动LLM提供商支持、日志系统修复、千帆模型集成 |
-| 🐛 Bug修复    | 2          | 关键稳定性问题修复、CLI错误处理、GLM新闻分析修复 |
-| 🔧 代码优化   | 1          | 命令行界面优化、用户体验改进    |
+| 📐 算法修正   | 1          | RSI Wilder 平滑算法(#823)、精度1e-9对齐 |
+| 🐛 Bug修复    | 3          | GLM新闻分析修复、AKShare限流回退(#819)、配置样例清理(#816) |
+| 🔧 代码优化   | 2          | 命令行界面优化、数据源同步异常处理(#822) |
+| 🛡️ 安全贡献   | 1          | 日志接口路径穿越漏洞报告(#775) |
 
 ### 
 
@@ -87,11 +130,21 @@
 ### 🏅 最佳AI集成贡献奖
 
 - **[@charliecai](https://github.com/charliecai)** - 硅基流动(SiliconFlow) LLM提供商集成
+- **[@kjlintong](https://github.com/kjlintong)** - 一键接入大模型服务向导，实现「填Key即用」的零门槛接入体验 (#813)
 - **TradingAgents-CN团队** - 百度千帆(Qianfan) ERNIE模型集成，提供OpenAI兼容接口
+
+### 📐 最佳算法贡献奖
+
+- **[@Mattbusel](https://github.com/Mattbusel)** - 港股/指数 RSI 修正为 Wilder 平滑法，使技术指标与主流行情软件一致 (#823)
 
 ### 🛠️ 最佳Bug修复贡献奖
 
 - **[@yifanhere](https://github.com/yifanhere)** - 修复了logging_manager.py中的关键NameError异常，通过添加自举日志器解决了系统启动时的核心问题，大幅提升了系统稳定性
+- **[@springlin2012](https://github.com/springlin2012)** - AKShare 东财限流自动回退新浪/腾讯数据源，解决生产环境高频事故 (#819)
+
+### 🛡️ 安全贡献奖
+
+- **[@andesyteoss](https://github.com/andesyteoss)** - 负责任地报告日志接口路径穿越漏洞（CWE-22），推动任意文件读写风险及时修复 (#775)
 
 ## 🌟 其他贡献
 
@@ -147,7 +200,7 @@
 
 ---
 
-**最后更新时间**: 2025年11月15日
-**贡献者总数**: 7位
-**总PR数量**: 8个 (Docker化、报告导出、AI模型集成、CLI优化、Bug修复、日志系统修复、GLM新闻分析修复等)
-**活跃贡献者**: 7位
+**最后更新时间**: 2026年11月25日
+**贡献者总数**: 11位
+**总PR数量**: 14个 (Docker化、报告导出、AI模型集成、CLI优化、Bug修复、日志系统修复、GLM新闻分析修复、一键接入大模型向导(#813)、配置样例清理(#816)、AKShare限流回退(#819)、异常处理规范化(#822)、RSI算法修正(#823)、路径穿越安全修复(#775)等)
+**活跃贡献者**: 11位

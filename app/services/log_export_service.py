@@ -12,6 +12,8 @@ from typing import List, Optional, Dict, Any
 import re
 import json
 
+from fastapi import HTTPException
+
 logger = logging.getLogger("webapi")
 
 
@@ -125,6 +127,31 @@ class LogExportService:
         else:
             return "other"
 
+    def _resolve_and_validate(self, filename: str) -> Path:
+        """
+        解析用户提供的文件名，并防止路径穿越（CWE-22）
+
+        Args:
+            filename: 用户输入的文件名
+
+        Returns:
+            校验后的绝对路径
+
+        Raises:
+            HTTPException: 路径穿越或非法文件名
+        """
+        if not filename or "\x00" in filename:
+            raise HTTPException(status_code=400, detail="非法文件名")
+
+        log_dir_resolved = self.log_dir.resolve()
+        target = (self.log_dir / filename).resolve()
+
+        if not target.is_relative_to(log_dir_resolved):
+            logger.warning(f"⚠️ [安全] 拒绝路径穿越请求: {filename}")
+            raise HTTPException(status_code=400, detail="非法文件路径")
+
+        return target
+
     def read_log_file(
         self,
         filename: str,
@@ -148,8 +175,8 @@ class LogExportService:
         Returns:
             日志内容和统计信息
         """
-        file_path = self.log_dir / filename
-        
+        file_path = self._resolve_and_validate(filename)
+
         if not file_path.exists():
             raise FileNotFoundError(f"日志文件不存在: {filename}")
         
@@ -238,7 +265,11 @@ class LogExportService:
         try:
             # 确定要导出的文件
             if filenames:
-                files_to_export = [self.log_dir / f for f in filenames if (self.log_dir / f).exists()]
+                files_to_export = []
+                for f in filenames:
+                    validated = self._resolve_and_validate(f)
+                    if validated.exists():
+                        files_to_export.append(validated)
             else:
                 files_to_export = list(self.log_dir.glob("*.log*"))
             

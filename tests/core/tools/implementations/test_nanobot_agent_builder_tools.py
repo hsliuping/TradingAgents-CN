@@ -618,14 +618,14 @@ async def test_create_or_update_agent_workshop_draft_creates_visible_spec_and_se
     payload = json.loads(raw)
 
     assert payload["status"] == "ok"
-    assert payload["spec_id"] == "valuation_candidate"
+    assert payload["spec_id"] == "agent_valuation_candidate"
     assert payload["source"] == "nanobot"
     spec_doc = fake_db["agent_specs"]._items[0]
     assert spec_doc["owner_user_id"] == "user_001"
     assert spec_doc["source"] == "nanobot"
     assert spec_doc["outputs"] == ["valuation_report"]
     session_doc = fake_db["agent_workshop_sessions"]._items[0]
-    assert session_doc["spec_id"] == "valuation_candidate"
+    assert session_doc["spec_id"] == "agent_valuation_candidate"
     assert session_doc["user_id"] == "user_001"
 
 
@@ -666,7 +666,7 @@ async def test_create_or_update_agent_workshop_draft_blocks_existing_active_vers
         lambda: "thread_industry_compare",
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.create_nanobot_draft",
+        "app.services.agent_workshop_service.AgentWorkshopService.create_nanobot_draft",
         _fake_create_nanobot_draft,
     )
 
@@ -722,7 +722,7 @@ async def test_create_or_update_agent_workshop_draft_blocks_existing_active_spec
         lambda: "thread_industry_compare",
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.create_nanobot_draft",
+        "app.services.agent_workshop_service.AgentWorkshopService.create_nanobot_draft",
         _fake_create_nanobot_draft,
     )
 
@@ -1176,7 +1176,7 @@ async def test_resolve_agent_workshop_blocking_gaps_medium_similarity_can_autocr
 
 
 @pytest.mark.asyncio
-async def test_resolve_agent_workshop_blocking_gaps_auto_continue_pending_user_review(monkeypatch):
+async def test_resolve_agent_workshop_blocking_gaps_auto_continue_builds_version(monkeypatch):
     fake_db = _FakeDb({
         "skill_creation_sessions": _FakeCollection([
             {
@@ -1186,9 +1186,7 @@ async def test_resolve_agent_workshop_blocking_gaps_auto_continue_pending_user_r
                 "pipeline_message": "完成",
                 "spec": {"tool_id": "auto_gap_skill", "display_name": "自动补齐技能"},
             }
-        ]),
-        "external_skills": _FakeCollection([]),
-        "skill_review_queue": _FakeCollection([]),
+        ])
     })
 
     class _FakeWorkshopService:
@@ -1220,9 +1218,17 @@ async def test_resolve_agent_workshop_blocking_gaps_auto_continue_pending_user_r
                 "tooling_plan": {"missing_capabilities": []},
             }
 
-        async def build_version(self, *args, **kwargs):
-            del args, kwargs
-            raise AssertionError("build_version 不应在用户审核前被调用（v3.6.0 HITL 路径B）")
+        async def build_version(self, session_id):
+            assert session_id == "ws_auto_continue_001"
+            return {
+                "session_id": session_id,
+                "spec_id": "spec_auto_continue_001",
+                "version": {
+                    "version_id": "spec_auto_continue_001_v1",
+                    "required_tools": ["auto_gap_skill"],
+                    "required_capabilities": ["auto_gap_capability"],
+                },
+            }
 
     class _FakeCapabilityService:
         def __init__(self, db):
@@ -1298,19 +1304,8 @@ async def test_resolve_agent_workshop_blocking_gaps_auto_continue_pending_user_r
 
     assert payload["status"] == "ok"
     assert payload["summary"]["successful"] == 1
-    # v3.6.0 HITL：Skill 生成后不自动 build_version，写入 skill_review_queue 等待人工审核
-    assert payload["auto_continue"]["status"] == "pending_user_review"
-    assert payload["auto_continue"]["build_version"]["skipped"] is True
-    assert payload["auto_continue"]["build_version"]["reason"] == "pending_user_review"
-    assert payload["auto_continue"]["gap_analysis"]["spec_id"] == "spec_auto_continue_001"
-    assert payload["auto_continue"]["tooling_plan"]["spec_id"] == "spec_auto_continue_001"
-    assert payload["auto_continue"]["pending_user_review"]["count"] == 1
-    assert payload["auto_continue"]["pending_user_review"]["tool_ids"] == ["auto_gap_skill"]
-    assert len(payload["auto_continue"]["pending_user_review"]["review_ids"]) == 1
-    review_doc = fake_db["skill_review_queue"]._items[0]
-    assert review_doc["tool_id"] == "auto_gap_skill"
-    assert review_doc["status"] == "pending_user_review"
-    assert review_doc["workshop_session_id"] == "ws_auto_continue_001"
+    assert payload["auto_continue"]["status"] == "completed"
+    assert payload["auto_continue"]["build_version"]["version_id"] == "spec_auto_continue_001_v1"
 
 
 @pytest.mark.asyncio
@@ -2737,7 +2732,7 @@ async def test_generate_confirmed_candidate_agent_runs_one_shot_after_confirmati
     assert payload["governance_boundary"]["workshop_governance"]["official_acceptance_status"] == "not_started"
     assert "样例" in payload["governance_boundary"]["warnings"][1]
     saved_agent = fake_db["agent_configs"]._items[0]
-    assert saved_agent["metadata"]["spec_id"] == "valuation_candidate"
+    assert saved_agent["metadata"]["spec_id"] == "agent_valuation_candidate"
     assert saved_agent["metadata"]["session_id"]
     assert saved_agent["metadata"]["linked_agent_workshop"] is True
     assert saved_agent["metadata"]["latest_workshop_version_id"] == "spec_nanobot_valuation_candidate_v1_v1"
@@ -2933,7 +2928,7 @@ async def test_debug_agent_workshop_version_calls_service(monkeypatch):
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.debug_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.debug_version",
         _fake_debug_version,
     )
     monkeypatch.setattr(
@@ -2998,7 +2993,7 @@ async def test_debug_agent_workshop_version_uses_default_reasoning_llm_when_not_
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.debug_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.debug_version",
         _fake_debug_version,
     )
     monkeypatch.setattr(
@@ -3108,11 +3103,11 @@ async def test_run_agent_workshop_real_data_test_records_evaluation(monkeypatch)
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.debug_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.debug_version",
         _fake_debug_version,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
         _fake_evaluate_version,
     )
     monkeypatch.setattr(
@@ -3177,7 +3172,7 @@ async def test_run_agent_workshop_real_data_test_returns_failed_stage_events(mon
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.debug_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.debug_version",
         _fake_debug_version,
     )
     monkeypatch.setattr(
@@ -3249,11 +3244,11 @@ async def test_run_agent_workshop_real_data_test_exposes_non_pass_acceptance_cle
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.debug_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.debug_version",
         _fake_debug_version,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
         _fake_evaluate_version,
     )
     monkeypatch.setattr(
@@ -3296,7 +3291,7 @@ async def test_run_agent_workshop_real_data_test_blocks_non_testing_version(monk
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.debug_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.debug_version",
         _fake_debug_version,
     )
 
@@ -3332,7 +3327,7 @@ async def test_publish_agent_workshop_version_calls_service(monkeypatch):
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.publish_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.publish_version",
         _fake_publish_version,
     )
 
@@ -3371,7 +3366,7 @@ async def test_publish_agent_workshop_version_blocks_without_pass_evaluation(mon
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.publish_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.publish_version",
         _fake_publish_version,
     )
 
@@ -3429,7 +3424,7 @@ async def test_evaluate_agent_workshop_version_calls_service(monkeypatch):
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
         _fake_evaluate_version,
     )
 
@@ -3470,7 +3465,7 @@ async def test_evaluate_agent_workshop_version_blocks_non_testing_version(monkey
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
         _fake_evaluate_version,
     )
 
@@ -3506,7 +3501,7 @@ async def test_evaluate_agent_workshop_version_rejects_missing_runtime_evidence(
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
         _fake_evaluate_version,
     )
 
@@ -3562,7 +3557,7 @@ async def test_evaluate_agent_workshop_version_accepts_debug_shaped_runtime_resu
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
         _fake_evaluate_version,
     )
 
@@ -3610,7 +3605,7 @@ async def test_evaluate_agent_workshop_version_allows_service_fallback_when_runt
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.evaluate_version",
         _fake_evaluate_version,
     )
 
@@ -3653,7 +3648,7 @@ async def test_iterate_agent_workshop_version_calls_service(monkeypatch):
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.iterate_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.iterate_version",
         _fake_iterate_version,
     )
 
@@ -3691,7 +3686,7 @@ async def test_iterate_agent_workshop_version_blocks_before_evaluation(monkeypat
         lambda: fake_db,
     )
     monkeypatch.setattr(
-        "app.pro.services.agent_workshop_service.AgentWorkshopService.iterate_version",
+        "app.services.agent_workshop_service.AgentWorkshopService.iterate_version",
         _fake_iterate_version,
     )
 
