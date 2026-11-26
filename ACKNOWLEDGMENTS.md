@@ -21,7 +21,7 @@ TradingAgents-CN 是面向中国 A 股市场的研究辅助系统。由多个扮
 
 > 本项目是**研究辅助工具**，所有 AI 生成内容仅供学习参考，**不构成投资建议**。
 
-## � 授权说明
+## 📜 授权说明
 
 本项目采用**混合授权**，不同目录适用不同许可证，详见 [LICENSE](LICENSE)：
 
@@ -36,14 +36,20 @@ TradingAgents-CN 是面向中国 A 股市场的研究辅助系统。由多个扮
 
 - **[Tauric Research](https://github.com/TauricResearch)** —— 源项目 TradingAgents 的开发团队
 - **hsliuping** —— 项目发起人与维护者
-- **社区贡献者** —— 通过 PR 参与共建的朋友（详见 [CONTRIBUTING.md](CONTRIBUTING.md)）
+- **社区贡献者** —— 通过 PR 参与共建的朋友（完整名单与贡献明细见 [CONTRIBUTORS.md](CONTRIBUTORS.md)）
+  - [@kjlintong](https://github.com/kjlintong) —— 一键接入大模型服务向导（[#813](https://github.com/hsliuping/TradingAgents-CN/pull/813)）
+  - [@guoximin66](https://github.com/guoximin66) —— `.env.example` 配置样例清理（[#816](https://github.com/hsliuping/TradingAgents-CN/pull/816)）
+  - [@springlin2012](https://github.com/springlin2012) —— AKShare 东财限流自动回退（[#819](https://github.com/hsliuping/TradingAgents-CN/pull/819)）
+  - [@baishanyue](https://github.com/baishanyue) —— 数据源同步异常处理规范化（[#822](https://github.com/hsliuping/TradingAgents-CN/pull/822)）
+  - [@Mattbusel](https://github.com/Mattbusel) —— 港股/指数 RSI 修正为 Wilder 平滑（[#823](https://github.com/hsliuping/TradingAgents-CN/pull/823)）
+  - [@andesyteoss](https://github.com/andesyteoss) —— 负责任披露日志接口路径穿越漏洞（[#775](https://github.com/hsliuping/TradingAgents-CN/pull/775)）
 - **所有提交问题、建议与反馈的用户** —— 你们的反馈是这个项目持续改进的动力
 
-## � 数据源致谢
+## 📊 数据源致谢
 
 感谢 [AkShare](https://github.com/akfamily/akshare)、[Tushare](https://tushare.pro)、[BaoStock](http://baostock.com)、[yfinance](https://github.com/ranaroussi/yfinance) 以及所有公开金融数据接口的维护者，让个人研究者也能便捷地获取市场数据。
 
-## � 赞助与支持
+## 💝 赞助与支持
 
 - **字节火山引擎** —— 对本项目的赞助支持
 - **所有开源工具与库的维护者** —— 本项目构建在你们的工作之上
@@ -53,4 +59,4 @@ TradingAgents-CN 是面向中国 A 股市场的研究辅助系统。由多个扮
 *"站在巨人的肩膀上，我们能看得更远。感谢 Tauric Research 团队为我们提供了如此坚实的肩膀。"*
 
 **TradingAgents-CN**
-2026年9月
+2026年11月
