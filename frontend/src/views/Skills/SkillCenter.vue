@@ -621,6 +621,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import type { Component } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Collection,
@@ -824,8 +825,10 @@ async function loadAgents() {
   }
 }
 
+const router = useRouter()
+
 function handleCreateSkill() {
-  window.location.href = '/skills/generation/create'
+  router.push('/skills/generation/create')
 }
 
 async function searchClawHubSkills() {

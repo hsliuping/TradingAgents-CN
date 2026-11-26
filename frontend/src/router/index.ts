@@ -104,6 +104,7 @@ const routes: RouteRecordRaw[] = [
     name: 'Analysis',
     component: () => import('@/layouts/BasicLayout.vue'),
     redirect: '/analysis/single',
+    meta: { requiresAuth: true },
     children: [
       {
         path: 'single',
@@ -676,6 +677,22 @@ const router = createRouter({
   }
 })
 
+// 宽松判断 JWT 是否"明确过期"（解析失败不视为过期，避免 atob 对 base64url
+// 变体（-、_ 字符）解析失败造成误判，从而每次导航都触发无谓刷新）
+const isTokenActuallyExpired = (token: string | null | undefined): boolean => {
+  if (!token) return false
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return false
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const payload = JSON.parse(atob(b64))
+    if (!payload.exp) return false
+    return payload.exp < Math.floor(Date.now() / 1000)
+  } catch {
+    return false
+  }
+}
+
 // 全局前置守卫
 router.beforeEach(async (to, _from, next) => {
   // 开始进度条
@@ -728,6 +745,28 @@ router.beforeEach(async (to, _from, next) => {
     } catch (error) {
       console.error('检查License权限失败:', error)
       // 如果检查失败，允许访问（开发环境可能未配置）
+    }
+  }
+
+  // Token 有效性预检（修复"点菜单跳转到一半被弹回"的历史顽疾）：
+  // 守卫此前只检查 token 是否存在，过期 token 也放行 → 目标页开始加载后
+  // API 请求才被动刷新，一旦刷新失败用户在页面加载中途被踢走。
+  // 现在把静默刷新前移到导航放行之前，消除"先放行、再弹回"的中间态。
+  if (to.meta.requiresAuth && authStore.isAuthenticated && authStore.token) {
+    if (isTokenActuallyExpired(authStore.token)) {
+      console.log('🔄 路由守卫检测到 access token 已过期，导航前静默刷新...')
+      try {
+        await authStore.refreshAccessToken()
+      } catch {
+        // 刷新异常不阻断导航，交给后续统一认证检查兜底
+      }
+      if (!authStore.isAuthenticated) {
+        // 刷新失败且认证已被清除（refresh token 确定无效）
+        authStore.setRedirectPath(to.fullPath)
+        next('/login')
+        return
+      }
+      // 瞬时网络错误：认证保留，正常放行，目标页请求会自动重试
     }
   }
 
@@ -785,20 +824,26 @@ router.beforeEach(async (to, _from, next) => {
   // 检查是否是 PRO 路由
   const isProRoute = proRoutes.some(route => to.path.startsWith(route))
   if (isProRoute && authStore.isAuthenticated) {
-    // 延迟导入 license store 避免循环依赖
-    const { useLicenseStore } = await import('@/stores/license')
-    const licenseStore = useLicenseStore()
+    try {
+      // 延迟导入 license store 避免循环依赖
+      const { useLicenseStore } = await import('@/stores/license')
+      const licenseStore = useLicenseStore()
 
-    // 确保已验证授权状态
-    if (!licenseStore.licenseInfo) {
-      await licenseStore.verifyLicense()
-    }
+      // 确保已验证授权状态
+      if (!licenseStore.licenseInfo) {
+        await licenseStore.verifyLicense()
+      }
 
-    // 如果不是高级学员，显示提示并重定向到授权管理页面
-    if (!licenseStore.isPro) {
-      ElMessage.warning('此功能为高级学员专属，请先升级学员等级')
-      next('/settings/license')
-      return
+      // 如果不是高级学员，显示提示并重定向到授权管理页面
+      if (!licenseStore.isPro) {
+        ElMessage.warning('此功能为高级学员专属，请先升级学员等级')
+        next('/settings/license')
+        return
+      }
+    } catch (error) {
+      // 动态导入/验证异常时放行导航：守卫抛异常会取消整个导航
+      //（表现为点击菜单无响应/弹回），此处降级允许访问，页面内自行兜底
+      console.error('PRO 路由 License 检查异常（已放行导航）:', error)
     }
   }
 

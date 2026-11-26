@@ -17,6 +17,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
 
 from app.core.database import get_mongo_db
+from app.routers.auth_db import get_current_user
 from app.services.capability_index_service import CapabilityIndexService
 from app.services.clawhub_skill_service import ClawHubSkillService, SKILLS_DIR
 from app.services.skillhub_service import SkillHubService
@@ -34,9 +35,68 @@ from core.tools.registry import get_tool_registry
 
 logger = logging.getLogger("webapi")
 
-router = APIRouter(prefix="/api/skills", tags=["skills"])
+router = APIRouter(
+    prefix="/api/skills",
+    tags=["skills"],
+    # 安全修复：Skill 中心所有端点强制登录，避免未认证的代码执行/导入/删除
+    dependencies=[Depends(get_current_user)],
+)
 
 COLLECTION = "skills"
+
+# 沙箱子进程环境变量白名单：仅保留运行 Python 所需的最小系统变量，
+# 防止执行 Skill 代码时读取 JWT_SECRET、数据库密码、各类 API Key 等敏感配置
+_SANDBOX_ENV_WHITELIST = (
+    "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP",
+    "HOME", "USERPROFILE", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
+    "PYTHONPATH", "PYTHONIOENCODING", "PYTHONUTF8", "PYTHONDONTWRITEBYTECODE",
+)
+
+
+def _build_sandbox_env() -> Dict[str, str]:
+    """构建沙箱子进程的最小环境变量集合（白名单），剥离所有敏感配置"""
+    import os
+
+    env: Dict[str, str] = {}
+    for key in _SANDBOX_ENV_WHITELIST:
+        val = os.environ.get(key)
+        if val is not None:
+            env[key] = val
+    return env
+
+
+def _assert_public_http_url(url: str) -> None:
+    """校验 URL 指向公网 http(s) 地址，阻断 SSRF（私网/回环/链路本地等）"""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="仅支持 http/https 协议的 URL")
+    host = parsed.hostname
+    if not host:
+        raise HTTPException(status_code=400, detail="URL 缺少主机名")
+
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail="无法解析目标主机地址")
+
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise HTTPException(status_code=400, detail="禁止访问内网或本机地址")
 
 
 # =============================================================================
@@ -901,6 +961,7 @@ def _execute_python_sandbox(code: str, args: Dict[str, Any], timeout: int) -> Di
             text=True,
             timeout=timeout,
             cwd=str(Path(__file__).parent.parent.parent),
+            env=_build_sandbox_env(),
         )
 
         if proc.returncode != 0:
@@ -2613,7 +2674,7 @@ async def import_skill_from_url(
     """通过下载链接导入 Skill 包
 
     流程：
-    1. 从 URL 下载 ZIP 文件
+    1. 从 URL 下载 ZIP 文件（SSRF 防护：仅允许公网 http/https，禁用自动重定向）
     2. 解压到临时目录，定位 SKILL.md
     3. 移动到 skills/<name>/
     4. 解析 SKILL.md 并注册到 MongoDB + ToolRegistry
@@ -2623,8 +2684,11 @@ async def import_skill_from_url(
     try:
         url = req.url.strip()
 
-        # 1. 下载 ZIP
-        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        # SSRF 防护：校验目标为公网地址
+        _assert_public_http_url(url)
+
+        # 1. 下载 ZIP（不自动跟随重定向，防止重定向到内网）
+        async with httpx.AsyncClient(timeout=60, follow_redirects=False) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             zip_bytes = resp.content

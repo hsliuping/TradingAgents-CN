@@ -180,3 +180,7 @@ deploy-all-in-one/wheels/
 
 nul
 node_modules
+_tdx_test/
+local/
+core/memory/__pycache__/
+

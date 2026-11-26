@@ -60,7 +60,7 @@
               <el-form-item label="服务名称" prop="name">
                 <el-input
                   v-model="form.name"
-                  placeholder="如 sensenova、custom"
+                  placeholder="如 modelflare、custom"
                   maxlength="64"
                   show-word-limit
                   clearable
@@ -70,12 +70,12 @@
             </el-col>
             <el-col :span="8">
               <el-form-item label="显示名称" prop="display_name">
-                <el-input v-model="form.display_name" placeholder="如 SenseNova" clearable />
+                <el-input v-model="form.display_name" placeholder="如 Modelflare" clearable />
               </el-form-item>
             </el-col>
             <el-col :span="8">
               <el-form-item label="API 基础地址" prop="base_url">
-                <el-input v-model="form.base_url" placeholder="https://token.sensenova.cn/v1" clearable>
+                <el-input v-model="form.base_url" placeholder="https://modelflare.dev/v1" clearable>
                   <template #append><el-icon><Link /></el-icon></template>
                 </el-input>
               </el-form-item>

@@ -2034,11 +2034,27 @@ async def get_user_analysis_history(
 # WebSocket 端点
 @router.websocket("/ws/task/{task_id}")
 async def websocket_task_progress(websocket: WebSocket, task_id: str):
-    """WebSocket 端点：实时获取任务进度"""
+    """WebSocket 端点：实时获取任务进度（需认证 + 任务归属校验）"""
     import json
+
+    # 复用新 WebSocket 的统一认证逻辑
+    from app.routers.websocket_notifications import _authenticate_websocket
+
+    user_id = await _authenticate_websocket(websocket, websocket.query_params.get("token"))
+    if not user_id:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+
     websocket_manager = get_websocket_manager()
 
     try:
+        # 归属校验：任务存在且属于当前用户
+        svc = get_queue_service()
+        task = await svc.get_task(task_id)
+        if not task or task.get("user") != user_id:
+            await websocket.close(code=1008, reason="Task not found or access denied")
+            return
+
         await websocket_manager.connect(websocket, task_id)
 
         # 发送连接确认消息
@@ -2053,7 +2069,6 @@ async def websocket_task_progress(websocket: WebSocket, task_id: str):
             try:
                 # 接收客户端的心跳消息
                 data = await websocket.receive_text()
-                # 可以处理客户端发送的消息
                 logger.debug(f"📡 收到 WebSocket 消息: {data}")
             except WebSocketDisconnect:
                 break

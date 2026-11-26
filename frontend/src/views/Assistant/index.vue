@@ -1134,7 +1134,12 @@ async function loadMemoryStatus() {
     const data = (res as any)?.data ?? res
     if (data?.ok) {
       memoryStatus.value = 'ok'
-      memoryStatusTip.value = `mem0 记忆层运行正常 (${data.mem0_version || 'unknown'})`
+      memoryStatusTip.value = data?.backend === 'markdown'
+        ? '记忆层运行正常（Markdown 文件后端，mem0 未配置已自动降级）'
+        : `mem0 记忆层运行正常 (${data.mem0_version || 'unknown'})`
+    } else if (data?.enabled === false) {
+      memoryStatus.value = 'off'
+      memoryStatusTip.value = data?.error || '记忆功能未配置'
     } else {
       memoryStatus.value = data?.error?.includes('禁用') ? 'off' : 'error'
       memoryStatusTip.value = data?.error || '记忆层不可用'

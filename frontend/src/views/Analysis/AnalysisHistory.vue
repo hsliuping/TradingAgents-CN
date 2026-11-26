@@ -285,6 +285,8 @@ import { analysisApi } from '@/api/analysis'
 import { useRouter } from 'vue-router'
 import { formatDateTime } from '@/utils/datetime'
 
+const router = useRouter()
+
 // 列表与分页状态
 const loading = ref(false)
 const currentPage = ref(1)
@@ -406,8 +408,8 @@ const viewTaskDetail = (_task: any) => {
 }
 
 const viewResult = (task: any) => {
-  const router = useRouter()
-  router.push(`/analysis/result/${task.task_id}`)
+  // 跳转到统一任务页查看结果（/analysis/result/:id 路由不存在，原为死链）
+  router.push(`/tasks/unified?task_id=${task.task_id}`)
 }
 
 const downloadReport = (task: any) => {

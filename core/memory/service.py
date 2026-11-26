@@ -20,6 +20,7 @@ import threading
 from typing import Any, Dict, List, Optional
 
 from .models import MemoryItem, MemoryScope, StockAnalysisMemory, StoreResult
+from .markdown_backend import MarkdownBackend
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,8 @@ class MemoryService:
         self._db = db
         self._mem: Any = None
         self._init_error: str = ""
+        # Markdown 降级后端（mem0 不可用时启用）
+        self._md_backend: Optional[MarkdownBackend] = None
         # A3: 初始化锁必须用 threading.Lock（跨线程安全）。
         # asyncio.Lock 非线程安全：并行开局场景下两个研究员线程各自的
         # event loop await 同一把 asyncio.Lock，持有者释放时无法唤醒
@@ -159,6 +162,47 @@ class MemoryService:
                 return False
 
     # ------------------------------------------------------------------
+    #  后端选择：mem0 优先，不可用时自动降级 Markdown 文件后端
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _configured_backend() -> str:
+        """MEMORY_BACKEND 环境变量：auto（默认）/ mem0 / markdown / off"""
+        return (os.environ.get("MEMORY_BACKEND") or "auto").strip().lower()
+
+    def _get_markdown_backend(self) -> Optional[MarkdownBackend]:
+        if self._md_backend is None:
+            try:
+                self._md_backend = MarkdownBackend()
+            except Exception as e:
+                logger.warning("[MemoryService] Markdown 后端初始化失败: %s", e)
+                return None
+        return self._md_backend
+
+    async def _resolve_backend(self) -> str:
+        """返回当前生效后端：'mem0' / 'markdown' / ''（完全不可用）"""
+        mode = self._configured_backend()
+        if mode == "off":
+            return ""
+        if mode == "markdown":
+            return "markdown" if self._get_markdown_backend() else ""
+        if mode == "mem0":
+            return "mem0" if await self._ensure_init() else ""
+        # auto：mem0 优先，失败降级 markdown
+        if await self._ensure_init():
+            return "mem0"
+        return "markdown" if self._get_markdown_backend() else ""
+
+    def _markdown_llm_config(self) -> Optional[Dict[str, Any]]:
+        """Markdown 后端事实抽取用的 LLM 配置（复用 mem0 的 LLM 配置）"""
+        try:
+            from .config import build_mem0_config
+            return build_mem0_config(self._db).get("llm")
+        except Exception as e:
+            logger.debug("[MemoryService] 获取 Markdown 后端 LLM 配置失败: %s", e)
+            return None
+
+    # ------------------------------------------------------------------
     #  写入
     # ------------------------------------------------------------------
 
@@ -184,12 +228,27 @@ class MemoryService:
             scope: 记忆分类（见 MemoryScope）
             metadata: 附加元数据（symbol, task_id 等）
         """
-        if not await self._ensure_init():
+        backend = await self._resolve_backend()
+        if backend == "markdown":
+            md = self._get_markdown_backend()
+            if md is None:
+                return StoreResult(success=False, error="记忆后端不可用")
+            return await md.store(
+                _truncate_messages(messages),
+                user_id=user_id,
+                agent_id=agent_id,
+                session_id=session_id,
+                scope=str(scope or ""),
+                metadata=metadata,
+                infer=infer,
+                llm_config=self._markdown_llm_config(),
+            )
+        if backend != "mem0":
             logger.info(
                 "[MemoryService] store SKIP — user=%s agent=%s scope=%s error=%s",
-                user_id, agent_id, scope, self._init_error or "mem0 不可用",
+                user_id, agent_id, scope, self._init_error or "记忆后端不可用",
             )
-            return StoreResult(success=False, error=self._init_error or "mem0 不可用")
+            return StoreResult(success=False, error=self._init_error or "记忆后端不可用")
 
         truncated = _truncate_messages(messages)
 
@@ -300,7 +359,20 @@ class MemoryService:
             scopes: 限定 scope 列表（None = 不限）
             limit: 最大返回条数
         """
-        if not await self._ensure_init():
+        backend = await self._resolve_backend()
+        if backend == "markdown":
+            md = self._get_markdown_backend()
+            if md is None:
+                return []
+            return await md.recall(
+                query,
+                user_id=user_id,
+                agent_id=agent_id,
+                scopes=scopes,
+                metadata_filters=metadata_filters,
+                limit=limit,
+            )
+        if backend != "mem0":
             return []
 
         normalized_scopes = _normalize_scopes(scopes)
@@ -422,7 +494,13 @@ class MemoryService:
         scopes: Optional[List[str]] = None,
     ) -> str:
         """获取用户所有记忆的摘要文本（用于画像增强）"""
-        if not await self._ensure_init():
+        backend = await self._resolve_backend()
+        if backend == "markdown":
+            md = self._get_markdown_backend()
+            if md is None:
+                return ""
+            return await md.get_user_summary(user_id, scopes)
+        if backend != "mem0":
             return ""
 
         kwargs: Dict[str, Any] = {"limit": 50}
@@ -466,10 +544,22 @@ class MemoryService:
         Returns:
             {"items": [MemoryItem, ...], "total": int}
         """
-        if not await self._ensure_init():
+        backend = await self._resolve_backend()
+        if backend == "markdown":
+            md = self._get_markdown_backend()
+            if md is None:
+                return {"items": [], "total": 0}
+            return await md.get_all(
+                user_id=user_id,
+                scopes=scopes,
+                metadata_filters=metadata_filters,
+                limit=limit,
+                page=page,
+            )
+        if backend != "mem0":
             logger.info(
                 "[MemoryService] get_all SKIP — user=%s scopes=%s error=%s",
-                user_id, scopes, self._init_error or "mem0 不可用",
+                user_id, scopes, self._init_error or "记忆后端不可用",
             )
             return {"items": [], "total": 0}
 
@@ -519,7 +609,11 @@ class MemoryService:
 
     async def delete_memory(self, memory_id: str) -> bool:
         """删除单条记忆"""
-        if not await self._ensure_init():
+        backend = await self._resolve_backend()
+        if backend == "markdown":
+            md = self._get_markdown_backend()
+            return await md.delete_memory(memory_id) if md else False
+        if backend != "mem0":
             return False
         try:
             await self._mem.delete(memory_id)
@@ -531,7 +625,11 @@ class MemoryService:
 
     async def delete_all_user_memories(self, user_id: str) -> int:
         """清除用户的全部记忆，返回删除数量"""
-        if not await self._ensure_init():
+        backend = await self._resolve_backend()
+        if backend == "markdown":
+            md = self._get_markdown_backend()
+            return await md.delete_all_user_memories(user_id) if md else 0
+        if backend != "mem0":
             return 0
         try:
             results = await self._mem.get_all(filters={"user_id": user_id}, limit=500)
@@ -551,12 +649,43 @@ class MemoryService:
             return 0
 
     async def health_check(self) -> Dict[str, Any]:
-        """连通性检查"""
+        """连通性检查（mem0 不可用时降级检查 Markdown 后端）"""
         from .config import build_mem0_config, summarize_mem0_config
 
         config = build_mem0_config(self._db)
         diagnostics = summarize_mem0_config(config)
         if not await self._ensure_init(config=config):
+            # mem0 不可用 → 按后端策略降级 Markdown 文件后端
+            mode = self._configured_backend()
+            if mode != "mem0":
+                md = self._get_markdown_backend()
+                if md is not None:
+                    md_health = await md.health_check()
+                    if md_health.get("ok"):
+                        return {
+                            "ok": True,
+                            "backend": "markdown",
+                            "mem0_version": _get_mem0_version(),
+                            "diagnostics": diagnostics,
+                            "note": "mem0 不可用，已降级 Markdown 文件后端",
+                            "mem0_error": self._init_error,
+                        }
+                    return {
+                        "ok": False,
+                        "backend": "markdown",
+                        "error": md_health.get("error") or "Markdown 后端不可写",
+                        "mem0_version": _get_mem0_version(),
+                        "diagnostics": diagnostics,
+                        "mem0_error": self._init_error,
+                    }
+            if mode == "off":
+                return {
+                    "ok": True,
+                    "backend": "off",
+                    "note": "已通过 MEMORY_BACKEND=off 关闭记忆功能",
+                    "mem0_version": _get_mem0_version(),
+                    "diagnostics": diagnostics,
+                }
             return {
                 "ok": False,
                 "error": self._init_error,
@@ -567,6 +696,7 @@ class MemoryService:
             await self._mem.get_all(filters={"user_id": "__health_check__"}, limit=1)
             return {
                 "ok": True,
+                "backend": "mem0",
                 "mem0_version": _get_mem0_version(),
                 "diagnostics": diagnostics,
             }
@@ -577,6 +707,7 @@ class MemoryService:
             if "out of bounds" in err_msg:
                 return {
                     "ok": True,
+                    "backend": "mem0",
                     "mem0_version": _get_mem0_version(),
                     "diagnostics": diagnostics,
                     "note": "collection_empty_but_reachable",

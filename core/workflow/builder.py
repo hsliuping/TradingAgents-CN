@@ -2881,6 +2881,7 @@ class WorkflowBuilder:
                 added_edges.add((node_id, target))
 
         # 3. 处理普通边
+        added_conditional_sources = set()
         for edge in definition.edges:
             source_node = definition.get_node(edge.source)
             target_node = definition.get_node(edge.target)
@@ -2910,6 +2911,12 @@ class WorkflowBuilder:
             if target_node.type == NodeType.END:
                 graph.add_edge(edge.source, END)
             elif edge.type == EdgeType.CONDITIONAL:
+                # 同一源节点的多条条件边必须合并为一次注册：
+                # LangGraph 以路由函数名作为分支名(_add_conditional_edge 内部固定为 "route")，
+                # 重复注册会抛 "Branch with name 'route' already exists for node ..."。
+                if edge.source in added_conditional_sources:
+                    continue
+                added_conditional_sources.add(edge.source)
                 self._add_conditional_edge(graph, edge, definition)
             elif target_node.type == NodeType.MERGE and merge_waits_all(target_node):
                 add_merge_predecessor(edge.target, edge.source)

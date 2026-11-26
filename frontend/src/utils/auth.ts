@@ -142,11 +142,15 @@ export const getTokenRemainingTime = (token: string): number => {
 }
 
 /**
- * 检查 token 是否即将过期（默认 5 分钟）
+ * 检查 token 是否需要刷新（即将过期或已过期）
+ *
+ * 注意：已过期的 token（remaining = 0）也必须返回 true，
+ * 否则挂机超过有效期后自动刷新器永远不会补救，只能等
+ * 下一个 API 请求触发被动刷新（往往伴随页面弹跳）。
  */
 export const isTokenExpiringSoon = (token: string, thresholdSeconds = 300): boolean => {
   const remaining = getTokenRemainingTime(token)
-  return remaining > 0 && remaining < thresholdSeconds
+  return remaining < thresholdSeconds
 }
 
 /**
@@ -180,10 +184,18 @@ export const autoRefreshToken = async (): Promise<boolean> => {
   return true
 }
 
+// 防止重复注册刷新定时器（login 与 initApp 都会调用，重复注册会导致每分钟多次刷新）
+let tokenRefreshTimerStarted = false
+
 /**
  * 设置定时刷新 token
  */
 export const setupTokenRefreshTimer = (): void => {
+  if (tokenRefreshTimerStarted) {
+    return
+  }
+  tokenRefreshTimerStarted = true
+
   // 每分钟检查一次
   setInterval(() => {
     autoRefreshToken()

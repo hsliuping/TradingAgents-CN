@@ -189,7 +189,9 @@ const connectTaskWebSocket = (taskId: string) => {
   }
 
   try {
-    const ws = createWebSocket(`/api/ws/task/${taskId}`, {
+    // 后端旧端点：/api/analysis/ws/task/{task_id}（analysis 路由前缀 + ws/task），
+    // 消息格式为 { type: 'progress_update', progress, status, message }
+    const ws = createWebSocket(`/api/analysis/ws/task/${taskId}`, {
       autoReconnect: true,
       maxReconnectAttempts: 5,
       heartbeatInterval: 0,

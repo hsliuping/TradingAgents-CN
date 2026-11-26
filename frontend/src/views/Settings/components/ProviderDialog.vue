@@ -294,6 +294,17 @@ const openRegisterUrl = () => {
 // 预设厂家数据
 const presetProviders = [
   {
+    name: 'modelflare',
+    display_name: 'Modelflare',
+    description: 'Modelflare聚合网关，一把Key调用GPT、Claude、Gemini、DeepSeek等多厂模型',
+    website: 'https://modelflare.dev',
+    api_doc_url: 'https://docs.modelflare.dev/zh/quickstart/',
+    default_base_url: 'https://modelflare.dev/v1',
+    supported_features: ['chat', 'completion', 'function_calling', 'streaming'],
+    register_url: 'https://modelflare.dev/sign-up?utm_source=github&utm_campaign=tradingagents-cn',
+    register_guide: '如果您还没有 Modelflare 账号，请先注册并获取 API Key：'
+  },
+  {
     name: 'volcengine',
     display_name: '火山方舟',
     description: '火山引擎火山方舟大模型服务平台，提供豆包等模型，OpenAI 兼容接口',
@@ -448,17 +459,6 @@ const presetProviders = [
     supported_features: ['chat', 'completion', 'embedding', 'function_calling', 'streaming'],
     register_url: 'https://localai.io/basics/installation/',
     register_guide: '请先安装并启动 LocalAI 服务，然后配置 API 地址'
-  },
-  {
-    name: 'modelflare',
-    display_name: 'Modelflare',
-    description: 'Modelflare 聚合网关，一把 Key 调用 GPT、Claude、Gemini、DeepSeek 等多厂模型',
-    website: 'https://modelflare.dev',
-    api_doc_url: 'https://docs.modelflare.dev/zh/quickstart/',
-    default_base_url: 'https://modelflare.dev/v1',
-    supported_features: ['chat', 'completion', 'function_calling', 'streaming'],
-    register_url: 'https://modelflare.dev',
-    register_guide: '如果您还没有 Modelflare 账号，请先注册并获取 API Key：'
   },
   {
     name: 'openai_compatible',

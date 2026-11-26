@@ -182,12 +182,23 @@ class UpdateService:
             logger.error("❌ 下载地址为空")
             return None
 
+        # 安全修复：强制要求服务端提供 SHA256，缺失则拒绝下载，避免无校验更新包被应用
+        if not update_info.sha256:
+            logger.error("❌ 更新信息缺少 SHA256 校验值，已拒绝下载")
+            self._download_progress = {
+                "status": "verify_failed",
+                "version": update_info.latest_version,
+                "percent": 0,
+                "error": "更新信息缺少 SHA256 校验值，已拒绝下载",
+            }
+            return None
+
         version = update_info.latest_version
         filename = self._build_download_filename(update_info)
         target_path = self.UPDATES_DIR / filename
 
         # 如果已下载且校验通过，直接返回
-        if target_path.exists() and update_info.sha256:
+        if target_path.exists():
             if self._verify_sha256(target_path, update_info.sha256):
                 logger.info(f"✅ 更新包已存在且校验通过: {filename}")
                 return target_path
@@ -223,13 +234,12 @@ class UpdateService:
                                     downloaded * 100 / total, 1
                                 )
 
-            # 校验
-            if update_info.sha256:
-                if not self._verify_sha256(target_path, update_info.sha256):
-                    logger.error("❌ 更新包校验失败，SHA256 不匹配")
-                    target_path.unlink(missing_ok=True)
-                    self._download_progress["status"] = "verify_failed"
-                    return None
+            # 校验（SHA256 为强制要求，缺失已在上方拦截）
+            if not self._verify_sha256(target_path, update_info.sha256):
+                logger.error("❌ 更新包校验失败，SHA256 不匹配")
+                target_path.unlink(missing_ok=True)
+                self._download_progress["status"] = "verify_failed"
+                return None
 
             self._download_progress["status"] = "completed"
             self._download_progress["percent"] = 100
@@ -257,7 +267,12 @@ class UpdateService:
 
     # ── 应用更新 ──────────────────────────────────────────
 
-    async def apply_update(self, update_file: Path, version: str) -> dict:
+    async def apply_update(
+        self,
+        update_file: Path,
+        version: str,
+        expected_sha256: Optional[str] = None,
+    ) -> dict:
         """
         启动独立更新器进程，然后通知调用方需要退出应用。
 
@@ -269,6 +284,14 @@ class UpdateService:
         """
         if not update_file.exists():
             return {"success": False, "message": "更新包文件不存在"}
+
+        # 安全修复：应用前强制校验 SHA256，防止下载后文件被替换或校验信息缺失
+        if not expected_sha256:
+            logger.error("❌ 缺少 SHA256 校验值，已拒绝应用更新")
+            return {"success": False, "message": "缺少 SHA256 校验值，已拒绝应用更新"}
+        if not self._verify_sha256(update_file, expected_sha256):
+            logger.error("❌ 更新包 SHA256 校验失败，已拒绝应用更新")
+            return {"success": False, "message": "更新包 SHA256 校验失败，已拒绝应用更新"}
 
         updater_script = PROJECT_ROOT / "scripts" / "updater" / "apply_update.ps1"
         if not updater_script.exists():

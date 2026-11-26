@@ -15,13 +15,26 @@ import logging
 import asyncio
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.routers.auth_db import get_current_user
 from app.services.update_service import get_update_service, UpdateService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/system/update")
+
+async def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    """仅允许管理员执行更新/下载等高危操作"""
+    if not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return current_user
+
+
+router = APIRouter(
+    prefix="/api/system/update",
+    # 安全修复：更新接口强制登录，避免未认证触发下载/重启（DoS）或被劫持更新通道导致 RCE
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _is_docker_env() -> bool:
@@ -93,7 +106,7 @@ _last_update_info = None
 
 
 @router.post("/download")
-async def download_update():
+async def download_update(_admin: dict = Depends(require_admin)):
     """下载更新包（仅 Windows 便携版/安装版支持）"""
     global _last_update_info
 
@@ -163,7 +176,7 @@ async def _do_download(svc: UpdateService, info):
 
 
 @router.post("/apply")
-async def apply_update():
+async def apply_update(_admin: dict = Depends(require_admin)):
     """应用更新（启动更新器，然后退出后端；仅 Windows 便携版/安装版支持）"""
     global _last_update_info
 
@@ -215,8 +228,17 @@ async def apply_update():
             "message": "更新包文件不存在，请重新下载",
         }
 
-    # 启动更新器
-    result = await svc.apply_update(update_file, version)
+    if not _last_update_info.sha256:
+        return {
+            "success": False,
+            "data": None,
+            "message": "更新信息缺少 SHA256 校验值，已拒绝应用更新",
+        }
+
+    # 启动更新器（应用前服务层会再次校验 SHA256）
+    result = await svc.apply_update(
+        update_file, version, expected_sha256=_last_update_info.sha256
+    )
 
     if result["success"]:
         # 给前端一个响应后，延迟退出后端进程

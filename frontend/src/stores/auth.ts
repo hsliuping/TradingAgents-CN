@@ -28,6 +28,9 @@ export interface AuthState {
   // 认证初始化状态
   authInitialized: boolean
   authInitPromise: Promise<void> | null
+
+  // Token 刷新单飞 Promise（并发刷新复用同一次请求）
+  refreshPromise: Promise<boolean> | null
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -72,7 +75,8 @@ export const useAuthStore = defineStore('auth', {
       redirectPath: '/',
 
       authInitialized: false,
-      authInitPromise: null
+      authInitPromise: null,
+      refreshPromise: null
     }
   },
 
@@ -277,8 +281,21 @@ export const useAuthStore = defineStore('auth', {
       }
     },
     
-    // 刷新Token
+    // 刷新Token（单飞：并发调用复用同一次刷新，避免刷新风暴）
     async refreshAccessToken() {
+      // 已有刷新进行中，直接复用同一个 Promise
+      if (this.refreshPromise) {
+        return this.refreshPromise
+      }
+
+      this.refreshPromise = this._doRefreshAccessToken().finally(() => {
+        this.refreshPromise = null
+      })
+
+      return this.refreshPromise
+    },
+
+    async _doRefreshAccessToken() {
       try {
         console.log('🔄 开始刷新Token...')
 
@@ -307,16 +324,27 @@ export const useAuthStore = defineStore('auth', {
       } catch (error: any) {
         console.error('❌ Token刷新异常:', error.message)
 
-        // 如果是网络错误或服务器错误，不要立即清除认证信息
-        if (error.code === 'NETWORK_ERROR' || error.response?.status >= 500) {
-          console.warn('⚠️ 网络或服务器错误，保留认证信息')
+        // 瞬时错误（网络不可达/超时/5xx）：保留认证信息，等下一轮定时器或请求重试。
+        // 修复：axios v1 网络/超时错误的 code 是 ERR_NETWORK / ECONNABORTED，
+        // 旧判断 'NETWORK_ERROR' 永远不匹配，导致后端繁忙时的瞬时错误被误判为
+        // "登录失效"，用户被直接踢到登录页（页面加载到一半被弹回的直接根因）。
+        // 注意：本地校验错误（无 code 无 response）不算瞬时错误，需正常清除认证。
+        const hasResponse = !!error.response
+        const isTransientError = hasResponse
+          ? error.response?.status >= 500
+          : (error.code === 'ERR_NETWORK' || error.code === 'ECONNABORTED' || error.code === 'NETWORK_ERROR')
+
+        if (isTransientError) {
+          console.warn('⚠️ 网络/服务器瞬时错误，保留认证信息，稍后自动重试')
           return false
         }
 
-        // 其他错误（如401），清除认证信息
-        console.log('🧹 清除认证信息并跳转登录')
+        // 确定性失败（refresh token 无效/过期）：清除本地认证。
+        // 跳转到登录页统一交给 request.ts 的 handle401Error（refresh 接口的
+        // 401 响应会被拦截器处理），这里不再 window.location.href 整页跳转，
+        // 消除 "SPA push('/login') + 整页刷新" 双重跳转竞态导致的页面闪跳。
+        console.log('🧹 Refresh token 已失效，清除本地认证信息')
         this.clearAuthInfo()
-        this.redirectToLogin()
 
         return false
       }
@@ -486,14 +514,29 @@ export const useAuthStore = defineStore('auth', {
           }
         } catch (error: unknown) {
           console.error('❌ 检查认证状态失败:', error)
-          // 如果是网络错误或超时，不清除认证信息，只是标记为未认证
-          if ((error as any)?.code === 'ECONNABORTED' || (error as any)?.message?.includes('timeout')) {
-            console.warn('⚠️ 网络超时，保留认证信息但标记为未认证状态')
+          // 瞬时错误（网络不可达/超时/5xx）：保留本地认证信息并标记为未认证，
+          // 后续请求拦截器/路由守卫会自动补救刷新。此前仅豁免超时，
+          // 网络闪断（ERR_NETWORK）会被误判为登录失效并整页跳转登录页。
+          const err = error as any
+          const hasResponse = !!err?.response
+          const isTransientError = hasResponse
+            ? err?.response?.status >= 500
+            : (
+              err?.code === 'ECONNABORTED' ||
+              err?.code === 'ERR_NETWORK' ||
+              err?.code === 'NETWORK_ERROR' ||
+              err?.message?.includes('timeout')
+            )
+
+          if (isTransientError) {
+            console.warn('⚠️ 网络/服务器瞬时错误，保留认证信息但标记为未认证状态')
             this.isAuthenticated = false
           } else {
-            // 其他错误则清除认证信息
+            // 确定性认证失败：清除本地认证。
+            // 不再整页跳转（redirectToLogin），统一交由路由守卫的
+            // next('/login') 走 SPA 导航，避免整页刷新闪跳
+            console.log('🧹 认证确定失败，清除本地认证信息')
             this.clearAuthInfo()
-            this.redirectToLogin()
           }
         }
       } else {

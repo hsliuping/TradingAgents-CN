@@ -444,7 +444,7 @@ const importingForProvider = ref(false)
 const exportingForProvider = ref(false)
 
 // 聚合平台列表
-const aggregatorProviders = ['302ai', 'aihubmix', 'oneapi', 'newapi', 'openrouter', 'volcengine', 'volcengine_coding', 'custom_aggregator']
+const aggregatorProviders = ['modelflare', '302ai', 'aihubmix', 'oneapi', 'newapi', 'openrouter', 'volcengine', 'volcengine_coding', 'custom_aggregator']
 
 // 计算属性：判断当前选择的是否为聚合平台
 const isAggregatorProvider = computed(() => {
@@ -1064,44 +1064,70 @@ const handleUsePresetModels = async () => {
 // 获取预设模型列表
 const getPresetModels = (providerName: string): ModelInfo[] => {
   const presets: Record<string, ModelInfo[]> = {
-    '302ai': [
-      // OpenAI 模型
-      { name: 'gpt-4o', display_name: 'GPT-4o', input_price_per_1k: 0.005, output_price_per_1k: 0.015, context_length: 128000, currency: 'USD' },
-      { name: 'gpt-4o-mini', display_name: 'GPT-4o Mini', input_price_per_1k: 0.00015, output_price_per_1k: 0.0006, context_length: 128000, currency: 'USD' },
-      { name: 'gpt-4-turbo', display_name: 'GPT-4 Turbo', input_price_per_1k: 0.01, output_price_per_1k: 0.03, context_length: 128000, currency: 'USD' },
-      { name: 'gpt-3.5-turbo', display_name: 'GPT-3.5 Turbo', input_price_per_1k: 0.0005, output_price_per_1k: 0.0015, context_length: 16385, currency: 'USD' },
-
-      // Anthropic 模型
-      { name: 'claude-3-5-sonnet-20241022', display_name: 'Claude 3.5 Sonnet', input_price_per_1k: 0.003, output_price_per_1k: 0.015, context_length: 200000, currency: 'USD' },
-      { name: 'claude-3-5-haiku-20241022', display_name: 'Claude 3.5 Haiku', input_price_per_1k: 0.001, output_price_per_1k: 0.005, context_length: 200000, currency: 'USD' },
-      { name: 'claude-3-opus-20240229', display_name: 'Claude 3 Opus', input_price_per_1k: 0.015, output_price_per_1k: 0.075, context_length: 200000, currency: 'USD' },
-
-      // Google 模型
-      { name: 'gemini-2.0-flash-exp', display_name: 'Gemini 2.0 Flash', input_price_per_1k: 0, output_price_per_1k: 0, context_length: 1000000, currency: 'USD' },
-      { name: 'gemini-1.5-pro', display_name: 'Gemini 1.5 Pro', input_price_per_1k: 0.00125, output_price_per_1k: 0.005, context_length: 2000000, currency: 'USD' },
-      { name: 'gemini-1.5-flash', display_name: 'Gemini 1.5 Flash', input_price_per_1k: 0.000075, output_price_per_1k: 0.0003, context_length: 1000000, currency: 'USD' },
+    "modelflare": [
+      { name: "gpt-5.6-sol", display_name: "GPT-5.6 Sol", input_price_per_1k: null, output_price_per_1k: null, context_length: 128000, currency: "USD" },
+      { name: "claude-fable-5-2", display_name: "Claude Fable 5.2", input_price_per_1k: null, output_price_per_1k: null, context_length: 200000, currency: "USD" },
+      { name: "claude-opus-5-5", display_name: "Claude Opus 5.5", input_price_per_1k: null, output_price_per_1k: null, context_length: 200000, currency: "USD" },
+      { name: "glm-5.3-flash", display_name: "GLM 5.3 Flash", input_price_per_1k: null, output_price_per_1k: null, context_length: 128000, currency: "CNY" },
     ],
-    'aihubmix': [
-      { name: 'gpt-4o', display_name: 'GPT-4o', input_price_per_1k: 0.005, output_price_per_1k: 0.015, context_length: 128000, currency: 'USD' },
-      { name: 'gpt-4o-mini', display_name: 'GPT-4o Mini', input_price_per_1k: 0.00015, output_price_per_1k: 0.0006, context_length: 128000, currency: 'USD' },
-      { name: 'claude-3-5-sonnet-latest', display_name: 'Claude 3.5 Sonnet', input_price_per_1k: 0.003, output_price_per_1k: 0.015, context_length: 200000, currency: 'USD' },
-      { name: 'gemini-2.0-flash', display_name: 'Gemini 2.0 Flash', input_price_per_1k: 0, output_price_per_1k: 0, context_length: 1000000, currency: 'USD' },
-      { name: 'deepseek-chat', display_name: 'DeepSeek Chat', input_price_per_1k: 0.00027, output_price_per_1k: 0.0011, context_length: 64000, currency: 'USD' },
+    "302ai": [
+      { name: "gpt-6.1-sol", display_name: "GPT-6.1 Sol", input_price_per_1k: 0.002, output_price_per_1k: 0.01, context_length: 1050000, currency: "USD" },
+      { name: "gpt-6-luna", display_name: "GPT-6 Luna", input_price_per_1k: 0.0001, output_price_per_1k: 0.0005, context_length: 1050000, currency: "USD" },
+      { name: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5", input_price_per_1k: 0.002, output_price_per_1k: 0.01, context_length: 1000000, currency: "USD" },
+      { name: "claude-haiku-5-5", display_name: "Claude Haiku 5.5", input_price_per_1k: 0.0001, output_price_per_1k: 0.0005, context_length: 1000000, currency: "USD" },
+      { name: "gemini-4-argon", display_name: "Gemini 4 Argon", input_price_per_1k: 0.004, output_price_per_1k: 0.02, context_length: 1048576, currency: "USD" },
+      { name: "gemini-3.6-flash", display_name: "Gemini 3.6 Flash", input_price_per_1k: 0.00075, output_price_per_1k: 0.00375, context_length: 1048576, currency: "USD" },
+      { name: "deepseek-v4.1-flash", display_name: "DeepSeek V4.1 Flash", input_price_per_1k: 0.000155, output_price_per_1k: 0.00062, context_length: 1048576, currency: "USD" },
     ],
-    'openrouter': [
-      // OpenAI 模型
-      { name: 'openai/gpt-4o', display_name: 'GPT-4o', input_price_per_1k: 0.005, output_price_per_1k: 0.015, context_length: 128000, currency: 'USD' },
-      { name: 'openai/gpt-4o-mini', display_name: 'GPT-4o Mini', input_price_per_1k: 0.00015, output_price_per_1k: 0.0006, context_length: 128000, currency: 'USD' },
-      { name: 'openai/gpt-3.5-turbo', display_name: 'GPT-3.5 Turbo', input_price_per_1k: 0.0005, output_price_per_1k: 0.0015, context_length: 16385, currency: 'USD' },
-
-      // Anthropic 模型
-      { name: 'anthropic/claude-3.5-sonnet', display_name: 'Claude 3.5 Sonnet', input_price_per_1k: 0.003, output_price_per_1k: 0.015, context_length: 200000, currency: 'USD' },
-      { name: 'anthropic/claude-3-opus', display_name: 'Claude 3 Opus', input_price_per_1k: 0.015, output_price_per_1k: 0.075, context_length: 200000, currency: 'USD' },
-
-      // Google 模型
-      { name: 'google/gemini-2.0-flash-exp', display_name: 'Gemini 2.0 Flash', input_price_per_1k: 0, output_price_per_1k: 0, context_length: 1000000, currency: 'USD' },
-      { name: 'google/gemini-pro-1.5', display_name: 'Gemini 1.5 Pro', input_price_per_1k: 0.00125, output_price_per_1k: 0.005, context_length: 2000000, currency: 'USD' },
-    ]
+    "aihubmix": [
+      { name: "gpt-6.2-astra", display_name: "GPT-6.2 Astra", input_price_per_1k: 0.008, output_price_per_1k: 0.04, context_length: 1050000, currency: "USD" },
+      { name: "gpt-6.1-terra", display_name: "GPT-6.1 Terra", input_price_per_1k: 0.001, output_price_per_1k: 0.005, context_length: 1050000, currency: "USD" },
+      { name: "gpt-6.1-sol", display_name: "GPT-6.1 Sol", input_price_per_1k: 0.002, output_price_per_1k: 0.01, context_length: 1050000, currency: "USD" },
+      { name: "gpt-6-luna", display_name: "GPT-6 Luna", input_price_per_1k: 0.0001, output_price_per_1k: 0.0005, context_length: 1050000, currency: "USD" },
+      { name: "gpt-5.5", display_name: "GPT-5.5", input_price_per_1k: 0.005, output_price_per_1k: 0.03, context_length: 1050000, currency: "USD" },
+      { name: "gpt-5.4-mini", display_name: "GPT-5.4 Mini", input_price_per_1k: 0.00075, output_price_per_1k: 0.0045, context_length: 400000, currency: "USD" },
+      { name: "gpt-5.3-codex", display_name: "GPT-5.3 Codex", input_price_per_1k: 0.00175, output_price_per_1k: 0.014, context_length: 400000, currency: "USD" },
+      { name: "claude-fable-5-1", display_name: "Claude Fable 5.1", input_price_per_1k: 0.011, output_price_per_1k: 0.055, context_length: 1000000, currency: "USD" },
+      { name: "claude-opus-5-5", display_name: "Claude Opus 5.5", input_price_per_1k: 0.004, output_price_per_1k: 0.02, context_length: 1000000, currency: "USD" },
+      { name: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5", input_price_per_1k: 0.002, output_price_per_1k: 0.01, context_length: 1000000, currency: "USD" },
+      { name: "claude-haiku-5-5", display_name: "Claude Haiku 5.5", input_price_per_1k: 0.0001, output_price_per_1k: 0.0005, context_length: 1000000, currency: "USD" },
+      { name: "claude-sonnet-4-6", display_name: "Claude Sonnet 4.6", input_price_per_1k: 0.003, output_price_per_1k: 0.015, context_length: 1000000, currency: "USD" },
+      { name: "gemini-4-argon", display_name: "Gemini 4 Argon", input_price_per_1k: 0.002, output_price_per_1k: 0.01, context_length: 1048576, currency: "USD" },
+      { name: "gemini-3.8-flash", display_name: "Gemini 3.8 Flash", input_price_per_1k: 0.00075, output_price_per_1k: 0.00375, context_length: 1048576, currency: "USD" },
+      { name: "gemini-3.6-flash", display_name: "Gemini 3.6 Flash", input_price_per_1k: 0.00075, output_price_per_1k: 0.00375, context_length: 1048576, currency: "USD" },
+      { name: "deepseek-v4.1-flash", display_name: "DeepSeek V4.1 Flash", input_price_per_1k: 0.000155, output_price_per_1k: 0.00062, context_length: 1048576, currency: "USD" },
+      { name: "deepseek-v4-pro-0813", display_name: "DeepSeek V4 Pro", input_price_per_1k: 0.000692, output_price_per_1k: 0.00208, context_length: 1048576, currency: "USD" },
+      { name: "kimi-k3", display_name: "Kimi K3", input_price_per_1k: 0.003, output_price_per_1k: 0.015, context_length: 1048576, currency: "USD" },
+      { name: "kimi-k2.7-code", display_name: "Kimi K2.7 Code", input_price_per_1k: 0.00095, output_price_per_1k: 0.004, context_length: 262144, currency: "USD" },
+      { name: "glm-5.3", display_name: "GLM 5.3", input_price_per_1k: 0.00113, output_price_per_1k: 0.00394, context_length: 1048576, currency: "USD" },
+      { name: "glm-5.3-flash", display_name: "GLM 5.3 Flash", input_price_per_1k: 0.000113, output_price_per_1k: 0.000394, context_length: 1048576, currency: "USD" },
+      { name: "qwen3.8-max", display_name: "Qwen3.8 Max", input_price_per_1k: 0.00169, output_price_per_1k: 0.00507, context_length: 1048576, currency: "USD" },
+      { name: "qwen3.8-flash", display_name: "Qwen3.8 Flash", input_price_per_1k: 0.000113, output_price_per_1k: 0.00038, context_length: 1048576, currency: "USD" },
+      { name: "qwen3.7-plus", display_name: "Qwen3.7 Plus", input_price_per_1k: 0.000282, output_price_per_1k: 0.00113, context_length: 1048576, currency: "USD" },
+      { name: "mimo-v2.6-flash", display_name: "MiMo V2.6 Flash", input_price_per_1k: 0.000155, output_price_per_1k: 0.00031, context_length: 1048576, currency: "USD" },
+      { name: "minimax-m3", display_name: "MiniMax M3", input_price_per_1k: 0.000288, output_price_per_1k: 0.00115, context_length: 1048576, currency: "USD" },
+      { name: "grok-4.7", display_name: "Grok 4.7", input_price_per_1k: 0.002, output_price_per_1k: 0.006, context_length: 500000, currency: "USD" },
+    ],
+    "openrouter": [
+      { name: "openai/gpt-6-luna", display_name: "GPT-6 Luna", input_price_per_1k: 0.0001, output_price_per_1k: 0.0005, context_length: 1050000, currency: "USD" },
+      { name: "anthropic/claude-opus-5.5", display_name: "Claude Opus 5.5", input_price_per_1k: 0.004, output_price_per_1k: 0.02, context_length: 1000000, currency: "USD" },
+      { name: "anthropic/claude-sonnet-5.5", display_name: "Claude Sonnet 5.5", input_price_per_1k: null, output_price_per_1k: null, context_length: 1000000, currency: "USD" },
+      { name: "anthropic/claude-haiku-5.5", display_name: "Claude Haiku 5.5", input_price_per_1k: null, output_price_per_1k: null, context_length: 1000000, currency: "USD" },
+      { name: "anthropic/claude-fable-5.1", display_name: "Claude Fable 5.1", input_price_per_1k: null, output_price_per_1k: null, context_length: 1000000, currency: "USD" },
+      { name: "anthropic/claude-sonnet-5", display_name: "Claude Sonnet 5", input_price_per_1k: null, output_price_per_1k: null, context_length: 1000000, currency: "USD" },
+      { name: "anthropic/claude-sonnet-4.6", display_name: "Claude Sonnet 4.6", input_price_per_1k: null, output_price_per_1k: null, context_length: 1000000, currency: "USD" },
+      { name: "anthropic/claude-haiku-4.5", display_name: "Claude Haiku 4.5", input_price_per_1k: null, output_price_per_1k: null, context_length: 200000, currency: "USD" },
+      { name: "google/gemini-4-argon", display_name: "Gemini 4 Argon", input_price_per_1k: null, output_price_per_1k: null, context_length: 1048576, currency: "USD" },
+      { name: "google/gemini-3.8-flash", display_name: "Gemini 3.8 Flash", input_price_per_1k: null, output_price_per_1k: null, context_length: 1048576, currency: "USD" },
+      { name: "google/gemini-3.6-flash", display_name: "Gemini 3.6 Flash", input_price_per_1k: null, output_price_per_1k: null, context_length: 1048576, currency: "USD" },
+      { name: "deepseek/deepseek-v4.1-flash-1017", display_name: "DeepSeek V4.1 Flash (1017)", input_price_per_1k: 0.00015, output_price_per_1k: 0.0006, context_length: 1048576, currency: "USD" },
+      { name: "deepseek/deepseek-v4-pro-0813", display_name: "DeepSeek V4 Pro (0813)", input_price_per_1k: null, output_price_per_1k: null, context_length: 1048576, currency: "USD" },
+      { name: "z-ai/glm-5.3-flash", display_name: "GLM 5.3 Flash", input_price_per_1k: 0.00012, output_price_per_1k: 0.00038, context_length: 1048576, currency: "USD" },
+      { name: "moonshotai/kimi-k3.1-pro", display_name: "Kimi K3.1 Pro", input_price_per_1k: null, output_price_per_1k: null, context_length: 1048576, currency: "USD" },
+      { name: "minimax/minimax-m3.1-flash", display_name: "MiniMax M3.1 Flash", input_price_per_1k: 7.5e-05, output_price_per_1k: 0.0003, context_length: 1048576, currency: "USD" },
+      { name: "minimax/minimax-m3", display_name: "MiniMax M3", input_price_per_1k: null, output_price_per_1k: null, context_length: 1048576, currency: "USD" },
+      { name: "tencent/hy4-flash", display_name: "混元 Hy4 Flash", input_price_per_1k: 3.5e-05, output_price_per_1k: 0.0001405, context_length: 1048576, currency: "USD" },
+    ],
   }
 
   return presets[providerName] || []

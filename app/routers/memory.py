@@ -49,16 +49,52 @@ def _build_metadata_filters(
 @router.get("/health")
 async def memory_health(db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
     """mem0 记忆层健康检查"""
-    from core.memory.service import get_memory_service
+    from core.memory.service import get_memory_service, _is_mem0_enabled
     svc = get_memory_service(db)
     result = await svc.health_check()
     ok = bool(result.get("ok", False))
+
+    if ok:
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": result, "message": ""},
+        )
+
+    # 记忆层是可选增强模块：未启用或 Embedding 未配置（如回退本地 Ollama 未运行）
+    # 属于「未配置」而非服务故障，返回 200 + enabled=false 优雅降级，
+    # 避免前端因 503 弹出全局错误横幅「服务暂时不可用」。
+    err = str(result.get("error") or "")
+    lowered = err.lower()
+    diagnostics = result.get("diagnostics") or {}
+    embedder_provider = str((diagnostics.get("embedder") or {}).get("provider") or "").lower()
+
+    not_configured = (
+        not _is_mem0_enabled()
+        or (embedder_provider == "ollama" and "ollama" in lowered)
+        or "embedding" in lowered
+        or "未配置" in err
+    )
+    if not_configured:
+        result["enabled"] = False
+        if not _is_mem0_enabled():
+            result["error"] = "记忆功能已禁用（MEM0_ENABLED=false）"
+        else:
+            result["error"] = (
+                "记忆功能未配置：缺少可用的 Embedding 模型，"
+                "可在「厂家管理」配置 DashScope/SiliconFlow 等支持 Embedding 的 API Key，"
+                "或本地启动 Ollama"
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"success": True, "data": result, "message": ""},
+        )
+
     return JSONResponse(
-        status_code=200 if ok else 503,
+        status_code=503,
         content={
-            "success": ok,
+            "success": False,
             "data": result,
-            "message": "" if ok else (result.get("error") or "记忆层不可用"),
+            "message": err or "记忆层不可用",
         },
     )
 

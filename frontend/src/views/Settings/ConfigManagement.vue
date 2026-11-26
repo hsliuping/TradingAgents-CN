@@ -1786,6 +1786,11 @@ const loadTabData = async (tab: string) => {
 // 🔥 计算属性：按启用状态排序的厂家列表（启用的在上面，禁用的在下面）
 const sortedProviders = computed(() => {
   return [...providers.value].sort((a, b) => {
+    // Modelflare（白金赞助商）始终置顶
+    const aPinned = a.name === 'modelflare'
+    const bPinned = b.name === 'modelflare'
+    if (aPinned && !bPinned) return -1
+    if (!aPinned && bPinned) return 1
     // 启用的排在前面（is_active=true 返回 -1）
     if (a.is_active && !b.is_active) return -1
     if (!a.is_active && b.is_active) return 1

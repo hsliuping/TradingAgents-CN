@@ -27,6 +27,26 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# 敏感环境变量标记（大小写不敏感的子串匹配）：
+# Skill 子进程的凭证应通过 credentials 参数显式注入，
+# 不应从父进程继承 JWT_SECRET / 数据库密码 / 各类 API Key 等全局敏感配置
+_SENSITIVE_ENV_MARKERS = (
+    "SECRET", "PASSWORD", "PASSWD", "TOKEN", "API_KEY", "APIKEY",
+    "ACCESS_KEY", "PRIVATE_KEY", "CREDENTIAL", "JWT", "MONGO", "REDIS",
+    "ADMIN_DEFAULT", "SESSION_KEY", "ENCRYPTION",
+)
+
+
+def sanitize_env(env: Dict[str, str]) -> Dict[str, str]:
+    """过滤环境变量中的敏感键（保留系统变量与业务配置，剥离密钥类变量）"""
+    filtered: Dict[str, str] = {}
+    for key, value in env.items():
+        upper = key.upper()
+        if any(marker in upper for marker in _SENSITIVE_ENV_MARKERS):
+            continue
+        filtered[key] = value
+    return filtered
+
 
 class ScriptSkillExecutor:
     """脚本型 Skill 执行器
@@ -76,8 +96,8 @@ class ScriptSkillExecutor:
                 "execution_time_ms": int((time.time() - start) * 1000), "exit_code": -1,
             }
 
-        # 构建环境变量
-        env = os.environ.copy()
+        # 构建环境变量（先剥离全局敏感配置，再显式注入 baseDir 与 credentials）
+        env = sanitize_env(os.environ.copy())
         env[ScriptSkillExecutor.BASE_DIR_VAR] = str(skill_dir_path)
         if credentials:
             for key, value in credentials.items():
@@ -195,8 +215,8 @@ class ScriptSkillExecutor:
                 "exit_code": -1,
             }
 
-        # 构建环境变量
-        env = os.environ.copy()
+        # 构建环境变量（剥离全局敏感配置）
+        env = sanitize_env(os.environ.copy())
         # {baseDir} 替换：将 Skill 包目录路径注入环境变量
         env[ScriptSkillExecutor.BASE_DIR_VAR] = str(skill_dir_path)
         # 凭证注入（阶段 2 实现，当前可选）
