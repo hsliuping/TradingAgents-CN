@@ -10,6 +10,16 @@
 
 > 本项目是研究辅助工具，所有 AI 生成内容仅供学习参考，**不构成投资建议**。
 
+<p align="center"><b>白金赞助商 · Modelflare</b></p>
+<p align="center">
+  <a href="https://modelflare.dev/sign-up?utm_source=github&utm_campaign=tradingagents-cn">
+    <img src="docs/images/sponsors/modelflare-banner-zh.png" width="720" alt="Modelflare：满血稳定不掺水，低成本享受全球 SOTA 模型">
+  </a>
+</p>
+<p><sub>感谢 <a href="https://modelflare.dev/sign-up?utm_source=github&utm_campaign=tradingagents-cn">Modelflare</a> 赞助本项目！Modelflare：满血稳定不掺水，低成本享受全球 SOTA 模型。站点由美国 LLC 主体 Havenbyte LLC 运营，支持 GPT、Claude、Gemini、Grok 等主流模型和常用兼容协议，还支持 40 多种图片和视频模型，支持大陆正规商务合作。</sub></p>
+<p><sub><b>缓存补偿是一大亮点：</b>部分 OpenAI 价格优先、稳定和高级分组提供每日 65%、75%、85% 的缓存命中率保障，符合条件的请求没达到目标的，平台补偿差额，结算后可在用量看板查看。</sub></p>
+<p><sub><b>特惠活动：</b>单笔充值 US$20 即可解锁 0.015 倍价格倍率的 GPT 特惠分组，单笔充值 US$50 即可解锁 0.03 倍价格倍率的 Claude 特惠分组。通过 <a href="https://modelflare.dev/sign-up?utm_source=github&utm_campaign=tradingagents-cn">专属链接注册</a>即可参与。</sub></p>
+
 ## 致敬源项目
 
 感谢 [Tauric Research](https://github.com/TauricResearch) 团队创造的革命性多智能体交易框架 [TradingAgents](https://github.com/TauricResearch/TradingAgents)！
