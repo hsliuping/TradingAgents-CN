@@ -10,6 +10,76 @@
 
 > 本项目是研究辅助工具，所有 AI 生成内容仅供学习参考，**不构成投资建议**。
 
+## 致敬源项目
+
+感谢 [Tauric Research](https://github.com/TauricResearch) 团队创造的革命性多智能体交易框架 [TradingAgents](https://github.com/TauricResearch/TradingAgents)！
+
+**我们的定位与使命**：专注学习与研究，提供中文化学习中心与工具，合规友好，支持 A 股的分析与教学，推动 AI 金融技术在中文社区的普及与正确使用。
+
+## V3.0 发布主线 —— 从分析工具走向 AI 助手
+
+> 当前版本：TradingAgents-CN v3.0.1，聚焦统一 AI 助手入口、自然语言选股、Agent 自主规划分析与 Skill 能力扩展。
+
+### 四个核心能力
+
+- **统一 AI 助手入口**：将分析、报告、股票关注列表、模拟交易等操作收拢到统一入口，减少页面切换成本
+- **自然语言选股**：直接用自然语言描述选股需求，输出结构化候选结果并无缝进入后续分析
+- **Agent 自主规划分析**：根据问题自动识别分析路径，组合工具与能力完成复杂任务
+- **Skill 能力扩展**：围绕自然语言需求自动生成、测试、验证并注册新能力，持续扩展系统边界
+
+### 核心特性
+
+#### 全新技术架构
+
+- **后端升级**：从 Streamlit 迁移到 FastAPI，提供更强大的 RESTful API
+- **前端重构**：采用 Vue 3 + Element Plus，打造现代化的单页应用
+- **数据库优化**：MongoDB + Redis 双数据库架构，性能大幅提升
+
+#### 核心功能
+
+- **用户权限管理**：完整的用户认证、角色管理、操作日志系统
+- **配置管理中心**：可视化的大模型配置、数据源管理、系统设置
+- **缓存管理系统**：智能缓存策略，支持 MongoDB/Redis/文件多级缓存
+- **实时通知系统**：SSE+WebSocket 双通道推送，实时跟踪分析进度和系统状态
+- **股票关注列表管理**：个人股票关注列表收藏、分组管理和跟踪功能
+- **个股详情页**：完整的个股信息展示和历史分析记录
+- **模拟交易计划**：虚拟交易环境，验证投资策略效果
+
+#### 智能分析增强
+
+- **动态供应商管理**：支持动态添加和配置 LLM 供应商
+- **模型能力管理**：智能模型选择，根据任务自动匹配最佳模型
+- **多数据源同步**：统一的数据源管理，支持 Tushare、AKShare、BaoStock
+- **报告导出功能**：支持 Markdown 格式专业报告导出
+
+#### 重大 Bug 修复
+
+- **技术指标计算修复**：彻底解决市场分析师技术指标计算不准确问题
+- **基本面数据修复**：修复基本面分析师 PE、PB 等关键财务数据计算错误
+- **死循环问题修复**：解决部分用户在分析过程中触发的无限循环问题
+- **数据一致性优化**：确保所有分析师使用统一、准确的数据源
+
+### 技术栈升级
+
+| 组件 | v0.1.x | v3.0.1 |
+|------|--------|--------|
+| **后端框架** | Streamlit | FastAPI + Uvicorn |
+| **前端框架** | Streamlit | Vue 3 + Vite + Element Plus |
+| **数据库** | 可选 MongoDB | MongoDB + Redis |
+| **API 架构** | 单体应用 | RESTful API + WebSocket |
+| **部署方式** | 本地/源码 | 本地源码部署 |
+
+### 推荐体验路径
+
+1. 从统一 AI 助手入口发起任务或问题
+2. 使用自然语言描述选股或分析需求
+3. 让 Agent 自动规划分析路径并生成结果
+4. 按需扩展 Skill，把高频需求沉淀为新能力
+
+### 中文增强特色
+
+相比原版新增：智能新闻分析、多层次新闻过滤、新闻质量评估、统一新闻工具、多 LLM 提供商集成、模型选择持久化、实时进度显示、智能会话管理、中文界面、A 股数据、国产 LLM、源码部署、专业报告导出、统一日志管理、Web 配置界面、成本优化。
+
 ## 核心功能
 
 - **单股研究**：多智能体辩论式分析（5 级深度），多情景观点呈现
@@ -26,10 +96,11 @@
 
 | 版本 | 定位 | 核心变化 |
 |------|------|---------|
+| v0.1.x | 开源起步期 | 中文本土化起步：国产 LLM 接入、A 股数据源、Web 界面与源码部署 |
 | v1.0 | 多智能体分析工具 | 单股研究 + 批量分析，多个分析师智能体协作完成 A 股研究流程 |
 | v2.0 | 分析融入研究闭环 | 统一分析引擎 + 可视化工作流，新增持仓分析、操作复盘与阶段性复盘 |
 | v2.1 | 研究辅助合规化 | 报告表达、提示词模板、界面文案全面对齐"研究辅助"定位；新模型接入与稳定性提升 |
-| v3.0 | 从分析工具到 AI 助手 | 统一 AI 助手入口、自然语言选股、Agent 自主规划分析、Skill 能力扩展；架构升级为 FastAPI + Vue 3 + MongoDB/Redis |
+| v3.0 | 从分析工具到 AI 助手 | 统一 AI 助手入口、自然语言选股、Agent 自主规划分析、Skill 能力扩展；架构升级为 FastAPI + Vue 3 + MongoDB/Redis；首次发布免费开源社区版 |
 
 ## 社区版与 Pro 版的差异
 
@@ -121,6 +192,7 @@ npm run dev                     # 默认 http://localhost:3000
 - 用户手册：[docs/02-user-guide/user-manual-v3.0.md](docs/02-user-guide/user-manual-v3.0.md)
 - 学习指南：[docs/02-user-guide/](docs/02-user-guide/)（learning-01 ~ 08）
 - 免费课程：[docs/07-courses/v3.0/phase-01-discover/](docs/07-courses/v3.0/phase-01-discover/)
+- 完整更新日志：[CHANGELOG.md](CHANGELOG.md)
 
 ## 数据来源
 
@@ -147,7 +219,13 @@ npm run dev                     # 默认 http://localhost:3000
 
 **你能得到**：公开署名与流量（版本发布/公众号点名致谢）、多智能体系统的工程实战经验、项目商业化优先权。项目目前收入尚不足以覆盖基础成本，暂为志愿参与；收入覆盖成本后的分配原则（社区贡献基金 / 顾问费 / 分成路径）已提前写明。
 
-**怎么联系**：初始沟通请发邮件至 hsliup@163.com；具体技术问题建议直接提 Issue / PR 公开讨论；协作顺畅后会邀请加入项目微信群与知识星球。
+**怎么联系**：
+- GitHub Issues：[提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
+- 邮箱：hsliup@163.com
+- 项目 QQ 群：1079484482
+- 微信公众号：TradingAgents-CN（扫码关注）
+
+  <img src="assets/wexin.png" alt="微信公众号" width="200"/>
 
 提交流程、分配框架与贡献者协议（CLA）详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
@@ -172,3 +250,13 @@ npm run dev                     # 默认 http://localhost:3000
 - 所有通过 PR 参与共建的贡献者
 
 完整致谢（含授权说明与数据源致谢）见 [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md)。
+
+---
+
+<div align="center">
+
+**如果这个项目对您有帮助，请给我们一个 Star！**
+
+[⭐ Star this repo](https://github.com/hsliuping/TradingAgents-CN) | [🍴 Fork this repo](https://github.com/hsliuping/TradingAgents-CN/fork) | [📖 Read the docs](./docs/)
+
+</div>
