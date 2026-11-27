@@ -29,11 +29,12 @@
 0. [v3.0 系统介绍（技术文档版）](./01-product/v3.0-system-introduction.md)
    - [v3.0 系统介绍（公众号传播版）](./01-product/v3.0-system-introduction-for-wechat.md)
 1. [快速开始](./02-user-guide/getting-started/quick-start.md)
-2. [安装指南](./02-user-guide/getting-started/installation.md)
-3. [Docker 安装使用指南](./02-user-guide/getting-started/docker-installation-guide.md)
-4. [数据库配置](./02-user-guide/getting-started/database-setup.md)
-5. [LLM 配置](./02-user-guide/configuration/llm-config.md)
-6. [数据源配置](./02-user-guide/configuration/config-guide.md)
+2. [一键安装使用手册](./02-user-guide/getting-started/one-click-install-guide.md)
+3. [安装指南](./02-user-guide/getting-started/installation.md)
+4. [Docker 安装使用指南](./02-user-guide/getting-started/docker-installation-guide.md)
+5. [数据库配置](./02-user-guide/getting-started/database-setup.md)
+6. [LLM 配置](./02-user-guide/configuration/llm-config.md)
+7. [数据源配置](./02-user-guide/configuration/config-guide.md)
 
 ### 功能使用
 - [个股分析](./02-user-guide/features/stock-analysis.md)

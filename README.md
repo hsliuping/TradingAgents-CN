@@ -129,13 +129,79 @@ Pro 版面向有更高阶研究工作流需求的用户，获取方式见项目�
 
 ## 快速开始
 
-### 环境要求
+### 一键安装（推荐）
+
+一条命令完成全部部署，**无需 Docker、无需手动装数据库**。脚本自动完成：检查/安装 Python → 获取代码 → 下载 MongoDB 与 Redis 运行时 → 构建前端 → 创建虚拟环境并安装依赖 → 生成 `.env`（随机密钥 + 管理员密码）→ 启动服务。
+
+**系统支持**
+
+| 系统 | 说明 |
+|------|------|
+| Windows | 10 / 11（PowerShell 5.1+，无需管理员权限） |
+| macOS | 12+（Intel / Apple Silicon；无 Python 时需 Homebrew） |
+| Linux（Debian 系） | Ubuntu 20.04+ / Debian 11+ |
+| Linux（RHEL 系） | Rocky Linux、AlmaLinux、CentOS Stream、RHEL / OL 8 - 9 |
+
+> CentOS 7 因系统 glibc 过旧（2.17 < 2.28，MongoDB 7 / Node 20 无法运行）不再支持，请升级系统或改用 Docker 部署。
+
+**Windows（PowerShell）**
+
+```powershell
+irm https://raw.githubusercontent.com/hsliuping/TradingAgents-CN/community/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+**Linux / macOS（bash）**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hsliuping/TradingAgents-CN/community/install.sh | bash
+```
+
+安装结束时终端会打印访问地址、管理员账号与随机生成的初始密码（同时写入 `.env` 的 `ADMIN_DEFAULT_PASSWORD`，请妥善保存）。
+
+**常用参数**（两种脚本命名一致）
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--port` / `-Port` | 8000 | Web 端口 |
+| `--mongo-port` / `-MongoPort` | 27017 | MongoDB 端口 |
+| `--redis-port` / `-RedisPort` | 6379 | Redis 端口 |
+| `--admin-password` / `-AdminPassword` | 随机生成 | 指定管理员密码 |
+| `--install-dir` / `-InstallDir` | `~/TradingAgentsCN` | 安装目录 |
+| `--mirror` / `-Mirror` | - | 下载镜像前缀（国内加速） |
+| `--no-start` / `-NoStart` | - | 只安装不启动 |
+
+示例：`./install.sh --port 8080 --admin-password MyPass123!`
+
+**日常启停**：安装目录下执行 `start.sh` / `stop.sh`（Windows 为 `start.ps1` / `stop.ps1`）；日志在 `logs/`，数据库数据在 `data/`（备份即复制这两个目录）。
+
+**快速排障**
+
+- 下载慢或失败：加 `--mirror` / `-Mirror` 换源重试
+- 忘记管理员密码：修改 `.env` 的 `ADMIN_DEFAULT_PASSWORD` 后重启
+- 启动未就绪：查看 `logs/server.err.log` 末尾 20 行
+- 端口被占用：换端口，或直接重跑安装脚本（已监听的端口会被复用）
+
+完整说明（目录结构、手动启动、卸载等）见 [一键安装使用手册](docs/02-user-guide/getting-started/one-click-install-guide.md)。
+
+已克隆本仓库的开发者，可在仓库根目录直接使用本地源码模式（跳过代码下载）：
+
+```bash
+bash install.sh --source-path .                      # Linux / macOS
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -SourcePath .   # Windows
+```
+
+> 三个平台的安装流程均由 GitHub Actions（`install-smoke` 工作流）真实部署验证（含 Ubuntu / macOS / Windows 与 Rocky Linux 9 容器）。
+
+### 手动安装（进阶）
+
+#### 环境要求
 
 - Python 3.11
 - Node.js 18+
 - MongoDB 7.0+（推荐 8.0）与 Redis 6+（推荐 7）—— 需自行安装，见下方「安装 MongoDB / Redis」
 
-### 安装 MongoDB / Redis
+#### 安装 MongoDB / Redis
 
 本项目不自带数据库，请先自行安装并启动 MongoDB 与 Redis（版本要求见上）。任意一种安装方式都可以，只要**账号密码与端口和下一步的 `.env` 保持一致**。
 
@@ -167,7 +233,7 @@ cd TradingAgents-CN
 python -m venv env
 env\Scripts\activate            # Windows
 source env/bin/activate         # Linux / macOS
-pip install -r requirements.txt
+pip install -e .
 
 # 3. 配置（必填 MongoDB / Redis / JWT_SECRET，详见 .env.example 注释）
 copy .env.example .env          # Windows
