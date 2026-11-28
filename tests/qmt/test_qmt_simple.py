@@ -13,7 +13,12 @@ except ImportError as e:
     print("   错误:", e)
     print("\n安装方法：")
     print("   pip install xtquant")
-    sys.exit(1)
+    if __name__ == "__main__":
+        # 手动运行时保持原有退出行为
+        sys.exit(1)
+    # pytest 收集时跳过整个模块，避免 sys.exit 中断收集
+    import pytest
+    pytest.skip(f"xtquant 未安装，跳过 QMT 简单测试: {e}", allow_module_level=True)
 
 print("\n检查 QMT 适配器...")
 try:

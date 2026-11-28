@@ -18,7 +18,12 @@ try:
     print("✅ xtquant 导入成功")
 except ImportError as e:
     print(f"❌ xtquant 导入失败: {e}")
-    sys.exit(1)
+    if __name__ == "__main__":
+        # 手动运行时保持原有退出行为
+        sys.exit(1)
+    # pytest 收集时跳过整个模块，避免 sys.exit 中断收集
+    import pytest
+    pytest.skip(f"xtquant 未安装，跳过 QMT K 线调试测试: {e}", allow_module_level=True)
 
 # 测试连接
 print("\n检查 xtdata 连接...")
@@ -27,7 +32,11 @@ try:
     print(f"✅ xtdata 连接成功")
 except Exception as e:
     print(f"❌ xtdata 连接失败: {e}")
-    sys.exit(1)
+    if __name__ == "__main__":
+        # 手动运行时保持原有退出行为
+        sys.exit(1)
+    # pytest 收集时跳过整个模块，避免 sys.exit 中断收集
+    pytest.skip(f"xtdata 连接失败: {e}", allow_module_level=True)
 
 # 测试获取 K 线数据
 print("\n" + "=" * 60)

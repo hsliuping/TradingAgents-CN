@@ -1,0 +1,118 @@
+name: Docker Publish All-in-One
+
+# 单容器统一部署镜像（deploy-all-in-one/Dockerfile）的 CI 构建推送：
+#   GitHub Actions 网络直连 Docker Hub（免本地代理折腾），
+#   buildx 原生多架构（amd64/arm64 一次构建），GHA 缓存复用依赖层。
+#
+# 触发：打 Tag（v3.0.1）或手动 workflow_dispatch（填 version）
+# 前置：仓库 Settings → Secrets 需配置 DOCKERHUB_USERNAME / DOCKERHUB_TOKEN
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 3.0.1）'
+        required: true
+        default: '3.0.1'
+      platforms:
+        description: '架构（默认双架构）'
+        required: false
+        default: 'linux/amd64,linux/arm64'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # searxng/ 被 gitignore（本地手动 clone + 补丁）。CI 复现方式：
+      # GitHub API tarball 锁定上游 commit f4822b3f（本地 5fee5a30 为本地合并提交，上游不可达），
+      # 再应用 deploy-all-in-one/patches/searxng-local.patch 复原本地补丁
+      - name: Prepare searxng source
+        run: |
+          mkdir -p searxng
+          curl -fsSL --retry 5 -o /tmp/searxng.tar.gz \
+            "https://api.github.com/repos/searxng/searxng/tarball/f4822b3fc46726bb259d14c6332b702c76b98f82"
+          tar -xzf /tmp/searxng.tar.gz -C /tmp
+          cp -a /tmp/searxng-searxng-*/. searxng/
+          cd searxng
+          git apply --whitespace=nowarn ../deploy-all-in-one/patches/searxng-local.patch
+          test -f setup.py && echo "searxng 就绪（f4822b3f + local patch）"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # VERSION 文件是版本号唯一来源（镜像 tag 从此读取，与 CLAUDE.md 规范一致）
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ inputs.version }}" != "" ]; then
+            V="${{ inputs.version }}"
+          else
+            V="$(tr -d '[:space:]' < VERSION)"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "构建版本: $V"
+
+      - name: Build frontend (frontend/dist)
+        working-directory: frontend
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/index.html
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push all-in-one image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./deploy-all-in-one/Dockerfile
+          platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-cn-pro:${{ steps.ver.outputs.version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-cn-pro:3-latest
+          build-args: |
+            VERSION=${{ steps.ver.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify remote manifest
+        run: |
+          IMG="${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-cn-pro:${{ steps.ver.outputs.version }}"
+          docker buildx imagetools inspect "$IMG"
+          docker buildx imagetools inspect "${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-cn-pro:3-latest"
+
+      - name: Summary
+        run: |
+          echo "## All-in-One 镜像已发布 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-cn-pro:${{ steps.ver.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-cn-pro:3-latest" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ secrets.DOCKERHUB_USERNAME }}/tradingagents-cn-pro:3-latest" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

@@ -18,7 +18,12 @@ try:
     print(f"✅ MongoDB报告管理器导入成功")
 except ImportError as e:
     print(f"❌ MongoDB报告管理器导入失败: {e}")
-    sys.exit(1)
+    if __name__ == "__main__":
+        # 手动运行时保持原有退出行为
+        sys.exit(1)
+    # pytest 收集时跳过整个模块，避免 sys.exit 中断收集
+    import pytest
+    pytest.skip(f"MongoDB报告管理器导入失败，跳过检查脚本: {e}", allow_module_level=True)
 
 def check_mongodb_connection():
     """检查MongoDB连接状态"""

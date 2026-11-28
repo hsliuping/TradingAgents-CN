@@ -269,6 +269,27 @@ class AKShareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ {symbol} 直接调用 API 失败: {e}")
             return None
 
+    def _fallback_stock_news_direct(self, symbol: str, limit: int) -> Optional[pd.DataFrame]:
+        """
+        AKShare 失败/为空时的兜底：直接调用东方财富 API
+
+        绕开 AKShare 内部的 regex 处理（PyArrow 后端下会抛
+        ArrowInvalid: invalid escape sequence）与反爬虫限制，
+        供同步/异步两条链路共用（#726）
+
+        Args:
+            symbol: 股票代码
+            limit: 返回数量限制
+
+        Returns:
+            新闻 DataFrame 或 None
+        """
+        try:
+            return self._get_stock_news_direct(symbol=symbol, limit=limit)
+        except Exception as e:
+            self.logger.error(f"❌ {symbol} 直接API兜底也失败: {e}")
+            return None
+
     def _configure_timeout(self):
         """配置AKShare的超时设置"""
         try:
@@ -793,7 +814,9 @@ class AKShareProvider(BaseStockDataProvider):
         个股的代码和名称应该已经在数据库中了
         """
         try:
-            akshare_symbol = self._get_akshare_cn_symbol(code)
+            # stock_individual_info_em 内部直接拼接 secid（1.代码/0.代码），
+            # 若传入 sh/sz/bj 前缀会生成非法的 0.sh600000 导致接口失败，必须传 6 位裸码
+            akshare_symbol = str(code).zfill(6)
 
             # 🔥 直接获取个股详细信息（包含行业、地区等详细信息）
             def fetch_individual_info():
@@ -1929,41 +1952,41 @@ class AKShareProvider(BaseStockDataProvider):
             except Exception as e:
                 logger.debug(f"获取{code}主要财务指标失败: {e}")
 
-            # 2. 获取资产负债表
+            # 2. 获取资产负债表（东财EM接口要求带市场前缀的代码，如 SZ000001）
             try:
                 def fetch_balance_sheet():
-                    return self.ak.stock_balance_sheet_by_report_em(symbol=code)
+                    return self.ak.stock_balance_sheet_by_report_em(symbol=self._get_xueqiu_symbol(code))
 
                 balance_sheet = await asyncio.to_thread(fetch_balance_sheet)
                 if balance_sheet is not None and not balance_sheet.empty:
                     financial_data['balance_sheet'] = balance_sheet.to_dict('records')
                     logger.debug(f"✅ {code}资产负债表获取成功")
             except Exception as e:
-                logger.debug(f"获取{code}资产负债表失败: {e}")
+                logger.warning(f"⚠️ 获取{code}资产负债表失败: {e}")
 
-            # 3. 获取利润表
+            # 3. 获取利润表（东财EM接口要求带市场前缀的代码，如 SZ000001）
             try:
                 def fetch_income_statement():
-                    return self.ak.stock_profit_sheet_by_report_em(symbol=code)
+                    return self.ak.stock_profit_sheet_by_report_em(symbol=self._get_xueqiu_symbol(code))
 
                 income_statement = await asyncio.to_thread(fetch_income_statement)
                 if income_statement is not None and not income_statement.empty:
                     financial_data['income_statement'] = income_statement.to_dict('records')
                     logger.debug(f"✅ {code}利润表获取成功")
             except Exception as e:
-                logger.debug(f"获取{code}利润表失败: {e}")
+                logger.warning(f"⚠️ 获取{code}利润表失败: {e}")
 
-            # 4. 获取现金流量表
+            # 4. 获取现金流量表（东财EM接口要求带市场前缀的代码，如 SZ000001）
             try:
                 def fetch_cash_flow():
-                    return self.ak.stock_cash_flow_sheet_by_report_em(symbol=code)
+                    return self.ak.stock_cash_flow_sheet_by_report_em(symbol=self._get_xueqiu_symbol(code))
 
                 cash_flow = await asyncio.to_thread(fetch_cash_flow)
                 if cash_flow is not None and not cash_flow.empty:
                     financial_data['cash_flow'] = cash_flow.to_dict('records')
                     logger.debug(f"✅ {code}现金流量表获取成功")
             except Exception as e:
-                logger.debug(f"获取{code}现金流量表失败: {e}")
+                logger.warning(f"⚠️ 获取{code}现金流量表失败: {e}")
 
             if financial_data:
                 logger.debug(f"✅ {code}财务数据获取完成: {len(financial_data)}个数据集")
@@ -2051,7 +2074,8 @@ class AKShareProvider(BaseStockDataProvider):
                             retry_delay *= 2  # 指数退避
                         else:
                             self.logger.error(f"❌ {symbol} 获取新闻失败(JSON解析错误): {e}")
-                            return None
+                            # #726: AKShare 全部重试失败，兜底直接调用东方财富 API
+                            return self._fallback_stock_news_direct(symbol_6, limit)
                     except Exception as e:
                         if attempt < max_retries - 1:
                             self.logger.warning(f"⚠️ {symbol} 第{attempt+1}次获取新闻失败: {e}，{retry_delay}秒后重试...")
@@ -2064,8 +2088,9 @@ class AKShareProvider(BaseStockDataProvider):
                     self.logger.info(f"✅ {symbol} AKShare新闻获取成功: {len(news_df)} 条")
                     return news_df.head(limit) if limit else news_df
                 else:
-                    self.logger.warning(f"⚠️ {symbol} 未获取到AKShare新闻数据")
-                    return None
+                    self.logger.warning(f"⚠️ {symbol} 未获取到AKShare新闻数据，兜底直接调用东方财富 API")
+                    # #726: AKShare 返回空，兜底直接调用东方财富 API
+                    return self._fallback_stock_news_direct(symbol_6, limit)
             else:
                 # 获取市场新闻
                 self.logger.debug("📰 获取AKShare市场新闻")
@@ -2080,6 +2105,9 @@ class AKShareProvider(BaseStockDataProvider):
 
         except Exception as e:
             self.logger.error(f"❌ AKShare新闻获取失败: {e}")
+            # #726: AKShare 异常时兜底直接调用东方财富 API（仅个股新闻）
+            if symbol:
+                return self._fallback_stock_news_direct(str(symbol).zfill(6), limit)
             return None
 
     async def get_stock_news(self, symbol: str = None, limit: int = 10) -> Optional[List[Dict[str, Any]]]:
@@ -2154,15 +2182,16 @@ class AKShareProvider(BaseStockDataProvider):
                                 retry_delay *= 2  # 指数退避
                             else:
                                 self.logger.error(f"❌ {symbol} 获取新闻失败(JSON解析错误): {e}")
-                                return []
+                                # #726: 兜底直接调用东方财富 API
+                                news_df = await asyncio.to_thread(self._get_stock_news_direct, symbol=symbol_6, limit=limit)
                         except KeyError as e:
                             # 东方财富网接口变更或反爬虫拦截，返回的字段结构改变
                             if str(e) == "'cmsArticleWebOld'":
                                 self.logger.error(f"❌ {symbol} AKShare新闻接口返回数据结构异常: 缺少 'cmsArticleWebOld' 字段")
                                 self.logger.error(f"   这通常是因为：1) 反爬虫拦截 2) 接口变更 3) 网络问题")
                                 self.logger.error(f"   建议：检查 AKShare 版本是否为最新 (当前要求 >=1.17.86)")
-                                # 返回空列表，避免程序崩溃
-                                return []
+                                # #726: 兜底直接调用东方财富 API
+                                news_df = await asyncio.to_thread(self._get_stock_news_direct, symbol=symbol_6, limit=limit)
                             else:
                                 if attempt < max_retries - 1:
                                     self.logger.warning(f"⚠️ {symbol} 第{attempt+1}次获取新闻失败(字段错误): {e}，{retry_delay}秒后重试...")
@@ -2170,14 +2199,22 @@ class AKShareProvider(BaseStockDataProvider):
                                     retry_delay *= 2
                                 else:
                                     self.logger.error(f"❌ {symbol} 获取新闻失败(字段错误): {e}")
-                                    return []
+                                    # #726: 兜底直接调用东方财富 API
+                                    news_df = await asyncio.to_thread(self._get_stock_news_direct, symbol=symbol_6, limit=limit)
                         except Exception as e:
                             if attempt < max_retries - 1:
                                 self.logger.warning(f"⚠️ {symbol} 第{attempt+1}次获取新闻失败: {e}，{retry_delay}秒后重试...")
                                 await asyncio.sleep(retry_delay)
                                 retry_delay *= 2
                             else:
-                                raise
+                                self.logger.error(f"❌ {symbol} 获取新闻失败: {e}")
+                                # #726: 兜底直接调用东方财富 API，避免异常上抛导致报告为空
+                                news_df = await asyncio.to_thread(self._get_stock_news_direct, symbol=symbol_6, limit=limit)
+
+                if news_df is None or news_df.empty:
+                    # #726: AKShare 为空，兜底直接调用东方财富 API
+                    self.logger.warning(f"⚠️ {symbol} 未获取到AKShare新闻数据，兜底直接调用东方财富 API")
+                    news_df = await asyncio.to_thread(self._get_stock_news_direct, symbol=symbol_6, limit=limit)
 
                 if news_df is not None and not news_df.empty:
                     news_list = []
@@ -2211,7 +2248,7 @@ class AKShareProvider(BaseStockDataProvider):
                     self.logger.info(f"✅ {symbol} AKShare新闻获取成功: {len(news_list)} 条")
                     return news_list
                 else:
-                    self.logger.warning(f"⚠️ {symbol} 未获取到AKShare新闻数据")
+                    self.logger.warning(f"⚠️ {symbol} 兜底直接调用东方财富 API 后仍无新闻数据")
                     return []
             else:
                 # 获取市场新闻

@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import time
 import random
 from datetime import datetime, timedelta
@@ -460,6 +461,8 @@ class OptimizedChinaDataProvider:
         logger.debug(f"🔍 [股票代码追踪] 调用 _estimate_financial_metrics，传入参数: '{symbol}'")
         try:
             financial_estimates = self._estimate_financial_metrics(symbol, current_price)
+            # #730: PE 数据质量校验后的置信度提示（无异常时为空串）
+            data_confidence_note = self._format_data_confidence_notes(financial_estimates)
             logger.debug(f"🔍 [股票代码追踪] _estimate_financial_metrics 返回结果: {financial_estimates}")
         except Exception as e:
             logger.warning(f"⚠️ [基本面分析] 无法获取财务指标: {e}")
@@ -525,6 +528,7 @@ class OptimizedChinaDataProvider:
 - **总市值**: {financial_estimates.get('total_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
+{data_confidence_note}
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
 - **净资产收益率(ROE)**: {financial_estimates.get('roe', 'N/A')}
 - **资产负债率**: {financial_estimates.get('debt_ratio', 'N/A')}
@@ -558,6 +562,7 @@ class OptimizedChinaDataProvider:
 - **总市值**: {financial_estimates.get('total_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
+{data_confidence_note}
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
 - **市销率(PS)**: {financial_estimates.get('ps', 'N/A')}
 - **股息收益率**: {financial_estimates.get('dividend_yield', 'N/A')}
@@ -617,6 +622,7 @@ class OptimizedChinaDataProvider:
 - **总市值**: {financial_estimates.get('total_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
+{data_confidence_note}
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
 - **市销率(PS)**: {financial_estimates.get('ps', 'N/A')}
 - **股息收益率**: {financial_estimates.get('dividend_yield', 'N/A')}
@@ -866,6 +872,8 @@ class OptimizedChinaDataProvider:
         real_metrics = self._get_real_financial_metrics(symbol, price_value)
         if real_metrics:
             logger.info(f"✅ 使用真实财务数据: {symbol}")
+            # #730: PE 数据质量校验，异常时在报告中附加置信度提示
+            self._validate_pe_metrics(symbol, real_metrics)
             return real_metrics
 
         # 如果无法获取真实数据，抛出异常
@@ -989,6 +997,65 @@ class OptimizedChinaDataProvider:
             logger.debug(f"获取{symbol}真实财务数据失败: {e}")
 
         return None
+
+    def _validate_pe_metrics(self, symbol: str, metrics: dict) -> None:
+        """PE/PE_TTM 数据质量校验（#730）
+
+        对进入 LLM 基本面报告前的 PE 数据做合理性检查：
+        1. 绝对值异常：PE_TTM > 300 或 0 < PE_TTM < 0.1
+        2. 动态 PE 与 PE_TTM 差异过大（单季利润波动导致 TTM 失真的典型信号）
+
+        校验不修改数据本身，仅在 metrics 中记录 data_confidence_notes，
+        由报告模板渲染为置信度提示，供 LLM 分析时谨慎参考。
+        """
+        if not isinstance(metrics, dict):
+            return
+
+        def _parse_pe(text) -> Optional[float]:
+            if not isinstance(text, str):
+                return None
+            m = re.match(r"^\s*([0-9]*\.?[0-9]+)", text)
+            if not m:
+                return None
+            try:
+                return float(m.group(1))
+            except (ValueError, TypeError):
+                return None
+
+        notes = []
+        pe = _parse_pe(metrics.get("pe"))
+        pe_ttm = _parse_pe(metrics.get("pe_ttm"))
+
+        if pe_ttm is not None:
+            if pe_ttm > 300:
+                notes.append(
+                    f"PE_TTM={pe_ttm:.1f}倍异常偏高，可能受单季利润异常或数据失真影响，请谨慎参考"
+                )
+            elif 0 < pe_ttm < 0.1:
+                notes.append(f"PE_TTM={pe_ttm:.2f}倍异常偏低，请谨慎参考")
+
+            if pe is not None and pe > 0 and pe_ttm > 0:
+                ratio = max(pe, pe_ttm) / min(pe, pe_ttm)
+                if ratio > 2.5:
+                    notes.append(
+                        f"PE_TTM（{pe_ttm:.1f}倍）与动态PE（{pe:.1f}倍）差异过大，"
+                        f"TTM口径可能因单季利润波动失真，建议结合年报数据复核"
+                    )
+
+        if notes:
+            metrics["data_confidence_notes"] = notes
+            logger.warning(f"⚠️ [PE数据校验] {symbol} 发现 {len(notes)} 条数据质量提示: {notes}")
+
+    @staticmethod
+    def _format_data_confidence_notes(metrics: dict) -> str:
+        """将数据质量提示渲染为报告中的置信度提示块（无提示时返回空串）"""
+        notes = metrics.get("data_confidence_notes") if isinstance(metrics, dict) else None
+        if not notes:
+            return ""
+        lines = "\n".join(f"> ⚠️ {n}" for n in notes)
+        return (
+            f"\n> **数据置信度提示**（以下指标可能失真，建议结合年报数据复核）:\n{lines}\n"
+        )
 
     def _parse_mongodb_financial_data(self, financial_data: dict, price_value: float) -> dict:
         """解析 MongoDB 标准化的财务数据为指标"""

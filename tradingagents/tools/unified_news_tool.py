@@ -25,6 +25,7 @@
 
 import logging
 import warnings
+import os
 from datetime import datetime
 import re
 
@@ -334,24 +335,30 @@ class UnifiedNewsAnalyzer:
                 logger.info(f"[统一新闻工具] ⚠️ 数据库中没有 {stock_code} 的新闻，尝试同步...")
 
                 # 🔥 数据库没有数据时，调用同步服务同步新闻
-                try:
-                    logger.info(f"[统一新闻工具] 📡 调用同步服务同步 {stock_code} 的新闻...")
-                    synced_news = self._sync_news_from_akshare(stock_code, max_news)
+                # #726: CLI 模式（MongoDB 未启用）下跳过同步步骤，直接走东方财富实时新闻，
+                #       避免 30 秒超时等待后仍然失败
+                _mongo_enabled = str(os.getenv("USE_MONGODB_STORAGE", "")).strip().lower() in ("1", "true", "yes", "on")
+                if _mongo_enabled:
+                    try:
+                        logger.info(f"[统一新闻工具] 📡 调用同步服务同步 {stock_code} 的新闻...")
+                        synced_news = self._sync_news_from_akshare(stock_code, max_news)
 
-                    if synced_news:
-                        logger.info(f"[统一新闻工具] ✅ 同步成功，重新从数据库获取...")
-                        # 重新从数据库获取
-                        db_news = self._get_news_from_database(stock_code, max_news)
-                        if db_news:
-                            logger.info(f"[统一新闻工具] ✅ 同步后数据库新闻获取成功: {len(db_news)} 字符")
-                            return self._format_news_result(db_news, "数据库缓存(新同步)", model_info)
-                    else:
-                        logger.warning(f"[统一新闻工具] ⚠️ 同步服务未返回新闻数据")
+                        if synced_news:
+                            logger.info(f"[统一新闻工具] ✅ 同步成功，重新从数据库获取...")
+                            # 重新从数据库获取
+                            db_news = self._get_news_from_database(stock_code, max_news)
+                            if db_news:
+                                logger.info(f"[统一新闻工具] ✅ 同步后数据库新闻获取成功: {len(db_news)} 字符")
+                                return self._format_news_result(db_news, "数据库缓存(新同步)", model_info)
+                        else:
+                            logger.warning(f"[统一新闻工具] ⚠️ 同步服务未返回新闻数据")
 
-                except Exception as sync_error:
-                    logger.warning(f"[统一新闻工具] ⚠️ 同步服务调用失败: {sync_error}")
+                    except Exception as sync_error:
+                        logger.warning(f"[统一新闻工具] ⚠️ 同步服务调用失败: {sync_error}")
 
-                logger.info(f"[统一新闻工具] ⚠️ 同步后仍无数据，尝试其他数据源...")
+                    logger.info(f"[统一新闻工具] ⚠️ 同步后仍无数据，尝试其他数据源...")
+                else:
+                    logger.info(f"[统一新闻工具] MongoDB 未启用(CLI 模式)，跳过新闻同步，直接尝试东方财富实时新闻")
         except Exception as e:
             logger.warning(f"[统一新闻工具] 数据库新闻获取失败: {e}")
 

@@ -1456,7 +1456,7 @@ class AKShareSyncService:
                     batch_stats["error_count"] += 1
                     batch_stats["errors"].append({
                         "code": symbol,
-                        "error": "历史数据为空",
+                        "error": "AKShare 未返回该股票的历史行情数据（可能为新股、长期停牌或接口暂不可用）",
                         "context": "_process_historical_batch"
                     })
 

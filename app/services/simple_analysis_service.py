@@ -1212,9 +1212,10 @@ class SimpleAnalysisService:
                 logger.error(f"💡 建议: {validation_result.suggestion}")
 
                 # 构建用户友好的错误消息
+                # 直接使用验证器自身的准确错误信息，区分「代码不存在」与「数据获取失败（网络/数据源）」
+                # 避免把网络断连或数据源故障误报为「股票代码无效」（见 issue #723）
                 user_friendly_error = (
-                    f"❌ 股票代码无效\n\n"
-                    f"{validation_result.error_message}\n\n"
+                    f"❌ {validation_result.error_message}\n\n"
                     f"💡 {validation_result.suggestion}"
                 )
 

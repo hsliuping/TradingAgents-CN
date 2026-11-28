@@ -16,7 +16,12 @@ try:
     print("✅ xtquant 导入成功")
 except ImportError as e:
     print(f"❌ xtquant 导入失败: {e}")
-    sys.exit(1)
+    if __name__ == "__main__":
+        # 手动运行时保持原有退出行为
+        sys.exit(1)
+    # pytest 收集时跳过整个模块，避免 sys.exit 中断收集
+    import pytest
+    pytest.skip(f"xtquant 未安装，跳过 QMT 下载测试: {e}", allow_module_level=True)
 
 # 测试下载单只股票数据
 print("\n" + "=" * 60)

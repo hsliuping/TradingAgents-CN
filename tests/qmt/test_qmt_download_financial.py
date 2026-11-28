@@ -12,9 +12,14 @@ sys.path.insert(0, project_root)
 
 try:
     import xtquant.xtdata as xtdata
-except ImportError:
-    print("❌ xtquant 未安装")
-    sys.exit(1)
+except ImportError as e:
+    print(f"❌ xtquant 未安装: {e}")
+    if __name__ == "__main__":
+        # 手动运行时保持原有退出行为
+        sys.exit(1)
+    # pytest 收集时跳过整个模块，避免 sys.exit 中断收集
+    import pytest
+    pytest.skip(f"xtquant 未安装，跳过 QMT 财务数据下载测试: {e}", allow_module_level=True)
 
 def on_progress(data):
     """下载进度回调函数"""
